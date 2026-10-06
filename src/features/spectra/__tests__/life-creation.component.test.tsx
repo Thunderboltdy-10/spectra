@@ -89,6 +89,20 @@ describe("creating by hand", () => {
     expect(field.form).toHaveBeenCalledTimes(1);
   });
 
+  it("an item landed under a key grows only into that item, whatever its arrival", () => {
+    beginCreation({ from: [200, 150], into: "item" }).land("node:n1");
+    const Plain = ({ id }: { id: string }) => {
+      const ref = useRef<HTMLDivElement>(null);
+      useLifeArrival(ref, id, undefined);
+      return <div ref={ref}>{id}</div>;
+    };
+    render(<Row id="node:other" />);
+    expect(field.morph).not.toHaveBeenCalled();
+    render(<Plain id="node:n1" />);
+    expect(field.morph).toHaveBeenCalledTimes(1);
+    expect(field.morph.mock.calls[0][0]).toBe(field.seed);
+  });
+
   it("goes back to the field when nothing opens from it in time", () => {
     beginCreation({ from: [200, 150] }).land();
     vi.advanceTimersByTime(2600);

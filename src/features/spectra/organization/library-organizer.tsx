@@ -84,7 +84,7 @@ import {
 } from "./surface-chrome";
 import { IconButton } from "@/components/ui/icon-button";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
-import { sendInto } from "../life/use-life";
+import { beginCreation, sendInto } from "../life/use-life";
 
 /**
  * The Library, as a filesystem.
@@ -726,7 +726,13 @@ function LibraryOrganizerContent({
 
   const createFolderHere = useCallback(() => {
     void run("The folder was not created.", async () => {
-      const created = await actions.createFolder("New folder", currentParentId);
+      // Dots gather at the press; the folder's row grows out of them.
+      const creation = beginCreation({ into: "item" });
+      const created = await actions.createFolder("New folder", currentParentId).catch((error: unknown) => {
+        creation.cancel();
+        throw error;
+      });
+      creation.land(`node:${created.nodeId}`);
       setRenamingId(created.nodeId);
       setSelection({
         ids: new Set([created.nodeId]),
@@ -748,13 +754,21 @@ function LibraryOrganizerContent({
     (blueprintKey: BlueprintChoiceKey, parentId: string | null) =>
       run("The work was not created.", async () => {
         const payload = createDefaultArtifactPayload(blueprintKey);
-        const created = await actions.createWorkHere({
-          blueprintKey,
-          title: payload.title,
-          summary: payload.summary,
-          content: payload.content,
-          parentId,
-        });
+        // Dots gather at the press; the work's studio grows out of them.
+        const creation = beginCreation();
+        const created = await actions
+          .createWorkHere({
+            blueprintKey,
+            title: payload.title,
+            summary: payload.summary,
+            content: payload.content,
+            parentId,
+          })
+          .catch((error: unknown) => {
+            creation.cancel();
+            throw error;
+          });
+        creation.land();
         onOpenWork(created.artifactId);
       }),
     [actions, onOpenWork, run],

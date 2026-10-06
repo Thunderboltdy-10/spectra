@@ -254,8 +254,12 @@ export function recentCause(): Point | undefined {
 /* ------------------------------------------------------------ creation */
 
 export type Creation = {
-  /** It exists now: what it becomes (the surface that opens, or the item that arrives) grows out of the gathered dots. */
-  land(): void;
+  /**
+   * It exists now: what it becomes (the surface that opens, or the item that
+   * arrives) grows out of the gathered dots. `key`, for an item: the arrival
+   * key of exactly what was made, so only it claims them.
+   */
+  land(key?: string): void;
   /** It was not made: the dots part where they gathered. */
   cancel(): void;
 };
@@ -273,11 +277,12 @@ export type CreationOptions = {
 
 const NO_CREATION: Creation = { land() {}, cancel() {} };
 
-/** A gathered item waiting for the row it becomes. */
-let seeded: { figure: Formed; at: number } | null = null;
+/** A gathered item waiting for the row it becomes: the one under `key`, or without one the next made by hand. */
+let seeded: { figure: Formed; at: number; key?: string } | null = null;
 
-function takeSeed(): Formed | null {
+function takeSeed(key: string, kind: ArrivalKind | undefined): Formed | null {
   if (!seeded || performance.now() - seeded.at > LAUNCH_WINDOW_MS) return null;
+  if (seeded.key ? seeded.key !== key : kind !== "human") return null;
   const { figure } = seeded;
   seeded = null;
   return figure;
@@ -299,12 +304,12 @@ export function beginCreation({ from, into = "surface" }: CreationOptions = {}):
   const seed = life.ghost({ strokes: [...outline.strokes, ...rows.strokes] }, { from: [x, y] });
   let settled = false;
   return {
-    land() {
+    land(key) {
       if (settled) return;
       settled = true;
       const at = performance.now();
       if (into === "surface") launch = { figure: seed, at };
-      else seeded = { figure: seed, at };
+      else seeded = { figure: seed, at, key };
       // Nothing grew from it in time: the dots go back to the field.
       window.setTimeout(() => {
         if (launch?.figure === seed) launch = null;
@@ -451,9 +456,14 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
     }
     if (arrived.has(key)) return;
     arrived.add(key);
-    if (!kind || !life.on) return;
-    const settling = performance.now() - navigatedAt < 1600;
-    if (settling && kind !== "ai") return;
+    if (!life.on) return;
+    // Made by hand just now: it grows out of the dots that gathered while it was on its way.
+    const seed = takeSeed(key, kind);
+    if (!seed) {
+      if (!kind) return;
+      const settling = performance.now() - navigatedAt < 1600;
+      if (settling && kind !== "ai") return;
+    }
     const previous = element.style.opacity;
     element.style.opacity = "0";
     let shown = false;
@@ -463,7 +473,9 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
       element.style.opacity = previous;
     };
     const shape = figureOf(element, { bars: "h2, h3, h4, [data-card-title], p", maxBars: 6, ...figure });
-    if (kind === "ai") {
+    if (seed) {
+      void life.morph(seed, shape).formed.then(show);
+    } else if (kind === "ai") {
       const trip = life.travel(prismPoint(), shape, { colour: "spectrum" });
       void trip.formed.then(() => {
         show();
@@ -471,9 +483,7 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
         life.pulse(r.left + r.width / 2, r.top + r.height / 2, 0.7, "spectrum");
       });
     } else {
-      // Made by hand: it grows out of the dots that gathered while it was on its way, or forms where the user acted.
-      const seed = takeSeed();
-      void (seed ? life.morph(seed, shape) : life.form(shape, { from: recentCause() })).formed.then(show);
+      void life.form(shape, { from: recentCause() }).formed.then(show);
     }
     const fallback = window.setTimeout(show, kind === "ai" ? 1700 : 800);
     return () => {

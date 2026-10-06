@@ -271,6 +271,17 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     });
     return;
   }
+  if (event.key === "agent_released") {
+    const agentId = event.payload?.targetId;
+    if (typeof agentId !== "string" || !agentId) return;
+    spectraBus.emit("agent.releasesChanged", { agentId });
+    noteAiLocation({
+      ...(event.runId ? { actorId: event.runId } : {}),
+      artifactId: agentId,
+      note: typeof event.payload?.note === "string" ? event.payload.note : "Released the agent",
+    });
+    return;
+  }
   if (event.key === "comment_changed" || event.key === "embed_changed") {
     const artifactId = event.payload?.targetId;
     if (typeof artifactId !== "string" || !artifactId) return;

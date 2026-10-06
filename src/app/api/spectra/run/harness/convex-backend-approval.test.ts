@@ -36,6 +36,8 @@ describe("staging an application command", () => {
     ["set_school_sync_mode", { kind: "grades", mode: "off" }, true],
     ["pair_device", {}, true],
     ["save_version", { artifactId: "wx1", name: "Draft" }, false],
+    ["release_agent", { agentId: "ag1", action: "release_private" }, false],
+    ["release_agent", { agentId: "ag1", action: "suspend", releaseId: "r1" }, true],
   ] as const)("records %s %j as needing approval: %s", async (command, args, asks) => {
     await backend().stageCommand({ command, args: { ...args }, toolCallId: "call-1", approved: false });
     const plan = calls.find((call) => call.name === "spectraOperations:recordPlan")!;

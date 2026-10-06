@@ -88,6 +88,7 @@ import { projectBindingsFromIr } from "../capabilities";
 import { useStudioContract } from "./artifact-studio-shell";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { AgentBench, useAgentBench } from "./agent-bench";
+import { spectraBus } from "../events";
 export { canPublishAgentArtifact } from "./agent-publish-gates";
 
 const FACET_LABEL: Record<FoundryFacet, string> = {
@@ -1115,6 +1116,18 @@ export function AgentFoundry({
       active = false;
     };
   }, [artifactId, readOnly]);
+
+  // Spectra can release this agent too; show the releases it made.
+  useEffect(
+    () =>
+      spectraBus.on("agent.releasesChanged", (detail) => {
+        if (detail.agentId !== artifactId) return;
+        void getSpectraAgentReleases(artifactId)
+          .then((response) => setReleases(response.releases))
+          .catch(() => undefined);
+      }),
+    [artifactId],
+  );
 
   // Usage is only asked for when the release view is opened, because opening an
   // editor should not cost a query nobody is looking at.

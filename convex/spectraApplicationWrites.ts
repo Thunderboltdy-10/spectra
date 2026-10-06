@@ -121,6 +121,17 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
       }
       break;
     }
+    case "release_agent": {
+      const notes = typeof args.releaseNotes === "string" && args.releaseNotes.trim() ? { releaseNotes: args.releaseNotes.trim() } : {};
+      switch (args.action) {
+        case "release_private": return { name: "spectraArtifacts:publishAgent", args: { agentId: String(args.agentId ?? ""), rollout: "internal_test", ...notes } };
+        case "publish": return { name: "spectraArtifacts:publishAgent", args: { agentId: String(args.agentId ?? ""), rollout: "published", ...notes } };
+        case "promote":
+        case "rollback":
+        case "suspend": return { name: "spectraArtifacts:manageAgentRelease", args: { releaseId: String(args.releaseId ?? ""), action: args.action } };
+      }
+      break;
+    }
     case "trigger_managebac_sync": return { name: "managebac:requestAiRefresh", args: aiRefreshRequest(args.purpose, args.force) };
     case "select_managebac_classes": return { name: "managebac:setSelectedClasses", args: {
       recordIds: strings(args.recordIds),

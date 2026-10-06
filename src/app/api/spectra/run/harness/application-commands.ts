@@ -166,6 +166,22 @@ const COMMANDS: Record<string, ApplicationCommand> = {
       }),
     authority: "sharing",
   },
+  // A release decides which version of an agent people reach; a private one reaches only the owner.
+  release_agent: {
+    input: z
+      .object({
+        agentId: z.string().trim().min(1).max(200),
+        action: z.enum(["release_private", "publish", "promote", "rollback", "suspend"]),
+        releaseId: z.string().trim().min(1).max(200).optional(),
+        releaseNotes: z.string().trim().max(4_000).optional(),
+      })
+      .superRefine((value, ctx) => {
+        const managed = value.action === "promote" || value.action === "rollback" || value.action === "suspend";
+        if (managed && !value.releaseId) ctx.addIssue({ code: "custom", path: ["releaseId"], message: "A release id is required." });
+        if (!managed && value.releaseId) ctx.addIssue({ code: "custom", path: ["releaseId"], message: "A new release is made from the current draft." });
+      }),
+    authority: "sharing",
+  },
   trigger_managebac_sync: {
     input: z.object({ purpose: z.enum(AI_SYNC_PURPOSES as [AiSyncPurpose, ...AiSyncPurpose[]]), force: z.boolean().optional() }),
     authority: "managebac_sync",

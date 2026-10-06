@@ -438,6 +438,23 @@ export async function executeApplicationCommand(
   }
   if (command === "publish_code")
     return publishCode({ artifactId: String(parsed.artifactId), action: parsed.action === "unpublish" ? "unpublish" : "publish", signal, onUiEvent });
+  if (command === "release_agent") {
+    const agentId = String(parsed.agentId);
+    const action = String(parsed.action);
+    if (typeof parsed.releaseId === "string") {
+      // A release is managed through its agent, so the step names the agent it changes.
+      const releases = await query<{ agentId: string }, Array<{ releaseId: string }>>("spectraArtifacts:listAgentReleases", { agentId });
+      if (!releases.some((release) => release.releaseId === parsed.releaseId))
+        throw new Error("AGENT_RELEASE_NOT_FOUND: That release is not one of this agent's. Read them with read_agent_releases.");
+    }
+    const result = await applyMutation<object, { releaseNumber?: number } | null>(
+      action === "release_private" || action === "publish" ? "spectraArtifacts:publishAgent" : "spectraArtifacts:manageAgentRelease",
+      parsed,
+    );
+    const number = typeof result?.releaseNumber === "number" ? ` ${result.releaseNumber}` : "";
+    onUiEvent?.({ key: "agent_released", payload: { targetId: agentId, note: AGENT_RELEASE_NOTES[action]?.replace("{n}", number) ?? "Changed the agent's releases" } });
+    return result ?? { ok: true };
+  }
   if (command === "restore_version") {
     if (!operationId) throw new Error("RESTORE_OPERATION_ID_REQUIRED");
     return restoreVersion({ runId, operationId, artifactId: String(parsed.artifactId), versionId: String(parsed.versionId), onUiEvent });
@@ -791,6 +808,14 @@ async function publishCode(input: {
     ...(result.build ? { buildId: result.build.buildId, publishedAt: result.build.publishedAt } : {}),
   };
 }
+
+const AGENT_RELEASE_NOTES: Record<string, string> = {
+  release_private: "Made release{n} for you only",
+  publish: "Published release{n}",
+  promote: "Took a release live",
+  rollback: "Rolled back to an earlier release",
+  suspend: "Suspended a release",
+};
 
 const EMBED_NOTES: Record<string, string> = {
   resize: "Resized an embed",

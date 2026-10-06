@@ -53,6 +53,8 @@ const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: 
   { command: "manage_class_workspaces", args: { action: "create", recordIds: ["class"] }, mutation: "managebac:materializeClassWorkspaces", event: "managebac_class_workspaces" },
   { command: "complete_calendar_block", args: { itemId: "block", expectedRevision: 2 }, mutation: "calendar:completeWorkBlock", event: "calendar_changed" },
   { command: "remove_calendar_event", args: { itemId: "event" }, mutation: "calendar:removePersonalItem", event: "calendar_changed" },
+  { command: "release_agent", args: { agentId: "agent", action: "release_private", releaseNotes: "Try it" }, mutation: "spectraArtifacts:publishAgent", event: "agent_released" },
+  { command: "release_agent", args: { agentId: "agent", action: "suspend", releaseId: "release" }, mutation: "spectraArtifacts:manageAgentRelease", event: "agent_released" },
 ];
 const calendarArgs: Record<string, Record<string, unknown>> = {
   schedule_calendar_task: { planArtifactId: "plan", planTaskId: "task", startAt: 1000, endAt: 2000, timezone: "UTC" },
@@ -75,6 +77,7 @@ describe("application action contract matrix (stubbed persistence)", () => {
     seams.query.mockImplementation(async (name: string) => {
       if (name === "artifactEmbeds:listForContainer") return { canConfigure: true, embeds: [{ embedId: "embed", state: "ready" }] };
       if (name === "spectraArtifacts:get") return { blueprintKey: "document" };
+      if (name === "spectraArtifacts:listAgentReleases") return [{ releaseId: "release" }];
       return undefined;
     });
   });
@@ -100,6 +103,14 @@ describe("application action contract matrix (stubbed persistence)", () => {
     else expect(seams.mutate).not.toHaveBeenCalled();
     if (event) expect(events).toContain(event);
     if (status) expect(result.status).toBe(status);
+  });
+
+  it("manages only a release of the agent the step names", async () => {
+    await expect(executeApplicationCommand("actor", "run", "attempt", "release_agent", { agentId: "agent", action: "rollback", releaseId: "elsewhere" },
+      undefined, undefined, undefined, "operation")).rejects.toThrow("AGENT_RELEASE_NOT_FOUND");
+    expect(seams.mutate).not.toHaveBeenCalled();
+    expect(() => parseApplicationCommand("release_agent", { agentId: "agent", action: "promote" })).toThrow();
+    expect(() => parseApplicationCommand("release_agent", { agentId: "agent", action: "publish", releaseId: "release" })).toThrow();
   });
 
   it("restores through the signed admission with the operation's request id, never the Convex write path", async () => {

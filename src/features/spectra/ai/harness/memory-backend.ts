@@ -1,4 +1,5 @@
 import type { ArtifactTypeKey } from "../../artifacts/types";
+import type { AgentReleaseState } from "./agent-releases";
 import type { CommentRow } from "./comments";
 import type { EmbedRow } from "./embeds";
 import type { SharingState } from "./sharing";
@@ -42,6 +43,8 @@ export type MemoryBackendOptions = {
   embeds?: Record<string, EmbedRow[]>;
   /** Sharing by resource id. */
   sharing?: Record<string, SharingState>;
+  /** Releases by agent id. */
+  agentReleases?: Record<string, AgentReleaseState>;
   /** Simulate the semantic layer answering with words only, or with a degraded index. */
   searchMode?: SearchResponse["mode"];
   searchDegraded?: SearchResponse["degraded"];
@@ -213,6 +216,10 @@ export class MemoryBackend implements HarnessBackend {
 
   async readSharing(input: { resourceType: string; resourceId: string }) {
     return this.options.sharing?.[input.resourceId] ?? null;
+  }
+
+  async readAgentReleases(input: { agentId: string }) {
+    return this.options.agentReleases?.[input.agentId] ?? null;
   }
 
   async readSchoolData() {

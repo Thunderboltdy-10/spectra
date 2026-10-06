@@ -885,12 +885,38 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     reach: tool("use_agent"),
   },
   {
+    id: "agents.releases",
+    area: "agents",
+    title: "Read an agent's releases",
+    description: "See an agent's releases, who each one reaches, and whether its current draft passed its checks.",
+    keywords: ["release history", "live version", "checks", "evaluation"],
+    reach: tool("read_agent_releases", { example: { agentId: "ag1" } }),
+  },
+  {
+    id: "agents.release",
+    area: "agents",
+    title: "Release an agent",
+    description: "Release an agent's current draft to yourself or to everyone who can use it, take a staged release live, roll back to an earlier release or suspend one.",
+    keywords: ["publish agent", "make private", "release privately", "promote", "roll back", "suspend", "go live"],
+    server: ["spectraArtifacts:publishAgent", "spectraArtifacts:manageAgentRelease"],
+    reach: tool("release_agent", { appCommand: "release_agent", example: { agentId: "ag1", action: "release_private" } }),
+  },
+  {
+    id: "agents.checks",
+    area: "agents",
+    title: "Run an agent's checks",
+    description: "Run an agent's evaluation checks, try it on the bench or compile it from its sources.",
+    keywords: ["evaluate", "test agent", "bench", "compile"],
+    server: ["agents:*"],
+    reach: gap("Checks, the bench and the compiler are model work that the agent studio's own routes start; the harness has no path to them yet. Spectra reads their outcome with read_agent_releases."),
+  },
+  {
     id: "agents.manage",
     area: "agents",
-    title: "Publish, follow or improve agents",
-    description: "Publish or release an agent, follow one, rate it or accept an improvement.",
-    server: ["agents:*", "spectraArtifacts:publishAgent", "spectraArtifacts:manageAgentRelease", "spectraArtifacts:addPublicAgent"],
-    reach: user("Releasing an agent to others and judging its work are the owner's decisions. Spectra builds agents as work with create_artifact and edit_artifact."),
+    title: "Follow or improve agents",
+    description: "Follow an agent, add a public one, rate its answers or accept an improvement.",
+    server: ["agents:follow", "agents:submitFeedback", "agents:proposeImprovement", "agents:decideImprovement", "spectraArtifacts:addPublicAgent"],
+    reach: user("Following an agent, rating its answers and accepting an improvement are the user's own judgment of it. Spectra builds agents as work with create_artifact and edit_artifact."),
   },
 
   // Study
@@ -1074,7 +1100,7 @@ const ARTIFACT_RULES: ReadonlyArray<{ match: RegExp; reach: AiReach }> = [
   { match: /^code\.publish$/, reach: tool("publish_code", { fixed: { action: "publish" }, appCommand: "publish_code" }) },
   { match: /^code\.unpublish$/, reach: tool("publish_code", { fixed: { action: "unpublish" }, appCommand: "publish_code" }) },
   // A quiz opens and closes for attempts with edit_artifact's publish and unpublish.
-  { match: /^agent\.private$/, reach: gap("Releasing an agent goes through the agent studio's own flow, which has no server path the harness can call yet.") },
+  { match: /^agent\.private$/, reach: tool("release_agent", { fixed: { action: "release_private" }, appCommand: "release_agent" }) },
   { match: /\.clipboard\.|\.copyStyle$/, reach: user("It uses the user's clipboard.") },
   { match: /\.protect\.sheet$/, reach: user("Protection guards a sheet against edits, including Spectra's, so only the user sets it.") },
   {

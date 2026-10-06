@@ -1,4 +1,5 @@
 import type { ArtifactTypeKey } from "../../artifacts/types";
+import type { AgentReleaseState } from "./agent-releases";
 import type { CommentRow } from "./comments";
 import type { EmbedRow } from "./embeds";
 import type { SharingState } from "./sharing";
@@ -154,6 +155,8 @@ export interface HarnessBackend {
   readEmbeds(input: { artifactId: string }, signal: AbortSignal): Promise<{ embeds: EmbedRow[]; canConfigure: boolean } | null>;
   /** Who can open a work, workspace or agent; null when the user cannot share it. */
   readSharing(input: { resourceType: "workspace" | "artifact" | "agent"; resourceId: string }, signal: AbortSignal): Promise<SharingState | null>;
+  /** An agent's releases and its current draft's checks; null when the user cannot open the agent. */
+  readAgentReleases(input: { agentId: string }, signal: AbortSignal): Promise<AgentReleaseState | null>;
   /** School records: deadlines, resources, timetable, classes, past tasks, grades, CAS, or one task or CAS experience by recordId. */
   readSchoolData(input: { purpose: string; classId?: string; recordId?: string }, signal: AbortSignal): Promise<string>;
   runCommand(request: CommandRequest, signal: AbortSignal): Promise<CommandResult>;

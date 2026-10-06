@@ -10,6 +10,7 @@ import type {
   ThreadReadRequest,
   WebResult,
 } from "@/features/spectra/ai/harness/backend";
+import type { AgentDraftChecks, AgentReleaseRow, AgentReleaseState } from "@/features/spectra/ai/harness/agent-releases";
 import { ARTIFACT_TYPE_KEYS, type ArtifactTypeKey } from "@/features/spectra/artifacts/types";
 import type { CommentRow } from "@/features/spectra/ai/harness/comments";
 import type { EmbedRow, EmbedState } from "@/features/spectra/ai/harness/embeds";
@@ -764,6 +765,33 @@ export class ConvexHarnessBackend implements HarnessBackend {
             })),
           }
         : {}),
+    };
+  }
+
+  async readAgentReleases(input: { agentId: string }): Promise<AgentReleaseState | null> {
+    // The agent studio's reads: releases need read access, checks need edit access.
+    const [releases, evaluation] = await Promise.all([
+      query<unknown & object, unknown>("spectraArtifacts:listAgentReleases", { agentId: input.agentId }).catch(() => null),
+      query<unknown & object, { currentContentHash?: unknown; runs?: unknown }>("agents:evalRuns", { agentId: input.agentId, limit: 12 }).catch(() => null),
+    ]);
+    if (!Array.isArray(releases)) return null;
+    const current = evaluation ? rows(evaluation.runs).find((run) => run.contentHash === evaluation.currentContentHash) : undefined;
+    const checks: AgentDraftChecks | null = !evaluation
+      ? null
+      : current?.status === "passed" || current?.status === "failed" || current?.status === "running"
+        ? current.status
+        : "none";
+    return {
+      checks,
+      releases: rows(releases).map((entry): AgentReleaseRow => ({
+        id: text(entry.releaseId),
+        number: typeof entry.releaseNumber === "number" ? entry.releaseNumber : 0,
+        status: entry.status === "suspended" || entry.status === "deprecated" ? entry.status : "published",
+        rollout: entry.rollout === "internal_test" || entry.rollout === "limited" ? entry.rollout : "published",
+        ...(text(entry.releaseNotes) ? { notes: text(entry.releaseNotes) } : {}),
+        publishedAt: typeof entry.publishedAt === "number" ? entry.publishedAt : 0,
+        checked: Boolean(text(entry.evalRunId)),
+      })),
     };
   }
 

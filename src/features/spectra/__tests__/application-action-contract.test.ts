@@ -8,6 +8,7 @@ vi.mock("@/app/api/spectra/run/harness/calendar-command", () => ({ executeRegist
 vi.mock("@/app/api/spectra/run/harness/reference-command", () => ({ executeReferenceInsertion: seams.reference }));
 vi.mock("@/lib/artifact-restore-server", () => ({ admitArtifactRestore: seams.restore, artifactRestoreFailure: () => null }));
 vi.mock("@/lib/artifact-restore-native", () => ({ prepareNativeArtifactRestore: vi.fn() }));
+vi.mock("@/lib/server-secrets", () => ({ aiPublicLinkToken: (input: Record<string, string>) => `token:${input.operationId}`, publicLinkTokenHash: () => "a".repeat(64) }));
 vi.mock("@/features/spectra/ai/yjs-artifact-operation", () => ({ applyAiArtifactMutation: seams.applyAi, readLiveArtifactValue: vi.fn() }));
 
 import { executeApplicationCommand } from "@/app/api/spectra/run/harness/effects";
@@ -29,6 +30,10 @@ const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: 
   { command: "change_sync_policy", args: { targetIds: ["node"], patch: {} }, mutation: "syncPolicy:patchItems" },
   { command: "write_memory", args: { action: "create", content: "Prefers short examples" }, mutation: "memory:remember" },
   { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "revoke", grantId: "grant" }, mutation: "authority:revoke" },
+  { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "withdraw_invitation", invitationId: "invitation" }, mutation: "authority:revokePendingInvitation", event: "sharing_changed" },
+  { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "set_exception", accountId: "member", effect: "restrict" }, mutation: "authority:setArtifactException", event: "sharing_changed" },
+  { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "clear_exception", accountId: "member" }, mutation: "authority:clearArtifactException", event: "sharing_changed" },
+  { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "revoke_public_link", linkId: "link" }, mutation: "authority:revokePublicLink", event: "sharing_changed" },
   { command: "trigger_managebac_sync", args: { purpose: "classes", force: true }, mutation: "managebac:requestAiRefresh" },
   { command: "select_managebac_classes", args: { recordIds: ["class"], expectedRevision: 1 }, mutation: "managebac:setSelectedClasses" },
   { command: "insert_reference", args: { hostWorkId: "host", targetWorkId: "source" }, event: "reference_insert", status: "canonical_write" },
@@ -99,6 +104,21 @@ describe("application action contract matrix (stubbed persistence)", () => {
     expect(await executeApplicationCommand("actor", "run", "attempt", "restore_version", { artifactId: "work", versionId: "version" },
       undefined, undefined, undefined, "operation")).toMatchObject({ state: "unchanged" });
     expect(seams.mutate).not.toHaveBeenCalled();
+  });
+
+  it("makes a public link with only the token's hash, and never hands the address to the model or the journal", async () => {
+    seams.mutate.mockResolvedValueOnce({ linkId: "link", policyVersion: 2, level: "read" });
+    const events: Array<{ key: string; payload?: Record<string, unknown> }> = [];
+    const result = await executeApplicationCommand("actor", "run", "attempt", "change_sharing",
+      { resourceType: "artifact", resourceId: "work", action: "create_public_link", expiresInDays: 30 },
+      undefined, (event) => events.push(event), undefined, "operation");
+    expect(seams.mutate).toHaveBeenCalledWith("spectraApplicationWrites:execute", expect.objectContaining({
+      operationId: "operation", expectedCommand: "change_sharing", derived: { publicLinkTokenHash: "a".repeat(64) },
+    }));
+    expect(result).toMatchObject({ linkId: "link", level: "read", expiresInDays: 30 });
+    expect(JSON.stringify(result)).not.toContain("token:");
+    expect(events).toEqual([{ key: "public_link_created", payload: expect.objectContaining({ linkId: "link", operationId: "operation", targetId: "work" }) }]);
+    expect(JSON.stringify(events)).not.toContain("token:");
   });
 
   it("removes an embed's node from the host before removing the embed, and refuses embeds outside the work", async () => {

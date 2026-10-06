@@ -1,4 +1,5 @@
 import { formatEmbeds } from "../embeds";
+import { formatSharing } from "../sharing";
 import { formatVersions } from "../versions";
 import { ToolInputError, type AnyHarnessTool, type HarnessTool } from "../types";
 import { commandTool } from "./app";
@@ -66,6 +67,38 @@ function readEmbedsTool(session: HarnessSession): HarnessTool<EmbedsArgs> {
   };
 }
 
+type SharingArgs = { resourceType: "workspace" | "artifact" | "agent"; resourceId: string };
+
+function readSharingTool(session: HarnessSession): HarnessTool<SharingArgs> {
+  return {
+    name: "read_sharing",
+    description:
+      "Read who can open a work, workspace or agent: people invited (pending or accepted, with the invitation and grant ids share takes), members of shared workspaces it sits in and any exception, and its public links by id. Use it before share. A public link's address is never shown to you.",
+    parameters: {
+      type: "object",
+      properties: { resourceType: { type: "string", enum: ["workspace", "artifact", "agent"] }, resourceId: { type: "string" } },
+      required: ["resourceType", "resourceId"],
+      additionalProperties: false,
+    },
+    effect: "read",
+    label: (args) => `Checking who can open ${titled(session, args.resourceId, "your work")}`,
+    parse: (raw) => ({
+      resourceType: oneOf(raw, "resourceType", ["workspace", "artifact", "agent"] as const),
+      resourceId: requireString(raw, "resourceId", 200),
+    }),
+    execute: async (args, ctx) => {
+      const found = await session.backend.readSharing(args, ctx.signal);
+      if (!found)
+        return { ok: false, content: `Nothing with id "${args.resourceId}" can be shared by the user: it does not exist, or only its owner can share it.` };
+      return {
+        ok: true,
+        content: formatSharing(found, session.titles.get(args.resourceId)?.title ?? "this"),
+        doneLabel: `Checked who can open ${titled(session, args.resourceId, "your work")}`,
+      };
+    },
+  };
+}
+
 const EMBED_ACTIONS = ["resize", "follow_live", "pin", "recheck", "remove"] as const;
 type EmbedArgs = { artifactId: string; embedId: string; action: (typeof EMBED_ACTIONS)[number]; mode?: "compact" | "expanded"; versionId?: string };
 const EMBED_LABELS: Record<EmbedArgs["action"], [string, string]> = {
@@ -98,6 +131,7 @@ export function workTools(session: HarnessSession): AnyHarnessTool[] {
       command: (args) => ({ command: "restore_version", args }),
     }),
     readEmbedsTool(session),
+    readSharingTool(session),
     commandTool(session, {
       name: "manage_embed",
       description:

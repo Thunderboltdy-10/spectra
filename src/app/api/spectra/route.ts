@@ -4,6 +4,7 @@ import { isAuthNoSchool, requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
+import { aiPublicLinkToken } from "@/lib/server-secrets";
 import {
   snapshotArtifactRegions,
   type ArtifactLiveValue,
@@ -1036,6 +1037,31 @@ export async function POST(request: NextRequest) {
         linkId: requireString(body.linkId, "linkId"),
       });
       return ok(result);
+    }
+
+    if (action === "revealAiPublicLink") {
+      // A public link Spectra AI made: its address is derived from the
+      // operation, so only its hash was ever stored. The run's owner (checked
+      // by spectraRuns:get) fetches it here; the model and journal never do.
+      const runId = requireString(body.runId, "runId");
+      const operationId = requireString(body.operationId, "operationId");
+      const detail = await spectraQuery<{ runId: string }, { operations?: Array<Record<string, unknown>> }>("spectraRuns:get", { runId });
+      const operation = (detail.operations ?? []).find((entry) => String(entry._id) === operationId);
+      const input = operation?.input && typeof operation.input === "object" ? (operation.input as Record<string, unknown>) : {};
+      const args = input.args && typeof input.args === "object" ? (input.args as Record<string, unknown>) : {};
+      const output = operation?.output && typeof operation.output === "object" ? (operation.output as Record<string, unknown>) : {};
+      const receipt = output.applicationWriteReceipt && typeof output.applicationWriteReceipt === "object"
+        ? (output.applicationWriteReceipt as Record<string, unknown>).result : undefined;
+      const linkId = [receipt, output].map((value) => (value && typeof value === "object" ? (value as Record<string, unknown>).linkId : undefined))
+        .find((value): value is string => typeof value === "string");
+      if (!operation || operation.type !== "app.command" || input.command !== "change_sharing" || args.action !== "create_public_link" || !linkId)
+        return badRequest("This step did not make a public link.");
+      const resourceType = requireResourceType(args.resourceType);
+      const resourceId = requireString(args.resourceId, "resourceId");
+      const live = await spectraQuery<{ resourceType: string; resourceId: string }, Array<{ linkId: string }>>("authority:listPublicLinks", { resourceType, resourceId });
+      if (!live.some((link) => String(link.linkId) === linkId))
+        return badRequest("That public link was turned off or has expired. Make a new one from Share.");
+      return ok({ linkId, url: `/public#${aiPublicLinkToken({ runId, operationId, resourceType, resourceId })}` });
     }
 
     if (action === "setArtifactAccessException") {

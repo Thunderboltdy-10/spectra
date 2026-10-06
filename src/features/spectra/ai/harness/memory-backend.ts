@@ -1,6 +1,7 @@
 import type { ArtifactTypeKey } from "../../artifacts/types";
 import type { CommentRow } from "./comments";
 import type { EmbedRow } from "./embeds";
+import type { SharingState } from "./sharing";
 import type { VersionRow } from "./versions";
 import { artifactTypeLabel } from "../../../../../shared/semantic-chunks";
 import { resolveArtifactWriteInput } from "../../operations/artifact-write-content";
@@ -39,6 +40,8 @@ export type MemoryBackendOptions = {
   versions?: Record<string, VersionRow[]>;
   /** Embeds by host work id. */
   embeds?: Record<string, EmbedRow[]>;
+  /** Sharing by resource id. */
+  sharing?: Record<string, SharingState>;
   /** Simulate the semantic layer answering with words only, or with a degraded index. */
   searchMode?: SearchResponse["mode"];
   searchDegraded?: SearchResponse["degraded"];
@@ -206,6 +209,10 @@ export class MemoryBackend implements HarnessBackend {
     const host = this.artifacts.get(input.artifactId);
     if (!host) return null;
     return { embeds: this.options.embeds?.[input.artifactId] ?? [], canConfigure: host.canEdit };
+  }
+
+  async readSharing(input: { resourceType: string; resourceId: string }) {
+    return this.options.sharing?.[input.resourceId] ?? null;
   }
 
   async readSchoolData() {

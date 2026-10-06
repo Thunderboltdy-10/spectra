@@ -96,12 +96,16 @@ export async function executeApplicationCommand(
   if (!catalogCommandForApplicationCommand(command))
     throw new Error(`APP_COMMAND_REGISTRY_DRIFT:${command}`);
   let uiObservation: UiObservationFence | undefined;
-  const applyMutation: typeof mutate = async <TArgs extends object, TResult>(_name: string, _args: TArgs) => {
+  // The write itself is chosen by Convex from the recorded operation; the name
+  // and args here only document it. `derived` carries server-made values the
+  // operation must not hold, such as a public link's token hash.
+  const applyMutation = async <TArgs extends object, TResult>(_name: string, _args: TArgs, derived?: { publicLinkTokenHash: string }) => {
     throwIfAborted(signal);
     if (!operationId) throw new Error("APPLICATION_OPERATION_ID_REQUIRED");
     return mutate<object, TResult>("spectraApplicationWrites:execute", {
       runId, executionId, operationId, expectedCommand: command, expectedArgs: parsed,
       ...(uiObservation ? { uiObservation } : {}),
+      ...(derived ? { derived } : {}),
     });
   };
   if (authorityTarget) {
@@ -564,6 +568,35 @@ export async function executeApplicationCommand(
         payload: { targetId: resourceId, note: "Revoked sharing access" },
       });
       return result;
+    }
+    const changed = async (name: string, note: string) => {
+      const result = await applyMutation(name, {});
+      onUiEvent?.({ key: "sharing_changed", payload: { targetId: resourceId, note } });
+      return result;
+    };
+    if (action === "withdraw_invitation") return changed("authority:revokePendingInvitation", "Withdrew a sharing invitation");
+    if (action === "set_exception") return changed("authority:setArtifactException", "Set an access exception");
+    if (action === "clear_exception") return changed("authority:clearArtifactException", "Cleared an access exception");
+    if (action === "revoke_public_link") return changed("authority:revokePublicLink", "Turned off a public link");
+    if (action === "create_public_link") {
+      if (!operationId) throw new Error("APPLICATION_OPERATION_ID_REQUIRED");
+      // The address carries a secret. It is derived here from the operation,
+      // only its hash reaches Convex and the journal, and the user alone
+      // fetches the address again (revealAiPublicLink). The model never sees it.
+      const { aiPublicLinkToken, publicLinkTokenHash } = await import("@/lib/server-secrets");
+      const tokenHash = publicLinkTokenHash(aiPublicLinkToken({ runId, operationId, resourceType, resourceId }));
+      const result = (await applyMutation("authority:createPublicLink", {}, { publicLinkTokenHash: tokenHash })) as Record<string, unknown>;
+      const linkId = typeof result?.linkId === "string" ? result.linkId : undefined;
+      onUiEvent?.({
+        key: "public_link_created",
+        payload: { targetId: resourceId, resourceType, linkId, operationId, note: "Made a public link" },
+      });
+      return {
+        linkId,
+        level: "read",
+        ...(typeof parsed.expiresInDays === "number" ? { expiresInDays: parsed.expiresInDays } : {}),
+        address: "Shown to the user only, in a notice with a Copy link button. You never see it; do not guess or write one.",
+      };
     }
     throw new Error("SHARING_ACTION_INVALID");
   }

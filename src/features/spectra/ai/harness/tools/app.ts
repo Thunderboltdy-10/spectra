@@ -29,6 +29,45 @@ const COMMENT_LABELS: Record<CommentArgs["action"], [string, string]> = {
   delete: ["Deleting a comment", "Deleted a comment"],
 };
 
+const SHARE_ACTIONS = ["invite", "change_level", "revoke", "withdraw_invitation", "set_exception", "clear_exception", "create_public_link", "revoke_public_link"] as const;
+type ShareArgs = {
+  action: (typeof SHARE_ACTIONS)[number];
+  resourceType: "workspace" | "artifact" | "agent";
+  resourceId: string;
+  subjectId?: string;
+  invitationId?: string;
+  grantId?: string;
+  accountId?: string;
+  linkId?: string;
+  level?: "read" | "modify";
+  effect?: "deny" | "restrict";
+  expiresInDays?: 7 | 30;
+};
+const SHARE_NEEDS: Record<ShareArgs["action"], Array<keyof ShareArgs>> = {
+  invite: ["subjectId", "level"],
+  change_level: ["invitationId", "level"],
+  revoke: ["grantId"],
+  withdraw_invitation: ["invitationId"],
+  set_exception: ["accountId", "effect"],
+  clear_exception: ["accountId"],
+  create_public_link: [],
+  revoke_public_link: ["linkId"],
+};
+
+function shareQuestion(work: string, args: ShareArgs) {
+  const can = args.level === "modify" ? "edit" : "view";
+  switch (args.action) {
+    case "invite": return `Share ${work} so they can ${can} it?`;
+    case "change_level": return `Change someone's access to ${work} to ${can}?`;
+    case "revoke": return `Remove someone's access to ${work}?`;
+    case "withdraw_invitation": return `Withdraw the pending invitation to ${work}?`;
+    case "set_exception": return args.effect === "deny" ? `Stop one member of a shared workspace from opening ${work}?` : `Let one member of a shared workspace only view ${work}?`;
+    case "clear_exception": return `Give one workspace member their usual access to ${work} again?`;
+    case "create_public_link": return `Make a public link so anyone with it can view ${work}${args.expiresInDays ? ` for ${args.expiresInDays} days` : ""}?`;
+    case "revoke_public_link": return `Turn off a public link to ${work}?`;
+  }
+}
+
 type CommandTool<A> = {
   name: string;
   description: string;
@@ -432,47 +471,58 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "share",
       description:
-        "Change who can open the user's work: invite {resourceType, resourceId, subjectId (an account id), level: read|modify}, change_level {invitationId, level}, revoke {grantId}. The user approves every sharing change unless they allowed sharing changes.",
+        "Change who can open the user's work (ids from read_sharing): invite {subjectId (an account id), level: read|modify}; change_level {invitationId, level}; revoke {grantId}; withdraw_invitation {invitationId} for a pending one; set_exception {accountId, effect: deny|restrict} limits one member who reaches a single work through a shared workspace (restrict means view only), clear_exception {accountId} lifts it; create_public_link {expiresInDays?: 7|30} makes a read-only address anyone can open, which goes to the user only, never to you; revoke_public_link {linkId}. The user approves every sharing change unless they allowed sharing changes, and every public link unless they allowed publishing outside Spectra.",
       parameters: {
         type: "object",
         properties: {
-          action: { type: "string", enum: ["invite", "change_level", "revoke"] },
+          action: { type: "string", enum: [...SHARE_ACTIONS] },
           resourceType: { type: "string", enum: ["workspace", "artifact", "agent"] },
           resourceId: { type: "string" },
           subjectId: { type: "string" },
           invitationId: { type: "string" },
           grantId: { type: "string" },
+          accountId: { type: "string" },
+          linkId: { type: "string" },
           level: { type: "string", enum: ["read", "modify"] },
+          effect: { type: "string", enum: ["deny", "restrict"] },
+          expiresInDays: { type: "number", enum: [7, 30] },
         },
         required: ["action", "resourceType", "resourceId"],
         additionalProperties: false,
       },
       effect: "irreversible",
-      category: "sharing",
-      label: (args: { resourceId: string }) => `Changing who can open ${titled(session, args.resourceId, "your work")}`,
-      doneLabel: (args: { resourceId: string }) => `Changed sharing for ${titled(session, args.resourceId, "your work")}`,
-      question: (args: { action: string; resourceId: string; level?: string }) =>
-        args.action === "revoke"
-          ? `Remove someone's access to ${titled(session, args.resourceId, "this work")}?`
-          : args.action === "invite"
-            ? `Share ${titled(session, args.resourceId, "this work")} so they can ${args.level === "modify" ? "edit" : "view"} it?`
-            : `Change someone's access to ${titled(session, args.resourceId, "this work")} to ${args.level === "modify" ? "edit" : "view"}?`,
-      parse: (raw) => {
-        const action = oneOf(raw, "action", ["invite", "change_level", "revoke"] as const);
-        const parsed: Record<string, unknown> = {
+      category: (args: ShareArgs) => (args.action === "create_public_link" ? "external_send" : "sharing"),
+      label: (args: ShareArgs) =>
+        args.action === "create_public_link"
+          ? `Making a public link to ${titled(session, args.resourceId, "your work")}`
+          : `Changing who can open ${titled(session, args.resourceId, "your work")}`,
+      doneLabel: (args: ShareArgs) =>
+        args.action === "create_public_link"
+          ? `Made a public link to ${titled(session, args.resourceId, "your work")}`
+          : `Changed sharing for ${titled(session, args.resourceId, "your work")}`,
+      question: (args: ShareArgs) => shareQuestion(titled(session, args.resourceId, "this work"), args),
+      parse: (raw): ShareArgs => {
+        const action = oneOf(raw, "action", SHARE_ACTIONS);
+        const parsed: ShareArgs = {
           action,
           resourceType: oneOf(raw, "resourceType", ["workspace", "artifact", "agent"] as const),
           resourceId: requireString(raw, "resourceId", 200),
         };
-        for (const key of ["subjectId", "invitationId", "grantId"]) {
+        for (const key of ["subjectId", "invitationId", "grantId", "accountId", "linkId"] as const) {
           const value = optionalString(raw, key, 200);
           if (value) parsed[key] = value;
         }
         if (raw.level !== undefined) parsed.level = oneOf(raw, "level", ["read", "modify"] as const);
-        if (action === "invite" && (!parsed.subjectId || !parsed.level)) throw new ToolInputError("invite needs subjectId and level.");
-        if (action === "change_level" && (!parsed.invitationId || !parsed.level)) throw new ToolInputError("change_level needs invitationId and level.");
-        if (action === "revoke" && !parsed.grantId) throw new ToolInputError("revoke needs grantId.");
-        return parsed as { action: string; resourceId: string; level?: string };
+        if (raw.effect !== undefined) parsed.effect = oneOf(raw, "effect", ["deny", "restrict"] as const);
+        if (raw.expiresInDays !== undefined) {
+          if (raw.expiresInDays !== 7 && raw.expiresInDays !== 30) throw new ToolInputError("expiresInDays is 7 or 30; leave it out for a link that does not expire.");
+          parsed.expiresInDays = raw.expiresInDays;
+        }
+        const needs = SHARE_NEEDS[action].filter((key) => parsed[key] === undefined);
+        if (needs.length) throw new ToolInputError(`${action} needs ${needs.join(" and ")}${action === "invite" ? "" : " (read_sharing lists them)"}.`);
+        if ((action === "set_exception" || action === "clear_exception") && parsed.resourceType === "workspace")
+          throw new ToolInputError("Exceptions are set on a single work: use resourceType artifact or agent.");
+        return parsed;
       },
       command: (args) => ({ command: "change_sharing", args: args as Record<string, unknown> }),
     }),

@@ -5,6 +5,8 @@ import { handleSettingsObservationEvent } from "./settings-observation-client";
 import { DEVICES_HREF } from "../bridge/client";
 import { runAiDeviceAction } from "../devices/device-actions";
 import { devicePairing } from "../devices/pairing";
+import { postSpectra } from "../data/api";
+import { toast } from "@/components/ui/toast";
 
 export type SpectraAiUiEvent = {
   key: string;
@@ -26,7 +28,64 @@ export function rememberCommittedArtifactResult(event: {
   noteAiLocation({ actorId: event.runId, artifactId });
 }
 
+const SHOWN_LINKS_KEY = "spectra.ai.shownPublicLinks";
+
+/** True the first time this computer shows a link's notice: run events replay
+ * after a reload and reach every tab watching the run. */
+function claimPublicLinkNotice(operationId: string): boolean {
+  try {
+    const shown = JSON.parse(window.localStorage.getItem(SHOWN_LINKS_KEY) ?? "[]") as unknown;
+    const list = Array.isArray(shown) ? shown.filter((id): id is string => typeof id === "string") : [];
+    if (list.includes(operationId)) return false;
+    window.localStorage.setItem(SHOWN_LINKS_KEY, JSON.stringify([...list, operationId].slice(-50)));
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+/** A public link Spectra made: its address reaches the user alone, fetched
+ * from the server with their own session, never through the run's events. */
+async function showAiPublicLink(runId: string, operationId: string) {
+  if (!claimPublicLinkNotice(operationId)) return;
+  let url: string;
+  try {
+    url = new URL((await postSpectra<{ url: string }>({ action: "revealAiPublicLink", runId, operationId })).url, window.location.origin).toString();
+  } catch {
+    return; // Turned off or expired since; Share shows what is on.
+  }
+  toast.success("Spectra made a public link", {
+    id: `ai-public-link:${operationId}`,
+    description: "Anyone with the link can view this work. Turn it off any time in Share.",
+    duration: Infinity,
+    closeButton: true,
+    action: {
+      label: "Copy link",
+      onClick: async () => {
+        try {
+          await navigator.clipboard.writeText(url);
+          toast.success("Link copied.");
+        } catch {
+          toast.error("Could not copy the link. Open Share to make a new one.");
+        }
+      },
+    },
+  });
+}
+
 function rememberEvent(event: SpectraAiUiEvent): void {
+  if (event.key === "public_link_created") {
+    const operationId = event.payload?.operationId;
+    const targetId = event.payload?.targetId;
+    if (event.runId && typeof operationId === "string" && operationId) void showAiPublicLink(event.runId, operationId);
+    noteAiSurface({
+      ...(event.runId ? { actorId: event.runId } : {}),
+      route: "settings",
+      target: "sharing",
+      note: typeof targetId === "string" && targetId ? "Made a public link" : "Updated sharing",
+    });
+    return;
+  }
   if (event.key === "organize_library") {
     const targetId = event.payload?.targetId;
     noteAiSurface({

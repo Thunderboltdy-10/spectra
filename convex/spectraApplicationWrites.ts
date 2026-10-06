@@ -29,7 +29,7 @@ function semanticInput(input: Row) {
 }
 
 /** A fixed semantic dispatch. Callers cannot supply a Convex function name. */
-function mutationFor(command: string, args: Row, runId: string, executionId: string, operationId: string, scopeNodeId?: string) {
+function mutationFor(command: string, args: Row, runId: string, executionId: string, operationId: string, scopeNodeId?: string, derived?: { publicLinkTokenHash: string }) {
   const targetIds = strings(args.targetIds);
   const destination = typeof args.destinationId === "string" && args.destinationId.trim() ? args.destinationId.trim() : scopeNodeId;
   switch (command) {
@@ -103,6 +103,24 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
         case "invite": return { name: "authority:invite", args: { resourceType, resourceId, inviteeAccountId: String(args.subjectId ?? ""), level } };
         case "change_level": return { name: "authority:changeAcceptedLevel", args: { invitationId: String(args.invitationId ?? ""), level } };
         case "revoke": return { name: "authority:revoke", args: { resourceType, resourceId, grantId: String(args.grantId ?? "") } };
+        case "withdraw_invitation": return { name: "authority:revokePendingInvitation", args: { invitationId: String(args.invitationId ?? "") } };
+        case "set_exception": return { name: "authority:setArtifactException", args: {
+          artifactId: resourceId,
+          accountId: String(args.accountId ?? ""),
+          effect: args.effect === "deny" ? "deny" : "restrict",
+          ...(args.effect === "deny" ? {} : { maxLevel: "read" }),
+        } };
+        case "clear_exception": return { name: "authority:clearArtifactException", args: { artifactId: resourceId, accountId: String(args.accountId ?? "") } };
+        case "create_public_link": {
+          // Only the hash of a server-derived token arrives here, never the token.
+          if (!derived?.publicLinkTokenHash) throw new Error("AI_PUBLIC_LINK_TOKEN_REQUIRED");
+          const days = args.expiresInDays === 7 || args.expiresInDays === 30 ? args.expiresInDays : undefined;
+          return { name: "authority:createPublicLink", args: {
+            resourceType, resourceId, tokenHash: derived.publicLinkTokenHash, requestId: `ai:${operationId}`,
+            ...(days ? { expiresAt: Date.now() + days * 24 * 60 * 60 * 1000 } : {}),
+          } };
+        }
+        case "revoke_public_link": return { name: "authority:revokePublicLink", args: { linkId: String(args.linkId ?? "") } };
       }
       break;
     }
@@ -147,7 +165,7 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
 }
 
 export const execute = mutation({
-  args: { runId: v.id("spectraAiRuns"), executionId: v.string(), operationId: v.id("spectraOperations"), expectedCommand: v.string(), expectedArgs: v.any(), uiObservation: v.optional(vUiObservationFence) },
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string(), operationId: v.id("spectraOperations"), expectedCommand: v.string(), expectedArgs: v.any(), uiObservation: v.optional(vUiObservationFence), derived: v.optional(v.object({ publicLinkTokenHash: v.string() })) },
   handler: async (ctx, args): Promise<unknown> => {
     const actor = await getAuthenticatedActor(ctx);
     const run = await ctx.db.get(args.runId);
@@ -209,7 +227,7 @@ export const execute = mutation({
       throw new Error("AI_APPLICATION_APPROVAL_SCOPE_REQUIRED");
     await assertUiObservationFence(operation, args.uiObservation, Date.now());
     const snapshot = row(run.contextSnapshot);
-    const spec = mutationFor(String(input.command), row(input.args), String(run._id), args.executionId, String(operation._id), typeof snapshot.scopeNodeId === "string" ? snapshot.scopeNodeId : undefined);
+    const spec = mutationFor(String(input.command), row(input.args), String(run._id), args.executionId, String(operation._id), typeof snapshot.scopeNodeId === "string" ? snapshot.scopeNodeId : undefined, args.derived);
     // MutationCtx.runMutation executes inside this transaction. Its permission
     // checks, the effect, this run/operation read set and receipt commit together.
     // A concurrent Stop/steer conflicts with these reads and retries the guard.

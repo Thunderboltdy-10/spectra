@@ -139,16 +139,25 @@ const COMMANDS: Record<string, ApplicationCommand> = {
       .object({
         resourceType: z.enum(["workspace", "artifact", "agent"]),
         resourceId: z.string(),
-        action: z.enum(["invite", "change_level", "revoke"]),
+        action: z.enum(["invite", "change_level", "revoke", "withdraw_invitation", "set_exception", "clear_exception", "create_public_link", "revoke_public_link"]),
         subjectId: z.string().optional(),
         invitationId: z.string().optional(),
         grantId: z.string().optional(),
+        accountId: z.string().optional(),
+        linkId: z.string().optional(),
         level: z.enum(["read", "modify"]).optional(),
+        effect: z.enum(["deny", "restrict"]).optional(),
+        expiresInDays: z.union([z.literal(7), z.literal(30)]).optional(),
       })
       .superRefine((value, ctx) => {
         if (value.action === "invite" && !value.subjectId) ctx.addIssue({ code: "custom", path: ["subjectId"], message: "An invitee account id is required." });
         if (value.action === "change_level" && (!value.invitationId || !value.level)) ctx.addIssue({ code: "custom", path: ["invitationId"], message: "An accepted invitation and new level are required." });
         if (value.action === "revoke" && !value.grantId) ctx.addIssue({ code: "custom", path: ["grantId"], message: "A grant id is required." });
+        if (value.action === "withdraw_invitation" && !value.invitationId) ctx.addIssue({ code: "custom", path: ["invitationId"], message: "A pending invitation id is required." });
+        if ((value.action === "set_exception" || value.action === "clear_exception") && !value.accountId) ctx.addIssue({ code: "custom", path: ["accountId"], message: "The member's account id is required." });
+        if ((value.action === "set_exception" || value.action === "clear_exception") && value.resourceType === "workspace") ctx.addIssue({ code: "custom", path: ["resourceType"], message: "Exceptions are set on a single work, not a workspace." });
+        if (value.action === "set_exception" && !value.effect) ctx.addIssue({ code: "custom", path: ["effect"], message: "An exception is deny or restrict." });
+        if (value.action === "revoke_public_link" && !value.linkId) ctx.addIssue({ code: "custom", path: ["linkId"], message: "A public link id is required." });
       }),
     authority: "sharing",
   },

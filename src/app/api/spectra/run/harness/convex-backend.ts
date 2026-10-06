@@ -13,6 +13,7 @@ import type {
 import { ARTIFACT_TYPE_KEYS, type ArtifactTypeKey } from "@/features/spectra/artifacts/types";
 import type { CommentRow } from "@/features/spectra/ai/harness/comments";
 import type { EmbedRow, EmbedState } from "@/features/spectra/ai/harness/embeds";
+import type { SharingInvitation, SharingLink, SharingMember, SharingState } from "@/features/spectra/ai/harness/sharing";
 import type { VersionRow, VersionSource } from "@/features/spectra/ai/harness/versions";
 import { readLiveArtifactValue } from "@/features/spectra/ai/yjs-artifact-operation";
 import { overlayLiveArtifactRecord } from "@/features/spectra/collaboration/artifact-yjs-model";
@@ -719,6 +720,63 @@ export class ConvexHarnessBackend implements HarnessBackend {
       }];
     });
     return { embeds, canConfigure: list.canConfigure === true };
+  }
+
+  async readSharing(input: { resourceType: "workspace" | "artifact" | "agent"; resourceId: string }): Promise<SharingState | null> {
+    const resource = { resourceType: input.resourceType, resourceId: input.resourceId };
+    const level = (value: unknown) => (value === "modify" ? "modify" : "read") as "read" | "modify";
+    // The share dialog's reads: each checks the user may share (or publish) this.
+    const [invitations, audience, links] = await Promise.all([
+      query<unknown & object, unknown>("authority:shareState", resource).catch(() => null),
+      input.resourceType === "workspace"
+        ? Promise.resolve(undefined)
+        : query<unknown & object, unknown>("authority:artifactInheritedAudience", { artifactId: input.resourceId }).catch(() => null),
+      query<unknown & object, unknown>("authority:listPublicLinks", resource).catch(() => undefined),
+    ]);
+    if (!Array.isArray(invitations)) return null;
+    const account = (value: unknown) => (value && typeof value === "object" ? (value as Record<string, unknown>) : {});
+    return {
+      invitations: rows(invitations).map((entry): SharingInvitation => {
+        const who = account(entry.account);
+        return {
+          invitationId: text(entry.invitationId),
+          status: entry.status === "accepted" ? "accepted" : "pending",
+          level: level(entry.level),
+          ...(text(who.accountId) ? { accountId: text(who.accountId) } : {}),
+          ...(text(who.name) ? { name: text(who.name) } : {}),
+          ...(text(who.email) ? { email: text(who.email) } : {}),
+          ...(text(entry.grantId) ? { grantId: text(entry.grantId) } : {}),
+          ...(typeof entry.expiresAt === "number" ? { expiresAt: entry.expiresAt } : {}),
+        };
+      }),
+      ...(Array.isArray(audience)
+        ? {
+            members: rows(audience).map((entry): SharingMember => {
+              const who = account(entry.account);
+              const exception = account(entry.exception).effect;
+              return {
+                accountId: text(who.accountId),
+                ...(text(who.name) ? { name: text(who.name) } : {}),
+                ...(text(who.email) ? { email: text(who.email) } : {}),
+                inheritedLevel: level(entry.inheritedLevel),
+                effectiveLevel: entry.effectiveLevel === "modify" || entry.effectiveLevel === "read" ? entry.effectiveLevel : null,
+                workspaces: rows(entry.sources).map((source) => text(source.workspaceTitle)).filter(Boolean),
+                ...(exception === "deny" || exception === "restrict" ? { exception } : {}),
+              };
+            }),
+          }
+        : {}),
+      ...(Array.isArray(links)
+        ? {
+            links: rows(links).map((entry): SharingLink => ({
+              linkId: text(entry.linkId),
+              ...(typeof entry.createdAt === "number" ? { createdAt: entry.createdAt } : {}),
+              ...(typeof entry.expiresAt === "number" ? { expiresAt: entry.expiresAt } : {}),
+              ...(text(entry.domainRestriction) ? { domain: text(entry.domainRestriction) } : {}),
+            })),
+          }
+        : {}),
+    };
   }
 
   async readCalendar(input: { from: number; to: number; title?: string }): Promise<string> {

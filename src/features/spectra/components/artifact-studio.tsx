@@ -5685,7 +5685,7 @@ function ArtifactStudioEditor({
         ]
       : []),
     ...(mode === "split" && !compact
-      ? [{ id: "open-as-tab", label: "Open as tab", icon: Maximize2, onSelect: onExpand }]
+      ? [{ id: "open-full", label: "Open full", icon: Maximize2, onSelect: onExpand }]
       : []),
   ];
   const syncTruth = useMemo(

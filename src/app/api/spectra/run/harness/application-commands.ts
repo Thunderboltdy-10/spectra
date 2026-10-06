@@ -171,6 +171,11 @@ const COMMANDS: Record<string, ApplicationCommand> = {
       }),
     authority: "sharing",
   },
+  // Checks run the agent's draft against its suite: they spend model tokens and record a run, nothing else.
+  run_agent_checks: {
+    input: z.object({ agentId: z.string().trim().min(1).max(200) }),
+    authority: "content",
+  },
   // A release decides which version of an agent people reach; a private one reaches only the owner.
   release_agent: {
     input: z

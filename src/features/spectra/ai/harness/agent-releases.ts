@@ -31,9 +31,9 @@ function reach(row: AgentReleaseRow) {
 
 const CHECKS: Record<AgentDraftChecks, string> = {
   passed: "The current draft passed its checks, so it can be published.",
-  failed: "The current draft failed its checks; publishing needs a passing run. Read the failures in the agent studio's Checks and fix the draft with edit_artifact.",
+  failed: "The current draft failed its checks; publishing needs a passing run. Run the checks with run_agent_checks to see the failing cases, fix the draft with edit_artifact and run them again.",
   running: "Checks on the current draft are still running.",
-  none: "The current draft has not been checked since it last changed; publishing needs a passing run, which the user starts from the agent studio's Checks. A release to the owner only needs none.",
+  none: "The current draft has not been checked since it last changed; publishing needs a passing run: run_agent_checks starts one. A release to the owner only needs none.",
 };
 
 export function formatAgentReleases(state: AgentReleaseState, title: string) {

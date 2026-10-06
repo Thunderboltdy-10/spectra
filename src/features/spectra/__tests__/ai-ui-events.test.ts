@@ -277,8 +277,9 @@ describe("AI UI events", () => {
     const changed: string[] = [];
     const off = spectraBus.on("agent.releasesChanged", ({ agentId }) => changed.push(agentId));
     handleSpectraAiUiEvent({ key: "agent_released", runId: "run-1", payload: { targetId: "agent-1", note: "Published release 3" } });
+    handleSpectraAiUiEvent({ key: "agent_checked", runId: "run-1", payload: { targetId: "agent-1", note: "The agent passed its checks" } });
     off();
-    expect(changed).toEqual(["agent-1"]);
+    expect(changed).toEqual(["agent-1", "agent-1"]);
     expect(getAiLocation()).toMatchObject({ artifactId: "agent-1" });
   });
 });

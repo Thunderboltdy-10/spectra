@@ -292,6 +292,7 @@ describe("harness tools", () => {
     ["remember", { content: "Prefers short answers." }, { command: "write_memory", args: { action: "create", content: "Prefers short answers." } }],
     ["remember", { content: "Prefers worked examples.", memoryId: "m1" }, { command: "write_memory", args: { action: "revise", content: "Prefers worked examples.", memoryId: "m1" } }],
     ["forget_memory", { memoryId: "m1" }, { command: "write_memory", args: { action: "forget", memoryId: "m1" } }],
+    ["run_agent_checks", { agentId: "ag1" }, { command: "run_agent_checks", args: { agentId: "ag1" } }],
   ] as const)("%s sends the application command for %j, asking under the server's category", async (name, raw, sent) => {
     const { tools, backend, session } = setup();
     const tool = [...tools, ...runOnlyTools(session)].find((entry) => entry.name === name)!;

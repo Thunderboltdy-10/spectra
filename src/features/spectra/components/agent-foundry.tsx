@@ -1117,7 +1117,7 @@ export function AgentFoundry({
     };
   }, [artifactId, readOnly]);
 
-  // Spectra can release this agent too; show the releases it made.
+  // Spectra can run this agent's checks and release it too; show what it did.
   useEffect(
     () =>
       spectraBus.on("agent.releasesChanged", (detail) => {
@@ -1125,8 +1125,15 @@ export function AgentFoundry({
         void getSpectraAgentReleases(artifactId)
           .then((response) => setReleases(response.releases))
           .catch(() => undefined);
+        if (!readOnly)
+          void getSpectraAgentEvalRuns(artifactId)
+            .then((response) => {
+              setEvalRuns(response.runs);
+              setCurrentHash(response.currentContentHash);
+            })
+            .catch(() => undefined);
       }),
-    [artifactId],
+    [artifactId, readOnly],
   );
 
   // Usage is only asked for when the release view is opened, because opening an

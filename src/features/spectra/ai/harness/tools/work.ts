@@ -192,9 +192,26 @@ export function workTools(session: HarnessSession): AnyHarnessTool[] {
     readSharingTool(session),
     readAgentReleasesTool(session),
     commandTool(session, {
+      name: "run_agent_checks",
+      description:
+        "Run an agent's checks on its current draft, as the agent studio's Run checks does: its skills' cases, privacy and adversarial cases, and the tests the user saved from the bench. It takes a few minutes and uses the school's AI allowance. Passing checks are what release_agent publish needs; failing cases come back with the graders' reasons, to improve the agent with edit_artifact and run the checks again.",
+      parameters: {
+        type: "object",
+        properties: { agentId: { type: "string" } },
+        required: ["agentId"],
+        additionalProperties: false,
+      },
+      effect: "write",
+      targets: (args: { agentId: string }) => [args.agentId],
+      label: (args: { agentId: string }) => `Running checks on ${titled(session, args.agentId, "your agent")}`,
+      doneLabel: (args: { agentId: string }) => `Ran checks on ${titled(session, args.agentId, "your agent")}`,
+      parse: (raw) => ({ agentId: requireString(raw, "agentId", 200) }),
+      command: (args) => ({ command: "run_agent_checks", args }),
+    }),
+    commandTool(session, {
       name: "release_agent",
       description:
-        "Release one of the user's agents, as the agent studio does. release_private makes a release of the current draft that only the user reaches, to try it in a conversation; it needs no checks. publish releases the current draft to everyone who can use the agent; it needs the draft to have passed its checks (read_agent_releases says). promote {releaseId} takes a staged release live; rollback {releaseId} serves an earlier checked release again; suspend {releaseId} stops a release reaching anyone new. releaseNotes is optional. Everything but release_private asks the user unless they allowed sharing changes. To stop sharing an agent with someone, use share.",
+        "Release one of the user's agents, as the agent studio does. release_private makes a release of the current draft that only the user reaches, to try it in a conversation; it needs no checks. publish releases the current draft to everyone who can use the agent; it needs the draft to have passed its checks (read_agent_releases says; run them with run_agent_checks). promote {releaseId} takes a staged release live; rollback {releaseId} serves an earlier checked release again; suspend {releaseId} stops a release reaching anyone new. releaseNotes is optional. Everything but release_private asks the user unless they allowed sharing changes. To stop sharing an agent with someone, use share.",
       parameters: {
         type: "object",
         properties: {

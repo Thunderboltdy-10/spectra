@@ -271,7 +271,7 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     });
     return;
   }
-  if (event.key === "agent_released") {
+  if (event.key === "agent_released" || event.key === "agent_checked") {
     const agentId = event.payload?.targetId;
     if (typeof agentId !== "string" || !agentId) return;
     spectraBus.emit("agent.releasesChanged", { agentId });

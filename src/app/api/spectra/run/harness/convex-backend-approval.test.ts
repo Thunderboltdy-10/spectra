@@ -40,6 +40,7 @@ describe("staging an application command", () => {
     ["release_agent", { agentId: "ag1", action: "suspend", releaseId: "r1" }, true],
     ["write_memory", { action: "create", content: "Prefers short answers." }, false],
     ["write_memory", { action: "forget", memoryId: "m1" }, true],
+    ["run_agent_checks", { agentId: "ag1" }, false],
   ] as const)("records %s %j as needing approval: %s", async (command, args, asks) => {
     await backend().stageCommand({ command, args: { ...args }, toolCallId: "call-1", approved: false });
     const plan = calls.find((call) => call.name === "spectraOperations:recordPlan")!;

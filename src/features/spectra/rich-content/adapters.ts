@@ -40,8 +40,12 @@ const STORED_HTML = /^<(?:p|h[1-6]|ul|ol|blockquote|pre|aside|div|table|hr|figur
  * written in: a TipTap field writes HTML, an import or the AI writes Markdown.
  */
 export function richContentFromStored(value: string): SpectraRichContentAst {
-  const trimmed = value.trim();
-  return STORED_HTML.test(trimmed) ? richContentFromHtml(trimmed) : parseSpectraRichContent(value);
+  return isStoredHtml(value) ? richContentFromHtml(value.trim()) : parseSpectraRichContent(value);
+}
+
+/** Whether a stored field value is editor HTML rather than Markdown. */
+export function isStoredHtml(value: string) {
+  return STORED_HTML.test(value.trim());
 }
 
 /** A stored text field's words, for a label, a rail row or a search. */

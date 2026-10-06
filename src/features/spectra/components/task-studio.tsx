@@ -13,6 +13,7 @@ import { formatMinutesBefore, REMINDER_MINUTE_OPTIONS } from "../reminders/minut
 import { useStudioContract } from "./artifact-studio-shell";
 import { ArtifactWorkbar, contentHistoryBindings } from "./artifact-workbar";
 import { SpectraStoredText } from "./spectra-rich-content";
+import { ArtifactRichTextEditor } from "./artifact-studio";
 
 /*
  * A planner task (EDITORS.md, "Planner task"): one thing by default. A title,
@@ -335,18 +336,21 @@ export function TaskStudio({
             </div>
           ) : null}
 
-          <textarea
-            className="spectra-task-notes"
-            value={fromSchool ? (task.personalOverlay?.note ?? "") : (task.description ?? "")}
-            disabled={!canEdit}
-            placeholder={fromSchool ? "Your notes" : "Notes"}
-            aria-label={fromSchool ? "Your notes" : "Notes"}
-            onChange={(event) =>
-              fromSchool
-                ? patch({ personalOverlay: { ...task.personalOverlay, note: event.target.value.slice(0, 20_000) } })
-                : patch({ description: event.target.value })
-            }
-          />
+          <div className="spectra-task-notes">
+            <ArtifactRichTextEditor
+              key={fromSchool ? "note" : "description"}
+              value={fromSchool ? (task.personalOverlay?.note ?? "") : (task.description ?? "")}
+              format="markdown"
+              disabled={!canEdit}
+              placeholder={fromSchool ? "Your notes" : "Notes"}
+              label={fromSchool ? "Your notes" : "Notes"}
+              onChange={(value) =>
+                fromSchool
+                  ? patch({ personalOverlay: { ...task.personalOverlay, note: value.slice(0, 20_000) } })
+                  : patch({ description: value })
+              }
+            />
+          </div>
           {fromSchool && task.description ? <SpectraStoredText value={task.description} className="spectra-task-school-notes" /> : null}
 
           {steps.length ? (

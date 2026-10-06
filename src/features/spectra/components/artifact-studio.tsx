@@ -32,6 +32,7 @@ import {
   Italic,
   Link2,
   List,
+  ListChecks,
   ListOrdered,
   Loader2,
   Maximize2,
@@ -219,8 +220,6 @@ import {
 } from "./artifact-workbar";
 import {
   downloadDocumentBlob,
-  markdownToDocumentHtml,
-  sanitizeDocumentHtml,
 } from "./artifact-studio-file-utils";
 import {
   StudioContractProvider,
@@ -6750,14 +6749,6 @@ function ArtifactStudioEditor({
   );
 }
 
-export function plannerDescriptionHtml(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return "<p></p>";
-  return /^<(?:p|h[1-6]|ul|ol|blockquote|pre)\b/i.test(trimmed)
-    ? sanitizeDocumentHtml(trimmed)
-    : markdownToDocumentHtml(value);
-}
-
 export const ArtifactRichTextEditor = dynamic(
   () => import("./artifact-rich-text-editor").then((module) => module.ArtifactRichTextEditor),
   { loading: StudioTypePlaceholder },
@@ -6880,6 +6871,12 @@ export function RichTextFormatBar({
             icon={ListOrdered}
             active={editor?.isActive("orderedList")}
             onClick={() => editor?.chain().focus().toggleOrderedList().run()}
+          />
+          <ToolbarButton
+            label="Checklist"
+            icon={ListChecks}
+            active={editor?.isActive("taskList")}
+            onClick={() => editor?.chain().focus().toggleTaskList().run()}
           />
           {inserts ? (
             <>

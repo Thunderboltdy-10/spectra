@@ -31,8 +31,9 @@
     overflow-wrap: break-word;
   }
 
-  /* Inside a line (an option, a label): the line's own type. */
-  .spectra-prose.spectra-prose-inline {
+  /* Inside a line (an option, a label), or inside an object that sets its
+     own type (a slide text box): the host's type, size and colour. */
+  .spectra-prose:is(.spectra-prose-inline, .spectra-prose-inherit) {
     color: inherit;
     font: inherit;
   }

@@ -6,7 +6,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SpectraRichContent, SpectraStoredText } from "../components/spectra-rich-content";
-import { richContentFromHtml } from "../rich-content";
+import { richContentFromHtml, richContentFromSlideParagraphs } from "../rich-content";
 
 vi.mock("../components/artifact-embed-host", () => ({
   ArtifactEmbedById: ({ embedId }: { embedId: string }) => <div data-testid="embed">{embedId}</div>,
@@ -118,6 +118,17 @@ describe("the shared rich-content renderer", () => {
     expect(prose().textContent).toBe("Empty card");
   });
 
+  it("shows a slide's runs and bullets as the deck wrote them", () => {
+    const ast = richContentFromSlideParagraphs([
+      { runs: [{ text: "Key ", bold: true }, { text: "idea" }], alignment: "center" },
+      { runs: [{ text: "First" }], bullet: "bullet" },
+      { runs: [{ text: "Second" }], bullet: "bullet" },
+    ]);
+    act(() => root.render(<SpectraRichContent ast={ast} className="spectra-prose-inherit" />));
+    expect(prose().querySelector("p strong")?.textContent).toBe("Key ");
+    expect([...prose().querySelectorAll("ul > li")].map((item) => item.textContent)).toEqual(["First", "Second"]);
+  });
+
   it("is styled by one stylesheet scope that the document and every field share", () => {
     const css = readFileSync(join(process.cwd(), "src/styles/spectra-prose.css"), "utf8");
     const globals = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
@@ -133,6 +144,14 @@ describe("the shared rich-content renderer", () => {
     expect(document).toContain('"spectra-prose spectra-composer-clearance');
     expect(document).not.toMatch(/\[&_\.ProseMirror_(?:h1|h2|p|li|blockquote)\]/);
     const field = readFileSync(join(process.cwd(), "src/features/spectra/components/artifact-rich-text-editor.tsx"), "utf8");
-    expect(field.match(/"spectra-prose /g)?.length).toBe(3);
+    expect(field.match(/"spectra-prose /g)?.length).toBe(4);
+    // Board text and slide text are drawn by the shared renderer, not a textarea look.
+    expect(app).not.toContain(".whiteboard-node textarea");
+    expect(app).not.toMatch(/\.spectra-task-notes \{[^}]*font-size/);
+    // Every field's bar carries the same commands, checklist included.
+    const studio = readFileSync(join(process.cwd(), "src/features/spectra/components/artifact-studio.tsx"), "utf8");
+    for (const command of ["toggleBold", "toggleItalic", "toggleUnderline", "toggleStrike", "toggleBulletList", "toggleOrderedList", "toggleTaskList", "toggleBlockquote", "toggleCode", "setLink", "inlineEquation"]) {
+      expect(studio).toContain(command);
+    }
   });
 });

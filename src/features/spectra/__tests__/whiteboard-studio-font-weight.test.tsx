@@ -54,6 +54,21 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("whiteboard font weight rendering", () => {
+  it("draws a note's Markdown as itself, not as raw marks", async () => {
+    const content = normalizeWhiteboardContent({ nodes: [{
+      id: "list", type: "note", content: { text: "- [x] **packed** $x^2$" },
+    }] });
+    await act(async () => {
+      render(<StudioContractProvider value={contract}>
+        <WhiteboardStudio artifactId="board-1" artifacts={[]} content={content} onChange={() => {}} readOnly={false} />
+      </StudioContractProvider>);
+    });
+    const text = document.querySelector(".whiteboard-node-text")!;
+    expect(text.querySelector('ul[data-type="taskList"] li[data-checked="true"] strong')?.textContent).toBe("packed");
+    expect(text.querySelector("[data-inline-equation]")).not.toBeNull();
+    expect(text.textContent).not.toContain("**");
+  });
+
   it.each([
     ["bold", undefined, "bold"],
     ["normal", undefined, "normal"],
@@ -78,8 +93,9 @@ describe("whiteboard font weight rendering", () => {
         <WhiteboardStudio artifactId="board-1" artifacts={[]} content={content} onChange={() => {}} readOnly={false} />
       </StudioContractProvider>);
     });
-    const textbox = screen.getAllByRole("textbox").find(element => (element as HTMLTextAreaElement).value === "A concept")!;
-    expect(textbox.style.fontWeight).toBe(expected);
+    const text = screen.getByText("A concept").closest(".whiteboard-node-text") as HTMLElement;
+    expect(text.style.fontWeight).toBe(expected);
+    expect(text.style.getPropertyValue("--prose-size")).toBe("30px");
     expect(errors.mock.calls.filter(call => call.some(value => String(value).includes("NaN") || String(value).includes("fontWeight")))).toEqual([]);
   });
 });

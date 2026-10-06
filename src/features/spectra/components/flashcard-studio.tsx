@@ -3544,7 +3544,7 @@ function CardFace({
             data-ai-region={aiRegionAttr(aiActive)}
             {...(path ? targetAttrs(path) : {})}
             readOnly={disabled}
-            className="min-h-[112px] w-full resize-none rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] px-6 py-6 text-center font-serif text-metric leading-snug text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,var(--brand-primary)_55%,var(--border-default))]"
+            className="min-h-[112px] w-full resize-none rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] px-6 py-6 text-center font-display text-metric leading-snug text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,var(--brand-primary)_55%,var(--border-default))]"
             placeholder={placeholder}
           />
         ) : (

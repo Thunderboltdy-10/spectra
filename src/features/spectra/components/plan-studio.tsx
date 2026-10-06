@@ -21,8 +21,8 @@ import {
 } from "lucide-react";
 import { SelectField } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { ArtifactWorkbar, contentHistoryBindings } from "./artifact-workbar";
+import { ArtifactRichTextEditor } from "./artifact-studio";
 import { projectBindingsFromIr } from "../capabilities";
 import { useStudioContract } from "./artifact-studio-shell";
 import {
@@ -1205,13 +1205,15 @@ export function PlanStudio({
             }
             aria-label="Task title"
           />
-          <Textarea
+          <ArtifactRichTextEditor
+            key={openTask.id}
             value={openTask.description}
+            format="markdown"
             disabled={readOnly}
             placeholder="What does done look like?"
-            aria-label="Task description"
-            onChange={(event) =>
-              patchTask(openTask.id, { description: event.target.value })
+            label="Task description"
+            onChange={(description) =>
+              patchTask(openTask.id, { description })
             }
           />
           <div className="spectra-plan-detail-grid">

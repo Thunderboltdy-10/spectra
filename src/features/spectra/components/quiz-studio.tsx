@@ -3466,6 +3466,7 @@ function QuestionEditor({
             onChange={(prompt) => onChange({ prompt })}
             path={`${qPath}/prompt`}
             placeholder="Write a clear question"
+            label="Question"
           />
         </Field>
       </div>
@@ -3911,11 +3912,13 @@ function QuestionEditor({
           aiActive={aiField("explanation")}
           path={`${qPath}/explanation`}
         >
-          <textarea
+          <ArtifactRichTextEditor
             value={question.explanation ?? ""}
-            onChange={(event) => onChange({ explanation: event.target.value })}
-            className={textareaClass("min-h-[110px]")}
+            format="markdown"
+            onChange={(explanation) => onChange({ explanation })}
+            path={`${qPath}/explanation`}
             placeholder="Optional answer explanation"
+            label="Explanation"
           />
         </Field>
       </div>

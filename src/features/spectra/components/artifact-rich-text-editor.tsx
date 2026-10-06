@@ -3,14 +3,19 @@
 import { useEffect, useRef, useState } from "react";
 import TiptapLink from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
+import { TaskItem } from "@tiptap/extension-task-item";
+import { TaskList } from "@tiptap/extension-task-list";
+import TextAlign from "@tiptap/extension-text-align";
+import { Color, FontFamily, FontSize, TextStyle } from "@tiptap/extension-text-style";
 import Underline from "@tiptap/extension-underline";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { DOMParser } from "@tiptap/pm/model";
 import { AiTextResolve } from "../editor/ai-text-resolve";
+import { Callout } from "../editor/callout-node";
 import { Equation, InlineEquation } from "../editor/equation-node";
+import { fieldContent, fieldDocument, fieldValue, type FieldFormat } from "../editor/field-format";
 import { targetAttrs } from "../collaboration/target-attributes";
-import { plannerDescriptionHtml, RichTextFormatBar } from "./artifact-studio";
+import { RichTextFormatBar } from "./artifact-studio";
 import { shouldEmitRichTextChange } from "./artifact-studio-value-utils";
 
 /** A change that came in through `value`: someone else's text (a peer's, or Spectra's). */
@@ -23,7 +28,10 @@ export function ArtifactRichTextEditor({
   onFocus,
   path,
   placeholder = "Write something…",
+  label,
   variant = "compact",
+  format = "html",
+  autoFocus = false,
   collapsible = false,
 }: {
   value: string;
@@ -32,15 +40,23 @@ export function ArtifactRichTextEditor({
   onFocus?: () => void;
   path?: string;
   placeholder?: string;
-  variant?: "planner" | "compact" | "card";
+  /** The field's accessible name. */
+  label?: string;
+  /** `bare` writes inside an object that is its own frame: a board note. */
+  variant?: "planner" | "compact" | "card" | "bare";
+  /** What the field stores: its editor's HTML, or Markdown. */
+  format?: FieldFormat;
+  /** Puts the caret at the end once the field opens. */
+  autoFocus?: boolean;
   collapsible?: boolean;
 }) {
   const onChangeRef = useRef(onChange);
   const valueRef = useRef(value);
-  const contentKeyRef = useRef(plannerDescriptionHtml(value));
+  // The stored value the editor last showed or wrote.
+  const contentKeyRef = useRef(value);
   const focusedRef = useRef(false);
   const typedWhileFocusedRef = useRef(false);
-  const [initialContent] = useState(() => plannerDescriptionHtml(value));
+  const [initialContent] = useState(() => fieldContent(value));
   const hostRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -48,8 +64,7 @@ export function ArtifactRichTextEditor({
   useEffect(() => {
     valueRef.current = value;
   }, [value]);
-  const emitRichTextChange = (html: string) => {
-    const next = html === "<p></p>" ? "" : html;
+  const emitRichTextChange = (next: string) => {
     if (
       !shouldEmitRichTextChange({
         committedValue: valueRef.current,
@@ -67,6 +82,16 @@ export function ArtifactRichTextEditor({
       StarterKit.configure({ link: false, underline: false }),
       Underline,
       TiptapLink.configure({ openOnClick: false, autolink: true }),
+      // The same text primitives as a document, so nothing a field is given
+      // (a checklist, a callout, a styled run) is dropped when it opens.
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      Callout,
+      TextStyle,
+      FontFamily,
+      FontSize,
+      Color,
+      TextAlign.configure({ types: ["heading", "paragraph"] }),
       Equation,
       InlineEquation,
       Placeholder.configure({ placeholder }),
@@ -78,9 +103,13 @@ export function ArtifactRichTextEditor({
     ] as never[],
     content: initialContent,
     editable: !disabled,
+    autofocus: autoFocus ? "end" : false,
     immediatelyRender: false,
     editorProps: {
       attributes: {
+        role: "textbox",
+        "aria-multiline": "true",
+        ...(label ? { "aria-label": label } : {}),
         class:
           variant === "card"
             ? // 180px left a single-line answer floating in an almost empty
@@ -88,7 +117,9 @@ export function ArtifactRichTextEditor({
               "spectra-prose min-h-[112px] px-6 py-6 text-center text-metric leading-snug outline-none"
             : variant === "planner"
               ? "spectra-prose min-h-[136px] px-4 py-3 text-ui leading-6 outline-none"
-              : "spectra-prose min-h-[62px] px-3 py-2 text-ui leading-5 outline-none",
+              : variant === "bare"
+                ? "spectra-prose min-h-full outline-none"
+                : "spectra-prose min-h-[62px] px-3 py-2 text-ui leading-5 outline-none",
       },
     },
     onFocus: () => {
@@ -97,9 +128,9 @@ export function ArtifactRichTextEditor({
     },
     onBlur: ({ editor: current }) => {
       focusedRef.current = false;
-      const html = current.getHTML();
-      contentKeyRef.current = html;
-      emitRichTextChange(html);
+      const next = fieldValue(current, format);
+      contentKeyRef.current = next;
+      emitRichTextChange(next);
       typedWhileFocusedRef.current = false;
     },
     onUpdate: ({ editor: current }) => {
@@ -107,10 +138,10 @@ export function ArtifactRichTextEditor({
       // focused may dirty the parent studio.
       if (!focusedRef.current) return;
       typedWhileFocusedRef.current = true;
-      const html = current.getHTML();
-      contentKeyRef.current = html;
+      const next = fieldValue(current, format);
+      contentKeyRef.current = next;
       // Publish intent before remote props arrive; the parent coalesces durable saves.
-      emitRichTextChange(html);
+      emitRichTextChange(next);
     },
   });
 
@@ -120,14 +151,11 @@ export function ArtifactRichTextEditor({
 
   useEffect(() => {
     if (!editor) return;
-    const incoming = plannerDescriptionHtml(value);
-    if (incoming === contentKeyRef.current) return;
-    contentKeyRef.current = incoming;
+    if (value === contentKeyRef.current) return;
+    contentKeyRef.current = value;
     // Apply the incoming delta, rather than replacing the whole document, so
     // a focused caret follows the peer's insertions/deletions.
-    const element = document.createElement("div");
-    element.innerHTML = incoming;
-    const next = DOMParser.fromSchema(editor.schema).parse(element, { preserveWhitespace: "full" });
+    const next = fieldDocument(editor.schema, value);
     const current = editor.state.doc;
     const start = current.content.findDiffStart(next.content);
     if (start === null) return;

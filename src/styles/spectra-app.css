@@ -1455,17 +1455,18 @@ body {
   box-shadow: 0 2px 6px rgba(21, 29, 25, 0.18);
 }
 
-.whiteboard-node textarea {
+.whiteboard-node-text {
+  --prose-leading: 1.45;
   width: 100%;
   height: 100%;
-  resize: none;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: inherit;
-  font-family: inherit;
-  line-height: 1.45;
+  overflow: hidden;
   padding: 14px 15px;
+  color: inherit;
+}
+
+.whiteboard-node-text[data-editing="true"] {
+  overflow: visible;
+  cursor: text;
 }
 
 .whiteboard-node[data-type="card"] {
@@ -5386,6 +5387,11 @@ button[data-spectra-context-trigger="true"]::after {
   to {
     clip-path: inset(0);
   }
+}
+
+/* Slide paragraphs sit flush, as they do in the deck file. */
+.presentation-object-copy {
+  --prose-gap: 0;
 }
 
 .presentation-object-text {
@@ -13497,6 +13503,44 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
   mask-image: none;
 }
 
+.spectra-rich-text-editor[data-rich-text-variant="bare"],
+.spectra-rich-text-editor[data-rich-text-variant="bare"]:focus-within {
+  /* The object it sits in is the frame: a board note keeps its own look. */
+  position: relative;
+  height: 100%;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.spectra-rich-text-editor[data-rich-text-variant="bare"] .ProseMirror {
+  min-height: 100%;
+}
+
+/* The same commands float above the object instead of pushing its words. */
+.spectra-rich-text-editor[data-rich-text-variant="bare"] [role="toolbar"],
+.spectra-rich-text-editor[data-rich-text-variant="bare"] > form {
+  position: absolute;
+  bottom: calc(100% + 14px);
+  left: -15px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 3px 5px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--control-radius);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+  white-space: nowrap;
+}
+
+.spectra-rich-text-editor[data-rich-text-variant="bare"] > form {
+  bottom: calc(100% + 54px);
+}
+
 .spectra-rich-text-editor[data-rich-text-variant="card"] {
   /* A card face is written in the face it is studied in. */
   --prose-font: var(--font-display);
@@ -16301,16 +16345,7 @@ html[data-spectra-motion="none"] .spectra-caption-live::after {
   color: var(--text-primary);
 }
 .spectra-task-notes {
-  min-height: 64px;
   margin-left: 34px;
-  resize: none;
-  border: 0;
-  background: transparent;
-  color: var(--text-primary);
-  font-size: var(--text-body);
-  line-height: 1.6;
-  field-sizing: content;
-  outline: none;
 }
 .spectra-task-school,
 .spectra-task-school-notes {

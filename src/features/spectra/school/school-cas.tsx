@@ -15,6 +15,7 @@ import type { Id } from "../../../../convex/_generated/dataModel";
 import { useLifeArrival } from "../life/use-life";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { dateLabel, sentenceOf, sizeLabel, strands, type SchoolExperience, type SchoolExperienceDetail, type SchoolPreferences } from "./school-model";
+import { SchoolFileViewer, schoolFileKind, type ViewedSchoolFile } from "./school-file-viewer";
 import { DetailHeading, SectionHeading, pressable } from "./school-tasks";
 
 function experienceMeta(experience: SchoolExperience, now: number) {
@@ -161,6 +162,7 @@ export function ExperienceDetails({ recordId, now, onNotice }: { recordId: strin
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState<Reflection | null>(null);
   const [removing, setRemoving] = useState(false);
+  const [viewing, setViewing] = useState<ViewedSchoolFile | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   if (experience === undefined) return <LoadingRows label="Loading the experience" count={4} />;
@@ -233,7 +235,23 @@ export function ExperienceDetails({ recordId, now, onNotice }: { recordId: strin
     }
   }
 
-  async function openEvidence(schoolFileId: string, filename: string) {
+  async function openEvidence(schoolFileId: string, filename: string, mimeType: string) {
+    const kind = schoolFileKind(mimeType, filename);
+    if (kind) {
+      // Photos and PDFs open in Spectra; the viewer holds a ghost until the kept copy is ready.
+      setViewing({ key: schoolFileId, filename, kind });
+      try {
+        const kept = await convex.query(api.school.fileUrl, { schoolFileId: schoolFileId as Id<"schoolFiles"> });
+        if (!kept?.url) throw new Error(`${filename} isn't available right now.`);
+        const url = kept.url;
+        setViewing((current) => (current?.key === schoolFileId ? { ...current, url } : current));
+      } catch (error) {
+        setViewing((current) => (current?.key === schoolFileId ? null : current));
+        onNotice(sentenceOf(error, `${filename} didn't open. Try again.`));
+      }
+      return;
+    }
+    // Spectra has no reader for this kind of file in place.
     const opened = window.open("about:blank", "_blank");
     try {
       const kept = await convex.query(api.school.fileUrl, { schoolFileId: schoolFileId as Id<"schoolFiles"> });
@@ -347,7 +365,7 @@ export function ExperienceDetails({ recordId, now, onNotice }: { recordId: strin
               title={file.filename}
               meta={sizeLabel(file.bytes) ?? undefined}
               actionsVisible
-              actions={<IconButton icon="openFull" label={`Open ${file.filename}`} size="compact" onClick={() => void openEvidence(file.schoolFileId, file.filename)} />}
+              actions={<IconButton icon="openFull" label={`Open ${file.filename}`} size="compact" onClick={() => void openEvidence(file.schoolFileId, file.filename, file.mimeType)} />}
             />
           ))}
         </div>
@@ -380,6 +398,7 @@ export function ExperienceDetails({ recordId, now, onNotice }: { recordId: strin
         onCancel={() => setDeleting(null)}
         onConfirm={() => void confirmDelete()}
       />
+      <SchoolFileViewer file={viewing} onClose={() => setViewing(null)} />
     </article>
   );
 }

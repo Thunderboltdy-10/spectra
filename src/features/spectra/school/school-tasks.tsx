@@ -17,6 +17,7 @@ import type { SchoolSyncKind } from "../../../../shared/school-sync";
 import { fetchSpectraSchoolFile } from "../data/api";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { handOffToLibrary } from "../workbench/library-handoff";
+import { SchoolFileViewer, schoolFileKind, type ViewedSchoolFile } from "./school-file-viewer";
 import {
   dateLabel,
   dueLabel,
@@ -217,6 +218,7 @@ export function TaskDetails({ recordId, now, onNotice }: { recordId: string; now
   const convex = useConvex();
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<ViewedSchoolFile | null>(null);
 
   if (task === undefined) return <LoadingRows label="Loading the task" count={4} />;
   if (task === null)
@@ -229,6 +231,7 @@ export function TaskDetails({ recordId, now, onNotice }: { recordId: string; now
       />
     );
   const submission = task.submission;
+  const viewedFile = viewing ? submission?.files.find((file) => file.providerFileId === viewing.key) : undefined;
 
   async function keptCopy(file: SubmittedFile) {
     if (!submission) throw new Error("Nothing was handed in for this task.");
@@ -242,6 +245,24 @@ export function TaskDetails({ recordId, now, onNotice }: { recordId: string; now
   }
 
   async function openFile(file: SubmittedFile) {
+    const kind = schoolFileKind(file.mimeType, file.filename);
+    if (kind) {
+      // Photos and PDFs open in Spectra; the viewer holds a ghost until the kept copy is ready.
+      const key = file.providerFileId;
+      setViewing({ key, filename: file.filename, kind });
+      setBusy(`open:${key}`);
+      try {
+        const kept = await keptCopy(file);
+        setViewing((current) => (current?.key === key ? { ...current, url: kept.url } : current));
+      } catch (error) {
+        setViewing((current) => (current?.key === key ? null : current));
+        onNotice(sentenceOf(error, `${file.filename} didn't open. Try again.`));
+      } finally {
+        setBusy(null);
+      }
+      return;
+    }
+    // Spectra has no reader for this kind of file in place (Copy into Library makes it editable).
     // Opened now, while the press still counts, then pointed at the file.
     const opened = window.open("about:blank", "_blank");
     setBusy(`open:${file.providerFileId}`);
@@ -385,6 +406,17 @@ export function TaskDetails({ recordId, now, onNotice }: { recordId: string; now
           </div>
         </>
       ) : null}
+      <SchoolFileViewer
+        file={viewing}
+        onClose={() => setViewing(null)}
+        actions={
+          viewedFile ? (
+            <Button variant="ghost" disabled={busy !== null} onClick={() => void copyIntoLibrary(viewedFile)}>
+              Copy into Library
+            </Button>
+          ) : null
+        }
+      />
     </article>
   );
 }

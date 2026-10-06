@@ -98,7 +98,8 @@ describe("the shared rich-content renderer", () => {
     act(() => root.render(<SpectraRichContent ast={ast} />));
     const span = prose().querySelector<HTMLElement>("p strong > span")!;
     expect(span.style.fontFamily).toBe("Georgia");
-    expect(span.style.fontSize).toBe("20pt");
+    // Points of the surface it is on: a scaled slide sets `--rich-pt`.
+    expect(span.style.fontSize).toBe("calc(var(--rich-pt, 1pt) * 20)");
   });
 
   it("draws a stored quiz or card field as written, not as raw tags", () => {

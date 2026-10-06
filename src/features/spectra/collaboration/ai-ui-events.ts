@@ -137,6 +137,15 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     });
     return;
   }
+  if (event.key === "share_invitation_answered") {
+    spectraBus.emit("notifications.changed", {});
+    noteAiSurface({
+      ...(event.runId ? { actorId: event.runId } : {}),
+      route: "library",
+      note: typeof event.payload?.note === "string" ? event.payload.note : "Answered an invitation",
+    });
+    return;
+  }
   if (event.key === "sharing_changed") {
     noteAiSurface({
       ...(event.runId ? { actorId: event.runId } : {}),
@@ -268,6 +277,17 @@ function rememberEvent(event: SpectraAiUiEvent): void {
       ...(event.runId ? { actorId: event.runId } : {}),
       artifactId,
       note: typeof event.payload?.note === "string" ? event.payload.note : "Published the live build",
+    });
+    return;
+  }
+  if (event.key === "agent_released" || event.key === "agent_checked") {
+    const agentId = event.payload?.targetId;
+    if (typeof agentId !== "string" || !agentId) return;
+    spectraBus.emit("agent.releasesChanged", { agentId });
+    noteAiLocation({
+      ...(event.runId ? { actorId: event.runId } : {}),
+      artifactId: agentId,
+      note: typeof event.payload?.note === "string" ? event.payload.note : "Released the agent",
     });
     return;
   }

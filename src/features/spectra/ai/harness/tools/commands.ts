@@ -46,7 +46,6 @@ export function runOnlyTools(session: HarnessSession): AnyHarnessTool[] {
         additionalProperties: false,
       },
       effect: "irreversible",
-      category: "bridge_files",
       label: () => "Changing how items sync",
       doneLabel: () => "Changed how items sync",
       question: (args: { targetIds: string[] }) =>

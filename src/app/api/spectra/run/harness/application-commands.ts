@@ -136,7 +136,12 @@ const COMMANDS: Record<string, ApplicationCommand> = {
     authority: "local_file",
   },
   write_memory: {
-    input: z.object({ action: z.enum(["create", "revise"]), content: z.string().min(1).max(10_000), memoryId: z.string().optional() }),
+    input: z
+      .object({ action: z.enum(["create", "revise", "forget"]), content: z.string().min(1).max(10_000).optional(), memoryId: z.string().optional() })
+      .superRefine((value, ctx) => {
+        if (value.action !== "forget" && !value.content) ctx.addIssue({ code: "custom", path: ["content"], message: "What to remember is required." });
+        if (value.action !== "create" && !value.memoryId) ctx.addIssue({ code: "custom", path: ["memoryId"], message: "A memory id is required." });
+      }),
     authority: "memory",
   },
   change_sharing: {
@@ -163,6 +168,32 @@ const COMMANDS: Record<string, ApplicationCommand> = {
         if ((value.action === "set_exception" || value.action === "clear_exception") && value.resourceType === "workspace") ctx.addIssue({ code: "custom", path: ["resourceType"], message: "Exceptions are set on a single work, not a workspace." });
         if (value.action === "set_exception" && !value.effect) ctx.addIssue({ code: "custom", path: ["effect"], message: "An exception is deny or restrict." });
         if (value.action === "revoke_public_link" && !value.linkId) ctx.addIssue({ code: "custom", path: ["linkId"], message: "A public link id is required." });
+      }),
+    authority: "sharing",
+  },
+  // Answering an invitation someone sent the user: accepting adds what they shared to the Library.
+  respond_share_invitation: {
+    input: z.object({ invitationId: z.string().trim().min(1).max(200), response: z.enum(["accept", "decline"]) }),
+    authority: "sharing",
+  },
+  // Checks run the agent's draft against its suite: they spend model tokens and record a run, nothing else.
+  run_agent_checks: {
+    input: z.object({ agentId: z.string().trim().min(1).max(200) }),
+    authority: "content",
+  },
+  // A release decides which version of an agent people reach; a private one reaches only the owner.
+  release_agent: {
+    input: z
+      .object({
+        agentId: z.string().trim().min(1).max(200),
+        action: z.enum(["release_private", "publish", "promote", "rollback", "suspend"]),
+        releaseId: z.string().trim().min(1).max(200).optional(),
+        releaseNotes: z.string().trim().max(4_000).optional(),
+      })
+      .superRefine((value, ctx) => {
+        const managed = value.action === "promote" || value.action === "rollback" || value.action === "suspend";
+        if (managed && !value.releaseId) ctx.addIssue({ code: "custom", path: ["releaseId"], message: "A release id is required." });
+        if (!managed && value.releaseId) ctx.addIssue({ code: "custom", path: ["releaseId"], message: "A new release is made from the current draft." });
       }),
     authority: "sharing",
   },

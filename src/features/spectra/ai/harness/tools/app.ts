@@ -1,5 +1,6 @@
 import { patchTouchesAiPermissions } from "../../../settings/schema/ai-permissions";
 import { normalizeAiPreferencePatch, preferenceLayerValuesSchema } from "../../../settings/schema/preferences";
+import { applicationCommandCategory } from "../../../../../../shared/ai-application-approval";
 import { AI_SYNC_PURPOSES, SCHOOL_SYNC_KINDS, SCHOOL_SYNC_MODES } from "../../../../../../shared/school-sync";
 import type { CommandResult } from "../backend";
 import { ToolInputError, type AnyHarnessTool, type HarnessTool, type PermissionCategory, type ToolEffect, type ToolOutcome } from "../types";
@@ -17,7 +18,9 @@ import {
  * Application tools. Each maps to one registered application command, so the
  * AI changes Spectra through the same server path as the user's own controls.
  * The effect decides permission: ordinary writes run (and are undoable);
- * settings, sharing, ManageBac and desktop-file effects ask first.
+ * settings, sharing, ManageBac and desktop-file effects ask first. The
+ * category they ask under comes from the command, the same table the server
+ * binds the user's approval with.
  */
 
 const COMMENT_ACTIONS = ["resolve", "reopen", "edit", "delete"] as const;
@@ -73,7 +76,6 @@ type CommandTool<A> = {
   description: string;
   parameters: Record<string, unknown>;
   effect: ToolEffect | ((args: A) => ToolEffect);
-  category?: PermissionCategory | ((args: A) => PermissionCategory | undefined);
   label: (args: A) => string;
   doneLabel: (args: A) => string;
   question?: (args: A) => string;
@@ -90,7 +92,10 @@ export function commandTool<A>(session: HarnessSession, spec: CommandTool<A>): H
     description: spec.description,
     parameters: spec.parameters,
     effect: spec.effect,
-    ...(spec.category ? { category: (args: A) => (typeof spec.category === "function" ? spec.category(args) : spec.category) } : {}),
+    category: (args: A): PermissionCategory | undefined => {
+      const { command, args: sent } = spec.command(args);
+      return applicationCommandCategory(command, sent) ?? undefined;
+    },
     label: spec.label,
     ...(spec.question ? { question: spec.question } : {}),
     ...(spec.targets ? { targets: spec.targets } : {}),
@@ -251,7 +256,6 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
         additionalProperties: false,
       },
       effect: "settings",
-      category: "settings",
       label: () => "Changing your settings",
       doneLabel: () => "Changed your settings",
       question: (args: { patch: Record<string, unknown> }) => `Change your settings: ${describePatch(args.patch).join("; ")}?`,
@@ -491,7 +495,6 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
         additionalProperties: false,
       },
       effect: "irreversible",
-      category: (args: ShareArgs) => (args.action === "create_public_link" ? "external_send" : "sharing"),
       label: (args: ShareArgs) =>
         args.action === "create_public_link"
           ? `Making a public link to ${titled(session, args.resourceId, "your work")}`
@@ -546,7 +549,6 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
         additionalProperties: false,
       },
       effect: "irreversible",
-      category: "managebac",
       label: (args: { action: string }) => MANAGEBAC_LABELS[args.action as ManageBacAction]?.[0] ?? "Updating ManageBac",
       doneLabel: (args: { action: string }) => MANAGEBAC_LABELS[args.action as ManageBacAction]?.[1] ?? "Updated ManageBac",
       question: (args: { action: string; classIds?: string[]; kind?: string; mode?: string; classId?: string }) => {
@@ -621,6 +623,22 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       }),
     }),
     commandTool(session, {
+      name: "forget_memory",
+      description:
+        "Erase a saved memory about the user for good, by memoryId (find it with search in [\"memory\"]). Only when the user asks to forget it; to fix a wrong memory, revise it with remember instead.",
+      parameters: {
+        type: "object",
+        properties: { memoryId: { type: "string" } },
+        required: ["memoryId"],
+        additionalProperties: false,
+      },
+      effect: "irreversible",
+      label: () => "Forgetting that",
+      doneLabel: () => "Forgot that",
+      parse: (raw) => ({ memoryId: requireString(raw, "memoryId", 200) }),
+      command: (args) => ({ command: "write_memory", args: { action: "forget", memoryId: args.memoryId } }),
+    }),
+    commandTool(session, {
       name: "add_comment",
       description:
         "Leave a visible, AI-attributed comment on a piece of work, for feedback the user asked for without changing the work. regionId is a block, slide or cell region from the content; omit it to comment on the whole item. replyTo (a comment id from read_comments) answers that comment in its thread.",
@@ -665,7 +683,6 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
         additionalProperties: false,
       },
       effect: (args: CommentArgs) => (args.action === "delete" ? "irreversible" : "write"),
-      category: (args: CommentArgs) => (args.action === "delete" ? "permanent_delete" : undefined),
       label: (args: CommentArgs) => `${COMMENT_LABELS[args.action]?.[0] ?? "Changing a comment"} on ${titled(session, args.artifactId, "your work")}`,
       doneLabel: (args: CommentArgs) => `${COMMENT_LABELS[args.action]?.[1] ?? "Changed a comment"} on ${titled(session, args.artifactId, "your work")}`,
       question: (args: CommentArgs) => `Delete this comment on ${titled(session, args.artifactId, "this work")}? Its text can't be brought back.`,
@@ -724,7 +741,6 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
         additionalProperties: false,
       },
       effect: (args: DevicesArgs) => devicesToolEffect(args.action),
-      category: (args: DevicesArgs) => (devicesToolEffect(args.action) === "settings" ? "settings" : undefined),
       label: (args: DevicesArgs) => devicesLabel(args.action)[0],
       doneLabel: (args: DevicesArgs) => devicesLabel(args.action)[1],
       question: (args: DevicesArgs) =>

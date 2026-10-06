@@ -10,15 +10,17 @@ import type {
   ThreadReadRequest,
   WebResult,
 } from "@/features/spectra/ai/harness/backend";
+import type { AgentDraftChecks, AgentReleaseRow, AgentReleaseState } from "@/features/spectra/ai/harness/agent-releases";
 import { ARTIFACT_TYPE_KEYS, type ArtifactTypeKey } from "@/features/spectra/artifacts/types";
 import type { CommentRow } from "@/features/spectra/ai/harness/comments";
 import type { EmbedRow, EmbedState } from "@/features/spectra/ai/harness/embeds";
-import type { SharingInvitation, SharingLink, SharingMember, SharingState } from "@/features/spectra/ai/harness/sharing";
+import type { IncomingInvitation, SharingInvitation, SharingLink, SharingMember, SharingState } from "@/features/spectra/ai/harness/sharing";
 import type { VersionRow, VersionSource } from "@/features/spectra/ai/harness/versions";
 import { readLiveArtifactValue } from "@/features/spectra/ai/yjs-artifact-operation";
 import { overlayLiveArtifactRecord } from "@/features/spectra/collaboration/artifact-yjs-model";
 import { parseModelOperation, type ModelOperation } from "@/features/spectra/operations/schema";
 import { conductParallelResearch } from "@/features/spectra/sources/research/parallel-search";
+import { applicationCommandCategory, LOCAL_FILE_COMMANDS } from "../../../../../../shared/ai-application-approval";
 import { SEMANTIC_KINDS, type SemanticResult, type SemanticSearchResponse } from "../../../../../../shared/semantic-types";
 import { loadAgent } from "./agents";
 import { localFileCountForApplicationCommand } from "./authority";
@@ -35,19 +37,6 @@ const isArtifactTypeKey = (value: string): value is ArtifactTypeKey => (ARTIFACT
  * and applied through the same server paths as the user's own controls, so
  * receipts, undo groups, live presence and approval scopes all work as before.
  */
-
-const CONFIRMED_COMMANDS = new Set([
-  "change_spectra_settings",
-  "change_sync_policy",
-  "change_sharing",
-  "trigger_managebac_sync",
-  "select_managebac_classes",
-  "set_school_sync_mode",
-  "manage_class_workspaces",
-  "pair_device",
-  "remove_device",
-]);
-const LOCAL_EFFECT_COMMANDS = new Set(["organize_library", "delete_library_items", "change_sync_policy"]);
 
 export type ConvexBackendInput = {
   actorClerkId: string;
@@ -396,14 +385,14 @@ export class ConvexHarnessBackend implements HarnessBackend {
     // "This conversation" is the one the run belongs to.
     if (request.command === "manage_conversation" && !args.threadId && this.input.threadId) args.threadId = this.input.threadId;
     let localFiles = 0;
-    if (LOCAL_EFFECT_COMMANDS.has(request.command)) {
+    if (LOCAL_FILE_COMMANDS.has(request.command)) {
       const count = await localFileCountForApplicationCommand(this.actorClerkId, request.command, args);
       if (count === null) args.localFileCountUnknown = true;
       else args.localFileCount = count;
       localFiles = count ?? 1;
     }
     const operation = parseModelOperation({ type: "app.command", input: { command: request.command, args } });
-    const requiresConfirmation = CONFIRMED_COMMANDS.has(request.command) || localFiles > 0;
+    const requiresConfirmation = applicationCommandCategory(request.command, args) !== null || localFiles > 0;
     return { operation, requiresConfirmation, localFiles };
   }
 
@@ -776,6 +765,53 @@ export class ConvexHarnessBackend implements HarnessBackend {
             })),
           }
         : {}),
+    };
+  }
+
+  async readShareInvitations(): Promise<IncomingInvitation[]> {
+    // The notification center's read: pending invitations addressed to this user.
+    const found = await query<Record<string, never>, unknown>("authority:listIncomingInvitations", {}).catch(() => []);
+    return rows(found).map((entry): IncomingInvitation => {
+      const resource = entry.resource && typeof entry.resource === "object" ? (entry.resource as Record<string, unknown>) : {};
+      const inviter = entry.inviter && typeof entry.inviter === "object" ? (entry.inviter as Record<string, unknown>) : {};
+      const resourceType = entry.resourceType === "workspace" || entry.resourceType === "agent" ? entry.resourceType : "artifact";
+      return {
+        invitationId: text(entry.invitationId),
+        resourceType,
+        title: text(resource.title) || "Untitled",
+        level: entry.level === "modify" ? "modify" : "read",
+        ...(text(inviter.name) ? { from: text(inviter.name) } : {}),
+        ...(text(entry.message) ? { message: text(entry.message) } : {}),
+        ...(typeof entry.createdAt === "number" ? { createdAt: entry.createdAt } : {}),
+        ...(typeof entry.expiresAt === "number" ? { expiresAt: entry.expiresAt } : {}),
+      };
+    });
+  }
+
+  async readAgentReleases(input: { agentId: string }): Promise<AgentReleaseState | null> {
+    // The agent studio's reads: releases need read access, checks need edit access.
+    const [releases, evaluation] = await Promise.all([
+      query<unknown & object, unknown>("spectraArtifacts:listAgentReleases", { agentId: input.agentId }).catch(() => null),
+      query<unknown & object, { currentContentHash?: unknown; runs?: unknown }>("agents:evalRuns", { agentId: input.agentId, limit: 12 }).catch(() => null),
+    ]);
+    if (!Array.isArray(releases)) return null;
+    const current = evaluation ? rows(evaluation.runs).find((run) => run.contentHash === evaluation.currentContentHash) : undefined;
+    const checks: AgentDraftChecks | null = !evaluation
+      ? null
+      : current?.status === "passed" || current?.status === "failed" || current?.status === "running"
+        ? current.status
+        : "none";
+    return {
+      checks,
+      releases: rows(releases).map((entry): AgentReleaseRow => ({
+        id: text(entry.releaseId),
+        number: typeof entry.releaseNumber === "number" ? entry.releaseNumber : 0,
+        status: entry.status === "suspended" || entry.status === "deprecated" ? entry.status : "published",
+        rollout: entry.rollout === "internal_test" || entry.rollout === "limited" ? entry.rollout : "published",
+        ...(text(entry.releaseNotes) ? { notes: text(entry.releaseNotes) } : {}),
+        publishedAt: typeof entry.publishedAt === "number" ? entry.publishedAt : 0,
+        checked: Boolean(text(entry.evalRunId)),
+      })),
     };
   }
 

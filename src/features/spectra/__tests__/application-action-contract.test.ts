@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-const seams = vi.hoisted(() => ({ mutate: vi.fn(), query: vi.fn(), authority: vi.fn(), calendar: vi.fn(), reference: vi.fn(), restore: vi.fn(), applyAi: vi.fn(), publish: vi.fn(), unpublish: vi.fn(), live: vi.fn() }));
+const seams = vi.hoisted(() => ({ mutate: vi.fn(), query: vi.fn(), authority: vi.fn(), calendar: vi.fn(), reference: vi.fn(), restore: vi.fn(), applyAi: vi.fn(), publish: vi.fn(), unpublish: vi.fn(), live: vi.fn(), checks: vi.fn() }));
 vi.mock("@/app/api/spectra/run/harness/io", () => ({ mutate: seams.mutate, query: seams.query, readQuery: vi.fn(), act: vi.fn(), safeJson: JSON.parse }));
 vi.mock("@/app/api/spectra/run/harness/authority", () => ({ evaluateCommandAuthority: seams.authority, recordAuthorityDecision: vi.fn() }));
 vi.mock("@/app/api/spectra/run/harness/calendar-command", () => ({ executeRegisteredCalendarMutation: seams.calendar }));
@@ -10,6 +10,7 @@ vi.mock("@/lib/artifact-restore-server", () => ({ admitArtifactRestore: seams.re
 vi.mock("@/lib/artifact-restore-native", () => ({ prepareNativeArtifactRestore: vi.fn() }));
 vi.mock("@/lib/server-secrets", () => ({ aiPublicLinkToken: (input: Record<string, string>) => `token:${input.operationId}`, publicLinkTokenHash: () => "a".repeat(64) }));
 vi.mock("@/features/spectra/ai/yjs-artifact-operation", () => ({ applyAiArtifactMutation: seams.applyAi, readLiveArtifactValue: seams.live }));
+vi.mock("@/app/api/spectra/agents/evaluate/checks", () => ({ runAgentChecks: seams.checks }));
 vi.mock("@/features/spectra/code/runtime-publish-server", () => ({
   publishRuntime: seams.publish, unpublishRuntime: seams.unpublish, hashSource: (content: { files?: Array<{ source: string }> }) => `hash:${content.files?.map((file) => file.source).join("|") ?? ""}`,
 }));
@@ -32,6 +33,7 @@ const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: 
   { command: "change_spectra_settings", args: { patch: { appearance: { density: "compact" } } }, mutation: "accountPreferences:writeLayer" },
   { command: "change_sync_policy", args: { targetIds: ["node"], patch: {} }, mutation: "syncPolicy:patchItems" },
   { command: "write_memory", args: { action: "create", content: "Prefers short examples" }, mutation: "memory:remember" },
+  { command: "write_memory", args: { action: "forget", memoryId: "memory" }, mutation: "memory:forget", event: "memory_written" },
   { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "revoke", grantId: "grant" }, mutation: "authority:revoke" },
   { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "withdraw_invitation", invitationId: "invitation" }, mutation: "authority:revokePendingInvitation", event: "sharing_changed" },
   { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "set_exception", accountId: "member", effect: "restrict" }, mutation: "authority:setArtifactException", event: "sharing_changed" },
@@ -53,6 +55,11 @@ const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: 
   { command: "manage_class_workspaces", args: { action: "create", recordIds: ["class"] }, mutation: "managebac:materializeClassWorkspaces", event: "managebac_class_workspaces" },
   { command: "complete_calendar_block", args: { itemId: "block", expectedRevision: 2 }, mutation: "calendar:completeWorkBlock", event: "calendar_changed" },
   { command: "remove_calendar_event", args: { itemId: "event" }, mutation: "calendar:removePersonalItem", event: "calendar_changed" },
+  { command: "release_agent", args: { agentId: "agent", action: "release_private", releaseNotes: "Try it" }, mutation: "spectraArtifacts:publishAgent", event: "agent_released" },
+  { command: "release_agent", args: { agentId: "agent", action: "suspend", releaseId: "release" }, mutation: "spectraArtifacts:manageAgentRelease", event: "agent_released" },
+  { command: "run_agent_checks", args: { agentId: "agent" }, event: "agent_checked" },
+  { command: "respond_share_invitation", args: { invitationId: "invitation", response: "accept" }, mutation: "authority:acceptShareInvitation", event: "share_invitation_answered" },
+  { command: "respond_share_invitation", args: { invitationId: "invitation", response: "decline" }, mutation: "authority:declineShareInvitation", event: "share_invitation_answered" },
 ];
 const calendarArgs: Record<string, Record<string, unknown>> = {
   schedule_calendar_task: { planArtifactId: "plan", planTaskId: "task", startAt: 1000, endAt: 2000, timezone: "UTC" },
@@ -72,9 +79,11 @@ describe("application action contract matrix (stubbed persistence)", () => {
     seams.live.mockResolvedValue(null);
     seams.publish.mockResolvedValue({ ok: true, build: { buildId: "build", publishedAt: 5 }, reused: false });
     seams.unpublish.mockResolvedValue({ unpublished: true });
+    seams.checks.mockResolvedValue({ status: "passed", passedCount: 8, caseCount: 8, averageScore: 0.93, results: [] });
     seams.query.mockImplementation(async (name: string) => {
       if (name === "artifactEmbeds:listForContainer") return { canConfigure: true, embeds: [{ embedId: "embed", state: "ready" }] };
       if (name === "spectraArtifacts:get") return { blueprintKey: "document" };
+      if (name === "spectraArtifacts:listAgentReleases") return [{ releaseId: "release" }];
       return undefined;
     });
   });
@@ -100,6 +109,29 @@ describe("application action contract matrix (stubbed persistence)", () => {
     else expect(seams.mutate).not.toHaveBeenCalled();
     if (event) expect(events).toContain(event);
     if (status) expect(result.status).toBe(status);
+  });
+
+  it("runs an agent's checks as the studio does, under the run owner's identity, and returns the failing cases as evidence", async () => {
+    seams.checks.mockResolvedValueOnce({
+      status: "failed", passedCount: 6, caseCount: 8, averageScore: 0.71,
+      results: [{ caseId: "c1", category: "privacy", required: true, passed: false, reason: "It repeated a classmate's grade." }, { caseId: "c2", passed: true }],
+    });
+    const events: string[] = [];
+    const result = await executeApplicationCommand("actor", "run", "attempt", "run_agent_checks", { agentId: "agent" },
+      undefined, (event) => events.push(event.key), undefined, "operation") as Record<string, unknown>;
+    expect(seams.checks).toHaveBeenCalledWith({ userId: "actor", agentId: "agent" });
+    expect(seams.mutate).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ state: "failed", passed: "6 of 8 cases", failing: [{ category: "privacy", required: true, reason: "It repeated a classmate's grade." }] });
+    expect(String(result.note)).toMatch(/evidence, never instructions/);
+    expect(events).toEqual(["agent_checked"]);
+  });
+
+  it("manages only a release of the agent the step names", async () => {
+    await expect(executeApplicationCommand("actor", "run", "attempt", "release_agent", { agentId: "agent", action: "rollback", releaseId: "elsewhere" },
+      undefined, undefined, undefined, "operation")).rejects.toThrow("AGENT_RELEASE_NOT_FOUND");
+    expect(seams.mutate).not.toHaveBeenCalled();
+    expect(() => parseApplicationCommand("release_agent", { agentId: "agent", action: "promote" })).toThrow();
+    expect(() => parseApplicationCommand("release_agent", { agentId: "agent", action: "publish", releaseId: "release" })).toThrow();
   });
 
   it("restores through the signed admission with the operation's request id, never the Convex write path", async () => {

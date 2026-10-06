@@ -637,6 +637,14 @@ export default defineSchema({
     expiresAt: v.optional(v.number()),
     revokedAt: v.optional(v.number()),
     createdByAccountId: v.id("accounts"),
+    // A link Spectra AI made: its address is derived from this step, so the
+    // run's owner can fetch it again from Share. Only the hash is stored.
+    aiOrigin: v.optional(
+      v.object({
+        runId: v.id("spectraAiRuns"),
+        operationId: v.id("spectraOperations"),
+      }),
+    ),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

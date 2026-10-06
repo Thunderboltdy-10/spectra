@@ -9,16 +9,13 @@ import { mapOperationArtifactReferences } from "../src/features/spectra/operatio
 import type { ModelOperation } from "../src/features/spectra/operations/schema";
 import { normalizeCalendarTimeInput } from "../shared/calendar-time";
 import { aiRefreshRequest } from "../shared/school-sync";
+import { applicationCommandCategory, LOCAL_FILE_COMMANDS } from "../shared/ai-application-approval";
 import { vUiObservationFence } from "./spectraUiObservationSchema";
 import { assertUiObservationFence } from "./spectraUiObservation";
 
 type Row = Record<string, unknown>;
 const row = (value: unknown): Row => value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
 const strings = (value: unknown) => Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
-// Moving items to the Trash is undoable, so it asks only when desktop files
-// are affected (counted below), like organising the library.
-export const confirmedCommands = new Set(["change_spectra_settings", "change_sync_policy", "change_sharing", "trigger_managebac_sync", "select_managebac_classes", "set_school_sync_mode", "manage_class_workspaces", "remove_device"]);
-const localEffectCommands = new Set(["organize_library", "change_sync_policy", "delete_library_items"]);
 
 function semanticInput(input: Row) {
   const args = { ...row(input.args) };
@@ -92,9 +89,11 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
     case "save_version": return { name: "changeGroups:createNamedCheckpoint", args: { artifactId: String(args.artifactId ?? ""), name: String(args.name ?? "") } };
     case "remove_device": return { name: "bridge:revokeDevice", args: { deviceId: String(args.deviceId ?? "") } };
     case "change_sync_policy": return { name: "syncPolicy:patchItems", args: { itemIds: targetIds, patch: row(args.patch), actorKind: "ai", idempotencyKey: `ai:${runId}:${operationId}` } };
-    case "write_memory": return args.action === "create"
-      ? { name: "memory:remember", args: { proposition: String(args.content ?? "").trim(), scope: "private_global", claimType: "inferred_preference", sourceType: "user_statement", captureReason: "You explicitly asked Spectra to remember this." } }
-      : { name: "memory:correct", args: { claimId: args.memoryId, proposition: String(args.content ?? "").trim() } };
+    case "write_memory": switch (args.action) {
+      case "create": return { name: "memory:remember", args: { proposition: String(args.content ?? "").trim(), scope: "private_global", claimType: "inferred_preference", sourceType: "user_statement", captureReason: "You explicitly asked Spectra to remember this." } };
+      case "forget": return { name: "memory:forget", args: { claimId: args.memoryId } };
+      default: return { name: "memory:correct", args: { claimId: args.memoryId, proposition: String(args.content ?? "").trim() } };
+    }
     case "change_sharing": {
       const resourceType = String(args.resourceType ?? "artifact");
       const resourceId = String(args.resourceId ?? "");
@@ -121,6 +120,21 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
           } };
         }
         case "revoke_public_link": return { name: "authority:revokePublicLink", args: { linkId: String(args.linkId ?? "") } };
+      }
+      break;
+    }
+    case "respond_share_invitation": return {
+      name: args.response === "accept" ? "authority:acceptShareInvitation" : "authority:declineShareInvitation",
+      args: { invitationId: String(args.invitationId ?? "") },
+    };
+    case "release_agent": {
+      const notes = typeof args.releaseNotes === "string" && args.releaseNotes.trim() ? { releaseNotes: args.releaseNotes.trim() } : {};
+      switch (args.action) {
+        case "release_private": return { name: "spectraArtifacts:publishAgent", args: { agentId: String(args.agentId ?? ""), rollout: "internal_test", ...notes } };
+        case "publish": return { name: "spectraArtifacts:publishAgent", args: { agentId: String(args.agentId ?? ""), rollout: "published", ...notes } };
+        case "promote":
+        case "rollback":
+        case "suspend": return { name: "spectraArtifacts:manageAgentRelease", args: { releaseId: String(args.releaseId ?? ""), action: args.action } };
       }
       break;
     }
@@ -208,11 +222,11 @@ export const execute = mutation({
     // The AI never changes its own permissions, whatever the approval says.
     if (input.command === "change_spectra_settings" && patchTouchesAiPermissions(row(input.args).patch))
       throw new Error("AI_PERMISSION_SELF_GRANT: Spectra cannot change its own permissions. Only you can, in Settings.");
-    let needsConfirmation = operation.requiresConfirmation || confirmedCommands.has(String(input.command));
+    let needsConfirmation = operation.requiresConfirmation || applicationCommandCategory(String(input.command), row(input.args)) !== null;
     const targetIds = strings(row(input.args).targetIds);
-    // Deletion's bounded approval scope below includes exact local identities;
-    // repeating the legacy count query would expand the subtree without a bound.
-    if (localEffectCommands.has(String(input.command)) && targetIds.length) {
+    // Moving items to the Trash is undoable, so like organising the library it
+    // asks only when desktop files are affected, counted here.
+    if (LOCAL_FILE_COMMANDS.has(String(input.command)) && targetIds.length) {
       const isPolicy = input.command === "change_sync_policy";
       const effect = await ctx.runQuery(makeFunctionReference<"query">(isPolicy ? "replicas:localEffectCount" : "replicas:localEffectCountForNodes"), isPolicy ? { workIds: targetIds } : { nodeIds: targetIds });
       const count = Number(row(effect).count);
@@ -232,6 +246,13 @@ export const execute = mutation({
     // checks, the effect, this run/operation read set and receipt commit together.
     // A concurrent Stop/steer conflicts with these reads and retries the guard.
     const result = await ctx.runMutation(makeFunctionReference<"mutation">(spec.name), spec.args);
+    if (spec.name === "authority:createPublicLink") {
+      // Remembers which step made the link, so its owner can copy it later from
+      // Share (a scheduled run may finish while nobody watches).
+      const linkId = ctx.db.normalizeId("publicLinks", String(row(result).linkId ?? ""));
+      if (!linkId) throw new Error("AI_PUBLIC_LINK_NOT_RECORDED");
+      await ctx.db.patch(linkId, { aiOrigin: { runId: run._id, operationId: operation._id } });
+    }
     await ctx.db.patch(operation._id, { output: { ...row(operation.output), applicationWriteReceipt: { scope, result } } });
     return result;
   },

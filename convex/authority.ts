@@ -1157,7 +1157,12 @@ export const createPublicLink = mutation({
 export const listPublicLinks = query({
   args: { resourceType, resourceId: v.string() },
   handler: async (ctx, args) => {
-    await requireCapability(ctx, args.resourceType, args.resourceId, "publish");
+    const decision = await requireCapability(
+      ctx,
+      args.resourceType,
+      args.resourceId,
+      "publish",
+    );
     const now = Date.now();
     const links = await ctx.db
       .query("publicLinks")
@@ -1168,17 +1173,28 @@ export const listPublicLinks = query({
       )
       .order("desc")
       .collect();
-    return links
-      .filter(
-        (link) => !link.revokedAt && (!link.expiresAt || link.expiresAt > now),
-      )
-      .map((link) => ({
-        linkId: link._id,
-        level: link.level,
-        domainRestriction: link.domainRestriction,
-        expiresAt: link.expiresAt,
-        createdAt: link.createdAt,
-      }));
+    const active = links.filter(
+      (link) => !link.revokedAt && (!link.expiresAt || link.expiresAt > now),
+    );
+    return Promise.all(
+      active.map(async (link) => {
+        // Only the owner of the run that made a link can fetch its address
+        // again; everyone else sees it as any other link.
+        const run = link.aiOrigin ? await ctx.db.get(link.aiOrigin.runId) : null;
+        const madeBySpectra =
+          link.aiOrigin && run?.ownerAccountId === decision.actor.accountId
+            ? link.aiOrigin
+            : undefined;
+        return {
+          linkId: link._id,
+          level: link.level,
+          domainRestriction: link.domainRestriction,
+          expiresAt: link.expiresAt,
+          createdAt: link.createdAt,
+          ...(madeBySpectra ? { madeBySpectra } : {}),
+        };
+      }),
+    );
   },
 });
 

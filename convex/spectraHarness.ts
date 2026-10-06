@@ -15,6 +15,7 @@ import {
   preferenceLayerValuesSchema,
 } from "../src/features/spectra/settings/schema/preferences";
 import { isPermissionCategory, type PermissionCategory } from "../src/features/spectra/settings/schema/ai-permissions";
+import { applicationApprovalCategory } from "../shared/ai-application-approval";
 
 /*
  * Durable state for the AI harness (src/features/spectra/ai/harness): the
@@ -232,20 +233,8 @@ export const joinableRun = query({
 /** The category a recorded operation asks under, decided by the server. */
 function operationCategory(operation: Doc<"spectraOperations">): PermissionCategory | null {
   if (operation.type !== "app.command") return "permanent_delete";
-  switch (String(record(operation.input).command)) {
-    case "change_spectra_settings":
-    case "pair_device":
-    case "remove_device": return "settings";
-    // A public link opens the work to anyone outside Spectra.
-    case "publish_code": return "external_send";
-    case "change_sharing": return record(record(operation.input).args).action === "create_public_link" ? "external_send" : "sharing";
-    case "trigger_managebac_sync":
-    case "select_managebac_classes": return "managebac";
-    case "change_sync_policy":
-    case "organize_library":
-    case "delete_library_items": return "bridge_files";
-    default: return null;
-  }
+  const input = record(operation.input);
+  return applicationApprovalCategory(String(input.command), record(input.args));
 }
 
 /** The user's stored choice: full control, or "Always allow" this category, unless they set it to Never. */

@@ -92,6 +92,8 @@ export type SpectraEvents = {
   "devices.changed": Record<string, never>;
   /** A Code work's published build changed (Spectra published or took it down). */
   "code.publishedChanged": { artifactId: string };
+  /** An agent's releases or checks changed (Spectra ran its checks, or released, promoted, rolled back or suspended one). */
+  "agent.releasesChanged": { agentId: string };
   "notifications.changed": Record<string, never>;
   /* Open the pending share invitations in the Library (a notification's
      Review), including when the Library already shows them. */

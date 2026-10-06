@@ -3,6 +3,7 @@
 import { Copy, Loader2, ShieldCheck, UserPlus, Check, Link2, Search, Share2, X, Building2, Globe2, Inbox } from "@/components/icons/glyph-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
+import { readConvexError } from "../../../../shared/convex-error.mjs";
 import {
   Dialog,
   DialogContent,
@@ -355,6 +356,31 @@ export function ShareDialog({
       toast.success("Public link copied.");
     } catch {
       toast.error("Could not copy the link. Select it and copy it manually.");
+    }
+  }
+
+  /** A link Spectra made in one of the user's runs: its address is derived
+   * again on the server for the run's owner, so it can be copied any time. */
+  async function copySpectraPublicLink(link: SpectraPublicLinkEntry) {
+    if (!link.madeBySpectra) return;
+    setBusyKey(`public:copy:${link.linkId}`);
+    try {
+      const result = await postSpectra<{ url: string }>({
+        action: "revealAiPublicLink",
+        runId: link.madeBySpectra.runId,
+        operationId: link.madeBySpectra.operationId,
+      });
+      await navigator.clipboard.writeText(
+        new URL(result.url, window.location.origin).toString(),
+      );
+      toast.success("Public link copied.");
+    } catch (error) {
+      toast.error(
+        readConvexError(error).message ||
+          "Could not copy the link. Make a new one here instead.",
+      );
+    } finally {
+      setBusyKey(null);
     }
   }
 
@@ -857,11 +883,27 @@ export function ShareDialog({
                         Public read-only link
                       </div>
                       <div className="text-micro text-[var(--text-tertiary)]">
+                        {link.madeBySpectra ? "Made by Spectra · " : ""}
                         {link.expiresAt
                           ? `Expires ${new Date(link.expiresAt).toLocaleDateString()}`
                           : "Does not expire"}
                       </div>
                     </div>
+                    {link.madeBySpectra ? (
+                      <button
+                        type="button"
+                        disabled={busyKey === `public:copy:${link.linkId}`}
+                        onClick={() => void copySpectraPublicLink(link)}
+                        className="inline-flex h-7 items-center gap-1 rounded-chip px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+                      >
+                        {busyKey === `public:copy:${link.linkId}` ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5" />
+                        )}
+                        Copy link
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       disabled={busyKey === `public:${link.linkId}`}

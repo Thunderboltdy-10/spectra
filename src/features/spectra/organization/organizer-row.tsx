@@ -105,6 +105,8 @@ export const OrganizerRow = memo(function OrganizerRow({
       data-active-work={active ? "true" : undefined}
       data-drop-node={node.nodeId}
       data-drop-kind={node.isContainer ? "container" : "item"}
+      data-life-receive={node.isContainer || undefined}
+      data-life-launch
       data-node-row={node.nodeId}
       style={{ top, height: ROW_HEIGHT }}
       className={cn(

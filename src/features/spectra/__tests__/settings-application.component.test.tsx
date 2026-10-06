@@ -5,6 +5,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SettingsApplication } from "@/features/spectra/settings/ui/settings-application";
 import { DEFAULT_SPECTRA_PREFERENCES } from "@/features/spectra/settings/schema";
+import { spectraBus } from "@/features/spectra/events";
+
+// The page header's command bar measures its room.
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver;
 
 /*
  * The preference store reads auth state through Convex's provider context.
@@ -20,6 +28,7 @@ vi.mock("convex/react", async (importOriginal) => ({
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
+  spectraBus.setQuery("side.open", null);
 });
 
 describe("Settings application accessibility contract", () => {
@@ -111,5 +120,17 @@ describe("Settings application accessibility contract", () => {
     expect(screen.queryByText("Expanded workbar")).toBeNull();
     expect(screen.queryByDisplayValue("Dead control")).toBeNull();
     expect(screen.queryByText("document.format.ghostFromNova")).toBeNull();
+  });
+  it("folds the section list into a popover while the Side holds work", async () => {
+    spectraBus.setQuery("side.open", { kind: "work" });
+    render(
+      <ThemeProvider>
+        <SettingsApplication initialSection="ai" />
+      </ThemeProvider>,
+    );
+    expect(screen.queryByRole("navigation", { name: "Settings sections" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Spectra AI. Choose a settings section" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Appearance" }));
+    expect(screen.getByRole("heading", { name: "Appearance", level: 2 })).toBeTruthy();
   });
 });

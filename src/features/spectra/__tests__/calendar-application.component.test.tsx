@@ -389,6 +389,34 @@ describe("Calendar application", () => {
     fireEvent.click(await screen.findByTitle("Maths HL"));
     expect(screen.queryByRole("button", { name: "Remove from Calendar" })).toBeNull();
   });
+
+  it("reads an event's notes as words, not markup", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
+    installFetch(() => undefined, [
+      { ...workBlock(), notes: "<p>Bring the <strong>lab book</strong></p><p>Room 4</p>" },
+    ]);
+    render(<CalendarApplication />);
+    fireEvent.click(await screen.findByTitle("Essay draft"));
+    const details = screen.getByLabelText("Essay draft details");
+    expect(details.textContent).toContain("Bring the lab book");
+    expect(details.textContent).toContain("Room 4");
+    expect(details.textContent).not.toContain("<p>");
+  });
+
+  it("opens a plan's work in the Side instead of a page of its own", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
+    const { spectraBus } = await import("../events");
+    const opened = vi.fn();
+    const stop = spectraBus.handle("work.open", opened);
+    installFetch(() => undefined, [
+      { ...workBlock(), taskItemId: undefined, planArtifactId: "plan-1", planTaskId: "task-1", linkedWorkIds: ["plan-1"] },
+    ]);
+    render(<CalendarApplication />);
+    fireEvent.click(await screen.findByTitle("Essay draft"));
+    fireEvent.click(screen.getByRole("button", { name: /Open plan/ }));
+    expect(opened).toHaveBeenCalledWith({ workId: "plan-1" });
+    stop();
+  });
 });
 
 function workBlock() {

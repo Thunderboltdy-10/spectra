@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, DatabaseZap, Layers3 } from "lucide-react";
-import { Clock3, ShieldCheck, BarChart3, RefreshCw } from "@/components/icons/glyph-icons";
+import { Clock3, ShieldCheck, BarChart3, RefreshCw, Activity, DatabaseZap, Layers3 } from "@/components/icons/glyph-icons";
+import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
+import { PageBody, PageHeader } from "@/components/ui/page-header";
+import { Segmented } from "@/components/ui/segmented";
 import { workTypeMeta } from "@/features/spectra/components/artifact-card";
 import type { CapabilityState } from "@/features/spectra/core/capability-truth";
 import {
@@ -46,6 +48,8 @@ type AnalyticsPayload = {
 };
 
 const WINDOWS = [7, 30, 90] as const;
+const RANGE_OPTIONS = WINDOWS.map((value) => ({ value: String(value) as `${(typeof WINDOWS)[number]}`, label: `${value} days` }));
+const BAR_PLAN: readonly CollapseStep[] = [{ toMenu: "refresh" }];
 
 async function loadAnalytics(from: number, to: number) {
   const response = await fetch(
@@ -102,7 +106,7 @@ export function AnalyticsShell() {
           workTypeMeta[row.key as keyof typeof workTypeMeta]?.label ??
           row.key.replaceAll("_", " "),
         color:
-          workTypeMeta[row.key as keyof typeof workTypeMeta]?.color ?? "#64748b",
+          workTypeMeta[row.key as keyof typeof workTypeMeta]?.color ?? "var(--text-tertiary)",
       })),
     [payload?.byType],
   );
@@ -118,51 +122,39 @@ export function AnalyticsShell() {
       ] as const
     : [];
 
+  const commands: BarCommand[] = [
+    {
+      id: "range",
+      icon: "calendar",
+      label: "Range",
+      pinned: true,
+      render: () => (
+        <Segmented
+          label="Range"
+          size="compact"
+          value={String(days) as `${(typeof WINDOWS)[number]}`}
+          options={RANGE_OPTIONS}
+          onChange={(next) => setDays(Number(next) as (typeof WINDOWS)[number])}
+        />
+      ),
+    },
+    { id: "refresh", icon: "retry", label: loading ? "Refreshing…" : "Refresh analytics", labelPolicy: "never", disabled: loading, onSelect: () => void refresh() },
+  ];
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <header className="px-6 py-5 lg:px-9">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            {overallState.kind !== "available" ? <CapabilityTruthBadge state={overallState} /> : null}
-            <h1 className="font-display text-display font-semibold leading-none tracking-[-0.03em] text-[var(--text-primary)]">
-              Analytics
-            </h1>
-            <p className="mt-2 max-w-2xl text-caption leading-5 text-[var(--text-secondary)]">
-              A date-bounded view of your work and AI activity, derived without reading private content.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1">
-              {WINDOWS.map((windowDays) => (
-                <button
-                  key={windowDays}
-                  type="button"
-                  onClick={() => setDays(windowDays)}
-                  className={`h-7 rounded-md px-3 text-micro font-semibold ${days === windowDays ? "bg-[var(--text-primary)] text-[var(--bg-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
-                >
-                  {windowDays}d
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => void refresh()}
-              disabled={loading}
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border-default)] px-3 text-micro font-semibold disabled:opacity-45"
-            >
-              <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
-              Refresh
-            </button>
-          </div>
-        </div>
-        {payload ? (
-          <p className="mt-3 text-micro text-[var(--text-tertiary)]">
-            {payload.range.fromDay} → {payload.range.toDay} · computed {formatDate(payload.computedAt)}
-          </p>
-        ) : null}
-      </header>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6 lg:px-9">
+    <main className="spectra-wave-y relative isolate min-h-0 flex-1 overflow-y-auto" data-spectra-app-surface="true">
+      <PageBody>
+        <PageHeader
+          title="Analytics"
+          commands={commands}
+          plan={BAR_PLAN}
+          barLabel="Analytics commands"
+          description={
+            payload
+              ? `Your work and Spectra AI activity from ${payload.range.fromDay} to ${payload.range.toDay}, worked out without reading what you wrote. Updated ${formatDate(payload.computedAt)}.`
+              : "Your work and Spectra AI activity over time, worked out without reading what you wrote."
+          }
+        />
+      <div className="mt-6">
         {error ? (
           <CapabilityTruthState state={overallState} title="Personal analytics" onRetry={() => void refresh()} />
         ) : null}
@@ -209,13 +201,13 @@ export function AnalyticsShell() {
                 <SectionHeading title="AI run outcomes" detail="Settled and still-active runs remain distinct" />
                 {payload.metrics.aiRuns.value === null ? <div className="mt-4"><CapabilityTruthState state={payload.metrics.aiRuns.state} title="AI run history" /></div> : <div className="mt-4 grid grid-cols-2 gap-1">
                   {([
-                    ["Completed", payload.runOutcomes.completed, "#14795c"],
-                    ["Active", payload.runOutcomes.active, "#2563eb"],
-                    ["Failed", payload.runOutcomes.failed, "#b45309"],
-                    ["Cancelled", payload.runOutcomes.cancelled, "#64748b"],
+                    ["Completed", payload.runOutcomes.completed, "var(--success)"],
+                    ["Active", payload.runOutcomes.active, "var(--accent-cyan)"],
+                    ["Failed", payload.runOutcomes.failed, "var(--warning)"],
+                    ["Cancelled", payload.runOutcomes.cancelled, "var(--text-tertiary)"],
                   ] as const).map(([label, value, color]) => (
                     <div key={label} className="rounded-card p-4 transition-colors hover:bg-[var(--bg-secondary)]">
-                      <p className="text-micro font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">{label}</p>
+                      <p className="text-caption font-medium text-[var(--text-secondary)]">{label}</p>
                       <p className="mt-2 font-display text-metric font-semibold tabular-nums" style={{ color }}>{value}</p>
                     </div>
                   ))}
@@ -230,7 +222,7 @@ export function AnalyticsShell() {
 
             <section className="mt-8 p-2">
               <div className="flex items-start gap-3">
-                <ShieldCheck className="mt-0.5 size-5 shrink-0 text-emerald-800" />
+                <ShieldCheck className="mt-0.5 size-5 shrink-0 text-[var(--success)]" />
                 <div>
                   <h2 className="text-ui font-semibold text-[var(--text-primary)]">Privacy and source boundary</h2>
                   <p className="mt-1 max-w-3xl text-caption leading-6 text-[var(--text-secondary)]">{payload.privacy}</p>
@@ -241,7 +233,8 @@ export function AnalyticsShell() {
           </>
         ) : null}
       </div>
-    </div>
+      </PageBody>
+    </main>
   );
 }
 

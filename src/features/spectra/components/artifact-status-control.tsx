@@ -74,7 +74,7 @@ export function ArtifactStatusControl({
             className="spectra-status-control"
             data-status={status.state}
             data-words={words.text ? (words.leaving ? "leaving" : "shown") : undefined}
-            aria-label={`Status: ${STATE_NAME[status.state]}`}
+            aria-label={`Status: ${(status.name ?? STATE_NAME[status.state])}`}
             aria-describedby={descriptionId}
             style={{ "--status-hue": status.hue } as CSSProperties}
           >
@@ -105,7 +105,7 @@ export function ArtifactStatusControl({
             <Icon name={status.glyph} size={20} accent={status.hue} animate={status.running} />
           </span>
           <div className="min-w-0">
-            <p className="text-caption font-semibold text-[var(--text-primary)]">{STATE_NAME[status.state]}</p>
+            <p className="text-caption font-semibold text-[var(--text-primary)]">{(status.name ?? STATE_NAME[status.state])}</p>
             <p className="text-micro leading-4 text-[var(--text-secondary)]">{status.sentence}</p>
           </div>
         </div>

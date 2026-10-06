@@ -10,8 +10,7 @@ import {
 import { useSearchParams } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { useNow } from "@/hooks/use-now";
-import { Activity, CircleDollarSign, CircleGauge, CloudCog, Database, HardDrive, HeartPulse, LayoutGrid, LifeBuoy, Network, ServerCog, Sparkles, TicketCheck, Workflow } from "lucide-react";
-import { FileClock, KeyRound, MessageCircle, Settings2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, BarChart3, CalendarDays, LockKeyhole, Plus, RefreshCw, School, Search, Users } from "@/components/icons/glyph-icons";
+import { FileClock, KeyRound, MessageCircle, Settings2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, BarChart3, CalendarDays, LockKeyhole, Plus, School, Search, Users, Activity, CircleDollarSign, CircleGauge, CloudCog, Database, HardDrive, HeartPulse, LayoutGrid, LifeBuoy, Network, ServerCog, TicketCheck, Workflow } from "@/components/icons/glyph-icons";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import {
@@ -20,8 +19,11 @@ import {
   type PlatformAdministrationOverview,
 } from "@/features/spectra/administration/api";
 import { metricDefinition } from "@/features/spectra/administration/metric-registry";
-import { AuxiliaryRail, AuxiliaryRailTrigger } from "@/features/spectra/components/auxiliary-rail";
-import { ProductPageHeader } from "@/features/spectra/components/product-page-header";
+import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
+import { PageBody, PageHeader } from "@/components/ui/page-header";
+import { LoadingRows } from "@/components/ui/page-state";
+import { SidePanel } from "@/components/ui/side-panel";
+import { describeFailure } from "@/components/ui/truthful-state";
 import { ProductSectionNav } from "@/features/spectra/components/product-section-nav";
 import { OverflowMenu } from "@/components/ui/dropdown-menu";
 import {
@@ -253,6 +255,8 @@ function PlatformUsageChart({
   );
 }
 
+const PLATFORM_BAR_PLAN: readonly CollapseStep[] = [{ toMenu: "refresh" }, { toMenu: "range" }];
+
 function PlatformOverviewSurface({
   data,
   onTab,
@@ -267,7 +271,6 @@ function PlatformOverviewSurface({
     (sum, value) => sum + value,
     0,
   );
-  const [contextOpen, setContextOpen] = useState(true);
   return (
     <div className="space-y-6">
       <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-5">
@@ -318,9 +321,8 @@ function PlatformOverviewSurface({
         />
       </div>
 
-      <div className={cn("grid min-w-0 gap-3", contextOpen && "xl:grid-cols-[minmax(0,1fr)_auto]")}>
+      <div className="min-w-0">
         <div className="min-w-0 space-y-3">
-        {!contextOpen ? <div className="flex justify-end"><AuxiliaryRailTrigger label="Platform context" onOpen={() => setContextOpen(true)} /></div> : null}
         <section>
           <AdminSectionHeader
             title="Platform usage"
@@ -398,72 +400,6 @@ function PlatformOverviewSurface({
         </section>
         </div>
         </div>
-        {contextOpen ? <AuxiliaryRail label="Platform context" onClose={() => setContextOpen(false)}>
-          <div className="space-y-8 p-4">
-          <section>
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="font-[var(--font-serif)] text-subhead font-medium">
-                Service health
-              </h2>
-              <InlineLink onClick={() => onTab("operations")}>
-                View status
-              </InlineLink>
-            </div>
-            <div className="mt-3 space-y-2">
-              {data.serviceHealth.map((service) => (
-                <div
-                  key={service.service}
-                  className="flex items-center gap-2 text-micro"
-                >
-                  <span
-                    className={cn(
-                      "size-1.5 rounded-full",
-                      service.status === "operational"
-                        ? "bg-[var(--accent-mint)]"
-                        : service.status === "degraded"
-                          ? "bg-[var(--accent-gold)]"
-                          : "bg-[var(--text-placeholder)]",
-                    )}
-                  />
-                  <span className="min-w-0 flex-1 truncate">
-                    {service.service}
-                  </span>
-                  <StatusBadge tone={statusToneFor(service.status)}>
-                    {service.status}
-                  </StatusBadge>
-                </div>
-              ))}
-            </div>
-          </section>
-          <section>
-            <h2 className="font-[var(--font-serif)] text-subhead font-medium">
-              Feedback overview
-            </h2>
-            <p className="mt-1 text-micro text-[var(--text-tertiary)]">
-              Operational sentiment · all cohort sizes
-            </p>
-            <div className="mt-3 space-y-2 text-micro">
-              {[
-                ["Positive", data.feedback.positive, "#26a47c"],
-                ["Neutral", data.feedback.neutral, "#ee9b3b"],
-                ["Negative", data.feedback.negative, "#d76453"],
-              ].map(([label, value, color]) => (
-                <div key={String(label)} className="flex items-center gap-2">
-                  <span
-                    className="size-2 rounded-full"
-                    style={{ backgroundColor: String(color) }}
-                  />
-                  <span className="flex-1">{label}</span>
-                  <strong>{formatCompact(value as number)}</strong>
-                </div>
-              ))}
-            </div>
-            <InlineLink onClick={() => onTab("requests")}>
-              Review feedback
-            </InlineLink>
-          </section>
-          </div>
-        </AuxiliaryRail> : null}
       </div>
 
       <div className="grid gap-8 md:grid-cols-2 xl:grid-cols-4">
@@ -553,7 +489,7 @@ function PlatformOverviewSurface({
           />
           <div className="space-y-3 px-4 pb-4 text-micro leading-4">
             <div className="flex gap-2">
-              <Sparkles size={13} className="mt-0.5 text-[var(--brand-primary)]" />
+              <Activity size={13} className="mt-0.5 text-[var(--brand-primary)]" />
               {formatCompact(totalTokens)} model tokens were metered this
               period.
             </div>
@@ -655,6 +591,80 @@ function PlatformOverviewSurface({
   );
 }
 
+/** Service health and feedback, beside the Overview. */
+function PlatformContext({
+  data,
+  onTab,
+}: {
+  data: PlatformAdministrationOverview;
+  onTab: (tab: Tab) => void;
+}) {
+  return (
+          <div className="space-y-8 px-1 pb-6 pt-2">
+          <section>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-ui font-semibold">Service health</h2>
+              <InlineLink onClick={() => onTab("operations")}>
+                View status
+              </InlineLink>
+            </div>
+            <div className="mt-3 space-y-2">
+              {data.serviceHealth.map((service) => (
+                <div
+                  key={service.service}
+                  className="flex items-center gap-2 text-micro"
+                >
+                  <span
+                    className={cn(
+                      "size-1.5 rounded-full",
+                      service.status === "operational"
+                        ? "bg-[var(--accent-mint)]"
+                        : service.status === "degraded"
+                          ? "bg-[var(--accent-gold)]"
+                          : "bg-[var(--text-placeholder)]",
+                    )}
+                  />
+                  <span className="min-w-0 flex-1 truncate">
+                    {service.service}
+                  </span>
+                  <StatusBadge tone={statusToneFor(service.status)}>
+                    {service.status}
+                  </StatusBadge>
+                </div>
+              ))}
+            </div>
+          </section>
+          <section>
+            <h2 className="text-ui font-semibold">Feedback</h2>
+            <p className="mt-1 text-micro text-[var(--text-tertiary)]">
+              How people felt, across every school.
+            </p>
+            <div className="mt-3 space-y-2 text-micro">
+              {[
+                ["Positive", data.feedback.positive, "var(--success)"],
+                ["Neutral", data.feedback.neutral, "var(--accent-gold)"],
+                ["Negative", data.feedback.negative, "var(--danger)"],
+              ].map(([label, value, color]) => (
+                <div key={String(label)} className="flex items-center gap-2">
+                  <span
+                    className="size-2 rounded-full"
+                    style={{ backgroundColor: String(color) }}
+                  />
+                  <span className="flex-1">{label}</span>
+                  <strong>{formatCompact(value as number)}</strong>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3">
+              <InlineLink onClick={() => onTab("requests")}>
+                Review feedback
+              </InlineLink>
+            </div>
+          </section>
+          </div>
+  );
+}
+
 export function SuperadminShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -683,9 +693,9 @@ export function SuperadminShell() {
       );
     } catch (nextError) {
       setError(
-        nextError instanceof Error
-          ? nextError.message
-          : "Platform administration could not load.",
+        describeFailure(nextError, {
+          fallback: "Check your connection, then try loading the platform again.",
+        }).message,
       );
     } finally {
       setLoading(false);
@@ -704,11 +714,21 @@ export function SuperadminShell() {
     [router],
   );
 
-  if (loading && !overview)
-    return <LoadingPanel label="Opening platform operations" />;
-  if (error && !overview)
-    return <ErrorPanel message={error} retry={() => void load()} />;
-  if (!overview) return null;
+  if (!overview)
+    return (
+      <main className="spectra-wave-y relative isolate min-h-0 flex-1 overflow-y-auto" data-spectra-app-surface="true">
+        <PageBody>
+          <PageHeader title="Platform" />
+          {loading ? (
+            <LoadingRows label="Opening the platform" count={6} className="mt-6" />
+          ) : error ? (
+            <div className="mt-6">
+              <ErrorPanel message={error} retry={() => void load()} />
+            </div>
+          ) : null}
+        </PageBody>
+      </main>
+    );
 
   const rangeLabel = (() => {
     const from = new Date(range.fromDay);
@@ -721,20 +741,45 @@ export function SuperadminShell() {
     return `${fmt.format(from)} – ${fmt.format(to)}`;
   })();
 
+  const commands: BarCommand[] = [
+    {
+      id: "range",
+      icon: "calendar",
+      label: rangeLabel,
+      render: () => (
+        <span className="inline-flex items-center gap-1.5 whitespace-nowrap px-1 text-micro font-medium text-[var(--text-secondary)]">
+          <CalendarDays size={12} />
+          {rangeLabel}
+        </span>
+      ),
+    },
+    {
+      id: "refresh",
+      icon: "retry",
+      label: loading ? "Refreshing…" : "Refresh",
+      labelPolicy: "never",
+      disabled: loading,
+      onSelect: () => setRefreshKey((value) => value + 1),
+    },
+  ];
+
   return (
-    <div className="spectra-wave-y spectra-admin-stage relative min-h-dvh pb-24">
-      <div className="w-full px-4 py-5 sm:px-6 lg:px-8 xl:px-10">
-        <ProductPageHeader
-          className="mb-5"
-          title="Platform administration"
-          description="Monitor platform health, usage, and school operations without accessing ordinary private content."
-          actions={<><span className="hidden items-center gap-1.5 text-micro font-medium text-[var(--text-secondary)] sm:inline-flex"><CalendarDays size={12} />{rangeLabel}</span><AdminButton className="min-h-8" onClick={() => setRefreshKey((value) => value + 1)}><RefreshCw size={12} />Refresh</AdminButton></>}
+    <main className="spectra-wave-y relative isolate flex h-full min-h-0 flex-1" data-spectra-app-surface="true">
+      <div className="min-w-0 flex-1 overflow-y-auto">
+      <PageBody>
+        <PageHeader
+          title="Platform"
+          commands={commands}
+          plan={PLATFORM_BAR_PLAN}
+          barLabel="Platform commands"
+          description="Health, usage and school operations, without opening anyone's work."
         />
         <ProductSectionNav
-          label="Platform administration"
+          label="Platform sections"
           items={tabs}
           active={tab}
           onChange={setTab}
+          className="mb-4 mt-4"
         />
         {tab === "overview" ? (
           <PlatformOverviewSurface data={overview} onTab={setTab} />
@@ -746,8 +791,14 @@ export function SuperadminShell() {
             onRefresh={() => setRefreshKey((value) => value + 1)}
           />
         )}
+      </PageBody>
       </div>
-    </div>
+      {tab === "overview" ? (
+        <SidePanel id="superadmin.context" title="Platform context" icon="health" stageMin={720} defaultWidth={320}>
+          <PlatformContext data={overview} onTab={setTab} />
+        </SidePanel>
+      ) : null}
+    </main>
   );
 }
 
@@ -1856,7 +1907,7 @@ function PlatformUsageSurface({
           detail="Metered platform storage"
         />
         <MetricCard
-          icon={Sparkles}
+          icon={Activity}
           label="Model tokens"
           value={formatCompact(
             (overview.usage.totals.model_input_tokens ?? 0) +
@@ -2076,7 +2127,7 @@ function RequestsSurface({
 function PlatformGovernanceSurface() {
   const guarantees = [
     {
-      icon: Sparkles,
+      icon: Activity,
       title: "AI without role gates",
       detail:
         "Provider operations optimize quality, reliability, caching, and cost without narrowing user capability.",

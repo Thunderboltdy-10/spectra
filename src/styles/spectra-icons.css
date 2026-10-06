@@ -110,6 +110,10 @@
 .spectra-icon[data-animate] .sg-nudge {
   transform: translateX(1px);
 }
+:is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-nudge-back,
+.spectra-icon[data-animate] .sg-nudge-back {
+  transform: translateX(-1px);
+}
 :is(button, a, [role="button"], [data-icon-host]):hover .spectra-icon .sg-nudge-up,
 .spectra-icon[data-animate] .sg-nudge-up {
   transform: translate(0.8px, -0.8px);

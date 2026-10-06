@@ -1,5 +1,4 @@
-import { type LucideIcon } from "lucide-react";
-import { Folder, FolderOpen, Link2, MessageSquare, Layers } from "@/components/icons/glyph-icons";
+import { Folder, FolderOpen, Link2, MessageSquare, Layers, type GlyphIcon } from "@/components/icons/glyph-icons";
 import { workTypeMeta } from "../components/artifact-card";
 import type { ArtifactCardView } from "../components/artifact-card";
 import type { TreeNode } from "./tree-client";
@@ -13,7 +12,7 @@ import type { TreeNode } from "./tree-client";
  */
 
 export type NodeIdentity = {
-  icon: LucideIcon;
+  icon: GlyphIcon;
   /** Line colour for the icon. */
   color: string;
   /** Tinted fill behind the icon. */

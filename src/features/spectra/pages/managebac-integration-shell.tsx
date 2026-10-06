@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Fingerprint, ListChecks, Network, TriangleAlert } from "lucide-react";
-import { BookOpen, CircleHelp, Clock3, Code2, FileClock, KeyRound, LoaderCircle, Play, RotateCcw, Save, Settings2, ShieldCheck, UserCheck, AlertCircle, AlertTriangle, CalendarDays, CheckCircle2, ChevronRight, ExternalLink, FileText, History, Link2, LockKeyhole, Plus, RefreshCw, School, X } from "@/components/icons/glyph-icons";
+import { BookOpen, CircleHelp, Clock3, Code2, FileClock, LoaderCircle, Play, RotateCcw, Save, Settings2, ShieldCheck, UserCheck, AlertCircle, AlertTriangle, CalendarDays, CheckCircle2, ChevronRight, ExternalLink, FileText, History, Link2, LockKeyhole, Plus, RefreshCw, School, X, Fingerprint, ListChecks, TriangleAlert } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import { readConvexError } from "../../../../shared/convex-error.mjs";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -13,8 +12,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ProductSectionNav } from "../components/product-section-nav";
-import { AuxiliaryRail, AuxiliaryRailTrigger } from "../components/auxiliary-rail";
-import { ProductPageHeader } from "../components/product-page-header";
+import { Icon } from "@/components/icons";
+import type { BarCommand } from "@/components/ui/adaptive-bar";
+import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { PageBody, PageHeader } from "@/components/ui/page-header";
+import { EmptyState as PageEmptyState, LoadingRows } from "@/components/ui/page-state";
+import { PanelTabs, SidePanel } from "@/components/ui/side-panel";
 import { ClassShelfEditor } from "../components/class-shelf-editor";
 import { fetchMyClassCandidates } from "../components/class-shelf-picker";
 import {
@@ -595,7 +599,6 @@ export function ManageBacIntegrationShell() {
   const [detailsTab, setDetailsTab] = useState<"details" | "activity">(
     "details",
   );
-  const [contextOpen, setContextOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [manifestOpen, setManifestOpen] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
@@ -779,493 +782,356 @@ export function ManageBacIntegrationShell() {
       setManifestText("");
     });
 
+  const syncLabel = busy === "sync" || syncInProgress ? "Syncing…" : integration?.status === "validating" ? "Validating…" : "Sync now";
+  const commands: BarCommand[] = [
+    ...(integration
+      ? [{
+          id: "sync",
+          icon: "syncing",
+          label: syncLabel,
+          disabled: Boolean(busy) || syncInProgress || integration.status === "validating" || integration.status === "draft",
+          onSelect: () => void runAction("sync", () => syncSpectraManageBac()),
+        } satisfies BarCommand]
+      : []),
+    { id: "refresh", icon: "retry", label: "Refresh connection data", labelPolicy: "never", onSelect: () => void refresh() },
+    ...(overview?.admin
+      ? [{ id: "settings", icon: "settings", label: "ManageBac settings", labelPolicy: "never", onSelect: () => setSettingsOpen(true) } satisfies BarCommand]
+      : []),
+  ];
+
   if (loading)
     return (
-      <div className="grid h-full min-h-[70vh] place-items-center">
-        <div className="flex items-center gap-2 text-caption text-[var(--text-tertiary)]">
-          <LoaderCircle className="animate-spin" size={15} />
-          Loading school data integration
-        </div>
-      </div>
+      <main className="min-h-0 flex-1 overflow-y-auto" data-spectra-app-surface="true">
+        <PageBody>
+          <PageHeader title="ManageBac" />
+          <LoadingRows label="Loading ManageBac" count={6} />
+        </PageBody>
+      </main>
     );
 
   return (
     <div className="spectra-wave-y relative flex h-full min-h-0 overflow-hidden text-[var(--text-primary)]">
-      <main className="min-w-0 flex-1 overflow-y-auto">
-        <div className="flex min-h-full w-full flex-col px-4 pb-24 pt-3 sm:px-6 lg:px-8">
+      <main className="min-w-0 flex-1 overflow-y-auto" data-spectra-app-surface="true">
+        <PageBody>
+          <PageHeader
+            title={overview?.admin ? "ManageBac connection" : "Your ManageBac data"}
+            commands={commands}
+            plan={[{ hideLabel: "sync" }]}
+            barLabel="ManageBac commands"
+            description={
+              overview?.admin
+                ? "The school's connection to ManageBac and how it syncs. Students see their own tasks, classes and CAS in School."
+                : "What Spectra reads from ManageBac for you. Your tasks, classes and CAS are in School."
+            }
+          />
+
           {error ? (
-            <div
-              className="mb-2 flex items-start gap-2 rounded-lg border border-[color-mix(in_oklab,var(--accent-coral)_22%,var(--bg-elevated))] bg-[color-mix(in_oklab,var(--accent-coral)_8%,var(--bg-elevated))] px-3 py-2.5 text-micro leading-5 text-[var(--danger)]"
-              role="alert"
-            >
-              <AlertTriangle className="mt-0.5 shrink-0" size={14} />
+            <div role="alert" className="mt-3 flex items-start gap-2.5 rounded-control px-2.5 py-2 text-caption leading-5 text-[var(--text-primary)]">
+              <Icon name="problem" size={16} accent="var(--danger)" className="mt-0.5 shrink-0" />
               <span className="min-w-0 flex-1">{error}</span>
-              <button
-                type="button"
-                onClick={() => setError("")}
-                className="grid size-5 place-items-center rounded hover:bg-[color-mix(in_oklab,var(--accent-coral)_18%,var(--bg-elevated))]"
-                aria-label="Dismiss error"
-              >
-                <X size={12} />
-              </button>
+              <IconButton icon="close" label="Dismiss" size="compact" onClick={() => setError("")} />
             </div>
           ) : null}
 
-          <section className="min-w-0">
-            <ProductPageHeader
-              className="pb-5 pt-1 sm:pt-2"
-              eyebrow={
-                overview?.admin
-                  ? "ManageBac · Admin setup"
-                  : "ManageBac · Personal data"
-              }
-              title={overview?.admin ? "ManageBac connection" : "Your ManageBac data"}
-              description={
-                overview?.admin
-                  ? "Manage the school connection and synchronization. Choose which classes get their own workspace from this page or from School."
-                  : "Review your classes, timetable, and assignments. Choose which classes get their own workspace from this page or from School."
-              }
-              actions={
-                <>
-                  <button type="button" onClick={() => void refresh()} className="inline-flex size-8 items-center justify-center rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="Refresh connection data" title="Refresh connection data"><RefreshCw size={13} /></button>
-                  {integration ? <button type="button" disabled={Boolean(busy) || syncInProgress || integration.status === "validating" || integration.status === "draft"} onClick={() => void runAction("sync", () => syncSpectraManageBac())} className="inline-flex h-8 items-center gap-2 rounded-control bg-[var(--text-primary)] px-3 text-micro font-medium text-[var(--bg-primary)] transition hover:opacity-90 disabled:opacity-60" title={integration.status === "validating" ? "Sync waits until capability validation finishes." : integration.status === "draft" ? "Connect ManageBac before syncing." : syncInProgress ? "A sync is already running." : "Sync now"}><RefreshCw size={13} className={busy === "sync" || syncInProgress ? "animate-spin" : ""} />{busy === "sync" || syncInProgress ? "Syncing…" : integration.status === "validating" ? "Validating…" : "Sync now"}</button> : null}
-                  {overview?.admin ? <button type="button" onClick={() => setSettingsOpen(true)} className="inline-flex size-8 items-center justify-center rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="ManageBac settings" title="ManageBac settings"><Settings2 size={13} /></button> : null}
-                  {!contextOpen ? <AuxiliaryRailTrigger label="ManageBac context" onOpen={() => setContextOpen(true)} /> : null}
-                </>
-              }
-            />
+          {integration && overview?.admin && data?.mapping?.status !== "verified" ? (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 px-0.5">
+              <div className="min-w-0">
+                <strong className="block text-ui font-semibold">Match your verified school account</strong>
+                <p className="mt-1 max-w-xl text-caption leading-5 text-[var(--text-secondary)]">
+                  Spectra matches the email already on your Spectra account to the school connection. You do not need to sign in again.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={Boolean(busy) || syncInProgress}
+                onClick={() => void runAction("identity", () => resolveSpectraManageBacIdentity())}
+              >
+                {busy === "identity" ? <Icon name="syncing" size={14} className="animate-spin" /> : <Fingerprint size={14} />}
+                Resolve my school identity
+              </Button>
+            </div>
+          ) : null}
 
-            {integration &&
-            overview?.admin &&
-            data?.mapping?.status !== "verified" ? (
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-card border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-3">
+          {!integration ? (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-4 px-0.5">
+              <div className="flex min-w-0 items-start gap-3">
+                <Icon name="locked" size={18} accent="var(--accent-cyan)" className="mt-0.5" />
                 <div className="min-w-0">
-                  <strong className="block text-ui font-semibold">
-                    Match your verified school account
+                  <strong className="text-ui font-semibold">
+                    {overview?.admin ? "Connect your school’s ManageBac" : "Your school has not connected ManageBac"}
                   </strong>
-                  <p className="mt-1 max-w-xl text-micro leading-5 text-[var(--text-secondary)]">
-                    Disconnecting ManageBac clears identity mappings. Spectra
-                    matches the email already on your Spectra account to the
-                    school connection and never reveals a selectable student ID.
+                  <p className="mt-1 max-w-xl text-caption leading-5 text-[var(--text-secondary)]">
+                    {overview?.admin
+                      ? "Spectra only reads from ManageBac. It never writes to it, and the school token never leaves the server."
+                      : "Once a school administrator connects ManageBac, your classes, tasks and CAS come into School."}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  disabled={Boolean(busy) || syncInProgress}
-                  onClick={() =>
-                    void runAction("identity", () =>
-                      resolveSpectraManageBacIdentity(),
-                    )
-                  }
-                  className="inline-flex h-8 items-center gap-2 rounded-control bg-[var(--text-primary)] px-3.5 text-micro font-medium text-[var(--bg-primary)] disabled:opacity-60"
-                >
-                  {busy === "identity" ? (
-                    <LoaderCircle className="animate-spin" size={13} />
-                  ) : (
-                    <Fingerprint size={13} />
-                  )}
-                  Resolve my school identity
-                </button>
               </div>
-            ) : null}
+              {overview?.admin ? (
+                <Button size="sm" variant="primary" onClick={() => setSettingsOpen(true)}>
+                  <Link2 size={14} />
+                  Connect ManageBac
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
 
-            {!integration && (
-              <div className="mb-1 rounded-card border border-dashed border-[var(--border-strong)] bg-[color-mix(in_oklab,var(--bg-secondary)_45%,transparent)] px-5 py-5">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div className="flex items-start gap-3">
-                    <span className="grid size-9 place-items-center rounded-lg bg-[var(--bg-elevated)] text-[var(--accent-cyan)]">
-                      <KeyRound size={16} />
-                    </span>
-                    <div>
-                      <strong className="text-ui font-semibold">
-                        {overview?.admin
-                          ? "Connect your school’s read-only API"
-                          : "Your school has not connected ManageBac"}
-                      </strong>
-                      <p className="mt-1 max-w-xl text-micro leading-5 text-[var(--text-tertiary)]">
-                        {overview?.admin
-                          ? "Use the tenant API Manager reference—Spectra never guesses routes, sends write requests, or exposes the school token."
-                          : "A school administrator must configure and verify the tenant capabilities before personal synchronization is available."}
-                      </p>
-                    </div>
-                  </div>
-                  {overview?.admin ? (
-                    <button
-                      type="button"
-                      onClick={() => setSettingsOpen(true)}
-                      className="inline-flex h-8 items-center gap-2 rounded-control bg-[var(--text-primary)] px-3.5 text-micro font-medium text-white shadow-sm hover:bg-[var(--text-primary)]"
-                    >
-                      <Link2 size={13} />
-                      Connect ManageBac
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            )}
+          <ProductSectionNav label="ManageBac sections" items={tabs} active={tab} onChange={setTab} className="mt-5" />
 
-            <ProductSectionNav
-              label="ManageBac sections"
-              items={tabs}
-              active={tab}
-              onChange={setTab}
-              className="mt-4"
-            />
-
-            <div className="min-h-[470px] py-4">
-              {!integration ? (
-                <EmptyState
-                  icon={LockKeyhole}
-                  title="Verified school data will appear here"
-                  detail="Once an administrator connects the token and imports the tenant capability manifest, Spectra will resolve your identity without exposing alternative accounts."
-                />
-              ) : !overview?.admin &&
-                data?.mapping?.status !== "verified" &&
-                tab !== "history" &&
-                tab !== "provenance" ? (
-                <div className="mx-auto flex min-h-[390px] max-w-lg flex-col items-center justify-center text-center">
-                  <span className="grid size-12 place-items-center rounded-2xl bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-elevated))] text-[var(--accent-cyan)]">
-                    <UserCheck size={22} />
-                  </span>
-                  <h2 className="mt-4 font-display text-xl font-semibold">
-                    Match your verified school account
-                  </h2>
-                  <p className="mt-2 text-caption leading-5 text-[var(--text-tertiary)]">
-                    Spectra matches the email already on your Spectra account to
-                    the school’s ManageBac connection. You do not need to sign
-                    in again. Exactly one match is accepted, and Spectra never
-                    sends or reveals a student ID.
-                  </p>
-                  <button
-                    type="button"
+          <div className="min-h-[470px] py-4">
+            {!integration ? (
+              <EmptyState
+                icon={LockKeyhole}
+                title="School data appears here once ManageBac is connected"
+                detail="Spectra matches each student by the email on their Spectra account and never shows anyone else's data."
+              />
+            ) : !overview?.admin && data?.mapping?.status !== "verified" && tab !== "history" && tab !== "provenance" ? (
+              <PageEmptyState
+                icon="identity"
+                title="Match your verified school account"
+                detail="Spectra matches the email already on your Spectra account to the school’s ManageBac connection. You do not need to sign in again. Exactly one match is accepted, and Spectra never shows a student ID."
+                action={
+                  <Button
+                    variant="primary"
                     disabled={Boolean(busy)}
-                    onClick={() =>
-                      void runAction("identity", () =>
-                        resolveSpectraManageBacIdentity(),
-                      )
-                    }
-                    className="mt-5 inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--text-primary)] px-4 text-micro font-medium text-white disabled:opacity-60"
+                    onClick={() => void runAction("identity", () => resolveSpectraManageBacIdentity())}
                   >
-                    {busy === "identity" || syncInProgress ? (
-                      <LoaderCircle className="animate-spin" size={14} />
-                    ) : (
-                      <Fingerprint size={14} />
-                    )}
+                    {busy === "identity" || syncInProgress ? <Icon name="syncing" size={14} className="animate-spin" /> : <Fingerprint size={14} />}
                     Resolve my school identity
-                  </button>
-                </div>
-              ) : tab === "overview" ? (
-                <div className="grid gap-x-12 gap-y-10 px-4 py-8 sm:px-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(260px,.8fr)] lg:py-10">
-                  <section className="min-w-0">
-                    <p className="text-micro font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Connection</p>
-                    <div className="mt-3 flex items-start gap-3">
-                      <span className={cn("mt-2 size-2.5 shrink-0 rounded-full ring-4 ring-current/10", integration.status === "connected" ? "text-emerald-600 bg-emerald-600" : integration.status === "validating" ? "text-sky-500 bg-sky-500" : "text-amber-500 bg-amber-500")} />
-                      <div>
-                        <h2 className="font-display text-title font-semibold tracking-[-0.02em]">{integration.status === "connected" ? "ManageBac is connected" : integration.status === "validating" ? "Validating ManageBac capabilities" : integration.status === "draft" ? "ManageBac is not connected yet" : "The connection needs attention"}</h2>
-                        <p className="mt-2 max-w-xl text-caption leading-5 text-[var(--text-secondary)]">{integrationConnectionMessage(integration)}</p>
+                  </Button>
+                }
+              />
+            ) : tab === "overview" ? (
+              <div className="grid gap-x-12 gap-y-10 py-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(260px,.8fr)]">
+                <section className="min-w-0">
+                  <h2 className="text-caption font-medium text-[var(--text-tertiary)]">Connection</h2>
+                  <div className="mt-3 flex items-start gap-3">
+                    <Icon
+                      name={integration.status === "connected" ? "saved" : integration.status === "validating" ? "syncing" : "problem"}
+                      size={18}
+                      accent={integration.status === "connected" ? "var(--success)" : integration.status === "validating" ? "var(--accent-cyan)" : "var(--warning)"}
+                      className="mt-1 shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <h3 className="font-display text-title font-semibold tracking-[-0.02em]">
+                        {integration.status === "connected"
+                          ? "ManageBac is connected"
+                          : integration.status === "validating"
+                            ? "Validating ManageBac capabilities"
+                            : integration.status === "draft"
+                              ? "ManageBac is not connected yet"
+                              : "The connection needs attention"}
+                      </h3>
+                      <p className="mt-2 max-w-xl text-caption leading-5 text-[var(--text-secondary)]">{integrationConnectionMessage(integration)}</p>
+                      <p className="mt-3 text-caption text-[var(--text-tertiary)]">
+                        {data?.school?.name ?? "Your school"} · last synced {integration.lastSyncAt ? relative(integration.lastSyncAt) : "never"}
+                        {data?.conflicts.length ? ` · ${data.conflicts.length} to review` : ""}
+                      </p>
+                      <div className="-ml-2 mt-4 flex flex-wrap gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => setTab("history")}>Sync history</Button>
+                        <Button variant="ghost" size="sm" onClick={() => setTab("conflicts")}>Review conflicts</Button>
                       </div>
                     </div>
-                    <p className="ml-5 mt-4 text-micro text-[var(--text-tertiary)]">{data?.school?.name ?? "Your school"} · last synchronized {integration.lastSyncAt ? relative(integration.lastSyncAt) : "never"} · {data?.conflicts.length ?? 0} conflicts</p>
-                    <div className="ml-5 mt-5 flex flex-wrap gap-1">
-                      <button type="button" onClick={() => setTab("history")} className="h-8 rounded-lg px-3 text-micro font-medium hover:bg-[var(--bg-hover)]">Sync history</button>
-                      <button type="button" onClick={() => setTab("conflicts")} className="h-8 rounded-lg px-3 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">Review conflicts</button>
-                    </div>
-                  </section>
+                  </div>
+                </section>
 
-                  <section className="min-w-0 lg:pt-1">
-                    <h2 className="text-body font-semibold">Synchronized data</h2>
-                    <p className="mt-1 text-micro leading-5 text-[var(--text-tertiary)]">Open a verified source collection.</p>
-                    <div className="mt-3 space-y-1">
-                      {([
-                        ["Classes", classCollection ? classes.length : "—", "classes", BookOpen],
-                        ["Calendar", timetable.length, "calendar", CalendarDays],
-                        ["Tasks", tasks.length, "tasks", ListChecks],
-                      ] as const).map(([label, count, target, Icon]) => (
-                        <button key={target} type="button" onClick={() => setTab(target)} className="group flex h-11 w-full items-center gap-3 rounded-xl px-2.5 text-micro text-[var(--text-secondary)] transition hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]">
-                          <Icon size={14} className="text-[var(--text-tertiary)] transition-transform group-hover:scale-110 group-hover:text-[var(--text-primary)]" />
-                          <span className="flex-1 text-left">{label}</span>
-                          <strong className="font-display text-editor font-semibold tabular-nums text-[var(--text-primary)]">{count}</strong>
-                          <ChevronRight size={13} className="text-[var(--text-tertiary)] transition-transform group-hover:translate-x-0.5" />
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                </div>
-              ) : tab === "classes" ? (
-                <div>
-                  <ClassShelfEditor
-                    integration={classCollection?.integration}
-                    identityRequired={classCollection?.identityRequired}
-                    identityStatus={classCollection?.identityStatus}
-                    classes={classes}
-                    selectionRevision={classCollection?.selectionRevision}
-                    classLoadError={classLoadError}
-                    onSaved={() =>
-                      runAction("sync", () => syncSpectraManageBac())
-                    }
-                  />
-                </div>
-              ) : tab === "calendar" ? (
-                <RecordsList
-                  records={timetable}
-                  emptyTitle="No Calendar source events"
-                  emptyDetail="Verified lessons and Calendar routes populate source-locked Calendar layers without creating work items."
-                />
-              ) : tab === "periods" ? (
-                <PeriodMapPanel
-                  periodMaps={data?.periodMaps ?? []}
+                <section className="min-w-0">
+                  <h2 className="text-caption font-medium text-[var(--text-tertiary)]">Synced data</h2>
+                  <div className="-mx-2.5 mt-2">
+                    {([
+                      ["Classes", classCollection ? classes.length : "—", "classes", "school"],
+                      ["Calendar", timetable.length, "calendar", "calendar"],
+                      ["Tasks", tasks.length, "tasks", "task"],
+                    ] as const).map(([label, count, target, glyph]) => (
+                      <button
+                        key={target}
+                        type="button"
+                        data-life-launch
+                        onClick={() => setTab(target)}
+                        className="group flex h-11 w-full items-center gap-3 rounded-control px-2.5 text-ui text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
+                      >
+                        <Icon name={glyph} size={16} />
+                        <span className="flex-1 text-left">{label}</span>
+                        <strong className="font-medium tabular-nums text-[var(--text-primary)]">{count}</strong>
+                        <Icon name="chevronRight" size={14} />
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            ) : tab === "classes" ? (
+              <ClassShelfEditor
+                integration={classCollection?.integration}
+                identityRequired={classCollection?.identityRequired}
+                identityStatus={classCollection?.identityStatus}
+                classes={classes}
+                selectionRevision={classCollection?.selectionRevision}
+                classLoadError={classLoadError}
+                onSaved={() => runAction("sync", () => syncSpectraManageBac())}
+              />
+            ) : tab === "calendar" ? (
+              <RecordsList
+                records={timetable}
+                emptyTitle="No lessons or school events yet"
+                emptyDetail="Lessons and school events from ManageBac show up in Calendar as their own layer. They never become tasks."
+              />
+            ) : tab === "periods" ? (
+              <PeriodMapPanel
+                periodMaps={data?.periodMaps ?? []}
+                busy={busy}
+                onSave={(period) => runAction(`period:${period.periodKey}`, () => upsertSpectraCalendarPeriodMap(period))}
+                onRemove={(periodMapId) => runAction(`period-remove:${periodMapId}`, () => removeSpectraCalendarPeriodMap(periodMapId))}
+              />
+            ) : tab === "tasks" ? (
+              <RecordsList
+                records={tasks}
+                emptyTitle="No assignments or deadlines"
+                emptyDetail="Assignments, assessments and deadlines from ManageBac show up here and in School. Your own notes stay yours."
+              />
+            ) : tab === "history" ? (
+              <SyncTable
+                runs={data?.syncRuns ?? []}
+                syncBusy={Boolean(busy) || syncInProgress}
+                onRetry={() => void runAction("sync", () => syncSpectraManageBac())}
+                onResolveIdentity={() => void runAction("identity", () => resolveSpectraManageBacIdentity())}
+              />
+            ) : tab === "conflicts" ? (
+              data?.conflicts.length ? (
+                <ConflictList
+                  conflicts={data.conflicts}
                   busy={busy}
-                  onSave={(period) =>
-                    runAction(`period:${period.periodKey}`, () =>
-                      upsertSpectraCalendarPeriodMap(period),
-                    )
-                  }
-                  onRemove={(periodMapId) =>
-                    runAction(`period-remove:${periodMapId}`, () =>
-                      removeSpectraCalendarPeriodMap(periodMapId),
-                    )
+                  onResolve={(conflict, resolution) =>
+                    runAction(`conflict:${conflict._id}`, () => resolveSpectraManageBacConflict({ conflictId: conflict._id, resolution }))
                   }
                 />
-              ) : tab === "tasks" ? (
-                <RecordsList
-                  records={tasks}
-                  emptyTitle="No assignments or deadlines"
-                  emptyDetail="Readable assignments, assessments, and deadlines appear as source-linked planner tasks without replacing personal notes."
-                />
-              ) : tab === "history" ? (
-                  <SyncTable
-                    runs={data?.syncRuns ?? []}
-                    syncBusy={Boolean(busy) || syncInProgress}
-                    onRetry={() =>
-                      void runAction("sync", () => syncSpectraManageBac())
-                    }
-                    onResolveIdentity={() =>
-                      void runAction("identity", () =>
-                        resolveSpectraManageBacIdentity(),
-                      )
-                    }
-                  />
-              ) : tab === "conflicts" ? (
-                data?.conflicts.length ? (
-                  <ConflictList
-                    conflicts={data.conflicts}
-                    busy={busy}
-                    onResolve={(conflict, resolution) =>
-                      runAction(`conflict:${conflict._id}`, () =>
-                        resolveSpectraManageBacConflict({
-                          conflictId: conflict._id,
-                          resolution,
-                        }),
-                      )
-                    }
-                  />
-                ) : (
-                  <EmptyState
-                    icon={CheckCircle2}
-                    title="No conflicts to review"
-                    detail="Safe source updates apply automatically. Ambiguous changes stop here before touching customized work."
-                  />
-                )
               ) : (
-                <ProvenancePanel
-                  records={records}
-                  capabilities={data?.capabilities ?? []}
-                  quarantine={data?.quarantine ?? []}
-                  identityQueue={data?.identityQueue ?? []}
-                  onOpenManifest={() => setManifestOpen(true)}
-                  onRetrySync={() => void runAction("sync", () => syncSpectraManageBac())}
-                  syncBusy={busy === "sync" || syncInProgress}
-                  admin={Boolean(overview?.admin)}
+                <EmptyState
+                  icon={CheckCircle2}
+                  title="Nothing to review"
+                  detail="Safe updates from ManageBac apply on their own. Changes that would touch your own edits wait here first."
                 />
-              )}
-            </div>
-          </section>
-        </div>
+              )
+            ) : (
+              <ProvenancePanel
+                records={records}
+                capabilities={data?.capabilities ?? []}
+                quarantine={data?.quarantine ?? []}
+                identityQueue={data?.identityQueue ?? []}
+                onOpenManifest={() => setManifestOpen(true)}
+                onRetrySync={() => void runAction("sync", () => syncSpectraManageBac())}
+                syncBusy={busy === "sync" || syncInProgress}
+                admin={Boolean(overview?.admin)}
+              />
+            )}
+          </div>
+        </PageBody>
       </main>
 
-      {contextOpen ? <AuxiliaryRail label="ManageBac context" onClose={() => setContextOpen(false)} className="hidden xl:block" navigation={
-        <div className="grid grid-cols-2 gap-1">
-          {(["details", "activity"] as const).map((item) => (
-            <button
-              key={item}
-              type="button"
-              onClick={() => setDetailsTab(item)}
-              className={cn(
-                "h-7 rounded-md text-micro capitalize text-[var(--text-tertiary)] transition",
-                detailsTab === item &&
-                  "bg-[color-mix(in_oklab,var(--text-primary)_7%,transparent)] font-medium text-[var(--text-primary)]",
-              )}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-      }>
+      <SidePanel
+        id="managebac.details"
+        title="Details"
+        icon="info"
+        stageMin={640}
+        header={
+          <PanelTabs
+            label="Details sections"
+            tabs={[
+              { id: "details", label: "Details", icon: "info" },
+              { id: "activity", label: "Activity", icon: "activity" },
+            ]}
+            value={detailsTab}
+            onChange={(id) => setDetailsTab(id as "details" | "activity")}
+          />
+        }
+      >
         {detailsTab === "details" ? (
-          <div className="space-y-7 px-4 pb-5 pt-3">
+          <div className="space-y-7 pb-5">
             <RightCard title="Integration">
               <div className="flex items-center gap-2.5">
-                <span className="grid size-7 place-items-center text-[var(--accent-cyan)]">
-                  <Network size={15} />
-                </span>
+                <Icon name="network" size={16} accent="var(--accent-cyan)" />
                 <div className="min-w-0 flex-1">
-                  <strong className="block text-caption font-medium">
-                    ManageBac
-                  </strong>
+                  <strong className="block text-caption font-medium">ManageBac</strong>
                   <span className="block truncate text-micro text-[var(--text-tertiary)]">
-                    {integration?.providerVersion
-                      ? `Reference ${integration.providerVersion}`
-                      : "Tenant-verified API"}
+                    {integration?.providerVersion ? `Reference ${integration.providerVersion}` : "Read only"}
                   </span>
                 </div>
-                <StatusPill state={integrationStatusTone(integration?.status)}>
-                  {integrationStatusLabel(integration?.status)}
-                </StatusPill>
+                <StatusPill state={integrationStatusTone(integration?.status)}>{integrationStatusLabel(integration?.status)}</StatusPill>
               </div>
             </RightCard>
-            <RightCard title="Connected school">
+            <RightCard title="School">
               <div className="flex items-center gap-2.5">
-                <School size={16} className="text-[var(--brand-primary)]" />
+                <Icon name="school" size={16} />
                 <div className="min-w-0">
-                  <strong className="block truncate text-caption font-medium">
-                    {data?.school?.name ?? "Your school"}
-                  </strong>
-                  <span className="text-micro text-[var(--text-tertiary)]">
-                    Read-only operational connection
-                  </span>
+                  <strong className="block truncate text-caption font-medium">{data?.school?.name ?? "Your school"}</strong>
+                  <span className="text-micro text-[var(--text-tertiary)]">Spectra reads; it never writes back</span>
                 </div>
               </div>
             </RightCard>
             <RightCard title="Sync settings">
-              <DetailRow
-                icon={Clock3}
-                label="Sync frequency"
-                value={
-                  integration
-                    ? `Every ${integration.syncPolicy.frequencyMinutes} minutes`
-                    : "Not configured"
-                }
-              />
-              <DetailRow
-                icon={School}
-                label="Auto-import new classes"
-                value={
-                  integration ? "Automatic" : "Unavailable until connected"
-                }
-                good={Boolean(integration)}
-              />
-              <DetailRow
-                icon={ListChecks}
-                label="Auto-import tasks"
-                value={
-                  integration ? "Automatic" : "Unavailable until connected"
-                }
-                good={Boolean(integration)}
-              />
+              <DetailRow icon={Clock3} label="How often" value={integration ? `Every ${integration.syncPolicy.frequencyMinutes} minutes` : "Not set up"} />
+              <DetailRow icon={School} label="New classes" value={integration ? "Come in on their own" : "After connecting"} good={Boolean(integration)} />
+              <DetailRow icon={ListChecks} label="Tasks" value={integration ? "Come in on their own" : "After connecting"} good={Boolean(integration)} />
               <DetailRow
                 icon={AlertCircle}
-                label="Conflict resolution"
-                value={
-                  integration
-                    ? integration.syncPolicy.conflictMode === "ask_me"
-                      ? "Ask me"
-                      : "Review"
-                    : "Unavailable until connected"
-                }
+                label="Conflicts"
+                value={integration ? (integration.syncPolicy.conflictMode === "ask_me" ? "Ask me" : "Review") : "After connecting"}
               />
               {overview?.admin ? (
-                <button
-                  type="button"
-                  onClick={() => setSettingsOpen(true)}
-                  className="mt-2 inline-flex items-center gap-2 text-micro text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                >
-                  <Settings2 size={12} />
+                <Button variant="ghost" size="sm" className="-ml-2 mt-2" onClick={() => setSettingsOpen(true)}>
+                  <Settings2 size={14} />
                   Edit settings
-                </button>
+                </Button>
               ) : null}
             </RightCard>
-            <RightCard title="Data provenance">
-              <p className="text-micro leading-5 text-[var(--text-secondary)]">
-                Imported records retain source identity, contract version,
-                refresh time, and tombstone state. User overlays remain
-                separate.
+            <RightCard title="Where data comes from">
+              <p className="text-caption leading-5 text-[var(--text-secondary)]">
+                Everything Spectra brings in remembers where it came from and when. Your own changes stay separate.
               </p>
-              <button
-                type="button"
-                onClick={() => setTab("provenance")}
-                className="mt-2 text-micro text-[var(--accent-cyan)]"
-              >
+              <Button variant="ghost" size="sm" className="-ml-2 mt-1" onClick={() => setTab("provenance")}>
                 Review provenance
-              </button>
+              </Button>
             </RightCard>
             <RightCard title="Quick actions">
-              <QuickAction
-                icon={AlertCircle}
-                label="Review conflicts"
-                onClick={() => setTab("conflicts")}
-              />
-              <QuickAction
-                icon={ShieldCheck}
-                label="Review capabilities"
-                onClick={() => setTab("provenance")}
-              />
+              <QuickAction icon={AlertCircle} label="Review conflicts" onClick={() => setTab("conflicts")} />
+              <QuickAction icon={ShieldCheck} label="Review capabilities" onClick={() => setTab("provenance")} />
               {integration?.referenceUrl ? (
                 <a
                   href={integration.referenceUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="flex h-8 items-center gap-2 rounded-md px-1 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+                  className="flex h-9 items-center gap-2 rounded-control px-1.5 text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 >
-                  <ExternalLink size={13} />
-                  Open tenant reference
+                  <ExternalLink size={14} />
+                  Open the API reference
                 </a>
               ) : null}
               {overview?.admin && integration ? (
-                <QuickAction
-                  icon={Link2}
-                  label="Disconnect ManageBac"
-                  onClick={() => setDisconnectOpen(true)}
-                />
+                <QuickAction icon={Link2} label="Disconnect ManageBac" onClick={() => setDisconnectOpen(true)} />
               ) : null}
             </RightCard>
-            {integration ? (
-              <RightCard title="Integration ID">
-                <code className="block truncate text-micro text-[var(--text-secondary)]">
-                  {integration._id}
-                </code>
-              </RightCard>
-            ) : null}
           </div>
         ) : (
-          <div className="px-4 pb-5 pt-3">
+          <div className="pb-5">
             <RightCard title="Recent sync activity">
               {(data?.syncRuns ?? []).slice(0, 8).map((run) => (
-                <div
-                  key={run._id}
-                    className="flex gap-2 rounded-lg py-2.5 transition-colors hover:bg-[var(--bg-hover)]"
-                >
-                  <span className="mt-0.5 grid size-5 shrink-0 place-items-center">
-                    <History size={11} />
-                  </span>
+                <div key={run._id} className="flex gap-2.5 rounded-control px-1 py-2.5">
+                  <Icon name="activity" size={14} className="mt-0.5 shrink-0" />
                   <div className="min-w-0">
-                    <strong className="block text-micro font-medium capitalize">
+                    <strong className="block text-caption font-medium">
                       {syncKindLabel(run.kind)} · {syncStatusLabel(run.status)}
                     </strong>
                     <span className="block text-micro text-[var(--text-tertiary)]">
-                      {run.counts.created} added · {run.counts.updated} updated
-                      · {syncStageLabel(run)} · {relative(run.completedAt ?? run.createdAt)}
+                      {run.counts.created ?? 0} added · {run.counts.updated ?? 0} updated · {syncStageLabel(run)} · {relative(run.completedAt ?? run.createdAt)}
                     </span>
                   </div>
                 </div>
               ))}
-              {!data?.syncRuns.length ? (
-                <p className="py-4 text-micro text-[var(--text-tertiary)]">
-                  No synchronization activity yet.
-                </p>
-              ) : null}
+              {!data?.syncRuns.length ? <p className="py-4 text-caption text-[var(--text-tertiary)]">Nothing has synced yet.</p> : null}
             </RightCard>
           </div>
         )}
-      </AuxiliaryRail> : null}
+      </SidePanel>
 
       {settingsOpen ? (
         <SettingsDialog

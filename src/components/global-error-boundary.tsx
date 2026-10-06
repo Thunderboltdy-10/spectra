@@ -3,6 +3,8 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { readConvexError } from "../../shared/convex-error.mjs";
 import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
+import { Icon } from "@/components/icons";
+import { Button } from "@/components/ui/button";
 
 type Props = { children: ReactNode; resetKey?: string | null };
 type State = { hasError: boolean; error?: Error };
@@ -58,39 +60,27 @@ export function ErrorScreen({ error, onRetry }: { error?: unknown; onRetry: () =
       readConvexError(error).message || "",
     );
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-[var(--bg-primary)] p-8 text-[var(--text-primary)]">
-      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[var(--bg-secondary)]">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-[var(--danger)]">
-          <circle cx="12" cy="12" r="10" />
-          <line x1="12" y1="8" x2="12" y2="12" />
-          <line x1="12" y1="16" x2="12.01" y2="16" />
-        </svg>
-      </div>
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-5 bg-[var(--bg-primary)] p-8 text-[var(--text-primary)]">
+      <span aria-hidden className="grid size-10 place-items-center text-[var(--danger)]" data-icon-host>
+        <Icon name="problem" size={24} />
+      </span>
       <div className="max-w-md text-center">
-        <h1 className="text-lg font-medium">Something went wrong</h1>
-        <p className="mt-2 text-sm text-[var(--text-secondary)]">
+        <h1 className="text-title font-semibold">Something went wrong</h1>
+        <p className="mt-2 text-ui leading-6 text-[var(--text-secondary)]">
           {needsReload
             ? "Part of Spectra could not load. Reconnect, then reload the page."
             : humanizePublicFailure(error)}
         </p>
       </div>
-      <div className="flex gap-3">
+      <div className="flex gap-2">
         {!needsReload && (
-          <button
-            type="button"
-            onClick={onRetry}
-            className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-5 py-2.5 text-sm transition hover:bg-[var(--bg-hover)]"
-          >
+          <Button variant="primary" size="lg" onClick={onRetry}>
             Try again
-          </button>
+          </Button>
         )}
-        <button
-          type="button"
-          onClick={() => window.location.reload()}
-          className="rounded-lg bg-[var(--accent-cyan)] px-5 py-2.5 text-sm text-white transition hover:opacity-90"
-        >
+        <Button variant={needsReload ? "primary" : "secondary"} size="lg" onClick={() => window.location.reload()}>
           Reload page
-        </button>
+        </Button>
       </div>
     </div>
   );

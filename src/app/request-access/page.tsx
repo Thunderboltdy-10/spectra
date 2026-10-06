@@ -1,52 +1,42 @@
 import Link from "next/link";
+import { PublicFrame } from "@/components/public-frame";
+import { Button } from "@/components/ui/button";
+
+const STEPS = [
+  "Choose the school email you'll sign up with.",
+  "Ask a teacher or your school's Spectra admin to invite that email.",
+  "Open the invitation link, make your account, and join.",
+];
 
 export default function RequestAccessPage() {
   return (
-    <main className="grid min-h-screen place-items-center px-4 py-10">
-      <div className="w-full max-w-2xl rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 shadow-[var(--shadow-soft)]">
-        <p className="text-micro font-medium uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
-          Spectra access
-        </p>
-        <h1 className="mt-2 font-display text-3xl text-[var(--text-primary)]">
-          Request school access
-        </h1>
-        <p className="mt-3 text-sm leading-relaxed text-[var(--text-secondary)]">
-          Spectra is invitation-based. Ask your school administrator to invite
-          the exact email you will use to sign up, or contact Spectra support if
-          your school is not yet onboarded.
-        </p>
-        <ol className="mt-6 space-y-3 text-sm text-[var(--text-secondary)]">
-          <li className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
-            1. Confirm the school email you will register with.
+    <PublicFrame>
+      <h1 className="font-display text-display font-semibold leading-tight tracking-[-0.03em]">
+        Getting into Spectra
+      </h1>
+      <p className="mt-3 text-ui leading-6 text-[var(--text-secondary)]">
+        Spectra works by school invitation. Ask your school to invite the email you&rsquo;ll sign up with. If your school
+        isn&rsquo;t on Spectra yet, your school&rsquo;s admin can get in touch with us.
+      </p>
+      <ol className="mt-6 space-y-1">
+        {STEPS.map((step, index) => (
+          <li key={step} className="flex items-baseline gap-3 rounded-control px-2.5 py-2 text-ui">
+            <span className="w-4 shrink-0 text-caption font-semibold text-[var(--text-tertiary)]">{index + 1}</span>
+            <span>{step}</span>
           </li>
-          <li className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
-            2. Ask a school admin to send an invitation for that email.
-          </li>
-          <li className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
-            3. Open the invitation link, create your account, and join.
-          </li>
-        </ol>
-        <div className="mt-8 flex flex-wrap gap-3">
-          <Link
-            href="/sign-up"
-            className="rounded-xl bg-[var(--accent-primary)] px-4 py-2.5 text-sm font-medium text-white transition hover:opacity-90"
-          >
-            Continue to sign up
-          </Link>
-          <Link
-            href="/sign-in"
-            className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-2.5 text-sm font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/join"
-            className="rounded-xl border border-[var(--border-default)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
-          >
-            I already have an invitation
-          </Link>
-        </div>
+        ))}
+      </ol>
+      <div className="mt-8 flex flex-wrap gap-2">
+        <Button asChild variant="primary" size="lg">
+          <Link href="/join">I have an invitation</Link>
+        </Button>
+        <Button asChild size="lg">
+          <Link href="/sign-up">Sign up</Link>
+        </Button>
+        <Button asChild variant="ghost" size="lg">
+          <Link href="/sign-in">Sign in</Link>
+        </Button>
       </div>
-    </main>
+    </PublicFrame>
   );
 }

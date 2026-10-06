@@ -1,7 +1,6 @@
 "use client";
 
-import { CornerUpLeft, MapPin } from "lucide-react";
-import { Clock3, Loader2, Bot, Check, MessageSquare, RefreshCw, Send } from "@/components/icons/glyph-icons";
+import { Clock3, Loader2, Bot, Check, MessageSquare, RefreshCw, Send, CornerUpLeft, MapPin } from "@/components/icons/glyph-icons";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
@@ -35,12 +34,15 @@ const tabLabels: Record<WorkbenchInspectorTab, string> = {
 export function WorkbenchInspectorTabs({
   work,
   overview,
+  section,
 }: {
   work: SpectraArtifact;
   overview: ReactNode;
+  /** Shown by a host with its own tabs (the companion): one section, no tab row. */
+  section?: WorkbenchInspectorTab;
 }) {
   const [tabSelection, setTabSelection] = useState<{ workId: string; tab: WorkbenchInspectorTab }>({ workId: work._id, tab: "overview" });
-  const tab = tabSelection.workId === work._id ? tabSelection.tab : "overview";
+  const tab = section ?? (tabSelection.workId === work._id ? tabSelection.tab : "overview");
   const [comments, setComments] = useState<SpectraArtifactComment[]>([]);
   const [versions, setVersions] = useState<SpectraArtifactVersionSummary[]>([]);
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
@@ -229,7 +231,8 @@ export function WorkbenchInspectorTabs({
   }
 
   return (
-    <div className="mt-4">
+    <div className={section ? undefined : "mt-4"}>
+      {section ? null : (
       <div aria-label="Inspector sections" className="grid grid-cols-3 border-b border-[var(--border-default)]" role="tablist">
         {(Object.keys(tabLabels) as WorkbenchInspectorTab[]).map((key) => (
           <button
@@ -244,6 +247,7 @@ export function WorkbenchInspectorTabs({
           </button>
         ))}
       </div>
+      )}
 
       {tab === "overview" ? overview : null}
       {tab === "comments" ? (

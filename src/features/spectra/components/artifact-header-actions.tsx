@@ -1,7 +1,7 @@
 "use client";
 
+import { type GlyphIcon } from "@/components/icons/glyph-icons";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
 import { planLayout, type BarCommand, type CollapseStep } from "@/components/ui/adaptive-bar";
 import { IconButton } from "@/components/ui/icon-button";
 import { WorkbarMenuAction, WorkbarMore } from "./artifact-workbar";
@@ -17,7 +17,7 @@ import { WorkbarMenuAction, WorkbarMore } from "./artifact-workbar";
 export type HeaderCommand = {
   id: string;
   label: string;
-  icon: LucideIcon;
+  icon: GlyphIcon;
   onSelect: () => void;
 };
 

@@ -1,13 +1,11 @@
-import type { LucideIcon } from "lucide-react";
-import { Workflow } from "lucide-react";
-import { BookOpen, CalendarCheck2, Code2, File, HelpCircle, Table2, Bot, CalendarDays, FileText, MessageSquare, Presentation } from "@/components/icons/glyph-icons";
+import { BookOpen, CalendarCheck2, Code2, File, HelpCircle, Table2, Bot, CalendarDays, FileText, MessageSquare, Presentation, Workflow, type GlyphIcon } from "@/components/icons/glyph-icons";
 import type { IconName } from "@/components/icons";
 import { ARTIFACT_TYPE_KEYS, type ArtifactTypeKey } from "./types";
 import { requireArtifactTypeManifest } from "./registry";
 
 export type PresentedWorkType = ArtifactTypeKey | "thread_reference" | "resource";
 /** `glyph` is the type's Spectra glyph (ICONS.md); `icon` stays until every page draws glyphs. */
-type TypePresentation = { label: string; icon: LucideIcon; glyph: IconName; color: string; soft: string };
+type TypePresentation = { label: string; icon: GlyphIcon; glyph: IconName; color: string; soft: string };
 
 const visuals: Record<PresentedWorkType, Omit<TypePresentation, "label">> = {
   document: { glyph: "document", icon: FileText, color: "var(--mode-document)", soft: "color-mix(in oklab, var(--mode-document) 9%, var(--bg-elevated))" },

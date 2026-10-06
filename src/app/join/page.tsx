@@ -6,6 +6,7 @@ import { useClerk } from "@clerk/nextjs";
 import { useRouter, useSearchParams } from "next/navigation";
 import { LoaderCircle, ShieldCheck, Check, School } from "@/components/icons/glyph-icons";
 import { SpectraLogo } from "@/components/spectra-logo";
+import { Button } from "@/components/ui/button";
 import { mutateAdministration } from "@/features/spectra/administration/api";
 import {
   authHrefForRedirect,
@@ -213,24 +214,22 @@ function JoinSchoolContent() {
         {status === "error" ? (
           <div
             role="alert"
-            className="mt-5 rounded-control border border-[color-mix(in_oklab,var(--accent-coral)_28%,var(--bg-elevated))] bg-[color-mix(in_oklab,var(--accent-coral)_8%,var(--bg-elevated))] p-3 text-micro leading-5 text-[var(--danger)]"
+            className="mt-5 rounded-control border border-[color-mix(in_oklab,var(--danger)_28%,var(--bg-elevated))] bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))] p-3 text-caption leading-5 [color:color-mix(in_oklab,var(--danger)_80%,var(--text-primary))]"
           >
             <p>{error}</p>
             {previewRetryable && previewState === "error" ? (
-              <button
-                type="button"
-                onClick={retryPreview}
-                className="mt-2 inline-flex h-8 items-center rounded-control border border-current px-2.5 text-micro font-medium hover:bg-[color-mix(in_oklab,var(--accent-coral)_10%,transparent)]"
-              >
+              <Button variant="secondary" size="sm" className="mt-2" onClick={retryPreview}>
                 Retry invitation check
-              </button>
+              </Button>
             ) : null}
           </div>
         ) : null}
         {token ? (
           <>
-            <button
-              type="button"
+            <Button
+              variant="primary"
+              size="lg"
+              className="mt-6 w-full"
               onClick={() => void accept()}
               disabled={
                 status === "accepting" ||
@@ -239,7 +238,6 @@ function JoinSchoolContent() {
                 previewState === "error" ||
                 preview?.emailMatches === false
               }
-              className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-control bg-[var(--text-primary)] text-caption font-medium text-[var(--bg-primary)] disabled:opacity-50"
             >
               {status === "accepting" ? (
                 <LoaderCircle size={15} className="animate-spin" />
@@ -247,7 +245,7 @@ function JoinSchoolContent() {
                 <ShieldCheck size={15} />
               )}
               {buttonLabel}
-            </button>
+            </Button>
             {/* Anyone on this page is already signed in, so a "Sign in" link
                 came straight back here. Switching means signing out first;
                 the invitation link is kept for the sign-in that follows. */}
@@ -271,12 +269,9 @@ function JoinSchoolContent() {
             </div>
           </>
         ) : (
-          <Link
-            href="/request-access"
-            className="mt-6 flex h-11 w-full items-center justify-center rounded-control border border-[var(--border-default)] text-caption font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-          >
-            How to get an invitation
-          </Link>
+          <Button asChild size="lg" className="mt-6 w-full">
+            <Link href="/request-access">How to get an invitation</Link>
+          </Button>
         )}
       </section>
     </main>

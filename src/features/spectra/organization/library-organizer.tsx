@@ -10,8 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { LayoutGrid, Rows3, Sparkles } from "lucide-react";
-import { Pencil, RotateCcw, ChevronRight, FolderPlus, Home, Link2, Share2, Star, Trash2 } from "@/components/icons/glyph-icons";
+import { Pencil, RotateCcw, ChevronRight, FolderPlus, Home, Link2, Share2, Star, Trash2, LayoutGrid, Rows3, ArrowRight } from "@/components/icons/glyph-icons";
 import { toast } from "@/components/ui/toast";
 import { showRetryToast } from "@/components/ui/retry-toast";
 import { useConvexAuth, useQuery } from "convex/react";
@@ -75,7 +74,6 @@ import { LIBRARY_IMPORT_ACCEPT } from "./library-import";
 import {
   SurfaceGroupBy,
   SurfaceNewMenu,
-  SurfaceRailToggle,
   SurfaceSearch,
   SurfaceSortMenu,
   SurfaceTypeFilter,
@@ -84,12 +82,9 @@ import {
   type BoardGroupBy,
   type SurfaceView,
 } from "./surface-chrome";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { IconButton } from "@/components/ui/icon-button";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
+import { sendInto } from "../life/use-life";
 
 /**
  * The Library, as a filesystem.
@@ -359,9 +354,9 @@ function LibraryOrganizerContent({
   /* The rail is the tree; hiding it gives the rows or the columns the whole
      window. Reachable from both views, because a reader who wants more room for
      a board wants it for a list too. */
-  const [railCollapsed, setRailCollapsed] = useState(false);
-  const [narrowViewport, setNarrowViewport] = useState(false);
-  const railToggleRef = useRef<HTMLButtonElement | null>(null);
+  /* Folders are a breadcrumb plus a popover tree (SHELL.md): the tree is
+     never a column of its own, so the Library keeps its three. */
+  const [foldersOpen, setFoldersOpen] = useState(false);
   const board = view === "board";
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -640,6 +635,8 @@ function LibraryOrganizerContent({
       const destination = parentId ? nodesById.get(parentId)?.name : floorLabel;
       void run("That move did not go through.", async () => {
         await actions.move(nodeIds, parentId, neighbours);
+        // "Add A to B" (LIFE.md, send): the folder that took it in pulses.
+        if (!neighbours) sendInto(dropTarget(parentId));
         if (!neighbours)
           toast.success(
             nodeIds.length === 1
@@ -656,6 +653,7 @@ function LibraryOrganizerContent({
       void run("That reference could not be filed.", async () => {
         for (const nodeId of nodeIds)
           await actions.createReference(nodeId, parentId);
+        sendInto(dropTarget(parentId));
         toast.success(
           nodeIds.length === 1
             ? "Reference filed. The original stayed where it was."
@@ -995,17 +993,6 @@ function LibraryOrganizerContent({
     return index === -1 ? chain : chain.slice(index + 1);
   }, [path, floorId]);
 
-  useEffect(() => {
-    const media = window.matchMedia("(max-width: 767px)");
-    const update = () => {
-      setNarrowViewport(media.matches);
-      if (media.matches) setRailCollapsed(true);
-    };
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
-
   const rail = (
     <OrganizerRail
       location={location}
@@ -1013,9 +1000,12 @@ function LibraryOrganizerContent({
       dropNodeId={railDropId}
       floorId={floorId}
       floorLabel={floorLabel}
-      className={narrowViewport ? "h-full w-full border-0 px-3" : undefined}
+      className="max-h-[min(70vh,520px)] w-full border-0 bg-transparent px-1.5 py-1.5"
       handlers={{
-        onNavigate: navigate,
+        onNavigate: (next) => {
+          setFoldersOpen(false);
+          navigate(next);
+        },
         onToggle: (nodeId) =>
           setExpanded((current) => {
             const next = new Set(current);
@@ -1064,11 +1054,22 @@ function LibraryOrganizerContent({
             compete in one clipped, horizontally scrolling strip. */}
         <div className="flex min-w-0 flex-1 basis-[300px] items-center gap-2">
           {showRail ? (
-            <SurfaceRailToggle
-              collapsed={railCollapsed}
-              buttonRef={railToggleRef}
-              onToggle={() => setRailCollapsed((current) => !current)}
-            />
+            <Popover open={foldersOpen} onOpenChange={setFoldersOpen}>
+              <PopoverAnchor asChild>
+                <span className="inline-flex">
+                  <IconButton
+                    icon="folderTree"
+                    label="Folders"
+                    className={foldersOpen ? "bg-[var(--bg-hover)] text-[var(--text-primary)]" : undefined}
+                    aria-expanded={foldersOpen}
+                    onClick={() => setFoldersOpen((open) => !open)}
+                  />
+                </span>
+              </PopoverAnchor>
+              <PopoverContent align="start" sideOffset={6} className="w-[280px] overflow-hidden p-0">
+                {rail}
+              </PopoverContent>
+            </Popover>
           ) : null}
           {onViewChange ? (
             <SurfaceViewSwitch
@@ -1099,23 +1100,19 @@ function LibraryOrganizerContent({
               </span>
             ) : showBreadcrumbs ? (
               <>
-                {/* The floor is named twice already — by the rail's root row and by
-                    the surface's own header — so it only becomes a crumb once the
-                    reader is standing below it and needs the way back. Without a
-                    rail there is nothing else naming it, so it stays. */}
-                {crumbs.length > 0 || !showRail ? (
-                  <Crumb
-                    label={floorLabel}
-                    nodeId={floorId}
-                    icon
-                    active={crumbs.length === 0}
-                    dropping={
-                      drag?.target?.type === "into" &&
-                      drag.target.parentId === floorId
-                    }
-                    onNavigate={navigate}
-                  />
-                ) : null}
+                {/* The tree lives in the Folders popover, so the breadcrumb is
+                    the one place that always names where the reader stands. */}
+                <Crumb
+                  label={floorLabel}
+                  nodeId={floorId}
+                  icon
+                  active={crumbs.length === 0}
+                  dropping={
+                    drag?.target?.type === "into" &&
+                    drag.target.parentId === floorId
+                  }
+                  onNavigate={navigate}
+                />
                 {crumbs.map((node, index) => (
                   <div key={node.nodeId} className="flex items-center">
                     <ChevronRight
@@ -1233,37 +1230,6 @@ function LibraryOrganizerContent({
       ) : null}
 
       <div className="relative flex min-h-0 flex-1">
-        {showRail && !railCollapsed ? (
-          narrowViewport ? (
-            <Sheet
-              open
-              onOpenChange={(open) => {
-                if (!open) setRailCollapsed(true);
-              }}
-            >
-              <SheetContent
-                aria-describedby="library-folders-description"
-                className="left-0 right-auto w-[min(320px,calc(100vw-24px))] border-l-0 border-r border-[var(--border-default)] data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left"
-                onCloseAutoFocus={(event) => {
-                  event.preventDefault();
-                  railToggleRef.current?.focus();
-                }}
-              >
-                <header className="shrink-0 border-b border-[var(--border-subtle)] px-5 py-4 pr-14">
-                  <SheetTitle className="text-heading font-semibold text-[var(--text-primary)]">
-                    Library folders
-                  </SheetTitle>
-                  <SheetDescription id="library-folders-description" className="mt-1">
-                    Choose a folder, recent view, or Trash.
-                  </SheetDescription>
-                </header>
-                <div className="min-h-0 flex-1 overflow-hidden">{rail}</div>
-              </SheetContent>
-            </Sheet>
-          ) : (
-            rail
-          )
-        ) : null}
 
         {board && !searching && inFolder ? (
           /* Same scope, same filter, different shape. The board mounts beside
@@ -1397,6 +1363,7 @@ function LibraryOrganizerContent({
               }}
               data-drop-node={currentParentId ?? "root"}
               data-drop-kind={flat ? "none" : "surface"}
+              data-life-receive={flat ? undefined : true}
               className={cn(
                 /* The command composer floats over the bottom of every surface,
                  so the list keeps a lane beneath the last row rather than
@@ -1626,6 +1593,12 @@ function ColumnLabel({
   );
 }
 
+/** The folder, crumb or rail row that takes items for `parentId`, to send light into. */
+function dropTarget(parentId: string | null) {
+  if (typeof document === "undefined") return null;
+  return document.querySelector(`[data-drop-node="${CSS.escape(parentId ?? "root")}"]`);
+}
+
 function Crumb({
   label,
   nodeId,
@@ -1646,6 +1619,7 @@ function Crumb({
       type="button"
       data-drop-node={nodeId ?? "root"}
       data-drop-kind="container"
+      data-life-receive
       onClick={() => onNavigate({ kind: "folder", nodeId })}
       className={cn(
         "flex min-w-0 items-center gap-1.5 rounded-chip px-1.5 py-1 transition-colors",
@@ -1771,7 +1745,7 @@ function NodeMenu({
                 {single.isContainer ? (
                   <ChevronRight className="size-3.5 text-[var(--text-tertiary)]" />
                 ) : (
-                  <Sparkles className="size-3.5 text-[var(--text-tertiary)]" />
+                  <ArrowRight className="size-3.5 text-[var(--text-tertiary)]" />
                 )}
                 {single.isContainer ? "Open folder" : "Open"}
               </DropdownMenuItem>

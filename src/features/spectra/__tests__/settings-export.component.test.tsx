@@ -5,6 +5,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SettingsApplication } from "@/features/spectra/settings/ui/settings-application";
 
+// The page header's command bar measures its room.
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver;
+
 const exportMemory = vi.hoisted(() => vi.fn());
 vi.mock("@clerk/nextjs", () => ({
   useClerk: () => ({ signOut: vi.fn(), openUserProfile: vi.fn() }),

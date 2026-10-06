@@ -31,6 +31,7 @@ const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: 
   { command: "insert_reference", args: { hostWorkId: "host", targetWorkId: "source" }, event: "reference_insert", status: "canonical_write" },
   { command: "organize_library", args: { action: "create_workspace", name: "Physics" }, mutation: "spectraWorkspaces:create", event: "organize_library" },
   { command: "restore_library_items", args: { targetIds: ["node"] }, mutation: "orgTree:restore", event: "organize_library" },
+  { command: "manage_comment", args: { artifactId: "work", commentId: "comment", action: "resolve" }, mutation: "artifactComments:setResolved", event: "comment_changed" },
   { command: "pin_library_item", args: { targetId: "node", pinned: true }, mutation: "orgTree:setPinned", event: "organize_library" },
   { command: "manage_conversation", args: { threadId: "thread", title: "Biology revision" }, mutation: "spectraThreads:update" },
   { command: "save_version", args: { artifactId: "work", name: "Before the rewrite" }, mutation: "changeGroups:createNamedCheckpoint", event: "version_saved" },

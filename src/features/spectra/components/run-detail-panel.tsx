@@ -1,8 +1,6 @@
 "use client";
 
-import { BookmarkPlus } from "lucide-react";
-import { Loader2, MessageSquarePlus, RotateCcw, Check, ExternalLink, Maximize2, MessageSquare, X } from "@/components/icons/glyph-icons";
-import type { LucideIcon } from "lucide-react";
+import { Loader2, MessageSquarePlus, RotateCcw, Check, ExternalLink, Maximize2, MessageSquare, X, BookmarkPlus, type GlyphIcon } from "@/components/icons/glyph-icons";
 import { useEffect, useMemo, useState } from "react";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { toast } from "@/components/ui/toast";
@@ -190,7 +188,7 @@ export function RunDetailPanel({
     return null;
   }
 
-  function runActionIcon(key: string): LucideIcon {
+  function runActionIcon(key: string): GlyphIcon {
     if (key === "retry") return RotateCcw;
     if (key === "confirm") return Check;
     if (key === "cancel" || key === "reject") return X;

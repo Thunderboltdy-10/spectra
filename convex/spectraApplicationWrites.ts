@@ -48,6 +48,16 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
       aiExecutionId: executionId,
       aiOperationId: operationId,
     } };
+    case "manage_comment": {
+      const commentId = String(args.commentId ?? "");
+      switch (args.action) {
+        case "resolve": return { name: "artifactComments:setResolved", args: { commentId, resolved: true } };
+        case "reopen": return { name: "artifactComments:setResolved", args: { commentId, resolved: false } };
+        case "edit": return { name: "artifactComments:updateBody", args: { commentId, body: String(args.body ?? "") } };
+        case "delete": return { name: "artifactComments:remove", args: { commentId } };
+      }
+      break;
+    }
     case "change_spectra_settings": return { name: "accountPreferences:writeLayer", args: { scope: "account", scopeKey: "account", values: normalizeAiPreferencePatch(args.patch) } };
     case "organize_library": {
       switch (args.action) {

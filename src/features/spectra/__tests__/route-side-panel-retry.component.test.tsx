@@ -223,3 +223,25 @@ it.each(["conversation", "work"] as const)("recovers the Dock's associated conve
   expect(screen.getByText("School context")).toBeTruthy();
   expect(fetchRequest).toHaveBeenCalledTimes(5);
 });
+
+it("holds one panel in the Side: the newest open is in front, and closing it brings back the one it covered", async () => {
+  offline = false;
+  mountHost();
+  await openConversation("conversation-a");
+  expect(screen.getByRole("complementary", { name: "Live conversation" })).toBeTruthy();
+  expect(spectraBus.getQuery("side.open")).toEqual({ kind: "thread" });
+  await act(async () => {
+    await spectraBus.commandAsyncResults("work.open", { workId: "work-a", surface: "panel" });
+  });
+  await waitFor(() => expect(screen.queryByRole("complementary", { name: "Live conversation" })).toBeNull());
+  expect(spectraBus.getQuery("side.open")).toEqual({ kind: "work" });
+  expect(spectraBus.getQuery("side.thread")).toBeNull();
+});
+
+it("tells the page when the Side closes, so its own panel comes back", async () => {
+  offline = false;
+  mountHost();
+  await openConversation("conversation-a");
+  fireEvent.click(screen.getByRole("button", { name: "Close live chat" }));
+  await waitFor(() => expect(spectraBus.getQuery("side.open")).toBeNull());
+});

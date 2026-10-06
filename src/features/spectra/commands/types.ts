@@ -1,4 +1,4 @@
-import type { LucideIcon } from "lucide-react";
+import { type GlyphIcon } from "@/components/icons/glyph-icons";
 import type { z } from "zod";
 import type { WorkCapability, WorkSharingRole, WorkType } from "../work/registry";
 
@@ -110,7 +110,7 @@ export type CommandExecutionResult = {
 export type CommandControlOption = {
   value: string;
   label: string;
-  icon?: LucideIcon;
+  icon?: GlyphIcon;
   hint?: string;
   /** Renders the option in its own typeface — used by the font picker. */
   previewFontFamily?: string;
@@ -207,7 +207,7 @@ export type Command<P = unknown> = {
   capabilityId?: string;
   domain: `artifact:${WorkType}` | `app:${string}`;
   title: string;
-  icon: LucideIcon;
+  icon: GlyphIcon;
   description: string;
   params?: z.ZodType<P>;
   execute: (ctx: CommandContext, params: P) =>
@@ -260,7 +260,7 @@ export type CommandBinding = {
   /** Typed operation parameters generated from the capability definition. */
   params?: z.ZodType<CommandParam>;
   label: string;
-  icon?: LucideIcon;
+  icon?: GlyphIcon;
   /**
    * The one implementation of this operation. A plain `() => void` stays valid;
    * parameterized controls receive their scalar here, so the bar, a shortcut,

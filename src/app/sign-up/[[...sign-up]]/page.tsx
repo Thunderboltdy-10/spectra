@@ -13,58 +13,57 @@ function SignUpCard({ redirectUrl }: { redirectUrl?: string }) {
   const invitationFlow = redirectUrl?.includes("/join?token=") ?? false;
 
   return (
-    <main className="relative isolate grid min-h-screen place-items-center px-4 py-8">
-      <div className="w-full max-w-4xl">
-        <div className="mx-auto mb-6 flex w-fit rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1">
+    <main className="spectra-wave-y relative isolate grid min-h-dvh place-items-center bg-[var(--bg-primary)] px-4 py-8 text-[var(--text-primary)]">
+      <div className="w-full min-w-0 max-w-4xl">
+        <nav aria-label="Sign in or sign up" className="mx-auto mb-6 flex w-fit rounded-control border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1">
           <Link
             href={authHrefForRedirect("/sign-in", redirectUrl)}
-            className="rounded-md px-4 py-1.5 text-sm text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
+            className="rounded-control px-4 py-1.5 text-caption text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
           >
             Sign in
           </Link>
-          <span className="rounded-md bg-[var(--bg-elevated)] px-4 py-1.5 text-sm font-medium text-[var(--text-primary)] shadow-sm">
+          <span aria-current="page" className="rounded-control bg-[var(--bg-elevated)] px-4 py-1.5 text-caption font-medium text-[var(--text-primary)] shadow-[var(--shadow-soft)]">
             Sign up
           </span>
-        </div>
+        </nav>
 
         <div className="rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 shadow-[var(--shadow-soft)] md:grid md:grid-cols-[1.1fr_1fr] md:gap-6 md:p-8">
           <section className="mb-6 md:mb-0">
-            <div className="mb-5 flex items-center gap-2.5">
-              <SpectraMark size={30} />
-              <span className="text-subhead font-bold tracking-tight text-[var(--text-primary)]">
+            <Link href="/" aria-label="Spectra home" className="mb-5 inline-flex items-center gap-2.5 rounded-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]">
+              <SpectraMark size={28} />
+              <span className="font-display text-subhead font-semibold text-[var(--text-primary)]">
                 Spectra
               </span>
-            </div>
-            <h1 className="font-display text-2xl text-[var(--text-primary)]">
+            </Link>
+            <h1 className="font-display text-display font-semibold leading-tight tracking-[-0.03em] text-[var(--text-primary)]">
               Create your account
             </h1>
-            <p className="mt-2 text-sm text-[var(--text-secondary)]">
-              Join your school workspace to chat with AI, use curriculum
-              resources, and build subject-specific agents.
+            <p className="mt-2 text-ui leading-6 text-[var(--text-secondary)]">
+              Join your school on Spectra to plan, study and make work
+              together, with Spectra AI beside you.
             </p>
-            <div className="mt-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-sm text-[var(--text-secondary)]">
+            <div className="mt-4 rounded-card border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-caption leading-5 text-[var(--text-secondary)]">
               {invitationFlow ? (
                 <>
-                  Create the account using the exact email address that received
-                  the invitation. You will return to the invitation page to
-                  review and accept it.
+                  Use the email your invitation went to. You&rsquo;ll come
+                  back to the invitation to join.
                 </>
               ) : (
                 <>
-                  School access is invitation-based. If your school has not
-                  invited you yet, submit an access request first.{" "}
+                  Spectra works by school invitation. If your school
+                  hasn&rsquo;t invited you yet, start here:{" "}
                   <Link
                     href="/request-access"
-                    className="text-[var(--accent-cyan)] hover:underline"
+                    className="font-medium text-[var(--text-primary)] underline underline-offset-2"
                   >
-                    Request access
+                    Getting into Spectra
                   </Link>
                 </>
               )}
             </div>
           </section>
 
-          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+          <section className="min-w-0 overflow-x-auto rounded-card border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
             <SignedInContinue to={redirectUrl} />
             <SignInConnectionState />
             <SignUp

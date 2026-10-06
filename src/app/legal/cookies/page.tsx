@@ -1,48 +1,35 @@
-import Link from "next/link";
 import { CookieSettingsButton } from "@/components/cookie-settings-button";
+import { LegalPage, LegalSection } from "@/components/public-frame";
 
 export default function CookiePolicyPage() {
   return (
-    <main className="mx-auto max-w-3xl px-4 py-8 text-[var(--text-primary)] sm:px-6">
-      <h1 className="font-display text-4xl">Cookie Policy</h1>
-      <p className="mt-3 text-sm text-[var(--text-secondary)]">
-        Spectra uses a consent-based cookie model with required and optional categories.
-      </p>
+    <LegalPage
+      title="Cookie Policy"
+      lead="Spectra uses a consent-based cookie model with required and optional categories."
+      related={[
+        { href: "/legal/privacy", label: "Privacy Notice" },
+        { href: "/legal/terms", label: "Terms of Service" },
+      ]}
+    >
+      <LegalSection title="Necessary cookies">
+        <p>Required for sign-in, security protections, session continuity, and core product functionality.</p>
+      </LegalSection>
 
-      <section className="mt-6 space-y-2">
-        <h2 className="text-lg font-semibold">Necessary cookies</h2>
-        <p className="text-sm text-[var(--text-secondary)]">
-          Required for sign-in, security protections, session continuity, and core product functionality.
-        </p>
-      </section>
+      <LegalSection title="Preference cookies">
+        <p>Store non-essential UI preferences and personalization settings. Disabled until you grant consent.</p>
+      </LegalSection>
 
-      <section className="mt-5 space-y-2">
-        <h2 className="text-lg font-semibold">Preference cookies</h2>
-        <p className="text-sm text-[var(--text-secondary)]">
-          Store non-essential UI preferences and personalization settings. Disabled until you grant consent.
-        </p>
-      </section>
-
-      <section className="mt-5 space-y-2">
-        <h2 className="text-lg font-semibold">Analytics cookies</h2>
-        <p className="text-sm text-[var(--text-secondary)]">
+      <LegalSection title="Analytics cookies">
+        <p>
           Used for optional product analytics. Disabled by default unless you choose Accept all or enable Analytics in
           Configure settings.
         </p>
-      </section>
+      </LegalSection>
 
-      <section className="mt-5 space-y-2">
-        <h2 className="text-lg font-semibold">Changing consent</h2>
-        <p className="text-sm text-[var(--text-secondary)]">
-          Use the persistent Cookie settings control in-app to update your choice at any time.
-        </p>
+      <LegalSection title="Changing consent">
+        <p>Use the persistent Cookie settings control in-app to update your choice at any time.</p>
         <CookieSettingsButton />
-      </section>
-
-      <p className="mt-8 text-xs text-[var(--text-secondary)]">
-        Related: <Link className="underline underline-offset-2" href="/legal/privacy">Privacy Notice</Link> and{" "}
-        <Link className="underline underline-offset-2" href="/legal/terms">Terms of Service</Link>.
-      </p>
-    </main>
+      </LegalSection>
+    </LegalPage>
   );
 }

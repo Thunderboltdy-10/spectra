@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Icon, type IconName } from "@/components/icons";
 import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
-import { Bot, LockKeyhole, Palette, RotateCcw, SlidersHorizontal, Sparkles } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
+import type { BarCommand } from "@/components/ui/adaptive-bar";
+import { PageBody, PageHeader } from "@/components/ui/page-header";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useSideHeld } from "@/components/ui/side-panel";
 import { SelectField } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { IsolatedErrorBoundary } from "@/components/global-error-boundary";
@@ -17,8 +21,6 @@ import { preferenceSaveStatus } from "../preference-save-status";
 import type { PreferenceSection, SpectraPreferences } from "../schema";
 import { clearSpectraMemory, exportSpectraMemory } from "../../data/api";
 import { downloadDocumentBlob } from "../../components/artifact-studio-file-utils";
-import { ProductSectionNav } from "../../components/product-section-nav";
-import { ProductPageHeader } from "../../components/product-page-header";
 import { COMMAND_TABS } from "../../commands";
 import { SMART_COMPLETION_TARGET } from "../../actions/protocol/semantic-action";
 import {
@@ -34,12 +36,12 @@ import {
 import { registerSettingsToggleControl } from "../../collaboration/settings-toggle-control";
 
 const SECTIONS = [
-  { id: "ai", label: "Spectra AI", icon: Bot },
-  { id: "writing", label: "Writing", icon: Sparkles },
-  { id: "appearance", label: "Appearance", icon: Palette },
-  { id: "workbar", label: "Workbars", icon: SlidersHorizontal },
-  { id: "privacy", label: "Privacy and data", icon: LockKeyhole },
-] as const;
+  { id: "ai", label: "Spectra AI", icon: "agent" },
+  { id: "writing", label: "Writing", icon: "edit" },
+  { id: "appearance", label: "Appearance", icon: "theme" },
+  { id: "workbar", label: "Workbars", icon: "tool" },
+  { id: "privacy", label: "Privacy and data", icon: "locked" },
+] as const satisfies ReadonlyArray<{ id: string; label: string; icon: IconName }>;
 
 const ISLAND_WAKE_OPTIONS = [
   { value: "prism", label: "Show the prism" },
@@ -59,7 +61,7 @@ const isSection = (value: string): value is SectionId =>
 
 function SettingGroup({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return (
-    <section className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-10">
+    <section className="grid gap-5 @min-[860px]/settings:grid-cols-[220px_minmax(0,1fr)] @min-[860px]/settings:gap-10">
       <header className="pt-2">
         <h2 className="font-display text-heading font-semibold text-[var(--text-primary)]">{title}</h2>
         <p className="mt-1 max-w-2xl text-caption leading-5 text-[var(--text-secondary)]">{description}</p>
@@ -322,6 +324,11 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
   const [active, setActive] = useState<SectionId>(isSection(initialSection) ? initialSection : "ai");
   const { preferences, hydrated, saveError, saving, update, reset, refreshConfirmedPreferences } = useSpectraPreferences();
   const saveStatus = preferenceSaveStatus({ saving, saveError });
+  // The section list folds into a popover while the Side holds work, or the window is narrow.
+  const sideHeld = useSideHeld();
+  const narrow = useSyncExternalStore(subscribeNarrow, isNarrow, wideOnServer);
+  const folded = sideHeld || narrow;
+  const [sectionsOpen, setSectionsOpen] = useState(false);
   useEffect(() => { if (isSection(initialSection)) setActive(initialSection); }, [initialSection]);
   const updateSection = <K extends PreferenceSection>(section: K) => (patch: Partial<SpectraPreferences[K]>) => update(section, patch);
   const body: Record<SectionId, ReactNode> = {
@@ -336,41 +343,58 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
     workbar: <WorkbarSettings p={preferences.workbar} update={updateSection("workbar")} />,
     privacy: <div className="space-y-10"><AccountSettings /><PrivacySettings /></div>,
   };
+  const current = SECTIONS.find((section) => section.id === active) ?? SECTIONS[0];
+  const choose = (id: SectionId) => {
+    setActive(id);
+    setSectionsOpen(false);
+    window.history.replaceState(null, "", `/settings?section=${id}`);
+  };
+  const commands: BarCommand[] = [
+    { id: "reset", icon: "undo", label: "Restore defaults", labelPolicy: "never", onSelect: reset },
+  ];
   return (
     <main className="spectra-wave-y relative isolate min-h-0 flex-1 overflow-auto" data-spectra-app-surface="true">
-      <div className="w-full px-4 pb-36 pt-6 sm:px-6 lg:px-8 lg:pt-8">
-        <ProductPageHeader
-          eyebrow="Preferences"
+      <PageBody>
+        <PageHeader
           title="Settings"
-          description="Only controls that change Spectra appear here. Changes follow your account and take effect immediately on every open surface."
-          actions={
-            <Button aria-label="Restore defaults" title="Restore defaults" variant="ghost" size="icon" onClick={reset}>
-              <RotateCcw className="size-4" />
-            </Button>
-          }
+          commands={commands}
+          barLabel="Settings commands"
+          description="Changes follow your account and apply at once, everywhere you use Spectra."
         />
-        <section
-          aria-label="Settings sections"
-          className={`mt-5 min-w-0 transition-opacity ${hydrated ? "opacity-100" : "opacity-70"}`}
-          aria-labelledby="settings-section-title"
-        >
-          <ProductSectionNav
-            label="Settings sections"
-            items={SECTIONS.map(({ id, label, icon }) => ({ key: id, label, icon }))}
-            active={active}
-            onChange={(id) => {
-              setActive(id);
-              window.history.replaceState(null, "", `/settings?section=${id}`);
-            }}
-          />
-          <div className="max-w-[1080px] py-2" data-spectra-ai-target={active}>
+        <div className={`mt-6 flex min-w-0 gap-8 transition-opacity ${hydrated ? "opacity-100" : "opacity-70"}`}>
+          {folded ? null : (
+            <div className="w-48 shrink-0">
+              <div className="sticky top-0">
+                <SectionList active={active} onChange={choose} />
+              </div>
+            </div>
+          )}
+          <section
+            className="@container/settings min-w-0 max-w-[1080px] flex-1"
+            aria-labelledby="settings-section-title"
+            data-spectra-ai-target={active}
+          >
+            {folded ? (
+              <Popover open={sectionsOpen} onOpenChange={setSectionsOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="ghost" size="sm" className="-ml-2 mb-4" aria-label={`${current.label}. Choose a settings section`}>
+                    <Icon name={current.icon} size={16} />
+                    {current.label}
+                    <Icon name="chevronDown" size={14} />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-56">
+                  <SectionList active={active} onChange={choose} />
+                </PopoverContent>
+              </Popover>
+            ) : null}
             <h2 id="settings-section-title" className="sr-only">
-              {SECTIONS.find((section) => section.id === active)?.label}
+              {current.label}
             </h2>
             <IsolatedErrorBoundary
               fallback={
                 <p className="py-6 text-caption text-[var(--text-secondary)]" role="status">
-                  This device is offline. Settings that live on this PC still work; Spectra will return the rest when you reconnect.
+                  This device is offline. Settings that live on this computer still work; the rest come back when you reconnect.
                 </p>
               }
             >
@@ -381,9 +405,43 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
               ) : null}
               {body[active]}
             </IsolatedErrorBoundary>
-          </div>
-        </section>
-      </div>
+          </section>
+        </div>
+      </PageBody>
     </main>
   );
 }
+
+/** The sections, as a list beside the page or inside the folded popover. */
+function SectionList({ active, onChange }: { active: SectionId; onChange: (id: SectionId) => void }) {
+  return (
+    <nav aria-label="Settings sections">
+      <ul className="space-y-0.5">
+        {SECTIONS.map((section) => (
+          <li key={section.id}>
+            <button
+              type="button"
+              data-icon-host
+              aria-current={section.id === active ? "page" : undefined}
+              onClick={() => onChange(section.id)}
+              className="flex h-9 w-full min-w-0 items-center gap-2.5 rounded-control px-2.5 text-left text-ui text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] aria-[current=page]:bg-[var(--bg-hover)] aria-[current=page]:font-medium aria-[current=page]:text-[var(--text-primary)]"
+            >
+              <Icon name={section.icon} size={16} />
+              <span className="truncate">{section.label}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}
+
+const NARROW = "(max-width: 899px)";
+function subscribeNarrow(listener: () => void) {
+  if (typeof window.matchMedia !== "function") return () => {};
+  const media = window.matchMedia(NARROW);
+  media.addEventListener("change", listener);
+  return () => media.removeEventListener("change", listener);
+}
+const isNarrow = () => typeof window.matchMedia === "function" && window.matchMedia(NARROW).matches;
+const wideOnServer = () => false;

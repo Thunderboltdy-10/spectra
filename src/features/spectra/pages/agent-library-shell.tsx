@@ -1,8 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Beaker, FilePenLine, FlaskConical, Grid3X3, MessageCircleQuestion, Sparkles, WandSparkles, type LucideIcon } from "lucide-react";
-import { BookOpen, Loader2, ShieldCheck, Bot, CheckCircle2, GraduationCap, Plus, Search, SlidersHorizontal, X } from "@/components/icons/glyph-icons";
+import { BookOpen, Loader2, ShieldCheck, Bot, CheckCircle2, GraduationCap, Plus, Search, Beaker, FilePenLine, FlaskConical, Grid3X3, MessageCircleQuestion, Sprout, type GlyphIcon } from "@/components/icons/glyph-icons";
 import { useSearchParams } from "next/navigation";
 import {
   useCallback,
@@ -28,7 +27,6 @@ import {
   useArtifactStudioState,
 } from "../components/artifact-studio-shell";
 import { ShareDialog } from "../components/share-dialog";
-import { ProductPageHeader } from "../components/product-page-header";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import {
   addSpectraPublicAgent,
@@ -45,6 +43,10 @@ import {
 import { formatRelativeTime } from "../components/spectra-view-model";
 import { useProvideIslandEngine } from "../island/engine";
 import { Button } from "@/components/ui/button";
+import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
+import { IconButton } from "@/components/ui/icon-button";
+import { PageBody, PageHeader } from "@/components/ui/page-header";
+import { EmptyState, LoadingRows, ProblemState } from "@/components/ui/page-state";
 import { SelectField } from "@/components/ui/select";
 import { useAgentCatalog, useWorkspaceCatalog } from "../data/use-catalog-pages";
 import { CatalogProgress } from "../components/catalog-progress";
@@ -80,11 +82,11 @@ type LibraryCard = {
   installedRelease?: number;
 };
 
-const cardIcons: LucideIcon[] = [
+const cardIcons: GlyphIcon[] = [
   FlaskConical,
   FilePenLine,
   BookOpen,
-  WandSparkles,
+  Sprout,
   GraduationCap,
   Beaker,
   MessageCircleQuestion,
@@ -92,11 +94,13 @@ const cardIcons: LucideIcon[] = [
 ];
 const cardTones = [
   { color: "var(--accent-mint)", soft: "color-mix(in oklab, var(--accent-mint) 10%, var(--bg-primary))" },
-  { color: "var(--accent-orange)", soft: "#fff1e7" },
-  { color: "var(--brand-primary)", soft: "#eeeaff" },
-  { color: "var(--accent-cyan)", soft: "#e7f5fb" },
-  { color: "var(--accent-coral)", soft: "#faedf2" },
+  { color: "var(--accent-orange)", soft: "color-mix(in oklab, var(--accent-orange) 10%, var(--bg-primary))" },
+  { color: "var(--brand-primary)", soft: "color-mix(in oklab, var(--brand-primary) 10%, var(--bg-primary))" },
+  { color: "var(--accent-cyan)", soft: "color-mix(in oklab, var(--accent-cyan) 10%, var(--bg-primary))" },
+  { color: "var(--accent-coral)", soft: "color-mix(in oklab, var(--accent-coral) 10%, var(--bg-primary))" },
 ];
+
+const AGENT_BAR_PLAN: readonly CollapseStep[] = [{ hideLabel: "filter" }, { hideLabel: "new" }];
 
 function hash(value: string) {
   let result = 0;
@@ -347,13 +351,9 @@ function LibrarySectionBlock({
           </p>
         </div>
         {cards.length > limit ? (
-          <button
-            type="button"
-            onClick={onViewAll}
-            className="shrink-0 text-micro font-semibold text-[var(--brand-primary)] hover:underline"
-          >
+          <Button variant="ghost" size="sm" className="shrink-0" onClick={onViewAll}>
             View all ({cards.length})
-          </button>
+          </Button>
         ) : null}
       </header>
       {cards.length ? (
@@ -361,7 +361,7 @@ function LibrarySectionBlock({
           {cards.slice(0, limit).map(children)}
         </div>
       ) : (
-        <p className="flex items-center gap-2 py-4 text-caption text-[var(--text-secondary)]"><Sparkles className="size-4 text-[var(--text-tertiary)]" />No agents in this collection yet.</p>
+        <p className="py-4 text-caption text-[var(--text-secondary)]">No agents here yet.</p>
       )}
     </section>
   );
@@ -781,19 +781,34 @@ export function AgentLibraryShell({
     );
   }
 
+  const filtered = subject !== "all" || capability !== "all" || sortMode !== "relevance";
+  const agentCommands: BarCommand[] = [
+    {
+      id: "new",
+      icon: "add",
+      label: busyKey === "create" ? "Making…" : "New agent",
+      pinned: true,
+      disabled: busyKey === "create",
+      onSelect: () => void createAgent(),
+    },
+    {
+      id: "filter",
+      icon: "filter",
+      label: filtered ? "Filters on" : "Filter and sort",
+      active: filtersOpen || filtered,
+      onSelect: () => setFiltersOpen((value) => !value),
+    },
+  ];
   return (
     <div className="spectra-wave-y relative flex h-full min-h-0 overflow-hidden">
-      <div className="min-w-0 flex-1 overflow-y-auto pb-32">
-        <main className="mx-auto w-full max-w-[1460px] px-5 py-6 sm:px-8 lg:px-10">
-          <ProductPageHeader
-            title="Agent library"
-            description="Discover, create, and add specialised agents without loading every specialist into every conversation."
-            actions={
-              <button type="button" disabled={busyKey === "create"} onClick={() => void createAgent()} className="agent-library-create">
-                {busyKey === "create" ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-                New agent
-              </button>
-            }
+      <div className="min-w-0 flex-1 overflow-y-auto">
+        <PageBody className="mx-auto max-w-[1460px]">
+          <PageHeader
+            title="Agents"
+            commands={agentCommands}
+            plan={AGENT_BAR_PLAN}
+            barLabel="Agents commands"
+            description="Find, make and add agents for the work they are good at."
           />
 
           <div className="mt-6 flex items-center gap-2.5">
@@ -805,26 +820,8 @@ export function AgentLibraryShell({
                 placeholder="Search agents by name, subject, or capability…"
                 className="min-w-0 flex-1 bg-transparent text-micro outline-none placeholder:text-[var(--text-tertiary)]"
               />
-              {search ? (
-                <button
-                  type="button"
-                  onClick={() => setSearch("")}
-                  aria-label="Clear search"
-                >
-                  <X className="size-3.5 text-[var(--text-tertiary)]" />
-                </button>
-              ) : null}
+              {search ? <IconButton icon="close" label="Clear search" size="compact" onClick={() => setSearch("")} /> : null}
             </label>
-            <button
-              type="button"
-              className={`relative grid size-10 shrink-0 place-items-center rounded-control border transition ${filtersOpen ? "border-[var(--text-primary)] bg-[var(--bg-secondary)] text-[var(--text-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
-              onClick={() => setFiltersOpen((value) => !value)}
-              aria-label="Filter and sort agents"
-              aria-expanded={filtersOpen}
-            >
-              <SlidersHorizontal className="size-4" />
-              {subject !== "all" || capability !== "all" || sortMode !== "relevance" ? <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-[var(--brand-primary)]" /> : null}
-            </button>
           </div>
           {filtersOpen ? (
             <div className="mt-2 flex flex-wrap gap-2.5">
@@ -863,20 +860,43 @@ export function AgentLibraryShell({
                 triggerClassName="min-w-[160px] bg-[var(--bg-elevated)]"
               />
               {subject !== "all" || capability !== "all" || sortMode !== "relevance" ? (
-                <button type="button" className="h-10 px-2 text-micro font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]" onClick={() => { setSubject("all"); setCapability("all"); setSortMode("relevance"); }}>
+                <Button variant="ghost" size="lg" onClick={() => { setSubject("all"); setCapability("all"); setSortMode("relevance"); }}>
                   Clear filters
-                </button>
+                </Button>
               ) : null}
             </div>
           ) : null}
 
           {loading ? (
-            <div className="mt-8 flex items-center gap-2 text-caption text-[var(--text-secondary)]"><Loader2 className="size-4 animate-spin" /> Loading agents…</div>
+            <LoadingRows label="Loading agents" count={6} className="mt-8" />
           ) : (
             <>
               <CatalogProgress catalog={agentCatalog} label="agents" />
               {!agentCatalog.isDone && agentCatalog.items.length > 0 ? <p role="status" className="text-micro text-[var(--text-secondary)]">More agents and filter choices are loading.</p> : null}
-              {publicError ? <button type="button" onClick={() => void load()} className="text-micro text-[var(--text-secondary)]">Published agents could not be loaded. Retry</button> : null}
+              {publicError ? (
+                <ProblemState
+                  compact
+                  title="Published agents couldn't load"
+                  detail="Your own and shared agents are still here."
+                  action={
+                    <Button variant="secondary" size="sm" onClick={() => void load()}>
+                      Try again
+                    </Button>
+                  }
+                />
+              ) : null}
+              {!publicError && !discover.length && !installed.length && !yours.length && !shared.length ? (
+                <EmptyState
+                  icon="agent"
+                  title={search || subject !== "all" || capability !== "all" ? "No agents match" : "No agents yet"}
+                  detail={search || subject !== "all" || capability !== "all" ? "Try other words or clear the filters." : "Make one for a subject or a kind of task, and add it where you need it."}
+                  action={
+                    <Button variant="primary" size="sm" disabled={busyKey === "create"} onClick={() => void createAgent()}>
+                      New agent
+                    </Button>
+                  }
+                />
+              ) : null}
               <LibrarySectionBlock
                 title="Discover"
                 description="Published agents whose owners opened them to your school. Installing references their release; it does not copy the agent."
@@ -923,7 +943,7 @@ export function AgentLibraryShell({
               </LibrarySectionBlock>
             </>
           )}
-        </main>
+        </PageBody>
       </div>
 
       {studio.mode === "split" && studio.activeArtifact ? (

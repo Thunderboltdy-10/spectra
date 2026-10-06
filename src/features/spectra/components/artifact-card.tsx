@@ -7,8 +7,7 @@ import {
   type PointerEvent,
   type ReactNode,
 } from "react";
-import { Building2, Sparkles } from "lucide-react";
-import { Check, MoreHorizontal, Share2 } from "@/components/icons/glyph-icons";
+import { Check, MoreHorizontal, Share2, Building2, Loader2 } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { useArtifactAiActivity } from "../collaboration/artifact-ai-activity";
@@ -287,7 +286,7 @@ export function ArtifactCard({
               liveAiState === "creating" ||
               liveAiState === "updating") ? (
               <span className="spectra-card-ai-activity inline-flex shrink-0 items-center gap-1 rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))] px-1.5 py-0.5 text-micro font-semibold text-[var(--accent-cyan)]">
-                <Sparkles className="h-2.5 w-2.5" aria-hidden="true" />
+                <Loader2 className="h-2.5 w-2.5" aria-hidden="true" />
                 AI {liveAiState === "creating" ? "building" : "editing"}
               </span>
             ) : null}
@@ -380,7 +379,7 @@ export function ArtifactCard({
               role="status"
               aria-live="polite"
             >
-              <Sparkles className="spectra-card-activity-spark" />
+              <Loader2 className="spectra-card-activity-spark" />
               <span className="spectra-card-activity-text">
                 {liveAiActivity.label ? (
                   <strong>{liveAiActivity.label}</strong>

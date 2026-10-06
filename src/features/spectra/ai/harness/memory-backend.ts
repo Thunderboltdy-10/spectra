@@ -1,4 +1,5 @@
 import type { ArtifactTypeKey } from "../../artifacts/types";
+import type { CommentRow } from "./comments";
 import { artifactTypeLabel } from "../../../../../shared/semantic-chunks";
 import { resolveArtifactWriteInput } from "../../operations/artifact-write-content";
 import type {
@@ -30,6 +31,8 @@ export type MemoryBackendOptions = {
   thread?: Array<{ id: string; role: "user" | "assistant"; content: string }>;
   calendar?: Array<{ id: string; title: string; start: number; end?: number; kind: string }>;
   webSearch?: (query: string) => Promise<WebResult[]>;
+  /** Comments by work id. */
+  comments?: Record<string, CommentRow[]>;
   /** Simulate the semantic layer answering with words only, or with a degraded index. */
   searchMode?: SearchResponse["mode"];
   searchDegraded?: SearchResponse["degraded"];
@@ -179,6 +182,12 @@ export class MemoryBackend implements HarnessBackend {
     const items = (this.options.calendar ?? []).filter((item) => item.start >= input.from && item.start < input.to);
     if (!items.length) return "Nothing on the calendar in that range.";
     return items.map((item) => `- ${item.title} (${item.kind}, id ${item.id}) ${new Date(item.start).toISOString()}`).join("\n");
+  }
+
+  async readComments(input: { artifactId: string; includeResolved?: boolean }) {
+    if (!this.artifacts.has(input.artifactId)) return null;
+    const rows = this.options.comments?.[input.artifactId] ?? [];
+    return input.includeResolved ? rows : rows.filter((row) => row.status !== "resolved");
   }
 
   async readSchoolData() {

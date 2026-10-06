@@ -1,24 +1,5 @@
 /* Agent Library — a quiet, high-density catalog aligned to the supplied
    reference while remaining inside Spectra's merged navigation shell. */
-.agent-library-create {
-  margin-left: 8px;
-  display: inline-flex;
-  height: 36px;
-  align-items: center;
-  gap: 7px;
-  border: 1px solid transparent;
-  border-radius: var(--card-radius);
-  background: var(--text-primary);
-  padding: 0 14px;
-  color: var(--bg-primary);
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.agent-library-create:hover {
-  filter: brightness(0.96);
-}
-
 .agent-library-filter {
   position: relative;
   display: flex;
@@ -9788,18 +9769,17 @@ button[data-spectra-context-trigger="true"]::after {
   width: max-content;
   min-width: 100%;
   overflow: visible;
-  border: 1px solid var(--border-default);
-  border-radius: var(--surface-radius);
-  background: var(--bg-elevated);
+  /* Quiet axes (SHELL.md): no frame around the week, hairlines only. */
+  border-top: 1px solid var(--border-subtle);
+  background: transparent;
 }
 
 .spectra-calendar-gutter {
   position: sticky;
   left: 0;
   z-index: 3;
-  border-right: 1px solid var(--border-subtle);
   border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
+  background: var(--bg-primary);
 }
 
 .spectra-calendar-week-caption,
@@ -9828,9 +9808,8 @@ button[data-spectra-context-trigger="true"]::after {
   align-items: center;
   gap: 2px;
   padding: 8px 4px 6px;
-  border-right: 1px solid var(--border-subtle);
   border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
+  background: var(--bg-primary);
   text-align: center;
 }
 
@@ -9857,14 +9836,30 @@ button[data-spectra-context-trigger="true"]::after {
   font-weight: 600;
 }
 
-.spectra-calendar-day-head.is-today {
-  background: color-mix(in oklab, #059669 7%, transparent);
+.spectra-calendar-day-head.is-today span {
+  color: var(--text-primary);
 }
 
 .spectra-calendar-day-head.is-today strong {
-  background: #047857;
-  color: white;
+  background: var(--text-primary);
+  color: var(--bg-primary);
   border-radius: var(--radius-pill);
+}
+
+/* The now line: one hairline in the accent, with a dot where the day starts. */
+.spectra-calendar-now {
+  background: var(--accent-coral);
+}
+
+.spectra-calendar-now::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-coral);
 }
 
 .spectra-calendar-allday-cell {
@@ -9885,12 +9880,14 @@ button[data-spectra-context-trigger="true"]::after {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  border: 1px solid;
+  border: 1px solid var(--border-subtle);
   border-radius: var(--control-radius);
-  padding: 3px 6px;
+  background: var(--bg-elevated);
+  padding: 3px 6px 3px 9px;
   text-align: left;
   font-size: var(--text-micro);
-  font-weight: 600;
+  font-weight: 500;
+  color: var(--text-primary);
 }
 
 @media (max-width: 900px) {
@@ -12619,6 +12616,13 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
    cover. The band measures and publishes its own height
    (`composer-safe-area.ts`); surfaces consume it here instead of each
    guessing a constant that goes stale the moment the dock grows a row. */
+/* A page's scrolling body (SHELL.md, "Page anatomy"): its content scrolls
+   clear of the island, about 88 px, or the island's own band when taller. */
+.spectra-page-scroll {
+  padding-bottom: max(88px, calc(var(--spectra-composer-safe-area, 0px) + 16px));
+  scroll-padding-bottom: max(88px, calc(var(--spectra-composer-safe-area, 0px) + 16px));
+}
+
 .spectra-composer-clearance {
   padding-bottom: calc(var(--spectra-composer-safe-area, 0px) + 16px);
 }

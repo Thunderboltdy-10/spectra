@@ -1,8 +1,6 @@
 "use client";
 
-import { Workflow } from "lucide-react";
-import { BookOpen, CalendarCheck2, Code2, HelpCircle, Table2, Bot, FileText, Presentation } from "@/components/icons/glyph-icons";
-import type { LucideIcon } from "lucide-react";
+import { BookOpen, CalendarCheck2, Code2, HelpCircle, Table2, Bot, FileText, Presentation, Workflow, type GlyphIcon } from "@/components/icons/glyph-icons";
 import { workTypeMeta } from "./artifact-card";
 import { requireBlueprint, requireArtifactTypeManifest } from "../artifacts/blueprint-catalog";
 import type { ArtifactTypeKey } from "../artifacts/types";
@@ -24,7 +22,7 @@ export type ArtifactPayload = {
 };
 
 
-export const blueprintChoices: Array<{ key: EditableBlueprintKey; label: string; icon: LucideIcon; description: string }> = [
+export const blueprintChoices: Array<{ key: EditableBlueprintKey; label: string; icon: GlyphIcon; description: string }> = [
   { key: "document", label: "Document", icon: FileText, description: "Notes, essay plans, and structured writing." },
   { key: "flashcard_deck", label: "Flashcard deck", icon: BookOpen, description: "A real deck with editable cards." },
   { key: "quiz", label: "Quiz", icon: HelpCircle, description: "Questions, answers, and review notes." },

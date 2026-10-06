@@ -803,6 +803,7 @@ export function PlanStudio({
                   <button
                     type="button"
                     className="spectra-plan-check"
+                    data-life-done=""
                     disabled={!canEdit}
                     aria-pressed={row.task.status === "done"}
                     aria-label={
@@ -1419,7 +1420,7 @@ export function PlanStudio({
               ) : null}
             </div>
           </div>
-          <div className="spectra-plan-checklist">
+          <div className="spectra-plan-checklist" data-life-done="">
             <strong>Checklist</strong>
             {openTask.checklist.map((item) => (
               <label key={item.id}>

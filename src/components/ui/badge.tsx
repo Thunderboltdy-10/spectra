@@ -1,5 +1,5 @@
+import { CircleDashed, type GlyphIcon } from "@/components/icons/glyph-icons";
 import * as React from "react";
-import { CircleDashed, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -104,7 +104,7 @@ export function StatusBadge({
 }: {
   children: React.ReactNode;
   tone?: StatusTone;
-  icon?: LucideIcon;
+  icon?: GlyphIcon;
   className?: string;
 }) {
   // Unknown is not a chip. A chip claims a measurement that does not exist.

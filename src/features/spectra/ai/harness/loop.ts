@@ -1,4 +1,5 @@
 import { deniedResult } from "./permissions";
+import { mergeSources, type RunSource } from "./sources";
 import {
   ProviderUnavailableError,
   providerToolSpec,
@@ -55,6 +56,8 @@ export type LoopState = {
   /** The reply the user has seen so far, across turns. */
   text: string;
   artifacts: ArtifactTouch[];
+  /** What the run read that its reply may cite. */
+  sources?: RunSource[];
   todos?: TodoItem[];
   /** The last widgets shown, newest last; the saved reply shows them again. */
   widgets?: ShownWidget[];
@@ -388,6 +391,7 @@ export async function runHarnessLoop(
       effect: prepared.effect,
     };
     state.artifacts = mergeArtifactTouches(state.artifacts, outcome.artifacts);
+    if (outcome.sources?.length) state.sources = mergeSources(state.sources, outcome.sources);
     if (outcome.todos) {
       state.todos = outcome.todos;
       hooks.onTodos?.(outcome.todos);

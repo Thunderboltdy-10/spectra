@@ -3,9 +3,7 @@
 import { subscribeShellWorkAvailability } from "../components/use-work-availability";
 import { retireShellArtifactLocation } from "./shell-location";
 
-import { PencilLine, Sprout, Workflow } from "lucide-react";
-import { BookOpen, CalendarCheck2, Download, Files, HelpCircle, Loader2, Table2, Code2, CheckCircle2, ExternalLink, FileText, Home, Library, Plus, School, Share2, Trash2, Users, X, Presentation, Bot } from "@/components/icons/glyph-icons";
-import type { LucideIcon } from "lucide-react";
+import { BookOpen, CalendarCheck2, Download, Files, HelpCircle, Loader2, Table2, Code2, CheckCircle2, ExternalLink, FileText, Plus, School, Trash2, X, Presentation, Bot, PencilLine, Workflow, type GlyphIcon } from "@/components/icons/glyph-icons";
 import {
   useCallback,
   useEffect,
@@ -57,9 +55,13 @@ import { createShellArtifactAccess } from "../components/shell-artifact-access";
 import { SelectionActionBar } from "../components/context-controls";
 import { InvitationStrip } from "../components/invitation-strip";
 import { WorkbenchInspectorTabs } from "../components/workbench-inspector-tabs";
+import { CompanionSheet, WorkCompanionPanel, type CompanionTab } from "../components/work-companion";
 import { RunDetailPanel } from "../components/run-detail-panel";
 import { LiveThreadPanel } from "../components/live-thread-panel";
-import { ChatBrowserButton, ChatBrowserPanel } from "../components/chat-browser-panel";
+import { ChatBrowserPanel } from "../components/chat-browser-panel";
+import { Icon } from "@/components/icons";
+import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
+import { PageHeader } from "@/components/ui/page-header";
 import { useProvideIslandEngine } from "../island/engine";
 import { createApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import { applyPreferencePatch } from "../settings/schema";
@@ -166,6 +168,7 @@ import {
   updateWorkbenchSurface,
   writeSharedWorkbenchSession,
 } from "../workbench";
+import { onLibraryHandoff, takeLibraryHandoffs } from "../workbench/library-handoff";
 import {
   artifactIdFromSpectraLocation,
   artifactIdFromSpectraPath,
@@ -430,7 +433,7 @@ function workspaceHubTab(
 const createTypes: Array<{
   key: ArtifactTypeKey;
   label: string;
-  icon: LucideIcon;
+  icon: GlyphIcon;
 }> = (
   [
     ["document", FileText],
@@ -442,7 +445,7 @@ const createTypes: Array<{
     ["sheets", Table2],
     ["code", Code2],
     ["whiteboard", Workflow],
-  ] satisfies Array<[ArtifactTypeKey, LucideIcon]>
+  ] satisfies Array<[ArtifactTypeKey, GlyphIcon]>
 ).map(([key, icon]) => ({
   key,
   icon,
@@ -464,6 +467,8 @@ function useOutsideClick<T extends HTMLElement>(
   }, [onClose, open]);
   return ref;
 }
+
+const WORKSPACE_BAR_PLAN: readonly CollapseStep[] = [{ hideLabel: "chats" }, { hideLabel: "people" }, { toMenu: "chats" }];
 
 function WorkspaceHeader({
   workspace,
@@ -505,67 +510,63 @@ function WorkspaceHeader({
       ? 1
       : 0);
 
+  const commands: BarCommand[] = [
+    ...(onOpenChats
+      ? [{ id: "chats", icon: "conversations", label: "Chats", onSelect: onOpenChats } satisfies BarCommand]
+      : []),
+    {
+      id: "people",
+      icon: "people",
+      label: workspace?.sharedWithCount ? `People · ${workspace.sharedWithCount}` : "People",
+      onSelect: onShareWorkspace,
+    },
+    {
+      id: "more",
+      icon: "more",
+      label: "More workspace actions",
+      pinned: true,
+      render: () => (
+        <OverflowMenu
+          label="More workspace actions"
+          items={[
+            { key: "settings", label: "Workspace settings", icon: PencilLine },
+            { key: "export", label: "Export workspace", icon: Download },
+            { key: "delete", label: "Delete workspace", icon: Trash2 },
+          ]}
+          onSelect={(key) => {
+            if (key === "settings") onEditWorkspace();
+            else if (key === "export") onExportWorkspace();
+            else if (key === "delete") onDeleteWorkspace();
+          }}
+          size={32}
+        />
+      ),
+    },
+  ];
+
   return (
-    <header
-      className="spectra-workspace-header border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 pb-4 pt-4"
+    <div
+      role="group"
+      className="spectra-workspace-header border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 pb-3 pt-3"
       aria-label={`${artifactCount} work items, ${threadCount} threads, ${cardCount} pinned, ${activeRuns} active runs`}
     >
-      <div className="flex items-start justify-between gap-5">
-        <div className="flex min-w-0 items-start gap-4">
-          <span className="grid size-14 shrink-0 place-items-center rounded-card bg-[color-mix(in_oklab,var(--accent-violet)_10%,var(--bg-elevated))] text-[var(--accent-violet)]">
-            <Sprout className="size-7" />
-          </span>
-          <div className="min-w-0 pt-0.5">
-            <div className="flex items-center gap-2">
-              <h1 className="truncate font-display text-display font-semibold leading-[1.12] tracking-[-.02em] text-[var(--text-primary)]">
-                {workspace?.title ?? "Workspace"}
-              </h1>
-              {workspace?.isShared ? (
-                <Share2
-                  className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]"
-                  role="img" aria-label="Shared workspace"
-                />
-              ) : null}
-            </div>
-            <p className="mt-1.5 max-w-[52ch] text-body leading-relaxed text-[var(--text-secondary)]">
-              {workspace?.description ?? "All your work, organized and ready."}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {onOpenChats ? <ChatBrowserButton onClick={onOpenChats} /> : null}
-          {/* People and Settings are compact disclosing actions, not sections:
-              they open a dialog, so they do not belong in the work nav. */}
-          <Button variant="secondary" size="md" onClick={onShareWorkspace}>
-            <Users className="size-3.5 text-[var(--text-secondary)]" />
-            People
-            {workspace?.sharedWithCount ? (
-              <span className="tabular-nums text-[var(--text-secondary)]">
-                {workspace.sharedWithCount}
+      <PageHeader
+        title={
+          <span className="inline-flex min-w-0 max-w-full items-center gap-2">
+            <span className="truncate">{workspace?.title ?? "Workspace"}</span>
+            {workspace?.isShared ? (
+              <span role="img" aria-label="Shared workspace" className="inline-flex shrink-0 text-[var(--text-tertiary)]">
+                <Icon name="share" size={16} />
               </span>
             ) : null}
-          </Button>
-          <OverflowMenu
-            label="More workspace actions"
-            items={[
-              {
-                key: "settings",
-                label: "Workspace settings",
-                icon: PencilLine,
-              },
-              { key: "export", label: "Export workspace", icon: Download },
-              { key: "delete", label: "Delete workspace", icon: Trash2 },
-            ]}
-            onSelect={(key) => {
-              if (key === "settings") onEditWorkspace();
-              else if (key === "export") onExportWorkspace();
-              else if (key === "delete") onDeleteWorkspace();
-            }}
-            size={36}
-          />
-        </div>
-      </div>
-    </header>
+          </span>
+        }
+        commands={commands}
+        plan={WORKSPACE_BAR_PLAN}
+        barLabel="Workspace commands"
+        description={workspace?.description || undefined}
+      />
+    </div>
   );
 }
 
@@ -591,32 +592,27 @@ function RootHeader({
   workspaceCount: number;
   onOpenChats?: () => void;
 }) {
-  const Icon = surface === "library" ? Library : Home;
+  const commands: BarCommand[] = onOpenChats
+    ? [{ id: "chats", icon: "conversations", label: "Chats", onSelect: onOpenChats }]
+    : [];
   return (
-    <header className="spectra-workspace-header border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 pb-4 pt-4">
-      <div className="flex items-start justify-between gap-5">
-        <div className="flex min-w-0 items-start gap-4">
-          <span className="grid size-14 shrink-0 place-items-center rounded-card bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-elevated))] text-[var(--brand-primary)]">
-            <Icon className="size-7" />
-          </span>
-          <div className="min-w-0 pt-0.5">
-            <h1 className="truncate font-display text-display font-semibold leading-[1.12] tracking-[-.02em] text-[var(--text-primary)]">
-              {surface === "library" ? "Library" : "Workspace"}
-            </h1>
-            <p className="mt-1.5 max-w-[52ch] text-body leading-relaxed text-[var(--text-secondary)]">
-              {surface === "library"
-                ? "Everything you have made, filed where you put it."
-                : workspaceCount === 0
-                  ? "Your work lives here."
-                  : workspaceCount === 1
-                    ? "One workspace, and everything filed across it."
-                    : `${workspaceCount} workspaces, and everything filed across them.`}
-            </p>
-          </div>
-        </div>
-        {onOpenChats ? <ChatBrowserButton onClick={onOpenChats} /> : null}
-      </div>
-    </header>
+    <div className="spectra-workspace-header border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 pb-3 pt-3">
+      <PageHeader
+        title={surface === "library" ? "Library" : "Workspace"}
+        commands={commands}
+        plan={WORKSPACE_BAR_PLAN}
+        barLabel={surface === "library" ? "Library commands" : "Workspace commands"}
+        description={
+          surface === "library"
+            ? "Everything you have made, filed where you put it."
+            : workspaceCount === 0
+              ? "Your work lives here."
+              : workspaceCount === 1
+                ? "One workspace, and everything filed across it."
+                : `${workspaceCount} workspaces, and everything filed across them.`
+        }
+      />
+    </div>
   );
 }
 
@@ -1064,7 +1060,7 @@ function ActionRow({
   label,
   onClick,
 }: {
-  icon: LucideIcon;
+  icon: GlyphIcon;
   label: string;
   onClick?: () => void;
 }) {
@@ -1260,6 +1256,18 @@ export function SpectraShell({
     refreshInvitations,
   } = useShareInvitations(invitationCollection);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  // Files another page handed over ("Copy into Library" on School) import here.
+  const importLibraryFileRef = useRef<((file: File, parentNodeId?: string | null) => Promise<void>) | null>(null);
+  useEffect(() => {
+    importLibraryFileRef.current = importLibraryFile;
+  });
+  useEffect(() => {
+    const drain = () => {
+      for (const file of takeLibraryHandoffs()) void importLibraryFileRef.current?.(file, null);
+    };
+    drain();
+    return onLibraryHandoff(drain);
+  }, []);
 
   /**
    * Favorites used to live in this browser's localStorage, which meant they
@@ -1799,6 +1807,11 @@ export function SpectraShell({
   );
   const chatBrowserArtifactId = studio.activeArtifactId ?? requestedArtifactId;
   const chatBrowserScope = chatBrowserArtifactId ? "artifact" : selectedWorkspaceId ? "workspace" : "library";
+  /* The companion (SHELL.md): beside fullscreen work it is a collapsible Side
+     panel; for work held in the Side it is an inner sheet over that work. */
+  const [companionTab, setCompanionTab] = useState<CompanionTab>("details");
+  const [companionReveal, setCompanionReveal] = useState(0);
+  const [companionSheetFor, setCompanionSheetFor] = useState<string | null>(null);
   const applicationCommandDispatcher = useMemo(
     () =>
       createApplicationCommandDispatcher({
@@ -2151,6 +2164,7 @@ export function SpectraShell({
   ]);
   const setActiveRunPanelId = useCallback(
     (runId: string | null, label = "Run details") => {
+      if (runId) setChatBrowserOpen(false);
       if (runId)
         openObject({
           type: "run",
@@ -2166,6 +2180,9 @@ export function SpectraShell({
   const setLiveThread = useCallback(
     (thread: { id: string; title: string } | null) => {
       if (thread) {
+        // The Side holds one pane: a conversation takes the chat browser's place.
+        setChatBrowserOpen(false);
+        setCompanionSheetFor(null);
         if (skipAutoContinueThreadIdRef.current !== thread.id)
           skipAutoContinueThreadIdRef.current = null;
         openObject({
@@ -3201,6 +3218,25 @@ export function SpectraShell({
   // The pending request carries its own fresh body, never a cached list row.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingArtifactOpen, cancelArtifactOpen]);
+
+  /** The chat browser takes the one Side slot a conversation or a run would. */
+  function openChatBrowser() {
+    setActiveRunPanelId(null);
+    setLiveThread(null);
+    setChatBrowserOpen(true);
+  }
+
+  /** Conversations about open work live in its companion. */
+  function openWorkConversations() {
+    const work = studio.activeArtifact;
+    if (!work) return openChatBrowser();
+    setCompanionTab("conversations");
+    setChatBrowserOpen(false);
+    setActiveRunPanelId(null);
+    setLiveThread(null);
+    if (studio.mode === "tab") setCompanionReveal((value) => value + 1);
+    else setCompanionSheetFor(work._id);
+  }
 
   function openArtifactTab(artifact: SpectraArtifact) {
     void requestArtifactOpen(artifact._id, "push", "tab")
@@ -4388,10 +4424,11 @@ export function SpectraShell({
                   onContinueThread={(threadId, title) =>
                     toggleContinuedThread(threadId, title)
                   }
-                  onOpenChats={() => setChatBrowserOpen(true)}
+                  onOpenChats={openChatBrowser}
                   executeApplicationCommand={applicationCommandDispatcher}
                 />
               ) : studio.mode === "tab" && studio.activeArtifact ? (
+                <div className="relative flex min-h-0 min-w-0 flex-1">
                 <ArtifactStudio
                   key={studio.activeArtifact._id}
                   mode="tab"
@@ -4414,9 +4451,23 @@ export function SpectraShell({
                       : undefined
                   }
                   onDirtyChange={studio.setDirty}
+                  onOpenChats={openWorkConversations}
                   executeApplicationCommand={applicationCommandDispatcher}
                   compact={false}
                 />
+                {/* A conversation, a run or the chat browser takes the companion's place for a while. */}
+                {liveThread || activeRunPanelId || chatBrowserOpen ? null : (
+                  <WorkCompanionPanel
+                    work={studio.activeArtifact}
+                    artifacts={allArtifacts}
+                    tab={companionTab}
+                    onTabChange={setCompanionTab}
+                    revealKey={companionReveal || null}
+                    onOpenWork={openArtifactTab}
+                    onOpenThread={setLiveThread}
+                  />
+                )}
+                </div>
               ) : (
                 <section
                   data-split-host
@@ -4459,13 +4510,13 @@ export function SpectraShell({
                             setWorkspaceDeleteConfirmation("");
                             setWorkspaceDeleteOpen(true);
                           }}
-                          onOpenChats={() => setChatBrowserOpen(true)}
+                          onOpenChats={openChatBrowser}
                         />
                       ) : (
                         <RootHeader
                           surface={surface}
                           workspaceCount={workspaces.length}
-                          onOpenChats={() => setChatBrowserOpen(true)}
+                          onOpenChats={openChatBrowser}
                         />
                       )}
                       {needsSchool ? (
@@ -4567,35 +4618,6 @@ export function SpectraShell({
                         onOpenArtifact={openArtifactPanel}
                       />
                     ) : null}
-                    {studio.mode === "tab" && studio.activeArtifact ? (
-                      <ArtifactStudio
-                        key={studio.activeArtifact._id}
-                        mode="tab"
-                        artifact={studio.activeArtifact}
-                        artifacts={allArtifacts}
-                        tabs={studio.tabs}
-                        dirtyIds={studio.dirtyIds}
-                        busy={
-                          busyKey ===
-                          `artifact:update:${studio.activeArtifact._id}`
-                        }
-                        sourceLabel={workspace?.title ?? surfaceLabel}
-                        onClose={returnToHub}
-                        onExpand={openArtifactTab}
-                        onActivateTab={activateArtifactTab}
-                        onCloseTab={closeArtifactTab}
-                        onArchive={archiveArtifact}
-                        onShare={
-                          studio.activeArtifact.ownership !== "shared"
-                            ? (artifact) => setArtifactShareTarget(artifact)
-                            : undefined
-                        }
-                        onDirtyChange={studio.setDirty}
-                        onOpenChats={() => setChatBrowserOpen(true)}
-                        executeApplicationCommand={applicationCommandDispatcher}
-                        compact={false}
-                      />
-                    ) : null}
                     {studio.mode === "split" && studio.activeArtifact ? (
                       <ArtifactStudio
                         key={studio.activeArtifact._id}
@@ -4625,9 +4647,27 @@ export function SpectraShell({
                             : undefined
                         }
                         onDirtyChange={studio.setDirty}
-                        onOpenChats={() => setChatBrowserOpen(true)}
+                        onOpenChats={openWorkConversations}
                         executeApplicationCommand={applicationCommandDispatcher}
                         compact={false}
+                      />
+                    ) : null}
+                    {studio.mode === "split" &&
+                    studio.activeArtifact &&
+                    companionSheetFor === studio.activeArtifact._id ? (
+                      <CompanionSheet
+                        rootRef={workbenchRowRef}
+                        work={studio.activeArtifact}
+                        artifacts={allArtifacts}
+                        tab={companionTab}
+                        onTabChange={setCompanionTab}
+                        onClose={() => setCompanionSheetFor(null)}
+                        onOpenFull={() => {
+                          setCompanionSheetFor(null);
+                          if (studio.activeArtifact) openArtifactTab(studio.activeArtifact);
+                        }}
+                        onOpenWork={(work) => openArtifactPanel(work)}
+                        onOpenThread={setLiveThread}
                       />
                     ) : null}
                     {!workSetIsolated && tiledArtifacts.length > 0 ? (

@@ -637,8 +637,32 @@ export async function executeApplicationCommand(
     });
     return result;
   }
+  if (command === "manage_comment") {
+    const artifactId = String(parsed.artifactId);
+    const commentId = String(parsed.commentId);
+    const action = String(parsed.action);
+    const result = await applyMutation(COMMENT_MUTATIONS[action] ?? "artifactComments:setResolved", { commentId });
+    onUiEvent?.({
+      key: "comment_changed",
+      payload: { targetId: artifactId, commentId, action, note: COMMENT_NOTES[action] ?? "Changed a comment" },
+    });
+    return result ?? { ok: true, commentId };
+  }
   throw new Error(`APP_COMMAND_NOT_REGISTERED:${command}`);
 }
+
+const COMMENT_MUTATIONS: Record<string, string> = {
+  resolve: "artifactComments:setResolved",
+  reopen: "artifactComments:setResolved",
+  edit: "artifactComments:updateBody",
+  delete: "artifactComments:remove",
+};
+const COMMENT_NOTES: Record<string, string> = {
+  resolve: "Resolved a comment",
+  reopen: "Reopened a comment",
+  edit: "Edited a comment",
+  delete: "Deleted a comment",
+};
 
 type UiEventSink = (event: { key: string; payload?: Record<string, unknown> }) => void;
 

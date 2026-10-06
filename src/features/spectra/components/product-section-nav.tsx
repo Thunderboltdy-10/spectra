@@ -1,7 +1,7 @@
 "use client";
 
+import { type GlyphIcon } from "@/components/icons/glyph-icons";
 import { useEffect, useState } from "react";
-import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { OverflowMenu } from "@/components/ui/dropdown-menu";
 
@@ -31,7 +31,7 @@ export function ProductSectionNav<T extends string>({
   className,
 }: {
   label: string;
-  items: Array<{ key: T; label: string; icon: LucideIcon }>;
+  items: Array<{ key: T; label: string; icon: GlyphIcon }>;
   active: T;
   onChange: (key: T) => void;
   primaryCount?: number;

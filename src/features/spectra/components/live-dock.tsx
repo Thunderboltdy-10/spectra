@@ -1,8 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { PauseCircle, Undo2, Unplug, Crosshair } from "lucide-react";
-import { CircleHelp, Loader2, MessageSquarePlus, SquareArrowOutUpRight, RotateCcw, ShieldCheck, Square, AlertCircle, CheckCircle2, ChevronDown, FileText, X } from "@/components/icons/glyph-icons";
+import { CircleHelp, Loader2, MessageSquarePlus, SquareArrowOutUpRight, RotateCcw, ShieldCheck, Square, AlertCircle, CheckCircle2, ChevronDown, FileText, X, PauseCircle, Undo2, Unplug, Crosshair } from "@/components/icons/glyph-icons";
 import {
   useCallback,
   useEffect,

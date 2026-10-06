@@ -41,6 +41,17 @@ const COMMANDS: Record<string, ApplicationCommand> = {
     }),
     authority: "content",
   },
+  manage_comment: {
+    input: z
+      .object({
+        artifactId: z.string().trim().min(1).max(200),
+        commentId: z.string().trim().min(1).max(200),
+        action: z.enum(["resolve", "reopen", "edit", "delete"]),
+        body: z.string().trim().min(1).max(20_000).optional(),
+      })
+      .refine((value) => value.action !== "edit" || Boolean(value.body), { message: "body is required to edit a comment." }),
+    authority: "content",
+  },
   read_devices: { input: z.object({}), authority: "navigation" },
   control_device: {
     input: z

@@ -30,6 +30,12 @@ const ACCENTS: Partial<Record<IconName, string>> = {
   info: "var(--accent-cyan)",
   done: "var(--success)",
   bell: "var(--danger)",
+  cas: "var(--accent-mint)",
+  grade: "var(--success)",
+  live: "var(--danger)",
+  blocked: "var(--danger)",
+  health: "var(--danger)",
+  memory: "var(--brand-primary)",
 };
 
 function Panel({ dark, animate, colour }: { dark: boolean; animate: boolean; colour: boolean }) {

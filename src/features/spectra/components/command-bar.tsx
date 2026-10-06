@@ -1,9 +1,7 @@
 "use client";
 
-import type { LucideIcon } from "lucide-react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
-import { ArrowUp } from "lucide-react";
-import { Image as ImageIcon, Loader2, Square, ChevronRight, FileText, Paperclip, Plus, X } from "@/components/icons/glyph-icons";
+import { Image as ImageIcon, Loader2, Square, ChevronRight, FileText, Paperclip, Plus, X, ArrowUp, type GlyphIcon } from "@/components/icons/glyph-icons";
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -68,7 +66,7 @@ export function CommandBarSubmenu({
   children,
 }: {
   label: string;
-  icon?: LucideIcon;
+  icon?: GlyphIcon;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);

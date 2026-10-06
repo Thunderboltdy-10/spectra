@@ -1,31 +1,4 @@
-import {
-  BarChart3,
-  Brain,
-  Bot,
-  BookOpen,
-  CalendarDays,
-  DatabaseZap,
-  FileDown,
-  FileUp,
-  FileX2,
-  FolderPlus,
-  FolderTree,
-  Laptop,
-  LibraryBig,
-  Link2,
-  Map,
-  MessageSquare,
-  MessageSquarePlus,
-  Pause,
-  RefreshCw,
-  Settings2,
-  Share2,
-  ShieldAlert,
-  SlidersHorizontal,
-  Square,
-  School,
-  UserRoundX,
-} from "lucide-react";
+import { BarChart3, Brain, Bot, BookOpen, CalendarDays, DatabaseZap, FileDown, FileUp, Trash2, FolderPlus, FolderTree, Laptop, LibraryBig, Link2, MapIcon, MessageSquare, MessageSquarePlus, Pause, RefreshCw, Settings2, Share2, ShieldAlert, SlidersHorizontal, Square, School, UserRoundX } from "@/components/icons/glyph-icons";
 import { z } from "zod";
 import type { Command, CommandContext, CommandEffectKind, CommandExecutionResult } from "./types";
 import { applicationCapability } from "../capabilities";
@@ -83,7 +56,7 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
   appCommand({
     id: "app.navigate",
     title: "Navigate Spectra",
-    icon: Map,
+    icon: MapIcon,
     description: "Navigate to a registered Spectra route or work target through the shared product path.",
     params: z.object({
       destination: z.enum(["library", "calendar", "settings", "workspace", "artifact"]),
@@ -388,7 +361,7 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
   appCommand({
     id: "app.work.open",
     title: "Open work",
-    icon: Map,
+    icon: MapIcon,
     description: "Open a work item through the shared product navigation path.",
     params: z.object({
       workId: z.string().trim().min(1),
@@ -409,7 +382,7 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
   appCommand({
     id: "app.work.reveal-anchor",
     title: "Reveal work anchor",
-    icon: Map,
+    icon: MapIcon,
     description: "Reveal a semantic work location through the mounted editor surface.",
     presentation: { kind: "button", compact: { iconOnly: true }, medium: { label: "Reveal" } },
     defaultPlacement: { tab: "General", group: "Navigation", order: 1 },
@@ -433,7 +406,7 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
   appCommand({
     id: "app.library.delete",
     title: "Delete Library items",
-    icon: FileX2,
+    icon: Trash2,
     description: "Move selected Library items through the recoverable tree deletion path.",
     parameters: [{ name: "targetIds", label: "Library item IDs", kind: "item", required: true, placeholder: "Comma-separated node IDs" }],
     presentation: { kind: "button", compact: { iconOnly: true }, medium: { label: "Delete" } },

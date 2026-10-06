@@ -21,8 +21,7 @@
  *     displacing it when the pane narrows.
  */
 
-import { CircleSlash, FlaskConical, Gauge, Play, ScrollText } from "lucide-react";
-import { ArrowRight, Loader2, RotateCcw, ShieldAlert, AlertTriangle, Check, ChevronDown, Lock, Plus, Trash2, X } from "@/components/icons/glyph-icons";
+import { ArrowRight, Loader2, RotateCcw, ShieldAlert, AlertTriangle, Check, ChevronDown, Lock, Plus, Trash2, X, CircleSlash, FlaskConical, Gauge, Play, ScrollText } from "@/components/icons/glyph-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBadge, statusToneFor } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

@@ -20,6 +20,15 @@ import {
  * settings, sharing, ManageBac and desktop-file effects ask first.
  */
 
+const COMMENT_ACTIONS = ["resolve", "reopen", "edit", "delete"] as const;
+type CommentArgs = { artifactId: string; commentId: string; action: (typeof COMMENT_ACTIONS)[number]; body?: string };
+const COMMENT_LABELS: Record<CommentArgs["action"], [string, string]> = {
+  resolve: ["Resolving a comment", "Resolved a comment"],
+  reopen: ["Reopening a comment", "Reopened a comment"],
+  edit: ["Editing a comment", "Edited a comment"],
+  delete: ["Deleting a comment", "Deleted a comment"],
+};
+
 type CommandTool<A> = {
   name: string;
   description: string;
@@ -561,21 +570,58 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "add_comment",
       description:
-        "Leave a visible, AI-attributed comment on a piece of work, for feedback the user asked for without changing the work. regionId is a block, slide or cell region from the content; omit it to comment on the whole item.",
+        "Leave a visible, AI-attributed comment on a piece of work, for feedback the user asked for without changing the work. regionId is a block, slide or cell region from the content; omit it to comment on the whole item. replyTo (a comment id from read_comments) answers that comment in its thread.",
       parameters: {
         type: "object",
-        properties: { artifactId: { type: "string" }, body: { type: "string" }, regionId: { type: "string" } },
+        properties: { artifactId: { type: "string" }, body: { type: "string" }, regionId: { type: "string" }, replyTo: { type: "string" } },
         required: ["artifactId", "body"],
         additionalProperties: false,
       },
       effect: "write",
       label: (args: { artifactId: string }) => `Commenting on ${titled(session, args.artifactId, "your work")}`,
       doneLabel: (args: { artifactId: string }) => `Commented on ${titled(session, args.artifactId, "your work")}`,
-      parse: (raw) => ({ artifactId: requireString(raw, "artifactId", 200), body: requireString(raw, "body"), regionId: optionalString(raw, "regionId", 240) }),
+      parse: (raw) => ({
+        artifactId: requireString(raw, "artifactId", 200),
+        body: requireString(raw, "body"),
+        regionId: optionalString(raw, "regionId", 240),
+        replyTo: optionalString(raw, "replyTo", 200),
+      }),
       command: (args) => ({
         command: "add_comment",
-        args: { artifactId: args.artifactId, body: args.body, anchor: { regionId: args.regionId ?? "work:root" } },
+        args: {
+          artifactId: args.artifactId,
+          body: args.body,
+          anchor: { regionId: args.regionId ?? "work:root" },
+          ...(args.replyTo ? { parentCommentId: args.replyTo } : {}),
+        },
       }),
+    }),
+    commandTool(session, {
+      name: "manage_comment",
+      description:
+        "Change a comment on a piece of work (ids from read_comments): resolve or reopen its thread, edit its text, or delete it. Only the comment's author can edit or delete it. Deleting removes the text for good, so the user is asked first.",
+      parameters: {
+        type: "object",
+        properties: {
+          artifactId: { type: "string" },
+          commentId: { type: "string" },
+          action: { type: "string", enum: [...COMMENT_ACTIONS] },
+          body: { type: "string", description: "The new text, for edit." },
+        },
+        required: ["artifactId", "commentId", "action"],
+        additionalProperties: false,
+      },
+      effect: (args: CommentArgs) => (args.action === "delete" ? "irreversible" : "write"),
+      category: (args: CommentArgs) => (args.action === "delete" ? "permanent_delete" : undefined),
+      label: (args: CommentArgs) => `${COMMENT_LABELS[args.action]?.[0] ?? "Changing a comment"} on ${titled(session, args.artifactId, "your work")}`,
+      doneLabel: (args: CommentArgs) => `${COMMENT_LABELS[args.action]?.[1] ?? "Changed a comment"} on ${titled(session, args.artifactId, "your work")}`,
+      question: (args: CommentArgs) => `Delete this comment on ${titled(session, args.artifactId, "this work")}? Its text can't be brought back.`,
+      parse: (raw): CommentArgs => {
+        const action = oneOf(raw, "action", COMMENT_ACTIONS);
+        const body = action === "edit" ? requireString(raw, "body") : undefined;
+        return { artifactId: requireString(raw, "artifactId", 200), commentId: requireString(raw, "commentId", 200), action, ...(body ? { body } : {}) };
+      },
+      command: (args) => ({ command: "manage_comment", args: { ...args } }),
     }),
     commandTool(session, {
       name: "open_in_spectra",

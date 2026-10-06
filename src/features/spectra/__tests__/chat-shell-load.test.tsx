@@ -219,6 +219,13 @@ vi.mock("../motion", () => ({
 }));
 
 beforeEach(() => {
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+  // Room for the header's commands, as on a desktop window.
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1200);
   mocks.searchParams = new URLSearchParams();
   mocks.getThreads.mockReset();
   mocks.getOverview.mockReset();
@@ -332,10 +339,10 @@ describe("ChatShell load states", () => {
 
   it("restores focus to the runs trigger after closing history", async () => {
     render(<ChatShell />);
-    const trigger = screen.getByRole("button", { name: "Open runs" });
+    const trigger = screen.getByRole("button", { name: "Runs" });
     trigger.focus();
     fireEvent.click(trigger);
-    expect(await screen.findByRole("heading", { name: "Runs & chats" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Runs and chats" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Close runs" }));
 
@@ -430,7 +437,7 @@ describe("ChatShell chat actions", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Chat name" }), {
       target: { value: "   " },
     });
-    const save = screen.getByRole("button", { name: "Save title" });
+    const save = screen.getByRole("button", { name: "Save name" });
     expect((save as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(save);
     expect(mocks.postSpectra).not.toHaveBeenCalled();
@@ -509,9 +516,9 @@ describe("ChatShell primary conversation hydration", () => {
     }
     const reads = mocks.getThread.mock.calls.length;
     for (let attempt = 0; attempt < 2; attempt++) {
-      fireEvent.click(screen.getByRole("button", { name: "Open runs" }));
+      fireEvent.click(screen.getByRole("button", { name: "Runs" }));
       fireEvent.click(await screen.findByRole("button", { name: /Saved conversation/ }));
-      expect(screen.queryByRole("heading", { name: "Runs & chats" })).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Runs and chats" })).toBeNull();
       expect(screen.getByText("Saved answer is available.")).toBeTruthy();
       expect(mocks.getThread).toHaveBeenCalledTimes(reads);
       expect(mocks.router.replace).not.toHaveBeenCalled();

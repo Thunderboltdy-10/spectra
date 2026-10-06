@@ -10,18 +10,18 @@ import {
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
-import { Activity, Archive, Building2, CircleGauge, Database, HardDrive, Inbox, LayoutGrid, Network, Sparkles, UsersRound, type LucideIcon } from "lucide-react";
-import { BookOpen, FileClock, KeyRound, MessageCircle, Save, Settings2, ShieldCheck, UserCheck, UserPlus, BarChart3, Bell, Bot, Check, ChevronDown, Folder, LockKeyhole, Mail, Plus, RefreshCw, School, Search, Send, Users } from "@/components/icons/glyph-icons";
+import { BookOpen, FileClock, KeyRound, MessageCircle, Save, Settings2, ShieldCheck, UserCheck, UserPlus, BarChart3, Bell, Bot, Check, ChevronDown, Folder, LockKeyhole, Mail, Plus, RefreshCw, School, Search, Send, Users, Activity, Archive, Building2, CircleGauge, Database, HardDrive, Inbox, LayoutGrid, Network, UsersRound, type GlyphIcon } from "@/components/icons/glyph-icons";
 import { toast } from "@/components/ui/toast";
-import { cn } from "@/lib/utils";
 import {
   getAdministration,
   mutateAdministration,
   type SchoolAdministrationOverview,
 } from "@/features/spectra/administration/api";
 import { metricDefinition } from "@/features/spectra/administration/metric-registry";
-import { AuxiliaryRail, AuxiliaryRailTrigger } from "@/features/spectra/components/auxiliary-rail";
-import { ProductPageHeader } from "@/features/spectra/components/product-page-header";
+import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
+import { PageBody, PageHeader } from "@/components/ui/page-header";
+import { LoadingRows } from "@/components/ui/page-state";
+import { SidePanel } from "@/components/ui/side-panel";
 import { ProductSectionNav } from "@/features/spectra/components/product-section-nav";
 import {
   AdminButton,
@@ -62,6 +62,8 @@ const MEMBER_STATUS_OPTIONS = [
   { value: "suspended", label: "Suspended" },
   { value: "ended", label: "Ended" },
 ] as const;
+
+const ADMIN_BAR_PLAN: readonly CollapseStep[] = [{ toMenu: "refresh" }];
 
 type Tab =
   | "overview"
@@ -187,11 +189,9 @@ function OverviewSurface({
     (point) =>
       Object.values(point.values).reduce((sum, value) => sum + value, 0) || 0,
   );
-  const [contextOpen, setContextOpen] = useState(true);
   return (
-    <div className={cn("grid min-w-0 gap-3", contextOpen && "xl:grid-cols-[minmax(0,1fr)_auto]")}>
+    <div className="min-w-0">
       <div className="min-w-0 space-y-3">
-        {!contextOpen ? <div className="flex justify-end"><AuxiliaryRailTrigger label="School context" onOpen={() => setContextOpen(true)} /></div> : null}
         <div className="grid gap-1 sm:grid-cols-2 2xl:grid-cols-4">
           <MetricCard
             icon={Users}
@@ -402,19 +402,29 @@ function OverviewSurface({
         <PrivacyNotice>{data.privacy}</PrivacyNotice>
       </div>
 
-      {contextOpen ? <AuxiliaryRail label="School context" onClose={() => setContextOpen(false)}>
-        <div className="space-y-7 p-4">
+    </div>
+  );
+}
+
+/** Usage, the ManageBac connection and shortcuts, beside the Overview. */
+function SchoolContext({
+  data,
+  onTab,
+}: {
+  data: SchoolAdministrationOverview;
+  onTab: (tab: Tab) => void;
+}) {
+  return (
+        <div className="space-y-7 px-1 pb-6 pt-2">
         <section>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="font-[var(--font-serif)] text-subhead font-medium">
-                Usage
-              </h2>
+              <h2 className="text-ui font-semibold">Usage</h2>
               <p className="mt-1 text-micro text-[var(--text-tertiary)]">
-                Privacy-safe meters for this school.
+                Totals for the school, never anyone&rsquo;s work.
               </p>
             </div>
-            <AdminButton onClick={() => onTab("usage")}>View usage</AdminButton>
+            <AdminButton tone="ghost" onClick={() => onTab("usage")}>View usage</AdminButton>
           </div>
           <div className="mt-4 space-y-2 text-micro">
             {(
@@ -456,7 +466,7 @@ function OverviewSurface({
         <section>
           <div className="flex items-center gap-2">
             <Database size={14} className="text-[var(--brand-primary)]" />
-            <h2 className="text-caption font-medium">ManageBac connection</h2>
+            <h2 className="text-ui font-semibold">ManageBac</h2>
           </div>
           <div className="mt-3">
             <StatusBadge
@@ -478,9 +488,7 @@ function OverviewSurface({
         </section>
 
         <section>
-          <h2 className="font-[var(--font-serif)] text-subhead font-medium">
-            School settings
-          </h2>
+          <h2 className="text-ui font-semibold">School settings</h2>
           <div className="mt-3 space-y-1">
             {(
               [
@@ -489,23 +497,21 @@ function OverviewSurface({
                 ["Security", "governance", ShieldCheck],
                 ["Integrations", "integrations", Network],
                 ["Data & privacy", "governance", LockKeyhole],
-              ] as Array<[string, Tab, LucideIcon]>
+              ] as Array<[string, Tab, GlyphIcon]>
             ).map(([label, tab, Icon]) => (
-              <button
-                type="button"
+              <AdminButton
+                tone="ghost"
                 key={String(label)}
                 onClick={() => onTab(tab as Tab)}
-                className="flex w-full items-center gap-2 rounded-control px-2 py-2 text-left text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                className="w-full justify-start"
               >
-                <Icon size={12} />
+                <Icon size={14} />
                 {label}
-              </button>
+              </AdminButton>
             ))}
           </div>
         </section>
         </div>
-      </AuxiliaryRail> : null}
-    </div>
   );
 }
 
@@ -612,14 +618,45 @@ export function SchoolAdminShell() {
     [operatorSessionId],
   );
 
-  if (loading && !overview)
-    return <LoadingPanel label="Opening school administration" />;
-  if (error && !overview)
-    return <ErrorPanel message={error} retry={() => void loadOverview()} />;
-  if (!overview) return null;
+  if (!overview)
+    return (
+      <main className="spectra-wave-y relative isolate min-h-0 flex-1 overflow-y-auto" data-spectra-app-surface="true">
+        <PageBody>
+          <PageHeader title="School admin" />
+          {loading ? (
+            <LoadingRows label="Opening school admin" count={6} className="mt-6" />
+          ) : error ? (
+            <div className="mt-6">
+              <ErrorPanel message={error} retry={() => void loadOverview()} />
+            </div>
+          ) : null}
+        </PageBody>
+      </main>
+    );
+
+  const commands: BarCommand[] = [
+    ...(overview.school.status !== "active"
+      ? [{
+          id: "status",
+          icon: "info",
+          label: `School ${overview.school.status}`,
+          pinned: true,
+          render: () => <StatusBadge tone="attention">{overview.school.status}</StatusBadge>,
+        } satisfies BarCommand]
+      : []),
+    {
+      id: "refresh",
+      icon: "retry",
+      label: loading ? "Refreshing…" : "Refresh",
+      labelPolicy: "never",
+      disabled: loading,
+      onSelect: () => setRefreshKey((value) => value + 1),
+    },
+  ];
 
   return (
-    <div className="spectra-wave-y spectra-admin-stage relative min-h-dvh pb-24">
+    <main className="spectra-wave-y relative isolate flex h-full min-h-0 flex-1" data-spectra-app-surface="true">
+      <div className="min-w-0 flex-1 overflow-y-auto">
       {overview.operatorSession ? (
         <div className="sticky top-0 z-chrome flex min-h-10 items-center justify-between gap-3 border-b border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--bg-elevated))] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-primary))] px-5 py-2 text-micro text-[var(--accent-cyan)]">
           <span className="flex items-center gap-2">
@@ -651,26 +688,21 @@ export function SchoolAdminShell() {
         </div>
       ) : null}
 
-      <div className="w-full px-4 py-5 sm:px-6 lg:px-8 xl:px-10">
-        <ProductPageHeader
-          className="mb-5"
-          title="School administration"
-          description={`${overview.school.name} · operational tools without private content access`}
-          actions={
-            <>
-            {overview.school.status !== "active" ? (
-              <StatusBadge tone="attention">{overview.school.status}</StatusBadge>
-            ) : null}
-            <AdminButton className="min-h-8" onClick={() => setRefreshKey((value) => value + 1)}><RefreshCw size={12} />Refresh</AdminButton>
-            </>
-          }
+      <PageBody>
+        <PageHeader
+          title="School admin"
+          commands={commands}
+          plan={ADMIN_BAR_PLAN}
+          barLabel="School admin commands"
+          description={`${overview.school.name}. Run the school from here without opening anyone's work.`}
         />
 
         <ProductSectionNav
-          label="School administration"
+          label="School admin sections"
           items={tabs}
           active={tab}
           onChange={setTab}
+          className="mb-4 mt-4"
         />
 
         {tab === "overview" ? (
@@ -686,9 +718,15 @@ export function SchoolAdminShell() {
             onRefresh={() => setRefreshKey((value) => value + 1)}
           />
         )}
+      </PageBody>
       </div>
 
-    </div>
+      {tab === "overview" ? (
+        <SidePanel id="admin.context" title="School context" icon="school" stageMin={720} defaultWidth={340}>
+          <SchoolContext data={overview} onTab={setTab} />
+        </SidePanel>
+      ) : null}
+    </main>
   );
 }
 
@@ -1644,8 +1682,8 @@ function UsageSurface({
   const categories = [
     ["Storage", "storage_bytes", HardDrive],
     ["Bandwidth", "bandwidth_bytes", Network],
-    ["Model input", "model_input_tokens", Sparkles],
-    ["Model output", "model_output_tokens", Sparkles],
+    ["Model input", "model_input_tokens", Activity],
+    ["Model output", "model_output_tokens", Activity],
     ["Rendering", "render_milliseconds", CircleGauge],
     ["Collaboration", "collaboration_bytes", UsersRound],
   ] as const;
@@ -2024,7 +2062,7 @@ function IntegrationsSurface({
 function GovernanceSurface() {
   const freedoms = [
     {
-      icon: Sparkles,
+      icon: Activity,
       title: "Full AI access",
       detail:
         "Models and adaptive AI operations are available to every ordinary user.",

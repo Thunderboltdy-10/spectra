@@ -47,6 +47,14 @@ afterEach(() => {
 });
 
 describe("public shared workspace", () => {
+  it("names the work by its type and says plainly when a shared space is empty", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(answer({ ...workspaceProjection, artifacts: [] })));
+    render(<PublicShareShell />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Biology HL" })).toBeTruthy();
+    expect(screen.getByText("Nothing shared here yet")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/blueprint|public workspace view/i);
+  });
+
   it("opens a piece of work from the shared workspace and returns to the list", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => answer(workspaceProjection)));
     render(<PublicShareShell />);

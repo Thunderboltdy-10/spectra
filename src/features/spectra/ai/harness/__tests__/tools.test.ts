@@ -260,12 +260,53 @@ describe("harness tools", () => {
     ["managebac", { action: "set_sync_mode", kind: "grades", mode: "follow", classId: "c9" }, { command: "set_school_sync_mode", args: { kind: "grades", mode: null, providerClassId: "c9" } }],
     ["managebac", { action: "release_class_workspaces", classIds: ["r1"], retention: "keep_in_spectra" }, { command: "manage_class_workspaces", args: { action: "release", recordIds: ["r1"], retention: "keep_in_spectra" } }],
     ["open_in_spectra", { destination: "analytics" }, { command: "navigate_spectra", args: { destination: "analytics" } }],
+    ["manage_comment", { artifactId: "wx1", commentId: "c1", action: "resolve" }, { command: "manage_comment", args: { artifactId: "wx1", commentId: "c1", action: "resolve" } }],
+    ["add_comment", { artifactId: "wx1", body: "Agreed.", replyTo: "c1" }, { command: "add_comment", args: { artifactId: "wx1", body: "Agreed.", parentCommentId: "c1" } }],
   ] as const)("%s sends the application command for %j", async (name, raw, sent) => {
     const { tools, backend } = setup();
     const tool = tools.find((entry) => entry.name === name)!;
     const args = tool.parse!({ ...raw });
     await tool.execute(args, { signal: new AbortController().signal, runId: "r", toolCallId: "t", approved: true });
     expect(backend.commands.at(-1)).toMatchObject(sent);
+  });
+
+  it("reads a work's comment threads with the ids manage_comment takes, replies under their comment", async () => {
+    const backend = new MemoryBackend({
+      artifacts: [{ id: "doc-1", type: "document", title: "Essay", content: authorNew("document", { markdown: "Text." }, { timeZone: "UTC" }).content }],
+      comments: {
+        "doc-1": [
+          { id: "c1", author: "Ana", body: "Is this source primary?", status: "open", regionId: "block:p1", excerpt: "The evidence", createdAt: Date.UTC(2026, 9, 5, 9) },
+          { id: "c2", parentId: "c1", author: "Pablo", body: "Yes, a diary.", status: "open", regionId: "block:p1", createdAt: Date.UTC(2026, 9, 5, 10) },
+          { id: "c3", author: "Ana", body: "Done.", status: "resolved", regionId: "work:root", createdAt: Date.UTC(2026, 9, 5, 11) },
+        ],
+      },
+    });
+    const { tools, session } = setup(backend);
+    session.titles.set("doc-1", { title: "Essay", type: "document" });
+    const tool = tools.find((entry) => entry.name === "read_comments")!;
+    const signal = new AbortController().signal;
+    const open = await tool.execute(tool.parse!({ artifactId: "doc-1" }), { signal, runId: "r", toolCallId: "t" });
+    expect(open.content).toContain("*Essay* has 1 comment thread (1 open)");
+    expect(open.content).toContain('- Comment c1 by Ana (open, on "The evidence" (region block:p1)), 2026-10-05 09:00 UTC: Is this source primary?');
+    expect(open.content).toContain("  - Reply c2 by Pablo, 2026-10-05 10:00 UTC: Yes, a diary.");
+    expect(open.content).not.toContain("c3");
+    const all = await tool.execute(tool.parse!({ artifactId: "doc-1", includeResolved: true }), { signal, runId: "r", toolCallId: "t" });
+    expect(all.content).toContain("Comment c3 by Ana (resolved, on the whole work)");
+    const missing = await tool.execute(tool.parse!({ artifactId: "nope" }), { signal, runId: "r", toolCallId: "t" });
+    expect(missing.ok).toBe(false);
+  });
+
+  it("asks before deleting a comment, and edits only with new text", () => {
+    const { tools } = setup();
+    const manage = tools.find((entry) => entry.name === "manage_comment")!;
+    const effect = (raw: Record<string, unknown>) => {
+      const args = manage.parse!(raw);
+      return typeof manage.effect === "function" ? manage.effect(args) : manage.effect;
+    };
+    expect(effect({ artifactId: "wx1", commentId: "c1", action: "delete" })).toBe("irreversible");
+    expect(manage.category?.(manage.parse!({ artifactId: "wx1", commentId: "c1", action: "delete" }))).toBe("permanent_delete");
+    expect(effect({ artifactId: "wx1", commentId: "c1", action: "resolve" })).toBe("write");
+    expect(() => manage.parse!({ artifactId: "wx1", commentId: "c1", action: "edit" })).toThrow(/body/);
   });
 
   it("refuses the reach commands' malformed requests with a fix the model can act on", () => {

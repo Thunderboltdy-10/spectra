@@ -1,7 +1,6 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { Sparkles } from "lucide-react";
 import { BookOpen, Files, Search, X } from "@/components/icons/glyph-icons";
 import { useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -276,7 +275,7 @@ export function GlobalSearch({
             ) : null}
             {!ready ? (
               <div className="px-3 py-10 text-center">
-                <Sparkles className="mx-auto h-5 w-5 text-[var(--text-tertiary)]" />
+                <Search className="mx-auto h-5 w-5 text-[var(--text-tertiary)]" />
                 <p className="mt-3 text-caption text-[var(--text-secondary)]">
                   Search across your Spectra workspace.
                 </p>

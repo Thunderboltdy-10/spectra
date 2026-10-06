@@ -9,13 +9,12 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { ArrowDown, CircleDot, GitCompareArrows, Undo2, Wrench } from "lucide-react";
 import { useWritingFront } from "../life/use-life";
-import { Code2, Loader2, ShieldCheck, AlertCircle, Bot, Check, ChevronDown, ExternalLink, FileText, FolderPlus, MessageSquare } from "@/components/icons/glyph-icons";
+import { Code2, Loader2, ShieldCheck, AlertCircle, Bot, Check, ChevronDown, ExternalLink, FileText, FolderPlus, MessageSquare, ArrowDown, CircleDot, GitCompareArrows, Undo2, Wrench } from "@/components/icons/glyph-icons";
 import { toast } from "@/components/ui/toast";
 import { SpectraMark } from "@/components/spectra-mark";
 import { PrismLoader } from "@/components/spectra-prism-optic";
-import { SpectraRichContent } from "./spectra-rich-content";
+import { SpectraRichContent, type CitationSource } from "./spectra-rich-content";
 import { useStreamingReveal } from "../runs/streaming/use-streaming-reveal";
 import { spectraBus } from "../events";
 import { cn } from "@/lib/utils";
@@ -210,6 +209,21 @@ function messageAttachments(message: SpectraThreadDetail["messages"][number]) {
           typeof (row as { name?: unknown }).name === "string",
       )
     : [];
+}
+
+const NO_SOURCES: readonly CitationSource[] = [];
+
+/** The sources a saved reply cites: each opens where it lives. */
+function messageSources(message: SpectraThreadDetail["messages"][number]): readonly CitationSource[] {
+  const rows = message.metadata?.sources;
+  if (!Array.isArray(rows) || !rows.length) return NO_SOURCES;
+  return rows.filter(
+    (row): row is CitationSource =>
+      Boolean(row) &&
+      typeof row === "object" &&
+      typeof (row as { id?: unknown }).id === "string" &&
+      (typeof (row as { workId?: unknown }).workId === "string" || typeof (row as { url?: unknown }).url === "string"),
+  );
 }
 
 export type ConversationBatchSelection = {
@@ -1574,10 +1588,12 @@ function LiveContentReveal({
   content,
   streaming,
   compact,
+  sources,
 }: {
   content: string;
   streaming: boolean;
   compact?: boolean;
+  sources?: readonly CitationSource[];
 }) {
   const { visibleText, active } = useStreamingReveal(content, {
     profile: "conversation",
@@ -1589,6 +1605,7 @@ function LiveContentReveal({
     <div ref={frontRef} className={active ? "spectra-stream-active" : undefined}>
       <SpectraRichContent
         content={visibleText}
+        sources={sources}
         className={cn(
           "text-body leading-7 text-[var(--text-primary)]",
           !compact && "sm:text-subhead",
@@ -1948,10 +1965,11 @@ export function ConversationSurface({
           {loading ? (
             <div className="space-y-8 py-10" aria-label="Loading conversation">
               <div data-life-ghost className="ml-auto h-16 w-[58%] animate-pulse rounded-surface bg-[var(--bg-secondary)]" />
-              <div className="space-y-3">
-                <div data-life-ghost className="h-3 w-24 animate-pulse rounded bg-[var(--bg-secondary)]" />
-                <div data-life-ghost className="h-3 w-full animate-pulse rounded bg-[var(--bg-secondary)]" />
-                <div data-life-ghost className="h-3 w-[72%] animate-pulse rounded bg-[var(--bg-secondary)]" />
+              {/* One ghost for the reply: its lines are bars of the same figure, so they settle as lines together. */}
+              <div data-life-ghost className="space-y-3">
+                <div data-life-ghost-bar className="h-3 w-24 animate-pulse rounded bg-[var(--bg-secondary)]" />
+                <div data-life-ghost-bar className="h-3 w-full animate-pulse rounded bg-[var(--bg-secondary)]" />
+                <div data-life-ghost-bar className="h-3 w-[72%] animate-pulse rounded bg-[var(--bg-secondary)]" />
               </div>
             </div>
           ) : null}
@@ -2090,6 +2108,7 @@ export function ConversationSurface({
                       ) : null}
                       <SpectraRichContent
                         content={message.content}
+                        sources={messageSources(message)}
                         className={cn(
                           "text-body leading-7 text-[var(--text-primary)]",
                           !compact && "sm:text-subhead",
@@ -2300,6 +2319,7 @@ export function ConversationSurface({
                         content={liveExchange.content}
                         streaming={liveExchange.status === "streaming"}
                         compact={compact}
+                        sources={liveExchange.sources}
                       />
                     ) : null}
                     <HarnessWidgets widgets={liveExchange.widgets} threadId={observedThreadId} onOpenArtifact={onOpenArtifact} />

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import { api } from "./_generated/api";
+import { makeFunctionReference } from "convex/server";
 
 const modules = import.meta.glob("./**/*.ts");
 const identity = {
@@ -152,5 +153,47 @@ describe("artifact comment AI attribution", () => {
     });
     expect(String(comments[0]?._id)).toBe(String(commentId.commentId));
     expect(comments[0]?.author).toMatchObject({ name: "Pablo Example", kind: "human" });
+  });
+});
+
+describe("Spectra managing comments", () => {
+  it("resolves, reopens, edits and deletes a comment through the same mutations as the comment panel", async () => {
+    const t = setupTest();
+    const seeded = await seedCommentTarget(t);
+    const user = t.withIdentity(identity);
+    const { commentId } = await user.mutation(api.artifactComments.create, {
+      artifactId: seeded.artifactId,
+      body: "Is this source primary?",
+      anchor: { regionId: "block:claim-2", fallbackExcerpt: "The evidence" },
+      mentionedAccountIds: [],
+    });
+    const execute = makeFunctionReference<"mutation">("spectraApplicationWrites:execute");
+    const manage = async (args: Record<string, unknown>) => {
+      const input = { artifactId: seeded.artifactId, commentId, ...args };
+      const operationId = await t.run((ctx) =>
+        ctx.db.insert("spectraOperations", {
+          runId: seeded.runId,
+          executionId: "exec-comment-1",
+          actorType: "ai",
+          type: "app.command",
+          status: "executing",
+          requiresConfirmation: false,
+          input: { command: "manage_comment", args: input },
+          affected: [],
+          createdAt: Date.now(),
+        }),
+      );
+      return user.mutation(execute, { runId: seeded.runId, executionId: "exec-comment-1", operationId, expectedCommand: "manage_comment", expectedArgs: input });
+    };
+    const read = () => t.run((ctx) => ctx.db.get(commentId));
+
+    await manage({ action: "resolve" });
+    expect((await read())?.status).toBe("resolved");
+    await manage({ action: "reopen" });
+    expect((await read())?.status).toBe("open");
+    await manage({ action: "edit", body: "Is this a primary source?" });
+    expect((await read())?.body).toBe("Is this a primary source?");
+    await manage({ action: "delete" });
+    expect((await read())?.status).toBe("deleted");
   });
 });

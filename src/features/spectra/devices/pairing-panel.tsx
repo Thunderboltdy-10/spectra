@@ -1,27 +1,57 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
+import { life } from "../life/life";
+import { STATUS_COLOURS } from "../life/prism";
+import { useLifeDeparture, useLifeEntrance, useLifeGlow } from "../life/use-life";
 import type { PairingState } from "./pairing";
+
+const PANEL_BARS = "p, [data-devices-code]";
 
 /*
  * Connecting this computer, one step at a time: look for Bridge, offer the
  * download with one sentence and wait for it, then show the code Bridge asks
  * the user to confirm. It continues by itself; the user only installs and
  * confirms.
+ *
+ * Its life (LIFE.md): the panel forms from the Connect press, light breathes
+ * round it while it waits for Bridge, each step lands with a pulse (red when
+ * it went wrong), and once paired it parts as the computer's row forms.
  */
-export function PairingPanel({
+export function PairingPanel(props: { state: PairingState; onCancel: () => void; onRetry: () => void }) {
+  if (props.state.phase === "idle" || props.state.phase === "paired") return null;
+  return <PairingCard {...props} state={props.state} />;
+}
+
+type ShownState = Exclude<PairingState, { phase: "idle" } | { phase: "paired" }>;
+
+function PairingCard({
   state,
   onCancel,
   onRetry,
 }: {
-  state: PairingState;
+  state: ShownState;
   onCancel: () => void;
   onRetry: () => void;
 }) {
-  if (state.phase === "idle" || state.phase === "paired") return null;
+  const ref = useRef<HTMLDivElement>(null);
+  const waiting = state.phase === "checking" || state.phase === "requesting" || state.phase === "download";
+  useLifeEntrance(ref, { bars: PANEL_BARS });
+  useLifeDeparture(ref, true, { bars: PANEL_BARS });
+  useLifeGlow(ref, waiting, "spectrum", 0.5);
+  const phase = useRef(state.phase);
+  useEffect(() => {
+    if (phase.current === state.phase) return;
+    phase.current = state.phase;
+    const r = ref.current?.getBoundingClientRect();
+    if (!r?.width) return;
+    life.pulse(r.left + r.width / 2, r.top + r.height / 2, 0.6, state.phase === "failed" ? STATUS_COLOURS.problem : "spectrum");
+  }, [state.phase]);
   return (
     <div
+      ref={ref}
       data-devices-pairing={state.phase}
       role="status"
       aria-live="polite"

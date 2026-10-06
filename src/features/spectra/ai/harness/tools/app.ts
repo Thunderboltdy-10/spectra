@@ -157,7 +157,7 @@ function localTime(raw: Record<string, unknown>, key: string, required: boolean)
 
 const CALENDAR_ACTIONS = ["add_event", "schedule_task", "move_block", "resize_block", "complete_block", "remove_event"] as const;
 const LIBRARY_ACTIONS = ["create_folder", "create_workspace", "rename", "move", "link", "pin", "unpin"] as const;
-const MANAGEBAC_ACTIONS = ["sync", "select_classes", "set_sync_mode", "create_class_workspaces", "release_class_workspaces"] as const;
+const MANAGEBAC_ACTIONS = ["sync", "select_classes", "set_sync_mode", "create_class_workspaces", "release_class_workspaces", "import_resource"] as const;
 type ManageBacAction = (typeof MANAGEBAC_ACTIONS)[number];
 const MANAGEBAC_LABELS: Record<ManageBacAction, [string, string]> = {
   sync: ["Syncing ManageBac", "Synced ManageBac"],
@@ -165,6 +165,7 @@ const MANAGEBAC_LABELS: Record<ManageBacAction, [string, string]> = {
   set_sync_mode: ["Changing what syncs from school", "Changed what syncs from school"],
   create_class_workspaces: ["Making class workspaces", "Made class workspaces"],
   release_class_workspaces: ["Releasing class workspaces", "Released class workspaces"],
+  import_resource: ["Copying a class resource into your Library", "Copied a class resource into your Library"],
 };
 
 /** The places open_in_spectra can show; the app's follow navigator handles each one. */
@@ -532,7 +533,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "managebac",
       description:
-        "Act on the user's ManageBac connection: sync {purpose: upcoming_deadlines|class_resources|timetable|classes|past_tasks|grades|cas} refreshes school records; select_classes {classIds, expectedRevision?} sets which classes sync. set_sync_mode {kind, mode: auto|manual|off} sets whether a kind of school record syncs automatically, only when asked, or not at all; with classId (as read_school_data names it) it sets one class's own choice, and mode follow lets that class follow the kind's mode again. create_class_workspaces {classIds} makes a workspace for each class; release_class_workspaces {classIds, retention?: keep_in_spectra|archive_projection} lets them go. The user approves unless they allowed ManageBac changes.",
+        "Act on the user's ManageBac connection: sync {purpose: upcoming_deadlines|class_resources|timetable|classes|past_tasks|grades|cas} refreshes school records; select_classes {classIds, expectedRevision?} sets which classes sync. set_sync_mode {kind, mode: auto|manual|off} sets whether a kind of school record syncs automatically, only when asked, or not at all; with classId (as read_school_data names it) it sets one class's own choice, and mode follow lets that class follow the kind's mode again. create_class_workspaces {classIds} makes a workspace for each class; release_class_workspaces {classIds, retention?: keep_in_spectra|archive_projection} lets them go. import_resource {resourceId} copies a class resource into the user's Library, as the class shelf's Import does: resourceId is the id of a record read_school_data {purpose: class_resources} returned, and Office files become editable works. When the resource changed since an earlier import, the result says so; refresh true then makes a new copy beside the earlier one. The user approves unless they allowed ManageBac changes.",
       parameters: {
         type: "object",
         properties: {
@@ -544,6 +545,8 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
           mode: { type: "string", enum: [...SCHOOL_SYNC_MODES, "follow"] },
           classId: { type: "string" },
           retention: { type: "string", enum: ["keep_in_spectra", "archive_projection"] },
+          resourceId: { type: "string" },
+          refresh: { type: "boolean" },
         },
         required: ["action"],
         additionalProperties: false,
@@ -551,10 +554,14 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       effect: "irreversible",
       label: (args: { action: string }) => MANAGEBAC_LABELS[args.action as ManageBacAction]?.[0] ?? "Updating ManageBac",
       doneLabel: (args: { action: string }) => MANAGEBAC_LABELS[args.action as ManageBacAction]?.[1] ?? "Updated ManageBac",
-      question: (args: { action: string; classIds?: string[]; kind?: string; mode?: string; classId?: string }) => {
+      question: (args: { action: string; classIds?: string[]; kind?: string; mode?: string; classId?: string; refresh?: boolean }) => {
         const classes = plural(args.classIds?.length ?? 0, "class");
         const kind = String(args.kind ?? "").replace(/_/g, " ");
         if (args.action === "sync") return "Refresh your school records from ManageBac now?";
+        if (args.action === "import_resource")
+          return args.refresh
+            ? "Copy the newer version of this class resource into your Library?"
+            : "Copy this class resource from ManageBac into your Library?";
         if (args.action === "set_sync_mode")
           return args.mode === "follow"
             ? `Let this class follow your choice for ${kind} again?`
@@ -574,6 +581,8 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
           return { action, kind: oneOf(raw, "kind", SCHOOL_SYNC_KINDS), mode, ...(classId ? { classId } : {}) };
         }
         if (action === "create_class_workspaces") return { action, classIds: stringList(raw, "classIds") };
+        if (action === "import_resource")
+          return { action, resourceId: requireString(raw, "resourceId", 200), ...(raw.refresh === true ? { refresh: true } : {}) };
         if (action === "release_class_workspaces") {
           const retention = raw.retention === undefined ? undefined : oneOf(raw, "retention", ["keep_in_spectra", "archive_projection"] as const);
           return { action, classIds: stringList(raw, "classIds"), ...(retention ? { retention } : {}) };
@@ -583,6 +592,8 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       },
       command: (args: Record<string, unknown>) => {
         if (args.action === "sync") return { command: "trigger_managebac_sync", args: { purpose: args.purpose } };
+        if (args.action === "import_resource")
+          return { command: "import_managebac_resource", args: { sourceRecordId: args.resourceId, ...(args.refresh ? { refresh: true } : {}) } };
         if (args.action === "set_sync_mode")
           return {
             command: "set_school_sync_mode",

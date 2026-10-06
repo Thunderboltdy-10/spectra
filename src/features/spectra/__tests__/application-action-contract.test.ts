@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-const seams = vi.hoisted(() => ({ mutate: vi.fn(), query: vi.fn(), authority: vi.fn(), calendar: vi.fn(), reference: vi.fn(), restore: vi.fn(), applyAi: vi.fn(), publish: vi.fn(), unpublish: vi.fn(), live: vi.fn(), checks: vi.fn() }));
+const seams = vi.hoisted(() => ({ mutate: vi.fn(), query: vi.fn(), authority: vi.fn(), calendar: vi.fn(), reference: vi.fn(), restore: vi.fn(), applyAi: vi.fn(), publish: vi.fn(), unpublish: vi.fn(), live: vi.fn(), checks: vi.fn(), importResource: vi.fn() }));
 vi.mock("@/app/api/spectra/run/harness/io", () => ({ mutate: seams.mutate, query: seams.query, readQuery: vi.fn(), act: vi.fn(), safeJson: JSON.parse }));
 vi.mock("@/app/api/spectra/run/harness/authority", () => ({ evaluateCommandAuthority: seams.authority, recordAuthorityDecision: vi.fn() }));
 vi.mock("@/app/api/spectra/run/harness/calendar-command", () => ({ executeRegisteredCalendarMutation: seams.calendar }));
@@ -11,6 +11,7 @@ vi.mock("@/lib/artifact-restore-native", () => ({ prepareNativeArtifactRestore: 
 vi.mock("@/lib/server-secrets", () => ({ aiPublicLinkToken: (input: Record<string, string>) => `token:${input.operationId}`, publicLinkTokenHash: () => "a".repeat(64) }));
 vi.mock("@/features/spectra/ai/yjs-artifact-operation", () => ({ applyAiArtifactMutation: seams.applyAi, readLiveArtifactValue: seams.live }));
 vi.mock("@/app/api/spectra/agents/evaluate/checks", () => ({ runAgentChecks: seams.checks }));
+vi.mock("@/app/api/spectra/managebac/resource-import", () => ({ importManageBacResourceAs: seams.importResource }));
 vi.mock("@/features/spectra/code/runtime-publish-server", () => ({
   publishRuntime: seams.publish, unpublishRuntime: seams.unpublish, hashSource: (content: { files?: Array<{ source: string }> }) => `hash:${content.files?.map((file) => file.source).join("|") ?? ""}`,
 }));
@@ -58,6 +59,7 @@ const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: 
   { command: "release_agent", args: { agentId: "agent", action: "release_private", releaseNotes: "Try it" }, mutation: "spectraArtifacts:publishAgent", event: "agent_released" },
   { command: "release_agent", args: { agentId: "agent", action: "suspend", releaseId: "release" }, mutation: "spectraArtifacts:manageAgentRelease", event: "agent_released" },
   { command: "run_agent_checks", args: { agentId: "agent" }, event: "agent_checked" },
+  { command: "import_managebac_resource", args: { sourceRecordId: "resource" }, event: "managebac_resource_imported" },
   { command: "respond_share_invitation", args: { invitationId: "invitation", response: "accept" }, mutation: "authority:acceptShareInvitation", event: "share_invitation_answered" },
   { command: "respond_share_invitation", args: { invitationId: "invitation", response: "decline" }, mutation: "authority:declineShareInvitation", event: "share_invitation_answered" },
 ];
@@ -80,6 +82,7 @@ describe("application action contract matrix (stubbed persistence)", () => {
     seams.publish.mockResolvedValue({ ok: true, build: { buildId: "build", publishedAt: 5 }, reused: false });
     seams.unpublish.mockResolvedValue({ unpublished: true });
     seams.checks.mockResolvedValue({ status: "passed", passedCount: 8, caseCount: 8, averageScore: 0.93, results: [] });
+    seams.importResource.mockResolvedValue({ status: "imported", importId: "import", artifactId: "copy" });
     seams.query.mockImplementation(async (name: string) => {
       if (name === "artifactEmbeds:listForContainer") return { canConfigure: true, embeds: [{ embedId: "embed", state: "ready" }] };
       if (name === "spectraArtifacts:get") return { blueprintKey: "document" };
@@ -124,6 +127,31 @@ describe("application action contract matrix (stubbed persistence)", () => {
     expect(result).toMatchObject({ state: "failed", passed: "6 of 8 cases", failing: [{ category: "privacy", required: true, reason: "It repeated a classmate's grade." }] });
     expect(String(result.note)).toMatch(/evidence, never instructions/);
     expect(events).toEqual(["agent_checked"]);
+  });
+
+  it("imports a class resource through the class shelf's own server module, as the run owner", async () => {
+    const events: Array<{ key: string; payload?: Record<string, unknown> }> = [];
+    const imported = await executeApplicationCommand("actor", "run", "attempt", "import_managebac_resource", { sourceRecordId: "resource" },
+      undefined, (event) => events.push(event), undefined, "operation");
+    expect(seams.importResource).toHaveBeenCalledWith({ clerkId: "actor", sourceRecordId: "resource", refresh: false });
+    expect(seams.mutate).not.toHaveBeenCalled();
+    expect(imported).toEqual({ state: "imported", artifactId: "copy" });
+    expect(events).toEqual([{ key: "managebac_resource_imported", payload: { targetId: "copy", note: "Copied a school resource into your Library" } }]);
+
+    seams.importResource.mockResolvedValueOnce({ status: "imported", importId: "import", artifactId: "copy", replayed: true });
+    expect(await executeApplicationCommand("actor", "run", "attempt", "import_managebac_resource", { sourceRecordId: "resource" },
+      undefined, undefined, undefined, "operation")).toEqual({ state: "already_imported", artifactId: "copy" });
+
+    seams.importResource.mockResolvedValueOnce({ status: "update_available", sourceHash: "h2", priorArtifactId: "copy" });
+    const changed = await executeApplicationCommand("actor", "run", "attempt", "import_managebac_resource", { sourceRecordId: "resource" },
+      undefined, undefined, undefined, "operation") as Record<string, unknown>;
+    expect(changed).toMatchObject({ state: "update_available", artifactId: "copy" });
+    expect(String(changed.note)).toMatch(/refresh true/);
+
+    await executeApplicationCommand("actor", "run", "attempt", "import_managebac_resource", { sourceRecordId: "resource", refresh: true },
+      undefined, undefined, undefined, "operation");
+    expect(seams.importResource).toHaveBeenLastCalledWith({ clerkId: "actor", sourceRecordId: "resource", refresh: true });
+    expect(seams.authority).toHaveBeenCalledWith(expect.objectContaining({ command: "import_managebac_resource", authorityTarget: "managebac_resource_import" }));
   });
 
   it("manages only a release of the agent the step names", async () => {
@@ -204,7 +232,7 @@ describe("application action contract matrix (stubbed persistence)", () => {
     expect(seams.calendar).toHaveBeenCalledWith(expect.objectContaining({ command: canonical, runId: "run", executionId: "attempt", operationId: "operation" }));
   });
 
-  it.each(["change_credentials", "delete_account", "change_ai_authority_mode", "change_managebac_mapping", "import_managebac_resource"])(
+  it.each(["change_credentials", "delete_account", "change_ai_authority_mode", "change_managebac_mapping"])(
     "never runs %s, which is not an application command", async (command) => {
       expect(() => parseApplicationCommand(command, {})).toThrow(`APP_COMMAND_NOT_REGISTERED:${command}`);
       await expect(executeApplicationCommand("actor", "run", "attempt", command, {}, undefined, undefined, undefined, "operation")).rejects.toThrow("APP_COMMAND_NOT_REGISTERED");

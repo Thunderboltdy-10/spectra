@@ -203,6 +203,17 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     });
     return;
   }
+  if (event.key === "managebac_resource_imported") {
+    // The copy is a work in the Library: following Spectra opens it.
+    const artifactId = event.payload?.targetId;
+    if (typeof artifactId !== "string" || !artifactId) return;
+    noteAiLocation({
+      ...(event.runId ? { actorId: event.runId } : {}),
+      artifactId,
+      note: typeof event.payload?.note === "string" ? event.payload.note : "Copied a school resource into your Library",
+    });
+    return;
+  }
   if (event.key === "managebac_classes_selected") {
     noteAiSurface({
       ...(event.runId ? { actorId: event.runId } : {}),

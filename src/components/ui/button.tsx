@@ -24,12 +24,14 @@ import { cn } from "@/lib/utils";
 const buttonVariants = cva(
   [
     "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-control font-semibold",
-    "outline-none transition-[color,background-color,border-color,opacity,transform] duration-[var(--motion-fast)] ease-[var(--ease-standard)]",
+    "outline-none transition-[color,background-color,border-color,opacity,transform]",
+    // A press compresses in 90 ms and springs back out (MOTION.md, Controls); hover raises tone, not size.
+    "[transition-timing-function:var(--ease-standard),var(--ease-standard),var(--ease-standard),var(--ease-standard),var(--ease-spring)] [transition-duration:var(--motion-fast),var(--motion-fast),var(--motion-fast),var(--motion-fast),var(--motion-spring)]",
+    "active:scale-[0.97] active:[transition-duration:90ms]",
     "focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)]",
     // `disabled:pointer-events-none` below means hover can never fire while
-    // disabled, so the lift needs no `enabled:` guard (which would also skip
+    // disabled, so the press needs no `enabled:` guard (which would also skip
     // anchors rendered through `asChild`).
-    "hover:-translate-y-px active:translate-y-0",
     "disabled:pointer-events-none disabled:cursor-not-allowed",
   ].join(" "),
   {

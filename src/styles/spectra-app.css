@@ -3455,6 +3455,9 @@ body {
   --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  /* A spring with a slight overshoot (MOTION.md, Micro): presses rebounding, toggles settling. */
+  --ease-spring: linear(0, 0.035 2.1%, 0.141 4.4%, 0.723 12.9%, 0.938 16.7%, 1.017 19.4%, 1.067 22%, 1.084 25%, 1.077 28%, 1.04 34%, 1.006 42%, 0.996 50%, 0.998 62%, 1);
+  --motion-spring: 420ms;
 
   --gradient-brand: linear-gradient(
     132deg,
@@ -3581,6 +3584,7 @@ body {
 :root[data-spectra-motion="none"] {
   --motion-instant: 0ms;
   --motion-fast: 0ms;
+  --motion-spring: 0ms;
   --motion-base: 0ms;
   --motion-slow: 0ms;
 }
@@ -3604,6 +3608,7 @@ html[data-spectra-motion="none"] *::after {
   :root {
     --motion-instant: 0ms;
     --motion-fast: 0ms;
+  --motion-spring: 0ms;
     --motion-base: 0ms;
     --motion-slow: 0ms;
   }

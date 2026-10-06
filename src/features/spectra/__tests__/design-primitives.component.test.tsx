@@ -149,11 +149,12 @@ describe("Input", () => {
 });
 
 describe("Button", () => {
-  it("keeps one hover/focus treatment across variants", () => {
+  it("keeps one press/focus treatment across variants: a press compresses, hover changes tone only", () => {
     render(<Button variant="primary">Create</Button>);
     const className = screen.getByRole("button", { name: "Create" }).className;
     expect(className).toContain("focus-visible:ring-2");
-    expect(className).toContain("hover:-translate-y-px");
+    expect(className).toContain("active:scale-[0.97]");
+    expect(className).not.toContain("hover:-translate-y-px");
     expect(className.split(/\s+/)).toContain("[color:var(--bg-primary)]");
     expect(className.split(/\s+/)).toContain("text-caption");
   });

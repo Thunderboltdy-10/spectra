@@ -12,6 +12,7 @@ import { planToIcs } from "../plan/projections";
 import { formatMinutesBefore, REMINDER_MINUTE_OPTIONS } from "../reminders/minutes-before";
 import { useStudioContract } from "./artifact-studio-shell";
 import { ArtifactWorkbar, contentHistoryBindings } from "./artifact-workbar";
+import { SpectraStoredText } from "./spectra-rich-content";
 
 /*
  * A planner task (EDITORS.md, "Planner task"): one thing by default. A title,
@@ -346,7 +347,7 @@ export function TaskStudio({
                 : patch({ description: event.target.value })
             }
           />
-          {fromSchool && task.description ? <p className="spectra-task-school-notes">{task.description}</p> : null}
+          {fromSchool && task.description ? <SpectraStoredText value={task.description} className="spectra-task-school-notes" /> : null}
 
           {steps.length ? (
             <section className="spectra-task-steps" aria-label="Steps">

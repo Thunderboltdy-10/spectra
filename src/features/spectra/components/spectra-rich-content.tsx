@@ -7,6 +7,8 @@ import { EquationPreview } from "../editor/equation-preview";
 import { spectraBus } from "../events";
 import {
   IncrementalRichContentParser,
+  richContentFromStored,
+  richContentToPlainText,
   type RichBlock,
   type RichInline,
   type RichMark,
@@ -253,4 +255,31 @@ export function SpectraRichContent({ content, ast, className, verifiedSourceIds 
   return <div className={cn("spectra-prose", className)} data-rich-complete={model.complete}>
     <Blocks blocks={model.blocks} verified={verified} />
   </div>;
+}
+
+const NO_SOURCES: Verified = { ids: new Set(), sources: new Map() };
+
+/**
+ * A stored text field drawn read-only: a quiz question, a flashcard face, an
+ * option, a note. The value is whatever its field wrote (editor HTML or
+ * Markdown). `inline` keeps a one-paragraph value inside a line, for an
+ * option in a button or a label in a row.
+ */
+export function SpectraStoredText({ value, fallback = "", inline = false, className }: {
+  value: string;
+  fallback?: string;
+  inline?: boolean;
+  className?: string;
+}) {
+  const ast = useMemo(() => {
+    const stored = richContentFromStored(value);
+    // A cleared editor still writes `<p></p>`: an empty field reads as its fallback.
+    const empty = stored.blocks.every((block) => block.type !== "media" && block.type !== "embed") && !richContentToPlainText(stored).trim();
+    return empty ? richContentFromStored(fallback) : stored;
+  }, [fallback, value]);
+  const only = ast.blocks.length === 1 ? ast.blocks[0] : undefined;
+  if (inline && (!only || only.type === "paragraph")) {
+    return <span className={cn("spectra-prose spectra-prose-inline", className)}>{only?.type === "paragraph" ? <Inlines content={only.content} verified={NO_SOURCES} /> : null}</span>;
+  }
+  return <SpectraRichContent ast={ast} className={className} />;
 }

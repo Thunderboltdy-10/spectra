@@ -4,7 +4,7 @@ import type { SpectraRichContentAst } from "./ast";
 import { richContentFromHtml } from "./html";
 import { parseSpectraRichContent } from "./markdown";
 import { richContentFromProseMirror, richContentToProseMirror } from "./prosemirror";
-import { richContentToMarkdown } from "./serialize";
+import { richContentToMarkdown, richContentToPlainText } from "./serialize";
 import { richContentFromSlideParagraphs, richContentToSlideParagraphs } from "./slides";
 
 /*
@@ -42,4 +42,9 @@ const STORED_HTML = /^<(?:p|h[1-6]|ul|ol|blockquote|pre|aside|div|table|hr|figur
 export function richContentFromStored(value: string): SpectraRichContentAst {
   const trimmed = value.trim();
   return STORED_HTML.test(trimmed) ? richContentFromHtml(trimmed) : parseSpectraRichContent(value);
+}
+
+/** A stored text field's words, for a label, a rail row or a search. */
+export function plainTextFromStored(value: string): string {
+  return value.trim() ? richContentToPlainText(richContentFromStored(value)) : "";
 }

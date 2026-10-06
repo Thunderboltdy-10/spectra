@@ -66,9 +66,9 @@ import {
   deckCards,
   iconButtonClass,
   inputClass,
-  plannerDescriptionHtml,
-  plannerDescriptionText,
 } from "./artifact-studio";
+import { plainTextFromStored } from "../rich-content";
+import { SpectraStoredText } from "./spectra-rich-content";
 import {
   arrayOfRecords,
   clozeAnswer,
@@ -1586,7 +1586,7 @@ export function FlashcardStudio({
       studyTypedAnswer.trim().length > 0
     ) {
       const normalize = (value: string) =>
-        value
+        plainTextFromStored(value)
           .normalize("NFKD")
           .replace(/[\u0300-\u036f]/g, "")
           .toLocaleLowerCase()
@@ -1767,9 +1767,7 @@ export function FlashcardStudio({
         ? clozePrompt(activeCard.front)
         : activeCard.front || "Untitled card"
     : "";
-  const activePreviewPlainText = plannerDescriptionText(
-    plannerDescriptionHtml(activePreviewSource),
-  );
+  const activePreviewPlainText = plainTextFromStored(activePreviewSource);
 
   // The rail and the card editor are the two authoring panes. Browse and
   // Progress read the deck, so they get the whole width instead of inheriting a
@@ -1965,7 +1963,7 @@ export function FlashcardStudio({
               onChange={setActiveCardId}
               items={cards.map((card) => ({
                 value: card.id,
-                label: plannerDescriptionText(card.front) || "Untitled card",
+                label: plainTextFromStored(card.front) || "Untitled card",
               }))}
             />
           )
@@ -2019,11 +2017,9 @@ export function FlashcardStudio({
             onClick={() => setPreviewRevealed((revealed) => !revealed)}
           >
             <span>{previewRevealed ? "Answer" : "Prompt"}</span>
-            <div
+            <SpectraStoredText
+              value={activePreviewSource}
               className="spectra-deck-viewer-copy"
-              dangerouslySetInnerHTML={{
-                __html: plannerDescriptionHtml(activePreviewSource),
-              }}
             />
             {previewRevealed && activeCard.explanation ? (
               <small>{activeCard.explanation}</small>
@@ -2188,7 +2184,7 @@ export function FlashcardStudio({
           onToggleCollapsed={() => setRailCollapsed((open) => !open)}
           items={filteredCards.map((card) => ({
             id: card.id,
-            title: plannerDescriptionText(card.front) || "Untitled card",
+            title: plainTextFromStored(card.front) || "Untitled card",
             subtitle: `${card.section || "Section 1"} · ${card.difficulty ?? "medium"}`,
             active: card.id === activeCard?.id,
           }))}
@@ -3131,7 +3127,10 @@ export function FlashcardStudio({
                         ? " · reverse"
                         : ""}
                     </span>
-                    <strong>{activeStudyPrompt}</strong>
+                    <SpectraStoredText
+                      value={activeStudyPrompt}
+                      className="spectra-deck-study-face"
+                    />
                     {canRecordStudy ? null : (
                       <small>
                         Practice only. Grades are not recorded here, so nothing
@@ -3197,7 +3196,10 @@ export function FlashcardStudio({
                   {studyRevealed ? (
                     <section data-answer="true">
                       <span>Answer</span>
-                      <strong>{activeStudyAnswer}</strong>
+                      <SpectraStoredText
+                        value={activeStudyAnswer}
+                        className="spectra-deck-study-face"
+                      />
                       {activeStudyCard.variant !== "image_occlusion" &&
                       activeStudyCard.media?.placement === "back" &&
                       activeStudyMedia?.downloadUrl ? (
@@ -3329,11 +3331,15 @@ export function FlashcardStudio({
                   <li key={card.id}>
                     <div>
                       <small>Front</small>
-                      <p>
-                        {card.variant === "cloze"
-                          ? clozePrompt(card.front)
-                          : card.front || "Incomplete card"}
-                      </p>
+                      <SpectraStoredText
+                        className="spectra-deck-print-face"
+                        value={
+                          card.variant === "cloze"
+                            ? clozePrompt(card.front)
+                            : card.front
+                        }
+                        fallback="Incomplete card"
+                      />
                       {deckMediaUrl(card) &&
                       (card.variant === "image_occlusion" ||
                         card.media?.placement !== "back") ? (
@@ -3365,11 +3371,15 @@ export function FlashcardStudio({
                     </div>
                     <div>
                       <small>Back</small>
-                      <p>
-                        {card.variant === "cloze"
-                          ? clozeAnswer(card.front)
-                          : card.back || "Incomplete card"}
-                      </p>
+                      <SpectraStoredText
+                        className="spectra-deck-print-face"
+                        value={
+                          card.variant === "cloze"
+                            ? clozeAnswer(card.front)
+                            : card.back
+                        }
+                        fallback="Incomplete card"
+                      />
                       {card.variant === "cloze" && card.back ? (
                         <em>{card.back}</em>
                       ) : null}

@@ -64,13 +64,14 @@ import {
 } from "../quiz/interchange";
 
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
+import { SpectraStoredText } from "./spectra-rich-content";
+import { plainTextFromStored } from "../rich-content";
 import { spectraBus } from "../events";
 import {
   ArtifactRichTextEditor,
   Field,
   iconButtonClass,
   inputClass,
-  plannerDescriptionText,
   quizQuestions,
   smallActionClass,
   textareaClass,
@@ -1637,7 +1638,7 @@ export function QuizStudio({
               items={questions.map((question) => ({
                 value: question.id,
                 label:
-                  plannerDescriptionText(question.prompt) ||
+                  plainTextFromStored(question.prompt) ||
                   "Untitled question",
               }))}
             />
@@ -1972,7 +1973,7 @@ export function QuizStudio({
                                   : ", not answered yet"
                         }`}
                         title={
-                          plannerDescriptionText(question.prompt) ||
+                          plainTextFromStored(question.prompt) ||
                           `Question ${index + 1}`
                         }
                         onClick={() => setActiveQuestionId(question.id)}
@@ -2028,10 +2029,11 @@ export function QuizStudio({
                         <ChevronRight className="h-4 w-4" />
                       </button>
                     </div>
-                    <div className="mt-2 text-subhead font-medium text-[var(--text-primary)]">
-                      {plannerDescriptionText(question.prompt) ||
-                        "Untitled question"}
-                    </div>
+                    <SpectraStoredText
+                      value={question.prompt}
+                      fallback="Untitled question"
+                      className="mt-2 text-subhead font-medium"
+                    />
                     {question.media ? (
                       quizAssetMap.get(question.media.assetId)?.downloadUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -2066,7 +2068,11 @@ export function QuizStudio({
                             className={`flex w-full items-center gap-2 rounded-control border px-3 py-2 text-left text-ui transition ${answers[question.id] === option ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
                           >
                             <Radio className="h-3.5 w-3.5" />
-                            {option || `Option ${optionIndex + 1}`}
+                            <SpectraStoredText
+                              inline
+                              value={option}
+                              fallback={`Option ${optionIndex + 1}`}
+                            />
                           </button>
                         ))
                       ) : question.type === "select_all" ? (
@@ -2101,7 +2107,11 @@ export function QuizStudio({
                                   <Check className="h-3 w-3" />
                                 ) : null}
                               </span>
-                              {option || `Option ${optionIndex + 1}`}
+                              <SpectraStoredText
+                                inline
+                                value={option}
+                                fallback={`Option ${optionIndex + 1}`}
+                              />
                             </button>
                           );
                         })
@@ -2116,9 +2126,11 @@ export function QuizStudio({
                               className="grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2 rounded-control border border-[var(--border-default)] px-3 py-2 text-ui"
                             >
                               <strong>{optionIndex + 1}</strong>
-                              <span>
-                                {option || `Option ${optionIndex + 1}`}
-                              </span>
+                              <SpectraStoredText
+                                inline
+                                value={option}
+                                fallback={`Option ${optionIndex + 1}`}
+                              />
                               <div className="flex gap-1">
                                 <button
                                   type="button"
@@ -2310,13 +2322,16 @@ export function QuizStudio({
                                 ?.explanation
                             : question.explanation
                         ) ? (
-                          <div className="mt-1">
-                            {practiceAttempt
-                              ? revealedPracticeResultByQuestion.get(
-                                  question.id,
-                                )?.explanation
-                              : question.explanation}
-                          </div>
+                          <SpectraStoredText
+                            className="mt-1"
+                            value={
+                              (practiceAttempt
+                                ? revealedPracticeResultByQuestion.get(
+                                    question.id,
+                                  )?.explanation
+                                : question.explanation) ?? ""
+                            }
+                          />
                         ) : null}
                         {practiceAttempt &&
                         revealedPracticeResultByQuestion.get(question.id)
@@ -2349,7 +2364,7 @@ export function QuizStudio({
                   items={displayedQuestions.map((question) => ({
                     value: question.id,
                     label:
-                      plannerDescriptionText(question.prompt) ||
+                      plainTextFromStored(question.prompt) ||
                       "Untitled question",
                   }))}
                 />
@@ -2821,7 +2836,7 @@ export function QuizStudio({
                 items={questions.map((question) => ({
                   id: question.id,
                   title:
-                    plannerDescriptionText(question.prompt) ||
+                    plainTextFromStored(question.prompt) ||
                     "Untitled question",
                   subtitle: `${QUIZ_TYPE_LABELS[question.type]} · ${question.points ?? 1} point${(question.points ?? 1) === 1 ? "" : "s"}`,
                   active: activeQuestion?.id === question.id,
@@ -3211,15 +3226,17 @@ export function QuizStudio({
           <ol>
             {questions.map((question) => (
               <li key={question.id}>
-                <h2>
-                  {plannerDescriptionText(question.prompt) ||
-                    "Untitled question"}
-                </h2>
+                <SpectraStoredText
+                  value={question.prompt}
+                  fallback="Untitled question"
+                  className="spectra-quiz-print-prompt"
+                />
                 {question.options.length ? (
                   <ul>
                     {question.options.map((option, index) => (
                       <li key={`${question.id}-print-${index}`}>
-                        {String.fromCharCode(65 + index)}. {option || "(blank)"}
+                        {String.fromCharCode(65 + index)}.{" "}
+                        <SpectraStoredText inline value={option} fallback="(blank)" />
                       </li>
                     ))}
                   </ul>
@@ -3242,7 +3259,7 @@ export function QuizStudio({
                           ? question.rubric || "Advisory review"
                           : question.correctAnswer}
                     {question.explanation ? (
-                      <p>{question.explanation}</p>
+                      <SpectraStoredText value={question.explanation} />
                     ) : null}
                   </aside>
                 ) : null}

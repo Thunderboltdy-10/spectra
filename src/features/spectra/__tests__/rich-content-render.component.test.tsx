@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SpectraRichContent } from "../components/spectra-rich-content";
+import { SpectraRichContent, SpectraStoredText } from "../components/spectra-rich-content";
 import { richContentFromHtml } from "../rich-content";
 
 vi.mock("../components/artifact-embed-host", () => ({
@@ -99,6 +99,23 @@ describe("the shared rich-content renderer", () => {
     const span = prose().querySelector<HTMLElement>("p strong > span")!;
     expect(span.style.fontFamily).toBe("Georgia");
     expect(span.style.fontSize).toBe("20pt");
+  });
+
+  it("draws a stored quiz or card field as written, not as raw tags", () => {
+    act(() => root.render(<SpectraStoredText value={'<p>Solve <strong>for</strong> <span data-inline-equation latex="x"></span></p><ul><li><p>step</p></li></ul>'} />));
+    expect(container.textContent).not.toContain("<strong>");
+    expect(prose().querySelector("p strong")?.textContent).toBe("for");
+    expect(prose().querySelector("[data-inline-equation]")).not.toBeNull();
+    expect(prose().querySelector("ul > li")?.textContent).toBe("step");
+  });
+
+  it("keeps a one-paragraph option inside its line, and an empty field reads as its fallback", () => {
+    act(() => root.render(<button type="button"><SpectraStoredText inline value="<p><em>Paris</em></p>" /></button>));
+    const inline = container.querySelector("button > span.spectra-prose.spectra-prose-inline")!;
+    expect(inline.querySelector("em")?.textContent).toBe("Paris");
+    expect(container.querySelector("button div")).toBeNull();
+    act(() => root.render(<SpectraStoredText value="<p></p>" fallback="Empty card" />));
+    expect(prose().textContent).toBe("Empty card");
   });
 
   it("is styled by one stylesheet scope that the document and every field share", () => {

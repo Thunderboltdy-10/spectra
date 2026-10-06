@@ -10684,12 +10684,12 @@ button[data-spectra-context-trigger="true"]::after {
   text-transform: uppercase;
 }
 
-.spectra-deck-study > main > section > strong {
+/* A face in study is the shared prose at study size, in the display face. */
+.spectra-deck-study-face {
+  --prose-size: clamp(20px, 3vw, 34px);
+  --prose-leading: 1.35;
+  --prose-font: var(--font-display);
   max-width: 590px;
-  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
-  font-size: clamp(20px, 3vw, 34px);
-  font-weight: 570;
-  line-height: 1.35;
 }
 
 .spectra-deck-study > main > section > small {
@@ -10944,13 +10944,13 @@ button[data-spectra-context-trigger="true"]::after {
     border-top: 1px dashed #ccc;
   }
 
-  .spectra-deck-print-section p {
-    margin: 5px 0 0;
-    white-space: pre-wrap;
-    font-size: 10pt;
+  .spectra-deck-print-face {
+    --prose-size: 10pt;
+    --prose-leading: 1.45;
+    margin-top: 5px;
   }
 
-  .spectra-deck-print-section em {
+  .spectra-deck-print-section li > div > em {
     display: block;
     margin-top: 7px;
     color: #666;
@@ -11032,13 +11032,14 @@ button[data-spectra-context-trigger="true"]::after {
     border-bottom: 1px solid #ddd;
   }
 
-  .spectra-quiz-print-sheet h2 {
+  .spectra-quiz-print-prompt {
+    --prose-size: 12pt;
+    --prose-leading: 1.45;
     margin: 0 0 10px;
-    font-size: 12pt;
-    line-height: 1.45;
+    font-weight: 600;
   }
 
-  .spectra-quiz-print-sheet li ul {
+  .spectra-quiz-print-sheet > ol > li > ul {
     display: grid;
     gap: 5px;
     padding: 0;
@@ -16330,10 +16331,8 @@ html[data-spectra-motion="none"] .spectra-caption-live::after {
   flex: 1 1 260px;
 }
 .spectra-task-school-notes {
+  --prose-leading: 1.6;
   color: var(--text-secondary);
-  font-size: var(--text-body);
-  line-height: 1.6;
-  white-space: pre-wrap;
 }
 .spectra-task-steps {
   margin-left: 34px;

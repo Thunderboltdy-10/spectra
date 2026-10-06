@@ -31,6 +31,12 @@
     overflow-wrap: break-word;
   }
 
+  /* Inside a line (an option, a label): the line's own type. */
+  .spectra-prose.spectra-prose-inline {
+    color: inherit;
+    font: inherit;
+  }
+
   /* -- Flow ---------------------------------------------------------------- */
 
   .spectra-prose :where(p, ul, ol, blockquote, pre, aside, figure, .tableWrapper, [data-equation]) {

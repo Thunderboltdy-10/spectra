@@ -12,7 +12,7 @@ import { useSpectraRouter } from "../hooks/use-spectra-router";
 import { isActiveRunStatus, useRunTabs } from "../island/run-tabs";
 import { figureOf } from "../life/figure-dom";
 import { life } from "../life/life";
-import { unformElement } from "../life/use-life";
+import { unformElement, useLifeArrival, useLifeDeparture } from "../life/use-life";
 import { useThreadSearch } from "../semantic/use-semantic";
 import { groupThreads, matchThreads, type ThreadGroup } from "./threads-model";
 
@@ -193,7 +193,7 @@ export function ThreadsView({ initialQuery = "", onClose }: { initialQuery?: str
                 <ul>
                   {group.threads.map((thread) => (
                     <li key={`${group.key}:${thread._id}`}>
-                      <ThreadRow thread={thread} active={activeIds.has(thread._id)} onChoose={choose} />
+                      <ThreadRow thread={thread} active={activeIds.has(thread._id)} onChoose={choose} departs={!searching} />
                     </li>
                   ))}
                 </ul>
@@ -206,11 +206,34 @@ export function ThreadsView({ initialQuery = "", onClose }: { initialQuery?: str
   );
 }
 
-function ThreadRow({ thread, active, onChoose }: { thread: SpectraThread; active: boolean; onChoose: (thread: SpectraThread, row: HTMLElement) => void }) {
+const ROW_FIGURE = { bars: ROW_BARS };
+
+/**
+ * A conversation that moves to another group (a new message brings it to
+ * Today) travels there (LIFE.md, Move); one removed while the list is plain
+ * parts where it was. Narrowing a search is a filter, not a removal: it stays
+ * quiet.
+ */
+function ThreadRow({
+  thread,
+  active,
+  onChoose,
+  departs,
+}: {
+  thread: SpectraThread;
+  active: boolean;
+  onChoose: (thread: SpectraThread, row: HTMLElement) => void;
+  departs: boolean;
+}) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const lifeKey = `thread:${thread._id}`;
+  useLifeArrival(ref, lifeKey, undefined, ROW_FIGURE);
+  useLifeDeparture(ref, departs, ROW_FIGURE, lifeKey);
   const artifacts = thread.contexts?.artifacts ?? [];
   const summary = thread.summaryShort || thread.previewText;
   return (
     <button
+      ref={ref}
       type="button"
       data-thread-row
       onClick={(event) => onChoose(thread, event.currentTarget)}

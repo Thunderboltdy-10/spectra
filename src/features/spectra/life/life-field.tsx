@@ -8,7 +8,7 @@ import { figureOf, hasVisibleFrame, replacementOf } from "./figure-dom";
 
 export { replacementOf };
 import { life, type Formed } from "./life";
-import { veil } from "./veil";
+import { isVeiled, veil } from "./veil";
 import { markNavigation, sendInto } from "./use-life";
 
 /*
@@ -42,7 +42,8 @@ const CONTENT_BARS = "h1, h2, h3, h4, [data-row-title], [data-row-meta], [data-c
 /** The content is hidden while the ghost's lines flow into its frame and lines, and is real when they have. */
 function handOver(formed: Formed, content: HTMLElement) {
   const r = content.getBoundingClientRect();
-  if (!r.width || r.bottom < 0 || r.top > window.innerHeight) return formed.release();
+  // Content that is forming itself (a landing, an arrival) brings its own light.
+  if (!r.width || r.bottom < 0 || r.top > window.innerHeight || isVeiled(content)) return formed.release();
   const show = veil(content);
   void life.morph(formed, figureOf(content, { bars: CONTENT_BARS, maxBars: 24, frame: hasVisibleFrame(content) })).formed.then(show);
   window.setTimeout(show, 700);

@@ -8527,6 +8527,320 @@ button[data-spectra-context-trigger="true"]::after {
   gap: 14px;
 }
 
+/* ---------------- bench ---------------- */
+
+/* The bench asks the draft sample questions. Each question is a row: the
+   answer before and this draft's answer side by side, what changed between
+   them, and the checks a saved test holds it to. */
+.agent-bench {
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-bench-label {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.agent-bench-ask {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.agent-bench-ask textarea {
+  min-height: 56px;
+}
+
+.agent-bench-samples,
+.agent-bench-compare {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-bench-samples .foundry-chip {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-bench-choice {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  background: var(--card-paper);
+  padding: 4px 11px;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 520;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.agent-bench-choice[aria-checked="true"] {
+  border-color: var(--foundry-mark);
+  background: color-mix(in oklab, var(--foundry-mark) 8%, var(--card-paper));
+  color: var(--foundry-mark);
+}
+
+.agent-bench-choice:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.agent-bench-choice:focus-visible {
+  outline: 2px solid var(--foundry-mark);
+  outline-offset: 2px;
+}
+
+.agent-bench-list {
+  display: flex;
+  margin: 18px 0 0;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-bench-case {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+  border-top: 1px solid var(--foundry-rule);
+  padding: 16px 0;
+}
+
+.agent-bench-case-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-bench-prompt {
+  margin: 0;
+  min-width: 0;
+  max-width: 70ch;
+  font-size: 13.5px;
+  font-weight: 560;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.agent-bench-case-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-bench-tag {
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklab, var(--foundry-hold) 12%, transparent);
+  padding: 2px 9px;
+  color: var(--foundry-hold);
+  font-size: var(--text-micro);
+  font-weight: 600;
+}
+
+.agent-bench-answers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@container (max-width: 640px) {
+  .agent-bench-answers {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .agent-bench-case-head,
+  .agent-bench-ask {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.agent-bench-answer {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-input);
+  background: var(--card-paper);
+  padding: 12px 14px;
+  font-size: 13px;
+  transition: border-color var(--motion-fast) var(--ease-standard);
+}
+
+.agent-bench-answer.is-streaming {
+  border-color: color-mix(in oklab, var(--ownership-ai) 40%, var(--border-subtle));
+}
+
+.agent-bench-rich {
+  max-height: 420px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+
+.agent-bench-changes,
+.agent-bench-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.agent-bench-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-bench-chips > li {
+  border-radius: var(--radius-pill);
+  background: var(--card-paper-quiet);
+  padding: 3px 10px;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+}
+
+.agent-bench-points,
+.agent-bench-checks ul,
+.agent-bench-suggestions {
+  display: flex;
+  margin: 0;
+  flex-direction: column;
+  gap: 5px;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.agent-bench-points > li > span {
+  margin-right: 6px;
+  font-size: var(--text-micro);
+  font-weight: 600;
+}
+
+.agent-bench-points > li.is-new > span {
+  color: var(--foundry-hold);
+}
+
+.agent-bench-points > li.is-gone > span {
+  color: var(--foundry-quarantine);
+}
+
+.agent-bench-checks li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-bench-checks li.is-passed svg {
+  color: var(--success);
+}
+
+.agent-bench-checks li.is-failed {
+  color: color-mix(in oklab, var(--danger) 80%, var(--text-primary));
+}
+
+.agent-bench-suggestions > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-left: 2px solid var(--foundry-mark);
+  padding-left: 10px;
+  color: var(--text-secondary);
+}
+
+.agent-bench-problem {
+  margin: 0;
+  color: color-mix(in oklab, var(--danger) 80%, var(--text-primary));
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.agent-bench-form,
+.agent-bench-skill {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agent-bench-form {
+  border-left: 2px solid var(--foundry-mark);
+  padding-left: 13px;
+}
+
+.agent-bench-field {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+}
+
+.agent-bench-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+.agent-bench-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.agent-bench-row > * {
+  min-width: 180px;
+  flex: 1 1 0;
+}
+
+.agent-bench-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-bench-skill {
+  margin: 0;
+  border: none;
+  border-top: 1px solid var(--foundry-rule);
+  padding: 14px 0 0;
+}
+
+.agent-bench-skill > legend {
+  padding: 0 0 6px;
+  font-size: 13.5px;
+  font-weight: 570;
+}
+
 /* ---------------- release ---------------- */
 
 .foundry-blockers {

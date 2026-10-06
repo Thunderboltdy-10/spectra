@@ -510,7 +510,7 @@ function benchPrompt(prompt: string) {
     throw new Error("AGENT_BENCH_PROMPT_REQUIRED: Write the question first.");
   if (text.length > BENCH_LIMITS.prompt)
     throw new Error(
-      "AGENT_BENCH_PROMPT_TOO_LONG: Keep the question under 4,000 characters.",
+      "AGENT_BENCH_PROMPT_INVALID: Keep the question under 4,000 characters.",
     );
   return text;
 }
@@ -586,7 +586,7 @@ export const saveBenchCase = mutation({
     if (args.caseId) {
       existing = await ctx.db.get(args.caseId);
       if (!existing || existing.agentId !== args.agentId)
-        throw new Error("AGENT_BENCH_CASE_MISSING: That test is gone.");
+        throw new Error("AGENT_BENCH_CASE_NOT_FOUND: That test is gone.");
     } else {
       existing = await ctx.db
         .query("agentBenchCases")
@@ -602,7 +602,7 @@ export const saveBenchCase = mutation({
     const saved = await loadBenchCases(ctx, args.agentId);
     if (saved.length >= BENCH_LIMITS.savedCases)
       throw new Error(
-        "AGENT_BENCH_FULL: An agent keeps up to 50 tests. Remove one first.",
+        "AGENT_BENCH_LIMIT_CONFLICT: An agent keeps up to 50 tests. Remove one first.",
       );
     const caseId = await ctx.db.insert("agentBenchCases", {
       ...fields,

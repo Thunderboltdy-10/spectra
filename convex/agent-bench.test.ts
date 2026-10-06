@@ -165,7 +165,7 @@ describe("bench tests in Convex", () => {
         mustInclude: ["a"],
         mustNotInclude: [],
       }),
-    ).rejects.toThrow("AGENT_BENCH_FULL");
+    ).rejects.toThrow("AGENT_BENCH_LIMIT_CONFLICT");
   });
 
   it("removes a test, and only from its own agent", async () => {

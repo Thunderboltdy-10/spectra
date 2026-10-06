@@ -75,7 +75,7 @@ export async function POST(request: Request) {
       throw new Error("AGENT_BENCH_PROMPT_REQUIRED: Write the question first.");
     if (prompt.length > BENCH_LIMITS.prompt)
       throw new Error(
-        "AGENT_BENCH_PROMPT_TOO_LONG: Keep the question under 4,000 characters.",
+        "AGENT_BENCH_PROMPT_INVALID: Keep the question under 4,000 characters.",
       );
     const target: BenchTarget = body.target === "release" ? "release" : "draft";
 

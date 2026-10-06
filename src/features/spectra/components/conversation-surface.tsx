@@ -1948,10 +1948,11 @@ export function ConversationSurface({
           {loading ? (
             <div className="space-y-8 py-10" aria-label="Loading conversation">
               <div data-life-ghost className="ml-auto h-16 w-[58%] animate-pulse rounded-surface bg-[var(--bg-secondary)]" />
-              <div className="space-y-3">
-                <div data-life-ghost className="h-3 w-24 animate-pulse rounded bg-[var(--bg-secondary)]" />
-                <div data-life-ghost className="h-3 w-full animate-pulse rounded bg-[var(--bg-secondary)]" />
-                <div data-life-ghost className="h-3 w-[72%] animate-pulse rounded bg-[var(--bg-secondary)]" />
+              {/* One ghost for the reply: its lines are bars of the same figure, so they settle as lines together. */}
+              <div data-life-ghost className="space-y-3">
+                <div data-life-ghost-bar className="h-3 w-24 animate-pulse rounded bg-[var(--bg-secondary)]" />
+                <div data-life-ghost-bar className="h-3 w-full animate-pulse rounded bg-[var(--bg-secondary)]" />
+                <div data-life-ghost-bar className="h-3 w-[72%] animate-pulse rounded bg-[var(--bg-secondary)]" />
               </div>
             </div>
           ) : null}

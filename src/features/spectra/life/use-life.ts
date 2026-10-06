@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, type Ref, type RefCallback, type RefObject } from "react";
 import type { LightColour, Rect } from "./engine";
 import { figureOf, type ElementFigureOptions } from "./figure-dom";
-import type { Figure, Point } from "./figure";
-import { life, type GlowHandle } from "./life";
+import { outlineFigure, rowsFigure, type Figure, type Point } from "./figure";
+import { life, type Formed, type GlowHandle } from "./life";
 import { STATUS_COLOURS } from "./prism";
 
 /*
@@ -106,7 +106,7 @@ export function travelElement(from: Element | Point, to: Element | { absorb: Ele
 let lastPress: { point: Point; at: number } | null = null;
 let pressWatch = false;
 /** The card or row the user just opened something from: what opens next grows out of it (MOTION.md, "Shared elements"). */
-let launch: { figure: Figure; at: number } | null = null;
+let launch: { figure: Figure | Formed; at: number } | null = null;
 const LAUNCHERS = "[data-spectra-card], [data-life-launch]";
 const LAUNCH_BARS = "h2, h3, h4, [data-card-title], [data-row-title], [data-thread-title], p";
 
@@ -249,6 +249,49 @@ export function markCause(point: Point) {
 export function recentCause(): Point | undefined {
   watchPresses();
   return lastPress && performance.now() - lastPress.at < 1000 ? lastPress.point : undefined;
+}
+
+/* ------------------------------------------------------------ creation */
+
+export type Creation = {
+  /** It exists now: whatever opens next grows out of the gathered dots. */
+  land(): void;
+  /** It was not made: the dots part where they gathered. */
+  cancel(): void;
+};
+
+const NO_CREATION: Creation = { land() {}, cancel() {} };
+
+/**
+ * Making something by hand (LIFE.md, "Create by hand"): while the request is
+ * on its way, dots gather where the user acted into the outline of a small
+ * work, breathing light. When it exists, the surface that opens morphs out of
+ * them; if it fails, they part.
+ */
+export function beginCreation(from?: Point): Creation {
+  if (!life.on) return NO_CREATION;
+  const [x, y] = from ?? recentCause() ?? [window.innerWidth / 2, window.innerHeight / 2];
+  const rect = { x: x - 64, y: y - 44, width: 128, height: 88 };
+  const outline = outlineFigure(rect, { radius: 12 });
+  const seed = life.ghost({ strokes: [...outline.strokes, ...rowsFigure(rect, [0.62, 0.86, 0.48]).strokes] }, { from: [x, y] });
+  let settled = false;
+  return {
+    land() {
+      if (settled) return;
+      settled = true;
+      launch = { figure: seed, at: performance.now() };
+      // Nothing opened from it in time: the dots go back to the field.
+      window.setTimeout(() => {
+        if (launch?.figure === seed) launch = null;
+        seed.release();
+      }, LAUNCH_WINDOW_MS);
+    },
+    cancel() {
+      if (settled) return;
+      settled = true;
+      void life.unform(seed);
+    },
+  };
 }
 
 export type SurfaceOptions = ElementFigureOptions & {

@@ -175,6 +175,7 @@ import {
   spectraShellHref,
   workspaceIdFromSpectraPath,
 } from "./shell-location";
+import { beginCreation } from "../life/use-life";
 import { useShareInvitations } from "./use-share-invitations";
 import { downloadDocumentBlob } from "../components/artifact-studio-file-utils";
 
@@ -3580,6 +3581,8 @@ export function SpectraShell({
   ) {
     const label = workTypeMeta[payload.blueprintKey].label;
     setBusyKey(`artifact:${payload.blueprintKey}`);
+    // Dots gather where it was asked for; the studio grows out of them.
+    const creation = beginCreation();
     try {
       const result = await postSpectra<{ artifactId: string }>({
         action: "createArtifact",
@@ -3595,6 +3598,7 @@ export function SpectraShell({
         (artifact) => artifact._id === result.artifactId,
       );
       if (created) {
+        creation.land();
         openArtifactPanel(created);
         toast.success(
           targetWorkspaceId
@@ -3602,11 +3606,13 @@ export function SpectraShell({
             : `${label} created in General.`,
         );
       } else {
+        creation.cancel();
         toast.message(
           `${label} created. It will appear as soon as the workspace finishes syncing.`,
         );
       }
     } catch (error) {
+      creation.cancel();
       toast.error(
         describeFailure(error, {
           fallback: `Could not create ${label.toLowerCase()}.`,

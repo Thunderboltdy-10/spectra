@@ -70,7 +70,7 @@ import { useNow } from "@/hooks/use-now";
 import { ArtifactHeaderActions, type HeaderCommand } from "./artifact-header-actions";
 import { ArtifactStatusControl } from "./artifact-status-control";
 import { useEditorFieldMoments } from "./editor-field-moments";
-import { useLifeLanding, useLifeReturn } from "../life/use-life";
+import { beginCreation, useLifeLanding, useLifeReturn } from "../life/use-life";
 import { artifactStatusOf, type ArtifactStatusActionKind } from "./artifact-status";
 import { humanizeNativeError, humanizePublicFailure } from "../bridge/humanize";
 import { useBridgeHealth } from "../bridge/use-bridge";
@@ -7181,6 +7181,7 @@ function StudioDetails({
   }
   async function duplicateCurrentArtifact() {
     setDuplicating(true);
+    const creation = beginCreation();
     try {
       const result = await postSpectra<{ artifactId: string }>({
         action: "createArtifact",
@@ -7192,7 +7193,11 @@ function StudioDetails({
         workspaceId: placements[0]?.workspaceId,
       });
       spectraBus.emit("workspace.refreshRequested", {});
+      creation.land();
       onOpenArtifact(result.artifactId);
+    } catch (error) {
+      creation.cancel();
+      throw error;
     } finally {
       setDuplicating(false);
     }

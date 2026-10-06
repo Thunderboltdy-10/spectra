@@ -150,12 +150,6 @@ body {
     #faf9f8 !important;
 }
 
-.spectra-document-studio[data-layout="continuous"] .ProseMirror {
-  color: #292622;
-  font-size: 15.5px;
-  line-height: 1.65;
-}
-
 .spectra-document-studio[data-layout="continuous"] .tiptap-root {
   width: min(920px, calc(100% - 168px));
   max-width: 920px !important;
@@ -170,17 +164,6 @@ body {
 
 .spectra-document-studio[data-layout="continuous"] .ProseMirror > :first-child {
   margin-top: 0 !important;
-}
-
-.spectra-document-studio .ProseMirror :is(h1, h2, h3) {
-  font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
-  font-weight: 600;
-  letter-spacing: -0.018em;
-}
-
-.spectra-document-studio .ProseMirror h2 {
-  font-size: 20px;
-  line-height: 1.28;
 }
 
 .spectra-artifact-studio[data-blueprint="planner_task"]
@@ -684,31 +667,16 @@ body {
   text-transform: uppercase;
 }
 
+/* A card face is the shared prose at study size, in the display face. */
 .spectra-deck-viewer-copy {
+  --prose-size: clamp(24px, 3.2vw, 42px);
+  --prose-leading: 1.28;
+  --prose-font: var(--font-display);
   max-width: 620px;
-  font-family: var(--font-display), var(--font-sans), sans-serif;
-  font-size: clamp(24px, 3.2vw, 42px);
-  font-weight: 570;
-  line-height: 1.28;
-}
-
-.spectra-deck-viewer-copy > :first-child {
-  margin-top: 0;
-}
-
-.spectra-deck-viewer-copy > :last-child {
-  margin-bottom: 0;
-}
-
-.spectra-deck-viewer-copy :is(ol, ul) {
-  display: grid;
-  gap: 10px;
-  padding-left: 1.3em;
-  text-align: left;
 }
 
 .spectra-deck-viewer-card[data-density="compact"] .spectra-deck-viewer-copy {
-  font-size: clamp(20px, 2.5vw, 32px);
+  --prose-size: clamp(20px, 2.5vw, 32px);
 }
 
 .spectra-deck-viewer-card[data-density="dense"] {
@@ -717,8 +685,8 @@ body {
 }
 
 .spectra-deck-viewer-card[data-density="dense"] .spectra-deck-viewer-copy {
-  font-size: clamp(17px, 2vw, 25px);
-  line-height: 1.36;
+  --prose-size: clamp(17px, 2vw, 25px);
+  --prose-leading: 1.36;
 }
 
 .spectra-deck-viewer-card > small {
@@ -3961,116 +3929,6 @@ button:disabled {
   }
 }
 
-.chat-rich {
-  color: var(--text-primary);
-  line-height: 1.55;
-}
-
-.chat-rich > * + * {
-  margin-top: 0.45em;
-}
-
-.chat-rich p {
-  margin: 0;
-}
-
-.chat-rich strong {
-  font-weight: 700;
-}
-
-.chat-rich em {
-  font-style: italic;
-}
-
-.chat-rich .katex-display {
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding-bottom: 0.2rem;
-  text-align: center;
-  margin: 1.2em 0;
-  padding: 0.4em 0;
-}
-
-.chat-rich .katex {
-  font-size: 1.15em;
-}
-
-.hljs {
-  background: transparent;
-  color: var(--text-primary);
-}
-
-.hljs-comment,
-.hljs-quote {
-  color: var(--text-secondary);
-}
-
-.hljs-keyword,
-.hljs-selector-tag,
-.hljs-literal,
-.hljs-section,
-.hljs-link {
-  color: #c44127;
-}
-
-.hljs-string,
-.hljs-title,
-.hljs-name,
-.hljs-type,
-.hljs-attribute,
-.hljs-symbol,
-.hljs-bullet,
-.hljs-addition,
-.hljs-variable,
-.hljs-template-tag,
-.hljs-template-variable {
-  color: #0a7abf;
-}
-
-.hljs-number {
-  color: #8b6914;
-}
-
-.hljs-built_in,
-.hljs-builtin-name {
-  color: #1a7a5a;
-}
-
-.dark .hljs {
-  color: #e8f0fb;
-}
-
-.dark .hljs-keyword,
-.dark .hljs-selector-tag,
-.dark .hljs-literal,
-.dark .hljs-section,
-.dark .hljs-link {
-  color: #ff7a59;
-}
-
-.dark .hljs-string,
-.dark .hljs-title,
-.dark .hljs-name,
-.dark .hljs-type,
-.dark .hljs-attribute,
-.dark .hljs-symbol,
-.dark .hljs-bullet,
-.dark .hljs-addition,
-.dark .hljs-variable,
-.dark .hljs-template-tag,
-.dark .hljs-template-variable {
-  color: #2cb5ff;
-}
-
-.dark .hljs-number {
-  color: #e5b567;
-}
-
-.dark .hljs-built_in,
-.dark .hljs-builtin-name {
-  color: #38d6a0;
-}
-
 ::selection {
   background: color-mix(in oklab, var(--accent-cyan) 35%, transparent);
   color: var(--text-primary);
@@ -4117,9 +3975,6 @@ button:disabled {
 
 .tiptap-root .ProseMirror {
   min-height: 200px;
-  color: var(--text-primary);
-  font-size: var(--text-editor);
-  line-height: 1.72;
 }
 
 .spectra-autocomplete-ghost {
@@ -4129,146 +3984,10 @@ button:disabled {
   user-select: none;
 }
 
-.tiptap-root.tiptap-full .ProseMirror {
-  font-size: var(--text-editor);
-  line-height: 1.86;
-  padding: 0 0 5rem 3.5rem; /* left: 56px to make room for gutter buttons */
-}
-
-.tiptap-root.tiptap-compact .ProseMirror {
-  font-size: var(--text-body);
-  line-height: 1.72;
-  padding: 0 0 2rem 3.5rem; /* left: 56px to make room for gutter buttons */
-  background: transparent !important;
-}
-
 .tiptap-root .ProseMirror:focus,
 .tiptap-root .ProseMirror:focus-visible {
   outline: none;
   box-shadow: none;
-}
-
-.tiptap-root .ProseMirror p {
-  margin: 0 0 0.9em;
-}
-
-.tiptap-root .ProseMirror h1 {
-  font-size: 1.75em;
-  font-weight: 700;
-  margin: 0 0 0.55em;
-  color: var(--text-primary);
-  font-family: var(--font-manrope), sans-serif;
-  line-height: 1.08;
-  letter-spacing: -0.045em;
-}
-
-.tiptap-root .ProseMirror > h1:first-child {
-  margin-top: 0;
-}
-
-.tiptap-root.tiptap-full .ProseMirror > h1:first-child {
-  font-size: clamp(2.5rem, 4vw, 3.35rem);
-  margin-bottom: 0.42em;
-  padding-bottom: 0.28em;
-  border-bottom: 1px solid
-    color-mix(in oklab, var(--border-default) 80%, transparent);
-}
-
-.tiptap-root.tiptap-compact .ProseMirror > h1:first-child {
-  font-size: 2rem;
-  margin-bottom: 0.45em;
-}
-
-.tiptap-root .ProseMirror h2 {
-  font-size: 1.35em;
-  font-weight: 700;
-  margin: 1.25em 0 0.4em;
-  color: var(--text-primary);
-}
-
-.tiptap-root .ProseMirror h3 {
-  font-size: 1.1em;
-  font-weight: 600;
-  margin: 1em 0 0.3em;
-  color: var(--text-primary);
-}
-
-.tiptap-root .ProseMirror ul,
-.tiptap-root .ProseMirror ol {
-  padding-left: 1.5em;
-  margin: 0 0 0.75em;
-}
-
-.tiptap-root .ProseMirror ul:not([data-type]) {
-  list-style-type: disc;
-}
-
-.tiptap-root .ProseMirror ol {
-  list-style-type: decimal;
-}
-
-.tiptap-root .ProseMirror li {
-  margin: 0.25em 0;
-}
-
-.tiptap-root .ProseMirror ul:not([data-type]) li,
-.tiptap-root .ProseMirror ol li {
-  display: list-item;
-}
-
-.tiptap-root .ProseMirror code {
-  font-family: var(--font-mono, "JetBrains Mono", monospace);
-  font-size: 0.875em;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-default);
-  border-radius: 4px;
-  padding: 0.1em 0.35em;
-  color: var(--accent-mint);
-}
-
-.tiptap-root .ProseMirror pre {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-default);
-  border-radius: var(--control-radius);
-  padding: 1em;
-  overflow-x: auto;
-  margin: 0.75em 0;
-}
-
-.tiptap-root .ProseMirror pre code {
-  background: none;
-  border: none;
-  padding: 0;
-  font-size: 0.85em;
-}
-
-.tiptap-root .ProseMirror blockquote {
-  border-left: 3px solid var(--accent-cyan);
-  padding-left: 1em;
-  margin: 0.75em 0;
-  color: var(--text-secondary);
-  font-style: italic;
-}
-
-.tiptap-root .ProseMirror hr {
-  border: none;
-  border-top: 1px solid var(--border-default);
-  margin: 1.5em 0;
-}
-
-.tiptap-root .ProseMirror strong {
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.tiptap-root .ProseMirror em {
-  font-style: italic;
-  color: var(--text-secondary);
-}
-
-.tiptap-root .ProseMirror s {
-  text-decoration: line-through;
-  color: var(--text-tertiary);
 }
 
 .tiptap-root .ProseMirror.is-editor-empty::before {
@@ -4308,38 +4027,13 @@ button:disabled {
 
 /* ── Tables ─────────────────────────────────────────────────────────── */
 
-.tiptap-root .ProseMirror table {
-  border-collapse: collapse;
-  width: 100%;
-  margin: 0.75em 0;
-  overflow: hidden;
-  border-radius: var(--chip-radius);
-  border: 1px solid var(--border-default);
-}
-
-.tiptap-root .ProseMirror th,
-.tiptap-root .ProseMirror td {
-  border: 1px solid var(--border-default);
-  padding: 0.5em 0.75em;
-  vertical-align: top;
+.tiptap-root .ProseMirror :is(th, td) {
   position: relative;
   min-width: 80px;
 }
 
-.tiptap-root .ProseMirror th {
-  background: var(--bg-secondary);
-  font-weight: 600;
-  font-size: 0.875em;
-  text-align: left;
-  color: var(--text-primary);
-}
-
-.tiptap-root .ProseMirror td {
-  font-size: 0.9em;
-}
-
 .tiptap-root .ProseMirror .selectedCell {
-  background: var(--accent-cyan) 12;
+  background: color-mix(in oklab, var(--accent-cyan) 12%, transparent);
 }
 
 .tiptap-root .ProseMirror .column-resize-handle {
@@ -4363,129 +4057,9 @@ button:disabled {
   cursor: col-resize;
 }
 
-/* ── Task Lists ─────────────────────────────────────────────────────── */
-
-.tiptap-root .ProseMirror ul[data-type="taskList"] {
-  list-style: none;
-  padding-left: 0;
-  margin: 0.5em 0;
-}
-
-.tiptap-root .ProseMirror ul[data-type="taskList"] li {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5em;
-  margin: 0.25em 0;
-}
-
-.tiptap-root .ProseMirror ul[data-type="taskList"] li > label {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  margin-top: 0.15em;
-}
-
-.tiptap-root
-  .ProseMirror
-  ul[data-type="taskList"]
-  li
-  > label
-  input[type="checkbox"] {
-  appearance: none;
-  width: 16px;
-  height: 16px;
-  border: 2px solid var(--border-default);
-  border-radius: 4px;
-  cursor: pointer;
-  transition:
-    background-color var(--motion-fast) var(--ease-standard),
-    border-color var(--motion-fast) var(--ease-standard);
-  position: relative;
-  background: transparent;
-}
-
-.tiptap-root
-  .ProseMirror
-  ul[data-type="taskList"]
-  li
-  > label
-  input[type="checkbox"]:checked {
-  background: var(--accent-cyan);
-  border-color: var(--accent-cyan);
-}
-
-.tiptap-root
-  .ProseMirror
-  ul[data-type="taskList"]
-  li
-  > label
-  input[type="checkbox"]:checked::after {
-  /* Escaped so the glyph survives any re-encoding of this file. */
-  content: "\2713";
-  position: absolute;
-  top: -1px;
-  left: 2px;
-  font-size: 11px;
-  color: white;
-  font-weight: 700;
-}
-
-.tiptap-root
-  .ProseMirror
-  ul[data-type="taskList"]
-  li[data-checked="true"]
-  > div
-  > p {
-  text-decoration: line-through;
-  color: var(--text-tertiary);
-}
-
-/* Nested task lists */
-.tiptap-root .ProseMirror ul[data-type="taskList"] ul[data-type="taskList"] {
-  padding-left: 1.5em;
-}
-
-/* ── Images ─────────────────────────────────────────────────────────── */
-
-.tiptap-root .ProseMirror img {
-  max-width: 100%;
-  height: auto;
-  border-radius: var(--control-radius);
-  margin: 0.75em 0;
-}
-
 .tiptap-root .ProseMirror img.ProseMirror-selectednode {
   outline: 2px solid var(--accent-cyan);
   outline-offset: 2px;
-}
-
-/* ── Callouts ───────────────────────────────────────────────────────── */
-
-.tiptap-root .ProseMirror .callout {
-  border-left: 4px solid var(--accent-cyan);
-  border-radius: 0 var(--control-radius) var(--control-radius) 0;
-  padding: 0.75em 1em;
-  margin: 0.75em 0;
-  background: var(--accent-cyan) 08;
-}
-
-.tiptap-root .ProseMirror .callout-info {
-  border-left-color: var(--accent-cyan);
-  background: var(--accent-cyan) 08;
-}
-
-.tiptap-root .ProseMirror .callout-warning {
-  border-left-color: #f59e0b;
-  background: #f59e0b0a;
-}
-
-.tiptap-root .ProseMirror .callout-tip {
-  border-left-color: var(--accent-mint);
-  background: var(--accent-mint) 08;
-}
-
-.tiptap-root .ProseMirror .callout p:last-child {
-  margin-bottom: 0;
 }
 
 /* ── Drag Handle ────────────────────────────────────────────────────── */
@@ -4544,30 +4118,10 @@ button:disabled {
   cursor: grabbing;
 }
 
-.spectra-equation {
-  margin: 1rem 0;
-  padding: 0;
-  background: transparent;
-}
-
 .spectra-equation.is-selected {
   background: transparent;
 }
 
-.spectra-equation.is-left {
-  text-align: left;
-}
-.spectra-equation.is-center {
-  text-align: center;
-}
-.spectra-equation.is-right {
-  text-align: right;
-}
-.spectra-equation-inline {
-  display: inline-flex;
-  margin: 0 0.2em;
-  padding: 0.12rem 0.3rem;
-}
 .spectra-equation-source {
   display: block;
   width: 100%;
@@ -10442,10 +9996,10 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .spectra-document-studio[data-compact][data-layout="continuous"] .ProseMirror {
+  --prose-size: var(--text-body);
+  --prose-leading: 1.62;
   min-height: 320px;
   padding: 16px 18px 48px !important;
-  font-size: 14.5px;
-  line-height: 1.62;
 }
 
 .spectra-document-studio[data-compact][data-layout="continuous"] .tiptap-root {
@@ -10524,73 +10078,12 @@ button[data-spectra-context-trigger="true"]::after {
   max-width: 920px;
 }
 
+/* The document's text is the shared prose at the editor size the reader
+   chose (spectra-prose.css). */
 .spectra-document-studio .ProseMirror {
-  color: color-mix(in oklab, var(--text-primary) 95%, #21170f);
+  --prose-size: var(--text-editor);
+  --prose-leading: 1.7;
   caret-color: var(--accent-cyan);
-}
-
-.spectra-document-studio .ProseMirror :is(p, li) {
-  font-family: var(--font-sans), sans-serif;
-  font-style: normal;
-  font-weight: 400;
-}
-
-.spectra-document-studio .ProseMirror blockquote {
-  font-family: var(--font-sans), sans-serif;
-  font-style: normal;
-}
-
-.spectra-document-studio .ProseMirror h1,
-.spectra-document-studio .ProseMirror h2,
-.spectra-document-studio .ProseMirror h3 {
-  margin-top: 1.65em;
-  color: var(--text-primary);
-}
-
-.spectra-document-studio .ProseMirror a {
-  color: var(--accent-cyan);
-  text-decoration: underline;
-  text-decoration-color: color-mix(
-    in oklab,
-    var(--accent-cyan) 38%,
-    transparent
-  );
-  text-underline-offset: 3px;
-}
-
-.spectra-document-studio .ProseMirror [data-callout="true"],
-.spectra-document-studio .ProseMirror [data-spectra-callout] {
-  position: relative;
-  margin: 1.25rem 0;
-  border: 1px solid
-    color-mix(in oklab, var(--accent-mint) 30%, var(--border-default));
-  border-radius: var(--card-radius);
-  background: color-mix(in oklab, var(--accent-mint) 6%, var(--bg-elevated));
-  padding: 0.7rem 0.95rem 0.7rem 2.55rem;
-  box-shadow: inset 3px 0
-    color-mix(in oklab, var(--accent-mint) 68%, transparent);
-}
-
-.spectra-document-studio .ProseMirror [data-callout="true"]::before,
-.spectra-document-studio .ProseMirror [data-spectra-callout]::before {
-  content: "";
-  position: absolute;
-  left: 0.95rem;
-  top: 0.95rem;
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in oklab, var(--accent-mint) 80%, var(--text-primary));
-}
-
-.spectra-document-studio .ProseMirror [data-callout-type="warning"] {
-  border-color: color-mix(in oklab, #d89832 30%, var(--border-default));
-  background: color-mix(in oklab, #f4c66b 8%, var(--bg-elevated));
-  box-shadow: inset 3px 0 color-mix(in oklab, #d89832 68%, transparent);
-}
-
-.spectra-document-studio .ProseMirror [data-callout-type="warning"]::before {
-  background: #b87618;
 }
 
 .spectra-flashcard-studio textarea {
@@ -11657,42 +11150,6 @@ button[data-spectra-context-trigger="true"]::after {
   min-height: 136px;
 }
 
-.spectra-planner-description .ProseMirror :is(p, ul, ol, blockquote) {
-  margin: 0 0 8px;
-}
-
-.spectra-planner-description .ProseMirror :is(ul, ol) {
-  padding-left: 22px;
-}
-
-.spectra-planner-description .ProseMirror ul {
-  list-style: disc;
-}
-
-.spectra-planner-description .ProseMirror ol {
-  list-style: decimal;
-}
-
-.spectra-planner-description .ProseMirror blockquote {
-  padding-left: 11px;
-  border-left: 2px solid #d8a66a;
-  color: var(--text-secondary);
-}
-
-.spectra-planner-description .ProseMirror a {
-  color: #596fc8;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.spectra-planner-description .ProseMirror code {
-  padding: 1px 4px;
-  border-radius: 4px;
-  background: var(--bg-secondary);
-  font-family: var(--font-mono);
-  font-size: 0.88em;
-}
-
 .spectra-studio-details {
   border-radius: var(--surface-radius) !important;
   box-shadow: 0 18px 48px -42px rgba(35, 27, 18, 0.4);
@@ -11701,27 +11158,6 @@ button[data-spectra-context-trigger="true"]::after {
 .spectra-studio-details > div:last-child {
   max-height: calc(100vh - 250px);
   overflow-y: auto;
-}
-
-.spectra-document-studio .ProseMirror blockquote {
-  margin: 1rem 0;
-  border: 1px solid
-    color-mix(in oklab, var(--accent-mint) 34%, var(--border-default)) !important;
-  border-radius: var(--control-radius);
-  background: color-mix(in oklab, var(--accent-mint) 7%, var(--bg-elevated));
-  padding: 0.7rem 0.9rem 0.7rem 2.2rem !important;
-  box-shadow: inset 3px 0
-    color-mix(in oklab, var(--accent-mint) 70%, transparent);
-}
-
-.spectra-document-studio .ProseMirror blockquote ~ blockquote {
-  border-color: color-mix(
-    in oklab,
-    #e2a03a 38%,
-    var(--border-default)
-  ) !important;
-  background: color-mix(in oklab, #f3a62b 7%, var(--bg-elevated));
-  box-shadow: inset 3px 0 color-mix(in oklab, #e29b2d 72%, transparent);
 }
 
 .spectra-studio-details
@@ -12238,7 +11674,6 @@ button[data-spectra-context-trigger="true"]::after {
   }
   .spectra-document-studio .ProseMirror {
     padding-inline: 8px !important;
-    font-size: 16px;
   }
   .spectra-command-bar {
     gap: 8px;
@@ -12443,12 +11878,6 @@ body {
     #faf9f8 !important;
 }
 
-.spectra-document-studio[data-layout="continuous"] .ProseMirror {
-  color: #292622;
-  font-size: 15px;
-  line-height: 1.62;
-}
-
 .spectra-document-studio[data-layout="continuous"] .tiptap-root {
   width: min(920px, calc(100% - 80px));
   max-width: 920px !important;
@@ -12560,11 +11989,6 @@ body {
   opacity: 0.48;
 }
 
-.spectra-document-studio .ProseMirror :is(h1, h2, h3) {
-  font-family:
-    var(--font-manrope), ui-sans-serif, system-ui, sans-serif !important;
-}
-
 .spectra-artifact-identity > .hidden.shrink-0.items-center {
   display: none !important;
 }
@@ -12584,23 +12008,10 @@ body {
 
 .spectra-document-studio[data-layout="continuous"] .ProseMirror {
   padding: 0 0 90px !important;
-  font-size: 13.5px;
-  line-height: 1.55;
 }
 
 .spectra-document-studio[data-layout="continuous"] .ProseMirror > :first-child {
   margin-top: 0 !important;
-}
-
-.spectra-document-studio .ProseMirror :is(h1, h2, h3) {
-  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
-  font-weight: 600;
-  letter-spacing: -0.018em;
-}
-
-.spectra-document-studio .ProseMirror h2 {
-  font-size: 20px;
-  line-height: 1.28;
 }
 
 .spectra-workspace-header nav[aria-label="Workspace sections"] {
@@ -14086,6 +13497,8 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
 }
 
 .spectra-rich-text-editor[data-rich-text-variant="card"] {
+  /* A card face is written in the face it is studied in. */
+  --prose-font: var(--font-display);
   border-radius: var(--card-radius);
   background:
     radial-gradient(
@@ -14095,16 +13508,6 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
     ),
     color-mix(in oklab, var(--bg-primary) 96%, transparent);
   box-shadow: 0 18px 42px -34px rgba(57, 38, 97, 0.38);
-}
-
-.spectra-rich-text-editor[data-rich-text-variant="card"] .ProseMirror > * {
-  margin-top: 0;
-  margin-bottom: 0.45em;
-}
-
-.spectra-rich-text-editor[data-rich-text-variant="compact"] .ProseMirror > * {
-  margin-top: 0;
-  margin-bottom: 0.35em;
 }
 
 .spectra-artifact-main

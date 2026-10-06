@@ -85,10 +85,10 @@ export function ArtifactRichTextEditor({
           variant === "card"
             ? // 180px left a single-line answer floating in an almost empty
               // box; two of them pushed the note, tags and settings off screen.
-              "min-h-[112px] px-6 py-6 text-center font-serif text-metric leading-snug text-[var(--text-primary)] outline-none"
+              "spectra-prose min-h-[112px] px-6 py-6 text-center text-metric leading-snug outline-none"
             : variant === "planner"
-              ? "min-h-[136px] px-4 py-3 text-ui leading-6 text-[var(--text-primary)] outline-none"
-              : "min-h-[62px] px-3 py-2 text-ui leading-5 text-[var(--text-primary)] outline-none",
+              ? "spectra-prose min-h-[136px] px-4 py-3 text-ui leading-6 outline-none"
+              : "spectra-prose min-h-[62px] px-3 py-2 text-ui leading-5 outline-none",
       },
     },
     onFocus: () => {

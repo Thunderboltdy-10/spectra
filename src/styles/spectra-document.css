@@ -347,10 +347,9 @@
    until hovered is a table people resize by trial and error.
    --------------------------------------------------------------------------- */
 
+/* The table's look is the shared prose (spectra-prose.css); a document adds
+   fixed columns the writer resizes. */
 .spectra-document-studio .ProseMirror table {
-  width: 100%;
-  margin: 14px 0;
-  border-collapse: collapse;
   table-layout: fixed;
   overflow: hidden;
 }
@@ -358,15 +357,6 @@
 .spectra-document-studio .ProseMirror table :is(td, th) {
   position: relative;
   min-width: 2em;
-  padding: 6px 9px;
-  border: 1px solid #dbe0d9;
-  vertical-align: top;
-}
-
-.spectra-document-studio .ProseMirror table th {
-  background: #f4f6f2;
-  font-weight: 660;
-  text-align: left;
 }
 
 .spectra-document-studio .ProseMirror table .selectedCell::after {

@@ -16,12 +16,13 @@ function useParent() {
 /**
  * Put inside something that appears because of what the reader just did (an
  * answer revealed, a result shown): it forms out of the field from that press
- * (LIFE.md, Arrive). It renders nothing visible.
+ * (LIFE.md, Arrive). Without a recent press (reopening what was already
+ * shown) it is simply there. It renders nothing visible.
  */
 export function LifeForm({ bars }: { bars?: string }) {
   const { anchor, host } = useParent();
   const [from] = useState(recentCause);
-  useLifeEntrance(host, { bars, from });
+  useLifeEntrance(host, { bars, from, enabled: from !== undefined });
   return <span ref={anchor} hidden />;
 }
 

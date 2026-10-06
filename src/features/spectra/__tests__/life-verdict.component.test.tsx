@@ -1,18 +1,20 @@
 // @vitest-environment jsdom
-import { render } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const field = vi.hoisted(() => ({
   pulse: vi.fn((_x: number, _y: number, _strength?: number, _colour?: unknown) => undefined),
   radiate: vi.fn((_figure: unknown, _options?: unknown) => undefined),
+  form: vi.fn((_figure: unknown, _options?: unknown) => ({ formed: Promise.resolve() })),
 }));
 
 vi.mock("../life/life", () => ({
-  life: { on: true, pulse: field.pulse, radiate: field.radiate },
+  life: { on: true, pulse: field.pulse, radiate: field.radiate, form: field.form },
 }));
 
-import { LifeVerdict } from "@/components/ui/life-moments";
-import type { Verdict } from "../life/use-life";
+
+import { LifeForm, LifeVerdict } from "@/components/ui/life-moments";
+import { recentCause, type Verdict } from "../life/use-life";
 import { STATUS_COLOURS } from "../life/prism";
 
 function Card({ verdict, immediate }: { verdict: Verdict | null; immediate?: boolean }) {
@@ -32,6 +34,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   field.pulse.mockClear();
   field.radiate.mockClear();
+  field.form.mockClear();
 });
 
 describe("verdicts", () => {
@@ -61,5 +64,21 @@ describe("verdicts", () => {
     render(<Card verdict="open" immediate />);
     expect(field.pulse).toHaveBeenCalledTimes(1);
     expect(field.pulse.mock.calls[0][3]).toEqual(STATUS_COLOURS.info);
+  });
+});
+
+describe("what a press reveals", () => {
+  it("forms from the press that revealed it", () => {
+    recentCause();
+    fireEvent.pointerDown(document.body, { clientX: 40, clientY: 60 });
+    render(<section><LifeForm />Answer</section>);
+    expect(field.form).toHaveBeenCalledTimes(1);
+    expect(field.form.mock.calls[0][1]).toEqual({ from: [40, 60] });
+  });
+
+  it("reopened later, it is simply there", () => {
+    vi.spyOn(performance, "now").mockReturnValue(10_000_000);
+    render(<section><LifeForm />Answer</section>);
+    expect(field.form).not.toHaveBeenCalled();
   });
 });

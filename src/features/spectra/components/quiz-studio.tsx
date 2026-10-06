@@ -29,7 +29,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { LifeVerdict } from "@/components/ui/life-moments";
+import { LifeForm, LifeVerdict } from "@/components/ui/life-moments";
 import { SelectField } from "@/components/ui/select";
 import { targetAttrs } from "../collaboration/target-attributes";
 import {
@@ -1812,6 +1812,7 @@ export function QuizStudio({
                 <div className="flex shrink-0 items-center gap-2">
                   {submitted ? (
                     <div className="rounded-control bg-[color-mix(in_oklab,var(--success)_9%,var(--bg-primary))] px-3 py-2 text-right text-caption font-semibold text-[var(--success)]">
+                      <LifeForm />
                       {practiceAttempt?.status === "submitted"
                         ? `${practiceAttempt.score ?? 0}/${practiceAttempt.maxScore ?? 0} points · ${practiceAttempt.percentage ?? 0}%`
                         : `${displayedQuestions.filter((question) => questionCorrect(question)).length}/${displayedQuestions.length} correct`}
@@ -1899,6 +1900,7 @@ export function QuizStudio({
               ) : null}
               {submitted && !inspectAttempt ? (
                 <div className="space-y-4">
+                  <LifeForm />
                   <QuizResultPie
                     correct={attemptScoreCounts.correct}
                     incorrect={attemptScoreCounts.incorrect}

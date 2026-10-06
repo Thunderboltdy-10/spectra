@@ -248,4 +248,32 @@ describe("harness tools", () => {
     expect(result.content).toMatch(/## Authoring format/);
     expect(result.content).toMatch(/add_slide/);
   });
+
+  it.each([
+    ["calendar", { action: "complete_block", itemId: "b1", expectedRevision: 2 }, { command: "complete_calendar_block", args: { itemId: "b1", expectedRevision: 2 } }],
+    ["calendar", { action: "remove_event", itemId: "e1" }, { command: "remove_calendar_event", args: { itemId: "e1" } }],
+    ["organize_library", { action: "pin", targetIds: ["n1"] }, { command: "pin_library_item", args: { targetId: "n1", pinned: true } }],
+    ["organize_library", { action: "create_workspace", name: "Physics" }, { command: "organize_library", args: { action: "create_workspace", targetIds: [], name: "Physics" } }],
+    ["restore_from_trash", { targetIds: ["n1"] }, { command: "restore_library_items", args: { targetIds: ["n1"] } }],
+    ["save_version", { artifactId: "wx1", name: "Draft one" }, { command: "save_version", args: { artifactId: "wx1", name: "Draft one" } }],
+    ["manage_conversation", { title: "Biology" }, { command: "manage_conversation", args: { title: "Biology" } }],
+    ["managebac", { action: "set_sync_mode", kind: "grades", mode: "follow", classId: "c9" }, { command: "set_school_sync_mode", args: { kind: "grades", mode: null, providerClassId: "c9" } }],
+    ["managebac", { action: "release_class_workspaces", classIds: ["r1"], retention: "keep_in_spectra" }, { command: "manage_class_workspaces", args: { action: "release", recordIds: ["r1"], retention: "keep_in_spectra" } }],
+    ["open_in_spectra", { destination: "analytics" }, { command: "navigate_spectra", args: { destination: "analytics" } }],
+  ] as const)("%s sends the application command for %j", async (name, raw, sent) => {
+    const { tools, backend } = setup();
+    const tool = tools.find((entry) => entry.name === name)!;
+    const args = tool.parse!({ ...raw });
+    await tool.execute(args, { signal: new AbortController().signal, runId: "r", toolCallId: "t", approved: true });
+    expect(backend.commands.at(-1)).toMatchObject(sent);
+  });
+
+  it("refuses the reach commands' malformed requests with a fix the model can act on", () => {
+    const { tools } = setup();
+    const named = (name: string) => tools.find((entry) => entry.name === name)!;
+    expect(() => named("organize_library").parse!({ action: "pin", targetIds: ["a", "b"] })).toThrow(/one id/);
+    expect(() => named("managebac").parse!({ action: "set_sync_mode", kind: "grades", mode: "follow" })).toThrow(/classId/);
+    expect(() => named("manage_conversation").parse!({})).toThrow(/title, pinned or archived/);
+    expect(() => named("calendar").parse!({ action: "complete_block", itemId: "b1" })).toThrow(/expectedRevision/);
+  });
 });

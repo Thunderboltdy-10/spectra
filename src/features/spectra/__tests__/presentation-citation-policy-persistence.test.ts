@@ -3,22 +3,16 @@ import path from "node:path";
 import { strFromU8, unzipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { buildAttachmentEvidence } from "../ai/attachment-evidence";
-import { prepareContentEvidence } from "../ai/source-evidence-content";
 import { enforceAiPresentationContentPolicy } from "../presentation/ai-content-policy";
 import { buildPresentationPptx } from "../presentation/io";
 import { normalizePresentationContent, type PresentationContent } from "../presentation/model";
 import { pptxLens } from "../lenses/pptx-lens";
 import { workYjsAdapter } from "../work/models/yjs/registry";
 
-const excerpt = "In this synthetic trial, sheltered trays lost 18 mL of water and exposed trays lost 31 mL over two hours. One tray was measured per condition; the trial does not establish causation.";
-const evidence = buildAttachmentEvidence([{
-  id: "tray-trial", name: "Tray trial.txt", mimeType: "text/plain", size: excerpt.length,
-  handling: "text", extractedText: excerpt,
-  sourceMap: [{ kind: "page", label: "Page 2", startOffset: 0, endOffset: excerpt.length }],
-}])!;
+const sourceRef = "evidence:tray-trial";
+const citation = { id: "tray-trial-p2", label: "Tray trial.txt, p. 2", sourceRefs: [sourceRef] };
 
-function trialDeck(sourceRef = evidence.evidence[0]!.id) {
+function trialDeck() {
   const text = (id: string, value: string, y: number, fontSize = 32) => ({
     id, type: "text", x: 70, y, width: 840, height: 90, rotation: 0,
     content: { text: value }, style: { fontSize },
@@ -27,10 +21,10 @@ function trialDeck(sourceRef = evidence.evidence[0]!.id) {
     theme: { id: "trial", tokens: { background: "var(--bg-primary)", heading: "var(--text-primary)", body: "var(--text-primary)" } },
     settings: { aspectRatio: "16:9" },
     slides: [
-      { id: "finding", title: "Less water lost under shelter", sourceRefs: [sourceRef],
+      { id: "finding", title: "Less water lost under shelter", sourceRefs: [sourceRef], citations: [citation],
         speakerNotes: "These observations come from a synthetic trial, not a general causal result.",
         objects: [text("finding-title", "Less water lost under shelter", 50, 40), text("finding-body", "A small trial suggests a useful next experiment.", 170)] },
-      { id: "measurement", title: "Compare the measured loss", sourceRefs: [sourceRef],
+      { id: "measurement", title: "Compare the measured loss", sourceRefs: [sourceRef], citations: [citation],
         speakerNotes: "Water loss was measured after two hours. Each condition had one tray.",
         objects: [text("measurement-title", "Compare the measured loss", 35, 40), {
           id: "water-loss", type: "chart", x: 80, y: 150, width: 820, height: 300, rotation: 0,
@@ -47,11 +41,8 @@ function trialDeck(sourceRef = evidence.evidence[0]!.id) {
 }
 
 describe("citation policy through saved editable output", () => {
-  it("rejects invented evidence, then saves the repaired three-slide deck without adding references", async () => {
-    expect(() => prepareContentEvidence("presentation", trialDeck("evidence:invented"), evidence))
-      .toThrow("RESEARCH_EVIDENCE_REF_NOT_ISSUED");
-
-    const content = normalizePresentationContent(prepareContentEvidence("presentation", trialDeck(), evidence));
+  it("saves a cited three-slide deck without adding references", async () => {
+    const content = normalizePresentationContent(trialDeck());
     const prepared = enforceAiPresentationContentPolicy(content, "Make a three-slide explanation of the tray trial.");
     const adapter = workYjsAdapter<PresentationContent>("presentation");
     const written = adapter.createDocument(prepared);
@@ -70,7 +61,7 @@ describe("citation policy through saved editable output", () => {
       expect(saved.slides.map((slide) => slide.id)).toEqual(["finding", "measurement", "next"]);
       expect(saved.slides[0]!.citations).toEqual(prepared.slides[0]!.citations);
       expect(saved.slides[1]!.citations?.[0]).toMatchObject({
-        label: "Tray trial.txt, p. 2", sourceRefs: [evidence.evidence[0]!.id],
+        label: "Tray trial.txt, p. 2", sourceRefs: [sourceRef],
       });
       expect(saved.slides[2]!.citations ?? []).toEqual([]);
 

@@ -128,7 +128,7 @@ function StepRow({
 }) {
   // A field object: a step forms from where it was made (your press, or the prism when Spectra adds it) and parts when removed.
   return (
-    <li className="spectra-task-step" data-life-object="" data-done={step.done || undefined}>
+    <li className="spectra-task-step" data-life-object="" data-life-done="" data-done={step.done || undefined}>
       <input
         type="checkbox"
         checked={step.done}
@@ -263,6 +263,7 @@ export function TaskStudio({
               aria-label={done ? "Mark as not done" : "Mark as done"}
               title={done ? "Mark as not done" : "Mark as done"}
               className="spectra-task-done"
+              data-life-done=""
               disabled={!canEdit}
               onClick={() => patch({ status: done ? "todo" : "done" })}
             >

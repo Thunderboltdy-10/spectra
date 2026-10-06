@@ -105,6 +105,31 @@ describe("read_thread lookups", () => {
     expect(text).toContain("message msg-4");
     expect(text).toContain("Spectra: The deadline moved to Friday.");
     expect(text).toContain("Other conversations that match:\n- Other plans (threadId thread-2)");
+    expect(text).toContain('read_thread {threadId: "thread-9", after: "msg-4"}');
+  });
+
+  it("pages on from a passage in both directions with message ids", async () => {
+    answer = { messages: [{ _id: "msg-5", role: "user", content: "And the essay?" }, { _id: "msg-6", role: "assistant", content: "Monday." }], more: true };
+    const later = await backend({ threadId: "thread-1" }).readThread({ threadId: "thread-9", after: "msg-4", limit: 2 });
+    expect(calls[0]).toMatchObject({ name: "spectraThreads:listMessagesFrom", args: { threadId: "thread-9", messageId: "msg-4", direction: "newer", limit: 2 } });
+    expect(later).toContain("[msg-5] User: And the essay?\n\n[msg-6] Spectra: Monday.");
+    expect(later).toContain('older: read_thread {threadId: "thread-9", before: "msg-5"}');
+    expect(later).toContain('newer: read_thread {threadId: "thread-9", after: "msg-6"}');
+    calls.length = 0;
+    answer = { messages: [{ _id: "msg-2", role: "user", content: "Hi" }], more: false };
+    const earlier = await backend({ threadId: "thread-1" }).readThread({ before: "msg-3" });
+    expect(calls[0]).toMatchObject({ name: "spectraThreads:listMessagesFrom", args: { threadId: "thread-1", messageId: "msg-3", direction: "older" } });
+    expect(earlier).not.toContain("older:");
+    expect(earlier).toContain('newer: read_thread {after: "msg-2"}');
+  });
+
+  it("offers older messages from the latest page by message id, never a cursor", async () => {
+    answer = { messages: [{ _id: "msg-8", role: "user", content: "Latest" }], hasOlder: true, olderBefore: "opaque-cursor" };
+    const text = await backend({ threadId: "thread-1" }).readThread({});
+    expect(calls[0]).toMatchObject({ name: "spectraThreads:listMessages", args: { threadId: "thread-1" } });
+    expect(calls[0]!.args).not.toHaveProperty("before");
+    expect(text).toContain('(Read on: older: read_thread {before: "msg-8"})');
+    expect(text).not.toContain("opaque-cursor");
   });
 
   it("says when nothing in the conversation matches, and why results may be thin", async () => {

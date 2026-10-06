@@ -7,10 +7,14 @@ import Underline from "@tiptap/extension-underline";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { DOMParser } from "@tiptap/pm/model";
+import { AiTextResolve } from "../editor/ai-text-resolve";
 import { Equation, InlineEquation } from "../editor/equation-node";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { plannerDescriptionHtml, RichTextFormatBar } from "./artifact-studio";
 import { shouldEmitRichTextChange } from "./artifact-studio-value-utils";
+
+/** A change that came in through `value`: someone else's text (a peer's, or Spectra's). */
+const INCOMING_META = "spectraIncomingValue";
 
 export function ArtifactRichTextEditor({
   value,
@@ -37,6 +41,7 @@ export function ArtifactRichTextEditor({
   const focusedRef = useRef(false);
   const typedWhileFocusedRef = useRef(false);
   const [initialContent] = useState(() => plannerDescriptionHtml(value));
+  const hostRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
@@ -65,6 +70,11 @@ export function ArtifactRichTextEditor({
       Equation,
       InlineEquation,
       Placeholder.configure({ placeholder }),
+      // Spectra's words resolve from a slight blur while it writes this field (MOTION.md).
+      AiTextResolve.configure({
+        writing: () => Boolean(hostRef.current?.closest('[data-ai-region="true"]')),
+        remote: (transaction) => transaction.getMeta(INCOMING_META) === true,
+      }),
     ] as never[],
     content: initialContent,
     editable: !disabled,
@@ -128,12 +138,14 @@ export function ArtifactRichTextEditor({
     editor.view.dispatch(editor.state.tr
       .replace(start, endA, next.slice(start, endB))
       .setMeta("preventUpdate", true)
+      .setMeta(INCOMING_META, true)
       .setMeta("addToHistory", false));
     typedWhileFocusedRef.current = false;
   }, [editor, value]);
 
   return (
     <div
+      ref={hostRef}
       className="spectra-planner-description spectra-rich-text-editor"
       data-disabled={disabled || undefined}
       data-rich-text-variant={variant}

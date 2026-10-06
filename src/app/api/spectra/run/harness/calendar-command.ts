@@ -1,10 +1,5 @@
 import { throwIfAborted } from "./abort";
-import { evaluateCommandAuthority, recordAuthorityDecision } from "./authority";
 import { mutate } from "./io";
-import {
-  authorityPublicMessage,
-  authorityRequiresNotice,
-} from "@/features/spectra/ai/authority-execution";
 import {
   calendarChangedNote,
   calendarConvexMutation,
@@ -19,8 +14,7 @@ import {
 } from "@/features/spectra/calendar/domain/command";
 import type { CalendarItem } from "@/features/spectra/calendar/domain/model";
 import type { CalendarActionPostcondition } from "@/features/spectra/calendar/domain/actions";
-import { spectraToolRegistry } from "@/features/spectra/tools/registry";
-import { normalizeCalendarTimeInput } from "../../../../../../shared/calendar-time";
+import { parseApplicationCommand } from "./application-commands";
 
 export type CalendarMutationResult = {
   ok: true;
@@ -30,10 +24,6 @@ export type CalendarMutationResult = {
   status: "canonical_write";
   postcondition: CalendarActionPostcondition;
 };
-
-function asArgs(value: Record<string, unknown>): Record<string, unknown> {
-  return normalizeCalendarTimeInput(value);
-}
 
 export async function executeRegisteredCalendarMutation(input: {
   actorClerkId: string;
@@ -52,45 +42,8 @@ export async function executeRegisteredCalendarMutation(input: {
   throwIfAborted(input.signal);
   const toolId = normalizeCalendarCommand(input.command);
   if (!toolId) throw new Error(`APP_COMMAND_NOT_REGISTERED:${input.command}`);
-  const definition = spectraToolRegistry.get(toolId);
-  if (!definition) throw new Error(`APP_COMMAND_NOT_REGISTERED:${toolId}`);
-  const parsed = definition.inputSchema.parse(asArgs(input.args)) as Record<
-    string,
-    unknown
-  >;
-  if (definition.aiAvailability === "prohibited")
-    throw new Error(
-      `AUTHORITY_PROHIBITED:${definition.prohibitionReason ?? definition.title}`,
-    );
-  if (definition.authorityTarget) {
-    const authority = await evaluateCommandAuthority({
-      actorClerkId: input.actorClerkId,
-      command: toolId,
-      args: parsed,
-      authorityTarget: definition.authorityTarget,
-    });
-    await recordAuthorityDecision({
-      actorClerkId: input.actorClerkId,
-      runId: input.runId,
-      executionId: input.executionId,
-      command: toolId,
-      decision: authority.decision,
-      target: authority.target,
-      reason: authority.reason,
-      consequence: authority.consequence,
-    });
-    if (authority.decision === "prohibited")
-      throw new Error(`AUTHORITY_PROHIBITED:${authority.reason}`);
-    if (authorityRequiresNotice(authority.decision) && authority.notice)
-      input.onUiEvent?.({
-        key: "authority_notice",
-        payload: {
-          note: authority.notice,
-          command: toolId,
-          message: authorityPublicMessage(authority),
-        },
-      });
-  }
+  // Calendar writes carry no authority class: they are undoable gestures.
+  const { args: parsed } = parseApplicationCommand(toolId, input.args);
   throwIfAborted(input.signal);
   const action = calendarSemanticAction(toolId, parsed);
   const scopeId =

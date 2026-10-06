@@ -8,7 +8,7 @@ import { applicationApprovalScope, applicationOperationScope, applicationWriteRe
 import { mapOperationArtifactReferences } from "../src/features/spectra/operations/dependencies";
 import type { ModelOperation } from "../src/features/spectra/operations/schema";
 import { normalizeCalendarTimeInput } from "../shared/calendar-time";
-import { AI_SYNC_PURPOSE_KINDS, aiSyncPurpose } from "../shared/school-sync";
+import { aiRefreshRequest } from "../shared/school-sync";
 import { vUiObservationFence } from "./spectraUiObservationSchema";
 import { assertUiObservationFence } from "./spectraUiObservation";
 
@@ -17,7 +17,7 @@ const row = (value: unknown): Row => value && typeof value === "object" && !Arra
 const strings = (value: unknown) => Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
 // Moving items to the Trash is undoable, so it asks only when desktop files
 // are affected (counted below), like organising the library.
-export const confirmedCommands = new Set(["change_spectra_settings", "change_sync_policy", "change_sharing", "trigger_managebac_sync", "select_managebac_classes", "remove_device"]);
+export const confirmedCommands = new Set(["change_spectra_settings", "change_sync_policy", "change_sharing", "trigger_managebac_sync", "select_managebac_classes", "set_school_sync_mode", "manage_class_workspaces", "remove_device"]);
 const localEffectCommands = new Set(["organize_library", "change_sync_policy", "delete_library_items"]);
 
 function semanticInput(input: Row) {
@@ -52,6 +52,7 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
     case "organize_library": {
       switch (args.action) {
         case "create_folder": return { name: "orgTree:createFolder", args: { name: String(args.name ?? "").trim(), ...(destination ? { parentId: destination } : {}) } };
+        case "create_workspace": return { name: "spectraWorkspaces:create", args: { title: String(args.name ?? "").trim(), ...(destination ? { parentNodeId: destination } : {}) } };
         case "rename": return { name: "orgTree:rename", args: { nodeId: targetIds[0], name: String(args.name ?? "") } };
         case "move": return { name: "orgTree:move", args: { nodeIds: targetIds, ...(destination ? { parentId: destination } : {}) } };
         case "link": return { name: "orgTree:createReference", args: { targetNodeId: targetIds[0], ...(destination ? { parentId: destination } : {}) } };
@@ -59,6 +60,15 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
       break;
     }
     case "delete_library_items": return { name: "orgTree:trash", args: { nodeIds: targetIds } };
+    case "restore_library_items": return { name: "orgTree:restore", args: { nodeIds: targetIds } };
+    case "pin_library_item": return { name: "orgTree:setPinned", args: { nodeId: String(args.targetId ?? ""), pinned: args.pinned === true } };
+    case "manage_conversation": return { name: "spectraThreads:update", args: {
+      threadId: String(args.threadId ?? ""),
+      ...(typeof args.title === "string" ? { title: args.title } : {}),
+      ...(typeof args.pinned === "boolean" ? { pinned: args.pinned } : {}),
+      ...(typeof args.archived === "boolean" ? { status: args.archived ? "archived" : "active" } : {}),
+    } };
+    case "save_version": return { name: "changeGroups:createNamedCheckpoint", args: { artifactId: String(args.artifactId ?? ""), name: String(args.name ?? "") } };
     case "remove_device": return { name: "bridge:revokeDevice", args: { deviceId: String(args.deviceId ?? "") } };
     case "change_sync_policy": return { name: "syncPolicy:patchItems", args: { itemIds: targetIds, patch: row(args.patch), actorKind: "ai", idempotencyKey: `ai:${runId}:${operationId}` } };
     case "write_memory": return args.action === "create"
@@ -75,15 +85,21 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
       }
       break;
     }
-    case "trigger_managebac_sync": {
-      const purpose = aiSyncPurpose(args.purpose);
-      return { name: "managebac:requestAiRefresh", args: { reason: `ai_${purpose}`, force: args.force !== false, kinds: [...AI_SYNC_PURPOSE_KINDS[purpose]] } };
-    }
+    case "trigger_managebac_sync": return { name: "managebac:requestAiRefresh", args: aiRefreshRequest(args.purpose, args.force) };
     case "select_managebac_classes": return { name: "managebac:setSelectedClasses", args: {
       recordIds: strings(args.recordIds),
       ...(typeof args.expectedRevision === "number" ? { expectedRevision: args.expectedRevision } : {}),
       ...(args.retention === "keep_in_spectra" || args.retention === "archive_projection" ? { retention: args.retention } : {}),
     } };
+    case "set_school_sync_mode": return typeof args.providerClassId === "string"
+      ? { name: "school:setClassOverride", args: { providerClassId: args.providerClassId, kind: args.kind, mode: args.mode ?? null } }
+      : { name: "school:setMode", args: { kind: args.kind, mode: args.mode } };
+    case "manage_class_workspaces": return args.action === "release"
+      ? { name: "managebac:releaseClassWorkspaces", args: {
+        recordIds: strings(args.recordIds),
+        ...(args.retention === "keep_in_spectra" || args.retention === "archive_projection" ? { retention: args.retention } : {}),
+      } }
+      : { name: "managebac:materializeClassWorkspaces", args: { recordIds: strings(args.recordIds) } };
     case "schedule_calendar_task": {
       const time = normalizeCalendarTimeInput(args);
       return { name: "calendar:scheduleTask", args: {
@@ -103,6 +119,8 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
     }
     case "move_calendar_block": return { name: "calendar:moveWorkBlock", args: { itemId: args.itemId, startAt: args.startAt, endAt: args.endAt, expectedRevision: args.expectedRevision } };
     case "resize_calendar_block": return { name: "calendar:resizeWorkBlock", args: { itemId: args.itemId, endAt: args.endAt, expectedRevision: args.expectedRevision } };
+    case "complete_calendar_block": return { name: "calendar:completeWorkBlock", args: { itemId: args.itemId, expectedRevision: args.expectedRevision } };
+    case "remove_calendar_event": return { name: "calendar:removePersonalItem", args: { itemId: args.itemId } };
   }
   throw new Error("AI_APPLICATION_WRITE_NOT_REGISTERED");
 }

@@ -138,6 +138,11 @@ const CODE_MESSAGES: Array<{ test: RegExp; message: (app: string) => string }> =
     message: () => "The save did not finish. Try again.",
   },
   {
+    test: /folder-paused/i,
+    message: () =>
+      "This folder is paused on this computer. Spectra saves the change when you resume it.",
+  },
+  {
     test: /office-locked/i,
     message: (app) =>
       `${app} still has this file open. Close it there, then try again.`,

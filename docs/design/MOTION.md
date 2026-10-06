@@ -105,6 +105,7 @@ animated layout properties.
 - Words fade in from a slight blur to sharp, at a steady rate.
 - A small buffer smooths uneven network chunks, so text never stutters or jumps.
 - The scroll follows, unless the user has scrolled up.
+- A reply starts as light that leaves the prism and crosses the field to where its first words go. A little light then follows the writing front, and when the reply is complete the paper pulses softly where the words settled.
 
 ### Captions
 

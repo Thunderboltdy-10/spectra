@@ -16376,6 +16376,41 @@ html[data-spectra-motion="none"] .spectra-caption-live::after {
   }
 }
 
+/* The same band over every other region Spectra writes: a card face, an
+   option, an event, a field (editor-field-moments.ts places it). It sits in
+   a layer over the work, clipped to the work, and lets go with a fade. */
+.spectra-ai-band-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.spectra-ai-band {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  transition: opacity var(--motion-slow) var(--ease-standard);
+}
+.spectra-ai-band.is-leaving {
+  opacity: 0;
+}
+.spectra-ai-band > i {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 28%,
+    color-mix(in oklab, #8b6cf6 8%, transparent) 40%,
+    color-mix(in oklab, #4f9fe6 10%, transparent) 50%,
+    color-mix(in oklab, #40c48e 8%, transparent) 60%,
+    transparent 72%
+  );
+  transform: translateX(-100%);
+  animation: spectra-ai-band 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
 /* Spectra's words resolve from a slight blur, a chunk at a time (editor/ai-text-resolve.ts). */
 .spectra-ai-resolve {
   animation: spectra-ai-resolve 440ms var(--ease-standard) both;

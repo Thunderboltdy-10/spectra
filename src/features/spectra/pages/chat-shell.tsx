@@ -707,7 +707,7 @@ export function ChatShell() {
       render: () => (
         <GlobalSearch
           trigger="icon"
-          onOpenArtifact={(artifact) => openArtifact(artifact._id)}
+          onOpenArtifact={(artifactId) => openArtifact(artifactId)}
           onOpenWorkspace={(workspace) => selectWorkspaceContext(workspace._id)}
         />
       ),

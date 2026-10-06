@@ -16,12 +16,18 @@ import {
   clampWidgetHeight,
   type WidgetTheme,
 } from "../widgets/widget-document";
+import { WIDGET_STOPPED_NOTE, WIDGET_WATCHDOG } from "../widgets/widget-watchdog";
 
 /*
  * A show_widget visual in the thread. The frame is sandboxed with scripts only
  * (an opaque origin: no cookies, storage or app access) and its document
  * carries a no-network CSP. The app tells it the theme; it tells the app its
  * height. The user can keep it as work.
+ *
+ * Its scripts run under a watchdog inside the frame, which stops a loop that
+ * never yields and says so. If the frame stops answering anyway (it runs on
+ * its own thread and is stuck in something the watchdog cannot see), the app
+ * removes it after a few silent seconds and shows the same plain note.
  */
 
 function readTheme(): WidgetTheme {
@@ -68,6 +74,10 @@ export function ThreadWidget({
   const frame = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState<number>(WIDGET_LIMITS.defaultHeight);
   const [save, setSave] = useState<SaveState>({ status: "idle" });
+  // running: answering; stopped: the watchdog stopped its scripts (the frame
+  // shows the note); silent: it stopped answering, so the frame is removed.
+  const [health, setHealth] = useState<"running" | "stopped" | "silent">("running");
+  const lastHeard = useRef<number | null>(null);
   const create = useMutation(api.spectraArtifacts.create);
   // The document is built once per widget; later theme changes are posted in,
   // so switching mode never reloads (and resets) the visual.
@@ -88,10 +98,21 @@ export function ThreadWidget({
       if (!frame.current || event.source !== frame.current.contentWindow) return;
       const data = event.data as { type?: unknown; height?: unknown } | null;
       if (data?.type === WIDGET_MESSAGE.size) setHeight(clampWidgetHeight(data.height));
+      if (data?.type === WIDGET_MESSAGE.alive) lastHeard.current = Date.now();
+      if (data?.type === WIDGET_MESSAGE.stopped) setHealth((current) => (current === "running" ? "stopped" : current));
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, []);
+
+  useEffect(() => {
+    if (health !== "running") return;
+    const timer = window.setInterval(() => {
+      // Only a frame that has answered before can fall silent.
+      if (lastHeard.current !== null && Date.now() - lastHeard.current > WIDGET_WATCHDOG.silenceMs) setHealth("silent");
+    }, WIDGET_WATCHDOG.heartbeatMs);
+    return () => window.clearInterval(timer);
+  }, [health]);
 
   const saveAsWork = async () => {
     if (save.status === "saving" || save.status === "saved") return;
@@ -148,16 +169,27 @@ export function ThreadWidget({
           {save.message}
         </p>
       ) : null}
-      <iframe
-        ref={frame}
-        title={widget.title}
-        sandbox={WIDGET_SANDBOX}
-        referrerPolicy="no-referrer"
-        srcDoc={srcDoc}
-        onLoad={postTheme}
-        style={{ height }}
-        className="block w-full border-0 bg-[var(--bg-primary)]"
-      />
+      {health === "stopped" ? (
+        <p role="status" className="sr-only">
+          {WIDGET_STOPPED_NOTE}
+        </p>
+      ) : null}
+      {health === "silent" ? (
+        <p role="status" data-spectra-widget-stopped className="m-3.5 rounded-control bg-[var(--bg-secondary)] px-3.5 py-3 text-caption text-[var(--text-secondary)]">
+          {WIDGET_STOPPED_NOTE}
+        </p>
+      ) : (
+        <iframe
+          ref={frame}
+          title={widget.title}
+          sandbox={WIDGET_SANDBOX}
+          referrerPolicy="no-referrer"
+          srcDoc={srcDoc}
+          onLoad={postTheme}
+          style={{ height }}
+          className="block w-full border-0 bg-[var(--bg-primary)]"
+        />
+      )}
     </figure>
   );
 }

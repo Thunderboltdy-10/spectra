@@ -85,8 +85,6 @@ const gap = (reason: string): AiReach => ({ kind: "user", reason, gap: true });
 
 const PERMISSION_REASON =
   "It changes what Spectra AI may do. Only the user changes that, in Settings, so the AI can never grant itself more.";
-const NOT_A_FOLLOW_DESTINATION =
-  "Following Spectra opens Library, Calendar, Settings, a workspace or a work item. This page is not a follow destination yet; adding it is a shell change.";
 
 export const COMMAND_CATALOG: readonly CatalogCommand[] = [
   // Navigation
@@ -147,25 +145,28 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     id: "navigation.open_agents",
     area: "navigation",
     title: "Open Agents",
-    description: "Show the specialist agents page.",
+    description: "Show the specialist agents page, or one agent (targetId: the agent's id).",
+    keywords: ["specialists", "go to"],
     ui: ["app.page.agents"],
-    reach: gap(NOT_A_FOLLOW_DESTINATION),
+    reach: tool("open_in_spectra", { fixed: { destination: "agents" }, appCommand: "navigate_spectra", example: {} }),
   },
   {
     id: "navigation.open_school",
     area: "navigation",
     title: "Open School",
     description: "Show school data and class shelves.",
+    keywords: ["classes", "grades", "go to"],
     ui: ["app.page.school"],
-    reach: gap(NOT_A_FOLLOW_DESTINATION),
+    reach: tool("open_in_spectra", { fixed: { destination: "school" }, appCommand: "navigate_spectra", example: {} }),
   },
   {
     id: "navigation.open_analytics",
     area: "navigation",
     title: "Open Analytics",
     description: "Show learning analytics.",
+    keywords: ["progress", "insights", "go to"],
     ui: ["app.page.analytics"],
-    reach: gap(NOT_A_FOLLOW_DESTINATION),
+    reach: tool("open_in_spectra", { fixed: { destination: "analytics" }, appCommand: "navigate_spectra", example: {} }),
   },
 
   // Conversation
@@ -192,9 +193,18 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     id: "conversation.manage",
     area: "conversation",
     title: "Rename or tidy a conversation",
-    description: "Rename a conversation or hide and keep its result cards and tabs.",
-    server: ["spectraThreads:update", "spectraRuns:hideTab", "spectraRuns:selectTab", "spectraRuns:hideResultCard", "spectraRuns:keepResultCard"],
-    reach: gap("These change how the user's own chat list looks. No AI command exists for them yet."),
+    description: "Rename, pin, archive or restore a conversation in the chat list.",
+    keywords: ["title", "chat", "archive", "pin"],
+    server: ["spectraThreads:update"],
+    reach: tool("manage_conversation", { appCommand: "manage_conversation", example: { title: "Biology revision" } }),
+  },
+  {
+    id: "conversation.result_cards",
+    area: "conversation",
+    title: "Hide or keep result cards",
+    description: "Hide, keep or switch between the result cards and tabs under a reply.",
+    server: ["spectraRuns:hideTab", "spectraRuns:selectTab", "spectraRuns:hideResultCard", "spectraRuns:keepResultCard"],
+    reach: user("These arrange what the user is looking at under a reply while they read it. Spectra's work is the same either way; the work itself stays in the library."),
   },
   {
     id: "conversation.continuation",
@@ -298,16 +308,25 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     title: "Place or refresh a living embed",
     description: "Embed live work in other work, update or remove embeds.",
     server: ["artifactEmbeds:*", "artifactEmbedPlacementActions:refresh"],
-    reach: gap("Living embeds are placed from the editor. An AI path for embeds is not built yet."),
+    reach: gap("Spectra places a living reference with insert_reference, which creates the embed and writes it into the host. Moving, refreshing or removing an existing embed needs its embed id, and Spectra cannot read a work's embeds yet; with that read, each change maps to its one mutation here."),
   },
   {
-    id: "work.versions",
+    id: "work.save_version",
     area: "work",
-    title: "Save or restore a version",
-    description: "Name a checkpoint of a work item or restore an earlier version.",
-    keywords: ["history", "checkpoint", "undo", "restore"],
-    server: ["changeGroups:createNamedCheckpoint", "changeGroups:commitRestore"],
-    reach: gap("Spectra changes work forward with edit_artifact; restoring a named version has no AI command yet."),
+    title: "Save a version",
+    description: "Name a checkpoint of a work item that the user can return to from its history.",
+    keywords: ["history", "checkpoint", "snapshot", "keep"],
+    server: ["changeGroups:createNamedCheckpoint"],
+    reach: tool("save_version", { appCommand: "save_version", example: { artifactId: "wx1", name: "Before the rewrite" } }),
+  },
+  {
+    id: "work.restore_version",
+    area: "work",
+    title: "Restore a version",
+    description: "Bring a work item back to an earlier version from its history.",
+    keywords: ["history", "undo", "restore", "go back"],
+    server: ["changeGroups:commitRestore"],
+    reach: gap("Spectra cannot read a work's version history yet, so it has no version ids to restore. A restore runs through the server's restore path, which rebuilds the live document from the stored version and commits both together; with a history read, the harness can call that same path. Until then Spectra saves a version first and changes the work forward with edit_artifact."),
   },
   {
     id: "work.request_access",
@@ -323,7 +342,7 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     title: "Publish a code runtime",
     description: "Publish or unpublish the live build of a code work.",
     server: ["spectraRuntimeBuilds:*"],
-    reach: gap("Publishing puts a build in front of other people. Spectra has no publish command yet."),
+    reach: gap("Publishing compiles the code in the publish route and serves the build to everyone who can open the work. That route answers only the user's own request today; a harness command needs the build moved into a shared server function, with the user's approval because it puts work in front of other people."),
   },
 
   // Library
@@ -352,8 +371,9 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     area: "library",
     title: "Restore from the Trash",
     description: "Bring items back from the Trash.",
+    keywords: ["undelete", "bring back", "trash", "recover"],
     server: ["orgTree:restore"],
-    reach: gap("No AI command restores from the Trash yet."),
+    reach: tool("restore_from_trash", { appCommand: "restore_library_items", example: { targetIds: ["n1"] } }),
   },
   {
     id: "library.delete_forever",
@@ -368,16 +388,18 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     area: "library",
     title: "Pin in the library",
     description: "Pin or unpin items and their sources.",
+    keywords: ["favourite", "star", "keep at the top"],
     server: ["orgTree:setPinned", "orgTree:pinSources"],
-    reach: gap("Pinning arranges the user's own view of the library. No AI command exists for it yet."),
+    reach: tool("organize_library", { fixed: { action: "pin" }, appCommand: "pin_library_item", example: { targetIds: ["n1"] } }),
   },
   {
     id: "library.workspaces",
     area: "library",
     title: "Create or rename a workspace",
     description: "Create a workspace or change its name and details.",
+    keywords: ["class", "project", "new workspace"],
     server: ["spectraWorkspaces:create", "spectraWorkspaces:update"],
-    reach: gap("Spectra creates folders with organize_library. A workspace command for the AI is not built yet."),
+    reach: tool("organize_library", { fixed: { action: "create_workspace" }, appCommand: "organize_library", example: { name: "Physics" } }),
   },
   {
     id: "library.import",
@@ -425,7 +447,7 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     title: "Edit, resolve or delete comments",
     description: "Edit a comment, resolve it, move its anchor or delete it.",
     server: ["artifactComments:updateBody", "artifactComments:setResolved", "artifactComments:reanchor", "artifactComments:remove"],
-    reach: gap("Spectra adds comments; changing existing ones has no AI command yet."),
+    reach: gap("Spectra cannot read a work's comment threads yet, so it has no comment ids to edit, resolve or delete. Reading comments through read_artifact comes first; then each change maps to its one mutation here."),
   },
   {
     id: "comments.notifications",
@@ -522,12 +544,22 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     reach: tool("calendar", { fixed: { action: "resize_block" }, appCommand: "resize_calendar_block", example: { itemId: "b1", end: "2026-10-07T18:00", expectedRevision: 1 } }),
   },
   {
-    id: "calendar.complete_or_remove",
+    id: "calendar.complete_block",
     area: "calendar",
-    title: "Complete a block or remove an event",
-    description: "Mark a work block done, or remove a personal event.",
-    server: ["calendar:completeWorkBlock", "calendar:removePersonalItem"],
-    reach: gap("Not on the AI's server command path yet."),
+    title: "Complete a work block",
+    description: "Mark a scheduled work block done: itemId and expectedRevision from read_calendar.",
+    keywords: ["done", "finished", "tick off"],
+    server: ["calendar:completeWorkBlock"],
+    reach: tool("calendar", { fixed: { action: "complete_block" }, appCommand: "complete_calendar_block", example: { itemId: "b1", expectedRevision: 1 } }),
+  },
+  {
+    id: "calendar.remove_event",
+    area: "calendar",
+    title: "Remove a calendar event",
+    description: "Take a personal event or a work block off the calendar: itemId from read_calendar.",
+    keywords: ["delete event", "cancel", "clear"],
+    server: ["calendar:removePersonalItem"],
+    reach: tool("calendar", { fixed: { action: "remove_event" }, appCommand: "remove_calendar_event", example: { itemId: "e1" } }),
   },
 
   // Reminders
@@ -679,7 +711,7 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     title: "Public links and access exceptions",
     description: "Create or revoke a public link, withdraw a pending invitation, or set a per-work access exception.",
     server: ["authority:createPublicLink", "authority:revokePublicLink", "authority:revokePendingInvitation", "authority:setArtifactException", "authority:clearArtifactException"],
-    reach: gap("Spectra changes sharing through the share tool. These finer controls have no AI command yet."),
+    reach: gap("A public link's address carries a secret shown once to whoever made it, and the AI journal keeps every write's result, so a link Spectra made would leave its secret in the run's history; it needs a receipt that keeps only the hash first. Withdrawing invitations and per-work exceptions need invitation and member ids Spectra cannot read yet. The share tool covers invite, change_level and revoke."),
   },
 
   // ManageBac
@@ -726,8 +758,16 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     area: "managebac",
     title: "Class workspaces",
     description: "Create, release or remove the workspaces made for ManageBac classes.",
-    server: ["managebac:materializeClassWorkspaces", "managebac:purgeAutoCreatedClassWorkspaces", "managebac:releaseClassWorkspaces"],
-    reach: gap("No AI command manages class workspaces yet."),
+    server: ["managebac:materializeClassWorkspaces", "managebac:releaseClassWorkspaces"],
+    reach: tool("managebac", { fixed: { action: "create_class_workspaces" }, appCommand: "manage_class_workspaces", example: { classIds: ["c1"] } }),
+  },
+  {
+    id: "managebac.purge_class_workspaces",
+    area: "managebac",
+    title: "Remove auto-created class workspaces",
+    description: "Remove every workspace Spectra made automatically for ManageBac classes.",
+    server: ["managebac:purgeAutoCreatedClassWorkspaces"],
+    reach: user("It removes every auto-created class workspace at once, behind a phrase the user types on the ManageBac page. Spectra releases class workspaces one class at a time with the managebac tool."),
   },
   {
     id: "managebac.sync_preferences",
@@ -736,7 +776,7 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     description: "Choose, per kind of school record and per class, whether ManageBac syncs automatically, on demand or not at all.",
     keywords: ["school", "sync", "automatic", "manual", "off"],
     server: ["school:setMode", "school:setClassOverride"],
-    reach: gap("What syncs from school is the student's own setting on the School page; no AI command changes it yet."),
+    reach: tool("managebac", { fixed: { action: "set_sync_mode" }, appCommand: "set_school_sync_mode", example: { kind: "grades", mode: "manual" } }),
   },
   {
     id: "managebac.sync_now",
@@ -974,7 +1014,7 @@ const ARTIFACT_RULES: ReadonlyArray<{ match: RegExp; reach: AiReach }> = [
   { match: /\.import(\.|$)|\.files\.open$|\.add\.image$/, reach: user("Files come from the browser's file picker, which only the user can open.") },
   { match: /\.(present|presenter)(\.|$)|\.present$|\.rehearse$/, reach: user("Presenting is the user's own live performance.") },
   { match: /\.attempt\.|\.study\.|\.runtime\.interact$/, reach: user("These are the learner's own answers and study. Spectra doing them would fake the learner's progress.") },
-  { match: /\.(publish|unpublish|private)$/, reach: gap("Publishing puts work in front of other people. Spectra has no publish command yet.") },
+  { match: /\.(publish|unpublish|private)$/, reach: gap("Publishing puts a quiz, a code build or an agent in front of other people through that editor's own publish flow. None has a server path the harness can call yet; each needs one, with the user's approval.") },
   { match: /\.clipboard\.|\.copyStyle$/, reach: user("It uses the user's clipboard.") },
   { match: /\.protect\.sheet$/, reach: user("Protection guards a sheet against edits, including Spectra's, so only the user sets it.") },
   {

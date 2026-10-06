@@ -157,7 +157,9 @@ export function selectSyncTruth(input: SyncTruthInput): SyncTruth {
     return {
       key: replicas.length > 1 ? "syncing" : "saving",
       label: replicas.length > 1 ? "Syncing…" : "Saving…",
-      detail: retryingReplica
+      detail: retryingReplica && replicaIsPaused(retryingReplica)
+        ? humanizePublicFailure(retryingReplica.errorCode!)
+        : retryingReplica
         ? `${humanizePublicFailure(retryingReplica.errorCode!)}. Spectra will retry automatically.`
         : queuedChangeCount > 0 && pendingCount === 0
           ? `${queuedChangeCount} change${queuedChangeCount === 1 ? " is" : "s are"} still queued for synchronization.`
@@ -208,6 +210,11 @@ export function replicaHasNativeLock(replica: ReplicaTruth): boolean {
   return Boolean(replica.errorCode && /office-locked/i.test(replica.errorCode));
 }
 
+/** The copy waits because its folder is paused on that computer. */
+export function replicaIsPaused(replica: ReplicaTruth): boolean {
+  return Boolean(replica.errorCode && /folder-paused/i.test(replica.errorCode));
+}
+
 export function replicaIsPresent(replica: ReplicaTruth): boolean {
   return replica.state !== "unavailable";
 }
@@ -248,6 +255,8 @@ export function replicaDisclosure(
     }
     const state = humanizeReplicaState(replica.state);
     if (replica.state === "unavailable") return `${location} · ${state}`;
+    if (replica.state === "pending" && replicaIsPaused(replica))
+      return `${location} · Paused on this computer`;
     if (replica.state === "pending" && replica.retryAt !== undefined && replica.errorCode)
       return `${location} · Retrying ${humanizePublicFailure(replica.errorCode)}`;
     if (replica.lastVerifiedAt === undefined)

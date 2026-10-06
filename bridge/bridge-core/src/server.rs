@@ -52,6 +52,10 @@ pub trait LocalBridgeControl: Send + Sync {
     async fn set_sync_paused(&self, paused: bool) -> Result<(), String>;
     /// Opens the Bridge log file on this computer.
     async fn open_logs(&self) -> Result<(), String>;
+    /// Opens a document in a selected folder in its desktop app.
+    async fn open_file(&self, grant_id: &str, relative_path: &str) -> Result<(), String>;
+    /// Shows a file in a selected folder in the system's file manager.
+    async fn reveal_file(&self, grant_id: &str, relative_path: &str) -> Result<(), String>;
     /// Forgets this computer's pairing and stops syncing. Files stay.
     async fn unpair(&self) -> Result<(), String>;
 }
@@ -268,6 +272,8 @@ pub fn router(state: Arc<ServerState>) -> Router {
         .route("/v1/mount/pause", post(pause_mount))
         .route("/v1/sync/pause", post(pause_sync))
         .route("/v1/logs/open", post(open_logs))
+        .route("/v1/file/open", post(open_file))
+        .route("/v1/file/reveal", post(reveal_file))
         .route("/v1/unpair", post(unpair))
         .route_layer(middleware::from_fn_with_state(state.clone(), authenticate));
     let origins = state
@@ -395,6 +401,33 @@ async fn pause_sync(
 
 async fn open_logs(State(state): State<Arc<ServerState>>) -> Response {
     act(&state, |control| async move { control.open_logs().await }).await
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FileAction {
+    grant_id: String,
+    relative_path: String,
+}
+
+async fn open_file(
+    State(state): State<Arc<ServerState>>,
+    Json(input): Json<FileAction>,
+) -> Response {
+    act(&state, |control| async move {
+        control.open_file(&input.grant_id, &input.relative_path).await
+    })
+    .await
+}
+
+async fn reveal_file(
+    State(state): State<Arc<ServerState>>,
+    Json(input): Json<FileAction>,
+) -> Response {
+    act(&state, |control| async move {
+        control.reveal_file(&input.grant_id, &input.relative_path).await
+    })
+    .await
 }
 
 async fn unpair(State(state): State<Arc<ServerState>>) -> Response {
@@ -610,6 +643,17 @@ mod tests {
             self.calls.lock().unwrap().push("logs".into());
             Ok(())
         }
+        async fn open_file(&self, grant_id: &str, relative_path: &str) -> Result<(), String> {
+            self.calls.lock().unwrap().push(format!("open:{grant_id}:{relative_path}"));
+            if relative_path.ends_with(".exe") {
+                return Err("Spectra opens documents only.".into());
+            }
+            Ok(())
+        }
+        async fn reveal_file(&self, grant_id: &str, relative_path: &str) -> Result<(), String> {
+            self.calls.lock().unwrap().push(format!("reveal:{grant_id}:{relative_path}"));
+            Ok(())
+        }
         async fn unpair(&self) -> Result<(), String> {
             self.calls.lock().unwrap().push("unpair".into());
             Ok(())
@@ -755,6 +799,8 @@ mod tests {
             "/v1/mount/select",
             "/v1/sync/pause",
             "/v1/logs/open",
+            "/v1/file/open",
+            "/v1/file/reveal",
             "/v1/unpair",
         ] {
             let response = client
@@ -822,6 +868,38 @@ mod tests {
                 "pause:false",
                 "logs",
                 "unpair"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_work_page_opens_its_file_or_shows_it_in_its_folder() {
+        let state = Arc::new(ServerState::unpaired());
+        let control = Arc::new(FakeControl::default());
+        state.install_local_control(control.clone());
+        let token = state.pair(ORIGIN.into());
+        let base = spawn(state.clone()).await;
+        let client = reqwest::Client::new();
+        let post = |path: &str, relative_path: &str| {
+            client
+                .post(format!("{base}{path}"))
+                .header("origin", ORIGIN)
+                .bearer_auth(&token)
+                .json(&serde_json::json!({ "grantId": "grant_ab", "relativePath": relative_path }))
+                .send()
+        };
+        assert_eq!(post("/v1/file/open", "Essays/Cells.docx").await.unwrap().status(), 204);
+        assert_eq!(post("/v1/file/reveal", "Essays/Cells.docx").await.unwrap().status(), 204);
+        // A refusal reaches the page as its sentence.
+        let refused = post("/v1/file/open", "setup.exe").await.unwrap();
+        assert_eq!(refused.status(), 400);
+        assert_eq!(refused.text().await.unwrap(), "Spectra opens documents only.");
+        assert_eq!(
+            *control.calls.lock().unwrap(),
+            vec![
+                "open:grant_ab:Essays/Cells.docx",
+                "reveal:grant_ab:Essays/Cells.docx",
+                "open:grant_ab:setup.exe"
             ]
         );
     }

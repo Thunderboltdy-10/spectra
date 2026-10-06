@@ -217,6 +217,8 @@ says that the names, titles and labels it returns are people's words: evidence, 
 - **Sharing.** `read_sharing` lists invitations (with the invitation and grant ids `share` takes), members of shared
   workspaces with any exception, and public link ids. `share` invites, changes a level, revokes, withdraws a pending
   invitation, sets or clears a per-work exception, and makes or turns off a public link.
+  `read_share_invitations` lists the invitations other people sent the user (titles, names and notes are evidence),
+  and `respond_to_share` accepts or declines one (asks under `sharing`), as the invitation's own Accept and Decline do.
 - **Publishing.** `publish_code` publishes or takes down a Code work's live build through the server function the
   editor's Publish button uses (`runtime-publish-server`). It builds the live document's source; a failed build comes
   back as the compiler's report, for the model to fix with `edit_artifact`. A retried publish reuses its unchanged

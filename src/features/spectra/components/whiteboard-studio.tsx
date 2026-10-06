@@ -117,6 +117,8 @@ import {
 import { projectBindingsFromIr } from "../capabilities";
 import { enforcePdfInput } from "../../../../shared/parser-limits";
 import { ArtifactEmbedById } from "./artifact-embed-host";
+import { ArtifactRichTextEditor } from "./artifact-studio";
+import { SpectraStoredText } from "./spectra-rich-content";
 import {
   artifactBlobSha256,
   downloadDocumentBlob,
@@ -319,6 +321,73 @@ function nodeFontWeight(
     : fallback;
 }
 
+/** Focuses a native text control with the caret after its last character. */
+function focusTextControlAtEnd(control: Element) {
+  if (
+    !(control instanceof HTMLInputElement) &&
+    !(control instanceof HTMLTextAreaElement)
+  )
+    return;
+  window.requestAnimationFrame(() => {
+    control.focus();
+    control.setSelectionRange(control.value.length, control.value.length);
+  });
+}
+
+/**
+ * A note's, shape's or card's words. At rest they are drawn by the shared
+ * renderer (lists, checklists, math and links read as themselves); a
+ * double-click opens the same field every other text uses, writing Markdown.
+ */
+function WhiteboardText({
+  path,
+  value,
+  editing,
+  label,
+  style,
+  onChange,
+  onFocus,
+  onPointerDown,
+  onDoubleClick,
+}: {
+  path?: string;
+  value: string;
+  editing: boolean;
+  label: string;
+  style: CSSProperties;
+  onChange: (value: string) => void;
+  onFocus: () => void;
+  onPointerDown: (event: ReactPointerEvent<HTMLElement>) => void;
+  onDoubleClick: (event: ReactMouseEvent<HTMLElement>) => void;
+}) {
+  return (
+    <div
+      className="whiteboard-node-text"
+      {...(path ? targetAttrs(path) : {})}
+      data-editing={editing || undefined}
+      {...(editing ? {} : { role: "group", "aria-label": label })}
+      style={style}
+      onPointerDown={onPointerDown}
+      onDoubleClick={editing ? undefined : onDoubleClick}
+    >
+      {editing ? (
+        <ArtifactRichTextEditor
+          value={value}
+          format="markdown"
+          variant="bare"
+          autoFocus
+          label={label}
+          placeholder="Write something"
+          onFocus={onFocus}
+          onChange={onChange}
+        />
+      ) : (
+        <SpectraStoredText value={value} />
+      )}
+    </div>
+  );
+}
+
 function BoardNode({
   node,
   artifact,
@@ -364,18 +433,12 @@ function BoardNode({
     !Array.isArray(node.content)
       ? (node.content as Record<string, unknown>)
       : {};
-  const beginTextEditing = (
-    event: ReactMouseEvent<HTMLInputElement | HTMLTextAreaElement>,
-  ) => {
+  const beginTextEditing = (event: ReactMouseEvent<HTMLElement>) => {
     if (readOnly || node.locked || compact) return;
     event.preventDefault();
     event.stopPropagation();
     setEditingText(true);
-    const control = event.currentTarget;
-    window.requestAnimationFrame(() => {
-      control.focus();
-      control.setSelectionRange(control.value.length, control.value.length);
-    });
+    focusTextControlAtEnd(event.currentTarget);
   };
   const textPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
     // Select-mode follows the familiar canvas contract: drag anywhere on an
@@ -387,12 +450,8 @@ function BoardNode({
     if (readOnly || node.locked || compact) return;
     setEditingText(true);
     window.requestAnimationFrame(() => {
-      const control = nodeElementRef.current?.querySelector<
-        HTMLInputElement | HTMLTextAreaElement
-      >("input, textarea");
-      if (!control) return;
-      control.focus();
-      control.setSelectionRange(control.value.length, control.value.length);
+      const control = nodeElementRef.current?.querySelector("input, textarea");
+      if (control) focusTextControlAtEnd(control);
     });
   };
   return (
@@ -435,9 +494,9 @@ function BoardNode({
       }}
       onClick={(event) => {
         event.stopPropagation();
-        const textControl = (event.target as Element).closest<
-          HTMLInputElement | HTMLTextAreaElement
-        >("input, textarea");
+        const textControl = (event.target as Element).closest(
+          "input, textarea, .whiteboard-node-text",
+        );
         if (
           selected &&
           event.detail >= 2 &&
@@ -448,13 +507,7 @@ function BoardNode({
           !compact
         ) {
           setEditingText(true);
-          window.requestAnimationFrame(() => {
-            textControl.focus();
-            textControl.setSelectionRange(
-              textControl.value.length,
-              textControl.value.length,
-            );
-          });
+          focusTextControlAtEnd(textControl);
         }
         onSelect(event.shiftKey);
       }}
@@ -569,37 +622,36 @@ function BoardNode({
                   : "var(--bg-elevated)",
             }}
           />
-          <textarea
-            {...(path ? targetAttrs(`${path}/content/body`) : {})}
+          <WhiteboardText
+            path={path ? `${path}/content/body` : undefined}
             value={String(content.body ?? "")}
-            readOnly={readOnly || node.locked || compact || !editingText}
-            aria-label={`${node.semanticLabel || "Card"} body`}
+            editing={editingText && !readOnly && !node.locked && !compact}
+            label={`${node.semanticLabel || "Card"} body`}
             onPointerDown={textPointerDown}
             onDoubleClick={beginTextEditing}
             onFocus={() => onSelect(false)}
-            onChange={(event) => onContentChange({ body: event.target.value })}
+            onChange={(body) => onContentChange({ body })}
             style={{
               color:
                 typeof content.bodyColor === "string"
                   ? content.bodyColor
                   : "inherit",
-              fontSize:
-                typeof content.fontSize === "number" ? content.fontSize : 13,
-            }}
+              "--prose-size": `${typeof content.fontSize === "number" ? content.fontSize : 13}px`,
+            } as CSSProperties}
           />
         </div>
       ) : (
-        <textarea
-          {...(path ? targetAttrs(`${path}/content/text`) : {})}
+        <WhiteboardText
+          path={path ? `${path}/content/text` : undefined}
           value={whiteboardNodeText(node)}
-          readOnly={readOnly || node.locked || compact || !editingText}
-          aria-label={node.semanticLabel || `${node.type} text`}
+          editing={editingText && !readOnly && !node.locked && !compact}
+          label={node.semanticLabel || `${node.type} text`}
           onPointerDown={textPointerDown}
           onDoubleClick={beginTextEditing}
           onFocus={() => onSelect(false)}
-          onChange={(event) => onTextChange(event.target.value)}
+          onChange={onTextChange}
           style={{
-            fontSize: Number(
+            "--prose-size": `${Number(
               visual(
                 node,
                 content,
@@ -607,7 +659,7 @@ function BoardNode({
                 ["fontSize"],
                 node.type === "text" ? 30 : 14,
               ),
-            ),
+            )}px`,
             fontWeight: nodeFontWeight(node, content),
             fontStyle: content.fontStyle === "italic" ? "italic" : undefined,
             textAlign:
@@ -618,7 +670,7 @@ function BoardNode({
                 : node.type === "shape"
                   ? "center"
                   : undefined,
-          }}
+          } as CSSProperties}
         />
       )}
       {selected &&

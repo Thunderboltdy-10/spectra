@@ -1,0 +1,477 @@
+/* ===========================================================================
+   Spectra prose: the one look of rich text (EDITORS.md, "Shared rich content").
+
+   Every place text is written or read draws these primitives the same way:
+   the document's ProseMirror, every TipTap field (quiz, flashcards, notes,
+   plans, tasks, slide text) and every read-only render of the shared model
+   (replies, comments, card faces, previews). Both sides emit the same DOM,
+   so one set of rules covers them, and no editor restyles a primitive.
+
+   A host sets only the size and the leading, through `--prose-size` and
+   `--prose-leading` (or a text utility on the root): everything else is in
+   em, so a heading in a card face and in a document keep their proportion.
+
+   It sits in the components layer so a utility on the host still wins.
+   =========================================================================== */
+
+@layer components {
+  .spectra-prose {
+    --prose-gap: 0.75em;
+    --prose-indent: 1.5em;
+    --prose-heading-font: var(--font-display), var(--font-sans), sans-serif;
+    --prose-link: var(--accent-cyan);
+    --prose-quiet: var(--text-secondary);
+    --prose-faint: var(--text-tertiary);
+    --prose-line: var(--border-default);
+    --prose-code-bg: var(--bg-code);
+    color: var(--text-primary);
+    font-family: var(--prose-font, var(--font-sans)), sans-serif;
+    font-size: var(--prose-size, var(--text-body));
+    line-height: var(--prose-leading, 1.65);
+    overflow-wrap: break-word;
+  }
+
+  /* Inside a line (an option, a label), or inside an object that sets its
+     own type (a slide text box): the host's type, size and colour. */
+  .spectra-prose:is(.spectra-prose-inline, .spectra-prose-inherit) {
+    color: inherit;
+    font: inherit;
+  }
+
+  /* -- Flow ---------------------------------------------------------------- */
+
+  .spectra-prose :where(p, ul, ol, blockquote, pre, aside, figure, .tableWrapper, [data-equation]) {
+    margin: 0 0 var(--prose-gap);
+  }
+
+  .spectra-prose > :first-child,
+  .spectra-prose :where(li, blockquote, aside, li > div) > :first-child {
+    margin-top: 0;
+  }
+
+  .spectra-prose > :last-child,
+  .spectra-prose :where(li, blockquote, aside, li > div) > :last-child {
+    margin-bottom: 0;
+  }
+
+  /* -- Headings ------------------------------------------------------------ */
+
+  .spectra-prose :where(h1, h2, h3, h4, h5, h6) {
+    margin: 1.35em 0 0.45em;
+    color: var(--text-primary);
+    font-family: var(--prose-heading-font);
+    font-weight: 600;
+    letter-spacing: -0.018em;
+    line-height: 1.25;
+  }
+
+  .spectra-prose :where(h1) {
+    font-size: 1.6em;
+    letter-spacing: -0.03em;
+  }
+
+  .spectra-prose :where(h2) {
+    font-size: 1.3em;
+  }
+
+  .spectra-prose :where(h3) {
+    font-size: 1.12em;
+  }
+
+  .spectra-prose :where(h4, h5, h6) {
+    font-size: 1em;
+  }
+
+  /* -- Marks and links ----------------------------------------------------- */
+
+  .spectra-prose :where(strong, b) {
+    font-weight: 650;
+  }
+
+  .spectra-prose :where(em, i) {
+    font-style: italic;
+  }
+
+  .spectra-prose :where(u) {
+    text-decoration: underline;
+    text-underline-offset: 0.18em;
+  }
+
+  .spectra-prose :where(s, del) {
+    color: var(--prose-quiet);
+    text-decoration: line-through;
+  }
+
+  .spectra-prose :where(a) {
+    color: var(--prose-link);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--prose-link) 38%, transparent);
+    text-underline-offset: 0.2em;
+  }
+
+  .spectra-prose :where(a:hover) {
+    text-decoration-color: currentColor;
+  }
+
+  .spectra-prose :where(sup) {
+    color: var(--prose-quiet);
+    font-size: 0.72em;
+  }
+
+  /* -- Lists and checklists ----------------------------------------------- */
+
+  .spectra-prose :where(ul, ol) {
+    padding-left: var(--prose-indent);
+  }
+
+  .spectra-prose :where(ul:not([data-type="taskList"])) {
+    list-style: disc;
+  }
+
+  .spectra-prose :where(ul:not([data-type="taskList"]) ul:not([data-type="taskList"])) {
+    list-style: circle;
+  }
+
+  .spectra-prose :where(ol) {
+    list-style: decimal;
+  }
+
+  .spectra-prose :where(li) {
+    display: list-item;
+    margin: 0.2em 0;
+  }
+
+  .spectra-prose :where(li)::marker {
+    color: var(--prose-faint);
+  }
+
+  .spectra-prose :where(li > p) {
+    margin: 0;
+  }
+
+  .spectra-prose :where(li > :is(ul, ol)) {
+    margin: 0.2em 0 0;
+  }
+
+  .spectra-prose :where(ul[data-type="taskList"]) {
+    padding-left: 0;
+    list-style: none;
+  }
+
+  .spectra-prose :where(ul[data-type="taskList"] ul[data-type="taskList"]) {
+    padding-left: var(--prose-indent);
+  }
+
+  .spectra-prose :where(ul[data-type="taskList"] > li) {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5em;
+  }
+
+  .spectra-prose :where(ul[data-type="taskList"] > li > label) {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    height: calc(1em * var(--prose-leading, 1.65));
+  }
+
+  .spectra-prose :where(ul[data-type="taskList"] > li > div) {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .spectra-prose :where(ul[data-type="taskList"] > li > label input[type="checkbox"]) {
+    position: relative;
+    width: 1em;
+    height: 1em;
+    margin: 0;
+    border: 1.5px solid var(--border-strong);
+    border-radius: var(--chip-radius);
+    appearance: none;
+    background: transparent;
+    cursor: pointer;
+    transition:
+      background-color var(--motion-fast) var(--ease-standard),
+      border-color var(--motion-fast) var(--ease-standard);
+  }
+
+  .spectra-prose :where(ul[data-type="taskList"] > li > label input[type="checkbox"]:disabled) {
+    cursor: default;
+  }
+
+  .spectra-prose :where(ul[data-type="taskList"] > li > label input[type="checkbox"]:checked) {
+    border-color: var(--accent-cyan);
+    background: var(--accent-cyan);
+  }
+
+  .spectra-prose :where(ul[data-type="taskList"] > li > label input[type="checkbox"]:checked)::after {
+    /* Escaped so the glyph survives any re-encoding of this file. */
+    content: "\2713";
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: var(--bg-elevated);
+    font-size: 0.75em;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .spectra-prose :where(ul[data-type="taskList"] > li[data-checked="true"] > div) {
+    color: var(--prose-faint);
+    text-decoration: line-through;
+  }
+
+  /* -- Quote and callout --------------------------------------------------- */
+
+  .spectra-prose :where(blockquote) {
+    padding-left: 1em;
+    border-left: 2px solid var(--border-strong);
+    color: var(--prose-quiet);
+  }
+
+  .spectra-prose :where(aside[data-spectra-callout], [data-callout="true"]) {
+    --callout-tone: var(--accent-cyan);
+    position: relative;
+    padding: 0.7em 0.95em 0.7em 2.4em;
+    border: 1px solid color-mix(in oklab, var(--callout-tone) 30%, var(--border-default));
+    border-radius: var(--card-radius);
+    background: color-mix(in oklab, var(--callout-tone) 6%, var(--bg-elevated));
+    box-shadow: inset 3px 0 color-mix(in oklab, var(--callout-tone) 68%, transparent);
+  }
+
+  .spectra-prose :where(aside[data-spectra-callout], [data-callout="true"])::before {
+    content: "";
+    position: absolute;
+    top: 1.05em;
+    left: 1em;
+    width: 0.45em;
+    height: 0.45em;
+    border-radius: var(--radius-pill);
+    background: color-mix(in oklab, var(--callout-tone) 80%, var(--text-primary));
+  }
+
+  .spectra-prose :where([data-callout-type="tip"]) {
+    --callout-tone: var(--accent-mint);
+  }
+
+  .spectra-prose :where([data-callout-type="warning"]) {
+    --callout-tone: var(--warning);
+  }
+
+  /* -- Code ---------------------------------------------------------------- */
+
+  .spectra-prose :where(code) {
+    padding: 0.1em 0.35em;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--chip-radius);
+    background: var(--prose-code-bg);
+    font-family: var(--font-mono);
+    font-size: 0.875em;
+  }
+
+  .spectra-prose :where(pre) {
+    overflow-x: auto;
+    padding: 0.85em 1em;
+    border: 1px solid var(--border-default);
+    border-radius: var(--control-radius);
+    background: var(--prose-code-bg);
+    font-size: 0.85em;
+    line-height: 1.6;
+  }
+
+  .spectra-prose :where(pre code) {
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: inherit;
+    white-space: pre;
+  }
+
+  .spectra-prose :where(.hljs-comment, .hljs-quote) {
+    color: var(--prose-quiet);
+  }
+
+  .spectra-prose :where(.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section, .hljs-link) {
+    color: #c44127;
+  }
+
+  .spectra-prose :where(.hljs-string, .hljs-title, .hljs-name, .hljs-type, .hljs-attribute, .hljs-symbol, .hljs-bullet, .hljs-addition, .hljs-variable, .hljs-template-tag, .hljs-template-variable) {
+    color: #0a7abf;
+  }
+
+  .spectra-prose :where(.hljs-number) {
+    color: #8b6914;
+  }
+
+  .spectra-prose :where(.hljs-built_in, .hljs-builtin-name) {
+    color: #1a7a5a;
+  }
+
+  .dark .spectra-prose :where(.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section, .hljs-link) {
+    color: #ff7a59;
+  }
+
+  .dark .spectra-prose :where(.hljs-string, .hljs-title, .hljs-name, .hljs-type, .hljs-attribute, .hljs-symbol, .hljs-bullet, .hljs-addition, .hljs-variable, .hljs-template-tag, .hljs-template-variable) {
+    color: #2cb5ff;
+  }
+
+  .dark .spectra-prose :where(.hljs-number) {
+    color: #e5b567;
+  }
+
+  .dark .spectra-prose :where(.hljs-built_in, .hljs-builtin-name) {
+    color: #38d6a0;
+  }
+
+  /* -- Math ---------------------------------------------------------------- */
+
+  .spectra-prose :where([data-equation]) {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .spectra-prose :where(.spectra-equation.is-left) {
+    text-align: left;
+  }
+
+  .spectra-prose :where(.spectra-equation.is-center) {
+    text-align: center;
+  }
+
+  .spectra-prose :where(.spectra-equation.is-right) {
+    text-align: right;
+  }
+
+  .spectra-prose :where(.spectra-equation-inline) {
+    display: inline-flex;
+    margin: 0 0.15em;
+    vertical-align: baseline;
+  }
+
+  .spectra-prose :where(.katex) {
+    font-size: 1.1em;
+  }
+
+  /* -- Tables, rules, media ------------------------------------------------ */
+
+  .spectra-prose :where(.tableWrapper) {
+    overflow-x: auto;
+  }
+
+  .spectra-prose :where(table) {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .spectra-prose :where(th, td) {
+    padding: 0.45em 0.7em;
+    border: 1px solid var(--prose-line);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .spectra-prose :where(th) {
+    background: var(--bg-secondary);
+    font-weight: 600;
+  }
+
+  .spectra-prose :where(th, td) > :where(p) {
+    margin: 0;
+  }
+
+  .spectra-prose :where(hr) {
+    margin: 1.5em 0;
+    border: 0;
+    border-top: 1px solid var(--prose-line);
+  }
+
+  .spectra-prose :where(img) {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--control-radius);
+  }
+
+  /* -- Citations, references, notes --------------------------------------- */
+
+  .spectra-prose :where([data-spectra-citation], [data-spectra-work-ref]) {
+    display: inline;
+    margin: 0 0.12em;
+    padding: 0 0.3em;
+    border: 1px solid var(--border-default);
+    border-radius: var(--chip-radius);
+    background: transparent;
+    color: var(--accent-cyan);
+    font: inherit;
+    font-size: 0.78em;
+    font-weight: 600;
+    line-height: inherit;
+    white-space: nowrap;
+  }
+
+  .spectra-prose :where([data-spectra-work-ref]) {
+    color: var(--text-primary);
+  }
+
+  .spectra-prose :where(button[data-spectra-citation], button[data-spectra-work-ref]) {
+    cursor: pointer;
+  }
+
+  .spectra-prose :where(button[data-spectra-citation], button[data-spectra-work-ref]):hover {
+    border-color: currentColor;
+  }
+
+  .spectra-prose :where([data-spectra-citation][data-unverified]) {
+    border-color: transparent;
+    color: var(--prose-quiet);
+  }
+
+  .spectra-prose :where([data-source-note]) {
+    color: var(--prose-quiet);
+    font-size: 0.86em;
+  }
+
+  .spectra-prose :where([data-footnote]) {
+    color: var(--prose-quiet);
+    font-size: 0.8em;
+  }
+
+  /* -- In an editor --------------------------------------------------------- */
+
+  .spectra-prose.ProseMirror :where(p.is-editor-empty:first-child)::before {
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    color: var(--prose-faint);
+    pointer-events: none;
+  }
+
+  /* -- One line ------------------------------------------------------------- */
+
+  /* A summary on one line (a result row): the same marks, math and code, laid
+     inline and clipped. */
+  .spectra-prose-line {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+  }
+
+  .spectra-prose-line :where(p, h1, h2, h3, h4, h5, h6, ul, ol, li, blockquote, aside, pre, figure, div, table, tbody, thead, tr, th, td) {
+    display: inline;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+    background: none;
+    font-size: inherit;
+  }
+
+  .spectra-prose-line :where(p, h1, h2, h3, h4, h5, h6, li, blockquote, aside, pre)::after {
+    content: " ";
+  }
+
+  .spectra-prose-line :where(aside)::before {
+    content: none;
+  }
+}

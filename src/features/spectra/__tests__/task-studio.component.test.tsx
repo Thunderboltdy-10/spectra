@@ -8,6 +8,13 @@ import { TaskStudio, dueDistance, taskInputs, taskInstant } from "../components/
 import { isSingleTask } from "../plan/model";
 
 vi.mock("convex/react", () => ({ useMutation: () => vi.fn(async () => ({})), useQuery: () => undefined }));
+// The shared field is covered by its own tests; here a textarea stands in for it.
+vi.mock("../components/artifact-studio", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../components/artifact-studio")>()),
+  ArtifactRichTextEditor: ({ value, label, onChange, onFocus }: { value: string; label?: string; onChange: (value: string) => void; onFocus?: () => void }) => (
+    <textarea aria-label={label} value={value} onFocus={onFocus} onChange={(event) => onChange(event.target.value)} />
+  ),
+}));
 vi.mock("../settings/preference-store", () => ({
   useSpectraPreferences: () => ({
     preferences: { workbar: {}, writing: { smartCompletion: false } },

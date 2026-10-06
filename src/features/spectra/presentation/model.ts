@@ -433,6 +433,117 @@ export function presentationSlideLabel(
 }
 
 
+type RunFormat = Omit<PresentationTextRun, "text">;
+
+function runFormat({ text: _text, ...format }: PresentationTextRun): RunFormat {
+  return format;
+}
+
+function sameFormat(left: RunFormat, right: RunFormat) {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]) as Set<keyof RunFormat>;
+  return [...keys].every((key) => JSON.stringify(left[key]) === JSON.stringify(right[key]));
+}
+
+/** The runs covering characters [from, to) of a paragraph, clipped. */
+function sliceRuns(runs: readonly PresentationTextRun[], from: number, to: number) {
+  const output: PresentationTextRun[] = [];
+  let offset = 0;
+  for (const run of runs) {
+    const start = Math.max(from, offset);
+    const end = Math.min(to, offset + run.text.length);
+    if (end > start) output.push({ ...run, text: run.text.slice(start - offset, end - offset) });
+    offset += run.text.length;
+  }
+  return output;
+}
+
+/** The formatting a character typed at `offset` takes: the run it follows. */
+function formatAt(runs: readonly PresentationTextRun[], offset: number): RunFormat {
+  const first = runs[0];
+  if (!first) return {};
+  if (offset <= 0) return runFormat(first);
+  let position = 0;
+  for (const run of runs) {
+    position += run.text.length;
+    if (run.text.length && offset <= position) return runFormat(run);
+  }
+  return runFormat(runs[runs.length - 1]!);
+}
+
+function mergeRuns(runs: readonly PresentationTextRun[], fallback: RunFormat): PresentationTextRun[] {
+  const output: PresentationTextRun[] = [];
+  for (const run of runs) {
+    if (!run.text) continue;
+    const last = output[output.length - 1];
+    if (last && sameFormat(runFormat(last), runFormat(run))) last.text += run.text;
+    else output.push({ ...run });
+  }
+  return output.length ? output : [{ ...fallback, text: "" }];
+}
+
+/** A paragraph given new words: unchanged characters keep their runs. */
+function retextParagraph(paragraph: PresentationParagraph, line: string): PresentationParagraph {
+  const before = paragraph.runs.map((run) => run.text).join("");
+  let prefix = 0;
+  while (prefix < before.length && prefix < line.length && before[prefix] === line[prefix]) prefix += 1;
+  let suffix = 0;
+  while (
+    suffix < before.length - prefix &&
+    suffix < line.length - prefix &&
+    before[before.length - 1 - suffix] === line[line.length - 1 - suffix]
+  ) suffix += 1;
+  const inserted = line.slice(prefix, line.length - suffix);
+  const format = formatAt(paragraph.runs, prefix);
+  return {
+    ...paragraph,
+    runs: mergeRuns([
+      ...sliceRuns(paragraph.runs, 0, prefix),
+      ...(inserted ? [{ ...format, text: inserted }] : []),
+      ...sliceRuns(paragraph.runs, before.length - suffix, before.length),
+    ], format),
+  };
+}
+
+/** A new line written inside a text box: its neighbour's paragraph and last run style. */
+function paragraphLike(template: PresentationParagraph | undefined, line: string): PresentationParagraph {
+  if (!template) return { runs: [{ text: line }] };
+  const last = template.runs[template.runs.length - 1];
+  return { ...template, runs: [{ ...(last ? runFormat(last) : {}), text: line }] };
+}
+
+/**
+ * The paragraphs of a text box after its plain text was edited.
+ *
+ * Writing in a text box used to replace every paragraph with one unstyled run,
+ * so typing one letter into an imported slide dropped its bold, colours,
+ * links, bullets and levels. Lines that did not change keep their paragraph;
+ * a changed line keeps the runs around the edit; a new line takes the style of
+ * the line it was split from.
+ */
+export function retextPresentationParagraphs(
+  previous: readonly PresentationParagraph[],
+  value: string,
+): PresentationParagraph[] {
+  const lines = value.split(/\r?\n/);
+  const texts = previous.map((paragraph) => paragraph.runs.map((run) => run.text).join(""));
+  let start = 0;
+  while (start < lines.length && start < texts.length && lines[start] === texts[start]) start += 1;
+  let end = 0;
+  while (
+    end < lines.length - start &&
+    end < texts.length - start &&
+    lines[lines.length - 1 - end] === texts[texts.length - 1 - end]
+  ) end += 1;
+  const changedBefore = previous.slice(start, previous.length - end);
+  const changedAfter = lines.slice(start, lines.length - end);
+  const middle = changedAfter.map((line, index) => {
+    const counterpart = changedBefore[index];
+    if (counterpart) return retextParagraph(counterpart, line);
+    return paragraphLike(changedBefore[changedBefore.length - 1] ?? previous[start - 1] ?? previous[previous.length - end], line);
+  });
+  return [...previous.slice(0, start), ...middle, ...previous.slice(previous.length - end)];
+}
+
 export function withPresentationObjectText(
   object: PresentationObject,
   value: string,
@@ -447,9 +558,10 @@ export function withPresentationObjectText(
             text: value,
             ...(Array.isArray(record(object.content).paragraphs)
               ? {
-                  paragraphs: value.split(/\r?\n/).map((line) => ({
-                    runs: [{ text: line }],
-                  })),
+                  paragraphs: retextPresentationParagraphs(
+                    presentationObjectParagraphs(object),
+                    value,
+                  ),
                 }
               : {}),
           },

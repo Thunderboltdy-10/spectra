@@ -32,6 +32,7 @@ import {
   Italic,
   Link2,
   List,
+  ListChecks,
   ListOrdered,
   Loader2,
   Maximize2,
@@ -198,6 +199,14 @@ import {
   persistableTitle,
 } from "./artifact-persistence";
 import { workTypeMeta } from "./artifact-card";
+import { SpectraRichContent, SpectraStoredText } from "./spectra-rich-content";
+import {
+  identifyBlocks,
+  richContentAst,
+  richContentFromProseMirror,
+  type RichBlockDraft,
+  type SpectraRichContentAst,
+} from "../rich-content";
 import {
   ArtifactCommentsPanel,
   type ArtifactCommentRegion,
@@ -211,8 +220,6 @@ import {
 } from "./artifact-workbar";
 import {
   downloadDocumentBlob,
-  markdownToDocumentHtml,
-  sanitizeDocumentHtml,
 } from "./artifact-studio-file-utils";
 import {
   StudioContractProvider,
@@ -812,6 +819,32 @@ function ReadonlyCodeSnapshot({
   );
 }
 
+/**
+ * A document checkpoint as the shared model: its editor JSON when the
+ * checkpoint carries one, otherwise its semantic blocks as plain text.
+ */
+function snapshotDocumentContent(
+  body: Record<string, unknown>,
+): SpectraRichContentAst {
+  const doc = record(body.tiptap);
+  if (doc.type === "doc") return richContentFromProseMirror(doc);
+  return richContentAst(
+    arrayOfRecords(body.blocks).map((block): RichBlockDraft => {
+      const content = [
+        { type: "text" as const, text: typeof block.text === "string" ? block.text : "" },
+      ];
+      if (block.type === "heading") return { type: "heading", level: 2, content };
+      if (block.type === "callout")
+        return {
+          type: "callout",
+          tone: "info",
+          blocks: identifyBlocks([{ type: "paragraph", content }]),
+        };
+      return { type: "paragraph", content };
+    }),
+  );
+}
+
 function ReadonlyArtifactSnapshot({
   artifactId,
   blueprintKey,
@@ -830,7 +863,8 @@ function ReadonlyArtifactSnapshot({
     blueprintKey === "flashcard_deck" ? deckCards(snapshot.content) : [];
   const questions =
     blueprintKey === "quiz" ? quizQuestions(snapshot.content) : [];
-  const blocks = blueprintKey === "document" ? arrayOfRecords(body.blocks) : [];
+  const documentContent =
+    blueprintKey === "document" ? snapshotDocumentContent(body) : null;
   const subtasks =
     blueprintKey === "planner_task" ? arrayOfRecords(body.subtasks) : [];
   const slides =
@@ -850,40 +884,8 @@ function ReadonlyArtifactSnapshot({
           {snapshot.summary}
         </p>
       ) : null}
-      {blueprintKey === "document" ? (
-        <div className="mt-7 space-y-4 text-ui leading-6">
-          {blocks.map((block, index) => {
-            const text = typeof block.text === "string" ? block.text : "";
-            const type =
-              typeof block.type === "string" ? block.type : "paragraph";
-            if (type === "heading")
-              return (
-                <h4
-                  key={String(block.id ?? index)}
-                  className="pt-3 font-display text-heading font-semibold"
-                >
-                  {text}
-                </h4>
-              );
-            if (type === "callout")
-              return (
-                <aside
-                  key={String(block.id ?? index)}
-                  className="rounded-card border border-[color-mix(in_oklab,var(--accent-mint)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-mint)_6%,var(--bg-primary))] px-4 py-3"
-                >
-                  {text}
-                </aside>
-              );
-            return (
-              <p
-                key={String(block.id ?? index)}
-                className="whitespace-pre-wrap"
-              >
-                {text}
-              </p>
-            );
-          })}
-        </div>
+      {documentContent ? (
+        <SpectraRichContent ast={documentContent} className="mt-7" />
       ) : null}
       {blueprintKey === "flashcard_deck" ? (
         <div className="mt-6 grid gap-3">
@@ -895,12 +897,14 @@ function ReadonlyArtifactSnapshot({
               <div className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--brand-primary)]">
                 Card {index + 1} · {card.section}
               </div>
-              <div className="mt-2 font-display text-title font-semibold">
-                {card.front}
-              </div>
-              <div className="mt-3 text-caption leading-5 text-[var(--text-secondary)]">
-                {card.back}
-              </div>
+              <SpectraStoredText
+                value={card.front}
+                className="mt-2 font-display text-title font-semibold"
+              />
+              <SpectraStoredText
+                value={card.back}
+                className="mt-3 text-caption leading-5 text-[var(--text-secondary)]"
+              />
               {card.hint ? (
                 <div className="mt-3 rounded-control bg-[color-mix(in_oklab,var(--brand-primary)_6%,var(--bg-primary))] px-3 py-2 text-micro text-[var(--text-secondary)]">
                   {card.hint}
@@ -920,9 +924,10 @@ function ReadonlyArtifactSnapshot({
               <div className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--accent-mint)]">
                 Question {index + 1}
               </div>
-              <div className="mt-2 font-display text-title font-semibold">
-                {question.prompt}
-              </div>
+              <SpectraStoredText
+                value={question.prompt}
+                className="mt-2 font-display text-title font-semibold"
+              />
               {question.options?.length ? (
                 <ol className="mt-3 space-y-1.5 text-caption text-[var(--text-secondary)]">
                   {question.options.map((option, optionIndex) => (
@@ -930,7 +935,8 @@ function ReadonlyArtifactSnapshot({
                       key={`${question.id}:${optionIndex}`}
                       className="rounded-control border border-[var(--border-subtle)] px-3 py-2"
                     >
-                      {String.fromCharCode(65 + optionIndex)}. {option}
+                      {String.fromCharCode(65 + optionIndex)}.{" "}
+                      <SpectraStoredText inline value={option} />
                     </li>
                   ))}
                 </ol>
@@ -6743,27 +6749,6 @@ function ArtifactStudioEditor({
   );
 }
 
-export function plannerDescriptionHtml(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return "<p></p>";
-  return /^<(?:p|h[1-6]|ul|ol|blockquote|pre)\b/i.test(trimmed)
-    ? sanitizeDocumentHtml(trimmed)
-    : markdownToDocumentHtml(value);
-}
-
-export function plannerDescriptionText(value: string) {
-  if (!value.trim()) return "";
-  if (typeof window !== "undefined") {
-    const parsed = new DOMParser().parseFromString(value, "text/html");
-    return (parsed.body.textContent ?? "").replace(/\s+\n/g, "\n").trim();
-  }
-  return value
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>|<\/li>|<\/blockquote>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .trim();
-}
-
 export const ArtifactRichTextEditor = dynamic(
   () => import("./artifact-rich-text-editor").then((module) => module.ArtifactRichTextEditor),
   { loading: StudioTypePlaceholder },
@@ -6886,6 +6871,12 @@ export function RichTextFormatBar({
             icon={ListOrdered}
             active={editor?.isActive("orderedList")}
             onClick={() => editor?.chain().focus().toggleOrderedList().run()}
+          />
+          <ToolbarButton
+            label="Checklist"
+            icon={ListChecks}
+            active={editor?.isActive("taskList")}
+            onClick={() => editor?.chain().focus().toggleTaskList().run()}
           />
           {inserts ? (
             <>

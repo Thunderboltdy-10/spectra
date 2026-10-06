@@ -25,10 +25,10 @@ import {
 } from "../references";
 import { ContextSourceRegistry } from "../context/registry/context-source-registry";
 import {
-  RICH_CONTENT_SURFACES,
   IncrementalRichContentParser,
-  getRichContentAdapter,
+  RICH_CONTENT_ADAPTERS,
   parseSpectraRichContent,
+  type RichBlock,
 } from "../rich-content";
 import {
   WORK_SOURCE_CONTRACTS,
@@ -180,7 +180,10 @@ describe("Phase 7 rich content, citations, exports, and comments", () => {
     const second = parser.append(" x = 1;\n```");
     expect(second.complete).toBe(true);
     expect(second.blocks[0]).toBe(stable);
-    for (const surface of RICH_CONTENT_SURFACES) expect(getRichContentAdapter(surface).toText(getRichContentAdapter(surface).fromText(source))).toBe(source);
+    // Markdown written from the model reads back as the same model.
+    const shape = (blocks: RichBlock[]) => JSON.parse(JSON.stringify(blocks, (key, value) => (key === "id" || key === "raw" || key === "complete" ? undefined : value)));
+    const markdown = RICH_CONTENT_ADAPTERS.markdown;
+    expect(shape(markdown.read(markdown.write(ast)).blocks)).toEqual(shape(ast.blocks));
   });
 
   it("requires verified source/evidence integrity and preserves it across every work conversion", () => {

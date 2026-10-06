@@ -90,3 +90,23 @@ it("keeps both edits through focused convergence, blur and a durable Yjs reload"
   const restored = new Y.Doc(); Y.applyUpdate(restored, Y.encodeStateAsUpdate(left));
   expect(prompt(restored)).toBe("<p>colors</p>");
 });
+
+it("opens Markdown it did not write with its checklist and math, and writes Markdown back", async () => {
+  const onChange = vi.fn();
+  render(<ArtifactRichTextEditor value={"- [x] done\n- [ ] next $x^2$"} format="markdown" onChange={onChange} />);
+  await waitFor(() => expect(harness.editor).toBeTruthy());
+  const editor = harness.editor!;
+  const json = JSON.stringify(editor.getJSON());
+  expect(json).toContain('"taskList"');
+  expect(json).toContain('"inlineEquation"');
+  fireEvent.focus(editor.view.dom);
+  act(() => { editor.commands.insertContentAt(7, "!"); });
+  expect(onChange).toHaveBeenLastCalledWith("- [x] done!\n- [ ] next $x^2$");
+});
+
+it("names the field for assistive technology", async () => {
+  render(<ArtifactRichTextEditor value="" label="Task description" onChange={vi.fn()} />);
+  await waitFor(() => expect(harness.editor).toBeTruthy());
+  expect(harness.editor!.view.dom.getAttribute("aria-label")).toBe("Task description");
+  expect(harness.editor!.view.dom.getAttribute("role")).toBe("textbox");
+});

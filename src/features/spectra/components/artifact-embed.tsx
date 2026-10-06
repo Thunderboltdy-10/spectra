@@ -16,6 +16,19 @@ import { ArtifactEmbedQuiz } from "./artifact-embed-quiz";
 import { RetainedPinRecovery } from "./retained-pin-recovery";
 import { shouldMountArtifactEmbedRuntime } from "./artifact-embed-runtime";
 import { sheetCellEntries } from "../../../../shared/sheet-cells";
+import { plainTextFromStored } from "../rich-content";
+import { SpectraStoredText } from "./spectra-rich-content";
+
+/** A card face as its author wrote it: formatting, lists and math intact. */
+function EmbedCardFace({ value, className }: { value: unknown; className: string }) {
+  return (
+    <SpectraStoredText
+      value={typeof value === "string" ? value : textFrom(value)}
+      fallback="Empty card"
+      className={className}
+    />
+  );
+}
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -27,44 +40,15 @@ function records(value: unknown) {
   return Array.isArray(value) ? value.map(record) : [];
 }
 
-/* Rich fields (quiz prompts, option text, card faces) are stored as HTML by
-   their studios. An embed preview is a *summary*, so it renders text — never
-   injected markup and never the raw tags the reader would otherwise see. */
-const HTML_ENTITIES: Record<string, string> = {
-  amp: "&",
-  lt: "<",
-  gt: ">",
-  quot: '"',
-  apos: "'",
-  nbsp: " ",
-};
-
-function plainTextFromRichValue(source: string) {
-  return source
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<(?:script|style)[\s\S]*?<\/(?:script|style)>/gi, " ")
-    .replace(/<(?:br|\/p|\/div|\/li|\/h[1-6])\s*\/?>/gi, " ")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, entity: string) => {
-      if (entity.startsWith("#")) {
-        const code =
-          entity[1]?.toLowerCase() === "x"
-            ? Number.parseInt(entity.slice(2), 16)
-            : Number.parseInt(entity.slice(1), 10);
-        return Number.isFinite(code) && code > 0
-          ? String.fromCodePoint(code)
-          : match;
-      }
-      return HTML_ENTITIES[entity.toLowerCase()] ?? match;
-    })
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
+/* Rich fields (quiz prompts, option text, card faces) are stored as HTML or
+   Markdown by their studios. A summary reads them as words through the shared
+   model — never injected markup and never the raw tags. */
 function textFrom(value: unknown, limit = 360): string {
   if (typeof value === "string")
     return (
-      /<[a-z!/][^>]*>/i.test(value) ? plainTextFromRichValue(value) : value
+      /<[a-z!/][^>]*>/i.test(value)
+        ? plainTextFromStored(value).replace(/\s+/g, " ")
+        : value
     ).slice(0, limit);
   if (Array.isArray(value))
     return value
@@ -260,10 +244,10 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
               <span className="text-micro font-semibold uppercase tracking-[.11em] text-[var(--text-tertiary)]">
                 {index % 2 === 0 ? "Front" : "Back"}
               </span>
-              <p className="mt-2 font-display text-ui leading-5 text-[var(--text-primary)]">
-                {textFrom(index % 2 === 0 ? entry.front : entry.back) ||
-                  "Empty card"}
-              </p>
+              <EmbedCardFace
+                value={index % 2 === 0 ? entry.front : entry.back}
+                className="mt-2 font-display text-ui leading-5"
+              />
             </div>
           ))}
           {cards.length === 0 ? (
@@ -286,9 +270,10 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
             <span className="block text-micro font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
               {revealed ? "Answer" : "Prompt"}
             </span>
-            <span className="mt-2 block text-subhead font-medium leading-6 text-[var(--text-primary)]">
-              {textFrom(revealed ? card?.back : card?.front) || "Empty card"}
-            </span>
+            <EmbedCardFace
+              value={revealed ? card?.back : card?.front}
+              className="mt-2 text-subhead font-medium leading-6"
+            />
             {!canReveal ? (
               <span className="mt-2 block text-micro text-[var(--text-tertiary)]">
                 Read-only preview

@@ -12,6 +12,8 @@ import {
   type SpectraQuizPracticeAttempt,
   type SpectraQuizPracticeQuestion,
 } from "../data/api";
+import { plainTextFromStored } from "../rich-content";
+import { SpectraStoredText } from "./spectra-rich-content";
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -19,21 +21,14 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function richText(value: unknown) {
-  if (typeof value !== "string") return "";
-  return value
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<(?:script|style)[\s\S]*?<\/(?:script|style)>/gi, " ")
-    .replace(/<(?:br|\/p|\/div|\/li|\/h[1-6])\s*\/?>/gi, " ")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/\s+/g, " ")
-    .trim();
+/** A stored question, option or match as words, for a label. */
+function plainText(value: unknown) {
+  return typeof value === "string" ? plainTextFromStored(value).replace(/\s+/g, " ") : "";
+}
+
+/** A stored question, option or match as it was written. */
+function Stored({ value, fallback, inline = false, className }: { value: unknown; fallback: string; inline?: boolean; className?: string }) {
+  return <SpectraStoredText value={typeof value === "string" ? value : ""} fallback={fallback} inline={inline} className={className} />;
 }
 
 function previewQuestions(embed: SpectraArtifactEmbed) {
@@ -212,9 +207,7 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
             key={String(question.id ?? index)}
             className="rounded-control border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3"
           >
-            <p className="text-caption font-semibold leading-5 text-[var(--text-primary)]">
-              {richText(question.prompt) || "Empty question"}
-            </p>
+            <Stored value={question.prompt} fallback="Empty question" className="text-caption font-semibold leading-5" />
           </div>
         ))}
         {previews.length === 0 ? (
@@ -288,9 +281,7 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
   return (
     <div>
       <div className="flex items-start justify-between gap-3">
-        <p className="text-ui font-semibold leading-5 text-[var(--text-primary)]">
-          {richText(question.prompt) || "Empty question"}
-        </p>
+        <Stored value={question.prompt} fallback="Empty question" className="min-w-0 text-ui font-semibold leading-5" />
         <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
           {activeIndex + 1} / {attempt.questions.length}
         </span>
@@ -392,7 +383,7 @@ function QuestionResponse({
               >
                 {active ? <Check className="h-3 w-3" /> : null}
               </span>
-              {richText(option) || "Empty option"}
+              <Stored inline value={option} fallback="Empty option" />
             </button>
           );
         })}
@@ -413,11 +404,11 @@ function QuestionResponse({
             <span className="font-semibold text-[var(--text-tertiary)]">
               {index + 1}
             </span>
-            <span>{richText(option) || "Empty option"}</span>
+            <Stored inline value={option} fallback="Empty option" />
             <span className="flex items-center gap-1">
               <button
                 type="button"
-                aria-label={`Move ${option} earlier`}
+                aria-label={`Move ${plainText(option)} earlier`}
                 disabled={disabled || index === 0}
                 onClick={() => {
                   const next = [...order];
@@ -433,7 +424,7 @@ function QuestionResponse({
               </button>
               <button
                 type="button"
-                aria-label={`Move ${option} later`}
+                aria-label={`Move ${plainText(option)} later`}
                 disabled={disabled || index === order.length - 1}
                 onClick={() => {
                   const next = [...order];
@@ -467,10 +458,10 @@ function QuestionResponse({
               className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-2"
             >
               <span className="text-micro font-medium text-[var(--text-primary)]">
-                {richText(pair.left) || "Untitled prompt"}
+                <Stored inline value={pair.left} fallback="Untitled prompt" />
               </span>
               <SelectField
-                ariaLabel={`Match for ${richText(pair.left) || "untitled prompt"}`}
+                ariaLabel={`Match for ${plainText(pair.left) || "untitled prompt"}`}
                 size="sm"
                 disabled={disabled}
                 placeholder="Choose a match"
@@ -484,7 +475,7 @@ function QuestionResponse({
                 }}
                 options={(question.matchingChoices ?? []).map((choice) => ({
                   value: choice,
-                  label: richText(choice) || "Empty match",
+                  label: plainText(choice) || "Empty match",
                 }))}
               />
             </div>
@@ -509,7 +500,7 @@ function QuestionResponse({
               <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current text-micro">
                 {String.fromCharCode(65 + index)}
               </span>
-              {richText(option) || "Empty option"}
+              <Stored inline value={option} fallback="Empty option" />
             </button>
           );
         })}

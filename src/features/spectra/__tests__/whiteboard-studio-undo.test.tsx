@@ -11,6 +11,13 @@ import {
 import { normalizeWhiteboardContent, whiteboardNodeText } from "../whiteboard/model";
 
 vi.mock("convex/react", () => ({ useMutation: () => vi.fn(async () => ({})) }));
+// The shared field is covered by its own tests; here a textarea stands in for it.
+vi.mock("../components/artifact-studio", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../components/artifact-studio")>()),
+  ArtifactRichTextEditor: ({ value, label, onChange, onFocus }: { value: string; label?: string; onChange: (value: string) => void; onFocus?: () => void }) => (
+    <textarea aria-label={label} value={value} onFocus={onFocus} onChange={(event) => onChange(event.target.value)} />
+  ),
+}));
 vi.mock("../data/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../data/api")>()),
   getArtifactAssets: vi.fn(async () => ({ assets: [] })),
@@ -70,6 +77,8 @@ function Host({ harness }: { harness: Harness }) {
     </StudioContractProvider>
   );
 }
+const noteText = (text: string) => screen.getByText(text).closest(".whiteboard-node-text") as HTMLElement;
+const openField = () => document.querySelector(".whiteboard-node-text textarea") as HTMLTextAreaElement;
 const nodeText = (content: unknown, id: string) =>
   whiteboardNodeText(normalizeWhiteboardContent(content).nodes.find((node) => node.id === id)!);
 
@@ -90,9 +99,8 @@ describe("whiteboard undo with collaborators", () => {
   it("undoes this student's sticky edit and keeps a collaborator's later edit", async () => {
     const harness: Harness = { content: null, setContent: () => {} };
     render(<Host harness={harness} />);
-    const mine = screen.getAllByRole("textbox").find((element) => (element as HTMLTextAreaElement).value === "Mine")!;
-    fireEvent.doubleClick(mine);
-    fireEvent.change(mine, { target: { value: "Mine, edited" } });
+    fireEvent.doubleClick(noteText("Mine"));
+    fireEvent.change(openField(), { target: { value: "Mine, edited" } });
     expect(nodeText(harness.content, "mine")).toBe("Mine, edited");
     act(() => {
       const board = normalizeWhiteboardContent(harness.content);
@@ -113,8 +121,7 @@ describe("whiteboard undo with collaborators", () => {
     const harness: Harness = { content: null, setContent: () => {} };
     render(<Host harness={harness} />);
     Element.prototype.setPointerCapture ??= () => {};
-    const mine = screen.getAllByRole("textbox").find((element) => (element as HTMLTextAreaElement).value === "Mine")!;
-    const node = mine.closest(".whiteboard-node") as HTMLElement;
+    const node = noteText("Mine").closest(".whiteboard-node") as HTMLElement;
     const canvas = document.querySelector(".whiteboard-canvas") as HTMLElement;
     const nodeX = (id: string) =>
       normalizeWhiteboardContent(harness.content).nodes.find((item) => item.id === id)!.x;
@@ -140,8 +147,8 @@ describe("whiteboard undo with collaborators", () => {
   it("undoes a sticky typing session as one step", async () => {
     const harness: Harness = { content: null, setContent: () => {} };
     render(<Host harness={harness} />);
-    const mine = screen.getAllByRole("textbox").find((element) => (element as HTMLTextAreaElement).value === "Mine")!;
-    fireEvent.doubleClick(mine);
+    fireEvent.doubleClick(noteText("Mine"));
+    const mine = openField();
     fireEvent.focus(mine);
     for (const value of ["Mine!", "Mine!!", "Mine!!!"]) fireEvent.change(mine, { target: { value } });
     fireEvent.blur(mine);

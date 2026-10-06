@@ -104,6 +104,7 @@ animation.
 | Load | A **ghost** of the real content forms from the field and shimmers until the content arrives, then hands over. |
 | Delete | The thing **unforms** from where you acted. |
 | Create by hand | The thing **forms** from where you made it. |
+| Hand over (an empty state gives way to content) | The stand-in **flows into** what takes its place: its dots morph into the new content's lines (`useLifeHandover`, `<LifeHandover />` in `EmptyState`). With nothing there it parts; content that is forming itself brings its own light. |
 | Add A to B | A **send** from A into B, which **absorbs** it and pulses. |
 | Move (another column, day or folder) | The thing **travels**: its old shape breaks into the field, crosses it and forms where it is now. A move in place, or many at once (a re-sort), simply lands. Keyed departures (`useLifeDeparture(..., key)`) and arrivals under the same key in one commit make the move. |
 | Create by hand (new work, duplicate, agent, event, comment) | While the request is on its way, dots **gather** where the user acted into the outline of a small work, breathing light (`beginCreation()`, a held ghost). When it exists, what it becomes **morphs out of them**: the surface that opens (`land()` hands the seed to `useLifeLanding`), or with `{ into: "item" }` the event or comment that arrives (its "human" arrival claims the seed); if it fails, they part (`cancel()`); if nothing opens within the launch window, they go back to the field. |

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, type Ref, type RefCallback, type RefObject } from "react";
 import type { LightColour, Rect } from "./engine";
-import { figureOf, type ElementFigureOptions } from "./figure-dom";
+import { figureOf, hasVisibleFrame, replacementOf, type ElementFigureOptions } from "./figure-dom";
 import { outlineFigure, rowsFigure, type Figure, type Point } from "./figure";
 import { life, type Formed, type GlowHandle } from "./life";
 import { STATUS_COLOURS } from "./prism";
@@ -501,6 +501,9 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
 const DEPARTURE_BATCH = 4;
 /** Something that left this frame, as it looked: an arrival under the same key means it moved. */
 type Departure = { key?: string; shape: Figure; rect: Rect; leave: () => void };
+
+/** The lines of whatever takes a place over. */
+const TAKEOVER_BARS = "h1, h2, h3, h4, [data-row-title], [data-card-title], p, li";
 let departures: Departure[] = [];
 let departureFrame = 0;
 /** Moves travelled this frame. More than a few at once is a re-sort, which simply lands. */
@@ -566,6 +569,26 @@ export function useLifeDeparture(
   figure: ElementFigureOptions = {},
   key?: string,
 ) {
+  useDeparture(ref, enabled, figure, key, false);
+}
+
+/**
+ * Something that stands in until there is content (LIFE.md, Hand over): an
+ * empty state, a "nothing yet" line. When it goes and something takes its
+ * place, its dots flow into that and become its lines; with nothing there,
+ * it parts like any departure.
+ */
+export function useLifeHandover(ref: RefObject<HTMLElement | null>, figure: ElementFigureOptions = {}) {
+  useDeparture(ref, true, figure, undefined, true);
+}
+
+function useDeparture(
+  ref: RefObject<HTMLElement | null>,
+  enabled: boolean | (() => boolean),
+  figure: ElementFigureOptions,
+  key: string | undefined,
+  handover: boolean,
+) {
   const keyRef = useRef(key);
   const enabledRef = useRef(enabled);
   const figureRef = useRef(figure);
@@ -590,12 +613,18 @@ export function useLifeDeparture(
         rect: { x: r.x, y: r.y, width: r.width, height: r.height },
         leave: () => {
           if (element.isConnected || window.location.pathname + window.location.search !== where) return;
-          void life.unform(shape);
+          const content = handover ? replacementOf(new DOMRect(r.x, r.y, r.width, r.height)) : null;
+          // Whatever arrives there may be forming itself (hidden until it has): then it brings its own light.
+          if (content && content.style.opacity !== "0") {
+            void life.morph(shape, figureOf(content, { bars: TAKEOVER_BARS, maxBars: 12, frame: hasVisibleFrame(content) }));
+          } else {
+            void life.unform(shape);
+          }
         },
       });
       if (!departureFrame) departureFrame = requestAnimationFrame(flushDepartures);
     };
-  }, [ref]);
+  }, [ref, handover]);
 }
 
 /* ------------------------------------------------------------ writing front */

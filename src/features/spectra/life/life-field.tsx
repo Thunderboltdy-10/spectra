@@ -4,7 +4,9 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { useSpectraMotion } from "../motion/motion-level";
 import type { LifeTier } from "./engine";
-import { figureOf, hasVisibleFrame } from "./figure-dom";
+import { figureOf, hasVisibleFrame, replacementOf } from "./figure-dom";
+
+export { replacementOf };
 import { life, type Formed } from "./life";
 import { markNavigation, sendInto } from "./use-life";
 
@@ -35,18 +37,6 @@ const CONTENT_BARS = "h1, h2, h3, h4, [data-row-title], [data-row-meta], [data-c
  * most of it without being much bigger. Nothing there (the page changed, the
  * list came back empty) means the ghost simply fades.
  */
-export function replacementOf(rect: DOMRect): HTMLElement | null {
-  const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + Math.min(rect.height / 2, 120));
-  let best: HTMLElement | null = null;
-  for (let node = hit instanceof HTMLElement ? hit : null; node && node !== document.body; node = node.parentElement) {
-    const r = node.getBoundingClientRect();
-    const w = Math.min(r.right, rect.right) - Math.max(r.left, rect.left);
-    const h = Math.min(r.bottom, rect.bottom) - Math.max(r.top, rect.top);
-    if (r.width * r.height > 2.5 * rect.width * rect.height) break;
-    if (w > 0 && h > 0 && w * h > 0.5 * rect.width * rect.height) best = node;
-  }
-  return best;
-}
 
 /** The content is hidden while the ghost's lines flow into its frame and lines, and is real when they have. */
 function handOver(formed: Formed, content: HTMLElement) {

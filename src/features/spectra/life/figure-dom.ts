@@ -127,3 +127,21 @@ export function barsOf(element: Element, ink: Rgb = inkOf()): Stroke[] {
 export function inkOf(): Rgb {
   return cssToRgb(getComputedStyle(document.body).color)?.rgb ?? [20, 19, 24];
 }
+
+/**
+ * What took the place of something that left at `rect`: the largest element
+ * there that covers most of it without being much bigger (a list, not the page).
+ */
+export function replacementOf(rect: DOMRect): HTMLElement | null {
+  if (typeof document.elementFromPoint !== "function") return null;
+  const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + Math.min(rect.height / 2, 120));
+  let best: HTMLElement | null = null;
+  for (let node = hit instanceof HTMLElement ? hit : null; node && node !== document.body; node = node.parentElement) {
+    const r = node.getBoundingClientRect();
+    const w = Math.min(r.right, rect.right) - Math.max(r.left, rect.left);
+    const h = Math.min(r.bottom, rect.bottom) - Math.max(r.top, rect.top);
+    if (r.width * r.height > 2.5 * rect.width * rect.height) break;
+    if (w > 0 && h > 0 && w * h > 0.5 * rect.width * rect.height) best = node;
+  }
+  return best;
+}

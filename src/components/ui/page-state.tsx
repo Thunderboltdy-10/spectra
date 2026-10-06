@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { cn } from "@/lib/utils";
+import { LifeHandover } from "./life-handover";
 import { Skeleton } from "./skeleton";
 
 /*
@@ -43,6 +44,7 @@ export function EmptyState({
         className,
       )}
     >
+      <LifeHandover bars="strong, p" />
       <span aria-hidden className="grid size-10 place-items-center text-[var(--text-tertiary)]" data-icon-host>
         {glyphOf(icon, compact ? 20 : 24)}
       </span>

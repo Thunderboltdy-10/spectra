@@ -392,10 +392,19 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
               {current.label}
             </h2>
             <IsolatedErrorBoundary
-              fallback={
-                <p className="py-6 text-caption text-[var(--text-secondary)]" role="status">
-                  This device is offline. Settings that live on this computer still work; the rest come back when you reconnect.
-                </p>
+              fallback={({ offline, retry }) =>
+                offline ? (
+                  <p className="py-6 text-caption text-[var(--text-secondary)]" role="status">
+                    This device is offline. Settings that live on this computer still work; the rest come back when you reconnect.
+                  </p>
+                ) : (
+                  <div role="alert" className="flex flex-wrap items-center gap-3 py-6">
+                    <p className="text-caption text-[var(--text-secondary)]">These settings didn&apos;t load.</p>
+                    <Button size="sm" onClick={retry}>
+                      Try again
+                    </Button>
+                  </div>
+                )
               }
             >
               {saveStatus ? (

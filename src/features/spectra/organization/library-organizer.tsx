@@ -82,6 +82,7 @@ import {
   type BoardGroupBy,
   type SurfaceView,
 } from "./surface-chrome";
+import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { sendInto } from "../life/use-life";
@@ -244,13 +245,19 @@ export function LibraryOrganizer(props: LibraryOrganizerProps) {
   return (
     <IsolatedErrorBoundary
       key={`${props.scope?.nodeId ?? "root"}:${attempt}`}
-      fallback={
-        <div role="alert" className="p-4 text-body text-[var(--text-secondary)]">
-          <p>The Library could not load. Check your connection and try again.</p>
-          <button type="button" className="mt-3 rounded-control border border-[var(--border-default)] px-3 py-2 hover:bg-[var(--bg-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--focus-ring-color)]" onClick={() => setAttempt((value) => value + 1)}>
-            Try again
-          </button>
-        </div>
+      fallback={({ offline }) =>
+        offline ? (
+          <p role="status" className="p-4 text-body text-[var(--text-secondary)]">
+            This device is offline. The Library comes back when it reconnects.
+          </p>
+        ) : (
+          <div role="alert" className="p-4 text-body text-[var(--text-secondary)]">
+            <p>The Library didn&apos;t load.</p>
+            <Button className="mt-3" onClick={() => setAttempt((value) => value + 1)}>
+              Try again
+            </Button>
+          </div>
+        )
       }
     >
       <LibraryOrganizerContent {...props} />

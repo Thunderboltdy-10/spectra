@@ -61,6 +61,7 @@ import { createPortal } from "react-dom";
 import { readSpectraSandboxTheme } from "../embed/theme-tokens";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { LifeVerdict } from "@/components/ui/life-moments";
 import { SelectField } from "@/components/ui/select";
 import {
   codeRuntimeVersion,
@@ -3278,6 +3279,7 @@ export function CodeStudio({
                           key={result.id}
                           className="flex items-start gap-2 border-b border-[var(--border-subtle)] px-2 py-1.5 last:border-0"
                         >
+                          <LifeVerdict verdict={result.status === "passed" ? "right" : result.status === "failed" ? "wrong" : null} />
                           {result.status === "running" ? (
                             <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-[var(--accent-cyan)] motion-reduce:animate-none" />
                           ) : result.status === "passed" ? (

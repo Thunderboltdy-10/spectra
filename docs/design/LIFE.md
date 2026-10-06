@@ -87,7 +87,7 @@ animation.
 | **travel** | "This goes there and becomes that." It breaks, pours into the field, crosses it as light, and forms (or is taken in) at the far end. A target close by is poured into directly. | Anything that changes place: a message into the prism, Spectra's question out of it, an answer back, an artifact Spectra makes |
 | **ghost** | "This is coming." A skeleton of the real content (frame, title and text lines at their real places) with a band of light sliding along it. | Loads of more than 300 ms. One placeholder is one ghost: a list's rows are its bars, with no frame unless it shows one. When the content arrives, the ghost's lines flow into the content's frame and lines (a morph), and then the content is real. |
 | **breathe** | "The prism took something in" or "the prism changed state." It parts into dots, swells a little and reassembles. | The prism only: receiving, asking, starting work |
-| **radiate** | "The prism has news." A few dots in the status colour fly from its edges and sink as light. | The prism only: done (green), problem (red) |
+| **radiate** | "The prism has news." A few dots in the status colour fly from its edges and sink as light. | The prism: done (green), problem (red). Elsewhere only the frame of something judged right (green): an answer, a passed test |
 | **absorb** | "This took that in." The field around it draws in. | The end of a send or travel into something |
 
 **The choreographies that combine them:**
@@ -109,6 +109,7 @@ animation.
 | Move (another column, day or folder) | The thing **travels**: its old shape breaks into the field, crosses it and forms where it is now. A move in place, or many at once (a re-sort), simply lands. Keyed departures (`useLifeDeparture(..., key)`) and arrivals under the same key in one commit make the move. |
 | Create by hand (new work, duplicate, agent, event, comment) | While the request is on its way, dots **gather** where the user acted into the outline of a small work, breathing light (`beginCreation()`, a held ghost). When it exists, what it becomes **morphs out of them**: the surface that opens (`land()` hands the seed to `useLifeLanding`), or with `{ into: "item" }` the event or comment that arrives (its "human" arrival claims the seed); if it fails, they part (`cancel()`); if nothing opens within the launch window, they go back to the field. |
 | Tick something off | The paper **pulses** green where it was done: a task's done control, a step, a checklist item in a work (`data-life-done`). Undoing it is quiet. |
+| Verdict (an answer checked, a card graded, a test run) | The paper **pulses** where the reader acted, green for right, red for wrong, blue for an open answer that is reviewed; a right answer's frame sends a few green dots off it (`useLifeVerdict`, `<LifeVerdict />`, `verdictAt`). Only a verdict that arrives on screen counts: coming back to an answered question is still. A revealed answer **forms** from the press that revealed it (`<LifeForm />`), as does the end of a study queue. |
 
 ### In editors
 

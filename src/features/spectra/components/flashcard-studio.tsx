@@ -36,7 +36,9 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { LifeForm, LifeVerdict } from "@/components/ui/life-moments";
 import { useModalFocus } from "@/components/ui/use-modal-focus";
+import { recentCause, verdictAt } from "../life/use-life";
 import { createPortal } from "react-dom";
 import { targetAttrs } from "../collaboration/target-attributes";
 import {
@@ -1611,6 +1613,8 @@ export function FlashcardStudio({
 
   async function rateStudyCard(rating: SpectraFlashcardRating) {
     if (!activeStudyCard || !activeStudyItem || studyReviewBusy) return;
+    // Where the grade was given (a press or its key), for the pulse once it is recorded.
+    const cause = recentCause();
     setStudyReviewBusy(true);
     setStudyError(undefined);
     try {
@@ -1637,6 +1641,7 @@ export function FlashcardStudio({
         ...current,
         [rating]: current[rating] + 1,
       }));
+      if (cause) verdictAt(cause, rating === "again" ? "wrong" : "right");
       setStudyClock(now);
       if (studyIndex + 1 >= studyQueue.length) {
         setStudyComplete(true);
@@ -3095,6 +3100,7 @@ export function FlashcardStudio({
               ) : null}
               {studyComplete ? (
                 <main className="spectra-deck-study-complete">
+                  <LifeForm bars="h3, p" />
                   <span className="grid size-12 place-items-center rounded-full bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-primary))] text-[var(--success)]">
                     <CheckCircle2 className="h-6 w-6" />
                   </span>
@@ -3195,6 +3201,11 @@ export function FlashcardStudio({
                   </section>
                   {studyRevealed ? (
                     <section data-answer="true">
+                      <LifeForm bars="span, p" />
+                      <LifeVerdict
+                        immediate
+                        verdict={studyTypedCorrect === undefined ? null : studyTypedCorrect ? "right" : "wrong"}
+                      />
                       <span>Answer</span>
                       <SpectraStoredText
                         value={activeStudyAnswer}

@@ -245,6 +245,51 @@ export function recentCause(): Point | undefined {
   return lastPress && performance.now() - lastPress.at < 1000 ? lastPress.point : undefined;
 }
 
+/* ------------------------------------------------------------ verdicts */
+
+/** What a check came to: right, wrong, or open (no single right answer; it is reviewed). */
+export type Verdict = "right" | "wrong" | "open";
+
+const VERDICT_COLOURS = { right: STATUS_COLOURS.done, wrong: STATUS_COLOURS.problem, open: STATUS_COLOURS.info } as const;
+
+/**
+ * A verdict given here (LIFE.md, Verdict): the paper pulses in its colour
+ * where the reader acted, and a right answer's frame sends a few dots off in
+ * the done colour. Given a point, only the pulse.
+ */
+export function verdictAt(at: Point | Element, verdict: Verdict) {
+  if (!life.on) return;
+  const colour = VERDICT_COLOURS[verdict];
+  const strength = verdict === "wrong" ? 0.7 : 0.9;
+  if (!(at instanceof Element)) {
+    life.pulse(at[0], at[1], strength, colour);
+    return;
+  }
+  const r = at.getBoundingClientRect();
+  if (!r.width) return;
+  const [x, y] = recentCause() ?? [r.left + r.width / 2, r.top + r.height / 2];
+  life.pulse(x, y, strength, colour);
+  if (verdict === "right") {
+    life.radiate(outlineFigure({ x: r.left, y: r.top, width: r.width, height: r.height }, { radius: 10 }), { colour, count: 20, reach: 24 });
+  }
+}
+
+/**
+ * The verdict on what `ref` shows. Only one that arrives while it is on
+ * screen counts, so coming back to an answered question is still; with
+ * `immediate`, one it mounts with counts too (an answer revealed with its
+ * verdict).
+ */
+export function useLifeVerdict(ref: RefObject<HTMLElement | null>, verdict: Verdict | null | undefined, { immediate = false } = {}) {
+  const before = useRef(immediate ? null : verdict);
+  useEffect(() => {
+    const previous = before.current;
+    before.current = verdict;
+    if (previous || !verdict || !ref.current) return;
+    verdictAt(ref.current, verdict);
+  }, [ref, verdict]);
+}
+
 /* ------------------------------------------------------------ creation */
 
 export type Creation = {

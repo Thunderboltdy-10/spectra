@@ -29,6 +29,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { LifeVerdict } from "@/components/ui/life-moments";
 import { SelectField } from "@/components/ui/select";
 import { targetAttrs } from "../collaboration/target-attributes";
 import {
@@ -2003,6 +2004,17 @@ export function QuizStudio({
                     key={question.id}
                     className={`rounded-control border bg-transparent p-4 ${submitted || revealedPracticeResultByQuestion.has(question.id) ? ((practiceAttempt ? revealedPracticeResultByQuestion.get(question.id)?.correct === null : question.type === "long_response") ? "border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))]" : questionCorrect(question) ? "border-[color-mix(in_oklab,var(--success)_48%,var(--border-default))]" : "border-[color-mix(in_oklab,var(--danger)_38%,var(--border-default))]") : "border-[var(--border-default)]"}`}
                   >
+                    <LifeVerdict
+                      verdict={
+                        submitted || revealedPracticeResultByQuestion.has(question.id)
+                          ? (practiceAttempt ? revealedPracticeResultByQuestion.get(question.id)?.correct === null : question.type === "long_response")
+                            ? "open"
+                            : questionCorrect(question)
+                              ? "right"
+                              : "wrong"
+                          : null
+                      }
+                    />
                     <div className="flex items-center gap-2 text-caption font-semibold text-[var(--text-secondary)]">
                       <button
                         type="button"

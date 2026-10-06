@@ -1505,7 +1505,7 @@ function TimedBlock({
   const placed = !item.id.startsWith("pending:");
   // A new event forms where it was placed; a removed one parts there.
   useLifeArrival(ref, placed ? item.id : undefined, "human");
-  useLifeDeparture(ref, placed);
+  useLifeDeparture(ref, placed, undefined, placed ? item.id : undefined);
   const top = (minutesOnDay(item.startAt!, timezone) / 60) * HOUR_PX;
   const duration = timedBlockDuration(item);
   const height = Math.max(24, (duration / HOUR) * HOUR_PX);

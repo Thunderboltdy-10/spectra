@@ -126,6 +126,53 @@ describe("departures", () => {
   });
 });
 
+function MovingCard({ id, column }: { id: string; column: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLifeArrival(ref, `card:${id}`, undefined);
+  useLifeDeparture(ref, true, {}, `card:${id}`);
+  return <div ref={ref} data-column={column}>{id}</div>;
+}
+
+function Board({ columns }: { columns: string[][] }) {
+  return (
+    <div>
+      {columns.map((ids, column) => (
+        <section key={column}>
+          {ids.map((id) => (
+            <MovingCard key={id} id={id} column={column} />
+          ))}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+describe("moves", () => {
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const x = 10 + Number(this.getAttribute("data-column") ?? 0) * 300;
+      return { x, y: 10, left: x, top: 10, right: x + 100, bottom: 50, width: 100, height: 40, toJSON: () => ({}) } as DOMRect;
+    });
+  });
+
+  it("travels a card that moved to another column instead of parting it", () => {
+    const view = render(<Board columns={[["m1", "m2"], []]} />);
+    view.rerender(<Board columns={[["m2"], ["m1"]]} />);
+    act(flushFrames);
+    expect(field.travel).toHaveBeenCalledTimes(1);
+    expect(field.unform).not.toHaveBeenCalled();
+  });
+
+  it("lets a re-sort of many cards simply land", () => {
+    const ids = ["n1", "n2", "n3", "n4", "n5", "n6"];
+    const view = render(<Board columns={[ids, []]} />);
+    view.rerender(<Board columns={[[], ids]} />);
+    act(flushFrames);
+    expect(field.travel).toHaveBeenCalledTimes(4);
+    expect(field.unform).not.toHaveBeenCalled();
+  });
+});
+
 function Landing({ id }: { id: string | null }) {
   const ref = useRef<HTMLDivElement>(null);
   useLifeLanding(ref, id);

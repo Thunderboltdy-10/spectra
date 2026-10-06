@@ -105,6 +105,7 @@ animation.
 | Delete | The thing **unforms** from where you acted. |
 | Create by hand | The thing **forms** from where you made it. |
 | Add A to B | A **send** from A into B, which **absorbs** it and pulses. |
+| Move (another column, day or folder) | The thing **travels**: its old shape breaks into the field, crosses it and forms where it is now. A move in place, or many at once (a re-sort), simply lands. Keyed departures (`useLifeDeparture(..., key)`) and arrivals under the same key in one commit make the move. |
 | Tick something off | The paper **pulses** green where it was done: a task's done control, a step, a checklist item in a work (`data-life-done`). Undoing it is quiet. |
 
 ### In editors

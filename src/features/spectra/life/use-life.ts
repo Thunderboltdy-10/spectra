@@ -375,6 +375,11 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
       arrived.add(key);
       return foldInto(element, back, figure);
     }
+    const moved = takeDeparture(key);
+    if (moved) {
+      arrived.add(key);
+      return moveInto(element, moved, figure);
+    }
     if (arrived.has(key)) return;
     arrived.add(key);
     if (!kind || !life.on) return;
@@ -413,15 +418,57 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
 
 /** More leaving at once than this is a change of view (a filter, a folder), not things being removed. */
 const DEPARTURE_BATCH = 4;
-let departures: Array<() => void> = [];
+/** Something that left this frame, as it looked: an arrival under the same key means it moved. */
+type Departure = { key?: string; shape: Figure; rect: Rect; leave: () => void };
+let departures: Departure[] = [];
 let departureFrame = 0;
+/** Moves travelled this frame. More than a few at once is a re-sort, which simply lands. */
+let movesThisFrame = 0;
+const MOVE_BATCH = 4;
 
 function flushDepartures() {
   departureFrame = 0;
+  movesThisFrame = 0;
   const batch = departures;
   departures = [];
   if (batch.length > DEPARTURE_BATCH || performance.now() - navigatedAt < 400) return;
-  for (const leave of batch) leave();
+  for (const departure of batch) departure.leave();
+}
+
+/** The departure under `key` from this frame, taken so it no longer parts: the thing moved, it did not go. */
+function takeDeparture(key: string): Departure | null {
+  const index = departures.findIndex((departure) => departure.key === key);
+  return index < 0 ? null : departures.splice(index, 1)[0];
+}
+
+/**
+ * Something moved (LIFE.md, travel): to another column, another day, a
+ * folder. Its old shape breaks into the field, crosses it as light and forms
+ * as it is now; it is hidden until it has. A move in place, or one of many at
+ * once (a re-sort), just lands.
+ */
+function moveInto(element: HTMLElement, from: Departure, figure: ElementFigureOptions) {
+  const r = element.getBoundingClientRect();
+  if (!life.on || ++movesThisFrame > MOVE_BATCH || !r.width || replaced(from.rect, r)) return;
+  const previous = element.style.opacity;
+  element.style.opacity = "0";
+  let shown = false;
+  const show = () => {
+    if (shown) return;
+    shown = true;
+    element.style.opacity = previous;
+  };
+  const frame = requestAnimationFrame(() => {
+    if (!element.isConnected) return show();
+    const shape = figureOf(element, { bars: "h2, h3, h4, [data-card-title], [data-row-title], p", maxBars: 6, ...figure });
+    void life.travel(from.shape, shape, { colour: "spectrum" }).formed.then(show);
+  });
+  const fallback = window.setTimeout(show, 1100);
+  return () => {
+    cancelAnimationFrame(frame);
+    window.clearTimeout(fallback);
+    show();
+  };
 }
 
 /**
@@ -431,12 +478,20 @@ function flushDepartures() {
  * really left the page: not when the page changed, not when React mounts it
  * again, and not when a whole view changes at once.
  */
-export function useLifeDeparture(ref: RefObject<HTMLElement | null>, enabled: boolean | (() => boolean) = true, figure: ElementFigureOptions = {}) {
+/** `key` names what it shows: if the same key arrives elsewhere in the same commit, it moved, and travels there instead. */
+export function useLifeDeparture(
+  ref: RefObject<HTMLElement | null>,
+  enabled: boolean | (() => boolean) = true,
+  figure: ElementFigureOptions = {},
+  key?: string,
+) {
+  const keyRef = useRef(key);
   const enabledRef = useRef(enabled);
   const figureRef = useRef(figure);
   useEffect(() => {
     enabledRef.current = enabled;
     figureRef.current = figure;
+    keyRef.current = key;
   });
   useLayoutEffect(() => {
     const element = ref.current;
@@ -448,9 +503,14 @@ export function useLifeDeparture(ref: RefObject<HTMLElement | null>, enabled: bo
       if (!r.width || r.bottom < 0 || r.top > window.innerHeight) return;
       const shape = figureOf(element, { bars: "h2, h3, h4, [data-card-title], [data-row-title], p", maxBars: 6, ...figureRef.current });
       const where = window.location.pathname + window.location.search;
-      departures.push(() => {
-        if (element.isConnected || window.location.pathname + window.location.search !== where) return;
-        void life.unform(shape);
+      departures.push({
+        key: keyRef.current,
+        shape,
+        rect: { x: r.x, y: r.y, width: r.width, height: r.height },
+        leave: () => {
+          if (element.isConnected || window.location.pathname + window.location.search !== where) return;
+          void life.unform(shape);
+        },
       });
       if (!departureFrame) departureFrame = requestAnimationFrame(flushDepartures);
     };

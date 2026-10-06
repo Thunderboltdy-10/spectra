@@ -6,6 +6,7 @@ import { StatusBadge, type StatusTone } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { MOTION_DURATIONS, MOTION_EASINGS } from "../motion/tokens";
 import { getSpectraMotionSnapshot } from "../motion/motion-level";
+import { useLifeArrival } from "../life/use-life";
 import type { TreeNode } from "./tree-client";
 import { nodeIdentity, relativeTime } from "./node-identity";
 
@@ -95,6 +96,17 @@ export const OrganizerRow = memo(function OrganizerRow({
     return () => animation.cancel();
   }, [top]);
 
+  /* A row new to the tree (LIFE.md): what Spectra is creating arrives from the
+     prism, and a folder just made here (it opens in rename) forms where the
+     user acted. The tree is virtualised, so rows mounting as it scrolls are
+     plain content, and rows leaving it never part. */
+  useLifeArrival(
+    rowRef,
+    `node:${node.nodeId}`,
+    node.source?.aiState === "creating" ? "ai" : renaming ? "human" : undefined,
+    { bars: "[data-node-title]" },
+  );
+
   return (
     <div
       ref={rowRef}
@@ -181,6 +193,7 @@ export const OrganizerRow = memo(function OrganizerRow({
       ) : (
         <span className="min-w-0 flex-1 truncate">
           <span
+            data-node-title
             className={cn(
               missing && "text-[var(--text-tertiary)] line-through",
             )}

@@ -68,7 +68,7 @@ export function SpectraCard({
   const ref = useRef<HTMLElement>(null);
   useLifeGlow(ref, CARD_WORKING.has(state));
   useLifeArrival(ref, lifeKey, arrival);
-  useLifeDeparture(ref, Boolean(lifeKey));
+  useLifeDeparture(ref, Boolean(lifeKey), undefined, lifeKey);
 
   return (
     <article

@@ -32,6 +32,7 @@ const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: 
   { command: "change_spectra_settings", args: { patch: { appearance: { density: "compact" } } }, mutation: "accountPreferences:writeLayer" },
   { command: "change_sync_policy", args: { targetIds: ["node"], patch: {} }, mutation: "syncPolicy:patchItems" },
   { command: "write_memory", args: { action: "create", content: "Prefers short examples" }, mutation: "memory:remember" },
+  { command: "write_memory", args: { action: "forget", memoryId: "memory" }, mutation: "memory:forget", event: "memory_written" },
   { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "revoke", grantId: "grant" }, mutation: "authority:revoke" },
   { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "withdraw_invitation", invitationId: "invitation" }, mutation: "authority:revokePendingInvitation", event: "sharing_changed" },
   { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "set_exception", accountId: "member", effect: "restrict" }, mutation: "authority:setArtifactException", event: "sharing_changed" },

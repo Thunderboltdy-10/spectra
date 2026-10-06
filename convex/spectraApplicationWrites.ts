@@ -89,9 +89,11 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
     case "save_version": return { name: "changeGroups:createNamedCheckpoint", args: { artifactId: String(args.artifactId ?? ""), name: String(args.name ?? "") } };
     case "remove_device": return { name: "bridge:revokeDevice", args: { deviceId: String(args.deviceId ?? "") } };
     case "change_sync_policy": return { name: "syncPolicy:patchItems", args: { itemIds: targetIds, patch: row(args.patch), actorKind: "ai", idempotencyKey: `ai:${runId}:${operationId}` } };
-    case "write_memory": return args.action === "create"
-      ? { name: "memory:remember", args: { proposition: String(args.content ?? "").trim(), scope: "private_global", claimType: "inferred_preference", sourceType: "user_statement", captureReason: "You explicitly asked Spectra to remember this." } }
-      : { name: "memory:correct", args: { claimId: args.memoryId, proposition: String(args.content ?? "").trim() } };
+    case "write_memory": switch (args.action) {
+      case "create": return { name: "memory:remember", args: { proposition: String(args.content ?? "").trim(), scope: "private_global", claimType: "inferred_preference", sourceType: "user_statement", captureReason: "You explicitly asked Spectra to remember this." } };
+      case "forget": return { name: "memory:forget", args: { claimId: args.memoryId } };
+      default: return { name: "memory:correct", args: { claimId: args.memoryId, proposition: String(args.content ?? "").trim() } };
+    }
     case "change_sharing": {
       const resourceType = String(args.resourceType ?? "artifact");
       const resourceId = String(args.resourceId ?? "");

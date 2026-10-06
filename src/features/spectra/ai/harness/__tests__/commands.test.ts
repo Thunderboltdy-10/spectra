@@ -59,6 +59,8 @@ describe("find_commands", () => {
     expect(top("resize the embedded spreadsheet")).toBe("work.manage_embed");
     expect(top("release my agent so the class can use it")).toBe("agents.release");
     expect(top("roll my agent back to its previous release")).toBe("agents.release");
+    expect(top("forget that I like short answers")).toBe("memory.forget");
+    expect(top("remember that I like short answers")).toBe("memory.remember");
     expect(rankCommands("zzzz qqqq")).toEqual([]);
   });
 

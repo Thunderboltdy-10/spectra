@@ -513,9 +513,19 @@ export async function executeApplicationCommand(
     return { ok: true, status: "requested", destination, ...(targetId ? { targetId } : {}), message: "Navigation requested. The destination view reports its own readiness." };
   }
   if (command === "write_memory") {
+    const action = String(parsed.action ?? "create");
+    if (action === "forget") {
+      const memoryId = typeof parsed.memoryId === "string" ? parsed.memoryId : "";
+      if (!memoryId) throw new Error("MEMORY_ID_REQUIRED");
+      const memory = await applyMutation("memory:forget", { actorClerkId, claimId: memoryId });
+      onUiEvent?.({
+        key: "memory_written",
+        payload: { targetId: memoryId, note: "Forgot a private memory" },
+      });
+      return { ok: true, memory };
+    }
     const content = String(parsed.content ?? "").trim();
     if (!content) throw new Error("MEMORY_CONTENT_REQUIRED");
-    const action = String(parsed.action ?? "create");
     if (action === "create") {
       const memory = await applyMutation("memory:remember", {
         actorClerkId,

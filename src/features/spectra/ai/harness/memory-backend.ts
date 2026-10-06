@@ -234,6 +234,11 @@ export class MemoryBackend implements HarnessBackend {
       return { ok: true, content: "Settings saved.", uiEvents: [{ key: "settings_changed", payload: { targetId: Object.keys(patch)[0] } }] };
     }
     if (request.command === "write_memory") {
+      if (request.args.action === "forget") {
+        const index = Number(String(request.args.memoryId).replace(/^memory-/, "")) - 1;
+        if (index >= 0 && index < this.memories.length) this.memories.splice(index, 1, "");
+        return { ok: true, content: "Forgot that." };
+      }
       this.memories.push(String(request.args.content));
       return { ok: true, content: "Saved to memory." };
     }

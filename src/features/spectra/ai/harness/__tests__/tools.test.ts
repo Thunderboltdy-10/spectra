@@ -289,6 +289,9 @@ describe("harness tools", () => {
     ["release_agent", { agentId: "ag1", action: "publish" }, { command: "release_agent", args: { agentId: "ag1", action: "publish" } }],
     ["release_agent", { agentId: "ag1", action: "rollback", releaseId: "r2" }, { command: "release_agent", args: { agentId: "ag1", action: "rollback", releaseId: "r2" } }],
     ["release_agent", { agentId: "ag1", action: "suspend", releaseId: "r3" }, { command: "release_agent", args: { agentId: "ag1", action: "suspend", releaseId: "r3" } }],
+    ["remember", { content: "Prefers short answers." }, { command: "write_memory", args: { action: "create", content: "Prefers short answers." } }],
+    ["remember", { content: "Prefers worked examples.", memoryId: "m1" }, { command: "write_memory", args: { action: "revise", content: "Prefers worked examples.", memoryId: "m1" } }],
+    ["forget_memory", { memoryId: "m1" }, { command: "write_memory", args: { action: "forget", memoryId: "m1" } }],
   ] as const)("%s sends the application command for %j, asking under the server's category", async (name, raw, sent) => {
     const { tools, backend, session } = setup();
     const tool = [...tools, ...runOnlyTools(session)].find((entry) => entry.name === name)!;

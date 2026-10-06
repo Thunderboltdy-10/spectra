@@ -136,7 +136,12 @@ const COMMANDS: Record<string, ApplicationCommand> = {
     authority: "local_file",
   },
   write_memory: {
-    input: z.object({ action: z.enum(["create", "revise"]), content: z.string().min(1).max(10_000), memoryId: z.string().optional() }),
+    input: z
+      .object({ action: z.enum(["create", "revise", "forget"]), content: z.string().min(1).max(10_000).optional(), memoryId: z.string().optional() })
+      .superRefine((value, ctx) => {
+        if (value.action !== "forget" && !value.content) ctx.addIssue({ code: "custom", path: ["content"], message: "What to remember is required." });
+        if (value.action !== "create" && !value.memoryId) ctx.addIssue({ code: "custom", path: ["memoryId"], message: "A memory id is required." });
+      }),
     authority: "memory",
   },
   change_sharing: {

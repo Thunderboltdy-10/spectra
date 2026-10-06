@@ -623,6 +623,22 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       }),
     }),
     commandTool(session, {
+      name: "forget_memory",
+      description:
+        "Erase a saved memory about the user for good, by memoryId (find it with search in [\"memory\"]). Only when the user asks to forget it; to fix a wrong memory, revise it with remember instead.",
+      parameters: {
+        type: "object",
+        properties: { memoryId: { type: "string" } },
+        required: ["memoryId"],
+        additionalProperties: false,
+      },
+      effect: "irreversible",
+      label: () => "Forgetting that",
+      doneLabel: () => "Forgot that",
+      parse: (raw) => ({ memoryId: requireString(raw, "memoryId", 200) }),
+      command: (args) => ({ command: "write_memory", args: { action: "forget", memoryId: args.memoryId } }),
+    }),
+    commandTool(session, {
       name: "add_comment",
       description:
         "Leave a visible, AI-attributed comment on a piece of work, for feedback the user asked for without changing the work. regionId is a block, slide or cell region from the content; omit it to comment on the whole item. replyTo (a comment id from read_comments) answers that comment in its thread.",

@@ -868,12 +868,23 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     reach: tool("remember", { appCommand: "write_memory", example: { content: "Prefers short answers." } }),
   },
   {
+    id: "memory.forget",
+    area: "memory",
+    title: "Forget a memory",
+    description: "Erase one saved memory for good when the user asks Spectra to forget it.",
+    keywords: ["forget", "erase memory", "delete memory"],
+    server: ["memory:forget"],
+    reach: tool("forget_memory", { appCommand: "write_memory", example: { memoryId: "memory-1" } }),
+  },
+  {
     id: "memory.manage",
     area: "memory",
-    title: "Forget or dispute memories",
-    description: "Forget a memory, clear all of them, dispute one or change memory settings.",
-    server: ["memory:forget", "memory:clearAll", "memory:setDisputed", "memory:updatePreferences"],
-    reach: user("What Spectra may keep about the user is the user's choice."),
+    title: "Clear, dispute or configure memory",
+    description: "Clear every memory at once, flag one as disputed or change what Spectra may remember.",
+    server: ["memory:clearAll", "memory:setDisputed", "memory:updatePreferences"],
+    reach: user(
+      "What Spectra may keep is the user's choice: clearing everything takes typed confirmation and memory settings are Spectra's own permissions. Spectra revises a wrong memory or forgets one instead of disputing it.",
+    ),
   },
 
   // Agents

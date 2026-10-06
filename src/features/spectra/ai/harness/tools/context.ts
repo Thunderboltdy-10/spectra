@@ -1,6 +1,7 @@
 import { ARTIFACT_TYPE_KEYS } from "../../../artifacts/types";
 import { plannerTime } from "../authoring/items";
 import type { SearchHit, SearchResponse } from "../backend";
+import { formatComments } from "../comments";
 import { webSourceId } from "../sources";
 import { ToolInputError, type HarnessTool } from "../types";
 import { typeName } from "./artifacts";
@@ -11,6 +12,7 @@ import {
   plural,
   rememberTitle,
   requireString,
+  titled,
   type HarnessSession,
 } from "./shared";
 
@@ -200,6 +202,36 @@ export function readThreadTool(session: HarnessSession): HarnessTool<ThreadArgs>
       content: await session.backend.readThread(args, ctx.signal),
       doneLabel: args.query ? `Looked for "${args.query}" in your chats` : "Read earlier messages",
     }),
+  };
+}
+
+type CommentsArgs = { artifactId: string; includeResolved?: boolean };
+
+export function readCommentsTool(session: HarnessSession): HarnessTool<CommentsArgs> {
+  return {
+    name: "read_comments",
+    description:
+      "Read the comment threads on a piece of work: each comment's id, author, where it is anchored, whether it is resolved, and its replies. Resolved threads only with includeResolved. Use it before answering, resolving, editing or deleting comments.",
+    parameters: {
+      type: "object",
+      properties: { artifactId: { type: "string" }, includeResolved: { type: "boolean" } },
+      required: ["artifactId"],
+      additionalProperties: false,
+    },
+    effect: "read",
+    label: (args) => `Reading the comments on ${titled(session, args.artifactId, "your work")}`,
+    parse: (raw) => ({ artifactId: requireString(raw, "artifactId", 200), includeResolved: raw.includeResolved === true }),
+    execute: async (args, ctx) => {
+      const rows = await session.backend.readComments(args, ctx.signal);
+      if (!rows)
+        return { ok: false, content: `No artifact has id "${args.artifactId}", or the user cannot open it. Find it with list_library or search.` };
+      const title = session.titles.get(args.artifactId)?.title ?? "This work";
+      return {
+        ok: true,
+        content: formatComments(rows, title),
+        doneLabel: `Read the comments on ${titled(session, args.artifactId, "your work")}`,
+      };
+    },
   };
 }
 

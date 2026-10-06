@@ -434,6 +434,14 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     reach: tool("add_comment", { appCommand: "add_comment", example: { artifactId: "wx1", body: "Cite this claim." } }),
   },
   {
+    id: "comments.read",
+    area: "comments",
+    title: "Read comments",
+    description: "Read the comment threads on a work item: who said what, where, and whether it is resolved.",
+    keywords: ["feedback", "review notes", "what did they say"],
+    reach: tool("read_comments", { example: { artifactId: "wx1" } }),
+  },
+  {
     id: "comments.open",
     area: "comments",
     title: "Open comments",
@@ -447,7 +455,7 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     title: "Edit, resolve or delete comments",
     description: "Edit a comment, resolve it, move its anchor or delete it.",
     server: ["artifactComments:updateBody", "artifactComments:setResolved", "artifactComments:reanchor", "artifactComments:remove"],
-    reach: gap("Spectra cannot read a work's comment threads yet, so it has no comment ids to edit, resolve or delete. Reading comments through read_artifact comes first; then each change maps to its one mutation here."),
+    reach: tool("manage_comment", { appCommand: "manage_comment", example: { artifactId: "wx1", commentId: "c1", action: "resolve" } }),
   },
   {
     id: "comments.notifications",

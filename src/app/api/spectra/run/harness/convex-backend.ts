@@ -11,6 +11,7 @@ import type {
   WebResult,
 } from "@/features/spectra/ai/harness/backend";
 import { ARTIFACT_TYPE_KEYS, type ArtifactTypeKey } from "@/features/spectra/artifacts/types";
+import type { CommentRow } from "@/features/spectra/ai/harness/comments";
 import { readLiveArtifactValue } from "@/features/spectra/ai/yjs-artifact-operation";
 import { overlayLiveArtifactRecord } from "@/features/spectra/collaboration/artifact-yjs-model";
 import { parseModelOperation, type ModelOperation } from "@/features/spectra/operations/schema";
@@ -632,6 +633,33 @@ export class ConvexHarnessBackend implements HarnessBackend {
       snippet: result.content.slice(0, 900),
       ...(result.publishedAt ? { publishedAt: result.publishedAt } : {}),
     }));
+  }
+
+  async readComments(input: { artifactId: string; includeResolved?: boolean }): Promise<CommentRow[] | null> {
+    const list = await query<unknown & object, unknown>("artifactComments:list", {
+      actorClerkId: this.actorClerkId,
+      artifactId: input.artifactId,
+      includeResolved: input.includeResolved === true,
+      limit: 150,
+    }).catch(() => null);
+    if (!Array.isArray(list)) return null;
+    return rows(list).flatMap((comment): CommentRow[] => {
+      const status = comment.status;
+      if (status !== "open" && status !== "resolved" && status !== "orphaned") return [];
+      const anchor = comment.anchor && typeof comment.anchor === "object" ? (comment.anchor as Record<string, unknown>) : {};
+      const author = comment.author && typeof comment.author === "object" ? (comment.author as Record<string, unknown>) : {};
+      return [{
+        id: String(comment._id),
+        ...(text(comment.parentCommentId) ? { parentId: text(comment.parentCommentId) } : {}),
+        author: text(author.name) || "Someone",
+        ...(author.kind === "ai" || comment.authorKind === "ai" ? { byAi: true } : {}),
+        body: text(comment.body),
+        status,
+        regionId: text(anchor.regionId) || "work:root",
+        ...(text(anchor.fallbackExcerpt) ? { excerpt: text(anchor.fallbackExcerpt) } : {}),
+        createdAt: typeof comment.createdAt === "number" ? comment.createdAt : 0,
+      }];
+    });
   }
 
   async readCalendar(input: { from: number; to: number; title?: string }): Promise<string> {

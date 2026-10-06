@@ -201,6 +201,16 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     noteAiLocation({ ...(event.runId ? { actorId: event.runId } : {}), artifactId: hostWorkId, note: message });
     return;
   }
+  if (event.key === "comment_changed") {
+    const artifactId = event.payload?.targetId;
+    if (typeof artifactId !== "string" || !artifactId) return;
+    noteAiLocation({
+      ...(event.runId ? { actorId: event.runId } : {}),
+      artifactId,
+      note: typeof event.payload?.note === "string" ? event.payload.note : "Changed a comment",
+    });
+    return;
+  }
   if (event.key === "comment_added") {
     const artifactId = event.payload?.targetId;
     if (typeof artifactId !== "string" || !artifactId) return;

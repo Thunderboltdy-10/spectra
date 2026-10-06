@@ -51,6 +51,8 @@ describe("find_commands", () => {
     expect(top("invite my friend to edit")).toBe("sharing.change");
     expect(top("refresh my school deadlines")).toBe("managebac.sync");
     expect(top("connect my computer files")).toBe("devices.pair");
+    expect(top("bring my essay back to an earlier version")).toBe("work.restore_version");
+    expect(top("who changed this and when")).toBe("work.history");
     expect(rankCommands("zzzz qqqq")).toEqual([]);
   });
 

@@ -7,12 +7,13 @@ import { normalizeCalendarTimeInput } from "../../../../../../shared/calendar-ti
 import { AI_SYNC_PURPOSES, SCHOOL_SYNC_KINDS, SCHOOL_SYNC_MODES, type AiSyncPurpose } from "../../../../../../shared/school-sync";
 
 /*
- * The application commands the harness tools send (tools/app.ts and
- * tools/commands.ts), with the arguments each one takes and the authority
- * class it is judged under. This is the server's boundary: an operation whose
- * command is not here, or whose arguments do not parse, never runs.
- * Convex's spectraApplicationWrites:execute then maps each command to its one
- * mutation.
+ * The application commands the harness tools send (tools/app.ts,
+ * tools/commands.ts and tools/work.ts), with the arguments each one takes and
+ * the authority class it is judged under. This is the server's boundary: an
+ * operation whose command is not here, or whose arguments do not parse, never
+ * runs. Convex's spectraApplicationWrites:execute then maps most commands to
+ * their one mutation; restore_version and the reference commands write
+ * through the collaboration room instead.
  */
 
 const calendarTime = {
@@ -101,6 +102,11 @@ const COMMANDS: Record<string, ApplicationCommand> = {
   },
   save_version: {
     input: z.object({ artifactId: z.string().trim().min(1).max(200), name: z.string().trim().min(1).max(180) }),
+    authority: "content",
+  },
+  // Restoring saves the current work as a version first, so it is undoable.
+  restore_version: {
+    input: z.object({ artifactId: z.string().trim().min(1).max(200), versionId: z.string().trim().min(1).max(200) }),
     authority: "content",
   },
   change_spectra_settings: { input: z.object({ patch: preferenceLayerValuesSchema }), authority: "settings" },

@@ -159,7 +159,7 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     });
     return;
   }
-  if (event.key === "version_saved") {
+  if (event.key === "version_saved" || event.key === "version_restored") {
     const artifactId = event.payload?.targetId;
     if (typeof artifactId !== "string" || !artifactId) return;
     noteAiLocation({

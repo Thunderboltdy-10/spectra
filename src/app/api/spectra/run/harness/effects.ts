@@ -4,6 +4,7 @@ import { executeRegisteredCalendarMutation } from "./calendar-command";
 import { normalizeCalendarCommand } from "@/features/spectra/calendar/domain/command";
 import { normalizeApplicationCommand, parseApplicationCommand } from "./application-commands";
 import { executeReferenceInsertion } from "./reference-command";
+import type { RestoreRequest } from "@/lib/artifact-restore-server";
 import { act, mutate, query } from "./io";
 import {
   authorityPublicMessage,
@@ -417,6 +418,10 @@ export async function executeApplicationCommand(
     onUiEvent?.({ key: "version_saved", payload: { targetId: artifactId, note: `Saved the version ${String(parsed.name)}` } });
     return result;
   }
+  if (command === "restore_version") {
+    if (!operationId) throw new Error("RESTORE_OPERATION_ID_REQUIRED");
+    return restoreVersion({ runId, operationId, artifactId: String(parsed.artifactId), versionId: String(parsed.versionId), onUiEvent });
+  }
   if (command === "complete_calendar_block" || command === "remove_calendar_event") {
     const itemId = String(parsed.itemId);
     const result = await applyMutation(
@@ -651,6 +656,51 @@ export async function executeApplicationCommand(
   throw new Error(`APP_COMMAND_NOT_REGISTERED:${command}`);
 }
 
+/**
+ * Restore through the same signed admission as the history panel: it fences
+ * the live room, saves the current work as "Your work before restore", then
+ * commits the restored version. The request id is the operation's, so a
+ * retried operation replays its receipt instead of restoring twice.
+ */
+async function restoreVersion(input: {
+  runId: string;
+  operationId: string;
+  artifactId: string;
+  versionId: string;
+  onUiEvent?: (event: { key: string; payload?: Record<string, unknown> }) => void;
+}) {
+  const { admitArtifactRestore, artifactRestoreFailure } = await import("@/lib/artifact-restore-server");
+  const { prepareNativeArtifactRestore } = await import("@/lib/artifact-restore-native");
+  let result: Awaited<ReturnType<typeof admitArtifactRestore>>;
+  try {
+    result = await admitArtifactRestore(
+      {
+        artifactId: input.artifactId as RestoreRequest["artifactId"],
+        sourceVersionId: input.versionId as RestoreRequest["sourceVersionId"],
+        requestId: `ai:${input.operationId}`,
+        clientId: `spectra-ai:${input.runId}`.slice(0, 180),
+      },
+      prepareNativeArtifactRestore,
+    );
+  } catch (error) {
+    const failure = artifactRestoreFailure(error);
+    throw failure ? new Error(failure.message) : error;
+  }
+  const receipt = result.receipt;
+  const restored = receipt.outcome === "restored";
+  input.onUiEvent?.({
+    key: "version_restored",
+    payload: { targetId: input.artifactId, note: restored ? "Restored an earlier version" : "That version matches the current work" },
+  });
+  return {
+    state: restored ? "restored" : "unchanged",
+    ...(receipt.outcome === "restored" ? { versionId: String(receipt.versionId) } : {}),
+    message: restored
+      ? "Restored. The work before the restore is saved in its history as \"Your work before restore\"."
+      : "Nothing changed: the work already matches that version.",
+  };
+}
+
 const COMMENT_MUTATIONS: Record<string, string> = {
   resolve: "artifactComments:setResolved",
   reopen: "artifactComments:setResolved",
@@ -663,6 +713,9 @@ const COMMENT_NOTES: Record<string, string> = {
   edit: "Edited a comment",
   delete: "Deleted a comment",
 };
+
+/** Commands that change one work, named by artifactId: the run lists it as touched. */
+const ARTIFACT_COMMANDS = new Set(["add_comment", "restore_version"]);
 
 type UiEventSink = (event: { key: string; payload?: Record<string, unknown> }) => void;
 
@@ -865,7 +918,7 @@ export async function executeOperation(
     affected =
       operation.input.command === "insert_reference"
         ? [{ type: "artifact", id: String(operation.input.args.hostWorkId) }]
-        : operation.input.command === "add_comment"
+        : ARTIFACT_COMMANDS.has(operation.input.command)
           ? [{ type: "artifact", id: String(operation.input.args.artifactId) }]
           : [];
   } else {

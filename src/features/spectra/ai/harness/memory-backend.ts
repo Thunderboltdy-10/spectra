@@ -1,5 +1,6 @@
 import type { ArtifactTypeKey } from "../../artifacts/types";
 import type { CommentRow } from "./comments";
+import type { VersionRow } from "./versions";
 import { artifactTypeLabel } from "../../../../../shared/semantic-chunks";
 import { resolveArtifactWriteInput } from "../../operations/artifact-write-content";
 import type {
@@ -33,6 +34,8 @@ export type MemoryBackendOptions = {
   webSearch?: (query: string) => Promise<WebResult[]>;
   /** Comments by work id. */
   comments?: Record<string, CommentRow[]>;
+  /** Saved versions by work id, newest first. */
+  versions?: Record<string, VersionRow[]>;
   /** Simulate the semantic layer answering with words only, or with a degraded index. */
   searchMode?: SearchResponse["mode"];
   searchDegraded?: SearchResponse["degraded"];
@@ -188,6 +191,12 @@ export class MemoryBackend implements HarnessBackend {
     if (!this.artifacts.has(input.artifactId)) return null;
     const rows = this.options.comments?.[input.artifactId] ?? [];
     return input.includeResolved ? rows : rows.filter((row) => row.status !== "resolved");
+  }
+
+  async readVersions(input: { artifactId: string; limit: number }) {
+    if (!this.artifacts.has(input.artifactId)) return null;
+    const rows = this.options.versions?.[input.artifactId] ?? [];
+    return { versions: rows.slice(0, input.limit), more: rows.length > input.limit };
   }
 
   async readSchoolData() {

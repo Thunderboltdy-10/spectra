@@ -38,6 +38,8 @@ type CommandTool<A> = {
   label: (args: A) => string;
   doneLabel: (args: A) => string;
   question?: (args: A) => string;
+  /** Works this call changes, so calls on the same work run in order. */
+  targets?: (args: A) => string[];
   parse: (raw: Record<string, unknown>) => A;
   command: (args: A) => { command: string; args: Record<string, unknown> };
   after?: (args: A, result: CommandResult) => Partial<ToolOutcome>;
@@ -52,6 +54,7 @@ export function commandTool<A>(session: HarnessSession, spec: CommandTool<A>): H
     ...(spec.category ? { category: (args: A) => (typeof spec.category === "function" ? spec.category(args) : spec.category) } : {}),
     label: spec.label,
     ...(spec.question ? { question: spec.question } : {}),
+    ...(spec.targets ? { targets: spec.targets } : {}),
     parse: spec.parse,
     stage: async (args, ctx) => {
       await session.backend.stageCommand?.(

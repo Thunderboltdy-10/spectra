@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-const seams = vi.hoisted(() => ({ mutate: vi.fn(), query: vi.fn(), authority: vi.fn(), calendar: vi.fn(), reference: vi.fn() }));
+const seams = vi.hoisted(() => ({ mutate: vi.fn(), query: vi.fn(), authority: vi.fn(), calendar: vi.fn(), reference: vi.fn(), restore: vi.fn() }));
 vi.mock("@/app/api/spectra/run/harness/io", () => ({ mutate: seams.mutate, query: seams.query, readQuery: vi.fn(), act: vi.fn(), safeJson: JSON.parse }));
 vi.mock("@/app/api/spectra/run/harness/authority", () => ({ evaluateCommandAuthority: seams.authority, recordAuthorityDecision: vi.fn() }));
 vi.mock("@/app/api/spectra/run/harness/calendar-command", () => ({ executeRegisteredCalendarMutation: seams.calendar }));
 vi.mock("@/app/api/spectra/run/harness/reference-command", () => ({ executeReferenceInsertion: seams.reference }));
+vi.mock("@/lib/artifact-restore-server", () => ({ admitArtifactRestore: seams.restore, artifactRestoreFailure: () => null }));
+vi.mock("@/lib/artifact-restore-native", () => ({ prepareNativeArtifactRestore: vi.fn() }));
 
 import { executeApplicationCommand } from "@/app/api/spectra/run/harness/effects";
 import { APPLICATION_COMMAND_NAMES, parseApplicationCommand } from "@/app/api/spectra/run/harness/application-commands";
@@ -35,6 +37,7 @@ const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: 
   { command: "pin_library_item", args: { targetId: "node", pinned: true }, mutation: "orgTree:setPinned", event: "organize_library" },
   { command: "manage_conversation", args: { threadId: "thread", title: "Biology revision" }, mutation: "spectraThreads:update" },
   { command: "save_version", args: { artifactId: "work", name: "Before the rewrite" }, mutation: "changeGroups:createNamedCheckpoint", event: "version_saved" },
+  { command: "restore_version", args: { artifactId: "work", versionId: "version" }, event: "version_restored" },
   { command: "set_school_sync_mode", args: { kind: "grades", mode: "manual" }, mutation: "school:setMode", event: "managebac_sync_preferences" },
   { command: "manage_class_workspaces", args: { action: "create", recordIds: ["class"] }, mutation: "managebac:materializeClassWorkspaces", event: "managebac_class_workspaces" },
   { command: "complete_calendar_block", args: { itemId: "block", expectedRevision: 2 }, mutation: "calendar:completeWorkBlock", event: "calendar_changed" },
@@ -53,6 +56,7 @@ describe("application action contract matrix (stubbed persistence)", () => {
     seams.mutate.mockResolvedValue({ saved: true });
     seams.authority.mockResolvedValue({ decision: "allow", target: "content" });
     seams.calendar.mockResolvedValue({ ok: true, status: "canonical_write" });
+    seams.restore.mockResolvedValue({ state: "committed", duplicate: false, receipt: { outcome: "restored", versionId: "restored-version" } });
     seams.reference.mockResolvedValue({ ok: true, status: "canonical_write", receipt: { phase: "canonical_write", versionId: "version" } });
   });
 
@@ -61,7 +65,7 @@ describe("application action contract matrix (stubbed persistence)", () => {
   });
 
   it("knows every command the harness tools send, and no other", () => {
-    const sent = ["tools/app.ts", "tools/commands.ts"].flatMap((file) =>
+    const sent = ["tools/app.ts", "tools/commands.ts", "tools/work.ts"].flatMap((file) =>
       [...readFileSync(`src/features/spectra/ai/harness/${file}`, "utf8").matchAll(/command: "([a-z_]+)"/g)].map((match) => match[1]!));
     expect([...new Set(sent)].sort()).toEqual([...APPLICATION_COMMAND_NAMES].sort());
   });
@@ -77,6 +81,17 @@ describe("application action contract matrix (stubbed persistence)", () => {
     else expect(seams.mutate).not.toHaveBeenCalled();
     if (event) expect(events).toContain(event);
     if (status) expect(result.status).toBe(status);
+  });
+
+  it("restores through the signed admission with the operation's request id, never the Convex write path", async () => {
+    const result = await executeApplicationCommand("actor", "run", "attempt", "restore_version", { artifactId: "work", versionId: "version" },
+      undefined, undefined, undefined, "operation") as Record<string, unknown>;
+    expect(seams.restore).toHaveBeenCalledWith({ artifactId: "work", sourceVersionId: "version", requestId: "ai:operation", clientId: "spectra-ai:run" }, expect.any(Function));
+    expect(result).toMatchObject({ state: "restored", versionId: "restored-version" });
+    seams.restore.mockResolvedValueOnce({ state: "unchanged", duplicate: false, receipt: { outcome: "unchanged" } });
+    expect(await executeApplicationCommand("actor", "run", "attempt", "restore_version", { artifactId: "work", versionId: "version" },
+      undefined, undefined, undefined, "operation")).toMatchObject({ state: "unchanged" });
+    expect(seams.mutate).not.toHaveBeenCalled();
   });
 
   it.each([["upcoming_deadlines", ["current_tasks"]], ["past_tasks", ["past_tasks", "dropbox_files"]], ["cas", ["cas"]], ["nonsense", ["current_tasks"]]] as const)(

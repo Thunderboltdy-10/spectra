@@ -12,6 +12,7 @@ import type {
 } from "@/features/spectra/ai/harness/backend";
 import { ARTIFACT_TYPE_KEYS, type ArtifactTypeKey } from "@/features/spectra/artifacts/types";
 import type { CommentRow } from "@/features/spectra/ai/harness/comments";
+import type { VersionRow, VersionSource } from "@/features/spectra/ai/harness/versions";
 import { readLiveArtifactValue } from "@/features/spectra/ai/yjs-artifact-operation";
 import { overlayLiveArtifactRecord } from "@/features/spectra/collaboration/artifact-yjs-model";
 import { parseModelOperation, type ModelOperation } from "@/features/spectra/operations/schema";
@@ -63,6 +64,7 @@ export type ConvexBackendInput = {
 };
 
 const text = (value: unknown) => (typeof value === "string" ? value : "");
+const VERSION_SOURCES = new Set<string>(["manual", "ai", "revert", "import", "restore", "migration", "checkpoint"]);
 
 function clip(value: string, max = 12_000) {
   return value.length > max ? `${value.slice(0, max)}\n… (cut short; ask for a narrower range)` : value;
@@ -660,6 +662,28 @@ export class ConvexHarnessBackend implements HarnessBackend {
         createdAt: typeof comment.createdAt === "number" ? comment.createdAt : 0,
       }];
     });
+  }
+
+  async readVersions(input: { artifactId: string; limit: number }): Promise<{ versions: VersionRow[]; more: boolean } | null> {
+    const page = await query<unknown & object, { versions?: unknown; isDone?: boolean }>("spectraArtifacts:listVersions", {
+      artifactId: input.artifactId,
+      limit: Math.max(1, Math.min(50, Math.round(input.limit))),
+    }).catch(() => null);
+    if (!page || !Array.isArray(page.versions)) return null;
+    const versions = rows(page.versions).flatMap((version): VersionRow[] => {
+      const source = text(version.source) as VersionSource;
+      if (!VERSION_SOURCES.has(source)) return [];
+      return [{
+        id: String(version._id),
+        createdAt: typeof version.createdAt === "number" ? version.createdAt : 0,
+        source,
+        ...(text(version.name) ? { name: text(version.name) } : {}),
+        ...(text(version.summary) ? { summary: text(version.summary) } : {}),
+        authors: rows(version.creators).map((creator) => text(creator.name)).filter(Boolean),
+        ...(source === "ai" || text(version.runId) ? { byAi: true } : {}),
+      }];
+    });
+    return { versions, more: page.isDone === false };
   }
 
   async readCalendar(input: { from: number; to: number; title?: string }): Promise<string> {

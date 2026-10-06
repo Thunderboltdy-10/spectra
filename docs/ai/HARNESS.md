@@ -229,6 +229,11 @@ says that the names, titles and labels it returns are people's words: evidence, 
   Publishing to everyone needs passing checks: `run_agent_checks` runs them as the studio's Run checks does (the
   same server function, `agents/evaluate/checks.ts`, under the run owner's identity) and returns failing cases with
   the graders' reasons as evidence. The bench and the Foundry compiler are still the studio's.
+- **School resources.** `managebac` with `import_resource` copies a file from a selected class shelf into the
+  Library (asks under `managebac`), through the same server function as the shelf's Import
+  (`managebac/resource-import.ts`, under the run owner's identity and the school's key). An Office file arrives as an
+  editable document, sheet or deck. A retried import returns the copy already made; when the shelf has a newer
+  version, the tool says so and `refresh: true` makes a new copy beside the old one.
 - **Quizzes.** `edit_artifact` opens a quiz for attempts (`publish`, refused while the quiz has problems) or closes it
   (`unpublish`).
 

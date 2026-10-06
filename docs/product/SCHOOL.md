@@ -10,6 +10,7 @@ timetable. Each student controls what syncs, and when.
 - **Nothing surprising.**
   - Automatic syncs are visible: each kind of data shows its last sync and the next one.
   - Writes back to ManageBac always ask first. They are `irreversible` in [HARNESS.md](../ai/HARNESS.md#permissions).
+  - Spectra AI asks before copying a class resource into the Library, as it does for every school sync action.
 - **Past work is first-class.** Old tasks and their submitted files are a resource for revision and portfolios, not
   an archive nobody opens.
 

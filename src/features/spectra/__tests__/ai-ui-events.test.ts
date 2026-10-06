@@ -263,4 +263,13 @@ describe("AI UI events", () => {
     expect(message).toBe("Spectra made a public link");
     expect(options.action.label).toBe("Copy link");
   });
+
+  it("tells an open Code editor that Spectra changed its published build", () => {
+    const changed: string[] = [];
+    const off = spectraBus.on("code.publishedChanged", ({ artifactId }) => changed.push(artifactId));
+    handleSpectraAiUiEvent({ key: "runtime_published", runId: "run-1", payload: { targetId: "code-1", note: "Published the live build" } });
+    off();
+    expect(changed).toEqual(["code-1"]);
+    expect(getAiLocation()).toMatchObject({ artifactId: "code-1" });
+  });
 });

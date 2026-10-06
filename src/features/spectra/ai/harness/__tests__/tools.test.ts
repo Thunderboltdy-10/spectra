@@ -268,6 +268,7 @@ describe("harness tools", () => {
     ["manage_embed", { artifactId: "wx1", embedId: "e1", action: "pin", versionId: "v1" }, { command: "manage_embed", args: { artifactId: "wx1", embedId: "e1", action: "pin", versionId: "v1" } }],
     ["manage_embed", { artifactId: "wx1", embedId: "e1", action: "follow_live" }, { command: "manage_embed", args: { artifactId: "wx1", embedId: "e1", action: "follow_live" } }],
     ["manage_embed", { artifactId: "wx1", embedId: "e1", action: "remove" }, { command: "manage_embed", args: { artifactId: "wx1", embedId: "e1", action: "remove" } }],
+    ["publish_code", { artifactId: "wx1", action: "publish" }, { command: "publish_code", args: { artifactId: "wx1", action: "publish" } }],
     ["share", { action: "withdraw_invitation", resourceType: "artifact", resourceId: "wx1", invitationId: "i1" }, { command: "change_sharing", args: { action: "withdraw_invitation", resourceType: "artifact", resourceId: "wx1", invitationId: "i1" } }],
     ["share", { action: "set_exception", resourceType: "artifact", resourceId: "wx1", accountId: "a2", effect: "restrict" }, { command: "change_sharing", args: { action: "set_exception", resourceType: "artifact", resourceId: "wx1", accountId: "a2", effect: "restrict" } }],
     ["share", { action: "clear_exception", resourceType: "agent", resourceId: "ag1", accountId: "a2" }, { command: "change_sharing", args: { action: "clear_exception", resourceType: "agent", resourceId: "ag1", accountId: "a2" } }],
@@ -400,6 +401,10 @@ describe("harness tools", () => {
     expect(() => share.parse!({ action: "set_exception", resourceType: "workspace", resourceId: "w1", accountId: "a2", effect: "deny" })).toThrow("single work");
     expect(() => share.parse!({ action: "withdraw_invitation", resourceType: "artifact", resourceId: "doc-1" })).toThrow("read_sharing");
     expect(() => share.parse!({ action: "create_public_link", resourceType: "artifact", resourceId: "doc-1", expiresInDays: 3 })).toThrow("7 or 30");
+    const publish = all.find((entry) => entry.name === "publish_code")!;
+    const build = publish.parse!({ artifactId: "doc-1", action: "publish" });
+    expect(typeof publish.effect === "function" ? publish.effect(build) : publish.effect).toBe("irreversible");
+    expect(publish.category?.(build)).toBe("external_send");
   });
 
   it("asks before deleting a comment, and edits only with new text", () => {

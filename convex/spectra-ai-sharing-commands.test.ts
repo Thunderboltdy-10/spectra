@@ -57,7 +57,7 @@ async function seed() {
   return { t, ids, user, run };
 }
 
-describe("Spectra AI sharing commands", () => {
+describe("Spectra AI sharing and publishing commands", () => {
   it("makes a public link from a server-derived hash and keeps only the link id in the receipt", async () => {
     const { t, ids, run } = await seed();
     await expect(run({ action: "create_public_link" })).rejects.toThrow("AI_PUBLIC_LINK_TOKEN_REQUIRED");
@@ -82,12 +82,16 @@ describe("Spectra AI sharing commands", () => {
     expect((await t.run((ctx) => ctx.db.get(invitation._id)))?.status).toBe("revoked");
   });
 
-  it("asks for a public link under publishing outside Spectra, not under sharing", async () => {
+  it.each([
+    ["a public link", "change_sharing", { resourceType: "artifact", action: "create_public_link" }],
+    ["a code build", "publish_code", { action: "publish" }],
+  ] as const)("asks for %s under publishing outside Spectra, not under sharing", async (_label, command, extra) => {
     const { t, ids, user } = await seed();
     const executionId = "share-attempt";
+    const args = { ...extra, ...(command === "change_sharing" ? { resourceId: ids.artifactId } : { artifactId: ids.artifactId }) };
     const operationId = await t.run((ctx) => ctx.db.insert("spectraOperations", {
       runId: ids.runId, executionId, actorType: "ai", type: "app.command", status: "proposed", requiresConfirmation: true, affected: [], createdAt: Date.now(),
-      input: { command: "change_sharing", args: { resourceType: "artifact", resourceId: ids.artifactId, action: "create_public_link" } },
+      input: { command, args },
     }));
     await user.mutation(api.spectraHarness.recordToolOperations, { runId: ids.runId, executionId, toolCallId: "call-link", operationIds: [operationId] });
     const allow = (categories: string[]) => user.mutation(api.accountPreferences.writeLayer, { scope: "account", scopeKey: "account", values: { ai: { permissionAllow: categories } } });

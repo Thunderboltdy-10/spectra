@@ -237,6 +237,7 @@ function operationCategory(operation: Doc<"spectraOperations">): PermissionCateg
     case "pair_device":
     case "remove_device": return "settings";
     // A public link opens the work to anyone outside Spectra.
+    case "publish_code": return "external_send";
     case "change_sharing": return record(record(operation.input).args).action === "create_public_link" ? "external_send" : "sharing";
     case "trigger_managebac_sync":
     case "select_managebac_classes": return "managebac";

@@ -358,7 +358,8 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     title: "Publish a code runtime",
     description: "Publish or unpublish the live build of a code work.",
     server: ["spectraRuntimeBuilds:*"],
-    reach: gap("Publishing compiles the code in the publish route and serves the build to everyone who can open the work. That route answers only the user's own request today; a harness command needs the build moved into a shared server function, with the user's approval because it puts work in front of other people."),
+    keywords: ["publish", "deploy", "release", "go live", "take down"],
+    reach: tool("publish_code", { appCommand: "publish_code", example: { artifactId: "wx1", action: "publish" } }),
   },
 
   // Library
@@ -1070,7 +1071,9 @@ const ARTIFACT_RULES: ReadonlyArray<{ match: RegExp; reach: AiReach }> = [
   { match: /\.import(\.|$)|\.files\.open$|\.add\.image$/, reach: user("Files come from the browser's file picker, which only the user can open.") },
   { match: /\.(present|presenter)(\.|$)|\.present$|\.rehearse$/, reach: user("Presenting is the user's own live performance.") },
   { match: /\.attempt\.|\.study\.|\.runtime\.interact$/, reach: user("These are the learner's own answers and study. Spectra doing them would fake the learner's progress.") },
-  { match: /\.(publish|unpublish|private)$/, reach: gap("Publishing puts a quiz, a code build or an agent in front of other people through that editor's own publish flow. None has a server path the harness can call yet; each needs one, with the user's approval.") },
+  { match: /^code\.publish$/, reach: tool("publish_code", { fixed: { action: "publish" }, appCommand: "publish_code" }) },
+  { match: /^code\.unpublish$/, reach: tool("publish_code", { fixed: { action: "unpublish" }, appCommand: "publish_code" }) },
+  { match: /\.(publish|unpublish|private)$/, reach: gap("Closing a quiz to new attempts and releasing an agent go through that editor's own flow, which has no server path the harness can call yet; each needs one, with the user's approval.") },
   { match: /\.clipboard\.|\.copyStyle$/, reach: user("It uses the user's clipboard.") },
   { match: /\.protect\.sheet$/, reach: user("Protection guards a sheet against edits, including Spectra's, so only the user sets it.") },
   {

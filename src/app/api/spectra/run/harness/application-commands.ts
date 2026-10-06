@@ -109,6 +109,11 @@ const COMMANDS: Record<string, ApplicationCommand> = {
     input: z.object({ artifactId: z.string().trim().min(1).max(200), versionId: z.string().trim().min(1).max(200) }),
     authority: "content",
   },
+  // Publishing serves a Code work's build to everyone who can open it.
+  publish_code: {
+    input: z.object({ artifactId: z.string().trim().min(1).max(200), action: z.enum(["publish", "unpublish"]) }),
+    authority: "content",
+  },
   // Embeds are the host work's content: changing or removing one is an edit.
   manage_embed: {
     input: z

@@ -99,6 +99,8 @@ function readSharingTool(session: HarnessSession): HarnessTool<SharingArgs> {
   };
 }
 
+type PublishArgs = { artifactId: string; action: "publish" | "unpublish" };
+
 const EMBED_ACTIONS = ["resize", "follow_live", "pin", "recheck", "remove"] as const;
 type EmbedArgs = { artifactId: string; embedId: string; action: (typeof EMBED_ACTIONS)[number]; mode?: "compact" | "expanded"; versionId?: string };
 const EMBED_LABELS: Record<EmbedArgs["action"], [string, string]> = {
@@ -109,7 +111,7 @@ const EMBED_LABELS: Record<EmbedArgs["action"], [string, string]> = {
   remove: ["Removing an embed", "Removed an embed"],
 };
 
-/** Commands only run_command reaches: a work's history, embeds and sharing. */
+/** Commands only run_command reaches: a work's history, embeds, sharing and publishing. */
 export function workTools(session: HarnessSession): AnyHarnessTool[] {
   return [
     readVersionsTool(session),
@@ -129,6 +131,28 @@ export function workTools(session: HarnessSession): AnyHarnessTool[] {
       doneLabel: (args: { artifactId: string }) => `Restored an earlier version of ${titled(session, args.artifactId, "your work")}`,
       parse: (raw) => ({ artifactId: requireString(raw, "artifactId", 200), versionId: requireString(raw, "versionId", 200) }),
       command: (args) => ({ command: "restore_version", args }),
+    }),
+    commandTool(session, {
+      name: "publish_code",
+      description:
+        "Publish a Code work's live build, so everyone who can open the work runs the current code (publish), or take the build down (unpublish). Publishing builds the work's saved source; when the build fails you get the compiler's report to fix the code with edit_artifact. The user approves it unless they allowed publishing.",
+      parameters: {
+        type: "object",
+        properties: { artifactId: { type: "string" }, action: { type: "string", enum: ["publish", "unpublish"] } },
+        required: ["artifactId", "action"],
+        additionalProperties: false,
+      },
+      effect: "irreversible",
+      category: "external_send",
+      targets: (args: PublishArgs) => [args.artifactId],
+      label: (args: PublishArgs) => `${args.action === "publish" ? "Publishing" : "Unpublishing"} ${titled(session, args.artifactId, "your code")}`,
+      doneLabel: (args: PublishArgs) => `${args.action === "publish" ? "Published" : "Unpublished"} ${titled(session, args.artifactId, "your code")}`,
+      question: (args: PublishArgs) =>
+        args.action === "publish"
+          ? `Publish ${titled(session, args.artifactId, "this code")} so everyone who can open it runs this version?`
+          : `Take down the published build of ${titled(session, args.artifactId, "this code")}?`,
+      parse: (raw): PublishArgs => ({ artifactId: requireString(raw, "artifactId", 200), action: oneOf(raw, "action", ["publish", "unpublish"] as const) }),
+      command: (args) => ({ command: "publish_code", args }),
     }),
     readEmbedsTool(session),
     readSharingTool(session),

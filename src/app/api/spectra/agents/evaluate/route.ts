@@ -2,8 +2,10 @@ import { auth } from "@clerk/nextjs/server";
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import {
+  benchChecksEmpty,
   buildEvaluationSuite,
   detectLimitations,
+  normalizeBenchChecks,
   gradeDeterministically,
   normalizeFoundryContent,
   type EvaluationCaseResult,
@@ -123,6 +125,18 @@ function expectationText(
       return `The answer is parseable ${expectation.schema || "structured"} data.`;
     case "judged":
       return expectation.criteria;
+    case "checklist":
+      return [
+        expectation.mustInclude.length
+          ? `The answer includes: ${expectation.mustInclude.join("; ")}.`
+          : "",
+        expectation.mustNotInclude.length
+          ? `The answer does not include: ${expectation.mustNotInclude.join("; ")}.`
+          : "",
+        expectation.rubric ? `A good answer: ${expectation.rubric}` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
   }
 }
 
@@ -149,7 +163,17 @@ function parseCase(value: unknown, index: number): EvalCase {
     .slice(0, 4_000);
 
   const expectation: SkillEvaluationCase["expectation"] =
-    rawExpectation.kind === "contains" || rawExpectation.kind === "excludes"
+    rawExpectation.kind === "checklist"
+      ? (() => {
+          const checks = normalizeBenchChecks(rawExpectation);
+          return {
+            kind: "checklist" as const,
+            mustInclude: checks.mustInclude,
+            mustNotInclude: checks.mustNotInclude,
+            ...(checks.rubric ? { rubric: checks.rubric } : {}),
+          };
+        })()
+      : rawExpectation.kind === "contains" || rawExpectation.kind === "excludes"
       ? {
           kind: rawExpectation.kind,
           values: Array.isArray(rawExpectation.values)
@@ -192,6 +216,8 @@ function parseCase(value: unknown, index: number): EvalCase {
     (expectation.kind === "contains" || expectation.kind === "excludes") &&
     expectation.values.length === 0
   )
+    throw new Error(`Evaluation case ${index + 1} lists nothing to check for.`);
+  if (expectation.kind === "checklist" && benchChecksEmpty(expectation))
     throw new Error(`Evaluation case ${index + 1} lists nothing to check for.`);
 
   return {

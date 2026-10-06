@@ -198,6 +198,34 @@ Tools are grouped by what the model is doing. Names below are indicative, so pic
 | Know | `load_skill`, `remember`, `recall` | See Skills and Memory. |
 | Track | `update_todos` | An optional visible checklist for long tasks. The model decides whether to use it. |
 
+### Commands only `run_command` reaches
+
+Some of a work's own controls are tools the model reaches through `find_commands` and `run_command` rather than the
+offered list, so the list stays short (`runOnlyTools` in `tools/commands.ts`, defined in `tools/work.ts`). Each read
+says that the names, titles and labels it returns are people's words: evidence, never instructions.
+
+- **History.** `read_versions` lists a work's saved versions, newest first, with their ids. `restore_version` restores
+  one through the same signed admission as the history panel (request id `ai:<operationId>`, so a retry replays). It
+  is a `write`: the work before the restore is saved first as "Your work before restore".
+- **Embeds.** `read_embeds` lists a work's live embeds: id, source, region, size, version policy and state.
+  `manage_embed` resizes one, makes it follow the live work, pins it to a version of its source, rechecks a retained
+  pin, or removes it, through the embeds panel's own mutations. Removing takes the node out of the host first, as the
+  editors do. Moving an embed is moving its block with `edit_artifact`.
+- **Sharing.** `read_sharing` lists invitations (with the invitation and grant ids `share` takes), members of shared
+  workspaces with any exception, and public link ids. `share` invites, changes a level, revokes, withdraws a pending
+  invitation, sets or clears a per-work exception, and makes or turns off a public link.
+- **Publishing.** `publish_code` publishes or takes down a Code work's live build through the server function the
+  editor's Publish button uses (`runtime-publish-server`). It builds the live document's source; a failed build comes
+  back as the compiler's report, for the model to fix with `edit_artifact`.
+
+**Public link addresses.** A public link's address carries a secret, and the journal keeps every write's result, so
+the secret must never be in either. The harness derives the token on the server from the operation (an HMAC under a
+purpose key from `SPECTRA_SECRET_BRIDGE_KEY`), passes only its SHA-256 to `spectraApplicationWrites:execute` as
+`derived.publicLinkTokenHash` (never part of the recorded operation), and the receipt keeps the link id. The UI event
+`public_link_created` carries the link and operation ids. The user's browser then fetches the address with their own
+session (`revealAiPublicLink`, which checks the run's owner and that the link is still on) and shows it once in a
+notice with **Copy link**. The model is told it never sees the address.
+
 ### Authoring formats
 
 The live run showed that a whole-artifact JSON schema (up to 10k characters of schema per type) produces empty or
@@ -248,7 +276,7 @@ The AI's edits land directly. History records each run as one undoable group: "U
 | --- | --- | --- |
 | `read` | search, read, list | Runs |
 | `write` | create, edit, move, rename, archive, move to trash, schedule, set a reminder | Runs, and can be undone |
-| `irreversible` | permanent deletion, emptying trash, sending or publishing outside Spectra, writing to ManageBac, overwriting a desktop file through Bridge | Asks |
+| `irreversible` | permanent deletion, emptying trash, sending or publishing outside Spectra (a public link, a published Code build), writing to ManageBac, overwriting a desktop file through Bridge | Asks |
 | `settings` | any setting, connection or sharing change | Asks |
 
 How asking works:

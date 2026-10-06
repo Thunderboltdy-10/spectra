@@ -42,7 +42,7 @@ export const AUTHORING_FORMATS: Record<AuthoredType, { create: string; edit: str
   quiz: {
     create:
       '{"items": [{"prompt": "...", "type": "multiple_choice"|"select_all"|"true_false"|"short_answer"|"numeric"|"fill_blank"|"ordering"|"matching"|"long_response", "options"?: [...], "answer": "exactly one option" | ["several", "for select_all or ordering"] | number, "pairs"?: [{"left", "right"}], "explanation"?, "points"?}], "settings"?: {"instructions"?, ...}}',
-    edit: "add {items, position?} | update {item: number, ...fields} | delete {items} | move {item, to} | replace {find, replace, all?} | settings {...}",
+    edit: "add {items, position?} | update {item: number, ...fields} | delete {items} | move {item, to} | replace {find, replace, all?} | settings {...} | publish (opens it for attempts by everyone who can open it; every question must be complete) | unpublish (closes it to new attempts)",
     read: "from/to: question numbers",
   },
   timetable: {

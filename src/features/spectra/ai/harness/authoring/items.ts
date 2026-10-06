@@ -16,7 +16,8 @@ export type ListEditOp =
   | { op: "delete"; items: Array<number | string> }
   | { op: "move"; item: number | string; to: number }
   | { op: "replace"; find: string; replace: string; all?: boolean }
-  | ({ op: "settings" } & Record<string, unknown>);
+  | ({ op: "settings" } & Record<string, unknown>)
+  | { op: "publish" | "unpublish" };
 
 type ListKind = {
   noun: string;
@@ -26,6 +27,10 @@ type ListKind = {
   build(input: Record<string, unknown>, previous: Item | null, label: string, ids: IdFactory, content: Record<string, unknown>): Item;
   textFields: readonly string[];
   settings?(content: Record<string, unknown>, input: Record<string, unknown>, label: string): void;
+  /** Opens the list to others (true) or closes it (false), after every other edit. */
+  publish?(content: Record<string, unknown>, open: boolean): void;
+  /** One line on whether others can use it, for the readback. */
+  status?(content: Record<string, unknown>): string;
   describe(item: Item, index: number): string;
   problems(content: Record<string, unknown>): string[];
 };
@@ -182,6 +187,22 @@ const quiz: ListKind = {
     }
     content.settings = settings;
   },
+  // As the quiz studio's Publish and Unpublish: attempts start only on a
+  // published quiz, and publishing checks every question is complete.
+  publish(content, open) {
+    if (!open) {
+      content.published = false;
+      return;
+    }
+    const problems = quiz.problems(content);
+    if (problems.length)
+      throw new AuthoringError(`The quiz cannot open for attempts yet. Fix these in the same edit: ${problems.join("; ")}.`);
+    content.published = true;
+    content.publishedAt = Date.now();
+  },
+  status(content) {
+    return content.published === true ? "Published: open for attempts." : "Not published: closed to new attempts.";
+  },
   describe(question, index) {
     const options = list(question.options).map(text);
     const answer = list(question.correctAnswers).length ? list(question.correctAnswers).map(text).join(" | ") : text(question.correctAnswer);
@@ -272,6 +293,7 @@ export function applyListEdits(type: string, content: unknown, ops: ListEditOp[]
   const next = structuredClone(record(content)) as Record<string, unknown>;
   let items = list(next[kind.field]).map((value) => ({ ...record(value) }) as Item);
   if (!Array.isArray(ops) || !ops.length) throw new AuthoringError("No operations were given.");
+  let open: boolean | undefined;
   ops.forEach((op, index) => {
     const label = `Edit ${index + 1} (${String(op?.op)})`;
     switch (op?.op) {
@@ -327,12 +349,21 @@ export function applyListEdits(type: string, content: unknown, ops: ListEditOp[]
         kind.settings(next, fields, label);
         break;
       }
+      case "publish":
+      case "unpublish": {
+        if (!kind.publish) throw new AuthoringError(`${label}: a ${type.replace(/_/g, " ")} is not published.`);
+        open = op.op === "publish";
+        break;
+      }
       default:
-        throw new AuthoringError(`${label}: unknown operation. Use add, update, delete, move, replace or settings.`);
+        throw new AuthoringError(
+          `${label}: unknown operation. Use add, update, delete, move, replace${kind.settings ? ", settings" : ""}${kind.publish ? ", publish or unpublish" : ""}.`,
+        );
     }
   });
   if (!items.length && type !== "timetable") throw new AuthoringError(`A ${type === "quiz" ? "quiz" : "deck"} keeps at least one ${kind.noun}.`);
   next[kind.field] = items;
+  if (open !== undefined) kind.publish!(next, open);
   return next;
 }
 
@@ -356,8 +387,9 @@ export function listOutline(type: string, content: unknown, options: { from?: nu
   const to = Math.min(items.length, options.to ?? items.length);
   const lines = items.slice(from - 1, to).map((item, offset) => kind.describe(item, from - 1 + offset));
   const settings = record(record(content).settings);
+  const status = kind.status ? ` ${kind.status(record(content))}` : "";
   return truncate(
-    [`${items.length} ${kind.noun}${items.length === 1 ? "" : "s"}${Object.keys(settings).length ? `; settings ${JSON.stringify(settings)}` : ""}.`, ...lines].join("\n"),
+    [`${items.length} ${kind.noun}${items.length === 1 ? "" : "s"}${Object.keys(settings).length ? `; settings ${JSON.stringify(settings)}` : ""}.${status}`, ...lines].join("\n"),
     options.max ?? 6_000,
   );
 }

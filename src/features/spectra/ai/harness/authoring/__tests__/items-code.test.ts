@@ -69,6 +69,24 @@ describe("flashcard and quiz authoring", () => {
     ).toThrow(/Edit 1 \(add\) items\[0\]: answer must be exactly one of the options/);
     expect(listOutline("quiz", quiz)).toMatch(/1\. \[multiple_choice\] 2 \+ 2\?\n {3}options: 3 \| 4 \| 5\n {3}answer: 4/);
   });
+
+  it("opens a quiz for attempts and closes it again, as the studio's Publish and Unpublish", () => {
+    const quiz = listFromSpec("quiz", { items: [{ prompt: "2 + 2?", options: ["3", "4"], answer: "4" }] }, sequentialIdFactory());
+    expect(listOutline("quiz", quiz)).toContain("Not published: closed to new attempts.");
+    const open = applyListEdits("quiz", quiz, [{ op: "publish" }]);
+    expect(open).toMatchObject({ published: true, publishedAt: expect.any(Number) });
+    expect(listOutline("quiz", open)).toContain("Published: open for attempts.");
+    expect(() => resolveArtifactWriteInput("quiz", quiz, { content: open }, "")).not.toThrow();
+    const closed = applyListEdits("quiz", open, [{ op: "unpublish" }]);
+    expect(closed.published).toBe(false);
+    expect(closed.questions).toEqual(open.questions);
+    // Publishing checks the quiz as it is after every edit in the call.
+    expect(() => applyListEdits("quiz", quiz, [{ op: "publish" }, { op: "add", items: [{ prompt: "Explain osmosis.", type: "short_answer" }] }])).toThrow(
+      /cannot open for attempts yet/,
+    );
+    const deck = listFromSpec("flashcard_deck", { items: [{ front: "a", back: "b" }] }, sequentialIdFactory());
+    expect(() => applyListEdits("flashcard_deck", deck, [{ op: "publish" }])).toThrow(/is not published/);
+  });
 });
 
 describe("planner task authoring", () => {

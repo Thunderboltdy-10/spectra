@@ -1073,7 +1073,8 @@ const ARTIFACT_RULES: ReadonlyArray<{ match: RegExp; reach: AiReach }> = [
   { match: /\.attempt\.|\.study\.|\.runtime\.interact$/, reach: user("These are the learner's own answers and study. Spectra doing them would fake the learner's progress.") },
   { match: /^code\.publish$/, reach: tool("publish_code", { fixed: { action: "publish" }, appCommand: "publish_code" }) },
   { match: /^code\.unpublish$/, reach: tool("publish_code", { fixed: { action: "unpublish" }, appCommand: "publish_code" }) },
-  { match: /\.(publish|unpublish|private)$/, reach: gap("Closing a quiz to new attempts and releasing an agent go through that editor's own flow, which has no server path the harness can call yet; each needs one, with the user's approval.") },
+  // A quiz opens and closes for attempts with edit_artifact's publish and unpublish.
+  { match: /^agent\.private$/, reach: gap("Releasing an agent goes through the agent studio's own flow, which has no server path the harness can call yet.") },
   { match: /\.clipboard\.|\.copyStyle$/, reach: user("It uses the user's clipboard.") },
   { match: /\.protect\.sheet$/, reach: user("Protection guards a sheet against edits, including Spectra's, so only the user sets it.") },
   {

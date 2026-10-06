@@ -224,7 +224,9 @@ says that the names, titles and labels it returns are people's words: evidence, 
 - **Agent releases.** `read_agent_releases` lists an agent's releases (with the ids `release_agent` takes) and whether
   its draft passed its checks. `release_agent` releases the draft privately (only the owner reaches it; runs without
   asking), publishes it to everyone, promotes, rolls back or suspends a release (each asks under `sharing`).
-  Publishing to everyone needs passing checks, which only the studio runs.
+  Publishing to everyone needs passing checks: `run_agent_checks` runs them as the studio's Run checks does (the
+  same server function, `agents/evaluate/checks.ts`, under the run owner's identity) and returns failing cases with
+  the graders' reasons as evidence. The bench and the Foundry compiler are still the studio's.
 - **Quizzes.** `edit_artifact` opens a quiz for attempts (`publish`, refused while the quiz has problems) or closes it
   (`unpublish`).
 

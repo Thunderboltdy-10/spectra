@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { insertOperationReference } from "../operations/reference-content";
+import { insertOperationReference, removeOperationReference } from "../operations/reference-content";
 import { documentYjsAdapter } from "../work/models/yjs/document-adapter";
 import { presentationYjsAdapter } from "../work/models/yjs/structured-adapters";
 import { workYjsOrigins } from "../work/models/yjs/origins";
@@ -118,5 +118,28 @@ describe("unmounted reference content", () => {
     const saved = insertOperationReference("document", { blocks: [] }, reference);
     expect(() => insertOperationReference("document", saved, { ...reference, embedId: "other" })).toThrow("CONFLICT");
     expect(() => insertOperationReference("quiz", {}, reference)).toThrow("documents, whiteboards, and presentations");
+  });
+  it("removes an embed's node from each host and leaves other content alone", () => {
+    const doc = insertOperationReference("document", { blocks: [{ id: "paragraph", type: "paragraph", text: "Kept" }] }, reference);
+    const fromDoc = removeOperationReference("document", doc, reference.embedId);
+    expect(fromDoc.removed).toBe(1);
+    expect(JSON.stringify(fromDoc.content)).not.toContain('"embedId":"embed"');
+    expect(JSON.stringify(fromDoc.content)).toContain("Kept");
+    expect(removeOperationReference("document", fromDoc.content, reference.embedId)).toEqual({ content: fromDoc.content, removed: 0 });
+
+    const board = insertOperationReference("whiteboard", normalizeWhiteboardContent({}), reference) as ReturnType<typeof normalizeWhiteboardContent>;
+    const linked = { ...board, edges: [{ id: "edge", from: reference.containerRegionId, to: "other" }] };
+    const fromBoard = removeOperationReference("whiteboard", linked, reference.embedId);
+    const boardAfter = fromBoard.content as typeof board;
+    expect(fromBoard.removed).toBe(1);
+    expect(boardAfter.nodes.some((node) => node.id === reference.containerRegionId)).toBe(false);
+    expect(boardAfter.edges).toEqual([]);
+    expect(boardAfter.zOrder).not.toContain(reference.containerRegionId);
+
+    const deck = insertOperationReference("presentation", createDefaultPresentationContent(), reference);
+    const fromDeck = removeOperationReference("presentation", deck, reference.embedId);
+    expect(fromDeck.removed).toBe(1);
+    expect(presentationContentSchema.safeParse(fromDeck.content).success).toBe(true);
+    expect(removeOperationReference("quiz", {}, reference.embedId)).toEqual({ content: {}, removed: 0 });
   });
 });

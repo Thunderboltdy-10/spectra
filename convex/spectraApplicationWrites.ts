@@ -58,6 +58,17 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
       }
       break;
     }
+    case "manage_embed": {
+      const embedId = String(args.embedId ?? "");
+      switch (args.action) {
+        case "resize": return { name: "artifactEmbeds:update", args: { embedId, mode: args.mode === "expanded" ? "expanded" : "compact" } };
+        case "follow_live": return { name: "artifactEmbeds:update", args: { embedId, versionPolicy: "live" } };
+        case "pin": return { name: "artifactEmbeds:update", args: { embedId, versionPolicy: "pinned", pinnedVersionId: String(args.versionId ?? "") } };
+        case "remove": return { name: "artifactEmbeds:remove", args: { embedId } };
+      }
+      // recheck is an action; the harness calls it directly.
+      break;
+    }
     case "change_spectra_settings": return { name: "accountPreferences:writeLayer", args: { scope: "account", scopeKey: "account", values: normalizeAiPreferencePatch(args.patch) } };
     case "organize_library": {
       switch (args.action) {

@@ -109,6 +109,22 @@ const COMMANDS: Record<string, ApplicationCommand> = {
     input: z.object({ artifactId: z.string().trim().min(1).max(200), versionId: z.string().trim().min(1).max(200) }),
     authority: "content",
   },
+  // Embeds are the host work's content: changing or removing one is an edit.
+  manage_embed: {
+    input: z
+      .object({
+        artifactId: z.string().trim().min(1).max(200),
+        embedId: z.string().trim().min(1).max(200),
+        action: z.enum(["resize", "follow_live", "pin", "recheck", "remove"]),
+        mode: z.enum(["compact", "expanded"]).optional(),
+        versionId: z.string().trim().min(1).max(200).optional(),
+      })
+      .superRefine((value, ctx) => {
+        if (value.action === "resize" && !value.mode) ctx.addIssue({ code: "custom", path: ["mode"], message: "resize needs a mode." });
+        if (value.action === "pin" && !value.versionId) ctx.addIssue({ code: "custom", path: ["versionId"], message: "pin needs a version id." });
+      }),
+    authority: "content",
+  },
   change_spectra_settings: { input: z.object({ patch: preferenceLayerValuesSchema }), authority: "settings" },
   change_sync_policy: {
     input: z.object({ targetIds: z.array(z.string()).min(1).max(100), patch: z.record(z.string(), z.unknown()) }),

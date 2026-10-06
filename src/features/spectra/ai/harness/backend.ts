@@ -1,5 +1,6 @@
 import type { ArtifactTypeKey } from "../../artifacts/types";
 import type { CommentRow } from "./comments";
+import type { EmbedRow } from "./embeds";
 import type { VersionRow } from "./versions";
 import type { ToolOutcome } from "./types";
 
@@ -148,6 +149,8 @@ export interface HarnessBackend {
   readComments(input: { artifactId: string; includeResolved?: boolean }, signal: AbortSignal): Promise<CommentRow[] | null>;
   /** A work's saved versions, newest first, and whether older ones exist; null when the user cannot open the work. */
   readVersions(input: { artifactId: string; limit: number }, signal: AbortSignal): Promise<{ versions: VersionRow[]; more: boolean } | null>;
+  /** The live embeds inside a work, and whether the user can change them; null when the user cannot open the work. */
+  readEmbeds(input: { artifactId: string }, signal: AbortSignal): Promise<{ embeds: EmbedRow[]; canConfigure: boolean } | null>;
   /** School records: deadlines, resources, timetable, classes, past tasks, grades, CAS, or one task or CAS experience by recordId. */
   readSchoolData(input: { purpose: string; classId?: string; recordId?: string }, signal: AbortSignal): Promise<string>;
   runCommand(request: CommandRequest, signal: AbortSignal): Promise<CommandResult>;

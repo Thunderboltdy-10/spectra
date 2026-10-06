@@ -1,7 +1,8 @@
+import { formatEmbeds } from "../embeds";
 import { formatVersions } from "../versions";
-import type { AnyHarnessTool, HarnessTool } from "../types";
+import { ToolInputError, type AnyHarnessTool, type HarnessTool } from "../types";
 import { commandTool } from "./app";
-import { optionalNumber, requireString, titled, type HarnessSession } from "./shared";
+import { oneOf, optionalNumber, optionalString, requireString, titled, type HarnessSession } from "./shared";
 
 /*
  * A work's history, embeds and sharing, reached through find_commands and
@@ -41,6 +42,40 @@ function readVersionsTool(session: HarnessSession): HarnessTool<VersionsArgs> {
   };
 }
 
+type EmbedsArgs = { artifactId: string };
+
+function readEmbedsTool(session: HarnessSession): HarnessTool<EmbedsArgs> {
+  return {
+    name: "read_embeds",
+    description:
+      "Read the live embeds (references to other work) inside a work: each embed's id, the work it shows, where it sits, its size, whether it follows the live work or a pinned version, and whether its source is still available. Use it before manage_embed.",
+    parameters: { type: "object", properties: { artifactId: { type: "string" } }, required: ["artifactId"], additionalProperties: false },
+    effect: "read",
+    label: (args) => `Reading what ${titled(session, args.artifactId, "your work")} embeds`,
+    parse: (raw) => ({ artifactId: requireString(raw, "artifactId", 200) }),
+    execute: async (args, ctx) => {
+      const found = await session.backend.readEmbeds(args, ctx.signal);
+      if (!found)
+        return { ok: false, content: `No artifact has id "${args.artifactId}", or the user cannot open it. Find it with list_library or search.` };
+      return {
+        ok: true,
+        content: formatEmbeds(found.embeds, session.titles.get(args.artifactId)?.title ?? "This work", found.canConfigure),
+        doneLabel: `Read what ${titled(session, args.artifactId, "your work")} embeds`,
+      };
+    },
+  };
+}
+
+const EMBED_ACTIONS = ["resize", "follow_live", "pin", "recheck", "remove"] as const;
+type EmbedArgs = { artifactId: string; embedId: string; action: (typeof EMBED_ACTIONS)[number]; mode?: "compact" | "expanded"; versionId?: string };
+const EMBED_LABELS: Record<EmbedArgs["action"], [string, string]> = {
+  resize: ["Resizing an embed", "Resized an embed"],
+  follow_live: ["Making an embed follow the live work", "Made an embed follow the live work"],
+  pin: ["Pinning an embed to a version", "Pinned an embed to a version"],
+  recheck: ["Checking an embed again", "Checked an embed again"],
+  remove: ["Removing an embed", "Removed an embed"],
+};
+
 /** Commands only run_command reaches: a work's history, embeds and sharing. */
 export function workTools(session: HarnessSession): AnyHarnessTool[] {
   return [
@@ -61,6 +96,43 @@ export function workTools(session: HarnessSession): AnyHarnessTool[] {
       doneLabel: (args: { artifactId: string }) => `Restored an earlier version of ${titled(session, args.artifactId, "your work")}`,
       parse: (raw) => ({ artifactId: requireString(raw, "artifactId", 200), versionId: requireString(raw, "versionId", 200) }),
       command: (args) => ({ command: "restore_version", args }),
+    }),
+    readEmbedsTool(session),
+    commandTool(session, {
+      name: "manage_embed",
+      description:
+        "Change a live embed inside a work (embedId from read_embeds): resize {mode: compact|expanded}; follow_live makes it show the source as it is now; pin {versionId} keeps it on one saved version of the source (ids from read_versions on the source work); recheck tries again to show a pinned embed whose source was deleted; remove takes it out of the work (the source work is untouched). To move an embed, move its block with edit_artifact. To add one, use insert_reference.",
+      parameters: {
+        type: "object",
+        properties: {
+          artifactId: { type: "string", description: "The work that contains the embed." },
+          embedId: { type: "string" },
+          action: { type: "string", enum: [...EMBED_ACTIONS] },
+          mode: { type: "string", enum: ["compact", "expanded"] },
+          versionId: { type: "string" },
+        },
+        required: ["artifactId", "embedId", "action"],
+        additionalProperties: false,
+      },
+      effect: "write",
+      targets: (args: EmbedArgs) => [args.artifactId],
+      label: (args: EmbedArgs) => `${EMBED_LABELS[args.action][0]} in ${titled(session, args.artifactId, "your work")}`,
+      doneLabel: (args: EmbedArgs) => `${EMBED_LABELS[args.action][1]} in ${titled(session, args.artifactId, "your work")}`,
+      parse: (raw): EmbedArgs => {
+        const action = oneOf(raw, "action", EMBED_ACTIONS);
+        const parsed: EmbedArgs = { artifactId: requireString(raw, "artifactId", 200), embedId: requireString(raw, "embedId", 200), action };
+        if (action === "resize") {
+          if (raw.mode === undefined) throw new ToolInputError("resize needs mode: compact or expanded.");
+          parsed.mode = oneOf(raw, "mode", ["compact", "expanded"] as const);
+        }
+        if (action === "pin") {
+          const versionId = optionalString(raw, "versionId", 200);
+          if (!versionId) throw new ToolInputError("pin needs versionId, a saved version of the embedded work (read_versions on that work lists them).");
+          parsed.versionId = versionId;
+        }
+        return parsed;
+      },
+      command: (args) => ({ command: "manage_embed", args }),
     }),
   ] as unknown as AnyHarnessTool[];
 }

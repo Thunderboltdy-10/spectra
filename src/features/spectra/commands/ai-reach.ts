@@ -291,7 +291,7 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     description: "Insert a live reference to one work inside another (hostWorkId, targetWorkId, label?).",
     keywords: ["link", "embed", "cite", "connect"],
     ui: ["app.reference.insert"],
-    server: ["spectraArtifactLinks:create", "spectraArtifactLinks:remove"],
+    server: ["artifactEmbeds:create", "spectraArtifactLinks:create", "spectraArtifactLinks:remove"],
     reach: tool("insert_reference", { appCommand: "insert_reference", example: { hostWorkId: "wx1", targetWorkId: "wx2" } }),
   },
   {
@@ -305,10 +305,19 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
   {
     id: "work.embeds",
     area: "work",
-    title: "Place or refresh a living embed",
-    description: "Embed live work in other work, update or remove embeds.",
-    server: ["artifactEmbeds:*", "artifactEmbedPlacementActions:refresh"],
-    reach: gap("Spectra places a living reference with insert_reference, which creates the embed and writes it into the host. Moving, refreshing or removing an existing embed needs its embed id, and Spectra cannot read a work's embeds yet; with that read, each change maps to its one mutation here."),
+    title: "Read the embeds in a work",
+    description: "See the live embeds inside a work: what each shows, where it sits, and whether it follows the live work or a pinned version.",
+    keywords: ["embed", "reference", "linked work", "what does this include"],
+    reach: tool("read_embeds", { example: { artifactId: "wx1" } }),
+  },
+  {
+    id: "work.manage_embed",
+    area: "work",
+    title: "Change or remove an embed",
+    description: "Resize a live embed, make it follow the live work or pin it to a version, check a pinned one again, or remove it from the work.",
+    keywords: ["embed", "reference", "pin", "unpin", "resize", "remove", "refresh"],
+    server: ["artifactEmbeds:update", "artifactEmbeds:remove", "artifactEmbedPlacementActions:refresh"],
+    reach: tool("manage_embed", { appCommand: "manage_embed", example: { artifactId: "wx1", embedId: "e1", action: "resize", mode: "expanded" } }),
   },
   {
     id: "work.save_version",
@@ -884,6 +893,10 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
 export const SERVER_PLUMBING: Readonly<Record<string, string>> = {
   "artifactAssets:*": "Upload protocol for work assets.",
   "artifactContent:*": "Upload protocol for work content.",
+  "artifactEmbeds:confirmPlacement": "Confirms a provisional placement against the saved version that holds it; the change-group writer does this for Spectra's own placements.",
+  "artifactEmbeds:migrateLegacy": "Upgrades an older embed node when the document opens.",
+  "artifactEmbeds:removeMany": "Editors keep embed rows in step when several nodes are deleted at once.",
+  "artifactEmbeds:restore": "Editors bring an embed row back when the user undoes deleting its node.",
   "artifactIntakeActions:*": "Upload verification.",
   "artifactUserStates:*": "Per-user view state the editors save as they are used.",
   "bridge:confirmPairing": "Spectra Bridge device protocol.",

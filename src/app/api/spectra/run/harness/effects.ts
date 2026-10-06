@@ -4,6 +4,7 @@ import { executeRegisteredCalendarMutation } from "./calendar-command";
 import { normalizeCalendarCommand } from "@/features/spectra/calendar/domain/command";
 import { normalizeApplicationCommand, parseApplicationCommand } from "./application-commands";
 import { executeReferenceInsertion } from "./reference-command";
+import { executeEmbedCommand } from "./embed-command";
 import type { RestoreRequest } from "@/lib/artifact-restore-server";
 import { act, mutate, query } from "./io";
 import {
@@ -418,6 +419,19 @@ export async function executeApplicationCommand(
     onUiEvent?.({ key: "version_saved", payload: { targetId: artifactId, note: `Saved the version ${String(parsed.name)}` } });
     return result;
   }
+  if (command === "manage_embed") {
+    if (!operationId) throw new Error("EMBED_OPERATION_ID_REQUIRED");
+    const artifactId = String(parsed.artifactId);
+    const action = String(parsed.action);
+    const result = await executeEmbedCommand({
+      actorClerkId, runId, executionId, operationId, artifactId, embedId: String(parsed.embedId), action,
+      ...(typeof parsed.mode === "string" ? { mode: parsed.mode } : {}),
+      ...(typeof parsed.versionId === "string" ? { versionId: parsed.versionId } : {}),
+      signal, applyMutation,
+    });
+    onUiEvent?.({ key: "embed_changed", payload: { targetId: artifactId, embedId: String(parsed.embedId), action, note: EMBED_NOTES[action] ?? "Changed an embed" } });
+    return result ?? { ok: true };
+  }
   if (command === "restore_version") {
     if (!operationId) throw new Error("RESTORE_OPERATION_ID_REQUIRED");
     return restoreVersion({ runId, operationId, artifactId: String(parsed.artifactId), versionId: String(parsed.versionId), onUiEvent });
@@ -701,6 +715,14 @@ async function restoreVersion(input: {
   };
 }
 
+const EMBED_NOTES: Record<string, string> = {
+  resize: "Resized an embed",
+  follow_live: "An embed now follows the live work",
+  pin: "Pinned an embed to a version",
+  recheck: "Checked an embed again",
+  remove: "Removed an embed",
+};
+
 const COMMENT_MUTATIONS: Record<string, string> = {
   resolve: "artifactComments:setResolved",
   reopen: "artifactComments:setResolved",
@@ -715,7 +737,7 @@ const COMMENT_NOTES: Record<string, string> = {
 };
 
 /** Commands that change one work, named by artifactId: the run lists it as touched. */
-const ARTIFACT_COMMANDS = new Set(["add_comment", "restore_version"]);
+const ARTIFACT_COMMANDS = new Set(["add_comment", "restore_version", "manage_embed"]);
 
 type UiEventSink = (event: { key: string; payload?: Record<string, unknown> }) => void;
 

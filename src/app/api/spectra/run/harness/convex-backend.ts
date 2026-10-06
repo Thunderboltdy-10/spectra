@@ -12,6 +12,7 @@ import type {
 } from "@/features/spectra/ai/harness/backend";
 import { ARTIFACT_TYPE_KEYS, type ArtifactTypeKey } from "@/features/spectra/artifacts/types";
 import type { CommentRow } from "@/features/spectra/ai/harness/comments";
+import type { EmbedRow, EmbedState } from "@/features/spectra/ai/harness/embeds";
 import type { VersionRow, VersionSource } from "@/features/spectra/ai/harness/versions";
 import { readLiveArtifactValue } from "@/features/spectra/ai/yjs-artifact-operation";
 import { overlayLiveArtifactRecord } from "@/features/spectra/collaboration/artifact-yjs-model";
@@ -65,6 +66,7 @@ export type ConvexBackendInput = {
 
 const text = (value: unknown) => (typeof value === "string" ? value : "");
 const VERSION_SOURCES = new Set<string>(["manual", "ai", "revert", "import", "restore", "migration", "checkpoint"]);
+const EMBED_STATES = new Set<string>(["ready", "no_access", "deleted", "archived", "version_unavailable", "removed"]);
 
 function clip(value: string, max = 12_000) {
   return value.length > max ? `${value.slice(0, max)}\n… (cut short; ask for a narrower range)` : value;
@@ -684,6 +686,39 @@ export class ConvexHarnessBackend implements HarnessBackend {
       }];
     });
     return { versions, more: page.isDone === false };
+  }
+
+  async readEmbeds(input: { artifactId: string }): Promise<{ embeds: EmbedRow[]; canConfigure: boolean } | null> {
+    const [host, list] = await Promise.all([
+      query<unknown & object, unknown>("spectraArtifacts:get", { actorClerkId: this.actorClerkId, artifactId: input.artifactId }).catch(() => null),
+      query<unknown & object, { canConfigure?: boolean; embeds?: unknown }>("artifactEmbeds:listForContainer", {
+        containerType: "artifact",
+        containerId: input.artifactId,
+      }).catch(() => null),
+    ]);
+    if (!host || !list || !Array.isArray(list.embeds)) return null;
+    const embeds = rows(list.embeds).flatMap((embed): EmbedRow[] => {
+      const state = text(embed.state);
+      if (!EMBED_STATES.has(state) || state === "removed") return [];
+      const source = embed.source && typeof embed.source === "object" ? (embed.source as Record<string, unknown>) : {};
+      const version = embed.version && typeof embed.version === "object" ? (embed.version as Record<string, unknown>) : {};
+      return [{
+        embedId: text(embed.embedId),
+        regionId: text(embed.containerRegionId),
+        sourceArtifactId: text(embed.sourceArtifactId),
+        ...(text(source.title) ? { sourceTitle: text(source.title) } : {}),
+        ...(text(source.blueprintKey) ? { sourceType: text(source.blueprintKey) } : {}),
+        mode: embed.mode === "expanded" ? "expanded" : "compact",
+        interaction: embed.interaction === "edit" || embed.interaction === "interact" ? embed.interaction : "read",
+        versionPolicy: embed.versionPolicy === "pinned" ? "pinned" : "live",
+        ...(text(embed.pinnedVersionId) ? { pinnedVersionId: text(embed.pinnedVersionId) } : {}),
+        ...(text(version.name) ? { versionName: text(version.name) } : {}),
+        ...(typeof version.createdAt === "number" ? { versionAt: version.createdAt } : {}),
+        state: state as EmbedState,
+        ...(text(embed.placementRefreshKey) ? { recheckable: true } : {}),
+      }];
+    });
+    return { embeds, canConfigure: list.canConfigure === true };
   }
 
   async readCalendar(input: { from: number; to: number; title?: string }): Promise<string> {

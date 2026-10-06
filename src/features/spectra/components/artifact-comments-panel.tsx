@@ -17,6 +17,8 @@ import { SpectraRichContent } from "./spectra-rich-content";
 import { LocalAutocompleteTextarea } from "../compute/autocomplete";
 import { OverflowMenu } from "@/components/ui/dropdown-menu";
 import { SelectField } from "@/components/ui/select";
+import { getAiLocation, subscribeFollowAi } from "../collaboration/follow-ai";
+import { unformElement, useLifeArrival, type ArrivalKind } from "../life/use-life";
 
 export type ArtifactCommentRegion = {
   regionId: string;
@@ -45,6 +47,22 @@ const NOTIFICATION_MODE_ITEMS: ReadonlyArray<{
 
 function initials(name?: string) {
   return (name || "?").split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+}
+
+/**
+ * One comment's card. A comment that arrives while the panel is open forms
+ * where the user posted it, or, when Spectra wrote it, from light that leaves
+ * the prism (LIFE.md, "Create by hand" and "Spectra creates"). What the panel
+ * opened with is simply content.
+ */
+function CommentFrame({ id, arrival, children }: { id: string; arrival?: ArrivalKind; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLifeArrival(ref, id, arrival, { bars: "[data-comment-author], [data-comment-body]" });
+  return (
+    <div ref={ref} data-comment-id={id} className="group rounded-card border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3.5">
+      {children}
+    </div>
+  );
 }
 
 function regionLabel(regions: readonly ArtifactCommentRegion[], regionId: string) {
@@ -95,11 +113,19 @@ export function ArtifactCommentsPanel({
   const searchSequence = useRef(0);
   const submittedRequestRef = useRef<string | null>(null);
   const createCommentRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  /** Comments already on screen, and the ones that arrived while the panel was open, with who made them. */
+  const knownIds = useRef(new Set<string>());
+  const arrivals = useRef(new Map<string, ArrivalKind>());
 
-  const refresh = useCallback(async () => {
+  /** `arriving`: what is new since the last load came from something just done here or by Spectra, so it forms. */
+  const refresh = useCallback(async (arriving = false) => {
     setLoading(true);
     try {
       const result = await getSpectraArtifactComments(artifactId, includeResolved);
+      for (const comment of result.comments) {
+        if (arriving && !knownIds.current.has(comment._id)) arrivals.current.set(comment._id, comment.author?.kind === "ai" ? "ai" : "human");
+        knownIds.current.add(comment._id);
+      }
       setComments(result.comments);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not load comments.");
@@ -129,6 +155,18 @@ export function ArtifactCommentsPanel({
       getSpectraArtifactCommentPreference(artifactId).then((result) => setNotificationMode(result.mode)),
     ]).catch(() => undefined);
   }, [artifactId, open, preferredRegionId, refresh, regions]);
+
+  // Spectra commenting on this work while the panel is open: its comment arrives from the prism.
+  useEffect(() => {
+    if (!open) return;
+    let seen = getAiLocation()?.updatedAt ?? 0;
+    return subscribeFollowAi(() => {
+      const location = getAiLocation();
+      if (!location || location.artifactId !== artifactId || location.updatedAt === seen) return;
+      seen = location.updatedAt;
+      if (location.path?.startsWith("/comments") || /comment/i.test(location.note ?? "")) void refresh(true);
+    });
+  }, [artifactId, open, refresh]);
 
   useEffect(() => {
     if (!open || !requestedComment) return;
@@ -205,7 +243,7 @@ export function ArtifactCommentsPanel({
       setReplyTo(null);
       setMentions([]);
       setMentionSearch("");
-      await refresh();
+      await refresh(true);
       if (requestedComment?.submit) onRequestedCommentResult?.();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not post this comment.");
@@ -246,6 +284,10 @@ export function ArtifactCommentsPanel({
     setBusy(`remove:${comment._id}`);
     try {
       await postSpectra({ action: "removeArtifactComment", commentId: comment._id });
+      // Its words part where they were; the card stays to say it was removed.
+      const card = Array.from(document.querySelectorAll("[data-comment-id]")).find((element) => element.getAttribute("data-comment-id") === comment._id);
+      const words = card?.querySelector("[data-comment-body]");
+      if (words) void unformElement(words);
       await refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not remove this comment.");
@@ -296,12 +338,12 @@ export function ArtifactCommentsPanel({
     const orphaned = comment.status === "orphaned" || !regions.some((region) => region.regionId === comment.anchor.regionId);
     return (
       <article key={comment._id} className={nested ? "ml-10 border-l border-[var(--border-default)] pl-3" : ""}>
-        <div className="group rounded-card border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3.5">
+        <CommentFrame id={comment._id} arrival={arrivals.current.get(comment._id)}>
           <div className="flex items-start gap-2.5">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--bg-secondary)] text-micro font-bold text-[var(--text-secondary)]">{initials(comment.author?.name)}</span>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className="truncate text-caption font-semibold text-[var(--text-primary)]">{comment.author?.name ?? "Former collaborator"}</span>
+                <span data-comment-author className="truncate text-caption font-semibold text-[var(--text-primary)]">{comment.author?.name ?? "Former collaborator"}</span>
                 <span className="text-micro text-[var(--text-tertiary)]">{formatRelativeTime(comment.createdAt)}</span>
                 {comment.updatedAt > comment.createdAt + 1_000 ? <span className="text-micro text-[var(--text-tertiary)]">edited</span> : null}
               </div>
@@ -310,10 +352,10 @@ export function ArtifactCommentsPanel({
                   <textarea autoFocus value={editingBody} onChange={(event) => setEditingBody(event.target.value)} className="min-h-20 w-full resize-y rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-caption leading-5 text-[var(--text-primary)] outline-none focus:border-[var(--border-strong)]" />
                   <div className="mt-2 flex justify-end gap-2"><button type="button" onClick={() => setEditingId(null)} className="rounded-chip px-2 py-1 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">Cancel</button><button type="button" disabled={!editingBody.trim() || busy === `edit:${comment._id}`} onClick={() => void saveEdit(comment)} className="rounded-chip bg-[var(--text-primary)] px-2.5 py-1 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45">Save</button></div>
                 </div>
-              ) : <SpectraRichContent content={comment.body} className="mt-1.5 whitespace-pre-wrap text-caption leading-5 text-[var(--text-primary)]" />}
+              ) : <div data-comment-body><SpectraRichContent content={comment.body} className="mt-1.5 whitespace-pre-wrap text-caption leading-5 text-[var(--text-primary)]" /></div>}
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 {comment.status !== "deleted" ? <button type="button" onClick={() => { setReplyTo(comment); setRegionId(comment.anchor.regionId); }} className="inline-flex h-6 items-center gap-1 rounded-chip px-1.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Reply className="h-3 w-3" />Reply</button> : null}
-                {comment.status !== "deleted" ? <button type="button" onClick={() => void setResolved(comment, comment.status !== "resolved")} className="inline-flex h-6 items-center gap-1 rounded-chip px-1.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Check className="h-3 w-3" />{comment.status === "resolved" ? "Reopen" : "Resolve"}</button> : null}
+                {comment.status !== "deleted" ? <button type="button" data-life-done={comment.status === "resolved" ? undefined : ""} onClick={() => void setResolved(comment, comment.status !== "resolved")} className="inline-flex h-6 items-center gap-1 rounded-chip px-1.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Check className="h-3 w-3" />{comment.status === "resolved" ? "Reopen" : "Resolve"}</button> : null}
                 {own && comment.status !== "deleted" ? <button type="button" onClick={() => { setEditingId(comment._id); setEditingBody(comment.body); }} className="h-6 rounded-chip px-1.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">Edit</button> : null}
                 {own && comment.status !== "deleted" ? <button type="button" aria-label="Remove comment" onClick={() => void remove(comment)} className="flex h-6 w-6 items-center justify-center rounded-chip text-[var(--text-tertiary)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-primary))] hover:text-[var(--danger)]"><Trash2 className="h-3 w-3" /></button> : null}
               </div>
@@ -323,7 +365,7 @@ export function ArtifactCommentsPanel({
             <div className="flex items-center gap-1.5 text-micro text-[var(--text-secondary)]"><MapPin className="h-3 w-3" /><span className="min-w-0 flex-1 truncate">{orphaned ? "Original region changed or was removed" : regionLabel(regions, comment.anchor.regionId)}</span>{orphaned ? <button type="button" onClick={() => { setReanchoringId(comment._id); setReanchorRegionId(regions[0]?.regionId ?? ""); }} className="font-semibold text-[var(--text-primary)]">Reattach</button> : null}</div>
             {reanchoringId === comment._id ? <div className="mt-2 flex gap-1.5"><SelectField ariaLabel="Reattach to region" value={reanchorRegionId} onChange={setReanchorRegionId} options={regions.map((region) => ({ value: region.regionId, label: region.label }))} size="sm" className="min-w-0 flex-1" triggerClassName="w-full" /><button type="button" disabled={!reanchorRegionId || busy === `anchor:${comment._id}`} onClick={() => void reanchor(comment)} className="rounded-chip bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45">Attach</button></div> : null}
           </div> : null}
-        </div>
+        </CommentFrame>
       </article>
     );
   }

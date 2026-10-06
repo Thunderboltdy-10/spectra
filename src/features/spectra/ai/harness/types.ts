@@ -17,6 +17,7 @@ export {
   type PermissionCategory,
 } from "@/features/spectra/settings/schema/ai-permissions";
 import type { PermissionCategory } from "@/features/spectra/settings/schema/ai-permissions";
+import type { RunSource } from "./sources";
 
 export type JsonSchema = Record<string, unknown>;
 
@@ -88,6 +89,8 @@ export type ToolOutcome = {
   ok: boolean;
   content: string;
   artifacts?: ArtifactTouch[];
+  /** What this step read that the reply may cite. */
+  sources?: RunSource[];
   /** Pause the run for the user (ask_user). */
   pause?: Omit<PendingInput, "toolCallId" | "toolName">;
   /** Client UI events (navigation, follow mode). */

@@ -304,6 +304,13 @@ progress view.
 - **Actions and bars.** Copy and retry appear on hover. There are no empty bars, footers, status strips or repeated
   summaries under a reply.
 - **Questions.** An answered question or approval collapses to one line.
+- **Citations.** A reply cites what it relies on as `[[cite:SOURCE:WHERE|Label]]`.
+  - SOURCE is a work's id (from `read_artifact` or `search`) or a web result's source id (`web_search`: a hash of its
+    address, stable across a paused run).
+  - The run keeps what it read in its state (`sources`) and streams it, so a live citation already opens.
+  - The saved reply keeps only the sources it cites, in `metadata.sources`. That is what makes a citation verified: it
+    names something the run really read. A work opens in the Side, and a web page in a new tab.
+  - Plain-text places (run summaries, thread previews) drop citations.
 
 ## Semantic layer
 

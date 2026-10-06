@@ -16,6 +16,7 @@ import { buildSystemPrompt, type EnvironmentInput } from "./prompt";
 import { SUMMARY_INSTRUCTIONS } from "./compaction";
 import { buildHarnessTools, createSession } from "./tools";
 import { rememberTitle } from "./tools/shared";
+import type { RunSource } from "./sources";
 import type {
   ArtifactTouch,
   HarnessContentPart,
@@ -42,6 +43,8 @@ export type HarnessEvent =
   | { type: "step_end"; id: string; ok: boolean; label: string; durationMs: number }
   | ({ type: "caption" } & CaptionEvent)
   | { type: "artifact"; artifact: ArtifactTouch }
+  /** Everything the run has read that its reply may cite, so far. */
+  | { type: "sources"; sources: RunSource[] }
   | { type: "todos"; todos: TodoItem[] }
   | { type: "widget"; id: string; widget: WidgetOutput }
   | { type: "ui_event"; key: string; payload?: Record<string, unknown> }
@@ -196,6 +199,13 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
   else state = emptyLoopState([...(input.history ?? []), userMessage(input.prompt, input.attachments)]);
   latestText = state.text;
   let artifactsSeen = state.artifacts.length;
+  let sourcesSeen = state.sources?.length ?? 0;
+  const emitSources = (current: LoopState) => {
+    const sources = current.sources ?? [];
+    if (sources.length === sourcesSeen) return;
+    sourcesSeen = sources.length;
+    emit({ type: "sources", sources });
+  };
 
   const outcome = await runHarnessLoop(
     state,
@@ -244,6 +254,7 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
           for (const touch of current.artifacts.slice(artifactsSeen)) emit({ type: "artifact", artifact: touch });
           // Later touches of a known artifact update its card in place.
           artifactsSeen = current.artifacts.length;
+          emitSources(current);
           const result = await quietly(() => input.sink.checkpoint({ state: current, status: "running" }));
           return result ?? undefined;
         },
@@ -259,6 +270,7 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
   latestText = outcome.state.text;
   if (input.sink.flushText) await quietly(() => input.sink.flushText!(latestText));
   for (const touch of outcome.state.artifacts.slice(artifactsSeen)) emit({ type: "artifact", artifact: touch });
+  emitSources(outcome.state);
 
   const status: RunCheckpoint["status"] =
     outcome.status === "paused" ? "paused" : outcome.status;

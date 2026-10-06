@@ -1,3 +1,4 @@
+import type { RunSource } from "@/features/spectra/ai/harness/sources";
 import { runLog } from "@/features/spectra/ai/run-log";
 import type { Card, RunDetail } from "./contract";
 import { mutate, query } from "./io";
@@ -155,6 +156,8 @@ export async function saveAssistantMessage(params: {
   caption?: string;
   /** Widgets the run showed, so the saved reply shows them again. */
   widgets?: Array<{ id: string; title: string; html: string }>;
+  /** The sources the reply cites, so its citations open them. */
+  sources?: RunSource[];
 }) {
   if (!params.threadId || !params.content.trim()) return;
   await mutate("spectraThreads:appendMessage", {
@@ -176,6 +179,7 @@ export async function saveAssistantMessage(params: {
       ...(params.artifacts?.length ? { artifacts: params.artifacts } : {}),
       ...(params.caption ? { caption: params.caption } : {}),
       ...(params.widgets?.length ? { widgets: params.widgets } : {}),
+      ...(params.sources?.length ? { sources: params.sources } : {}),
     },
   });
 }

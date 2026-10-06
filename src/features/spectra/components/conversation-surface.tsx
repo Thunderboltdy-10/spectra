@@ -14,7 +14,7 @@ import { Code2, Loader2, ShieldCheck, AlertCircle, Bot, Check, ChevronDown, Exte
 import { toast } from "@/components/ui/toast";
 import { SpectraMark } from "@/components/spectra-mark";
 import { PrismLoader } from "@/components/spectra-prism-optic";
-import { SpectraRichContent } from "./spectra-rich-content";
+import { SpectraRichContent, type CitationSource } from "./spectra-rich-content";
 import { useStreamingReveal } from "../runs/streaming/use-streaming-reveal";
 import { spectraBus } from "../events";
 import { cn } from "@/lib/utils";
@@ -209,6 +209,21 @@ function messageAttachments(message: SpectraThreadDetail["messages"][number]) {
           typeof (row as { name?: unknown }).name === "string",
       )
     : [];
+}
+
+const NO_SOURCES: readonly CitationSource[] = [];
+
+/** The sources a saved reply cites: each opens where it lives. */
+function messageSources(message: SpectraThreadDetail["messages"][number]): readonly CitationSource[] {
+  const rows = message.metadata?.sources;
+  if (!Array.isArray(rows) || !rows.length) return NO_SOURCES;
+  return rows.filter(
+    (row): row is CitationSource =>
+      Boolean(row) &&
+      typeof row === "object" &&
+      typeof (row as { id?: unknown }).id === "string" &&
+      (typeof (row as { workId?: unknown }).workId === "string" || typeof (row as { url?: unknown }).url === "string"),
+  );
 }
 
 export type ConversationBatchSelection = {
@@ -1573,10 +1588,12 @@ function LiveContentReveal({
   content,
   streaming,
   compact,
+  sources,
 }: {
   content: string;
   streaming: boolean;
   compact?: boolean;
+  sources?: readonly CitationSource[];
 }) {
   const { visibleText, active } = useStreamingReveal(content, {
     profile: "conversation",
@@ -1588,6 +1605,7 @@ function LiveContentReveal({
     <div ref={frontRef} className={active ? "spectra-stream-active" : undefined}>
       <SpectraRichContent
         content={visibleText}
+        sources={sources}
         className={cn(
           "text-body leading-7 text-[var(--text-primary)]",
           !compact && "sm:text-subhead",
@@ -2090,6 +2108,7 @@ export function ConversationSurface({
                       ) : null}
                       <SpectraRichContent
                         content={message.content}
+                        sources={messageSources(message)}
                         className={cn(
                           "text-body leading-7 text-[var(--text-primary)]",
                           !compact && "sm:text-subhead",
@@ -2300,6 +2319,7 @@ export function ConversationSurface({
                         content={liveExchange.content}
                         streaming={liveExchange.status === "streaming"}
                         compact={compact}
+                        sources={liveExchange.sources}
                       />
                     ) : null}
                     <HarnessWidgets widgets={liveExchange.widgets} threadId={observedThreadId} onOpenArtifact={onOpenArtifact} />

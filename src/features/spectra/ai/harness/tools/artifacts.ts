@@ -253,8 +253,9 @@ export function readArtifactTool(session: HarnessSession): HarnessTool<ReadArgs>
       if (!current)
         return { ok: false, content: `No artifact has id "${args.id}", or the user cannot open it. Find it with list_library or search.` };
       rememberTitle(session, current.id, current.title, current.type);
+      const sources = [{ id: current.id, title: current.title, workId: current.id }];
       if (!isAuthoredType(current.type))
-        return { ok: true, content: `*${current.title}* (${current.type}). ${current.summary ?? ""}` };
+        return { ok: true, content: `*${current.title}* (${current.type}). ${current.summary ?? ""}`, sources };
       let body: string;
       try {
         body = readAuthored(current.type, current.content, args);
@@ -265,6 +266,7 @@ export function readArtifactTool(session: HarnessSession): HarnessTool<ReadArgs>
         ok: true,
         content: `*${current.title}*, a ${typeName(current.type)} (id ${current.id})${current.canEdit ? "" : ", read-only"}${current.location ? `, in ${current.location}` : ""}.\n${body}`,
         doneLabel: `Read *${current.title}*`,
+        sources,
       };
     },
   };

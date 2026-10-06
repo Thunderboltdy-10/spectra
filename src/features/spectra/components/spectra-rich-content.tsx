@@ -41,7 +41,8 @@ function Citation({ node, verified }: { node: Extract<RichInline, { type: "citat
   const opens = source && ("workId" in source || webUrl(source.url));
   if (source && opens) {
     const where = "workId" in source ? "in the Side" : "in a new tab";
-    return <button type="button" onClick={() => openCitationSource(source)} className={CITATION_CLASS} title={source.title ? `Verified source: ${source.title}` : "Verified source"} aria-label={`Open the source ${source.title ?? node.label ?? ""} ${where}`.replace(/\s+/g, " ")}>{text}</button>;
+    // A work opens in the Side out of the citation (MOTION.md, "Shared elements").
+    return <button type="button" {...("workId" in source ? { "data-life-launch": "" } : {})} onClick={() => openCitationSource(source)} className={CITATION_CLASS} title={source.title ? `Verified source: ${source.title}` : "Verified source"} aria-label={`Open the source ${source.title ?? node.label ?? ""} ${where}`.replace(/\s+/g, " ")}>{text}</button>;
   }
   // Verified, but with nowhere to open: no button that does nothing.
   if (source || verified.ids.has(node.sourceId)) return <span className={CITATION_CLASS} title="Verified source">{text}</span>;
@@ -54,7 +55,7 @@ function InlineContent({ content, verified }: { content: RichInline[]; verified:
     if (node.type === "inline_code") return <code key={index} className="rounded bg-[var(--bg-tertiary)] px-1 py-0.5 font-mono text-caption">{node.code}</code>;
     if (node.type === "inline_math") return <span key={index} aria-label={`Math: ${node.math}`}>${node.math}$</span>;
     if (node.type === "citation") return <Citation key={index} node={node} verified={verified} />;
-    if (node.type === "reference") return <button key={index} type="button" onClick={() => void spectraBus.command("work.open", { workId: node.workId, surface: "panel" })} className="mx-0.5 rounded border border-[var(--border-default)] px-1 text-micro font-semibold text-[var(--text-primary)]">{node.label ?? "Referenced work"}</button>;
+    if (node.type === "reference") return <button key={index} type="button" data-life-launch="" onClick={() => void spectraBus.command("work.open", { workId: node.workId, surface: "panel" })} className="mx-0.5 rounded border border-[var(--border-default)] px-1 text-micro font-semibold text-[var(--text-primary)]">{node.label ?? "Referenced work"}</button>;
     return <sup key={index}>[{node.id}]</sup>;
   })}</>;
 }

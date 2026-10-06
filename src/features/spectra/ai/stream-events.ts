@@ -304,6 +304,19 @@ export const spectraStreamEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z
+    // What the run has read that its reply may cite, so far.
+    .object({
+      type: z.literal("sources"),
+      runId: z.string(),
+      sources: z.array(
+        z.union([
+          z.object({ id: z.string(), title: z.string(), workId: z.string() }).strict(),
+          z.object({ id: z.string(), title: z.string(), url: z.string() }).strict(),
+        ]),
+      ).max(60),
+    })
+    .strict(),
+  z
     .object({
       type: z.literal("widget"),
       runId: z.string(),

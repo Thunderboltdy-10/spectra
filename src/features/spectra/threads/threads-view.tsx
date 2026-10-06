@@ -178,6 +178,13 @@ export function ThreadsView({ initialQuery = "", onClose }: { initialQuery?: str
               <div data-life-ghost-bar key={index} className="h-12 animate-pulse rounded-control bg-[var(--bg-secondary)]" style={{ animationDelay: `${index * 60}ms` }} />
             ))}
           </div>
+        ) : searching && search.status === "loading" && !found?.threads.length ? (
+          // Still looking: a ghost of what is coming, not "nothing matches" before the answer is in.
+          <div data-life-ghost className="space-y-2 px-2 py-2" role="status" aria-label="Searching conversations">
+            {Array.from({ length: 3 }, (_, index) => (
+              <div data-life-ghost-bar key={index} className="h-12 animate-pulse rounded-control bg-[var(--bg-secondary)]" style={{ animationDelay: `${index * 60}ms` }} />
+            ))}
+          </div>
         ) : shown.every((group) => !group.threads.length) ? (
           <p className="px-3 py-10 text-center text-caption text-[var(--text-tertiary)]">
             {searching ? `Nothing matches “${query.trim()}”.` : "Your conversations will appear here. Start one from the island."}

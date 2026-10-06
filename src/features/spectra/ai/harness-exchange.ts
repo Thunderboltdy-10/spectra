@@ -21,6 +21,9 @@ export type LiveWidget = { id: string; title: string; html: string };
 
 export type LiveTodo = { content: string; status: "pending" | "in_progress" | "completed" };
 
+/** Something the run read, which a citation in the reply can open. */
+export type LiveSource = { id: string; title: string } & ({ workId: string } | { url: string });
+
 export type HarnessAnswerValue =
   | { kind: "approval"; allowed: boolean; alwaysAllow?: boolean }
   | { kind: "question"; choiceKey?: string; text?: string };
@@ -36,6 +39,7 @@ export type HarnessExchangeFields = {
   artifacts?: HarnessArtifactTouchView[];
   widgets?: LiveWidget[];
   todos?: LiveTodo[];
+  sources?: LiveSource[];
   compacted?: boolean;
   /** The open question or approval, while the run waits for it. */
   input?: HarnessInputView;
@@ -47,7 +51,7 @@ const MAX_STEPS = 12;
 type HarnessEvent = Extract<
   SpectraStreamEvent,
   {
-    type: "step" | "caption" | "artifact_touched" | "widget" | "todos" | "compacted" | "input_required" | "input_answered";
+    type: "step" | "caption" | "artifact_touched" | "widget" | "todos" | "sources" | "compacted" | "input_required" | "input_answered";
   }
 >;
 
@@ -60,6 +64,7 @@ export function isHarnessExchangeEvent(event: SpectraStreamEvent): event is Harn
     event.type === "artifact_touched" ||
     event.type === "widget" ||
     event.type === "todos" ||
+    event.type === "sources" ||
     event.type === "compacted"
   );
 }
@@ -141,6 +146,8 @@ export function applyHarnessEvent<T extends HarnessExchangeFields>(exchange: T, 
     }
     case "todos":
       return { ...exchange, todos: event.todos };
+    case "sources":
+      return { ...exchange, sources: event.sources };
     case "compacted":
       return { ...exchange, compacted: true };
     case "input_required":

@@ -2,6 +2,7 @@ import { createRunItem } from "@/features/spectra/actions/protocol";
 import { runHarness, type HarnessEvent, type RunCheckpoint } from "@/features/spectra/ai/harness/run";
 import type { LoopState } from "@/features/spectra/ai/harness/loop";
 import { alwaysAllowLabel } from "@/features/spectra/ai/harness/permissions";
+import { citedSources, withoutCitations } from "@/features/spectra/ai/harness/sources";
 import type { ArtifactTouch, HarnessMessage, InputAnswer, PendingInput, Steer } from "@/features/spectra/ai/harness/types";
 import { SPECTRA_RUN_HEARTBEAT_INTERVAL_MS } from "@/features/spectra/ai/run-lease";
 import { runLog, withSpectraRunLog } from "@/features/spectra/ai/run-log";
@@ -385,6 +386,9 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
         case "todos":
           publish({ type: "todos", runId, todos: event.todos });
           return;
+        case "sources":
+          publish({ type: "sources", runId, sources: event.sources });
+          return;
         case "widget":
           publish({ type: "widget", runId, id: event.id, title: event.widget.title, html: event.widget.html });
           return;
@@ -518,6 +522,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
           content: reply,
           affected: backend.affected,
           widgets: result.state.widgets,
+          sources: citedSources(reply, result.state.sources),
         }).catch(() => null);
       return;
     }
@@ -563,9 +568,9 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       executionId,
       status: "completed",
       decision: backend.executedAny ? "operate" : "answer",
-      finalSummary: content,
+      finalSummary: withoutCitations(content),
       resultTitle: "Done",
-      resultSummary: content.slice(0, 2_000),
+      resultSummary: withoutCitations(content).slice(0, 2_000),
       resultVariant: artifactIds.length ? "artifact" : "status",
       resultActions: actions,
       provenance: {
@@ -589,6 +594,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       artifacts: touches,
       caption: finalCaption,
       widgets: result.state.widgets,
+      sources: citedSources(content, result.state.sources),
       model: getSpectraModelId(),
     }).catch(() => null);
     if (params.mode === "start")

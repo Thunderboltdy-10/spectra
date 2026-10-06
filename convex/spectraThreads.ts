@@ -150,8 +150,14 @@ function childCursor(
   });
 }
 
+/** A one-line preview: a reply's citations drop out, and a reference reads as its label. */
 function previewContent(value: string) {
-  return value.replace(/\s+/g, " ").trim().slice(0, 240);
+  return value
+    .replace(/\s?\[\[cite:[^\]]*\]\]/g, "")
+    .replace(/\[\[ref:[^\]|]+(?:\|([^\]]+))?\]\]/g, (_match, label: string | undefined) => label ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 240);
 }
 
 function compactThread(thread: Doc<"spectraThreads">) {

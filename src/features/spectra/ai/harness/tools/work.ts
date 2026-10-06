@@ -1,6 +1,6 @@
 import { formatAgentReleases } from "../agent-releases";
 import { formatEmbeds } from "../embeds";
-import { formatSharing } from "../sharing";
+import { formatIncomingInvitations, formatSharing } from "../sharing";
 import { formatVersions } from "../versions";
 import { ToolInputError, type AnyHarnessTool, type HarnessTool } from "../types";
 import { commandTool } from "./app";
@@ -100,6 +100,25 @@ function readSharingTool(session: HarnessSession): HarnessTool<SharingArgs> {
   };
 }
 
+function readShareInvitationsTool(session: HarnessSession): HarnessTool<Record<string, never>> {
+  return {
+    name: "read_share_invitations",
+    description:
+      "Read the invitations other people sent the user (to a work, workspace or agent) that wait for an answer, with the invitation ids respond_to_share takes.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+    effect: "read",
+    label: () => "Checking your invitations",
+    parse: () => ({}),
+    execute: async (_args, ctx) => ({
+      ok: true,
+      content: formatIncomingInvitations(await session.backend.readShareInvitations(ctx.signal)),
+      doneLabel: "Checked your invitations",
+    }),
+  };
+}
+
+type RespondArgs = { invitationId: string; response: "accept" | "decline" };
+
 type AgentReleasesArgs = { agentId: string };
 
 function readAgentReleasesTool(session: HarnessSession): HarnessTool<AgentReleasesArgs> {
@@ -190,6 +209,28 @@ export function workTools(session: HarnessSession): AnyHarnessTool[] {
     }),
     readEmbedsTool(session),
     readSharingTool(session),
+    readShareInvitationsTool(session),
+    commandTool(session, {
+      name: "respond_to_share",
+      description:
+        "Answer an invitation someone sent the user (invitationId from read_share_invitations): accept adds the shared work, workspace or agent to the user's Library at the invited level; decline turns it down. Only when the user asks; the user approves it unless they allowed sharing changes.",
+      parameters: {
+        type: "object",
+        properties: { invitationId: { type: "string" }, response: { type: "string", enum: ["accept", "decline"] } },
+        required: ["invitationId", "response"],
+        additionalProperties: false,
+      },
+      effect: "irreversible",
+      label: (args: RespondArgs) => (args.response === "accept" ? "Accepting an invitation" : "Declining an invitation"),
+      doneLabel: (args: RespondArgs) => (args.response === "accept" ? "Accepted the invitation" : "Declined the invitation"),
+      question: (args: RespondArgs) =>
+        args.response === "accept" ? "Accept this invitation and add what was shared to your Library?" : "Decline this invitation?",
+      parse: (raw): RespondArgs => ({
+        invitationId: requireString(raw, "invitationId", 200),
+        response: oneOf(raw, "response", ["accept", "decline"] as const),
+      }),
+      command: (args) => ({ command: "respond_share_invitation", args }),
+    }),
     readAgentReleasesTool(session),
     commandTool(session, {
       name: "run_agent_checks",

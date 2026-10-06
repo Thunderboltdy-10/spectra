@@ -30,6 +30,9 @@ export function applicationCommandCategory(command: string, args: Args): Permiss
       return "external_send";
     case "change_sharing":
       return args.action === "create_public_link" ? "external_send" : "sharing";
+    // Accepting or declining an invitation someone sent the user.
+    case "respond_share_invitation":
+      return "sharing";
     // A release only the owner reaches changes nothing for anyone else.
     case "release_agent":
       return args.action === "release_private" ? null : "sharing";

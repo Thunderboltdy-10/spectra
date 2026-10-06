@@ -58,6 +58,8 @@ const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: 
   { command: "release_agent", args: { agentId: "agent", action: "release_private", releaseNotes: "Try it" }, mutation: "spectraArtifacts:publishAgent", event: "agent_released" },
   { command: "release_agent", args: { agentId: "agent", action: "suspend", releaseId: "release" }, mutation: "spectraArtifacts:manageAgentRelease", event: "agent_released" },
   { command: "run_agent_checks", args: { agentId: "agent" }, event: "agent_checked" },
+  { command: "respond_share_invitation", args: { invitationId: "invitation", response: "accept" }, mutation: "authority:acceptShareInvitation", event: "share_invitation_answered" },
+  { command: "respond_share_invitation", args: { invitationId: "invitation", response: "decline" }, mutation: "authority:declineShareInvitation", event: "share_invitation_answered" },
 ];
 const calendarArgs: Record<string, Record<string, unknown>> = {
   schedule_calendar_task: { planArtifactId: "plan", planTaskId: "task", startAt: 1000, endAt: 2000, timezone: "UTC" },

@@ -282,4 +282,12 @@ describe("AI UI events", () => {
     expect(changed).toEqual(["agent-1", "agent-1"]);
     expect(getAiLocation()).toMatchObject({ artifactId: "agent-1" });
   });
+
+  it("refreshes the notifications when Spectra answers an invitation", () => {
+    let refreshed = 0;
+    const off = spectraBus.on("notifications.changed", () => { refreshed += 1; });
+    handleSpectraAiUiEvent({ key: "share_invitation_answered", runId: "run-1", payload: { note: "Accepted the invitation" } });
+    off();
+    expect(refreshed).toBe(1);
+  });
 });

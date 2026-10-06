@@ -438,6 +438,15 @@ export async function executeApplicationCommand(
   }
   if (command === "publish_code")
     return publishCode({ artifactId: String(parsed.artifactId), action: parsed.action === "unpublish" ? "unpublish" : "publish", signal, onUiEvent });
+  if (command === "respond_share_invitation") {
+    const accept = parsed.response === "accept";
+    const result = await applyMutation(accept ? "authority:acceptShareInvitation" : "authority:declineShareInvitation", parsed);
+    onUiEvent?.({
+      key: "share_invitation_answered",
+      payload: { targetId: String(parsed.invitationId), note: accept ? "Added shared work to your Library" : "Declined an invitation" },
+    });
+    return result;
+  }
   if (command === "run_agent_checks")
     return runAgentChecks({ actorClerkId, agentId: String(parsed.agentId), signal, onUiEvent });
   if (command === "release_agent") {

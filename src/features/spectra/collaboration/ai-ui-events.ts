@@ -137,6 +137,15 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     });
     return;
   }
+  if (event.key === "share_invitation_answered") {
+    spectraBus.emit("notifications.changed", {});
+    noteAiSurface({
+      ...(event.runId ? { actorId: event.runId } : {}),
+      route: "library",
+      note: typeof event.payload?.note === "string" ? event.payload.note : "Answered an invitation",
+    });
+    return;
+  }
   if (event.key === "sharing_changed") {
     noteAiSurface({
       ...(event.runId ? { actorId: event.runId } : {}),

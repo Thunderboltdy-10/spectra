@@ -2,7 +2,7 @@ import type { ArtifactTypeKey } from "../../artifacts/types";
 import type { AgentReleaseState } from "./agent-releases";
 import type { CommentRow } from "./comments";
 import type { EmbedRow } from "./embeds";
-import type { SharingState } from "./sharing";
+import type { IncomingInvitation, SharingState } from "./sharing";
 import type { VersionRow } from "./versions";
 import { artifactTypeLabel } from "../../../../../shared/semantic-chunks";
 import { resolveArtifactWriteInput } from "../../operations/artifact-write-content";
@@ -43,6 +43,8 @@ export type MemoryBackendOptions = {
   embeds?: Record<string, EmbedRow[]>;
   /** Sharing by resource id. */
   sharing?: Record<string, SharingState>;
+  /** Invitations waiting for the user's answer. */
+  shareInvitations?: IncomingInvitation[];
   /** Releases by agent id. */
   agentReleases?: Record<string, AgentReleaseState>;
   /** Simulate the semantic layer answering with words only, or with a degraded index. */
@@ -216,6 +218,10 @@ export class MemoryBackend implements HarnessBackend {
 
   async readSharing(input: { resourceType: string; resourceId: string }) {
     return this.options.sharing?.[input.resourceId] ?? null;
+  }
+
+  async readShareInvitations() {
+    return this.options.shareInvitations ?? [];
   }
 
   async readAgentReleases(input: { agentId: string }) {

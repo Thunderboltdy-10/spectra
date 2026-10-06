@@ -123,6 +123,10 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
       }
       break;
     }
+    case "respond_share_invitation": return {
+      name: args.response === "accept" ? "authority:acceptShareInvitation" : "authority:declineShareInvitation",
+      args: { invitationId: String(args.invitationId ?? "") },
+    };
     case "release_agent": {
       const notes = typeof args.releaseNotes === "string" && args.releaseNotes.trim() ? { releaseNotes: args.releaseNotes.trim() } : {};
       switch (args.action) {

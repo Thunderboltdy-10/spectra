@@ -14,7 +14,7 @@ import type { AgentDraftChecks, AgentReleaseRow, AgentReleaseState } from "@/fea
 import { ARTIFACT_TYPE_KEYS, type ArtifactTypeKey } from "@/features/spectra/artifacts/types";
 import type { CommentRow } from "@/features/spectra/ai/harness/comments";
 import type { EmbedRow, EmbedState } from "@/features/spectra/ai/harness/embeds";
-import type { SharingInvitation, SharingLink, SharingMember, SharingState } from "@/features/spectra/ai/harness/sharing";
+import type { IncomingInvitation, SharingInvitation, SharingLink, SharingMember, SharingState } from "@/features/spectra/ai/harness/sharing";
 import type { VersionRow, VersionSource } from "@/features/spectra/ai/harness/versions";
 import { readLiveArtifactValue } from "@/features/spectra/ai/yjs-artifact-operation";
 import { overlayLiveArtifactRecord } from "@/features/spectra/collaboration/artifact-yjs-model";
@@ -766,6 +766,26 @@ export class ConvexHarnessBackend implements HarnessBackend {
           }
         : {}),
     };
+  }
+
+  async readShareInvitations(): Promise<IncomingInvitation[]> {
+    // The notification center's read: pending invitations addressed to this user.
+    const found = await query<Record<string, never>, unknown>("authority:listIncomingInvitations", {}).catch(() => []);
+    return rows(found).map((entry): IncomingInvitation => {
+      const resource = entry.resource && typeof entry.resource === "object" ? (entry.resource as Record<string, unknown>) : {};
+      const inviter = entry.inviter && typeof entry.inviter === "object" ? (entry.inviter as Record<string, unknown>) : {};
+      const resourceType = entry.resourceType === "workspace" || entry.resourceType === "agent" ? entry.resourceType : "artifact";
+      return {
+        invitationId: text(entry.invitationId),
+        resourceType,
+        title: text(resource.title) || "Untitled",
+        level: entry.level === "modify" ? "modify" : "read",
+        ...(text(inviter.name) ? { from: text(inviter.name) } : {}),
+        ...(text(entry.message) ? { message: text(entry.message) } : {}),
+        ...(typeof entry.createdAt === "number" ? { createdAt: entry.createdAt } : {}),
+        ...(typeof entry.expiresAt === "number" ? { expiresAt: entry.expiresAt } : {}),
+      };
+    });
   }
 
   async readAgentReleases(input: { agentId: string }): Promise<AgentReleaseState | null> {

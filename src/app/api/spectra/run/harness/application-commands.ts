@@ -171,6 +171,11 @@ const COMMANDS: Record<string, ApplicationCommand> = {
       }),
     authority: "sharing",
   },
+  // Answering an invitation someone sent the user: accepting adds what they shared to the Library.
+  respond_share_invitation: {
+    input: z.object({ invitationId: z.string().trim().min(1).max(200), response: z.enum(["accept", "decline"]) }),
+    authority: "sharing",
+  },
   // Checks run the agent's draft against its suite: they spend model tokens and record a run, nothing else.
   run_agent_checks: {
     input: z.object({ agentId: z.string().trim().min(1).max(200) }),

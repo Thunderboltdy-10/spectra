@@ -3672,6 +3672,8 @@ export function SpectraShell({
     let importJobId: string | null = null;
     let pendingOfficeArtifactId: string | null = null;
     setBusyKey("library:import");
+    // Dots gather and breathe while the file comes in; the work grows out of them.
+    const creation = beginCreation();
     try {
       const titleHint = file.name.replace(/\.[^.]+$/, "") || "Untitled file";
       /* Same parent New uses: only place under a folder when the organizer
@@ -3692,7 +3694,10 @@ export function SpectraShell({
         const resource = refreshed?.artifacts.find(
           (work) => work._id === imported.artifactId,
         );
-        if (resource) openArtifactPanel(resource);
+        if (resource) {
+          creation.land();
+          openArtifactPanel(resource);
+        }
         toast.success(
           selectedWorkspaceId
             ? `${titleHint} imported as a file in this workspace.`
@@ -3796,6 +3801,7 @@ export function SpectraShell({
         }).catch(() => undefined);
       }
       await loadOverview(selectedWorkspaceId, true);
+      creation.land();
       // The overview is intentionally summary-only and does not carry the
       // document body. Hydrate the committed artifact before mounting the
       // collaborative editor, otherwise its empty/default document can be
@@ -3839,6 +3845,8 @@ export function SpectraShell({
               .message,
       );
     } finally {
+      // Landed already, or nothing was made: the dots part.
+      creation.cancel();
       setBusyKey(null);
       if (importInputRef.current) importInputRef.current.value = "";
     }

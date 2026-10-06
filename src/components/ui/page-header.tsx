@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useLifeLanding } from "@/features/spectra/life/use-life";
 import { cn } from "@/lib/utils";
 import { AdaptiveBar, type BarCommand, type CollapseStep } from "./adaptive-bar";
 
@@ -9,6 +10,10 @@ import { AdaptiveBar, type BarCommand, type CollapseStep } from "./adaptive-bar"
  * in the display serif on top-level pages, and its AdaptiveBar on the right.
  * One line, always: the bar folds by its authored plan and the title
  * truncates; nothing wraps to a second row.
+ *
+ * Reached from the rail, a card or a creation, the header grows out of what
+ * was pressed: its dots flow across the field into the title and the line
+ * under it (LIFE.md, Go to a page).
  */
 export function PageHeader({
   title,
@@ -19,6 +24,7 @@ export function PageHeader({
   barLabel,
   description,
   className,
+  lifeKey,
 }: {
   title: React.ReactNode;
   /** Before the title: a back control, or a breadcrumb that folds a navigation column. */
@@ -32,9 +38,13 @@ export function PageHeader({
   /** One quiet sentence under the line, only when the page needs it. */
   description?: React.ReactNode;
   className?: string;
+  /** What the header is the header of, when the title is not a plain string: a new key lands again. */
+  lifeKey?: string;
 }) {
+  const ref = React.useRef<HTMLElement>(null);
+  useLifeLanding(ref, lifeKey ?? (typeof title === "string" ? title : barLabel ?? "page"), { bars: "h1, p" });
   return (
-    <header className={cn("min-w-0", className)}>
+    <header ref={ref} className={cn("min-w-0", className)}>
       <div className="flex min-h-10 min-w-0 items-center gap-3">
         {lead ? <div className="flex min-w-0 shrink items-center gap-1">{lead}</div> : null}
         <h1

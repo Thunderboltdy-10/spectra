@@ -175,7 +175,7 @@ import {
   spectraShellHref,
   workspaceIdFromSpectraPath,
 } from "./shell-location";
-import { beginCreation, useLifeLanding } from "../life/use-life";
+import { beginCreation } from "../life/use-life";
 import { useShareInvitations } from "./use-share-invitations";
 import { downloadDocumentBlob } from "../components/artifact-studio-file-utils";
 
@@ -494,9 +494,6 @@ function WorkspaceHeader({
   onDeleteWorkspace: () => void;
   onOpenChats?: () => void;
 }) {
-  const headerRef = useRef<HTMLDivElement>(null);
-  // A workspace just made by hand grows out of the dots its Create gathered.
-  useLifeLanding(headerRef, workspace?._id);
   const artifactCount = items.filter((item) => item.artifact).length;
   const threadCount = workspaceThreadCount(items);
   const cardCount = items.filter((item) => item.pinned).length;
@@ -550,7 +547,6 @@ function WorkspaceHeader({
 
   return (
     <div
-      ref={headerRef}
       role="group"
       className="spectra-workspace-header border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 pb-3 pt-3"
       aria-label={`${artifactCount} work items, ${threadCount} threads, ${cardCount} pinned, ${activeRuns} active runs`}
@@ -570,6 +566,7 @@ function WorkspaceHeader({
         plan={WORKSPACE_BAR_PLAN}
         barLabel="Workspace commands"
         description={workspace?.description || undefined}
+        lifeKey={workspace?._id}
       />
     </div>
   );

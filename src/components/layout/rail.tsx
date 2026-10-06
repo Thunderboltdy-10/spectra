@@ -273,6 +273,8 @@ export function Rail() {
                     href={destination.key === "home" ? "/workspace?home=1" : destination.href}
                     prefetch={false}
                     data-rail-item={destination.key}
+                    // The page it opens grows out of it; the page already open stays as it is.
+                    data-life-launch={current ? undefined : ""}
                     aria-current={current ? "page" : undefined}
                     onMouseEnter={(event) => placeMarker(event.currentTarget)}
                     onClick={(event) => {
@@ -399,6 +401,7 @@ function PinnedWorks() {
               <li key={node.nodeId}>
                 <button
                   type="button"
+                  data-life-launch=""
                   onClick={(event) => {
                     pulseFrom(event.currentTarget, 0.5);
                     const handled = spectraBus.command("work.open", { workId: node.sourceId!, surface: "panel" });

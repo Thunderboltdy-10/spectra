@@ -20,6 +20,7 @@ vi.mock("../life/figure-dom", () => ({
 }));
 
 import { markNavigation, useLifeHandover } from "../life/use-life";
+import { veil } from "../life/veil";
 
 function Empty() {
   const ref = useRef<HTMLDivElement>(null);
@@ -78,11 +79,12 @@ describe("hand over", () => {
   it("content that is forming itself brings its own light", () => {
     const view = render(<Empty />);
     const content = document.createElement("div");
-    content.style.opacity = "0";
+    const show = veil(content);
     field.replacement = content;
     view.unmount();
     flushFrames();
     expect(field.morph).not.toHaveBeenCalled();
     expect(field.unform).toHaveBeenCalledTimes(1);
+    show();
   });
 });

@@ -8,6 +8,7 @@ import { figureOf, hasVisibleFrame, replacementOf } from "./figure-dom";
 
 export { replacementOf };
 import { life, type Formed } from "./life";
+import { veil } from "./veil";
 import { markNavigation, sendInto } from "./use-life";
 
 /*
@@ -42,14 +43,7 @@ const CONTENT_BARS = "h1, h2, h3, h4, [data-row-title], [data-row-meta], [data-c
 function handOver(formed: Formed, content: HTMLElement) {
   const r = content.getBoundingClientRect();
   if (!r.width || r.bottom < 0 || r.top > window.innerHeight) return formed.release();
-  const previous = content.style.opacity;
-  content.style.opacity = "0";
-  let shown = false;
-  const show = () => {
-    if (shown) return;
-    shown = true;
-    content.style.opacity = previous;
-  };
+  const show = veil(content);
   void life.morph(formed, figureOf(content, { bars: CONTENT_BARS, maxBars: 24, frame: hasVisibleFrame(content) })).formed.then(show);
   window.setTimeout(show, 700);
 }

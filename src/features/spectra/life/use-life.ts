@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, type Ref, type RefCallback, type RefObject } from "react";
 import type { LightColour, Rect } from "./engine";
 import { figureOf, hasVisibleFrame, replacementOf, type ElementFigureOptions } from "./figure-dom";
+import { isVeiled, veil } from "./veil";
 import { outlineFigure, rowsFigure, type Figure, type Point } from "./figure";
 import { life, type Formed, type GlowHandle } from "./life";
 import { STATUS_COLOURS } from "./prism";
@@ -62,14 +63,7 @@ export function useLifeEntrance(ref: RefObject<HTMLElement | null>, { enabled = 
     const formed = life.form(figureOf(element, { bars: figure.bars, rows: figure.rows, colour: figure.colour, fill: figure.fill }), {
       from: from ?? [element.getBoundingClientRect().x + 16, element.getBoundingClientRect().y + 16],
     });
-    const previous = element.style.opacity;
-    element.style.opacity = "0";
-    let shown = false;
-    const show = () => {
-      if (shown) return;
-      shown = true;
-      element.style.opacity = previous;
-    };
+    const show = veil(element);
     // The element never waits on the field for long.
     const fallback = window.setTimeout(show, 1400);
     void formed.formed.then(show);
@@ -357,14 +351,7 @@ export function useLifeSurface<T extends HTMLElement>({ wait = false, bars = SUR
         const state: SurfaceState = { formed: null, leaving: false };
         surfaces.set(node, state);
         const from = recentCause();
-        const previous = node.style.opacity;
-        let shown = !wait;
-        if (wait) node.style.opacity = "0";
-        const show = () => {
-          if (shown) return;
-          shown = true;
-          node.style.opacity = previous;
-        };
+        const show = wait ? veil(node) : () => {};
         // Measured after layout, so the figure is where the surface really is.
         requestAnimationFrame(() => {
           if (!node.isConnected) return show();
@@ -464,14 +451,7 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
       const settling = performance.now() - navigatedAt < 1600;
       if (settling && kind !== "ai") return;
     }
-    const previous = element.style.opacity;
-    element.style.opacity = "0";
-    let shown = false;
-    const show = () => {
-      if (shown) return;
-      shown = true;
-      element.style.opacity = previous;
-    };
+    const show = veil(element);
     const shape = figureOf(element, { bars: "h2, h3, h4, [data-card-title], p", maxBars: 6, ...figure });
     if (seed) {
       void life.morph(seed, shape).formed.then(show);
@@ -534,14 +514,7 @@ function takeDeparture(key: string): Departure | null {
 function moveInto(element: HTMLElement, from: Departure, figure: ElementFigureOptions) {
   const r = element.getBoundingClientRect();
   if (!life.on || ++movesThisFrame > MOVE_BATCH || !r.width || replaced(from.rect, r)) return;
-  const previous = element.style.opacity;
-  element.style.opacity = "0";
-  let shown = false;
-  const show = () => {
-    if (shown) return;
-    shown = true;
-    element.style.opacity = previous;
-  };
+  const show = veil(element);
   const frame = requestAnimationFrame(() => {
     if (!element.isConnected) return show();
     const shape = figureOf(element, { bars: "h2, h3, h4, [data-card-title], [data-row-title], p", maxBars: 6, ...figure });
@@ -615,7 +588,7 @@ function useDeparture(
           if (element.isConnected || window.location.pathname + window.location.search !== where) return;
           const content = handover ? replacementOf(new DOMRect(r.x, r.y, r.width, r.height)) : null;
           // Whatever arrives there may be forming itself (hidden until it has): then it brings its own light.
-          if (content && content.style.opacity !== "0") {
+          if (content && !isVeiled(content)) {
             void life.morph(shape, figureOf(content, { bars: TAKEOVER_BARS, maxBars: 12, frame: hasVisibleFrame(content) }));
           } else {
             void life.unform(shape);
@@ -726,14 +699,7 @@ export function useLifeLanding(ref: RefObject<HTMLElement | null>, key: string |
     if (!key || !element || !life.on || !launch || performance.now() - launch.at > LAUNCH_WINDOW_MS) return;
     const from = launch.figure;
     launch = null;
-    const previous = element.style.opacity;
-    element.style.opacity = "0";
-    let shown = false;
-    const show = () => {
-      if (shown) return;
-      shown = true;
-      element.style.opacity = previous;
-    };
+    const show = veil(element);
     // A frame later, the surface has its final layout to grow into.
     const frame = requestAnimationFrame(() => {
       const target = figureOf(element, { bars: "h1, h2, [data-artifact-title], [data-thread-title], [data-panel-title]", maxBars: 8, ...figure });
@@ -763,14 +729,7 @@ function takeReturn(key: string): Figure | null {
 
 /** The card is hidden while the closing work's dots flow back into its frame, and is real when they have. */
 function foldInto(element: HTMLElement, from: Figure, figure: ElementFigureOptions = {}) {
-  const previous = element.style.opacity;
-  element.style.opacity = "0";
-  let shown = false;
-  const show = () => {
-    if (shown) return;
-    shown = true;
-    element.style.opacity = previous;
-  };
+  const show = veil(element);
   const frame = requestAnimationFrame(() => {
     const r = element.getBoundingClientRect();
     if (!r.width || r.bottom < 0 || r.top > window.innerHeight) return show();

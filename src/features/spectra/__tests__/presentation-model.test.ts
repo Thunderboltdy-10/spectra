@@ -5,9 +5,13 @@ import { applyPresentationLayout } from "../presentation/layouts";
 import {
   createDefaultPresentationContent,
   createPresentationObject,
+  nativePresentationParagraphs,
   normalizePresentationContent,
+  presentationObjectParagraphs,
+  presentationParagraphsAreNative,
   producePresentationContent,
   retextPresentationParagraphs,
+  withPresentationObjectParagraphs,
   withPresentationObjectText,
   type PresentationParagraph,
 } from "../presentation/model";
@@ -113,3 +117,35 @@ describe("writing in a text box keeps the deck's formatting", () => {
   });
 });
 
+describe("Spectra-only slide text", () => {
+  const paragraphs: PresentationParagraph[] = [
+    { runs: [{ text: "Pack", bold: true, hyperlink: { kind: "external", url: "https://a.b" } }], bullet: "bullet", checked: true, level: 1 },
+    { runs: [{ text: "Quoted" }, { text: " not italic", italic: false }], block: "quote" },
+    { runs: [{ text: "let x" }], block: "code" },
+    { runs: [{ text: "\\frac{a}\n{b}" }], block: "math" },
+    { runs: [{ text: "run " }, { text: "f()", code: true }, { text: "x^2", math: true }] },
+  ];
+
+  it("survives the model's own normalisation", () => {
+    const object = { ...createPresentationObject("text"), content: { text: "", paragraphs } };
+    expect(presentationObjectParagraphs(object)).toEqual(paragraphs);
+  });
+
+  it("gives PowerPoint the nearest thing DrawingML holds", () => {
+    expect(presentationParagraphsAreNative(paragraphs)).toBe(false);
+    const native = nativePresentationParagraphs(paragraphs);
+    expect(presentationParagraphsAreNative(native)).toBe(true);
+    expect(native).toEqual([
+      { runs: [{ text: "☑ ", bold: true }, { text: "Pack", bold: true, hyperlink: { kind: "external", url: "https://a.b" } }], bullet: "none", level: 1 },
+      { runs: [{ text: "Quoted", italic: true }, { text: " not italic", italic: false }] },
+      { runs: [{ text: "let x", fontFamily: "Consolas" }] },
+      { runs: [{ text: "\\frac{a} {b}", fontFamily: "Cambria Math" }] },
+      { runs: [{ text: "run " }, { text: "f()", fontFamily: "Consolas" }, { text: "x^2", fontFamily: "Cambria Math" }] },
+    ]);
+  });
+
+  it("writes a field's paragraphs with the words beside them", () => {
+    const object = withPresentationObjectParagraphs(createPresentationObject("text"), paragraphs.slice(0, 2));
+    expect(object.content).toMatchObject({ text: "Pack\nQuoted not italic", paragraphs: paragraphs.slice(0, 2) });
+  });
+});

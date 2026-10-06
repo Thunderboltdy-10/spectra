@@ -5408,6 +5408,107 @@ button[data-spectra-context-trigger="true"]::after {
   outline: none;
 }
 
+/* An embedded work edited where it is embedded: its own studio, in the
+   embed's frame, at a height that leaves the page around it in view. */
+.spectra-embed-editor {
+  display: flex;
+  height: clamp(360px, 70vh, 680px);
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+.spectra-embed-editor > section {
+  border-left: 0;
+}
+
+.spectra-embed-editor-ghost {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.spectra-embed-editor-failure {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  text-align: center;
+}
+
+.spectra-embed-editor-failure button {
+  display: inline-flex;
+  height: 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--control-radius);
+  color: var(--text-primary);
+}
+
+.spectra-embed-editor-failure button:hover {
+  background: var(--bg-hover);
+}
+
+/* A preview opens its work when pressed. */
+[data-embed-preview][data-opens] {
+  cursor: pointer;
+}
+
+/* The shared rich field fills its text box and keeps the box's own type. */
+.presentation-text-field {
+  cursor: text;
+}
+
+.presentation-text-field-content,
+.presentation-text-field .ProseMirror {
+  min-height: 100%;
+  outline: none;
+}
+
+.presentation-text-field .ProseMirror {
+  --prose-leading: 1.1;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* Its commands float beside the box, over the canvas, never in it. */
+.presentation-text-bar {
+  position: fixed;
+  z-index: var(--z-dropdown);
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: 6px;
+  transform: translateY(-100%);
+}
+
+.presentation-text-bar[data-below] {
+  flex-direction: column;
+  transform: none;
+}
+
+.presentation-text-bar [role="toolbar"],
+.presentation-text-bar form {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 3px 5px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--control-radius);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+  white-space: nowrap;
+}
+
 .presentation-shape,
 .presentation-media-missing {
   display: flex;

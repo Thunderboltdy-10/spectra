@@ -80,7 +80,8 @@ function runStyle(style: Extract<RichInline, { type: "text" }>["style"]): CSSPro
   if (!style) return undefined;
   return {
     ...(style.fontFamily ? { fontFamily: style.fontFamily } : {}),
-    ...(style.fontSizePt ? { fontSize: `${style.fontSizePt}pt` } : {}),
+    // A run's size is in points of the surface it is on: a slide scaled into a thumbnail sets `--rich-pt` smaller.
+    ...(style.fontSizePt ? { fontSize: `calc(var(--rich-pt, 1pt) * ${style.fontSizePt})` } : {}),
     ...(style.color ? { color: style.color } : {}),
   };
 }

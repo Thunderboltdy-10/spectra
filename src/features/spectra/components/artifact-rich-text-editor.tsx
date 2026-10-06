@@ -1,25 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import TiptapLink from "@tiptap/extension-link";
-import Placeholder from "@tiptap/extension-placeholder";
-import { TaskItem } from "@tiptap/extension-task-item";
-import { TaskList } from "@tiptap/extension-task-list";
-import TextAlign from "@tiptap/extension-text-align";
-import { Color, FontFamily, FontSize, TextStyle } from "@tiptap/extension-text-style";
-import Underline from "@tiptap/extension-underline";
 import { EditorContent, useEditor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
-import { AiTextResolve } from "../editor/ai-text-resolve";
-import { Callout } from "../editor/callout-node";
-import { Equation, InlineEquation } from "../editor/equation-node";
+import { fieldExtensions, INCOMING_META } from "../editor/field-extensions";
 import { fieldContent, fieldDocument, fieldValue, type FieldFormat } from "../editor/field-format";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { RichTextFormatBar } from "./artifact-studio";
 import { shouldEmitRichTextChange } from "./artifact-studio-value-utils";
-
-/** A change that came in through `value`: someone else's text (a peer's, or Spectra's). */
-const INCOMING_META = "spectraIncomingValue";
 
 export function ArtifactRichTextEditor({
   value,
@@ -78,29 +65,7 @@ export function ArtifactRichTextEditor({
     typedWhileFocusedRef.current = false;
   };
   const editor = useEditor({
-    extensions: [
-      StarterKit.configure({ link: false, underline: false }),
-      Underline,
-      TiptapLink.configure({ openOnClick: false, autolink: true }),
-      // The same text primitives as a document, so nothing a field is given
-      // (a checklist, a callout, a styled run) is dropped when it opens.
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      Callout,
-      TextStyle,
-      FontFamily,
-      FontSize,
-      Color,
-      TextAlign.configure({ types: ["heading", "paragraph"] }),
-      Equation,
-      InlineEquation,
-      Placeholder.configure({ placeholder }),
-      // Spectra's words resolve from a slight blur while it writes this field (MOTION.md).
-      AiTextResolve.configure({
-        writing: () => Boolean(hostRef.current?.closest('[data-ai-region="true"]')),
-        remote: (transaction) => transaction.getMeta(INCOMING_META) === true,
-      }),
-    ] as never[],
+    extensions: fieldExtensions({ placeholder, host: () => hostRef.current }),
     content: initialContent,
     editable: !disabled,
     autofocus: autoFocus ? "end" : false,

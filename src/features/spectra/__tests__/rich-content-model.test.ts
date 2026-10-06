@@ -12,6 +12,7 @@ import {
   richContentToPlainText,
   richContentToProseMirror,
   richContentToSlideParagraphs,
+  slideParagraphsAfterEdit,
   type RichBlock,
   type SpectraRichContentAst,
 } from "../rich-content";
@@ -152,6 +153,83 @@ describe("rich content: slides", () => {
   it("splits a line break into its own paragraph, as PowerPoint holds it", () => {
     const ast = parseSpectraRichContent("one\ntwo");
     expect(richContentToSlideParagraphs(ast)).toEqual([{ runs: [{ text: "one" }] }, { runs: [{ text: "two" }] }]);
+  });
+
+  // The same command set as every field: checklist, quote, code and equations live in a slide too.
+  const spectraOnly: PresentationParagraph[] = [
+    { runs: [{ text: "Bring a calculator" }], bullet: "bullet", checked: true },
+    { runs: [{ text: "Read " }, { text: "chapter 4", italic: true }], bullet: "bullet", checked: false },
+    { runs: [{ text: "Nested" }], bullet: "bullet", level: 1, checked: false },
+    { runs: [{ text: "To be or not" }], block: "quote" },
+    { runs: [{ text: "Hamlet", bold: true }], block: "quote" },
+    { runs: [{ text: "const x = 1;" }], block: "code" },
+    { runs: [], block: "code" },
+    { runs: [{ text: "x++" }], block: "code" },
+    { runs: [{ text: "E = mc^2" }], block: "math" },
+    { runs: [{ text: "Call " }, { text: "fit()", code: true }, { text: " with " }, { text: "\\alpha", math: true }] },
+  ];
+
+  it("reads and writes checklists, quotes, code and equations as Spectra's own blocks", () => {
+    const ast = richContentFromSlideParagraphs(spectraOnly);
+    expect(ast.blocks.map((block) => (block.type === "list" ? `list:${block.kind}` : block.type))).toEqual(["list:task", "quote", "code_block", "math_block", "paragraph"]);
+    expect(ast.blocks[0]).toMatchObject({ items: [{ checked: true }, { checked: false, blocks: [{}, { type: "list", kind: "task" }] }] });
+    expect(ast.blocks[2]).toMatchObject({ code: "const x = 1;\n\nx++" });
+    expect(ast.blocks[4]).toMatchObject({ content: [{ type: "text" }, { type: "inline_code", code: "fit()" }, { type: "text" }, { type: "inline_math", math: "\\alpha" }] });
+    expect(richContentToSlideParagraphs(ast)).toEqual(spectraOnly);
+  });
+
+  it("keeps them through the TipTap field", () => {
+    const doc = richContentToProseMirror(RICH_CONTENT_ADAPTERS.slides.read(spectraOnly));
+    expect(RICH_CONTENT_ADAPTERS.slides.write(RICH_CONTENT_ADAPTERS.prosemirror.read(doc))).toEqual(spectraOnly);
+  });
+
+  it("writes a callout as a quote and keeps a separate equation per paragraph", () => {
+    const ast = parseSpectraRichContent("> [!TIP]\n> Mind the units\n\n$$a$$\n\n$$b$$");
+    expect(richContentToSlideParagraphs(ast)).toEqual([
+      { runs: [{ text: "Mind the units" }], block: "quote" },
+      { runs: [{ text: "a" }], block: "math" },
+      { runs: [{ text: "b" }], block: "math" },
+    ]);
+  });
+});
+
+describe("rich content: a slide text box after its field changed", () => {
+  const deck: PresentationParagraph[] = [
+    { runs: [{ text: "Agenda", bold: false, hyperlink: "https://legacy.example" }], alignment: "left", bullet: "none", level: 0 },
+    { runs: [{ text: "One", fontSizePt: 24 }, { text: " two", bold: true }], bullet: "bullet" },
+    { runs: [{ text: "Three" }], alignment: "left" },
+  ];
+  const fromField = (paragraphs: PresentationParagraph[]) => RICH_CONTENT_ADAPTERS.slides.write(RICH_CONTENT_ADAPTERS.prosemirror.read(richContentToProseMirror(RICH_CONTENT_ADAPTERS.slides.read(paragraphs))));
+
+  it("returns the deck's own paragraphs when nothing changed", () => {
+    const after = slideParagraphsAfterEdit(deck, fromField(deck));
+    expect(after).toEqual(deck);
+    expect(after[0]).toBe(deck[0]);
+  });
+
+  it("keeps what the model drops on an edited paragraph: an explicit left, level 0, no bullet, a run switched off", () => {
+    const edited = fromField(deck);
+    edited[0] = { ...edited[0]!, runs: [{ ...edited[0]!.runs[0]!, text: "Agenda today" }] };
+    const after = slideParagraphsAfterEdit(deck, edited);
+    expect(after[0]).toEqual({ runs: [{ text: "Agenda today", bold: false, hyperlink: "https://legacy.example" }], alignment: "left", bullet: "none", level: 0 });
+    expect(after[1]).toBe(deck[1]);
+    expect(after[2]).toBe(deck[2]);
+  });
+
+  it("lets the field's own changes win", () => {
+    const edited = fromField(deck);
+    edited[2] = { ...edited[2]!, bullet: "numbered" };
+    edited[1] = { ...edited[1]!, runs: [{ text: "One", fontSizePt: 24, italic: true }, { text: " two", bold: true }] };
+    const after = slideParagraphsAfterEdit(deck, edited);
+    expect(after[1]!.runs).toEqual([{ text: "One", fontSizePt: 24, italic: true }, { text: " two", bold: true }]);
+    expect(after[2]).toEqual({ runs: [{ text: "Three" }], alignment: "left", bullet: "numbered" });
+  });
+
+  it("adds and removes paragraphs without borrowing a neighbour's properties", () => {
+    const edited = fromField(deck);
+    const after = slideParagraphsAfterEdit(deck, [edited[0]!, { runs: [{ text: "New" }] }, edited[1]!, edited[2]!]);
+    expect(after).toEqual([deck[0], { runs: [{ text: "New" }] }, deck[1], deck[2]]);
+    expect(slideParagraphsAfterEdit(deck, [edited[0]!, edited[2]!])).toEqual([deck[0], deck[2]]);
   });
 });
 

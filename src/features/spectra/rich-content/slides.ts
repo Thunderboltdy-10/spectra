@@ -22,6 +22,10 @@ import {
  * consecutive bulleted paragraphs into nested lists by level; writing
  * flattens them back. A run's typeface, size and colour travel as the text's
  * own style, so editing a word never loses the deck's formatting.
+ *
+ * Checklists, quotes, code and equations are Spectra's own: a paragraph
+ * carries `checked` or `block`, a run `code` or `math`, and PowerPoint gets
+ * the nearest thing it has (`nativePresentationParagraph`).
  */
 
 const SLIDE_LINK = "slide:";
@@ -51,10 +55,16 @@ function runInlines(runs: readonly PresentationTextRun[]): RichInline[] {
       ...(run.color ? { color: run.color } : {}),
     };
     const pieces: RichInline[] = [];
-    run.text.split(/\r?\n|\v/).forEach((text, index) => {
-      if (index) pieces.push({ type: "break" });
-      if (text) pieces.push({ type: "text", text, ...(marks.length ? { marks } : {}), ...(Object.keys(style).length ? { style } : {}) });
-    });
+    if (run.math) {
+      if (run.text) pieces.push({ type: "inline_math", math: run.text, complete: true });
+    } else {
+      run.text.split(/\r?\n|\v/).forEach((text, index) => {
+        if (index) pieces.push({ type: "break" });
+        if (!text) return;
+        if (run.code) pieces.push({ type: "inline_code", code: text });
+        else pieces.push({ type: "text", text, ...(marks.length ? { marks } : {}), ...(Object.keys(style).length ? { style } : {}) });
+      });
+    }
     const href = hrefOf(run.hyperlink);
     const last = output[output.length - 1];
     if (href && last?.type === "link" && last.href === href) last.content.push(...pieces);
@@ -69,13 +79,19 @@ function paragraphBlock(paragraph: PresentationParagraph): RichBlockDraft {
   return { type: "paragraph", content: runInlines(paragraph.runs), ...(align ? { align } : {}) };
 }
 
-/** Slide paragraphs as the shared model. */
-export function richContentFromSlideParagraphs(paragraphs: readonly PresentationParagraph[]): SpectraRichContentAst {
+function listKind(paragraph: PresentationParagraph): SlideList["kind"] | null {
+  if (paragraph.bullet === "numbered") return "ordered";
+  if (paragraph.bullet !== "bullet") return null;
+  return paragraph.checked === undefined ? "bullet" : "task";
+}
+
+/** Paragraphs that are neither quote, code nor equation: plain paragraphs and the lists they make. */
+function listBlocks(paragraphs: readonly PresentationParagraph[]): RichBlockDraft[] {
   const blocks: RichBlockDraft[] = [];
   // The open list at each level while consecutive bulleted paragraphs run.
   let stack: SlideList[] = [];
   for (const paragraph of paragraphs) {
-    const kind = paragraph.bullet === "bullet" ? "bullet" : paragraph.bullet === "numbered" ? "ordered" : null;
+    const kind = listKind(paragraph);
     if (!kind) {
       stack = [];
       blocks.push(paragraphBlock(paragraph));
@@ -105,9 +121,37 @@ export function richContentFromSlideParagraphs(paragraphs: readonly Presentation
       stack[level] = next;
       list = next;
     }
-    list.items.push({ blocks: [paragraphBlock(paragraph)] as RichBlock[] });
+    list.items.push({
+      ...(kind === "task" ? { checked: paragraph.checked === true } : {}),
+      blocks: [paragraphBlock(paragraph)] as RichBlock[],
+    });
   }
-  return richContentAst(blocks);
+  return blocks;
+}
+
+const paragraphText = (paragraph: PresentationParagraph) => paragraph.runs.map((run) => run.text).join("");
+
+function slideBlocks(paragraphs: readonly PresentationParagraph[]): RichBlockDraft[] {
+  const blocks: RichBlockDraft[] = [];
+  let index = 0;
+  while (index < paragraphs.length) {
+    const kind = paragraphs[index]!.block;
+    let end = index + 1;
+    // Consecutive lines of a quote or a code block are one block; each equation is its own.
+    if (kind !== "math") while (end < paragraphs.length && paragraphs[end]!.block === kind) end += 1;
+    const group = paragraphs.slice(index, end);
+    if (kind === "quote") blocks.push({ type: "quote", blocks: slideBlocks(group.map(({ block: _block, ...paragraph }) => paragraph)) as RichBlock[] });
+    else if (kind === "code") blocks.push({ type: "code_block", code: group.map(paragraphText).join("\n") });
+    else if (kind === "math") blocks.push({ type: "math_block", math: paragraphText(group[0]!) });
+    else blocks.push(...listBlocks(group));
+    index = end;
+  }
+  return blocks;
+}
+
+/** Slide paragraphs as the shared model. */
+export function richContentFromSlideParagraphs(paragraphs: readonly PresentationParagraph[]): SpectraRichContentAst {
+  return richContentAst(slideBlocks(paragraphs));
 }
 
 // ---------------------------------------------------------------------------
@@ -136,10 +180,10 @@ function runsOf(content: readonly RichInline[], href?: string): PresentationText
         });
         break;
       case "inline_code":
-        push({ text: inline.code, ...link });
+        push({ text: inline.code, code: true, ...link });
         break;
       case "inline_math":
-        push({ text: inline.math, ...link });
+        push({ text: inline.math, math: true, ...link });
         break;
       case "citation":
         push({ text: `[${inline.label ?? "source"}]`, ...link });
@@ -167,22 +211,19 @@ function runsOf(content: readonly RichInline[], href?: string): PresentationText
   return lines;
 }
 
-function paragraphsOf(content: readonly RichInline[], shape: Omit<PresentationParagraph, "runs">): PresentationParagraph[] {
-  return runsOf(content).map((runs, index) => ({
-    runs,
-    ...(shape.alignment ? { alignment: shape.alignment } : {}),
-    ...(shape.level ? { level: shape.level } : {}),
-    // Only the first line of a list item carries its bullet.
-    ...(shape.bullet ? { bullet: index === 0 ? shape.bullet : ("none" as const) } : {}),
-  }));
+type ParagraphShape = Omit<PresentationParagraph, "runs">;
+
+/** A list item's later lines keep its level but not its bullet or tick. */
+function continuation({ checked: _checked, ...shape }: ParagraphShape): ParagraphShape {
+  return shape.bullet ? { ...shape, bullet: "none" } : shape;
+}
+
+function paragraphsOf(content: readonly RichInline[], shape: ParagraphShape): PresentationParagraph[] {
+  return runsOf(content).map((runs, index) => ({ runs, ...(index === 0 ? shape : continuation(shape)) }));
 }
 
 function blockText(block: RichBlock): RichInline[] {
   switch (block.type) {
-    case "code_block":
-      return block.code.split("\n").flatMap((line, index) => [...(index ? [{ type: "break" } as const] : []), { type: "text", text: line } as const]);
-    case "math_block":
-      return [{ type: "text", text: block.math }];
     case "table":
       return block.rows.flatMap((row, index) => [...(index ? [{ type: "break" } as const] : []), ...row.flatMap((cell, cellIndex) => [...(cellIndex ? [{ type: "text", text: " | " } as const] : []), ...cell])]);
     case "media":
@@ -198,30 +239,59 @@ function blockText(block: RichBlock): RichInline[] {
   }
 }
 
-function flatten(blocks: readonly RichBlock[], level: number | undefined, listItem?: { bullet: "bullet" | "numbered" }): PresentationParagraph[] {
+type ListItemShape = { bullet: "bullet" | "numbered"; checked?: boolean };
+
+function flatten(blocks: readonly RichBlock[], level: number | undefined, listItem?: ListItemShape): PresentationParagraph[] {
   const output: PresentationParagraph[] = [];
   let leading = Boolean(listItem);
-  const shapeFor = (align?: RichAlign): Omit<PresentationParagraph, "runs"> => {
-    const bullet = leading && listItem ? listItem.bullet : listItem ? "none" : undefined;
+  const shapeFor = (align?: RichAlign): ParagraphShape => {
+    const first = leading && listItem;
+    const bullet = first ? listItem.bullet : listItem ? "none" : undefined;
     leading = false;
-    return { ...(align ? { alignment: align } : {}), ...(level !== undefined ? { level } : {}), ...(bullet ? { bullet } : {}) };
+    return {
+      ...(align ? { alignment: align } : {}),
+      ...(level ? { level } : {}),
+      ...(bullet ? { bullet } : {}),
+      ...(first && listItem.checked !== undefined ? { checked: listItem.checked } : {}),
+    };
   };
-  for (const block of blocks) {
+  for (const [index, block] of blocks.entries()) {
     switch (block.type) {
       case "paragraph":
       case "heading":
+        // A list item cannot open with a nested list in the editor, so it
+        // carries an empty line there: a deeper bullet with no parent of its own.
+        if (leading && listItem && !block.content.length && blocks[index + 1]?.type === "list") break;
         output.push(...paragraphsOf(block.content, shapeFor(block.align)));
         break;
       case "list":
         block.items.forEach((item: RichListItem) => {
-          output.push(...flatten(item.blocks, listItem ? (level ?? 0) + 1 : level ?? 0, { bullet: block.kind === "ordered" ? "numbered" : "bullet" }));
+          output.push(...flatten(item.blocks, listItem ? (level ?? 0) + 1 : level ?? 0, {
+            bullet: block.kind === "ordered" ? "numbered" : "bullet",
+            ...(block.kind === "task" ? { checked: item.checked === true } : {}),
+          }));
         });
         leading = false;
         break;
       case "quote":
-      case "callout":
-        output.push(...flatten(block.blocks, level, leading && listItem ? listItem : undefined));
+      case "callout": {
+        // A callout has no slide form of its own: it reads as a quote.
+        const inner = flatten(block.blocks, level, leading && listItem ? listItem : undefined);
+        output.push(...inner.map((paragraph) => (paragraph.block ? paragraph : { ...paragraph, block: "quote" as const })));
         leading = false;
+        break;
+      }
+      case "code_block": {
+        const shape = shapeFor();
+        output.push(...block.code.split("\n").map((line, index) => ({
+          runs: line ? [{ text: line }] : [],
+          ...(index === 0 ? shape : continuation(shape)),
+          block: "code" as const,
+        })));
+        break;
+      }
+      case "math_block":
+        output.push({ runs: block.math ? [{ text: block.math }] : [], ...shapeFor(), block: "math" });
         break;
       case "rule":
         break;
@@ -230,7 +300,7 @@ function flatten(blocks: readonly RichBlock[], level: number | undefined, listIt
     }
   }
   // An empty list item still owns its bullet.
-  if (leading && listItem) output.push({ runs: [], ...(level ? { level } : {}), bullet: listItem.bullet });
+  if (leading && listItem) output.push({ runs: [], ...shapeFor() });
   return output;
 }
 
@@ -238,4 +308,62 @@ function flatten(blocks: readonly RichBlock[], level: number | undefined, listIt
 export function richContentToSlideParagraphs(ast: SpectraRichContentAst): PresentationParagraph[] {
   const paragraphs = flatten(ast.blocks, undefined);
   return paragraphs.length ? paragraphs : [{ runs: [] }];
+}
+
+// ---------------------------------------------------------------------------
+
+const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+const PARAGRAPH_KEYS = ["alignment", "level", "bullet", "checked", "block"] as const;
+
+/**
+ * What a run looked like before the field: every key the field did not
+ * change keeps its original value (an explicit `bold: false` over a bold
+ * placeholder, a legacy link string), and the field's words and changes win.
+ */
+function keepRun(next: PresentationTextRun, normalized: readonly PresentationTextRun[], original: readonly PresentationTextRun[]): PresentationTextRun {
+  const { text, ...format } = next;
+  const index = normalized.findIndex(({ text: _text, ...candidate }) => same(candidate, format));
+  const source = index >= 0 ? original[index] : undefined;
+  if (!source) return next;
+  const { text: _text, ...kept } = source;
+  return { ...kept, text };
+}
+
+function keepParagraph(next: PresentationParagraph, normalized: PresentationParagraph | undefined, original: PresentationParagraph | undefined): PresentationParagraph {
+  if (!normalized || !original) return next;
+  const merged: PresentationParagraph = { ...next };
+  for (const key of PARAGRAPH_KEYS) {
+    // The field did not change it: the deck's own value stands, even where the model drops it (a `left` alignment, level 0, an explicit `none` bullet).
+    if (same(next[key], normalized[key]) && original[key] !== undefined) (merged as Record<string, unknown>)[key] = original[key];
+  }
+  // Runs line up one to one when the original had no empty runs: the model drops them.
+  const runs = original.runs.filter((run) => run.text);
+  merged.runs = runs.length === normalized.runs.length ? next.runs.map((run) => keepRun(run, normalized.runs, runs)) : next.runs;
+  return merged;
+}
+
+/**
+ * The paragraphs a slide text box keeps after its rich field changed.
+ *
+ * The field speaks the shared model, which does not carry everything a deck
+ * holds (an explicit left alignment, a level on an unbulleted line, a run
+ * that switches bold off over a bold placeholder). Paragraphs the field did
+ * not touch keep their original objects exactly, and a changed paragraph
+ * keeps every property the field left as it was, so editing one word never
+ * rewrites the rest of an imported slide.
+ */
+export function slideParagraphsAfterEdit(previous: readonly PresentationParagraph[], next: readonly PresentationParagraph[]): PresentationParagraph[] {
+  const normalized = richContentToSlideParagraphs(richContentFromSlideParagraphs(previous));
+  // Line breaks inside a run become paragraphs in the model, so the two no longer line up: the field's paragraphs stand.
+  if (normalized.length !== previous.length) return [...next];
+  let start = 0;
+  while (start < next.length && start < normalized.length && same(next[start], normalized[start])) start += 1;
+  let end = 0;
+  while (end < next.length - start && end < normalized.length - start && same(next[next.length - 1 - end], normalized[normalized.length - 1 - end])) end += 1;
+  const middle = next.slice(start, next.length - end).map((paragraph, offset) => {
+    const at = start + offset;
+    // A paragraph that lines up with an old one is that one, edited; a new one takes nothing from its neighbours.
+    return at < normalized.length - end ? keepParagraph(paragraph, normalized[at], previous[at]) : paragraph;
+  });
+  return [...previous.slice(0, start), ...middle, ...previous.slice(previous.length - end)];
 }

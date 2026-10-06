@@ -2,7 +2,7 @@ import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey, type Transaction } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { ySyncPluginKey } from "@tiptap/y-tiptap";
-import { nextSuggestionWord, requestLocalAutocomplete } from "./autocomplete";
+import { nextSuggestionWord, requestLocalAutocomplete, type AutocompleteSurface } from "./autocomplete";
 
 type GhostState = {
   text: string;
@@ -23,14 +23,16 @@ function remoteOrAiTransaction(transaction: Transaction) {
 export const SpectraTiptapAutocomplete = Extension.create<{
   enabled: boolean;
   delayMs: number;
+  /** What is being written: a document, a slide's text box. */
+  surface: AutocompleteSurface;
 }>({
   name: "spectraLocalAutocomplete",
   addOptions() {
-    return { enabled: true, delayMs: 420 };
+    return { enabled: true, delayMs: 420, surface: "document" };
   },
   addProseMirrorPlugins() {
     if (!this.options.enabled) return [];
-    const delayMs = this.options.delayMs;
+    const { delayMs, surface } = this.options;
     return [
       new Plugin<GhostState>({
         key: pluginKey,
@@ -134,7 +136,7 @@ export const SpectraTiptapAutocomplete = Extension.create<{
               request = requestLocalAutocomplete({
                 value,
                 cursor: value.length,
-                surface: "document",
+                surface,
               });
               void request.result
                 .then((suggestion) => {

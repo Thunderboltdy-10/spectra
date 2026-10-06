@@ -519,7 +519,7 @@ function BoardNode({
         </span>
       ) : node.type === "embed" && typeof content.embedId === "string" ? (
         <div className="h-full w-full overflow-auto rounded-card">
-          <ArtifactEmbedById embedId={content.embedId} />
+          <ArtifactEmbedById embedId={content.embedId} editInPlace={!readOnly && !compact} />
         </div>
       ) : node.type === "embed" ? (
         <div
@@ -2118,7 +2118,8 @@ export function WhiteboardStudio({
   function canvasKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (
       (event.target as HTMLElement).matches(
-        "input, textarea, [contenteditable='true']",
+        // A work edited in place on the board answers its own keys.
+        "input, textarea, [contenteditable='true'], [data-embed-editor] *",
       )
     )
       return;

@@ -1,6 +1,7 @@
 import { strFromU8, strToU8, zipSync } from "fflate";
 import { OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 import {
+  nativePresentationParagraph,
   normalizePresentationContent,
   normalizePresentationHyperlink,
   presentationObjectParagraphs,
@@ -707,10 +708,30 @@ function presentationTextRuns(
       color?: string;
       hyperlink?: { url?: string; slide?: number };
       breakLine?: boolean;
+      align?: "left" | "center" | "right" | "justify";
+      bullet?: boolean | { type: "number" } | { characterCode: string };
+      indentLevel?: number;
     };
   }> = [];
-  paragraphs.forEach((paragraph, paragraphIndex) => {
-    paragraph.runs.forEach((run) => {
+  paragraphs.forEach((source, paragraphIndex) => {
+    // pptxgenjs writes a paragraph's properties with each of its runs and ends
+    // the paragraph after a run marked `breakLine`, so every run carries its
+    // paragraph's bullet, level and alignment, and the last one ends it.
+    const paragraph = nativePresentationParagraph(source, "bullet");
+    const shape = {
+      ...(paragraph.alignment ? { align: paragraph.alignment } : {}),
+      ...(source.checked !== undefined
+        ? { bullet: { characterCode: source.checked ? "2611" : "2610" } }
+        : paragraph.bullet === "numbered"
+          ? { bullet: { type: "number" as const } }
+          : paragraph.bullet === "bullet"
+            ? { bullet: true }
+            : {}),
+      ...(paragraph.level ? { indentLevel: paragraph.level } : {}),
+      ...(paragraphIndex < paragraphs.length - 1 ? { breakLine: true } : {}),
+    };
+    const last = paragraph.runs.length - 1;
+    paragraph.runs.forEach((run, runIndex) => {
       const options: NonNullable<(typeof runs)[number]["options"]> = {
         fontFace: presentationNativeFontFamily(
           run.fontFamily ?? object.style?.fontFamily,
@@ -729,12 +750,13 @@ function presentationTextRuns(
         ...(run.hyperlink || object.hyperlink
           ? { hyperlink: pptxHyperlink(run.hyperlink ?? object.hyperlink, slideNumbers) }
           : {}),
+        ...shape,
+        ...(runIndex < last ? { breakLine: false } : {}),
       };
-      if (paragraphIndex > 0 && runs.length) options.breakLine = true;
       runs.push({ text: run.text, options });
     });
-    if (!paragraph.runs.length && paragraphIndex > 0)
-      runs.push({ text: "", options: { breakLine: true } });
+    // An empty paragraph is still a line.
+    if (!paragraph.runs.length) runs.push({ text: "", options: shape });
   });
   return { runs, fallbackFont };
 }

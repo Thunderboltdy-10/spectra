@@ -36,7 +36,7 @@ export const WordRevision = Node.create({
   },
 });
 
-function ReferenceNodeView({ node, selected, deleteNode }: NodeViewProps) {
+function ReferenceNodeView({ node, selected, deleteNode, editor }: NodeViewProps) {
   const embedId =
     typeof node.attrs.embedId === "string" ? node.attrs.embedId : "";
   return (
@@ -47,7 +47,7 @@ function ReferenceNodeView({ node, selected, deleteNode }: NodeViewProps) {
       contentEditable={false}
     >
       {embedId ? (
-        <ArtifactEmbedById embedId={embedId} onRemove={deleteNode} />
+        <ArtifactEmbedById embedId={embedId} onRemove={deleteNode} editInPlace={editor.isEditable} />
       ) : (
         <div className="rounded-card border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)] px-4 py-3 text-micro text-[var(--text-secondary)]">
           This older reference is no longer linked to a live source. Add it
@@ -113,7 +113,17 @@ export const SpectraReferenceNode = Node.create({
     ];
   },
   addNodeView() {
-    return ReactNodeViewRenderer(ReferenceNodeView);
+    const render = ReactNodeViewRenderer(ReferenceNodeView);
+    return (props) => {
+      const view = render(props);
+      // A work edited in place inside the reference is its own editor: its
+      // presses, keys and clipboard never reach this document.
+      const own = view.stopEvent?.bind(view);
+      view.stopEvent = (event: Event) =>
+        (event.target instanceof Element && Boolean(event.target.closest("[data-embed-editor]"))) ||
+        Boolean(own?.(event));
+      return view;
+    };
   },
 });
 

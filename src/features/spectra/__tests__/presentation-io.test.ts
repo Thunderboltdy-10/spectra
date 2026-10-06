@@ -145,4 +145,58 @@ describe("PowerPoint import ordering", () => {
     expect(slideXml).toContain('typeface="Cambria"');
     expect(slideXml).toContain('typeface="Georgia"');
   });
+
+  it("writes each slide paragraph as its own native paragraph with its bullet, level and tick", async () => {
+    const exported = await buildPresentationPptx(
+      {
+        theme: { id: "lists", fonts: { heading: "Aptos", body: "Aptos" } },
+        slides: [
+          {
+            id: "slide-1",
+            title: "Lists",
+            objects: [
+              {
+                id: "body",
+                type: "text",
+                x: 100,
+                y: 100,
+                width: 800,
+                height: 400,
+                rotation: 0,
+                content: {
+                  text: "",
+                  paragraphs: [
+                    { runs: [{ text: "Intro " }, { text: "bold", bold: true }] },
+                    { runs: [{ text: "Point" }], bullet: "bullet" },
+                    { runs: [{ text: "Sub point" }], bullet: "bullet", level: 1 },
+                    { runs: [{ text: "Step" }], bullet: "numbered", alignment: "center" },
+                    { runs: [] },
+                    { runs: [{ text: "Done" }], bullet: "bullet", checked: true },
+                    { runs: [{ text: "x^2" }], block: "math" },
+                    { runs: [{ text: "Call " }, { text: "fit()", code: true }] },
+                  ],
+                },
+                style: { fontSize: 24 },
+              },
+            ],
+          },
+        ],
+      },
+      [],
+    );
+    const files = unzipSync(new Uint8Array(await exported.arrayBuffer()));
+    const slideXml = strFromU8(files["ppt/slides/slide1.xml"]!);
+    const paragraphs = [...slideXml.matchAll(/<a:p>([\s\S]*?)<\/a:p>/g)].map((match) => match[1]!);
+    const words = paragraphs.map((paragraph) => [...paragraph.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map((match) => match[1]).join(""));
+    // A paragraph's runs stay together, and each paragraph is its own line.
+    expect(words).toEqual(["Intro bold", "Point", "Sub point", "Step", "", "Done", "x^2", "Call fit()"]);
+    expect(paragraphs[0]).toContain("<a:buNone/>");
+    expect(paragraphs[1]).toMatch(/<a:buChar char="&#x2022;"\/>/);
+    expect(paragraphs[2]).toContain('lvl="1"');
+    expect(paragraphs[3]).toContain("<a:buAutoNum");
+    expect(paragraphs[3]).toContain('algn="ctr"');
+    expect(paragraphs[5]).toContain('<a:buChar char="&#x2611;"/>');
+    expect(paragraphs[6]).toContain('typeface="Cambria Math"');
+    expect(paragraphs[7]).toContain('typeface="Consolas"');
+  });
 });

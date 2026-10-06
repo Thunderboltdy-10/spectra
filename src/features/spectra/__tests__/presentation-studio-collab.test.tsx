@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { Editor } from "@tiptap/core";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PresentationStudio } from "../components/presentation-studio";
@@ -9,6 +10,19 @@ import {
   type StudioContract,
 } from "../components/artifact-studio-shell";
 import { normalizePresentationContent } from "../presentation/model";
+
+const editors = vi.hoisted(() => [] as Editor[]);
+vi.mock("@tiptap/react", async (original) => {
+  const actual = await original<typeof import("@tiptap/react")>();
+  return {
+    ...actual,
+    useEditor: (...args: Parameters<typeof actual.useEditor>) => {
+      const editor = actual.useEditor(...args);
+      if (editor && !editors.includes(editor)) editors.push(editor);
+      return editor;
+    },
+  };
+});
 
 vi.mock("../settings/preference-store", () => ({
   useSpectraPreferences: () => ({
@@ -76,14 +90,32 @@ function Host({ harness }: { harness: Harness }) {
   );
 }
 
-function editableBox(value: string) {
-  return screen
-    .getAllByLabelText("Slide text")
-    .find(
-      (element) =>
-        (element as HTMLTextAreaElement).value === value &&
-        !(element as HTMLTextAreaElement).readOnly,
-    )!;
+/** The slide's text box: the shared rich field, written in place. */
+async function editableBox(value: string) {
+  await waitFor(() =>
+    expect(
+      editors.find((editor) => !editor.isDestroyed && editor.isEditable && editor.getText() === value),
+    ).toBeTruthy(),
+  );
+  const editor = editors.find(
+    (candidate) => !candidate.isDestroyed && candidate.isEditable && candidate.getText() === value,
+  )!;
+  expect(screen.getAllByLabelText("Slide text")).toContain(editor.view.dom);
+  return editor;
+}
+
+function focus(editor: Editor) {
+  fireEvent.focus(editor.view.dom);
+}
+
+function type(editor: Editor, text: string) {
+  act(() => {
+    editor.commands.insertContentAt(editor.state.doc.content.size - 1, text);
+  });
+}
+
+function blur(editor: Editor) {
+  fireEvent.blur(editor.view.dom);
 }
 
 function slideText(content: unknown, slide: number) {
@@ -101,25 +133,26 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  editors.length = 0;
   vi.unstubAllGlobals();
 });
 
 describe("presentation text editing", () => {
-  it("commits slide text while typing, before the box loses focus", () => {
+  it("commits slide text while typing, before the box loses focus", async () => {
     const harness: Harness = { content: null, setContent: () => {}, changes: 0 };
     render(<Host harness={harness} />);
-    const box = editableBox("Hello");
-    fireEvent.focus(box);
-    fireEvent.change(box, { target: { value: "Hello world" } });
+    const box = await editableBox("Hello");
+    focus(box);
+    type(box, " world");
     expect(slideText(harness.content, 0)).toBe("Hello world");
   });
 
-  it("keeps a collaborator's edit to another slide made while this student typed", () => {
+  it("keeps a collaborator's edit to another slide made while this student typed", async () => {
     const harness: Harness = { content: null, setContent: () => {}, changes: 0 };
     render(<Host harness={harness} />);
-    const box = editableBox("Hello");
-    fireEvent.focus(box);
-    fireEvent.change(box, { target: { value: "Hello there" } });
+    const box = await editableBox("Hello");
+    focus(box);
+    type(box, " there");
     act(() => {
       const deck = normalizePresentationContent(harness.content);
       harness.setContent({
@@ -131,19 +164,19 @@ describe("presentation text editing", () => {
         ),
       });
     });
-    fireEvent.change(box, { target: { value: "Hello there!" } });
-    fireEvent.blur(box);
+    type(box, "!");
+    blur(box);
     expect(slideText(harness.content, 0)).toBe("Hello there!");
     expect(slideText(harness.content, 1)).toBe("Peer edit");
   });
 
-  it("undoes the student's typing without reverting a collaborator's later edit", () => {
+  it("undoes the student's typing without reverting a collaborator's later edit", async () => {
     const harness: Harness = { content: null, setContent: () => {}, changes: 0 };
     render(<Host harness={harness} />);
-    const box = editableBox("Hello");
-    fireEvent.focus(box);
-    fireEvent.change(box, { target: { value: "Hello class" } });
-    fireEvent.blur(box);
+    const box = await editableBox("Hello");
+    focus(box);
+    type(box, " class");
+    blur(box);
     act(() => {
       const deck = normalizePresentationContent(harness.content);
       harness.setContent({
@@ -160,12 +193,12 @@ describe("presentation text editing", () => {
     expect(slideText(harness.content, 1)).toBe("Peer edit");
   });
 
-  it("undoes the typing without reverting a collaborator's edit made while it went on", () => {
+  it("undoes the typing without reverting a collaborator's edit made while it went on", async () => {
     const harness: Harness = { content: null, setContent: () => {}, changes: 0 };
     render(<Host harness={harness} />);
-    const box = editableBox("Hello");
-    fireEvent.focus(box);
-    fireEvent.change(box, { target: { value: "Hello class" } });
+    const box = await editableBox("Hello");
+    focus(box);
+    type(box, " class");
     act(() => {
       const deck = normalizePresentationContent(harness.content);
       harness.setContent({
@@ -177,8 +210,8 @@ describe("presentation text editing", () => {
         ),
       });
     });
-    fireEvent.change(box, { target: { value: "Hello class!" } });
-    fireEvent.blur(box);
+    type(box, "!");
+    blur(box);
     fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
     expect(slideText(harness.content, 0)).toBe("Hello");
     expect(slideText(harness.content, 1)).toBe("Peer edit");

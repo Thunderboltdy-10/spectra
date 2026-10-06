@@ -483,8 +483,16 @@ describe("ordinary student and peer authority boundaries", () => {
     );
     expect(beforeRevoke).toMatchObject({
       state: "ready",
+      // A reader of the source sees it, but cannot edit it where it is embedded.
+      canEditSource: false,
       source: { snapshot: { content: { blocks: [{ type: "paragraph", text: "private content" }] } } },
     });
+    // Its owner may change it, so they can edit it in place.
+    expect(
+      await t.withIdentity(fixture.owner).query(api.artifactEmbeds.getProjection, {
+        embedId: live.embedId,
+      }),
+    ).toMatchObject({ state: "ready", canEditSource: true });
     expect(pinnedBeforeRevoke).toMatchObject({
       state: "ready",
       version: { versionId: fixture.pinnedVersionId },

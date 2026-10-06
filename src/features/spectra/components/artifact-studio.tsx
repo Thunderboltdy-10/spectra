@@ -57,6 +57,7 @@ import {
   isValidElement,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -5050,7 +5051,8 @@ function ArtifactStudioEditor({
       // closes the menu, so Escape on More would close the whole studio.
       if (
         document.querySelector(
-          '[data-state="open"][aria-haspopup], [role="menu"][data-state="open"], [role="listbox"][data-state="open"], [role="dialog"][data-state="open"], details[open], [aria-expanded="true"][aria-haspopup], .slash-command-portal, .spectra-document-studio[data-focus]',
+          // A work edited in place inside another takes Escape for itself.
+          '[data-state="open"][aria-haspopup], [role="menu"][data-state="open"], [role="listbox"][data-state="open"], [role="dialog"][data-state="open"], details[open], [aria-expanded="true"][aria-haspopup], .slash-command-portal, .spectra-document-studio[data-focus], [data-embed-editor]',
         )
       ) {
         return;
@@ -5121,7 +5123,13 @@ function ArtifactStudioEditor({
       if (!direction) return;
       const surface = studioSurfaceRef.current;
       const target = event.target;
-      const inside = target instanceof Node && Boolean(surface?.contains(target));
+      // A work edited in place inside this one keeps its own undo.
+      const nested =
+        target instanceof Element ? target.closest("[data-embed-editor]") : null;
+      const inside =
+        target instanceof Node &&
+        Boolean(surface?.contains(target)) &&
+        !(nested && surface?.contains(nested));
       const unfocused =
         target === document.body || target === document.documentElement;
       if (!surface || !(inside || (unfocused && lastInteractedStudioSurface === surface)))
@@ -6772,6 +6780,7 @@ export function RichTextFormatBar({
   withTextStyle = false,
   inserts = true,
   trailing,
+  unavailable,
 }: {
   editor: TiptapEditor | null;
   disabled?: boolean;
@@ -6785,8 +6794,15 @@ export function RichTextFormatBar({
   inserts?: boolean;
   /** Type-specific inserts (tables, callouts). Kept after the shared verbs. */
   trailing?: ReactNode;
+  /**
+   * Commands this field's text cannot hold, by label, and why: a linked
+   * PowerPoint text box has no checklists, quotes, code or equations.
+   */
+  unavailable?: { labels: readonly string[]; reason: string };
 }) {
   const [linkOpen, setLinkOpen] = useState(false);
+  const reasonFor = (command: string) =>
+    unavailable?.labels.includes(command) ? unavailable.reason : undefined;
   const [linkDraft, setLinkDraft] = useState("https://");
   const textStyle = editor?.isActive("heading", { level: 1 })
     ? "h1"
@@ -6875,6 +6891,7 @@ export function RichTextFormatBar({
           <ToolbarButton
             label="Checklist"
             icon={ListChecks}
+            reason={reasonFor("Checklist")}
             active={editor?.isActive("taskList")}
             onClick={() => editor?.chain().focus().toggleTaskList().run()}
           />
@@ -6883,12 +6900,14 @@ export function RichTextFormatBar({
               <ToolbarButton
                 label="Quote"
                 icon={MessageSquare}
+                reason={reasonFor("Quote")}
                 active={editor?.isActive("blockquote")}
                 onClick={() => editor?.chain().focus().toggleBlockquote().run()}
               />
               <ToolbarButton
                 label="Inline code"
                 icon={Code2}
+                reason={reasonFor("Inline code")}
                 active={editor?.isActive("code")}
                 onClick={() => editor?.chain().focus().toggleCode().run()}
               />
@@ -6910,6 +6929,7 @@ export function RichTextFormatBar({
               <ToolbarButton
                 label="Inline equation"
                 icon={Sigma}
+                reason={reasonFor("Inline equation")}
                 active={editor?.isActive("inlineEquation")}
                 onClick={() =>
                   editor
@@ -6924,6 +6944,7 @@ export function RichTextFormatBar({
               />
               <ToolbarTextButton
                 label="Block equation"
+                reason={reasonFor("Block equation")}
                 onClick={() =>
                   editor
                     ?.chain()
@@ -7723,15 +7744,19 @@ export function ToolbarButton({
   icon: Icon,
   active,
   disabled,
+  reason,
   onClick,
 }: {
   label: string;
   icon: LucideIcon;
   active?: boolean;
   disabled?: boolean;
+  /** Why it cannot be used here: the button is off and says so. */
+  reason?: string;
   onClick?: () => void;
 }) {
   const contract = useOptionalStudioContract();
+  const reasonId = useId();
   const execute = () => {
     if (!onClick) return;
     if (!contract) return onClick();
@@ -7746,16 +7771,18 @@ export function ToolbarButton({
     });
   };
   return (
-    <Tooltip label={label}>
+    <Tooltip label={reason ? `${label}. ${reason}` : label}>
       <button
         type="button"
         className={toolbarClass()}
         data-active={active || undefined}
         onClick={execute}
-        disabled={disabled}
+        disabled={disabled || Boolean(reason)}
         aria-label={label}
+        aria-describedby={reason ? reasonId : undefined}
       >
         <Icon className="h-4 w-4" />
+        {reason ? <span id={reasonId} className="sr-only">{reason}</span> : null}
       </button>
     </Tooltip>
   );
@@ -7764,15 +7791,19 @@ export function ToolbarButton({
 export function ToolbarTextButton({
   label,
   active,
+  reason,
   onClick,
   children,
 }: {
   label: string;
   active?: boolean;
+  /** Why it cannot be used here: the button is off and says so. */
+  reason?: string;
   onClick?: () => void;
   children: ReactNode;
 }) {
   const contract = useOptionalStudioContract();
+  const reasonId = useId();
   const execute = () => {
     if (!onClick) return;
     if (!contract) return onClick();
@@ -7787,15 +7818,18 @@ export function ToolbarTextButton({
     });
   };
   return (
-    <Tooltip label={label}>
+    <Tooltip label={reason ? `${label}. ${reason}` : label}>
       <button
         type="button"
         className={toolbarClass()}
         data-active={active || undefined}
         onClick={execute}
+        disabled={Boolean(reason)}
         aria-label={label}
+        aria-describedby={reason ? reasonId : undefined}
       >
         {children}
+        {reason ? <span id={reasonId} className="sr-only">{reason}</span> : null}
       </button>
     </Tooltip>
   );

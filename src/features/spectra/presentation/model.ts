@@ -18,6 +18,10 @@ export type PresentationTextRun = {
   color?: string;
   /** Legacy strings are accepted at the boundary and treated as external URLs. */
   hyperlink?: string | PresentationHyperlink;
+  /** Inline code. Spectra-only: PowerPoint gets the words in a monospaced face. */
+  code?: boolean;
+  /** An inline equation; `text` is its LaTeX. Spectra-only: PowerPoint gets the LaTeX in Cambria Math. */
+  math?: boolean;
 };
 
 /** One native a:p. Keeping paragraphs separate prevents a line break edit from
@@ -27,6 +31,13 @@ export type PresentationParagraph = {
   alignment?: "left" | "center" | "right" | "justify";
   level?: number;
   bullet?: "none" | "bullet" | "numbered";
+  /** Set on a checklist item (with `bullet: "bullet"`). Spectra-only: PowerPoint gets a ☐ or ☑ bullet. */
+  checked?: boolean;
+  /**
+   * A line of a quote, a code block or a block equation (whose runs hold its
+   * LaTeX). Spectra-only: PowerPoint gets italic, monospaced or Cambria Math text.
+   */
+  block?: "quote" | "code" | "math";
 };
 
 export type PresentationTextContent = {
@@ -397,6 +408,8 @@ export function presentationObjectParagraphs(
                 ...(normalizePresentationHyperlink(value.hyperlink)
                   ? { hyperlink: normalizePresentationHyperlink(value.hyperlink) }
                   : {}),
+                ...(value.code === true ? { code: true } : {}),
+                ...(value.math === true ? { math: true } : {}),
               } satisfies PresentationTextRun]
             : [];
         }),
@@ -406,6 +419,10 @@ export function presentationObjectParagraphs(
         ...(typeof paragraph.level === "number" ? { level: paragraph.level } : {}),
         ...(paragraph.bullet === "none" || paragraph.bullet === "bullet" || paragraph.bullet === "numbered"
           ? { bullet: paragraph.bullet }
+          : {}),
+        ...(typeof paragraph.checked === "boolean" ? { checked: paragraph.checked } : {}),
+        ...(paragraph.block === "quote" || paragraph.block === "code" || paragraph.block === "math"
+          ? { block: paragraph.block }
           : {}),
       } satisfies PresentationParagraph];
     });
@@ -542,6 +559,69 @@ export function retextPresentationParagraphs(
     return paragraphLike(changedBefore[changedBefore.length - 1] ?? previous[start - 1] ?? previous[previous.length - end], line);
   });
   return [...previous.slice(0, start), ...middle, ...previous.slice(previous.length - end)];
+}
+
+/** The faces PowerPoint shows Spectra's code and equations in. */
+export const NATIVE_CODE_FACE = "Consolas";
+export const NATIVE_MATH_FACE = "Cambria Math";
+
+/**
+ * One paragraph as DrawingML can hold it. Checklists, quotes, code and
+ * equations are Spectra's; PowerPoint gets the nearest thing it has: a ☐ or ☑
+ * before the words (or, with `checklist: "bullet"`, kept as a bullet whose
+ * glyph the writer chooses), italic quotes, monospaced code and equations as
+ * their LaTeX in Cambria Math.
+ */
+export function nativePresentationParagraph(
+  { checked, block, runs, ...paragraph }: PresentationParagraph,
+  checklist: "prefix" | "bullet" = "prefix",
+): PresentationParagraph {
+  const native = runs.map(({ code, math, ...run }) => {
+    const face = code || block === "code" ? NATIVE_CODE_FACE : math || block === "math" ? NATIVE_MATH_FACE : undefined;
+    return {
+      ...run,
+      ...(math || block === "math" ? { text: run.text.replace(/\s*\r?\n\s*/g, " ") } : {}),
+      ...(face ? { fontFamily: face } : {}),
+      ...(block === "quote" && run.italic === undefined ? { italic: true } : {}),
+    };
+  });
+  if (checked === undefined || checklist === "bullet") return { ...paragraph, runs: native };
+  const { hyperlink: _link, ...format } = native[0] ? runFormat(native[0]) : {};
+  return { ...paragraph, bullet: "none", runs: [{ ...format, text: checked ? "☑ " : "☐ " }, ...native] };
+}
+
+/** A text box's paragraphs as DrawingML can hold them (see `nativePresentationParagraph`). */
+export function nativePresentationParagraphs(paragraphs: readonly PresentationParagraph[]) {
+  return paragraphs.map((paragraph) => nativePresentationParagraph(paragraph));
+}
+
+/** Whether every paragraph is already plain DrawingML: nothing Spectra-only to degrade. */
+export function presentationParagraphsAreNative(paragraphs: readonly PresentationParagraph[]) {
+  return paragraphs.every((paragraph) =>
+    paragraph.checked === undefined && paragraph.block === undefined && paragraph.runs.every((run) => !run.code && !run.math));
+}
+
+/** A text box's words, one paragraph per line: what search, titles and the AI read. */
+export function presentationParagraphsText(paragraphs: readonly PresentationParagraph[]) {
+  return paragraphs.map((paragraph) => paragraph.runs.map((run) => run.text).join("")).join("\n");
+}
+
+/**
+ * A text box given new paragraphs from its rich field. Its words are kept
+ * beside them, so search, the slide title and the AI read the same text.
+ */
+export function withPresentationObjectParagraphs(
+  object: PresentationObject,
+  paragraphs: PresentationParagraph[],
+): PresentationObject {
+  return {
+    ...object,
+    content: {
+      ...(typeof object.content === "string" ? {} : record(object.content)),
+      text: presentationParagraphsText(paragraphs),
+      paragraphs,
+    },
+  };
 }
 
 export function withPresentationObjectText(

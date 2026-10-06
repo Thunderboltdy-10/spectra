@@ -1334,6 +1334,18 @@ export const publishAgent = mutation({
       throw new Error(
         "AGENT_EVAL_GATE_REQUIRED: Run and pass the current draft evaluation suite before release.",
       );
+    if (passingEval) {
+      // A test saved from the bench after the last passing run is not yet in
+      // that run, though the draft itself has not changed.
+      const savedTests = await ctx.db
+        .query("agentBenchCases")
+        .withIndex("by_agent_created", (q) => q.eq("agentId", artifact._id))
+        .take(50);
+      if (savedTests.some((test) => test.updatedAt > passingEval.startedAt))
+        throw new Error(
+          "AGENT_EVAL_GATE_REQUIRED: Run checks again so they include the tests you saved.",
+        );
+    }
     const previous = artifact.currentVersionId
       ? await ctx.db.get(artifact.currentVersionId)
       : null;
@@ -1766,6 +1778,47 @@ export const listAgentsForSwitch = query({
           left.title.localeCompare(right.title),
       )
       .slice(0, 100);
+  },
+});
+
+/**
+ * The newest release the bench can compare a draft with: whatever rollout it
+ * went out on, since the creator tests their own agent.
+ */
+export const agentBenchRelease = query({
+  args: { agentId: v.id("spectraArtifacts") },
+  handler: async (ctx, args) => {
+    const { artifact } = await requireArtifactCapability(
+      ctx,
+      args.agentId,
+      "modify",
+    );
+    if (artifact.blueprintKey !== "agent") return null;
+    const release = await latestPublishedAgentRelease(ctx, artifact._id, [
+      "internal_test",
+      "limited",
+      "published",
+    ]);
+    if (!release) return null;
+    const version = await ctx.db.get(release.versionId);
+    if (
+      !version ||
+      version.artifactId !== artifact._id ||
+      version.schoolId !== artifact.schoolId
+    )
+      return null;
+    const snapshot = await loadVersionAfter(ctx, version);
+    const state =
+      snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+        ? (snapshot as Record<string, unknown>)
+        : {};
+    return {
+      releaseNumber: release.releaseNumber,
+      title: typeof state.title === "string" ? state.title : artifact.title,
+      summary:
+        typeof state.summary === "string" ? state.summary : artifact.summary,
+      content: state.content ?? null,
+    };
   },
 });
 

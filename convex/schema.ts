@@ -3317,6 +3317,47 @@ export default defineSchema({
     .index("by_agent_hash_status", ["agentId", "contentHash", "status"])
     .index("by_school_created", ["schoolId", "createdAt"]),
 
+  /**
+   * Bench cases a creator kept as tests (EDITORS.md, "Agents (user-built)").
+   * Each joins the agent's evaluation suite in the regression layer, so "Run
+   * checks" includes it.
+   */
+  agentBenchCases: defineTable({
+    agentId: v.id("spectraArtifacts"),
+    schoolId: v.id("schools"),
+    creatorAccountId: v.id("accounts"),
+    prompt: v.string(),
+    promptKey: v.string(),
+    mustInclude: v.array(v.string()),
+    mustNotInclude: v.array(v.string()),
+    rubric: v.optional(v.string()),
+    required: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_agent_created", ["agentId", "createdAt"])
+    .index("by_agent_prompt", ["agentId", "promptKey"])
+    .index("by_school_created", ["schoolId", "createdAt"]),
+
+  /**
+   * Answers the bench got, kept per person so a prompt's next run can be
+   * compared with its previous one, or with the last release's answer.
+   */
+  agentBenchRuns: defineTable({
+    agentId: v.id("spectraArtifacts"),
+    schoolId: v.id("schools"),
+    accountId: v.id("accounts"),
+    prompt: v.string(),
+    promptKey: v.string(),
+    target: v.union(v.literal("draft"), v.literal("release")),
+    releaseNumber: v.optional(v.number()),
+    output: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_agent_account_created", ["agentId", "accountId", "createdAt"])
+    .index("by_agent_account_prompt", ["agentId", "accountId", "promptKey", "createdAt"])
+    .index("by_school_created", ["schoolId", "createdAt"]),
+
   agentFeedback: defineTable({
     agentId: v.id("spectraArtifacts"),
     agentVersionId: v.id("spectraArtifactVersions"),

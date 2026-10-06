@@ -10,6 +10,12 @@ import {
 import { writeAuditEvent } from "./auditShared";
 import { assertSchoolModelTokenCeiling, recordModelTokenUsage } from "./metering";
 import { commitDirectHumanChange, commitHumanCheckpoint } from "./changeGroups";
+import {
+  BENCH_LIMITS,
+  benchChecksEmpty,
+  benchPromptKey,
+  normalizeBenchChecks,
+} from "../src/features/spectra/agents/foundry/bench";
 
 const vEvalResult = v.object({
   caseId: v.string(),
@@ -269,7 +275,11 @@ export const admitModelWork = mutation({
 export const recordModelWork = mutation({
   args: {
     agentId: v.id("spectraArtifacts"),
-    purpose: v.union(v.literal("agent_foundry"), v.literal("agent_eval_generate")),
+    purpose: v.union(
+      v.literal("agent_foundry"),
+      v.literal("agent_eval_generate"),
+      v.literal("agent_bench"),
+    ),
     inputTokens: v.number(),
     outputTokens: v.number(),
     timestamp: v.number(),
@@ -477,6 +487,220 @@ export const evalRuns = query({
       currentContentHash: await agentDraftHash(artifact),
       runs,
     };
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Bench: sample prompts, their answers, and the tests saved from them */
+/* ------------------------------------------------------------------ */
+
+async function requireBenchAgent(
+  ctx: Parameters<typeof requireArtifactCapability>[0],
+  agentId: Id<"spectraArtifacts">,
+) {
+  const access = await requireArtifactCapability(ctx, agentId, "modify");
+  if (access.artifact.blueprintKey !== "agent" || !access.artifact.schoolId)
+    throw new Error("AGENT_INVALID: This is not an agent.");
+  return { ...access, schoolId: access.artifact.schoolId };
+}
+
+function benchPrompt(prompt: string) {
+  const text = prompt.trim();
+  if (!text)
+    throw new Error("AGENT_BENCH_PROMPT_REQUIRED: Write the question first.");
+  if (text.length > BENCH_LIMITS.prompt)
+    throw new Error(
+      "AGENT_BENCH_PROMPT_TOO_LONG: Keep the question under 4,000 characters.",
+    );
+  return text;
+}
+
+function benchCaseView(row: Doc<"agentBenchCases">) {
+  return {
+    id: row._id as string,
+    prompt: row.prompt,
+    checks: {
+      mustInclude: row.mustInclude,
+      mustNotInclude: row.mustNotInclude,
+      ...(row.rubric ? { rubric: row.rubric } : {}),
+    },
+    required: row.required,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+/** Saved tests, oldest first, as the suite and the bench both read them. */
+export async function loadBenchCases(
+  ctx: Parameters<typeof requireArtifactCapability>[0],
+  agentId: Id<"spectraArtifacts">,
+) {
+  return ctx.db
+    .query("agentBenchCases")
+    .withIndex("by_agent_created", (q) => q.eq("agentId", agentId))
+    .take(BENCH_LIMITS.savedCases);
+}
+
+export const benchCases = query({
+  args: { agentId: v.id("spectraArtifacts") },
+  handler: async (ctx, args) => {
+    await requireBenchAgent(ctx, args.agentId);
+    return (await loadBenchCases(ctx, args.agentId)).map(benchCaseView);
+  },
+});
+
+/**
+ * Keeps a bench prompt as a test. The same question saved twice updates the
+ * one test rather than adding a second.
+ */
+export const saveBenchCase = mutation({
+  args: {
+    agentId: v.id("spectraArtifacts"),
+    caseId: v.optional(v.id("agentBenchCases")),
+    prompt: v.string(),
+    mustInclude: v.array(v.string()),
+    mustNotInclude: v.array(v.string()),
+    rubric: v.optional(v.string()),
+    required: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const { actor, schoolId } = await requireBenchAgent(ctx, args.agentId);
+    const prompt = benchPrompt(args.prompt);
+    const checks = normalizeBenchChecks(args);
+    if (benchChecksEmpty(checks))
+      throw new Error(
+        "AGENT_BENCH_CHECKS_REQUIRED: Say what a good answer must or must not do.",
+      );
+    const promptKey = benchPromptKey(prompt);
+    const now = Date.now();
+    const fields = {
+      prompt,
+      promptKey,
+      mustInclude: checks.mustInclude,
+      mustNotInclude: checks.mustNotInclude,
+      rubric: checks.rubric,
+      required: args.required ?? true,
+      updatedAt: now,
+    };
+    let existing: Doc<"agentBenchCases"> | null = null;
+    if (args.caseId) {
+      existing = await ctx.db.get(args.caseId);
+      if (!existing || existing.agentId !== args.agentId)
+        throw new Error("AGENT_BENCH_CASE_MISSING: That test is gone.");
+    } else {
+      existing = await ctx.db
+        .query("agentBenchCases")
+        .withIndex("by_agent_prompt", (q) =>
+          q.eq("agentId", args.agentId).eq("promptKey", promptKey),
+        )
+        .first();
+    }
+    if (existing) {
+      await ctx.db.patch(existing._id, fields);
+      return { caseId: existing._id, created: false };
+    }
+    const saved = await loadBenchCases(ctx, args.agentId);
+    if (saved.length >= BENCH_LIMITS.savedCases)
+      throw new Error(
+        "AGENT_BENCH_FULL: An agent keeps up to 50 tests. Remove one first.",
+      );
+    const caseId = await ctx.db.insert("agentBenchCases", {
+      ...fields,
+      agentId: args.agentId,
+      schoolId,
+      creatorAccountId: actor.accountId,
+      createdAt: now,
+    });
+    return { caseId, created: true };
+  },
+});
+
+export const removeBenchCase = mutation({
+  args: {
+    agentId: v.id("spectraArtifacts"),
+    caseId: v.id("agentBenchCases"),
+  },
+  handler: async (ctx, args) => {
+    await requireBenchAgent(ctx, args.agentId);
+    const row = await ctx.db.get(args.caseId);
+    if (!row || row.agentId !== args.agentId) return { removed: false };
+    await ctx.db.delete(row._id);
+    return { removed: true };
+  },
+});
+
+/** The signed-in person's recent bench answers for this agent, newest first. */
+export const benchRuns = query({
+  args: { agentId: v.id("spectraArtifacts"), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const { actor } = await requireBenchAgent(ctx, args.agentId);
+    const rows = await ctx.db
+      .query("agentBenchRuns")
+      .withIndex("by_agent_account_created", (q) =>
+        q.eq("agentId", args.agentId).eq("accountId", actor.accountId),
+      )
+      .order("desc")
+      .take(Math.max(1, Math.min(120, args.limit ?? 120)));
+    return rows.map((row) => ({
+      id: row._id as string,
+      prompt: row.prompt,
+      target: row.target,
+      ...(row.releaseNumber !== undefined
+        ? { releaseNumber: row.releaseNumber }
+        : {}),
+      output: row.output,
+      createdAt: row.createdAt,
+    }));
+  },
+});
+
+/**
+ * Keeps one bench answer so the next run of the same prompt has something to
+ * be compared with. Only the latest few per prompt and target are kept.
+ */
+export const recordBenchRun = mutation({
+  args: {
+    agentId: v.id("spectraArtifacts"),
+    prompt: v.string(),
+    target: v.union(v.literal("draft"), v.literal("release")),
+    releaseNumber: v.optional(v.number()),
+    output: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { actor, schoolId } = await requireBenchAgent(ctx, args.agentId);
+    const prompt = benchPrompt(args.prompt);
+    const promptKey = benchPromptKey(prompt);
+    const now = Date.now();
+    const runId = await ctx.db.insert("agentBenchRuns", {
+      agentId: args.agentId,
+      schoolId,
+      accountId: actor.accountId,
+      prompt,
+      promptKey,
+      target: args.target,
+      ...(args.target === "release" && args.releaseNumber !== undefined
+        ? { releaseNumber: args.releaseNumber }
+        : {}),
+      output: args.output.slice(0, BENCH_LIMITS.output),
+      createdAt: now,
+    });
+    const recent = await ctx.db
+      .query("agentBenchRuns")
+      .withIndex("by_agent_account_prompt", (q) =>
+        q
+          .eq("agentId", args.agentId)
+          .eq("accountId", actor.accountId)
+          .eq("promptKey", promptKey),
+      )
+      .order("desc")
+      .take(BENCH_LIMITS.runsPerPrompt * 4);
+    await Promise.all(
+      recent
+        .filter((row) => row.target === args.target)
+        .slice(BENCH_LIMITS.runsPerPrompt)
+        .map((row) => ctx.db.delete(row._id)),
+    );
+    return { runId, createdAt: now };
   },
 });
 

@@ -1,5 +1,5 @@
 import type { AnyExtension } from "@tiptap/core";
-import { getStyleProperty } from "@tiptap/core";
+import { Extension, getStyleProperty } from "@tiptap/core";
 import TiptapLink from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import { TaskItem } from "@tiptap/extension-task-item";
@@ -11,6 +11,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { AiTextResolve } from "./ai-text-resolve";
 import { Callout } from "./callout-node";
 import { Equation, InlineEquation } from "./equation-node";
+import { LIST_FILLER } from "../rich-content/prosemirror";
 
 /** A change that came in through a field's value: someone else's text (a peer's, or Spectra's). */
 export const INCOMING_META = "spectraIncomingValue";
@@ -49,6 +50,31 @@ export const ScaledFontSize = FontSize.extend({
   },
 });
 
+/**
+ * Marks the empty line a field puts at the top of a list item that opens with
+ * a deeper list or a block, so it is told apart from an empty bullet someone
+ * left there (`richContentFromProseMirror` drops it). A line split from it is
+ * an ordinary line.
+ */
+export const ListFiller = Extension.create({
+  name: "listFiller",
+  addGlobalAttributes() {
+    return [
+      {
+        types: ["paragraph"],
+        attributes: {
+          [LIST_FILLER]: {
+            default: null,
+            keepOnSplit: false,
+            parseHTML: (element) => (element.hasAttribute("data-list-filler") ? true : null),
+            renderHTML: (attributes) => (attributes[LIST_FILLER] ? { "data-list-filler": "" } : {}),
+          },
+        },
+      },
+    ];
+  },
+});
+
 export type FieldExtensionOptions = {
   placeholder: string;
   /** Where the field is: Spectra's words resolve from a blur while it writes the region around it. */
@@ -74,6 +100,7 @@ export function fieldExtensions({ placeholder, host, box = false }: FieldExtensi
     TaskList,
     TaskItem.configure({ nested: true }),
     Callout,
+    ListFiller,
     TextStyle,
     FontFamily,
     ScaledFontSize,

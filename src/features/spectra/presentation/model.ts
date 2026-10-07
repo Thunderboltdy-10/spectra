@@ -34,11 +34,18 @@ export type PresentationParagraph = {
   /** Set on a checklist item (with `bullet: "bullet"`). Spectra-only: PowerPoint gets a ☐ or ☑ bullet. */
   checked?: boolean;
   /**
-   * A line of a quote, a code block or a block equation (whose runs hold its
-   * LaTeX). Spectra-only: PowerPoint gets italic, monospaced or Cambria Math text.
+   * A line of a quote, a callout, a code block or a block equation (whose runs
+   * hold its LaTeX). Spectra-only: PowerPoint gets italic (a quote or a
+   * callout), monospaced or Cambria Math text.
    */
-  block?: "quote" | "code" | "math";
+  block?: "quote" | "callout" | "code" | "math";
+  /** A callout's tone, with `block: "callout"`. */
+  tone?: PresentationCalloutTone;
 };
+
+/** The callout tones a slide keeps, as the shared editor offers them. */
+export type PresentationCalloutTone = "info" | "tip" | "warning";
+const CALLOUT_TONES = new Set<unknown>(["info", "tip", "warning"]);
 
 export type PresentationTextContent = {
   text: string;
@@ -421,8 +428,11 @@ export function presentationObjectParagraphs(
           ? { bullet: paragraph.bullet }
           : {}),
         ...(typeof paragraph.checked === "boolean" ? { checked: paragraph.checked } : {}),
-        ...(paragraph.block === "quote" || paragraph.block === "code" || paragraph.block === "math"
+        ...(paragraph.block === "quote" || paragraph.block === "callout" || paragraph.block === "code" || paragraph.block === "math"
           ? { block: paragraph.block }
+          : {}),
+        ...(paragraph.block === "callout" && CALLOUT_TONES.has(paragraph.tone)
+          ? { tone: paragraph.tone as PresentationCalloutTone }
           : {}),
       } satisfies PresentationParagraph];
     });
@@ -566,14 +576,14 @@ export const NATIVE_CODE_FACE = "Consolas";
 export const NATIVE_MATH_FACE = "Cambria Math";
 
 /**
- * One paragraph as DrawingML can hold it. Checklists, quotes, code and
- * equations are Spectra's; PowerPoint gets the nearest thing it has: a ☐ or ☑
- * before the words (or, with `checklist: "bullet"`, kept as a bullet whose
- * glyph the writer chooses), italic quotes, monospaced code and equations as
- * their LaTeX in Cambria Math.
+ * One paragraph as DrawingML can hold it. Checklists, quotes, callouts, code
+ * and equations are Spectra's; PowerPoint gets the nearest thing it has: a ☐
+ * or ☑ before the words (or, with `checklist: "bullet"`, kept as a bullet
+ * whose glyph the writer chooses), italic quotes and callouts, monospaced code
+ * and equations as their LaTeX in Cambria Math.
  */
 export function nativePresentationParagraph(
-  { checked, block, runs, ...paragraph }: PresentationParagraph,
+  { checked, block, tone: _tone, runs, ...paragraph }: PresentationParagraph,
   checklist: "prefix" | "bullet" = "prefix",
 ): PresentationParagraph {
   const native = runs.map(({ code, math, ...run }) => {
@@ -582,7 +592,7 @@ export function nativePresentationParagraph(
       ...run,
       ...(math || block === "math" ? { text: run.text.replace(/\s*\r?\n\s*/g, " ") } : {}),
       ...(face ? { fontFamily: face } : {}),
-      ...(block === "quote" && run.italic === undefined ? { italic: true } : {}),
+      ...((block === "quote" || block === "callout") && run.italic === undefined ? { italic: true } : {}),
     };
   });
   if (checked === undefined || checklist === "bullet") return { ...paragraph, runs: native };

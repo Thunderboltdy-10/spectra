@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState, LoadingRows } from "@/components/ui/page-state";
 import { PanelTabs, SidePanel } from "@/components/ui/side-panel";
-import { plainText } from "../../../../../shared/semantic-chunks";
+import { SpectraStoredText } from "../../components/spectra-rich-content";
+import { plainTextFromStored } from "../../rich-content";
 import { beginCreation, useLifeArrival, useLifeDeparture, useLifeLanding } from "../../life/use-life";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
@@ -282,8 +283,8 @@ function CalendarDatePicker({
 }
 
 function planSubtitle(item: CalendarItem) {
-  const notes = item.notes?.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-  if (notes && notes.length <= 48 && !notes.includes("**")) return notes;
+  const notes = item.notes ? plainTextFromStored(item.notes).replace(/\s+/g, " ").trim() : "";
+  if (notes && notes.length <= 48) return notes;
   return "Plan";
 }
 
@@ -1585,8 +1586,9 @@ function CalendarItemDetails({
   // School records belong to their source; everything a person placed here
   // (events, scheduled work) can be taken off again.
   const removable = !item.sourceLocked;
-  // Notes can arrive as rich text from a plan or from ManageBac: read them as words.
-  const notes = item.notes ? plainText(item.notes) : "";
+  // Notes arrive as editor HTML or Markdown from a plan, Spectra or ManageBac:
+  // they are drawn by the shared renderer, and an empty editor value shows nothing.
+  const hasNotes = item.notes ? Boolean(plainTextFromStored(item.notes)) : false;
   return (
     <div ref={ref} aria-label={`${item.title} details`} className="min-w-0 px-1 pb-4">
       <span className="inline-flex items-center gap-2 text-caption font-medium text-[var(--text-secondary)]">
@@ -1612,10 +1614,12 @@ function CalendarItemDetails({
             <dd className="mt-0.5">{item.location}</dd>
           </div>
         ) : null}
-        {notes ? (
+        {hasNotes ? (
           <div>
             <dt className="text-caption text-[var(--text-tertiary)]">Notes</dt>
-            <dd className="mt-0.5 whitespace-pre-wrap leading-5 text-[var(--text-secondary)]">{notes}</dd>
+            <dd className="mt-0.5 text-[var(--text-secondary)]">
+              <SpectraStoredText value={item.notes!} className="text-ui" />
+            </dd>
           </div>
         ) : null}
       </dl>

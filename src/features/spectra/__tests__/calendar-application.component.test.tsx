@@ -390,17 +390,34 @@ describe("Calendar application", () => {
     expect(screen.queryByRole("button", { name: "Remove from Calendar" })).toBeNull();
   });
 
-  it("reads an event's notes as words, not markup", async () => {
+  it("draws an event's notes as rich text with the shared renderer, never as markup", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
     installFetch(() => undefined, [
-      { ...workBlock(), notes: "<p>Bring the <strong>lab book</strong></p><p>Room 4</p>" },
+      { ...workBlock(), notes: "<p>Bring the <strong>lab book</strong></p><ul><li><p>Room 4</p></li></ul>" },
     ]);
     render(<CalendarApplication />);
     fireEvent.click(await screen.findByTitle("Essay draft"));
     const details = screen.getByLabelText("Essay draft details");
-    expect(details.textContent).toContain("Bring the lab book");
-    expect(details.textContent).toContain("Room 4");
+    const prose = details.querySelector(".spectra-prose");
+    expect(prose).toBeTruthy();
+    expect(prose!.querySelector("strong")?.textContent).toBe("lab book");
+    expect(prose!.querySelector("ul li")?.textContent).toBe("Room 4");
     expect(details.textContent).not.toContain("<p>");
+  });
+
+  it("draws Markdown notes the same way, and shows no Notes for an empty editor value", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
+    installFetch(() => undefined, [
+      { ...workBlock(), notes: "Read **chapter 3** first" },
+      { ...workBlock(), id: "block-empty", title: "Empty notes", taskItemId: "task-2", notes: "<p></p>", startAt: Date.parse("2026-09-29T09:00:00Z"), endAt: Date.parse("2026-09-29T10:00:00Z") },
+    ]);
+    render(<CalendarApplication />);
+    fireEvent.click(await screen.findByTitle("Essay draft"));
+    const details = screen.getByLabelText("Essay draft details");
+    expect(details.querySelector(".spectra-prose strong")?.textContent).toBe("chapter 3");
+    expect(details.textContent).not.toContain("**");
+    fireEvent.click(await screen.findByTitle("Empty notes"));
+    expect(within(screen.getByLabelText("Empty notes details")).queryByText("Notes")).toBeNull();
   });
 
   it("opens a plan's work in the Side instead of a page of its own", async () => {

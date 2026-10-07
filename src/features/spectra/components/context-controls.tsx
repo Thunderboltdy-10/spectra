@@ -273,6 +273,9 @@ export function GlobalSearch({
                 <div data-life-ghost className="h-10 animate-pulse rounded-control bg-[var(--bg-secondary)] [animation-delay:180ms]" />
               </div>
             ) : null}
+            {ready && work.degraded && work.degraded !== "index_partial" ? (
+              <p role="status" className="px-2 py-1 text-caption text-[var(--text-tertiary)]">Matching exact words only right now.</p>
+            ) : null}
             {!ready ? (
               <div className="px-3 py-10 text-center">
                 <Search className="mx-auto h-5 w-5 text-[var(--text-tertiary)]" />

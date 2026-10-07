@@ -1,4 +1,7 @@
 import { createHmac, randomUUID } from "node:crypto";
+import { estimateTokens } from "@/features/spectra/ai/harness/compaction";
+import type { HarnessMessage } from "@/features/spectra/ai/harness/types";
+import { insideRunUsageLedger, recordProviderUsage } from "@/features/spectra/ai/run-usage";
 import { convexMutation } from "@/lib/convex-server";
 
 /**
@@ -56,6 +59,41 @@ export function openRouterTokens(usage: unknown): ModelTokens {
     inputTokens: count(record.prompt_tokens),
     outputTokens: count(record.completion_tokens),
   };
+}
+
+/** What a harness turn (callSpectraModel) reported it spent. */
+export function turnTokens(usage?: { promptTokens?: number; completionTokens?: number }): ModelTokens {
+  return { inputTokens: usage?.promptTokens ?? 0, outputTokens: usage?.completionTokens ?? 0 };
+}
+
+/**
+ * A stopped stream ends before the provider reports usage, so what it spent
+ * is estimated: the messages sent, and the text that came back before Stop.
+ */
+export function stoppedTokens(messages: readonly HarnessMessage[], streamedChars: number): ModelTokens {
+  return { inputTokens: estimateTokens(messages), outputTokens: Math.ceil(Math.max(0, streamedChars) / 3.5) };
+}
+
+/**
+ * Meters agent model work done through the harness client. Inside a Spectra
+ * run, the run's ledger already counts every provider response the client
+ * reads, so a finished turn is not metered twice; a stopped one reported no
+ * usage, so its estimate joins the run's ledger. Outside a run it is metered
+ * as agent model work, signed by the server.
+ */
+export async function recordHarnessModelWork(
+  userId: string,
+  agentId: string,
+  purpose: AgentModelWorkPurpose,
+  spent: ModelTokens,
+  options: { stopped?: boolean } = {},
+) {
+  if (insideRunUsageLedger()) {
+    if (options.stopped)
+      recordProviderUsage({ promptTokens: spent.inputTokens, completionTokens: spent.outputTokens });
+    return;
+  }
+  await recordAgentModelWork(userId, agentId, purpose, spent);
 }
 
 /** Throws the school's plain "AI usage limit" message once it is reached. */

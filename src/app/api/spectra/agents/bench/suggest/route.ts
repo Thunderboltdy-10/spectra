@@ -13,7 +13,7 @@ import { callSpectraModel } from "@/features/spectra/ai/harness/model";
 import { ProviderUnavailableError } from "@/features/spectra/ai/harness/types";
 import { convexQuery } from "@/lib/convex-server";
 import { readConvexError } from "../../../../../../../shared/convex-error.mjs";
-import { admitAgentModelWork, recordAgentModelWork } from "../../model-work";
+import { admitAgentModelWork, recordHarnessModelWork, stoppedTokens, turnTokens } from "../../model-work";
 
 /*
  * Model-written suggestions for one bench answer: the model reads the draft's
@@ -21,7 +21,8 @@ import { admitAgentModelWork, recordAgentModelWork } from "../../model-work";
  * and proposes edits to the instructions. Nothing is applied here; the bench
  * shows them and the creator applies one to the draft. The model, provider and
  * reasoning come only from the environment, through the harness client, and
- * the work is admitted and metered like any other bench answer.
+ * the work is admitted and metered like any other bench answer, including
+ * when the creator stops it (then what it spent is estimated).
  */
 
 export const runtime = "nodejs";
@@ -70,20 +71,32 @@ export async function POST(request: Request) {
     const checks = normalizeBenchChecks(body.checks);
 
     await admitAgentModelWork(agentId);
-    const turn = await callSpectraModel({
-      messages: benchSuggestionMessages({
-        instructions,
-        prompt,
-        output,
-        ...(benchChecksEmpty(checks) ? {} : { checks }),
-      }),
-      signal: request.signal,
-      title: "Spectra agent bench suggestions",
+    const messages = benchSuggestionMessages({
+      instructions,
+      prompt,
+      output,
+      ...(benchChecksEmpty(checks) ? {} : { checks }),
     });
-    await recordAgentModelWork(userId, agentId, "agent_bench", {
-      inputTokens: turn.usage?.promptTokens ?? 0,
-      outputTokens: turn.usage?.completionTokens ?? 0,
-    });
+    let streamed = 0;
+    let turn: Awaited<ReturnType<typeof callSpectraModel>>;
+    try {
+      turn = await callSpectraModel({
+        messages,
+        signal: request.signal,
+        title: "Spectra agent bench suggestions",
+        onText: (delta) => {
+          streamed += delta.length;
+        },
+        onRetry: () => {
+          streamed = 0;
+        },
+      });
+    } catch (error) {
+      if (request.signal.aborted)
+        await recordHarnessModelWork(userId, agentId, "agent_bench", stoppedTokens(messages, streamed), { stopped: true });
+      throw error;
+    }
+    await recordHarnessModelWork(userId, agentId, "agent_bench", turnTokens(turn.usage));
     return NextResponse.json({ suggestions: parseBenchSuggestions(turn.text, instructions) });
   } catch (error) {
     const { message } = readConvexError(error);

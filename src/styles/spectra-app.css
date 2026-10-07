@@ -8303,6 +8303,10 @@ button[data-spectra-context-trigger="true"]::after {
   font-weight: 600;
 }
 
+.agent-bench-label .agent-bench-tag {
+  margin-left: 8px;
+}
+
 .agent-bench-answers {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

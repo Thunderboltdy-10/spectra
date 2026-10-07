@@ -54,6 +54,8 @@ export type BenchRun = {
   releaseNumber?: number;
   output: string;
   createdAt: number;
+  /** Stopped before it finished: `output` is what it had written. */
+  stopped?: true;
 };
 
 export type BenchCompareMode = "previous" | "release";
@@ -419,15 +421,16 @@ export function benchPair(
 ): BenchPair {
   const ordered = runs.slice().sort((left, right) => right.createdAt - left.createdAt);
   const drafts = ordered.filter((run) => run.target === "draft");
+  // The newest answer shows even when it was stopped; what it is compared
+  // with is a finished answer, unless only a stopped one exists.
   const current = drafts[0];
+  const released = ordered.filter(
+    (run) => run.target === "release" && releaseNumber !== undefined && run.releaseNumber === releaseNumber,
+  );
   const baseline =
     mode === "previous"
-      ? drafts[1]
-      : releaseNumber === undefined
-        ? undefined
-        : ordered.find(
-            (run) => run.target === "release" && run.releaseNumber === releaseNumber,
-          );
+      ? drafts.slice(1).find((run) => !run.stopped)
+      : (released.find((run) => !run.stopped) ?? released[0]);
   return {
     ...(current ? { current } : {}),
     ...(baseline ? { baseline } : {}),

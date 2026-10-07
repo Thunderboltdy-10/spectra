@@ -3360,6 +3360,8 @@ export default defineSchema({
     target: v.union(v.literal("draft"), v.literal("release")),
     releaseNumber: v.optional(v.number()),
     output: v.string(),
+    /** Stopped before it finished: the text is what it had written so far. */
+    stopped: v.optional(v.boolean()),
     createdAt: v.number(),
   })
     .index("by_agent_account_created", ["agentId", "accountId", "createdAt"])

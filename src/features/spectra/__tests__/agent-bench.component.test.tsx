@@ -306,11 +306,35 @@ describe("the agent bench", () => {
     expect(screen.getByText(/Stopped before the answer finished/)).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(document.querySelector('[data-ai-region="true"]')).toBeNull();
+    // What it wrote stays, marked stopped, and is not compared with the answer before.
+    expect(screen.getByText("Half an ans")).toBeTruthy();
+    expect(screen.getByText("Stopped", { selector: ".agent-bench-tag" })).toBeTruthy();
+    expect(screen.queryByText("What changed")).toBeNull();
     // The answer before is still there, and the question can run again.
     expect(screen.getByText("Old.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Run again/ }));
     await waitFor(() => expect(calls).toHaveLength(2));
     expect(screen.queryByText(/Stopped before the answer finished/)).toBeNull();
+  });
+
+  it("does not grade a stopped answer against its test", async () => {
+    controlledStream();
+    setup({
+      cases: [
+        {
+          id: "case_1",
+          prompt: "Mark it",
+          checks: { mustInclude: ["next step"], mustNotInclude: [] },
+          required: true,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      runs: [{ ...run("Mark it", "Half", 2), stopped: true }],
+    });
+    expect(await screen.findByText("Half")).toBeTruthy();
+    expect(screen.getByText("Stopped", { selector: ".agent-bench-tag" })).toBeTruthy();
+    expect(screen.queryByText(/checks hold/)).toBeNull();
   });
 
   it("stops Run all before it asks the next question", async () => {

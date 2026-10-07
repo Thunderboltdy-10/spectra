@@ -152,28 +152,7 @@ import {
   materializeJsonImages,
 } from "../organization/library-import";
 import { requestSpectra } from "../data/request";
-
-type ReferenceDocument = {
-  descendants: (
-    callback: (node: {
-      type: { name: string };
-      attrs: Record<string, unknown>;
-    }) => boolean | void,
-  ) => void;
-};
-
-function documentReferenceIds(document: ReferenceDocument) {
-  const ids = new Set<string>();
-  document.descendants((node) => {
-    if (
-      node.type.name === "spectraReference" &&
-      typeof node.attrs.embedId === "string" &&
-      node.attrs.embedId
-    )
-      ids.add(node.attrs.embedId);
-  });
-  return ids;
-}
+import { documentReferenceIds } from "./document-reference-ids";
 
 function documentMarkdown(json: JSONContent) {
   const renderInline = (node: JSONContent): string => {

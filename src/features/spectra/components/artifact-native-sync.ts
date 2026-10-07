@@ -58,15 +58,6 @@ type NativeLive = {
   unsynchronizedChanges: number;
 };
 
-function syncRejected(result: unknown): boolean {
-  return Boolean(
-    result &&
-    typeof result === "object" &&
-    "applied" in result &&
-    (result as { applied?: boolean }).applied === false,
-  );
-}
-
 function isRetryableMaterializationError(error: unknown) {
   if (error instanceof TypeError) return true;
   return Boolean(
@@ -192,30 +183,7 @@ export function useArtifactNativeSync({
     ) => {
       nativeProjectionOverrideRef.current = projection;
       const nextValue = { ...live.liveValue, content: projection };
-      const applied = await live.synchronize(nextValue);
-      if (typeof window !== "undefined") {
-        const target = window as Window & {
-          __spectraNativeProjection?: Array<Record<string, unknown>>;
-        };
-        const log = (target.__spectraNativeProjection ??= []);
-        log.push({
-          event: "applyExternalProjection",
-          applied: !syncRejected(applied),
-          rejected: syncRejected(applied),
-          blockCount: Array.isArray(
-            (projection as { blocks?: unknown[] } | null)?.blocks,
-          )
-            ? (projection as { blocks: unknown[] }).blocks.length
-            : null,
-          hasWordMarker: JSON.stringify(projection).includes("RCV1WORDNATIVE"),
-          at: Date.now(),
-        });
-        if (log.length > 40) log.splice(0, log.length - 40);
-      }
-      if (syncRejected(applied))
-        throw new Error(
-          `The ${nativeOfficeApplication} edit overlaps an active collaborator region.`,
-        );
+      await live.synchronize(nextValue);
       const snapshot = {
         ...currentSnapshotRef.current,
         content: projection,
@@ -347,11 +315,6 @@ export function useArtifactNativeSync({
       return;
     void live
       .synchronize({ ...initialLiveValue, content: refreshedContent })
-      .then((result) => {
-        if (syncRejected(result)) {
-          nativeProjectionArtifactRef.current = undefined;
-        }
-      })
       .catch(() => {
         nativeProjectionArtifactRef.current = undefined;
       });

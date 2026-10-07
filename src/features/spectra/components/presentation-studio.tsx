@@ -1019,6 +1019,7 @@ export function PresentationStudio({
   const [searchQuery, setSearchQuery] = useState("");
   const [stageZoom, setStageZoom] = useState(1);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const studioRef = useRef<HTMLElement>(null);
   const mediaTargetRef = useRef<{ slideId: string; objectId?: string } | undefined>(undefined);
   const importInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<DragState | undefined>(undefined);
@@ -1271,7 +1272,7 @@ export function PresentationStudio({
     if (readOnly || surface !== "slides" || !selectedObjectId) return;
     const keydown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
-      if (!eventBelongsToFocusedStudio(event, artifactId)) return;
+      if (!eventBelongsToFocusedStudio(event, artifactId, studioRef.current)) return;
       const target = event.target as HTMLElement | null;
       if (
         target?.matches("input, textarea, select") ||
@@ -1321,7 +1322,7 @@ export function PresentationStudio({
     if (readOnly || surface !== "slides") return;
     const keydown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
-      if (!eventBelongsToFocusedStudio(event, artifactId)) return;
+      if (!eventBelongsToFocusedStudio(event, artifactId, studioRef.current)) return;
       if (!event.ctrlKey && !event.metaKey) return;
       const target = event.target as HTMLElement | null;
       if (
@@ -3124,7 +3125,7 @@ export function PresentationStudio({
   const commandBlocked = (id: string) => commandRefusal(id) !== undefined;
 
   return (
-    <section className="presentation-studio">
+    <section ref={studioRef} className="presentation-studio">
       <ArtifactWorkbar
         label="Presentation"
         selectionContext={selectionContext}

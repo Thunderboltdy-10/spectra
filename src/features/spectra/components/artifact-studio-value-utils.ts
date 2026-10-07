@@ -815,3 +815,19 @@ export function studioHistoryShortcut(event: {
   if (key === "y" && !event.shiftKey) return "redo";
   return null;
 }
+
+/**
+ * Whether a `work.requestClose` reaches this studio. The same work can be open
+ * in the Side and edited in place inside another work at once: a request
+ * naming a copy (`instance`) reaches only that copy, and one naming none
+ * reaches only the work's own studio.
+ */
+export function closeRequestReaches(
+  request: { workId: string; instance?: string },
+  studio: { workId: string; instanceKey?: string },
+) {
+  return (
+    request.workId === studio.workId &&
+    (request.instance ?? null) === (studio.instanceKey ?? null)
+  );
+}

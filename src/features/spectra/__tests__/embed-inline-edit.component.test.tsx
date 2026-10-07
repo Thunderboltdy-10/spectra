@@ -21,17 +21,31 @@ vi.mock("../data/api", async (original) => ({
 }));
 // The work's own studio is covered by its own tests; here it only has to open and close.
 vi.mock("../components/artifact-studio", () => ({
-  ArtifactStudio: ({ artifact, onClose }: { artifact: { title: string }; onClose: () => void }) => (
-    <section aria-label="Embedded studio">
+  ArtifactStudio: ({
+    artifact,
+    onClose,
+    onDirtyChange,
+    instanceKey,
+  }: {
+    artifact: { _id: string; title: string };
+    onClose: () => void;
+    onDirtyChange: (id: string, dirty: boolean) => void;
+    instanceKey?: string;
+  }) => (
+    <section aria-label="Embedded studio" data-instance={instanceKey}>
       <p>{artifact.title} studio</p>
       <button type="button" onClick={onClose}>
         Close studio
+      </button>
+      <button type="button" onClick={() => onDirtyChange(artifact._id, true)}>
+        Make a change
       </button>
     </section>
   ),
 }));
 
 import { ArtifactEmbedById, editableInPlace } from "../components/artifact-embed-host";
+import { spectraBus } from "../events";
 
 function embed(overrides: Partial<SpectraArtifactEmbed> = {}): SpectraArtifactEmbed {
   return {
@@ -110,6 +124,26 @@ describe("editing an embedded work where it is embedded", () => {
     await screen.findByLabelText("Embedded studio");
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(screen.queryByLabelText("Embedded studio")).toBeNull();
+  });
+
+  it("asks only its own copy to close when Done leaves unsynced changes", async () => {
+    const requests: Array<{ workId: string; instance?: string }> = [];
+    const stop = spectraBus.handle("work.requestClose", (request) => {
+      requests.push(request);
+    });
+    try {
+      render(<ArtifactEmbedById embedId="embed-1" editInPlace onOpenSource={vi.fn()} />);
+      fireEvent.click(screen.getByRole("button", { name: "Edit Cell biology here" }));
+      const studio = await screen.findByLabelText("Embedded studio");
+      expect(studio.getAttribute("data-instance")).toBe("embed-1");
+      fireEvent.click(screen.getByRole("button", { name: "Make a change" }));
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      // The studio asks first; the same work open in the Side is not asked at all.
+      expect(requests).toEqual([{ workId: "deck-1", instance: "embed-1" }]);
+      expect(screen.getByLabelText("Embedded studio")).toBeTruthy();
+    } finally {
+      stop();
+    }
   });
 
   it("shows a ghost while the work loads and says when it cannot open", async () => {

@@ -63,26 +63,33 @@ export function commandContextFromContract(
  * Split view mounts one workbar per artifact. A global keydown without a
  * studio check fires every listener (CMD-1). When two or more studios are
  * marked, only the focused one handles the shortcut.
+ *
+ * `scope` is an element inside the listening studio. With it the check is by
+ * studio, not by work: the same work open twice (in the Side and edited in
+ * place inside another work) answers only where the keys were pressed, and a
+ * work edited inside another never takes the host's shortcuts, nor the host
+ * its.
  */
 export function eventBelongsToFocusedStudio(
   event: KeyboardEvent,
   artifactId: string,
+  scope?: Element | null,
 ): boolean {
   if (typeof document === "undefined") return true;
   const studios = document.querySelectorAll("[data-spectra-studio]");
   if (studios.length === 0) return true;
-  if (studios.length === 1) {
-    return studios[0]!.getAttribute("data-spectra-studio") === artifactId;
-  }
+  const owner = scope?.closest("[data-spectra-studio]") ?? null;
+  const matches = (studio: Element | null | undefined) =>
+    owner
+      ? studio === owner
+      : studio?.getAttribute("data-spectra-studio") === artifactId;
+  if (studios.length === 1) return matches(studios[0]);
   const active =
     document.activeElement instanceof Element ? document.activeElement : null;
   const focused = active?.closest("[data-spectra-studio]");
-  if (focused) {
-    return focused.getAttribute("data-spectra-studio") === artifactId;
-  }
+  if (focused) return matches(focused);
   const target = event.target instanceof Element ? event.target : null;
-  const fromEvent = target?.closest("[data-spectra-studio]");
-  return fromEvent?.getAttribute("data-spectra-studio") === artifactId;
+  return matches(target?.closest("[data-spectra-studio]"));
 }
 
 export function shortcutMatchesEvent(

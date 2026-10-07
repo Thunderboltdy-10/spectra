@@ -99,8 +99,9 @@ export function ArtifactEmbedById({
   }
 
   function stopEditing() {
-    // Unsynchronised changes go through the studio's own close, which asks first.
-    if (dirtyRef.current && workId) void spectraBus.command("work.requestClose", { workId });
+    // Unsynchronised changes go through the inline studio's own close, which
+    // asks first. Only that copy: the same work open in the Side stays open.
+    if (dirtyRef.current && workId) void spectraBus.command("work.requestClose", { workId, instance: embedId });
     else setEditing(false);
   }
 

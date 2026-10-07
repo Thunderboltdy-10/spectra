@@ -38,7 +38,12 @@ export type SpectraCommands = {
   "navigation.show": NavigationShow;
   "navigation.home": Record<string, never>;
   "surface.share": Record<string, never>;
-  "work.requestClose": { workId: string };
+  /**
+   * Ask a studio to close, asking first about unsynchronised changes.
+   * `instance` names one copy edited in place inside another work; without it
+   * the request is for the work's own studio, never those copies.
+   */
+  "work.requestClose": { workId: string; instance?: string };
   "work.reveal": { workId: string; path?: string };
   "quiz.preview": { workId: string };
   "deck.study": { workId: string };

@@ -30,6 +30,9 @@ export const FIELD_OBJECTS = [
   ".whiteboard-node",
   ".presentation-object",
   ".timetable-event",
+  ".sheets-chart-object",
+  ".foundry-skill",
+  ".foundry-pair",
   ".spectra-plan-list article",
   ".ProseMirror > :is(table, .tableWrapper, figure, img, hr, pre, [data-type])",
 ].join(", ");

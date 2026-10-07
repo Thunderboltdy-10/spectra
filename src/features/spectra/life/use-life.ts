@@ -479,11 +479,13 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
     const back = takeReturn(key);
     if (back) {
       arrived.add(key);
+      arrivedHere.add(element);
       return foldInto(element, back, figure);
     }
     const moved = takeDeparture(key);
     if (moved) {
       arrived.add(key);
+      arrivedHere.add(element);
       return moveInto(element, moved, figure);
     }
     if (arrived.has(key)) return;
@@ -496,6 +498,7 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
       const settling = performance.now() - navigatedAt < 1600;
       if (settling && kind !== "ai") return;
     }
+    arrivedHere.add(element);
     const show = veil(element);
     const shape = figureOf(element, { bars: "h2, h3, h4, [data-card-title], p", maxBars: 6, ...figure });
     if (seed) {
@@ -522,6 +525,8 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
 
 /* ------------------------------------------------------------ joining a list */
 
+/** Elements an arrival already brought (a move, a fold-back, a gathered seed): joining their list adds nothing. */
+const arrivedHere = new WeakSet<Element>();
 /** More joining one list at once than this is the list filling in (data, a filter, a tab), not things being made. */
 export const JOIN_BATCH = 2;
 /** What each list has shown, by its element; `opening` while its first items are still mounting. */
@@ -572,7 +577,7 @@ export function useLifeJoin(ref: RefObject<HTMLElement | null>, key: string, fig
   useLayoutEffect(() => {
     const element = ref.current;
     const list = element?.parentElement;
-    if (!element || !list) return;
+    if (!key || !element || !list) return;
     let shown = listsShown.get(list);
     const firstSight = !shown;
     if (!shown) {
@@ -587,7 +592,7 @@ export function useLifeJoin(ref: RefObject<HTMLElement | null>, key: string, fig
     }
     if (shown.keys.has(key)) return;
     shown.keys.add(key);
-    if (shown.opening || !life.on || performance.now() - navigatedAt < 1600 || withinForming(list)) return;
+    if (arrivedHere.has(element) || shown.opening || !life.on || performance.now() - navigatedAt < 1600 || withinForming(list)) return;
     const from = recentCause();
     // A list seen for the first time came with the view unless the reader just made it; Spectra's work arrives in a list already there.
     const kind: ArrivalKind | null = from ? "human" : !firstSight && prismWorking() ? "ai" : null;

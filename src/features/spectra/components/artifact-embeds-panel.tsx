@@ -1,5 +1,6 @@
 "use client";
 
+import { LifeKey } from "@/components/ui/life-moments";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { Loader2, Check, Link2, Plus, Search, X } from "@/components/icons/glyph-icons";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -677,6 +678,7 @@ export function ArtifactEmbedsPanel({
                 <div className="space-y-4">
                   {embeds.map((embed) => (
                     <div key={embed.embedId}>
+                      <LifeKey id={`embed:${embed.embedId}`} />
                       <ArtifactEmbed
                         embed={embed}
                         busy={busy?.includes(embed.embedId) ?? false}

@@ -4493,6 +4493,7 @@ function CodeSettings({
               return (
                 <div
                   key={dependency.key}
+                  data-life-object
                   className="flex items-center justify-between gap-3 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5"
                 >
                   <span className="min-w-0 text-micro font-semibold text-[var(--text-primary)]">
@@ -4741,6 +4742,7 @@ function CodeSettings({
               return (
                 <div
                   key={reference.id}
+                  data-life-object
                   className="flex flex-wrap items-center gap-3 rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5"
                 >
                   <FileImage className="h-4 w-4 shrink-0 text-[var(--accent-violet)]" />
@@ -4806,6 +4808,7 @@ function CodeSettings({
                   {retainedUnlinkedAssets.map((asset) => (
                     <div
                       key={asset.assetId}
+                      data-life-object
                       className="flex flex-wrap items-center gap-2 rounded-control bg-[var(--bg-elevated)] px-2.5 py-2 text-micro"
                     >
                       <span className="min-w-0 flex-1 truncate font-medium text-[var(--text-secondary)]">
@@ -4948,6 +4951,7 @@ function CodeSettings({
               return (
                 <div
                   key={binding.id}
+                  data-life-object
                   className="grid gap-2 rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 sm:grid-cols-[minmax(0,1fr)_minmax(120px,.35fr)_32px] sm:items-center"
                 >
                   <div className="min-w-0">
@@ -5087,6 +5091,7 @@ function CodeSettings({
             {importHistory.map((item) => (
               <div
                 key={item.jobId}
+                data-life-object
                 className="flex flex-wrap items-center gap-3 rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5"
               >
                 <FileArchive className="h-4 w-4 shrink-0 text-[var(--accent-cyan)]" />
@@ -5196,6 +5201,7 @@ function CodeSettings({
             {(content.tests ?? []).map((test, index) => (
               <div
                 key={test.id}
+                data-life-object
                 className="grid gap-2 rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 md:grid-cols-[24px_minmax(150px,.35fr)_minmax(0,1fr)_28px]"
               >
                 <input

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
+import { LifeKey } from "@/components/ui/life-moments";
 import type { BarCommand } from "@/components/ui/adaptive-bar";
 import { PageBody, PageHeader } from "@/components/ui/page-header";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -227,6 +228,7 @@ function WorkbarSettings({ p, update }: SectionProps<"workbar">) {
         const shippedName = workbarCommandName(commandId);
         return (
           <div key={commandId} className="rounded-card px-3.5 py-3">
+            <LifeKey id={`command-override:${commandId}`} />
             <div className="text-ui font-medium text-[var(--text-primary)]">{override.label ?? shippedName}</div>
             <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
               <Input

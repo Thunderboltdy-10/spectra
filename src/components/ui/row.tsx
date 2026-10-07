@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { Icon, type IconName } from "@/components/icons";
-import { useLifeArrival, useLifeDeparture, useLifeEntrance } from "@/features/spectra/life/use-life";
+import { useLifeArrival, useLifeDeparture, useLifeEntrance, useLifeJoin } from "@/features/spectra/life/use-life";
 import { cn } from "@/lib/utils";
 
 /**
@@ -10,7 +10,9 @@ import { cn } from "@/lib/utils";
  * trailing actions. Life comes built in: a row made just now (`fresh`) forms
  * out of the field where it appears, and a row that is removed parts there.
  * With a `lifeKey`, a row that moves (another group, another list) travels
- * there instead, and anything that departs under the same key flows into it.
+ * there instead, and anything that departs under the same key flows into it;
+ * a row that joins its list later forms from the press that made it, or
+ * arrives from the prism while Spectra works (LIFE.md, Join any list).
  */
 const ROW_FIGURE = { bars: "[data-row-title], [data-row-meta]" };
 
@@ -36,6 +38,7 @@ export const Row = React.forwardRef<
   React.useImperativeHandle(forwarded, () => ref.current!);
   useLifeEntrance(ref, { enabled: Boolean(fresh) && !lifeKey, ...ROW_FIGURE });
   useLifeArrival(ref, lifeKey, fresh ? "human" : undefined, ROW_FIGURE);
+  useLifeJoin(ref, lifeKey ?? "", ROW_FIGURE);
   useLifeDeparture(ref, true, ROW_FIGURE, lifeKey);
   return (
     <div

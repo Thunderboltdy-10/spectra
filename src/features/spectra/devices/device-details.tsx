@@ -157,6 +157,7 @@ function FolderRow({
   return (
     <Row
       glyph="folder"
+      lifeKey={`device-folder:${folder.id}`}
       title={folder.path}
       meta={`${folder.label}${progress}${folder.detail ? ` · ${folder.detail}` : ""}`}
       actionsVisible={working}

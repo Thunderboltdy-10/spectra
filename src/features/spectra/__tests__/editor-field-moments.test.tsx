@@ -40,6 +40,7 @@ vi.mock("../life/figure-dom", () => ({
 }));
 
 import {
+  FIELD_OBJECTS,
   BULK_BATCH,
   MAX_BANDS,
   SEEN_MS,
@@ -313,5 +314,15 @@ describe("the field in an editor", () => {
     expect(item.getAttribute("data-settling")).toBe("true");
     await settle(400);
     expect(item.hasAttribute("data-settling")).toBe(false);
+  });
+});
+
+describe("what counts as an object in a work", () => {
+  it("includes a sheet's charts and an agent's skills and examples", () => {
+    for (const className of ["sheets-chart-object", "foundry-skill", "foundry-pair"]) {
+      const element = document.createElement("div");
+      element.className = className;
+      expect(element.matches(FIELD_OBJECTS)).toBe(true);
+    }
   });
 });

@@ -17,6 +17,7 @@ vi.mock("../life/figure-dom", () => ({
 }));
 
 import { LifeKey } from "@/components/ui/life-moments";
+import { Row } from "@/components/ui/row";
 import { markCause, markNavigation } from "../life/use-life";
 
 function List({ ids }: { ids: string[] }) {
@@ -31,6 +32,16 @@ function List({ ids }: { ids: string[] }) {
         ))}
       </ul>
     </section>
+  );
+}
+
+function Rows({ ids, fresh }: { ids: string[]; fresh?: string }) {
+  return (
+    <div>
+      {ids.map((id) => (
+        <Row key={id} lifeKey={`row:${id}`} fresh={id === fresh} title={id} />
+      ))}
+    </div>
   );
 }
 
@@ -134,6 +145,26 @@ describe("an item joining a list", () => {
     view.rerender(<List ids={["e1", "e2", "e3", "e4"]} />);
     act(flushFrames);
     expect(field.form).not.toHaveBeenCalled();
+  });
+});
+
+describe("a keyed row joining its list", () => {
+  it("forms from the reader's press like any other item", () => {
+    const view = render(<Rows ids={["g1"]} />);
+    act(flushFrames);
+    markCause([40, 50]);
+    view.rerender(<Rows ids={["g1", "g2"]} />);
+    act(flushFrames);
+    expect(field.form).toHaveBeenCalledTimes(1);
+  });
+
+  it("forms once when its own arrival already brought it", () => {
+    const view = render(<Rows ids={["h1"]} />);
+    act(flushFrames);
+    markCause([40, 50]);
+    view.rerender(<Rows ids={["h1", "h2"]} fresh="h2" />);
+    act(flushFrames);
+    expect(field.form).toHaveBeenCalledTimes(1);
   });
 });
 

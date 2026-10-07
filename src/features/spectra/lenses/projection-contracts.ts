@@ -411,6 +411,25 @@ const xlsxChartSeriesProjectionSchema = z
   })
   .strict();
 
+const xlsxAnchorPointSchema = z
+  .object({ column: z.number().int().nonnegative(), row: z.number().int().nonnegative(), x: z.number(), y: z.number() })
+  .strict();
+/**
+ * Where a drawing sits by cell, as Excel stores it: the cell and pixel offset
+ * of its top-left corner, and either its bottom-right corner or its size.
+ * Read for placing an object over real column widths; never written back
+ * (the writer places by `position`) and never part of the semantic digest.
+ */
+export const xlsxDrawingAnchorSchema = z
+  .object({
+    from: xlsxAnchorPointSchema,
+    to: xlsxAnchorPointSchema.optional(),
+    width: z.number().optional(),
+    height: z.number().optional(),
+  })
+  .strict();
+const xlsxPositionSchema = z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }).strict();
+
 export const xlsxChartProjectionSchema = z
   .object({
     id: z.string(),
@@ -418,7 +437,8 @@ export const xlsxChartProjectionSchema = z
     sourceRange: z.string(),
     title: z.string(),
     showLegend: z.boolean().optional(),
-    position: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }).strict(),
+    position: xlsxPositionSchema,
+    anchor: xlsxDrawingAnchorSchema.optional(),
     series: z.array(xlsxChartSeriesProjectionSchema).optional(),
     partName: z.string().optional(),
     drawingPartName: z.string().optional(),
@@ -451,6 +471,22 @@ export const xlsxSheetProjectionSchema = z
     charts: z.array(xlsxChartProjectionSchema).optional(),
     validations: z.array(xlsxNativeRuleSchema).optional(),
     conditionalFormats: z.array(xlsxNativeRuleSchema).optional(),
+    /** Pictures on the sheet's drawing, read for showing. The drawing part keeps them. */
+    pictures: z.array(
+      z.object({
+        id: z.string(),
+        name: z.string().optional(),
+        description: z.string().optional(),
+        mediaPart: z.string(),
+        mediaType: z.string(),
+        position: xlsxPositionSchema,
+        anchor: xlsxDrawingAnchorSchema.optional(),
+      }).strict(),
+    ).optional(),
+    /** Excel notes by cell, read for showing. The comments part keeps them. */
+    comments: z.array(
+      z.object({ ref: z.string(), author: z.string().optional(), text: z.string() }).strict(),
+    ).optional(),
     /** The workbook relationship target, stable across worksheet reorder. */
     partName: z.string().optional(),
   })
@@ -478,6 +514,7 @@ export const xlsxProjectionSchema = z
 export type XlsxCellProjection = z.infer<typeof xlsxCellProjectionSchema>;
 export type XlsxTableProjection = z.infer<typeof xlsxTableProjectionSchema>;
 export type XlsxChartProjection = z.infer<typeof xlsxChartProjectionSchema>;
+export type XlsxDrawingAnchor = z.infer<typeof xlsxDrawingAnchorSchema>;
 export type XlsxSheetProjection = z.infer<typeof xlsxSheetProjectionSchema>;
 export type XlsxProjection = z.infer<typeof xlsxProjectionSchema>;
 

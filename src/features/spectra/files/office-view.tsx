@@ -10,6 +10,7 @@ import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import dynamic from "next/dynamic";
 import { EmptyState, ProblemState } from "@/components/ui/page-state";
 import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
@@ -20,9 +21,11 @@ import { launchFrom, useLifeLanding } from "../life/use-life";
 import { presentationSlideLabel, type PresentationContent } from "../presentation/model";
 import type { SpectraRichContentAst } from "../rich-content/ast";
 import { cellVisualStyle } from "../sheets/cell-style";
+import { conditionalCellCss } from "../sheets/conditional-format";
+import { EXCEL_DEFAULT_COLUMN_PIXELS, EXCEL_DEFAULT_ROW_PIXELS } from "../sheets/excel-units";
 import { columnName } from "../sheets/model";
 import type { OfficeViewKind } from "./file-kind";
-import { isPreviewMediaId, SHEET_PREVIEW_LIMITS, type OfficePreview, type OfficePreviewMedia, type SheetPreview, type SheetPreviewMerge, type SheetPreviewSheet } from "./office-preview";
+import { isPreviewMediaId, SHEET_PREVIEW_LIMITS, type OfficePreview, type OfficePreviewMedia, type SheetPreview, type SheetPreviewMerge, type SheetPreviewPlacement, type SheetPreviewSheet } from "./office-preview";
 import { loadOfficePreview, OfficePreviewRefusal } from "./office-preview-client";
 import { OfficeGhost } from "./office-ghost";
 
@@ -54,7 +57,7 @@ export default function OfficeView({ kind, url, filename, bytes }: { kind: Offic
     loadOfficePreview({ kind, url, bytes }, controller.signal).then(
       (preview) => {
         if (controller.signal.aborted) return;
-        setState({ status: "ready", preview, urls: objectUrls(preview.kind === "sheet" ? [] : preview.media) });
+        setState({ status: "ready", preview, urls: objectUrls(preview.media) });
       },
       (error: unknown) => {
         if (controller.signal.aborted) return;
@@ -76,8 +79,14 @@ export default function OfficeView({ kind, url, filename, bytes }: { kind: Offic
   const { preview, urls } = state;
   if (preview.kind === "document") return <DocumentView ast={preview.ast} urls={urls} />;
   if (preview.kind === "slides") return <SlidesView deck={preview.deck} media={preview.media} urls={urls} />;
-  return <WorkbookView workbook={preview} />;
+  return <WorkbookView workbook={preview} urls={urls} />;
 }
+
+/** Charts draw with the editor's chart, loaded only when a sheet has one. */
+const ChartPlot = dynamic(() => import("../components/sheets-chart-view").then((module) => module.SheetsChartPlot), {
+  ssr: false,
+  loading: () => <div className="h-full w-full" role="status" aria-label="Drawing chart" aria-busy="true" />,
+});
 
 /** Points each placeholder picture at its object URL. */
 function withMedia<T>(value: T, urls: ReadonlyMap<string, string>): T {
@@ -196,9 +205,9 @@ function SlidesView({ deck, media, urls }: { deck: PresentationContent; media: r
   );
 }
 
-/** The grid's own default sizes, so a workbook reads the same here as in Sheets. */
-const COLUMN_WIDTH = 122;
-const ROW_HEIGHT = 31;
+/** Excel's default sizes, so columns and rows without their own read as they do in Excel. */
+const COLUMN_WIDTH = EXCEL_DEFAULT_COLUMN_PIXELS;
+const ROW_HEIGHT = EXCEL_DEFAULT_ROW_PIXELS;
 const HEADER_HEIGHT = 28;
 const HEADER_WIDTH = 48;
 const OVERSCAN = 240;
@@ -221,7 +230,25 @@ function indexAt(starts: Float64Array, position: number) {
   return Math.max(0, low);
 }
 
-function WorkbookView({ workbook }: { workbook: SheetPreview }) {
+/** A placed object's box, in the grid's own pixels: by its cells when the file anchors it. */
+function placementRect(placement: SheetPreviewPlacement, columns: Float64Array, rows: Float64Array) {
+  const anchor = placement.anchor;
+  const columnAt = (index: number) => columns[Math.min(index, columns.length - 1)]!;
+  const rowAt = (index: number) => rows[Math.min(index, rows.length - 1)]!;
+  if (!anchor) return { ...placement.position };
+  const left = columnAt(anchor.from.column) + anchor.from.x;
+  const top = rowAt(anchor.from.row) + anchor.from.y;
+  if (anchor.to)
+    return {
+      x: left,
+      y: top,
+      width: Math.max(24, columnAt(anchor.to.column) + anchor.to.x - left),
+      height: Math.max(24, rowAt(anchor.to.row) + anchor.to.y - top),
+    };
+  return { x: left, y: top, width: anchor.width ?? placement.position.width, height: anchor.height ?? placement.position.height };
+}
+
+function WorkbookView({ workbook, urls }: { workbook: SheetPreview; urls: ReadonlyMap<string, string> }) {
   const [activeId, setActiveId] = useState(workbook.activeSheetId);
   const sheet = workbook.sheets.find((candidate) => candidate.id === activeId) ?? workbook.sheets[0];
   if (!sheet) return <EmptyState compact icon="sheet" title="This workbook has no visible sheets." />;
@@ -237,7 +264,7 @@ function WorkbookView({ workbook }: { workbook: SheetPreview }) {
   };
   return (
     <div className="file-viewer-workbook" data-file-view="sheet">
-      <SheetGrid key={sheet.id} sheet={sheet} />
+      <SheetGrid key={sheet.id} sheet={sheet} urls={urls} />
       {sheet.clipped ? (
         <p role="note" className="file-viewer-clip-note">
           Showing the first {SHEET_PREVIEW_LIMITS.rows.toLocaleString("en-US")} rows and {SHEET_PREVIEW_LIMITS.columns} columns. Open it in a new tab to see the rest.
@@ -266,7 +293,7 @@ function WorkbookView({ workbook }: { workbook: SheetPreview }) {
 
 type Viewport = { left: number; top: number; width: number; height: number };
 
-function SheetGrid({ sheet }: { sheet: SheetPreviewSheet }) {
+function SheetGrid({ sheet, urls }: { sheet: SheetPreviewSheet; urls: ReadonlyMap<string, string> }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState<Viewport>({ left: 0, top: 0, width: 960, height: 640 });
   const hiddenRows = useMemo(() => new Set(sheet.hiddenRows), [sheet.hiddenRows]);
@@ -340,12 +367,15 @@ function SheetGrid({ sheet }: { sheet: SheetPreviewSheet }) {
     const address = `${columnName(column)}${row + 1}`;
     const value = sheet.cells[address];
     const format = value?.format;
+    const note = sheet.notes[address];
     return (
       <div
         key={key}
         data-address={address}
         className={cn("file-viewer-cell", format?.wrap && "is-wrapped")}
         data-gridlines={sheet.showGridlines || undefined}
+        data-note={note ? "true" : undefined}
+        title={note ? (note.author ? `${note.author}: ${note.text}` : note.text) : undefined}
         style={{
           left: columns[column]! - columns[originColumn]!,
           top: rows[row]! - rows[originRow]!,
@@ -356,9 +386,11 @@ function SheetGrid({ sheet }: { sheet: SheetPreviewSheet }) {
           justifyContent: format?.align === "center" ? "center" : format?.align === "right" || (!format?.align && value?.numeric) ? "flex-end" : undefined,
           color: format?.textColor,
           backgroundColor: format?.fillColor,
+          ...conditionalCellCss(sheet.conditional[address]),
         }}
       >
         {value?.text}
+        {note ? <span aria-hidden className="file-viewer-note-mark" /> : null}
       </div>
     );
   };
@@ -386,6 +418,50 @@ function SheetGrid({ sheet }: { sheet: SheetPreviewSheet }) {
     }
     return cells;
   };
+
+  // Charts and pictures float over the body, placed by their cells and drawn
+  // only while near the window, so a sheet of charts scrolls like any other.
+  const visibleLeft = viewport.left + frozenWidth - OVERSCAN;
+  const visibleRight = viewport.left + viewport.width + OVERSCAN;
+  const visibleTop = viewport.top + frozenHeight - OVERSCAN;
+  const visibleBottom = viewport.top + viewport.height + OVERSCAN;
+  const near = (box: { x: number; y: number; width: number; height: number }) =>
+    box.x < visibleRight && box.x + box.width > visibleLeft && box.y < visibleBottom && box.y + box.height > visibleTop;
+  const drawingStyle = (box: { x: number; y: number; width: number; height: number }): CSSProperties => ({
+    left: box.x - frozenWidth,
+    top: box.y - frozenHeight,
+    width: box.width,
+    height: box.height,
+  });
+  const drawings = [
+    ...sheet.pictures.flatMap((picture) => {
+      const box = placementRect(picture, columns, rows);
+      if (!near(box)) return [];
+      const url = picture.mediaId ? urls.get(picture.mediaId) : undefined;
+      return [
+        url ? (
+          // eslint-disable-next-line @next/next/no-img-element -- a local object URL, not an optimisable asset
+          <img key={picture.id} src={url} alt={picture.label} className="file-viewer-drawing is-picture" style={drawingStyle(box)} />
+        ) : (
+          <div key={picture.id} role="img" aria-label={picture.label} className="file-viewer-drawing is-unshown" style={drawingStyle(box)}>
+            <span>{"This picture's format doesn't show here."}</span>
+          </div>
+        ),
+      ];
+    }),
+    ...sheet.charts.flatMap((chart) => {
+      const box = placementRect(chart, columns, rows);
+      if (!near(box)) return [];
+      return [
+        <figure key={chart.id} className="file-viewer-drawing is-chart" style={drawingStyle(box)} aria-label={chart.title || "Chart"}>
+          {chart.title ? <figcaption className="file-viewer-chart-title">{chart.title}</figcaption> : null}
+          <div className="file-viewer-chart-plot">
+            <ChartPlot chart={chart} plot={chart.plot} />
+          </div>
+        </figure>,
+      ];
+    }),
+  ];
 
   const bodyWidth = columns[sheet.columnCount]! - frozenWidth;
   const bodyHeight = rows[sheet.rowCount]! - frozenHeight;
@@ -444,6 +520,7 @@ function SheetGrid({ sheet }: { sheet: SheetPreviewSheet }) {
       </div>
       <div className="file-viewer-pane is-body" style={{ gridArea: "3 / 3 / 4 / 4" }}>
         {range(firstRow, lastRow, firstColumn, lastColumn, frozenRows, frozenColumns, sheet.rowCount, sheet.columnCount)}
+        {drawings}
       </div>
     </div>
   );

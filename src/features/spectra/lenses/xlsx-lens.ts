@@ -404,7 +404,9 @@ export async function xlsxSemanticDigest(
       showHeadings: sheet.showHeadings,
       tabColor: sheet.tabColor,
       tables: sheet.tables,
-      charts: sheet.charts,
+      // A chart's cell anchor is read for placement only; the writer places
+      // by `position`. Pictures and notes are read-only and stay out too.
+      charts: sheet.charts?.map(({ anchor: _anchor, ...chart }) => chart),
       validations: sheet.validations,
       conditionalFormats: sheet.conditionalFormats,
     })),

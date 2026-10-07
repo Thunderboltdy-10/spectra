@@ -230,7 +230,22 @@ export type SheetConditionalFormat =
       range: string;
       kind: "color_scale";
       minimumColor: string;
+      /** A three-colour scale's middle, at the 50th percentile as Excel puts it. */
+      midpointColor?: string;
       maximumColor: string;
+      priority?: number;
+      stopIfTrue?: boolean;
+    }
+  | {
+      /**
+       * A bar across the cell, as long as the value is large. Read from Excel
+       * and drawn; Spectra does not author data bars, and the workbook keeps
+       * Excel's own rule.
+       */
+      id: string;
+      range: string;
+      kind: "data_bar";
+      color: string;
       priority?: number;
       stopIfTrue?: boolean;
     }
@@ -836,10 +851,28 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
                       typeof rule.minimumColor === "string"
                         ? rule.minimumColor
                         : "#f1f8f4",
+                    ...(typeof rule.midpointColor === "string"
+                      ? { midpointColor: rule.midpointColor }
+                      : {}),
                     maximumColor:
                       typeof rule.maximumColor === "string"
                         ? rule.maximumColor
                         : "#78d2ad",
+                    ...(typeof rule.priority === "number"
+                      ? { priority: rule.priority }
+                      : {}),
+                    ...(typeof rule.stopIfTrue === "boolean"
+                      ? { stopIfTrue: rule.stopIfTrue }
+                      : {}),
+                  },
+                ];
+              if (rule.kind === "data_bar" && typeof rule.color === "string")
+                return [
+                  {
+                    id,
+                    range: rangeLabel(parseRange(rule.range)!),
+                    kind: "data_bar",
+                    color: rule.color,
                     ...(typeof rule.priority === "number"
                       ? { priority: rule.priority }
                       : {}),

@@ -53,7 +53,8 @@ describe("A Library file's read-only view", () => {
     mocks.load.mockResolvedValue({
       kind: "sheet",
       activeSheetId: "s",
-      sheets: [{ id: "s", name: "Budget", rowCount: 24, columnCount: 8, frozenRows: 0, frozenColumns: 0, hiddenRows: [], hiddenColumns: [], columnWidths: {}, rowHeights: {}, merges: [], showGridlines: true, clipped: false, cells: { A1: { text: "Rent" } } }],
+      sheets: [{ id: "s", name: "Budget", rowCount: 24, columnCount: 8, frozenRows: 0, frozenColumns: 0, hiddenRows: [], hiddenColumns: [], columnWidths: {}, rowHeights: {}, merges: [], conditional: {}, notes: {}, charts: [], pictures: [], showGridlines: true, clipped: false, cells: { A1: { text: "Rent" } } }],
+      media: [],
     });
     render(<ResourceSurface artifact={artifact("Budget.xlsx", "xlsx")} onClose={() => {}} />);
     expect(await screen.findByRole("alert")).toBeTruthy();

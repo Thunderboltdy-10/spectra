@@ -210,14 +210,26 @@ describe("FileViewer: Office files", () => {
         {
           id: "a", name: "Marks", rowCount: 24, columnCount: 8, frozenRows: 1, frozenColumns: 0, hiddenRows: [], hiddenColumns: [],
           columnWidths: {}, rowHeights: {}, merges: [{ row: 3, column: 0, rows: 1, columns: 2 }], showGridlines: true, clipped: false,
-          cells: { A1: { text: "Student", format: { bold: true } }, B2: { text: "7", numeric: true }, A4: { text: "Merged note" } },
+          cells: { A1: { text: "Student", format: { bold: true } }, B2: { text: "7", numeric: true }, A4: { text: "Merged note" }, B3: { text: "9", numeric: true } },
+          conditional: { B2: { backgroundColor: "var(--danger)" }, B3: { bar: { color: "var(--accent)", ratio: 0.5 } } },
+          notes: { C2: { author: "Ms Ade", text: "Check this mark" } },
+          charts: [],
+          pictures: [
+            { id: "p1", label: "School crest", mediaId: "spectra-preview-media:0", position: { x: 0, y: 0, width: 10, height: 10 }, anchor: { from: { column: 1, row: 4, x: 4, y: 2 }, to: { column: 3, row: 8, x: 0, y: 0 } } },
+            { id: "p2", label: "Old logo", position: { x: 0, y: 0, width: 10, height: 10 }, anchor: { from: { column: 4, row: 4, x: 0, y: 0 }, width: 80, height: 40 } },
+          ],
         },
         {
           id: "b", name: "Summary", tabColor: "var(--accent-mint)", rowCount: 24, columnCount: 8, frozenRows: 0, frozenColumns: 0, hiddenRows: [], hiddenColumns: [],
           columnWidths: {}, rowHeights: {}, merges: [], showGridlines: false, clipped: true, cells: { C3: { text: "Mean" } },
+          conditional: {}, notes: {}, charts: [], pictures: [],
         },
       ],
+      media: [{ id: "spectra-preview-media:0", mediaType: "image/png", bytes: new Uint8Array([137, 80, 78, 71]).buffer }],
     } satisfies OfficePreview);
+    // jsdom has no object URLs; the viewer only needs one per picture.
+    URL.createObjectURL = vi.fn(() => "blob:crest");
+    URL.revokeObjectURL = vi.fn();
     render(<FileViewer file={{ key: "x1", filename: "marks.xlsx", kind: "sheet", url: "https://files.example/marks" }} onClose={() => {}} />);
     const grid = await screen.findByRole("region", { name: "Marks, read-only" });
     const cell = (address: string) => grid.querySelector<HTMLElement>(`[data-address='${address}']`)!;
@@ -226,12 +238,23 @@ describe("FileViewer: Office files", () => {
     // Numbers sit to the right, as in Excel.
     expect(cell("B2").textContent).toBe("7");
     expect(cell("B2").style.textAlign).toBe("right");
-    // A merge spans the columns it covers, and the cell under it is not drawn.
-    expect(cell("A4").style.width).toBe("244px");
+    // A merge spans the columns it covers (Excel's 64px default), and the cell under it is not drawn.
+    expect(cell("A4").style.width).toBe("128px");
     expect(cell("B4")).toBeNull();
     // The frozen row is drawn in its own pane, which stays put while the body scrolls.
     expect(grid.querySelector(".is-frozen-rows [data-address='A1']")).toBeTruthy();
     expect(grid.querySelector(".is-body [data-address='B2']")).toBeTruthy();
+    // Conditional formats arrive evaluated: a fill, and a data bar as long as its value.
+    expect(cell("B2").style.backgroundColor).toBe("var(--danger)");
+    expect(cell("B3").style.backgroundSize).toBe("50% 72%");
+    // Excel's notes mark their cell and read on hover.
+    expect(cell("C2").getAttribute("title")).toBe("Ms Ade: Check this mark");
+    expect(cell("C2").querySelector(".file-viewer-note-mark")).toBeTruthy();
+    // Pictures sit on their cells; one the browser can't draw says so.
+    const crest = within(grid).getByRole("img", { name: "School crest" });
+    expect(crest.style.left).toBe("68px");
+    expect(crest.style.width).toBe("124px");
+    expect(within(grid).getByRole("img", { name: "Old logo" }).textContent).toContain("doesn't show here");
 
     const tabs = screen.getByRole("tablist", { name: "Sheets" });
     expect(within(tabs).getByRole("tab", { name: "Marks" }).getAttribute("aria-selected")).toBe("true");

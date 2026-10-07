@@ -16813,9 +16813,59 @@ html[data-spectra-motion="none"] .spectra-caption-live::after {
   display: flex;
   align-items: flex-end;
   overflow: hidden;
-  padding: 0 6px 5px;
+  /* Excel's 20px rows, so the text sits low and tight as it does there. */
+  padding: 0 5px 2px;
+  line-height: 1.25;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+.file-viewer-cell[data-note] {
+  cursor: help;
+}
+.file-viewer-note-mark {
+  position: absolute;
+  top: 0;
+  right: 0;
+  border-top: 6px solid var(--danger);
+  border-left: 6px solid transparent;
+}
+.file-viewer-drawing {
+  position: absolute;
+  z-index: 1;
+  margin: 0;
+}
+.file-viewer-drawing.is-picture {
+  object-fit: fill;
+}
+.file-viewer-drawing.is-unshown {
+  display: grid;
+  place-items: center;
+  padding: 8px;
+  border: 1px dashed var(--border-default);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  text-align: center;
+}
+.file-viewer-drawing.is-chart {
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--control-radius);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-sm);
+}
+.file-viewer-chart-title {
+  padding-bottom: 4px;
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  text-align: center;
+}
+.file-viewer-chart-plot {
+  min-height: 0;
+  flex: 1;
 }
 .file-viewer-cell[data-gridlines] {
   border-right: 1px solid var(--sheet-grid-line);

@@ -1,4 +1,5 @@
 "use client";
+import { conditionalCellCss, conditionalFormatStyles } from "../sheets/conditional-format";
 import { contentForDurableRequest } from "../data/durable-content";
 
 import {
@@ -477,26 +478,6 @@ function rangesOverlap(left: CellRange, right: CellRange) {
     a.end.column < b.start.column ||
     a.start.column > b.end.column
   );
-}
-
-function interpolateHexColor(start: string, end: string, amount: number) {
-  const parse = (value: string) => {
-    const normalized = value.trim().replace(/^#/, "");
-    if (!/^[0-9a-f]{6}$/i.test(normalized)) return [255, 255, 255];
-    return [0, 2, 4].map((offset) =>
-      Number.parseInt(normalized.slice(offset, offset + 2), 16),
-    );
-  };
-  const from = parse(start);
-  const to = parse(end);
-  const ratio = Math.max(0, Math.min(1, amount));
-  return `#${from
-    .map((channel, index) =>
-      Math.round(channel + (to[index]! - channel) * ratio)
-        .toString(16)
-        .padStart(2, "0"),
-    )
-    .join("")}`;
 }
 
 const SheetsChartView = dynamic(
@@ -1032,95 +1013,23 @@ export const SheetsStudio = memo(function SheetsStudio({
     }
     return map;
   }, [activeSheet.mergedRanges]);
-  const conditionalStyles = useMemo(() => {
-    const styles = new Map<
-      string,
-      { backgroundColor?: string; color?: string }
-    >();
-    /**
-     * Each rule reads its own range, capped, rather than every populated cell in
-     * the sheet. A workbook with three rules over `A1:D50` used to walk 200,000
-     * addresses per rule on every keystroke; now it walks 200 (D20).
-     */
-    for (const rule of activeSheet.conditionalFormats ?? []) {
-      const parsed = parseRange(rule.range);
-      if (!parsed) continue;
-      const normalized = normalizeRange(parsed);
-      const area =
-        (normalized.end.row - normalized.start.row + 1) *
-        (normalized.end.column - normalized.start.column + 1);
-      if (area > 20_000) continue;
-      const addresses = rangeAddresses(normalized).filter(
-        (address) => activeSheet.cells[address] !== undefined,
-      );
-      const resolve = (address: string) =>
-        calculated.get(`${activeSheet.id}:${address}`)?.value ??
-        activeSheet.cells[address]?.value;
-      if (rule.kind === "text_contains") {
-        const needle = rule.text.toLowerCase();
-        if (!needle) continue;
-        for (const address of addresses) {
-          const value = resolve(address);
-          if (value === undefined || value === null) continue;
-          if (!String(value).toLowerCase().includes(needle)) continue;
-          styles.set(address, {
-            ...styles.get(address),
-            backgroundColor: rule.fillColor,
-            color: rule.textColor,
-          });
-        }
-        continue;
-      }
-      const numeric = addresses.flatMap((address) => {
-        const value = resolve(address);
-        return typeof value === "number" && Number.isFinite(value)
-          ? [{ address, value }]
-          : [];
-      });
-      if (rule.kind === "color_scale") {
-        if (!numeric.length) continue;
-        const minimum = Math.min(...numeric.map((entry) => entry.value));
-        const maximum = Math.max(...numeric.map((entry) => entry.value));
-        for (const entry of numeric)
-          styles.set(entry.address, {
-            ...styles.get(entry.address),
-            backgroundColor: interpolateHexColor(
-              rule.minimumColor,
-              rule.maximumColor,
-              maximum === minimum
-                ? 1
-                : (entry.value - minimum) / (maximum - minimum),
-            ),
-          });
-        continue;
-      }
-      for (const entry of numeric) {
-        const second = rule.secondValue ?? rule.value;
-        const matches =
-          rule.operator === "greater_than"
-            ? entry.value > rule.value
-            : rule.operator === "less_than"
-              ? entry.value < rule.value
-              : rule.operator === "greater_equal"
-                ? entry.value >= rule.value
-                : rule.operator === "less_equal"
-                  ? entry.value <= rule.value
-                  : rule.operator === "not_equal_to"
-                    ? entry.value !== rule.value
-                    : rule.operator === "between"
-                      ? entry.value >= Math.min(rule.value, second) &&
-                        entry.value <= Math.max(rule.value, second)
-                      : entry.value === rule.value;
-        if (matches)
-          styles.set(entry.address, {
-            ...styles.get(entry.address),
-            backgroundColor: rule.fillColor,
-            color: rule.textColor,
-          });
-      }
-    }
-    return styles;
-  }, [activeSheet, calculated]);
+  /**
+   * Each rule reads its own range, capped, rather than every populated cell in
+   * the sheet (D20). The evaluator is shared with the read-only Office viewer,
+   * so an imported workbook formats the same in both.
+   */
+  const conditionalStyles = useMemo(
+    () =>
+      conditionalFormatStyles(
+        activeSheet.conditionalFormats,
+        (address) =>
+          activeSheet.cells[address] === undefined
+            ? undefined
+            : (calculated.get(`${activeSheet.id}:${address}`)?.value ??
+              activeSheet.cells[address]?.value),
+      ),
+    [activeSheet, calculated],
+  );
   const filteredOutRows = useMemo(() => {
     const filtered = new Set(activeSheet.hiddenRows ?? []);
     activeSheet.tables.forEach((table) => {
@@ -4543,9 +4452,9 @@ export const SheetsStudio = memo(function SheetsStudio({
                                 ? 3
                                 : undefined,
                       ...cellVisualStyle(style, zoom),
-                      color: conditionalStyle?.color ?? style?.textColor,
-                      backgroundColor:
-                        conditionalStyle?.backgroundColor ?? style?.fillColor,
+                      color: style?.textColor,
+                      backgroundColor: style?.fillColor,
+                      ...conditionalCellCss(conditionalStyle),
                     }}
                     onDoubleClick={() => {
                       if (!locked) {

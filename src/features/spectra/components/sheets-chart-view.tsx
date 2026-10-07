@@ -21,7 +21,7 @@ import {
   YAxis,
 } from "recharts";
 import type { WorkbookSheet, SheetChart, SheetsCalculation } from "../sheets/model";
-import { chartDataset, histogramDataset } from "../sheets/chart-dataset";
+import { chartDataset, histogramDataset, type ChartPlotData } from "../sheets/chart-dataset";
 
 const CHART_COLORS = ["#169b69", "#7066ed", "#db7b27", "#2f8fd2", "#b85d7a"];
 
@@ -42,7 +42,25 @@ export function SheetsChartView({
   chart: SheetChart;
   calculated: SheetsCalculation;
 }) {
-  const dataset = chartDataset(sheet, chart, calculated);
+  const plot: ChartPlotData = {
+    ...chartDataset(sheet, chart, calculated),
+    ...(chart.type === "histogram" ? { histogram: histogramDataset(sheet, chart, calculated) } : {}),
+  };
+  return <SheetsChartPlot chart={chart} plot={plot} />;
+}
+
+/**
+ * A chart drawn from data already worked out. The editor computes it on the
+ * page; the Office viewer computes it in its worker and sends it over.
+ */
+export function SheetsChartPlot({
+  chart,
+  plot,
+}: {
+  chart: Pick<SheetChart, "type" | "title">;
+  plot: ChartPlotData;
+}) {
+  const dataset = plot;
   const tick = {
     fontSize: 10,
     fill: "var(--text-secondary)",
@@ -93,7 +111,7 @@ export function SheetsChartView({
     ) : null,
   ];
   if (chart.type === "histogram") {
-    const histogram = histogramDataset(sheet, chart, calculated);
+    const histogram = plot.histogram ?? [];
     return (
       <ResponsiveContainer width="100%" height="100%">
         <BarChart

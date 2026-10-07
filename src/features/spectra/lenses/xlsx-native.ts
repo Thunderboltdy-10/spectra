@@ -29,6 +29,7 @@ import {
   DEFAULT_CHART_COLOR_XML,
   DEFAULT_CHART_STYLE_XML,
 } from "./xlsx-chart-assets";
+import { excelColor, workbookPalette, type ExcelPalette } from "./xlsx-colors";
 
 export const SML = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 export const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -223,10 +224,8 @@ function worksheetView(root: XmlElement) {
   };
 }
 
-function worksheetTabColor(root: XmlElement) {
-  return child(root, SML, "sheetPr")?.find(SML, "tabColor")?.getAttribute("rgb")?.replace(/^FF/i, "#")
-    ?? child(root, SML, "sheetPr")?.find(SML, "tabColor")?.getAttribute("indexed")
-    ?? undefined;
+function worksheetTabColor(root: XmlElement, palette: ExcelPalette) {
+  return excelColor(child(root, SML, "sheetPr")?.find(SML, "tabColor"), palette);
 }
 
 function worksheetValidations(root: XmlElement, sheetId: number): NativeRule[] {
@@ -241,26 +240,67 @@ function worksheetValidations(root: XmlElement, sheetId: number): NativeRule[] {
     }));
 }
 
-function worksheetConditionalFormats(root: XmlElement, sheetId: number): NativeRule[] {
-  return (root.elements().filter((node) => node.namespaceUri() === SML && node.localName === "conditionalFormatting"))
-    .map((node, groupIndex) => ({
-      id: `xlsx:conditional-group:${sheetId}:${groupIndex + 1}`,
-      sqref: node.getAttribute("sqref") ?? "",
-      rules: node.elements().filter((rule) => rule.namespaceUri() === SML && rule.localName === "cfRule").map((rule, ruleIndex) => ({
+/**
+ * The differential formats conditional rules point at (`dxfId`), as the fill
+ * and text colour each one paints. In a dxf a solid fill keeps its colour in
+ * `bgColor`, unlike a cell style.
+ */
+async function workbookDxfColors(workbook: Workbook, palette: ExcelPalette) {
+  const part = workbook.office.package.getPart("/xl/styles.xml");
+  if (!part) return [];
+  const root = (await workbook.office.xml(part.name)).root;
+  return (child(root, SML, "dxfs")?.findAll(SML, "dxf") ?? []).map((dxf) => {
+    const pattern = child(child(dxf, SML, "fill"), SML, "patternFill");
+    const fillColor = pattern && pattern.getAttribute("patternType") !== "none"
+      ? excelColor(child(pattern, SML, "bgColor"), palette) ?? excelColor(child(pattern, SML, "fgColor"), palette)
+      : undefined;
+    const textColor = excelColor(child(child(dxf, SML, "font"), SML, "color"), palette);
+    return { ...(fillColor ? { fillColor } : {}), ...(textColor ? { textColor } : {}) };
+  });
+}
+
+function scaleStops(scale: XmlElement) {
+  return scale.elements().filter((item) => item.localName === "cfvo").map((item) => ({
+    type: item.getAttribute("type") ?? "min",
+    ...(item.getAttribute("val") !== undefined ? { value: item.getAttribute("val") } : {}),
+  }));
+}
+
+async function worksheetConditionalFormats(workbook: Workbook, root: XmlElement, sheetId: number): Promise<NativeRule[]> {
+  const groups = root.elements().filter((node) => node.namespaceUri() === SML && node.localName === "conditionalFormatting");
+  if (!groups.length) return [];
+  const palette = await workbookPalette(workbook);
+  const dxfs = await workbookDxfColors(workbook, palette);
+  return groups.map((node, groupIndex) => ({
+    id: `xlsx:conditional-group:${sheetId}:${groupIndex + 1}`,
+    sqref: node.getAttribute("sqref") ?? "",
+    rules: node.elements().filter((rule) => rule.namespaceUri() === SML && rule.localName === "cfRule").map((rule, ruleIndex) => {
+      const scale = child(rule, SML, "colorScale");
+      const bar = child(rule, SML, "dataBar");
+      // The colours a rule paints, resolved here so every reader sees Excel's
+      // colours. The writer never turns these into attributes: a kept rule
+      // keeps its own `dxfId`.
+      const dxf = dxfs[Number(rule.getAttribute("dxfId"))];
+      return {
         id: `xlsx:conditional:${sheetId}:${groupIndex + 1}:${ruleIndex + 1}`,
         ...Object.fromEntries(rule.attributes.filter((attr) => !attr.prefix).map((attr) => [attr.localName, attr.value])),
         formulas: rule.elements().filter((formula) => formula.namespaceUri() === SML && formula.localName === "formula").map((formula) => textOf(formula)),
-        ...(child(rule, SML, "colorScale") ? {
+        ...(rule.getAttribute("dxfId") !== undefined && dxf ? dxf : {}),
+        ...(scale ? {
           colorScale: {
-            cfvo: child(rule, SML, "colorScale")!.elements().filter((item) => item.localName === "cfvo").map((item) => ({
-              type: item.getAttribute("type") ?? "min",
-              ...(item.getAttribute("val") !== undefined ? { value: item.getAttribute("val") } : {}),
-            })),
-            colors: child(rule, SML, "colorScale")!.elements().filter((item) => item.localName === "color").map((item) => item.getAttribute("rgb") ?? item.getAttribute("theme") ?? ""),
+            cfvo: scaleStops(scale),
+            colors: scale.elements().filter((item) => item.localName === "color").map((item) => excelColor(item, palette) ?? item.getAttribute("rgb") ?? item.getAttribute("theme") ?? ""),
           },
         } : {}),
-      })),
-    }));
+        ...(bar ? {
+          dataBar: {
+            cfvo: scaleStops(bar),
+            color: excelColor(child(bar, SML, "color"), palette) ?? "#638EC6",
+          },
+        } : {}),
+      };
+    }),
+  }));
 }
 
 function tableFilters(tableRoot: XmlElement) {
@@ -424,17 +464,123 @@ function anchorPosition(anchor: XmlElement | undefined) {
   };
 }
 
-async function projectCharts(workbook: Workbook, sheet: Worksheet): Promise<XlsxChartProjection[]> {
+/** One corner of a drawing anchor: a cell and a pixel offset inside it. */
+function anchorPoint(point: XmlElement | undefined) {
+  if (!point) return undefined;
+  return {
+    column: Math.max(0, Math.round(numericAttribute(textOf(child(point, DRAWING_NS, "col"))))),
+    row: Math.max(0, Math.round(numericAttribute(textOf(child(point, DRAWING_NS, "row"))))),
+    x: Math.max(0, numericAttribute(textOf(child(point, DRAWING_NS, "colOff"))) / 9525),
+    y: Math.max(0, numericAttribute(textOf(child(point, DRAWING_NS, "rowOff"))) / 9525),
+  };
+}
+
+/**
+ * Where a drawing sits, by cell, the way Excel stores it. `position` flattens
+ * this onto a 64×20 grid for the editor; a reader that draws real column
+ * widths places the object by its cells instead, so it lands where Excel
+ * puts it.
+ */
+function drawingAnchor(anchor: XmlElement) {
+  const from = anchorPoint(child(anchor, DRAWING_NS, "from"));
+  if (!from) return undefined;
+  const to = anchor.localName === "twoCellAnchor" ? anchorPoint(child(anchor, DRAWING_NS, "to")) : undefined;
+  const ext = child(anchor, DRAWING_NS, "ext");
+  return {
+    from,
+    ...(to ? { to } : {}),
+    ...(!to && ext ? { width: numericAttribute(ext.getAttribute("cx")) / 9525, height: numericAttribute(ext.getAttribute("cy")) / 9525 } : {}),
+  };
+}
+
+type WorksheetDrawing = { part: NonNullable<ReturnType<typeof sheetPart>>; anchors: XmlElement[] };
+
+/** The worksheet's drawing part and its cell anchors, or nothing. */
+async function worksheetDrawing(workbook: Workbook, sheet: Worksheet, worksheetRoot: XmlElement): Promise<WorksheetDrawing | undefined> {
   const part = sheetPart(workbook, sheet);
-  if (!part) return [];
-  const worksheetRoot = (await workbook.office.xml(sheet.partName)).root;
   const drawingRef = child(worksheetRoot, SML, "drawing")?.getAttribute("r:id");
-  if (!drawingRef) return [];
+  if (!part || !drawingRef) return undefined;
   const drawingPart = workbook.office.package.relatedPart(part, drawingRef);
-  if (!drawingPart) return [];
+  if (!drawingPart) return undefined;
   const drawingRoot = (await workbook.office.xml(drawingPart.name)).root;
+  return {
+    part: drawingPart,
+    anchors: drawingRoot.elements().filter((node) => node.namespaceUri() === DRAWING_NS && (node.localName === "twoCellAnchor" || node.localName === "oneCellAnchor")),
+  };
+}
+
+const PICTURE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", bmp: "image/bmp", webp: "image/webp" };
+
+/**
+ * Pictures placed on the sheet. Read for showing: the drawing part keeps them
+ * in the file, untouched, whatever the editor does.
+ */
+async function projectPictures(workbook: Workbook, sheet: Worksheet, drawing: WorksheetDrawing) {
+  const pictures: NonNullable<XlsxSheetProjection["pictures"]> = [];
+  for (const anchor of drawing.anchors) {
+    const picture = child(anchor, DRAWING_NS, "pic");
+    const embed = picture ? firstDescendant(picture, A_NS, "blip")?.getAttribute("r:embed") : undefined;
+    if (!picture || !embed) continue;
+    const media = workbook.office.package.relatedPart(drawing.part, embed);
+    if (!media) continue;
+    const extension = media.name.split(".").at(-1)?.toLowerCase() ?? "";
+    const mediaType = media.contentType.toLowerCase() || PICTURE_TYPES[extension] || "";
+    const properties = firstDescendant(picture, DRAWING_NS, "cNvPr");
+    const placed = drawingAnchor(anchor);
+    pictures.push({
+      id: `xlsx:picture:${sheet.sheetId}:${pictures.length + 1}`,
+      ...(properties?.getAttribute("name") ? { name: properties.getAttribute("name") } : {}),
+      ...(properties?.getAttribute("descr") ? { description: properties.getAttribute("descr") } : {}),
+      mediaPart: media.name,
+      mediaType,
+      position: anchorPosition(anchor),
+      ...(placed ? { anchor: placed } : {}),
+    });
+  }
+  return pictures;
+}
+
+const COMMENTS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments";
+const COMMENT_LIMITS = { count: 1000, text: 4000 } as const;
+
+/**
+ * The sheet's notes (Excel's legacy comments, which threaded comments also
+ * write as a fallback). Read for showing only; the comments part is kept in
+ * the file untouched.
+ */
+async function projectComments(workbook: Workbook, sheet: Worksheet) {
+  const part = sheetPart(workbook, sheet);
+  const relationship = part?.relationships().byType(COMMENTS_REL)[0];
+  const commentsPart = part && relationship ? workbook.office.package.relatedPart(part, relationship.id) : undefined;
+  if (!commentsPart) return [];
+  const root = (await workbook.office.xml(commentsPart.name)).root;
+  const authors = (child(root, SML, "authors")?.findAll(SML, "author") ?? []).map((author) => textOf(author));
+  const comments: NonNullable<XlsxSheetProjection["comments"]> = [];
+  for (const comment of child(root, SML, "commentList")?.findAll(SML, "comment") ?? []) {
+    if (comments.length >= COMMENT_LIMITS.count) break;
+    const ref = (comment.getAttribute("ref") ?? "").split(":")[0]!.replaceAll("$", "").toUpperCase();
+    if (!/^[A-Z]{1,3}[1-9][0-9]*$/.test(ref)) continue;
+    const author = authors[Number(comment.getAttribute("authorId"))];
+    // Excel opens each note with its author's name in bold; the name is shown
+    // on its own, so the copy in the text goes.
+    const written = allDescendants(child(comment, SML, "text") ?? comment, SML, "t").map((node) => node.text()).join("").trim();
+    const text = author && written.startsWith(`${author}:`) ? written.slice(author.length + 1).trim() : written;
+    if (!text) continue;
+    comments.push({
+      ref,
+      ...(author ? { author } : {}),
+      text: text.slice(0, COMMENT_LIMITS.text),
+    });
+  }
+  return comments;
+}
+
+async function projectCharts(workbook: Workbook, sheet: Worksheet, known?: WorksheetDrawing | null): Promise<XlsxChartProjection[]> {
+  const drawing = known === undefined ? await worksheetDrawing(workbook, sheet, (await workbook.office.xml(sheet.partName)).root) : known;
+  if (!drawing) return [];
+  const drawingPart = drawing.part;
   const result: XlsxChartProjection[] = [];
-  for (const anchor of drawingRoot.elements().filter((node) => node.namespaceUri() === DRAWING_NS && (node.localName === "twoCellAnchor" || node.localName === "oneCellAnchor"))) {
+  for (const anchor of drawing.anchors) {
     const frame = firstDescendant(anchor, DRAWING_NS, "graphicFrame");
     const chartNode = firstDescendant(frame ?? anchor, CHART_NS, "chart") ?? firstDescendant(frame ?? anchor, CHART_EX_NS, "chart");
     const chartRef = chartNode?.getAttribute("r:id");
@@ -467,6 +613,7 @@ async function projectCharts(workbook: Workbook, sheet: Worksheet): Promise<Xlsx
         ? (firstDescendant(modernChart!, CHART_EX_NS, "legend") ? {} : { showLegend: false })
         : (child(child(chartRoot, CHART_NS, "chart"), CHART_NS, "legend") ? {} : { showLegend: false })),
       position: anchorPosition(anchor),
+      ...(drawingAnchor(anchor) ? { anchor: drawingAnchor(anchor) } : {}),
       ...(series.length ? { series } : {}),
       partName: chartPart.name,
       drawingPartName: drawingPart.name,
@@ -485,6 +632,10 @@ export async function projectXlsxSheet(workbook: Workbook, sheet: Worksheet): Pr
   const freeze = freezePane && ["frozen", "frozenSplit"].includes(freezePane.getAttribute("state") ?? "")
     ? { frozenRows: Math.max(0, Math.round(numericAttribute(freezePane.getAttribute("ySplit")))), frozenColumns: Math.max(0, Math.round(numericAttribute(freezePane.getAttribute("xSplit")))) }
     : { frozenRows: 0, frozenColumns: 0 };
+  const tabColor = worksheetTabColor(root, await workbookPalette(workbook));
+  const drawing = await worksheetDrawing(workbook, sheet, root);
+  const pictures = drawing ? await projectPictures(workbook, sheet, drawing) : [];
+  const comments = await projectComments(workbook, sheet);
   return {
     rowCount: Math.max(100, dimension.rows),
     columnCount: Math.max(26, dimension.columns),
@@ -492,12 +643,14 @@ export async function projectXlsxSheet(workbook: Workbook, sheet: Worksheet): Pr
     ...(sheetElement(sheet).getAttribute("state") && sheetElement(sheet).getAttribute("state") !== "visible" ? { hidden: true } : {}),
     ...(view.showGridlines !== undefined ? { showGridlines: view.showGridlines } : {}),
     ...(view.showHeadings !== undefined ? { showHeadings: view.showHeadings } : {}),
-    ...(worksheetTabColor(root) ? { tabColor: worksheetTabColor(root) } : {}),
+    ...(tabColor ? { tabColor } : {}),
     ...freeze,
     tables: await projectTables(workbook, sheet),
-    charts: await projectCharts(workbook, sheet),
+    charts: await projectCharts(workbook, sheet, drawing ?? null),
     validations: worksheetValidations(root, sheet.sheetId),
-    conditionalFormats: worksheetConditionalFormats(root, sheet.sheetId),
+    conditionalFormats: await worksheetConditionalFormats(workbook, root, sheet.sheetId),
+    ...(pictures.length ? { pictures } : {}),
+    ...(comments.length ? { comments } : {}),
     partName: sheet.partName,
   };
 }

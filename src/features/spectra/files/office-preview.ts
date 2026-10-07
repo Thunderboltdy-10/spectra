@@ -2,6 +2,10 @@ import type { JSONContent } from "@tiptap/core";
 import type { SpectraRichContentAst } from "../rich-content/ast";
 import type { PresentationContent } from "../presentation/model";
 import type { SheetCellFormat } from "../sheets/model";
+import type { ChartPlotData } from "../sheets/chart-dataset";
+import type { ConditionalCellStyle } from "../sheets/conditional-format";
+import { EXCEL_DEFAULT_COLUMN_PIXELS, EXCEL_DEFAULT_ROW_PIXELS } from "../sheets/excel-units";
+import type { XlsxDrawingAnchor, XlsxChartProjection } from "../lenses/projection-contracts";
 import type { OfficeViewKind } from "./file-kind";
 
 /*
@@ -21,6 +25,20 @@ export type SlidesPreview = { kind: "slides"; deck: PresentationContent; media: 
 
 export type SheetPreviewCell = { text: string; format?: SheetCellFormat; numeric?: boolean };
 export type SheetPreviewMerge = { row: number; column: number; rows: number; columns: number };
+/** Where a chart or picture sits: by cell when the file says, else by pixels. */
+export type SheetPreviewPlacement = {
+  anchor?: XlsxDrawingAnchor;
+  position: { x: number; y: number; width: number; height: number };
+};
+export type SheetPreviewChart = SheetPreviewPlacement & {
+  id: string;
+  type: XlsxChartProjection["type"];
+  title: string;
+  plot: ChartPlotData;
+};
+/** A picture on the sheet. Without `mediaId` it is a kind the browser can't draw (EMF, WMF). */
+export type SheetPreviewPicture = SheetPreviewPlacement & { id: string; label: string; mediaId?: string };
+export type SheetPreviewNote = { author?: string; text: string };
 export type SheetPreviewSheet = {
   id: string;
   name: string;
@@ -31,21 +49,28 @@ export type SheetPreviewSheet = {
   frozenColumns: number;
   hiddenRows: number[];
   hiddenColumns: number[];
+  /** In pixels. Columns and rows without their own size take Excel's default. */
   columnWidths: Record<string, number>;
   rowHeights: Record<string, number>;
   merges: SheetPreviewMerge[];
+  /** Conditional formats, already evaluated, by address. */
+  conditional: Record<string, ConditionalCellStyle>;
+  /** Excel's notes, by address. */
+  notes: Record<string, SheetPreviewNote>;
+  charts: SheetPreviewChart[];
+  pictures: SheetPreviewPicture[];
   showGridlines: boolean;
   /** Keyed by the cell's address (`B4`). Empty cells are absent. */
   cells: Record<string, SheetPreviewCell>;
   /** The sheet is larger than the viewer draws; the rest opens in Excel. */
   clipped: boolean;
 };
-export type SheetPreview = { kind: "sheet"; sheets: SheetPreviewSheet[]; activeSheetId: string };
+export type SheetPreview = { kind: "sheet"; sheets: SheetPreviewSheet[]; activeSheetId: string; media: OfficePreviewMedia[] };
 
 export type OfficePreview = DocumentPreview | SlidesPreview | SheetPreview;
 
 /** How far the workbook viewer reads. Past this it says so instead of freezing. */
-export const SHEET_PREVIEW_LIMITS = { rows: 10_000, columns: 256, cells: 250_000 } as const;
+export const SHEET_PREVIEW_LIMITS = { rows: 10_000, columns: 256, cells: 250_000, charts: 24, pictures: 48 } as const;
 
 const MEDIA_PREFIX = "spectra-preview-media:";
 const RASTER_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/avif"]);
@@ -60,7 +85,7 @@ export function isPreviewMediaId(value: unknown): value is string {
 
 /** The bytes a transfer can move rather than copy. */
 export function previewTransferables(preview: OfficePreview): ArrayBuffer[] {
-  return preview.kind === "sheet" ? [] : preview.media.map((item) => item.bytes);
+  return preview.media.map((item) => item.bytes);
 }
 
 function decodeDataUrl(value: string): { mediaType: string; bytes: ArrayBuffer } | null {
@@ -123,16 +148,24 @@ async function slidesPreview(bytes: Uint8Array): Promise<SlidesPreview> {
       delete content.sha256;
       delete content.nativeMediaSha256;
     }
+  return { kind: "slides", deck, media: packageMedia(unzipSync, opened.preservedCarry.safePayload ?? bytes, parts) };
+}
+
+/** The bytes of each wanted package part, under the id its content points at. */
+function packageMedia(
+  unzip: typeof import("fflate").unzipSync,
+  payload: Uint8Array,
+  parts: ReadonlyMap<string, { id: string; mediaType: string }>,
+) {
   const media: OfficePreviewMedia[] = [];
-  if (parts.size) {
-    const wanted = new Set([...parts.keys()].map((part) => part.replace(/^\//, "")));
-    const files = unzipSync(opened.preservedCarry.safePayload ?? bytes, { filter: (file) => wanted.has(file.name) });
-    for (const [part, { id, mediaType }] of parts) {
-      const file = files[part.replace(/^\//, "")];
-      if (file) media.push({ id, mediaType, bytes: file.slice().buffer });
-    }
+  if (!parts.size) return media;
+  const wanted = new Set([...parts.keys()].map((part) => part.replace(/^\//, "")));
+  const files = unzip(payload, { filter: (file) => wanted.has(file.name) });
+  for (const [part, { id, mediaType }] of parts) {
+    const file = files[part.replace(/^\//, "")];
+    if (file) media.push({ id, mediaType, bytes: file.slice().buffer });
   }
-  return { kind: "slides", deck, media };
+  return media;
 }
 
 function rangeSpan(range: string, parseAddress: (address: string) => { row: number; column: number } | null): SheetPreviewMerge | null {
@@ -148,25 +181,53 @@ function rangeSpan(range: string, parseAddress: (address: string) => { row: numb
   };
 }
 
+/** The last row and column (exclusive) a placed object reaches, by cell. */
+function placementExtent(placement: SheetPreviewPlacement) {
+  const anchor = placement.anchor;
+  if (anchor?.to) return { rows: anchor.to.row + 1, columns: anchor.to.column + 1 };
+  if (anchor) {
+    const width = anchor.width ?? placement.position.width;
+    const height = anchor.height ?? placement.position.height;
+    return {
+      rows: anchor.from.row + Math.ceil((anchor.from.y + height) / EXCEL_DEFAULT_ROW_PIXELS) + 1,
+      columns: anchor.from.column + Math.ceil((anchor.from.x + width) / EXCEL_DEFAULT_COLUMN_PIXELS) + 1,
+    };
+  }
+  return {
+    rows: Math.ceil((placement.position.y + placement.position.height) / EXCEL_DEFAULT_ROW_PIXELS) + 1,
+    columns: Math.ceil((placement.position.x + placement.position.width) / EXCEL_DEFAULT_COLUMN_PIXELS) + 1,
+  };
+}
+
 async function sheetPreview(bytes: Uint8Array): Promise<SheetPreview> {
-  const [{ xlsxLens }, { xlsxArtifactContent }, model] = await Promise.all([
+  const [{ xlsxLens }, { xlsxArtifactContent }, model, { chartPlotData }, { conditionalFormatStyles }, { unzipSync }] = await Promise.all([
     import("../lenses/xlsx-lens"),
     import("../lenses/office-content"),
     import("../sheets/model"),
+    import("../sheets/chart-dataset"),
+    import("../sheets/conditional-format"),
+    import("fflate"),
   ]);
   const opened = await xlsxLens.open(bytes, "strict-native");
   const content = model.normalizeSheetsContent(xlsxArtifactContent(opened.projection));
+  const projected = new Map(opened.projection.sheets.map((sheet) => [sheet.id, sheet]));
   const calculation = model.sheetsCalculation(content);
   const locale = content.workbook.locale || "en-US";
   const date1904 = content.workbook.date1904 === true;
   let budget: number = SHEET_PREVIEW_LIMITS.cells;
   const sheets: SheetPreviewSheet[] = [];
+  const mediaParts = new Map<string, { id: string; mediaType: string }>();
   // A hidden sheet is hidden in Excel too; it still answers the formulas above.
   for (const sheet of content.sheets.filter((candidate) => !candidate.hidden)) {
+    const native = projected.get(sheet.id);
     const cells: Record<string, SheetPreviewCell> = {};
     let usedRows = 0;
     let usedColumns = 0;
     let clipped = false;
+    const reach = (rows: number, columns: number) => {
+      usedRows = Math.max(usedRows, Math.min(rows, SHEET_PREVIEW_LIMITS.rows));
+      usedColumns = Math.max(usedColumns, Math.min(columns, SHEET_PREVIEW_LIMITS.columns));
+    };
     for (const [address, cell] of Object.entries(sheet.cells)) {
       const coordinate = model.parseAddress(address);
       if (!coordinate) continue;
@@ -179,8 +240,7 @@ async function sheetPreview(bytes: Uint8Array): Promise<SheetPreview> {
       const value = calculated?.value ?? cell.value;
       if (!text && !cell.format?.fillColor && !cell.format?.borders) continue;
       budget -= 1;
-      usedRows = Math.max(usedRows, coordinate.row + 1);
-      usedColumns = Math.max(usedColumns, coordinate.column + 1);
+      reach(coordinate.row + 1, coordinate.column + 1);
       cells[address.toUpperCase()] = {
         text,
         ...(cell.format ? { format: cell.format } : {}),
@@ -191,18 +251,60 @@ async function sheetPreview(bytes: Uint8Array): Promise<SheetPreview> {
       const span = rangeSpan(range, model.parseAddress);
       return span && span.row < SHEET_PREVIEW_LIMITS.rows && span.column < SHEET_PREVIEW_LIMITS.columns ? [span] : [];
     });
-    for (const merge of merges) {
-      usedRows = Math.max(usedRows, merge.row + merge.rows);
-      usedColumns = Math.max(usedColumns, merge.column + merge.columns);
+    for (const merge of merges) reach(merge.row + merge.rows, merge.column + merge.columns);
+    const notes: Record<string, SheetPreviewNote> = {};
+    for (const comment of native?.comments ?? []) {
+      const coordinate = model.parseAddress(comment.ref);
+      if (!coordinate || coordinate.row >= SHEET_PREVIEW_LIMITS.rows || coordinate.column >= SHEET_PREVIEW_LIMITS.columns) continue;
+      notes[comment.ref] = { ...(comment.author ? { author: comment.author } : {}), text: comment.text };
+      reach(coordinate.row + 1, coordinate.column + 1);
     }
+    // Charts read their series wherever the file points, on any sheet.
+    const charts: SheetPreviewChart[] = (native?.charts ?? []).slice(0, SHEET_PREVIEW_LIMITS.charts).map((chart) => ({
+      id: chart.id,
+      type: chart.type,
+      title: chart.title,
+      plot: chartPlotData(content.sheets, sheet, sheet.charts.find((candidate) => candidate.id === chart.id) ?? chart, calculation, locale),
+      position: chart.position,
+      ...(chart.anchor ? { anchor: chart.anchor } : {}),
+    }));
+    const pictures: SheetPreviewPicture[] = (native?.pictures ?? []).slice(0, SHEET_PREVIEW_LIMITS.pictures).map((picture) => {
+      const drawable = RASTER_TYPES.has(picture.mediaType);
+      if (drawable && !mediaParts.has(picture.mediaPart))
+        mediaParts.set(picture.mediaPart, { id: previewMediaId(mediaParts.size), mediaType: picture.mediaType });
+      return {
+        id: picture.id,
+        label: picture.description || picture.name || "Picture",
+        ...(drawable ? { mediaId: mediaParts.get(picture.mediaPart)!.id } : {}),
+        position: picture.position,
+        ...(picture.anchor ? { anchor: picture.anchor } : {}),
+      };
+    });
+    for (const placed of [...charts, ...pictures]) {
+      const extent = placementExtent(placed);
+      reach(extent.rows, extent.columns);
+    }
+    // A little room past the last value, as a grid shows, without drawing
+    // Excel's million empty rows.
+    const rowCount = Math.min(SHEET_PREVIEW_LIMITS.rows, Math.max(usedRows + 2, 24));
+    const columnCount = Math.min(SHEET_PREVIEW_LIMITS.columns, Math.max(usedColumns + 1, 8));
+    const conditional = Object.fromEntries(
+      conditionalFormatStyles(
+        sheet.conditionalFormats,
+        (address) => {
+          const cell = sheet.cells[address];
+          if (!cell) return undefined;
+          return cell.formula ? calculation.get(`${sheet.id}:${address}`)?.value : cell.value;
+        },
+        { rows: rowCount, columns: columnCount },
+      ),
+    );
     sheets.push({
       id: sheet.id,
       name: sheet.name,
       ...(sheet.tabColor ? { tabColor: sheet.tabColor } : {}),
-      // A little room past the last value, as a grid shows, without drawing
-      // Excel's million empty rows.
-      rowCount: Math.min(SHEET_PREVIEW_LIMITS.rows, Math.max(usedRows + 2, 24)),
-      columnCount: Math.min(SHEET_PREVIEW_LIMITS.columns, Math.max(usedColumns + 1, 8)),
+      rowCount,
+      columnCount,
       frozenRows: Math.min(sheet.frozenRows ?? 0, 50),
       frozenColumns: Math.min(sheet.frozenColumns ?? 0, 20),
       hiddenRows: sheet.hiddenRows ?? [],
@@ -212,11 +314,20 @@ async function sheetPreview(bytes: Uint8Array): Promise<SheetPreview> {
       merges,
       showGridlines: sheet.showGridlines !== false,
       cells,
+      conditional,
+      notes,
+      charts,
+      pictures,
       clipped,
     });
   }
   const active = sheets.find((sheet) => sheet.id === content.activeSheetId) ?? sheets[0];
-  return { kind: "sheet", sheets, activeSheetId: active?.id ?? "" };
+  return {
+    kind: "sheet",
+    sheets,
+    activeSheetId: active?.id ?? "",
+    media: packageMedia(unzipSync, opened.preservedCarry.safePayload ?? bytes, mediaParts),
+  };
 }
 
 /** Reads an Office file for showing. Throws when the lens cannot open it safely. */

@@ -58,6 +58,7 @@ import type * as durableContentDependencies from "../durableContentDependencies.
 import type * as durablePayloadIntegrity from "../durablePayloadIntegrity.js";
 import type * as durablePayloadOwnership from "../durablePayloadOwnership.js";
 import type * as durableStorageBindings from "../durableStorageBindings.js";
+import type * as embeddingDimensions from "../embeddingDimensions.js";
 import type * as embeddingProvider from "../embeddingProvider.js";
 import type * as env from "../env.js";
 import type * as executionScheduler from "../executionScheduler.js";
@@ -197,6 +198,7 @@ declare const fullApi: ApiFromModules<{
   durablePayloadIntegrity: typeof durablePayloadIntegrity;
   durablePayloadOwnership: typeof durablePayloadOwnership;
   durableStorageBindings: typeof durableStorageBindings;
+  embeddingDimensions: typeof embeddingDimensions;
   embeddingProvider: typeof embeddingProvider;
   env: typeof env;
   executionScheduler: typeof executionScheduler;

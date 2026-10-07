@@ -178,3 +178,25 @@ describe("School admin People", () => {
     expect(screen.queryByText("Loading members")).toBeNull();
   });
 });
+
+describe("School admin refresh", () => {
+  it("keeps a list on screen while it refreshes, instead of flashing a placeholder", async () => {
+    navigation.tab = "audit";
+    let auditLoads = 0;
+    api.getAdministration.mockImplementation(async (kind: string) => {
+      if (kind === "schoolOverview") return overview;
+      if (kind === "audit") {
+        auditLoads += 1;
+        if (auditLoads > 1) return new Promise(() => {});
+        return { events: [{ eventId: "e1", action: "membership.invite", targetType: "membership", createdAt: Date.now() }] };
+      }
+      return {};
+    });
+    render(<SchoolAdminShell />);
+    expect(await screen.findByText("membership")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(auditLoads).toBe(2));
+    expect(screen.getByText("membership")).toBeTruthy();
+    expect(screen.queryByText("Loading audit events")).toBeNull();
+  });
+});

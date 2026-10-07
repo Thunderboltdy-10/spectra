@@ -1223,7 +1223,6 @@ function GroupsSurface({
   const [members, setMembers] = useState<string[]>([]);
   useEffect(() => {
     let active = true;
-    setLoading(true);
     void Promise.all([
       getAdministration<{ groups: SchoolGroup[] }>("groups", {
         operatorSessionId,
@@ -1239,7 +1238,7 @@ function GroupsSurface({
         setPeople(peopleResult.people);
       })
       .catch((error) =>
-        toast.error(error instanceof Error ? error.message : "Groups failed."),
+        toast.error(describeFailure(error, { fallback: "Couldn't load groups. Check your connection, then try again." }).message),
       )
       .finally(() => active && setLoading(false));
     return () => {
@@ -1429,7 +1428,6 @@ function CommunicationSurface({
   const [scheduledAt, setScheduledAt] = useState("");
   useEffect(() => {
     let active = true;
-    setLoading(true);
     void Promise.all([
       getAdministration<{ announcements: Announcement[] }>("announcements", {
         operatorSessionId,
@@ -1445,7 +1443,7 @@ function CommunicationSurface({
       })
       .catch((error) =>
         toast.error(
-          error instanceof Error ? error.message : "Communication failed.",
+          describeFailure(error, { fallback: "Couldn't load announcements. Check your connection, then try again." }).message,
         ),
       )
       .finally(() => active && setLoading(false));
@@ -2164,14 +2162,13 @@ function FeedbackSurface({
   const [status, setStatus] = useState("in_progress");
   const [loading, setLoading] = useState(true);
   useEffect(() => {
-    setLoading(true);
     void getAdministration<{ feedback: FeedbackItem[] }>("feedbackInbox", {
       operatorSessionId,
     })
       .then((result) => setRows(result.feedback))
       .catch((error) =>
         toast.error(
-          error instanceof Error ? error.message : "Feedback failed.",
+          describeFailure(error, { fallback: "Couldn't load feedback. Check your connection, then try again." }).message,
         ),
       )
       .finally(() => setLoading(false));
@@ -2465,7 +2462,6 @@ function AuditSurface({
   const [filter, setFilter] = useState("");
   const [loading, setLoading] = useState(true);
   useEffect(() => {
-    setLoading(true);
     void getAdministration<{ events: AuditEvent[] }>("audit", {
       operatorSessionId,
       actionPrefix: filter || undefined,
@@ -2473,7 +2469,7 @@ function AuditSurface({
     })
       .then((result) => setEvents(result.events))
       .catch((error) =>
-        toast.error(error instanceof Error ? error.message : "Audit failed."),
+        toast.error(describeFailure(error, { fallback: "Couldn't load the audit log. Check your connection, then try again." }).message),
       )
       .finally(() => setLoading(false));
   }, [operatorSessionId, filter, refreshKey]);

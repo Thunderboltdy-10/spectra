@@ -53,6 +53,7 @@ import { useMutation } from "convex/react";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { api } from "../../../../convex/_generated/api";
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -713,6 +714,56 @@ function BoardNode({
   );
 }
 
+/** What a board node asks of the studio, by node id, so the functions never change. */
+type BoardNodeActions = {
+  /** A compact canvas is a preview: its nodes neither select nor drag. */
+  select: (nodeId: string, additive: boolean, compact: boolean) => void;
+  pointerDown: (nodeId: string, event: ReactPointerEvent<HTMLDivElement>, compact: boolean) => void;
+  resize: (nodeId: string, event: ReactPointerEvent<HTMLButtonElement>) => void;
+  text: (nodeId: string, value: string) => void;
+  content: (nodeId: string, change: Record<string, unknown>) => void;
+};
+
+type BoardNodeProps = Parameters<typeof BoardNode>[0];
+
+/**
+ * One board node that renders again only when its own node, media or state
+ * changes: a peer's or Spectra's edit to one object leaves the others alone.
+ */
+const BoardNodeItem = memo(function BoardNodeItem({
+  actions,
+  ...props
+}: Omit<BoardNodeProps, "onSelect" | "onPointerDown" | "onResizePointerDown" | "onTextChange" | "onContentChange"> & {
+  actions: BoardNodeActions;
+}) {
+  const { compact } = props;
+  const id = props.node.id;
+  const onSelect = useCallback((additive: boolean) => actions.select(id, additive, compact), [actions, id, compact]);
+  const onPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => actions.pointerDown(id, event, compact),
+    [actions, id, compact],
+  );
+  const onResizePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>) => actions.resize(id, event),
+    [actions, id],
+  );
+  const onTextChange = useCallback((value: string) => actions.text(id, value), [actions, id]);
+  const onContentChange = useCallback(
+    (change: Record<string, unknown>) => actions.content(id, change),
+    [actions, id],
+  );
+  return (
+    <BoardNode
+      {...props}
+      onSelect={onSelect}
+      onPointerDown={onPointerDown}
+      onResizePointerDown={onResizePointerDown}
+      onTextChange={onTextChange}
+      onContentChange={onContentChange}
+    />
+  );
+});
+
 export function WhiteboardStudio({
   artifactId,
   artifacts,
@@ -953,6 +1004,58 @@ export function WhiteboardStudio({
       emit(next, record);
     },
     [emit],
+  );
+  // Board nodes are memoised, so they get one set of functions for life; each
+  // call reads the studio's handlers as of the latest render.
+  const nodeActionsRef = useRef<BoardNodeActions | null>(null);
+  useEffect(() => {
+    nodeActionsRef.current = {
+      select: (nodeId, additive, compact) => {
+        if (selectionHandledRef.current) {
+          selectionHandledRef.current = false;
+          return;
+        }
+        const node = nodeById.get(nodeId);
+        if (node && !compact) selectNode(node, additive);
+      },
+      pointerDown: (nodeId, event, compact) => {
+        const node = nodeById.get(nodeId);
+        if (node && !compact) beginNodeDrag(node, event);
+      },
+      resize: (nodeId, event) => {
+        const node = nodeById.get(nodeId);
+        if (node) beginResize(node, event);
+      },
+      text: (nodeId, value) =>
+        mutate((draft) => {
+          const candidate = draft.nodes.find((item) => item.id === nodeId);
+          if (candidate)
+            Object.assign(candidate, withWhiteboardNodeText(candidate, value));
+        }),
+      content: (nodeId, change) =>
+        mutate((draft) => {
+          const candidate = draft.nodes.find((item) => item.id === nodeId);
+          if (!candidate) return;
+          const current =
+            candidate.content &&
+            typeof candidate.content === "object" &&
+            !Array.isArray(candidate.content)
+              ? (candidate.content as Record<string, unknown>)
+              : {};
+          candidate.content = { ...current, ...change };
+        }),
+    };
+  });
+  const boardNodeActions = useMemo<BoardNodeActions>(
+    () => ({
+      select: (nodeId, additive, compact) => nodeActionsRef.current?.select(nodeId, additive, compact),
+      pointerDown: (nodeId, event, compact) =>
+        nodeActionsRef.current?.pointerDown(nodeId, event, compact),
+      resize: (nodeId, event) => nodeActionsRef.current?.resize(nodeId, event),
+      text: (nodeId, value) => nodeActionsRef.current?.text(nodeId, value),
+      content: (nodeId, change) => nodeActionsRef.current?.content(nodeId, change),
+    }),
+    [],
   );
 
   useEffect(
@@ -3031,7 +3134,7 @@ export function WhiteboardStudio({
                 (pathTouches(aiChangedPaths, `/nodes/${index}`) ||
                   pathTouches(aiChangedPaths, `/nodes/${node.id}`));
               return (
-                <BoardNode
+                <BoardNodeItem
                   key={node.id}
                   node={node}
                   artifact={
@@ -3052,46 +3155,9 @@ export function WhiteboardStudio({
                   }
                   readOnly={readOnly || compact}
                   compact={compact}
-                  onSelect={(additive) => {
-                    if (selectionHandledRef.current) {
-                      selectionHandledRef.current = false;
-                      return;
-                    }
-                    if (!compact) selectNode(node, additive);
-                  }}
-                  onPointerDown={(event) => {
-                    if (!compact) beginNodeDrag(node, event);
-                  }}
-                  onResizePointerDown={(event) => beginResize(node, event)}
-                  onTextChange={(value) =>
-                    mutate((draft) => {
-                      const candidate = draft.nodes.find(
-                        (item) => item.id === node.id,
-                      );
-                      if (candidate)
-                        Object.assign(
-                          candidate,
-                          withWhiteboardNodeText(candidate, value),
-                        );
-                    })
-                  }
+                  actions={boardNodeActions}
                   aiActive={nodeAiActive}
                   path={index >= 0 ? `/nodes/${index}` : undefined}
-                  onContentChange={(change) =>
-                    mutate((draft) => {
-                      const candidate = draft.nodes.find(
-                        (item) => item.id === node.id,
-                      );
-                      if (!candidate) return;
-                      const current =
-                        candidate.content &&
-                        typeof candidate.content === "object" &&
-                        !Array.isArray(candidate.content)
-                          ? (candidate.content as Record<string, unknown>)
-                          : {};
-                      candidate.content = { ...current, ...change };
-                    })
-                  }
                 />
               );
             })}

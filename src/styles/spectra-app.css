@@ -6320,14 +6320,22 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .presentation-import-history article > div span,
-.presentation-import-history article > a {
+.presentation-import-original > a,
+.presentation-import-original > button {
   margin-top: 2px;
   color: var(--text-tertiary);
   font-size: var(--text-micro);
   text-transform: capitalize;
 }
 
-.presentation-import-history article > a {
+.presentation-import-original {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.presentation-import-original > a,
+.presentation-import-original > button {
   color: var(--brand-ink);
   font-weight: 700;
 }

@@ -123,6 +123,8 @@ import {
   type StudioHistoryEntry,
 } from "./artifact-studio-value-utils";
 import { StudioItemRail } from "./studio-item-rail";
+import { FileViewer, type ViewedFile } from "../files/file-viewer";
+import { ImportOriginal } from "../files/import-original";
 import {
   SlideCanvas,
   styleValue,
@@ -997,6 +999,8 @@ export function PresentationStudio({
   const [ioBusy, setIoBusy] = useState<string>();
   const [ioError, setIoError] = useState<string>();
   const [ioMessage, setIoMessage] = useState<string>();
+  // An imported file's original, read-only in the shared file viewer.
+  const [viewingOriginal, setViewingOriginal] = useState<ViewedFile | null>(null);
   const [importHistory, setImportHistory] = useState<SpectraArtifactImport[]>(
     [],
   );
@@ -4156,9 +4160,12 @@ export function PresentationStudio({
                                 </span>
                               </div>
                               {entry.downloadUrl ? (
-                                <a href={entry.downloadUrl} download>
-                                  Original
-                                </a>
+                                <ImportOriginal
+                                  className="presentation-import-original"
+                                  entry={entry}
+                                  downloadUrl={entry.downloadUrl}
+                                  onView={setViewingOriginal}
+                                />
                               ) : null}
                               {entry.quarantineReason ? (
                                 <p>{entry.quarantineReason}</p>
@@ -4543,6 +4550,7 @@ export function PresentationStudio({
             document.body,
           )
         : null}
+      <FileViewer file={viewingOriginal} onClose={() => setViewingOriginal(null)} />
     </section>
   );
 }

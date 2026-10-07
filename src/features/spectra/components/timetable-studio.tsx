@@ -1,5 +1,6 @@
 "use client";
 
+import { downloadDocumentText } from "./artifact-studio-file-utils";
 import {
   AlertTriangle,
   CalendarDays,
@@ -209,15 +210,6 @@ function collisionLayout(events: TimetableOccurrence[]) {
     finalize();
   }
   return result;
-}
-
-function downloadText(name: string, type: string, content: string) {
-  const url = URL.createObjectURL(new Blob([content], { type }));
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name;
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function EventCard({
@@ -1324,7 +1316,7 @@ path={eventPath(event.id)}
       tab: "Schedule",
       priority: "advanced",
       onSelect: () =>
-        downloadText(
+        downloadDocumentText(
           "spectra-timetable.ics",
           "text/calendar;charset=utf-8",
           exportTimetableIcs(baseVisibleEvents, "Spectra timetable"),

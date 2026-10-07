@@ -38,7 +38,10 @@ deploys on its own. Order matters: each tier needs the addresses and keys of the
      `SPECTRA_*_EVIDENCE` flag.
 3. Fill the search index once embeddings are set: `npx convex run semanticIndex:startBackfill --prod` and
    `npx convex run memory:backfillEmbeddings '{"limit":200}' --prod` (repeat until it reports nothing left).
-4. Run `npx convex codegen` and confirm `convex/_generated/api.d.ts` has no diff.
+4. Complete the catalog summaries: `npx convex run spectraArtifacts:backfillSummaries '{"cursor":null,"limit":10}' --prod`,
+   then pass each returned cursor until it reports `done` (agent and artifact catalogs need the whole traversal).
+5. Start school usage ceilings from real totals: `npx convex run metering:backfillSchoolUsageTotals '{}' --prod`, once.
+6. Run `npx convex codegen` and confirm `convex/_generated/api.d.ts` has no diff.
 
 ## 2. Collaboration gateway (Fly)
 

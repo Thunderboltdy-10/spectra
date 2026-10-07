@@ -9,3 +9,5 @@ export const MAX_IMPORT_ORIGINAL_BYTES = 80_000_000;
 export const MAX_IMPORT_REQUEST_BYTES = 32_000_000;
 export const MAX_PERSISTED_CONTENT_BYTES = 900_000;
 export const MAX_ATTACHMENT_BYTES = 25_000_000;
+/** Files one message to Spectra can carry. */
+export const MAX_RUN_ATTACHMENTS = 20;

@@ -1,4 +1,5 @@
 "use client";
+import { downloadDocumentBlob } from "../components/artifact-studio-file-utils";
 import { useWorkAvailability } from "../components/use-work-availability";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
@@ -189,11 +190,7 @@ export function ResourceSurface({
       const blob = await response.blob();
       const disposition = response.headers.get("content-disposition") ?? "";
       const match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = match ? decodeURIComponent(match[1]!) : artifact.title;
-      link.click();
-      URL.revokeObjectURL(link.href);
+      downloadDocumentBlob(match ? decodeURIComponent(match[1]!) : artifact.title, blob);
     } catch (error) {
       setOpenError(
         error instanceof Error

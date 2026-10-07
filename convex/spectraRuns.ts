@@ -4,7 +4,7 @@ import type { MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { normalizeMediaType, normalizeSha256 } from "../shared/intake-integrity";
-import { MAX_ATTACHMENT_BYTES } from "../shared/intake-limits";
+import { MAX_ATTACHMENT_BYTES, MAX_RUN_ATTACHMENTS } from "../shared/intake-limits";
 import type { Doc, Id } from "./_generated/dataModel";
 import { getAuthenticatedActor } from "./identityShared";
 import { applicationApprovalScope } from "./spectraApplicationWriteScope";
@@ -649,6 +649,16 @@ const vRunPointers = v.object({
   references: v.optional(v.array(vRunPointer)),
 });
 
+/** What a user message records about its files: their names and kinds, never their contents. */
+const vMessageMetadata = v.object({
+  attachments: v.optional(v.array(v.object({
+    name: v.string(),
+    mimeType: v.string(),
+    size: v.number(),
+    handling: v.union(v.literal("pdf"), v.literal("text"), v.literal("docx"), v.literal("xlsx"), v.literal("pptx"), v.literal("image")),
+  }))),
+});
+
 export const beginRun = mutation({
   args: {
     /** Page, open items, selection and @ references, kept for resumed attempts. */
@@ -662,7 +672,7 @@ export const beginRun = mutation({
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     artifactId: v.optional(v.id("spectraArtifacts")),
     modelUsed: v.optional(v.string()),
-    messageMetadata: v.optional(v.any()),
+    messageMetadata: v.optional(vMessageMetadata),
     clarificationId: v.optional(v.string()),
     clarificationMessageId: v.optional(v.id("spectraMessages")),
     clarificationExecutionId: v.optional(v.string()),
@@ -680,6 +690,8 @@ export const beginRun = mutation({
       .trim()
       .slice(0, 12_000);
     if (!cleanPrompt) throw new Error("Write a message before starting a run.");
+    if ((args.messageMetadata?.attachments?.length ?? 0) > MAX_RUN_ATTACHMENTS)
+      throw new Error(`A message can carry at most ${MAX_RUN_ATTACHMENTS} files.`);
     const existingRun = await ctx.db
       .query("spectraAiRuns")
       .withIndex("by_account_submission", (q) =>

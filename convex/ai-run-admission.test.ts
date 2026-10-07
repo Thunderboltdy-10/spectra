@@ -55,3 +55,34 @@ it("caps an account's live AI runs across fresh threads and per hour", async () 
   });
   await expect(begin("after-burst")).rejects.toThrow("many AI requests in the last hour");
 });
+
+it("records only the names and kinds of a message's files, and only so many", async () => {
+  const t = convexTest(schema, modules);
+  for (const name of ["orgNodeCountByType", "orgNodeCountByWorkspace", "orgNodeCountByParent"])
+    aggregateTest.register(t, name);
+  await t.run(async (ctx) => {
+    const now = Date.now();
+    const schoolId = await ctx.db.insert("schools", {
+      name: "Metadata School", slug: "metadata-school", verifiedDomains: [], status: "active",
+      timezone: "Europe/Madrid", policyVersion: 1, createdAt: now, updatedAt: now,
+    });
+    const accountId = await ctx.db.insert("accounts", {
+      clerkId: identity.subject, email: identity.email, emailVerified: true,
+      name: "Admission", status: "active", createdAt: now, updatedAt: now,
+    });
+    await ctx.db.insert("schoolMemberships", {
+      accountId, schoolId, role: "student", status: "active", joinedAt: now, createdAt: now, updatedAt: now,
+    });
+  });
+  const user = t.withIdentity(identity);
+  const file = { name: "notes.txt", mimeType: "text/plain", size: 5, handling: "text" as const };
+  const begin = (submissionKey: string, messageMetadata: unknown) =>
+    user.mutation(api.spectraRuns.beginRun, {
+      sourceSurface: "chat", userPrompt: "Summarise these.", submissionKey,
+      messageMetadata: messageMetadata as { attachments: (typeof file)[] },
+    });
+
+  await expect(begin("files-ok", { attachments: [file] })).resolves.toMatchObject({ created: true });
+  await expect(begin("files-many", { attachments: Array.from({ length: 21 }, () => file) })).rejects.toThrow("at most 20 files");
+  await expect(begin("files-extra", { attachments: [file], notes: "x".repeat(100_000) })).rejects.toThrow();
+});

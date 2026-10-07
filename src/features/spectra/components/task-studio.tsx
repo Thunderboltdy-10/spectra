@@ -1,5 +1,6 @@
 "use client";
 
+import { downloadDocumentText } from "./artifact-studio-file-utils";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { CalendarCheck2, Clock3, Lock, Plus, X } from "@/components/icons/glyph-icons";
@@ -226,12 +227,7 @@ export function TaskStudio({
 
   const exportIcs = () => {
     const name = (task.taskTitle || title || "task").replace(/[^a-z0-9-_]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
-    const url = URL.createObjectURL(new Blob([planToIcs(normalizePlanContent(task), title)], { type: "text/calendar" }));
-    const anchor = window.document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${name || "task"}.ics`;
-    anchor.click();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    downloadDocumentText(`${name || "task"}.ics`, "text/calendar", planToIcs(normalizePlanContent(task), title));
   };
 
   const stepsDone = useMemo(() => steps.filter((step) => step.done).length, [steps]);

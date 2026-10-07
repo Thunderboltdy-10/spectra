@@ -1,5 +1,6 @@
 "use client";
 
+import { downloadDocumentText } from "./artifact-studio-file-utils";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { currentTimeMs, uniqueToken } from "@/lib/unique-token";
@@ -377,12 +378,7 @@ export function PlanStudio({
         : format === "ics"
           ? "text/calendar"
           : "application/json";
-    const url = URL.createObjectURL(new Blob([payload], { type }));
-    const anchor = window.document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${name || "plan"}.${format}`;
-    anchor.click();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    downloadDocumentText(`${name || "plan"}.${format}`, type, payload);
     setNotice(
       format === "ics"
         ? "Exported as calendar to-dos. School deadlines are marked, not rewritten."

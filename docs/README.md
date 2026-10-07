@@ -161,10 +161,9 @@ This list reflects main after Phase 3 (`853e4a12`). A tag in brackets names the 
 - **Surfaces:**
   - a deleted workspace leaves its tab open;
   - some admin lists flash on refresh;
-  - some downloads revoke their URL immediately;
   - the "Not reached" surfaces are `/agents/[id]`, `/analytics` and most of `/superadmin`.
   - [P3-SURFACES-2]
-- **Small hardening:** DNS rebinding on ManageBac fetches, and an unbounded `beginRun.messageMetadata`. [SECURITY-PRIVACY R5, R8]
+- **Small hardening:** DNS rebinding on ManageBac fetches. [SECURITY-PRIVACY R5]
 
 ## History
 

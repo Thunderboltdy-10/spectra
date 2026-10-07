@@ -101,6 +101,7 @@ function hitLine(hit: SearchHit) {
   else if (hit.kind === "event") facts.push(`calendar item ${hit.id}`);
   else if (hit.kind === "school") facts.push(`school record ${hit.id}`);
   if (hit.location) facts.push(`at "${hit.location}"`);
+  if (hit.kind === "artifact" && hit.regionId) facts.push(`region ${hit.regionId}`);
   if (hit.workspace) facts.push(`in ${hit.workspace}`);
   if (hit.ownership === "shared") facts.push("shared with the user");
   if (hit.timeAt) facts.push(`on ${new Date(hit.timeAt).toISOString().slice(0, 16).replace("T", " ")} UTC`);

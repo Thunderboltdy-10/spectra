@@ -126,6 +126,8 @@ import {
 } from "./sandboxed-artifact-runtime";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { spectraBus } from "../events";
+import { FILE_NOUNS, itemForRegion, lineOfExcerpt, regionTexts, type WorkRegion } from "../anchors/locate";
+import { useOpenAnchor, type AnchorLanding } from "../anchors/use-open-anchor";
 import {
   ArtifactWorkbar,
   WorkbarItemSelector,
@@ -801,6 +803,45 @@ export function CodeStudio({
     }
     return spectraBus.handle("work.reveal", onReveal);
   }, [artifactId, activeFileId, workbook.files]);
+
+  // Opened at a file (a search hit, a citation): show its source and land on
+  // the line the matched passage starts at, or on the file when none is known.
+  // The editor keeps focus where it was; only the view moves.
+  const landOnFile = useCallback(
+    (region: WorkRegion): AnchorLanding | null => {
+      const file =
+        itemForRegion(workbook.files, region, FILE_NOUNS) ??
+        workbook.files.find((candidate) => regionTexts(region).includes(candidate.path));
+      if (!file) return null;
+      // The passage was indexed as the path, a line break, then the source.
+      const indexedLine = lineOfExcerpt(`${file.path}\n${file.source}`, region.excerpt);
+      const lineNumber = indexedLine ? Math.max(1, indexedLine - 1) : null;
+      let scrolled = false;
+      return {
+        select: () => {
+          setActiveFileId(file.id);
+          setSourceMode("code");
+          setSurface((current) => (current === "preview" ? "split" : current));
+        },
+        find: () => {
+          const view = editorViewRef.current;
+          if (!view?.dom.isConnected || view.state.doc.toString() !== file.source) return null;
+          if (!lineNumber) return view.dom;
+          const line = view.state.doc.line(Math.min(lineNumber, view.state.doc.lines));
+          if (!scrolled) {
+            scrolled = true;
+            view.dispatch({ effects: EditorView.scrollIntoView(line.from, { y: "center" }) });
+            return null;
+          }
+          const at = view.domAtPos(line.from).node;
+          return (at instanceof Element ? at : at.parentElement)?.closest(".cm-line") ?? view.dom;
+        },
+        scroll: false,
+      };
+    },
+    [workbook.files],
+  );
+  useOpenAnchor(artifactId, landOnFile);
 
   // Spectra can publish or take down the build too; show what it did.
   const [publishedRevision, setPublishedRevision] = useState(0);

@@ -90,6 +90,16 @@ import { ArtifactWorkbar, type CommandBinding, WorkbarItemSelector } from "./art
 import { projectBindingsFromIr } from "../capabilities";
 import { useStudioContract } from "./artifact-studio-shell";
 import { targetAttrs } from "../collaboration/target-attributes";
+import { TARGET_ATTRIBUTE } from "../collaboration/interaction-geometry";
+import type { WorkRegion } from "../anchors/locate";
+import { attributeSelector, paintedFirst, useOpenAnchor, type AnchorLanding } from "../anchors/use-open-anchor";
+
+/** The semantic layer's agent regions (shared/semantic-chunks.ts): the view each is in and its control. */
+const AGENT_REGION_PARTS = new Map<string, { view: string; path: string; brief?: boolean }>([
+  ["agent:profile", { view: "overview", path: "/foundry/mission" }],
+  ["agent:routing", { view: "releases", path: "/routing/description" }],
+  ["agent-instructions", { view: "releases", path: "/instructions/text", brief: true }],
+]);
 import { AgentBench, benchBarAction, useAgentBench } from "./agent-bench";
 import { spectraBus } from "../events";
 export { canPublishAgentArtifact } from "./agent-publish-gates";
@@ -1057,6 +1067,20 @@ export function AgentFoundry({
   const [showDismissed, setShowDismissed] = useState(false);
   const [showBrief, setShowBrief] = useState(false);
   const [ledgerOpen, setLedgerOpen] = useState(false);
+  // Opened at a part of the agent (a search hit, a citation): show the view it
+  // is in and land on it.
+  const landOnPart = useCallback((region: WorkRegion): AnchorLanding | null => {
+    const part = AGENT_REGION_PARTS.get(region.id);
+    if (!part) return null;
+    return {
+      select: () => {
+        setView(part.view);
+        if (part.brief) setShowBrief(true);
+      },
+      find: (root) => paintedFirst(root.querySelectorAll(attributeSelector(TARGET_ATTRIBUTE, part.path))),
+    };
+  }, []);
+  useOpenAnchor(artifactId, landOnPart);
   const [activeQuestionId, setActiveQuestionId] = useState("");
   const [analytics, setAnalytics] = useState<SpectraAgentAnalytics | null>(null);
   const [analyticsState, setAnalyticsState] = useState<

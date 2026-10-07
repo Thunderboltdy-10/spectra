@@ -4169,7 +4169,9 @@ export default defineSchema({
     itemId: v.string(),
     generation: v.number(),
     embeddingVersion: v.string(),
-    neighbors: v.array(v.object({ itemKind: semanticIndexedKind, itemId: v.string(), similarity: v.number() })),
+    // `chunkKey`: the neighbour's passage most like the item, so opening it from Related lands there.
+    neighbors: v.array(v.object({ itemKind: semanticIndexedKind, itemId: v.string(), similarity: v.number(),
+      chunkKey: v.optional(v.string()) })),
     expiresAt: v.number(),
   })
     .index("by_account_item", ["accountId", "itemKind", "itemId"])

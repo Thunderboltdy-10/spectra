@@ -8,8 +8,28 @@ const { runLocalDeviceAction } = vi.hoisted(() => ({
 }));
 vi.mock("../devices/device-actions", () => ({ runLocalDeviceAction }));
 import { spectraBus } from "../events";
+import { clearLandings, pendingLanding } from "../anchors/open-anchor";
 
 describe("application command dispatcher", () => {
+  it("records where a work should land before asking the host to open it", async () => {
+    clearLandings();
+    let seen: unknown;
+    const openArtifact = vi.fn((workId: string) => {
+      seen = pendingLanding(workId)?.region;
+    });
+    const dispatch = createApplicationCommandDispatcher({
+      openArtifact,
+      navigate: vi.fn(),
+      replacePreferences: vi.fn(),
+      preferences: DEFAULT_SPECTRA_PREFERENCES,
+    });
+    await dispatch("app.work.open", { workId: "work-1", region: { id: "slide-2", label: "Slide 2: Results" } });
+    expect(seen).toEqual({ id: "slide-2", label: "Slide 2: Results" });
+    clearLandings();
+    await dispatch("app.work.open", { workId: "work-1" });
+    expect(pendingLanding("work-1")).toBeUndefined();
+  });
+
   it("routes navigation and work opening through the shell host", async () => {
     const openArtifact = vi.fn();
     const navigate = vi.fn();

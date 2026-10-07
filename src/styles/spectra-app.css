@@ -15051,6 +15051,23 @@ html[data-spectra-motion="none"] [data-anchor-focus="true"] {
   box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent-cyan) 35%, transparent);
 }
 
+/* A search result, citation or Spectra opened a work at a place inside it:
+ * the place gets the same ring, drawn over the content (never on the
+ * editor's own nodes), clipped to the studio, and gone once it settles. */
+.spectra-anchor-landing {
+  position: fixed;
+  z-index: calc(var(--z-panel) + 1);
+  pointer-events: none;
+  border-radius: var(--chip-radius);
+  animation: spectra-target-pulse 1.15s var(--ease-standard) both;
+}
+
+html[data-spectra-motion="reduced"] .spectra-anchor-landing,
+html[data-spectra-motion="none"] .spectra-anchor-landing {
+  animation: none;
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent-cyan) 35%, transparent);
+}
+
 /* ================================================================ *
  * Side-panel transfer (Phase 14.7): panels arrive from the edge they
  * belong to; closing and panel-to-fullscreen handoffs settle instead of

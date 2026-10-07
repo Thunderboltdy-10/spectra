@@ -113,6 +113,8 @@ import {
 } from "../presentation/io";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { spectraBus } from "../events";
+import { itemForRegion, SLIDE_NOUNS, type WorkRegion } from "../anchors/locate";
+import { regionElement, useOpenAnchor, type AnchorLanding } from "../anchors/use-open-anchor";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { ArtifactWorkbar, WorkbarItemSelector } from "./artifact-workbar";
 import { useStudioContract } from "./artifact-studio-shell";
@@ -1089,6 +1091,23 @@ export function PresentationStudio({
     }
     return spectraBus.handle("work.reveal", onReveal);
   }, [artifactId, activeSlideId, deck.slides]);
+  // Opened at a slide (a search hit, a citation): show it, then land on it.
+  const landOnSlide = useCallback(
+    (region: WorkRegion): AnchorLanding | null => {
+      const slide = itemForRegion(deck.slides, region, SLIDE_NOUNS);
+      if (!slide) return null;
+      return {
+        select: () => {
+          setActiveSlideId(slide.id);
+          setSelectedObjectId(undefined);
+          setLayerSelection([]);
+        },
+        find: (root) => regionElement(root, slide.id),
+      };
+    },
+    [deck.slides],
+  );
+  useOpenAnchor(artifactId, landOnSlide);
   useEffect(() => {
     let active = true;
     void getArtifactAssets(artifactId)

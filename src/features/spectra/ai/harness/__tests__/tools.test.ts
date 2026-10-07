@@ -264,6 +264,8 @@ describe("harness tools", () => {
     ["managebac", { action: "set_sync_mode", kind: "grades", mode: "follow", classId: "c9" }, { command: "set_school_sync_mode", args: { kind: "grades", mode: null, providerClassId: "c9" } }],
     ["managebac", { action: "release_class_workspaces", classIds: ["r1"], retention: "keep_in_spectra" }, { command: "manage_class_workspaces", args: { action: "release", recordIds: ["r1"], retention: "keep_in_spectra" } }],
     ["open_in_spectra", { destination: "analytics" }, { command: "navigate_spectra", args: { destination: "analytics" } }],
+    ["open_in_spectra", { destination: "artifact", targetId: "wx1", region: "slide-3" }, { command: "navigate_spectra", args: { destination: "artifact", targetId: "wx1", region: "slide-3" } }],
+    ["open_in_spectra", { destination: "analytics", region: "slide-3" }, { command: "navigate_spectra", args: { destination: "analytics" } }],
     ["manage_comment", { artifactId: "wx1", commentId: "c1", action: "resolve" }, { command: "manage_comment", args: { artifactId: "wx1", commentId: "c1", action: "resolve" } }],
     ["add_comment", { artifactId: "wx1", body: "Agreed.", replyTo: "c1" }, { command: "add_comment", args: { artifactId: "wx1", body: "Agreed.", parentCommentId: "c1" } }],
     ["restore_version", { artifactId: "wx1", versionId: "v1" }, { command: "restore_version", args: { artifactId: "wx1", versionId: "v1" } }],

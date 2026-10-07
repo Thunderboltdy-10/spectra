@@ -101,11 +101,17 @@ describe("semantic search over the fixture corpus", () => {
     expect(relatedIds).not.toContain(copyId);
     expect(related.results.every((result) => result.reasons.length > 0)).toBe(true);
     expect(relatedIds).not.toContain(world.ids["a-budget"]);
+    // A similar work names its passage most like this one, so opening it from Related lands there.
+    const deck = related.results.find((result) => result.itemId === world.ids["a-cells-deck"])!;
+    expect(deck.anchor).toMatchObject({ kind: "artifact", artifactId: world.ids["a-cells-deck"], regionId: expect.any(String) });
+    expect(deck.location).toMatch(/^Slide \d/);
+    expect(deck.snippet).toBeTruthy();
 
     await world.t.finishAllScheduledFunctions(vi.runAllTimers);
     const cached = await world.ana.action(api.semantic.related, { itemId: world.ids["a-cell-notes"]! });
     expect(cached.cached).toBe(true);
     expect(cached.results.map((result) => result.itemId)).toEqual(relatedIds);
+    expect(cached.results.find((result) => result.itemId === world.ids["a-cells-deck"])?.anchor).toEqual(deck.anchor);
   });
 });
 

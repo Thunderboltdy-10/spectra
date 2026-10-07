@@ -177,6 +177,7 @@ import {
   workspaceIdFromSpectraPath,
 } from "./shell-location";
 import { beginCreation } from "../life/use-life";
+import { expectLanding, type WorkRegion } from "../anchors/open-anchor";
 import { useShareInvitations } from "./use-share-invitations";
 import { downloadDocumentBlob } from "../components/artifact-studio-file-utils";
 
@@ -2872,8 +2873,9 @@ export function SpectraShell({
   ]);
 
   useEffect(() => {
-    function onOpenArtifact({ workId: artifactId }: { workId: string }) {
+    function onOpenArtifact({ workId: artifactId, region }: { workId: string; region?: WorkRegion }) {
       if (!artifactId) return;
+      expectLanding(artifactId, region);
       // Overview cache is not the membership test. Embeds, follow, and
       // calendar can name work that is not in the loaded snapshot yet; a
       // silent miss leaves Open source looking wired and doing nothing.

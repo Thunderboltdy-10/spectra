@@ -15,6 +15,7 @@ import {
   setFollowingAi,
 } from "../collaboration/follow-ai";
 import { spectraBus } from "../events";
+import { clearLandings, pendingLanding } from "../anchors/open-anchor";
 
 describe("follow AI", () => {
   beforeEach(() => {
@@ -192,6 +193,28 @@ describe("follow AI", () => {
     expect(opened).toEqual([]);
     noteAiLocation({ actorId: "run-a", artifactId: "art-a2" });
     expect(opened).toEqual(["art-a2"]);
+  });
+
+  it("opens the work at the place Spectra asked to show, and moves there when already open", () => {
+    clearLandings();
+    const regions: unknown[] = [];
+    spectraBus.handle("work.open", ({ region }) => {
+      regions.push(region);
+    });
+    setFollowingAi(true);
+    noteAiLocation({ artifactId: "art-1", region: { id: "slide-2" } });
+    expect(regions).toEqual([{ id: "slide-2" }]);
+    noteAiLocation({ artifactId: "art-1", path: "/slides/4", region: { id: "slide-5" } });
+    expect(regions).toHaveLength(1);
+    expect(pendingLanding("art-1")?.region).toEqual({ id: "slide-5" });
+    clearLandings();
+  });
+
+  it("does not move a view that is not following to the place Spectra named", () => {
+    clearLandings();
+    noteAiLocation({ artifactId: "art-1", region: { id: "slide-2" } });
+    noteAiLocation({ artifactId: "art-1", path: "/x", region: { id: "slide-3" } });
+    expect(pendingLanding("art-1")).toBeUndefined();
   });
 
   it("ignores a programmatic-open window that has expired", () => {

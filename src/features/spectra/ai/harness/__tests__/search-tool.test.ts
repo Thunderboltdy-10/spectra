@@ -45,6 +45,24 @@ describe("search tool", () => {
     expect(session.titles.get("doc-1")).toEqual({ title: "Photosynthesis essay", type: "document" });
   });
 
+  it("gives the region a passage is in, so open_in_spectra and citations can land there", async () => {
+    class Located extends MemoryBackend {
+      override async search() {
+        return {
+          mode: "hybrid" as const,
+          hits: [
+            { kind: "artifact" as const, id: "deck-1", title: "Cells", typeLabel: "Slides", subtype: "presentation", location: "Slide 3: Mitosis", regionId: "slide-abc" },
+            { kind: "event" as const, id: "ev-1", title: "Quiz", typeLabel: "Calendar event", regionId: "ignored" },
+          ],
+        };
+      }
+    }
+    const { run } = tools(new Located());
+    const { outcome } = await run("search", { query: "mitosis" });
+    expect(outcome.content).toContain('id deck-1, at "Slide 3: Mitosis", region slide-abc');
+    expect(outcome.content).not.toContain("region ignored");
+  });
+
   it("looks only where asked", async () => {
     const { run } = tools(seeded());
     const { outcome } = await run("search", { query: "photosynthesis", in: ["calendar"] });

@@ -121,6 +121,9 @@ import {
 import { createSlashCommandRenderer } from "../editor/slash-command-renderer";
 import { StableBlockId } from "../editor/stable-block-id";
 import { spectraBus } from "../events";
+import type { WorkRegion } from "../anchors/locate";
+import { documentBlockFor } from "../anchors/document-region";
+import { useOpenAnchor, type AnchorLanding } from "../anchors/use-open-anchor";
 import { parseSpectraWorkUrl, type ReferenceNode } from "../references";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { enforcePdfInput, OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
@@ -1379,6 +1382,17 @@ export function DocumentStudio({
         });
     }
   }, [artifactId, editor, migrateLegacyReference, readOnly]);
+
+  // Opened at a block or heading (a search hit, a citation): land on it. The
+  // editor's nodes are only read; the mark is drawn over them.
+  const landOnBlock = useCallback(
+    (region: WorkRegion): AnchorLanding | null => {
+      if (!editor || editor.isDestroyed) return null;
+      return { find: () => documentBlockFor(editor.view.dom, region) };
+    },
+    [editor],
+  );
+  useOpenAnchor(artifactId, landOnBlock, { ready: Boolean(editor) });
 
   useEffect(
     () =>

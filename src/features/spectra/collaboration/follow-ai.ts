@@ -20,6 +20,8 @@
 import { useSyncExternalStore } from "react";
 import { spectraBus } from "../events";
 import type { FollowRoute } from "./follow-navigation";
+import { expectLanding } from "../anchors/open-anchor";
+import type { WorkRegion } from "../anchors/locate";
 
 export type AiLocation = {
   actorId?: string;
@@ -69,16 +71,17 @@ function emit(): void {
   emitVisible();
 }
 
-function dispatchOpen(artifactId: string): void {
+function dispatchOpen(artifactId: string, region?: WorkRegion): void {
   if (
     lastDispatchedArtifactId === artifactId &&
     Date.now() - programmaticOpenAt < PROGRAMMATIC_OPEN_MS
   ) {
+    expectLanding(artifactId, region);
     return;
   }
   lastDispatchedArtifactId = artifactId;
   programmaticOpenAt = Date.now();
-  void spectraBus.command("work.open", { workId: artifactId, surface: "panel" });
+  void spectraBus.command("work.open", { workId: artifactId, surface: "panel", ...(region ? { region } : {}) });
 }
 
 function dispatchSurface(location: AiSurfaceLocation): void {
@@ -221,6 +224,8 @@ export function noteAiLocation(update: {
   artifactId: string;
   path?: string;
   note?: string;
+  /** A place inside the work Spectra asked to show (open_in_spectra): a followed view lands there. */
+  region?: WorkRegion;
 }): void {
   if (!update.artifactId) return;
   const sameArtifact = location?.artifactId === update.artifactId;
@@ -247,12 +252,18 @@ export function noteAiLocation(update: {
   // beat. Publishing the same semantic location must be a no-op; otherwise the
   // store re-renders ArtifactStudioEditor, which republishes the location, and
   // React correctly stops the resulting external-store feedback loop.
-  if (sameArtifact && samePath && sameNote && location?.actorId === nextLocation.actorId) return;
+  if (sameArtifact && samePath && sameNote && location?.actorId === nextLocation.actorId) {
+    // Already there: a followed view still moves to the place asked for.
+    if (update.region && shouldAnnounce(update.actorId)) expectLanding(update.artifactId, update.region);
+    return;
+  }
   location = nextLocation;
   if (update.actorId) locationsByActor.set(update.actorId, nextLocation);
   lockActorIfNeeded(update.actorId);
-  if (shouldAnnounce(update.actorId) && !sameArtifact)
-    dispatchOpen(update.artifactId);
+  if (shouldAnnounce(update.actorId)) {
+    if (!sameArtifact) dispatchOpen(update.artifactId, update.region);
+    else expectLanding(update.artifactId, update.region);
+  }
   emit();
 }
 

@@ -11,6 +11,8 @@ import { projectBindingsFromIr } from "../capabilities";
 import { normalizePlanContent } from "../plan/model";
 import { planToIcs } from "../plan/projections";
 import { formatMinutesBefore, REMINDER_MINUTE_OPTIONS } from "../reminders/minutes-before";
+import type { WorkRegion } from "../anchors/locate";
+import { regionElement, useOpenAnchor, type AnchorLanding } from "../anchors/use-open-anchor";
 import { useStudioContract } from "./artifact-studio-shell";
 import { ArtifactWorkbar, contentHistoryBindings } from "./artifact-workbar";
 import { SpectraStoredText } from "./spectra-rich-content";
@@ -131,7 +133,7 @@ function StepRow({
 }) {
   // A field object: a step forms from where it was made (your press, or the prism when Spectra adds it) and parts when removed.
   return (
-    <li className="spectra-task-step" data-life-object="" data-life-done="" data-done={step.done || undefined}>
+    <li className="spectra-task-step" data-anchor-region={`task:subtask:${step.id}:title`} data-life-object="" data-life-done="" data-done={step.done || undefined}>
       <input
         type="checkbox"
         checked={step.done}
@@ -166,13 +168,21 @@ function StepRow({
   );
 }
 
+/** The semantic layer names a task's parts (shared/semantic-chunks.ts); each is marked where it is shown. */
+function landOnTaskPart(region: WorkRegion): AnchorLanding {
+  return { find: (root) => regionElement(root, region.id) };
+}
+
 export function TaskStudio({
+  artifactId,
   mode,
   title,
   content,
   onChange,
   readOnly,
 }: {
+  /** The work, so opening it at a step or its notes lands there. */
+  artifactId?: string;
   mode: "split" | "tab";
   title: string;
   content: unknown;
@@ -195,6 +205,9 @@ export function TaskStudio({
     const timer = window.setInterval(() => setNow(currentTimeMs()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  // Opened at a part of the task (a search hit, a citation): land on it.
+  useOpenAnchor(artifactId, landOnTaskPart);
 
   const locked = new Set(task.source?.provider === "managebac" ? (task.source.lockedFields ?? []) : []);
   const fromSchool = locked.size > 0;
@@ -268,6 +281,7 @@ export function TaskStudio({
               {done ? <Icon name="check" size={16} animate /> : null}
             </button>
             <textarea
+              data-anchor-region="task:taskTitle"
               className="spectra-task-title"
               rows={1}
               value={task.taskTitle ?? ""}
@@ -332,7 +346,7 @@ export function TaskStudio({
             </div>
           ) : null}
 
-          <div className="spectra-task-notes">
+          <div className="spectra-task-notes" data-anchor-region={fromSchool ? undefined : "task:description"}>
             <ArtifactRichTextEditor
               key={fromSchool ? "note" : "description"}
               value={fromSchool ? (task.personalOverlay?.note ?? "") : (task.description ?? "")}
@@ -347,7 +361,11 @@ export function TaskStudio({
               }
             />
           </div>
-          {fromSchool && task.description ? <SpectraStoredText value={task.description} className="spectra-task-school-notes" /> : null}
+          {fromSchool && task.description ? (
+            <div data-anchor-region="task:description">
+              <SpectraStoredText value={task.description} className="spectra-task-school-notes" />
+            </div>
+          ) : null}
 
           {steps.length ? (
             <section className="spectra-task-steps" aria-label="Steps">

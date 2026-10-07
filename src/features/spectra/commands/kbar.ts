@@ -6,6 +6,7 @@ import { commandForBinding } from "./registry";
 import { documentCommandBindings, documentCommandStubHandlers } from "./office/document-commands";
 import type { Command, CommandContext, CommandExecutionResult, CommandParam } from "./types";
 import type { WorkType } from "../work/registry";
+import { regionOfResult } from "../anchors/locate";
 
 export type KBarContext = {
   pathname: string;
@@ -280,15 +281,17 @@ export const KBAR_SEMANTIC_KINDS = ["artifact", "thread"] as const satisfies rea
 /** Semantic results as command-bar results, in the layer's ranking order. */
 export function semanticKBarResults(results: readonly SemanticResult[]): KBarSearchResult[] {
   return results.flatMap((result, index): KBarSearchResult[] => {
-    if (result.kind === "artifact")
+    if (result.kind === "artifact") {
+      const region = regionOfResult(result);
       return [{
         id: result.itemId,
         kind: "artifact",
         title: result.title || "Untitled",
         subtitle: [result.typeLabel, result.location ?? result.snippet].filter(Boolean).join(" · "),
-        params: { workId: result.itemId, surface: "panel" },
+        params: { workId: result.itemId, surface: "panel", ...(region ? { region } : {}) },
         rank: index,
       }];
+    }
     if (result.kind === "thread")
       return [{
         id: result.itemId,

@@ -715,6 +715,7 @@ export function SlideCanvas({
     <div
       className="presentation-canvas"
       data-authoring={!compact || undefined}
+      data-anchor-region={compact ? undefined : slide.id}
       data-transition={
         animateObjects && slide.transition?.kind !== "none"
           ? slide.transition?.kind

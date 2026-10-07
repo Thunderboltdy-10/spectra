@@ -31,7 +31,7 @@ type ApplicationCommand = { input: z.ZodType<Record<string, unknown>>; authority
 
 const COMMANDS: Record<string, ApplicationCommand> = {
   navigate_spectra: {
-    input: z.object({ destination: z.enum(NAVIGATION_DESTINATIONS), targetId: z.string().optional() }),
+    input: z.object({ destination: z.enum(NAVIGATION_DESTINATIONS), targetId: z.string().optional(), region: z.string().trim().min(1).max(400).optional() }),
     authority: "navigation",
   },
   add_comment: {

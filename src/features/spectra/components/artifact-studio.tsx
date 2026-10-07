@@ -1,5 +1,6 @@
 "use client";
 
+import { OpenAnchorScope } from "../anchors/use-open-anchor";
 import { useWorkAvailability } from "./use-work-availability";
 
 import { Tooltip } from "@/components/ui/tooltip";
@@ -5903,6 +5904,7 @@ function ArtifactStudioEditor({
   );
 
   return (
+    <OpenAnchorScope enabled={!instanceKey} root={presenceSurfaceRef}>
     <div
       ref={studioSurfaceRef}
       className="spectra-artifact-studio relative flex h-full min-h-0 flex-col"
@@ -6461,6 +6463,7 @@ function ArtifactStudioEditor({
               {artifact.blueprintKey === "planner_task" && isSingleTask(editorContent) ? (
                 <TaskStudio
                   key={`${artifact._id}:task`}
+                  artifactId={artifact._id}
                   mode={contentMode}
                   title={title}
                   content={editorContent}
@@ -6762,6 +6765,7 @@ function ArtifactStudioEditor({
         />
       ) : null}
     </div>
+    </OpenAnchorScope>
   );
 }
 

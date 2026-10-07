@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -63,6 +64,8 @@ import type { WorkCapability } from "../work/registry";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 import { spectraBus } from "../events";
+import { CARD_NOUNS, itemForRegion, itemInPassage, plainOfMarkup, type WorkRegion } from "../anchors/locate";
+import { regionElement, useOpenAnchor, type AnchorLanding } from "../anchors/use-open-anchor";
 import {
   ArtifactRichTextEditor,
   Field,
@@ -261,6 +264,28 @@ export function FlashcardStudio({
     };
     return spectraBus.handle("work.reveal", reveal);
   }, [artifactId, cards]);
+  // Opened at a card (a search hit, a citation): show it, then land on it.
+  const cardsView = deckViewModes.find((entry) => entry.id !== "progress")?.id ?? "browse";
+  const landOnCard = useCallback(
+    (region: WorkRegion): AnchorLanding | null => {
+      const named = itemForRegion(cards, region, CARD_NOUNS);
+      if (!named) return null;
+      const card =
+        itemInPassage(cards, cards.indexOf(named), (entry) =>
+          [entry.front, entry.back, entry.hint, entry.explanation].map(plainOfMarkup).join(" "),
+        region.excerpt) ?? named;
+      return {
+        select: () => {
+          setActiveCardId(card.id);
+          if (card.section) setActiveSection(card.section);
+          if (activeView === "progress") setStudioView(cardsView);
+        },
+        find: (root) => regionElement(root, card.id),
+      };
+    },
+    [activeView, cards, cardsView],
+  );
+  useOpenAnchor(artifactId, landOnCard);
   const [maskDraft, setMaskDraft] = useState<{
     x: number;
     y: number;
@@ -2004,6 +2029,7 @@ export function FlashcardStudio({
       {activeView === "browse" && activeCard ? (
         <section
           className="spectra-deck-viewer"
+          data-anchor-region={activeCard.id}
           aria-label={`Flashcard ${activeCardIndex + 1} of ${cards.length}`}
         >
           <div className="spectra-deck-viewer-context">
@@ -2231,7 +2257,7 @@ export function FlashcardStudio({
           }
         />
       ) : null}
-      <section className="spectra-deck-card-editor min-w-0 overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+      <section data-anchor-region={activeCard?.id} className="spectra-deck-card-editor min-w-0 overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
         {activeCard ? (
           <div>
             <div className="spectra-deck-card-heading mb-4 flex items-center justify-between gap-3">

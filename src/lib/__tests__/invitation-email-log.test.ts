@@ -30,3 +30,11 @@ it("logs the invitation id, not the invitee's address, when SMTP delivery throws
   expect(logged).toContain("inv_123");
   expect(logged).not.toContain("pupil.name@school.test");
 });
+
+it("reports a refused delivery by count, not by the invitee's address", async () => {
+  mocks.sendMail.mockResolvedValue({ accepted: [], rejected: ["pupil.name@school.test"], response: "550 <pupil.name@school.test> unknown" });
+  const result = await sendInvitationEmail({
+    to: "pupil.name@school.test", role: "student", joinUrl: "https://example.test/join?token=t", invitationId: "inv_123",
+  });
+  expect(result).toEqual({ status: "failed", reason: "SMTP delivery not accepted. accepted=0 rejected=1 response=550 <[address]> unknown" });
+});

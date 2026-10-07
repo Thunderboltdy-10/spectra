@@ -115,7 +115,8 @@ export async function sendInvitationEmail(params: InviteEmailParams): Promise<In
     if (accepted.length === 0 || rejected.length > 0) {
       return {
         status: "failed",
-        reason: `SMTP delivery not accepted. accepted=${accepted.join(",") || "none"} rejected=${rejected.join(",") || "none"} response=${info.response || "none"}`,
+        // Counts, not addresses: the reason travels in the response and may be logged on the way.
+        reason: `SMTP delivery not accepted. accepted=${accepted.length} rejected=${rejected.length} response=${(info.response || "none").replace(/[^\s<>@"']+@[^\s<>@"']+/g, "[address]")}`,
       };
     }
 

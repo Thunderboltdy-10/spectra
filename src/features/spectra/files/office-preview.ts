@@ -1,5 +1,5 @@
 import type { JSONContent } from "@tiptap/core";
-import type { SpectraRichContentAst } from "../rich-content/ast";
+import type { RichComment, SpectraRichContentAst } from "../rich-content/ast";
 import type { PresentationContent } from "../presentation/model";
 import type { SheetCellFormat } from "../sheets/model";
 import type { ChartPlotData } from "../sheets/chart-dataset";
@@ -20,7 +20,18 @@ import type { OfficeViewKind } from "./file-kind";
 /** A picture taken out of the file. `id` is the placeholder its content points at. */
 export type OfficePreviewMedia = { id: string; mediaType: string; bytes: ArrayBuffer };
 
-export type DocumentPreview = { kind: "document"; ast: SpectraRichContentAst; media: OfficePreviewMedia[] };
+export type DocumentPreview = {
+  kind: "document";
+  ast: SpectraRichContentAst;
+  media: OfficePreviewMedia[];
+  /** Word's comment threads, numbered as the text marks them. */
+  comments: RichComment[];
+  /** The last section's own header and footer text, when it has one. */
+  header?: string;
+  footer?: string;
+  /** What the file holds that this view can't draw, named for the reader. */
+  unshown: string[];
+};
 export type SlidesPreview = { kind: "slides"; deck: PresentationContent; media: OfficePreviewMedia[] };
 
 export type SheetPreviewCell = { text: string; format?: SheetCellFormat; numeric?: boolean };
@@ -111,15 +122,40 @@ function liftDocumentImages(node: JSONContent, media: OfficePreviewMedia[]): JSO
   return node.content ? { ...node, content: node.content.map((child) => liftDocumentImages(child, media)) } : node;
 }
 
+/** Word's preserved features this view can't draw, as the reader would name them. */
+const UNSHOWN_WORD_FEATURES: Record<string, string> = {
+  smartArt: "SmartArt",
+  ole: "embedded objects",
+  textBox: "text boxes",
+};
+
 async function documentPreview(bytes: Uint8Array): Promise<DocumentPreview> {
-  const [{ importDocxPayload }, { richContentFromProseMirror }] = await Promise.all([
+  const [{ importDocxPayload }, { richDocumentFromProseMirror }] = await Promise.all([
     import("../lenses/docx-adapter"),
     import("../rich-content/prosemirror"),
   ]);
-  const { json } = await importDocxPayload(bytes);
+  const { json, projection, conversion } = await importDocxPayload(bytes);
   const media: OfficePreviewMedia[] = [];
   const doc = liftDocumentImages(json as JSONContent, media);
-  return { kind: "document", ast: richContentFromProseMirror(doc), media };
+  const { ast, comments } = richDocumentFromProseMirror(doc);
+  const unshown = new Set<string>();
+  for (const placeholder of projection.nativeBinding?.nativePlaceholders ?? []) {
+    const name = placeholder.feature ? UNSHOWN_WORD_FEATURES[placeholder.feature] : undefined;
+    if (name) unshown.add(name);
+  }
+  if (conversion.notes.some((note) => note.scope === "unsupported media")) unshown.add("pictures in formats a browser can't draw");
+  const chrome = (text: string | undefined) => (text?.trim() ? { value: text } : null);
+  const header = chrome(projection.pageSetup?.header);
+  const footer = chrome(projection.pageSetup?.footer);
+  return {
+    kind: "document",
+    ast,
+    media,
+    comments,
+    ...(header ? { header: header.value } : {}),
+    ...(footer ? { footer: footer.value } : {}),
+    unshown: [...unshown],
+  };
 }
 
 async function slidesPreview(bytes: Uint8Array): Promise<SlidesPreview> {

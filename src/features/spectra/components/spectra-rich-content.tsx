@@ -91,7 +91,15 @@ function runStyle(style: Extract<RichInline, { type: "text" }>["style"]): CSSPro
     // A run's size is in points of the surface it is on: a slide scaled into a thumbnail sets `--rich-pt` smaller.
     ...(style.fontSizePt ? { fontSize: `calc(var(--rich-pt, 1pt) * ${style.fontSizePt})` } : {}),
     ...(style.color ? { color: style.color } : {}),
+    // A highlighter is a wash, so the text stays readable on either theme.
+    ...(style.highlight ? { backgroundColor: `color-mix(in srgb, ${style.highlight} 45%, transparent)` } : {}),
   };
+}
+
+/** Who made a tracked change and when, as its tooltip says it. */
+function revisionLabel(node: Extract<RichInline, { type: "revision" }>) {
+  const day = node.date && /^\d{4}-\d{2}-\d{2}/.test(node.date) ? node.date.slice(0, 10) : undefined;
+  return `${node.kind === "insert" ? "Inserted" : "Deleted"} by ${node.author || "Word"}${day ? ` on ${day}` : ""}`;
 }
 
 function Inlines({ content, verified }: { content: readonly RichInline[]; verified: Verified }) {
@@ -128,6 +136,16 @@ function Inlines({ content, verified }: { content: readonly RichInline[]; verifi
         return safeMediaSrc(node.url) ? <img key={index} src={node.url} alt={node.alt} /> : <Fragment key={index}>{node.alt}</Fragment>;
       case "break":
         return <br key={index} />;
+      case "revision":
+        return createElement(
+          node.kind === "insert" ? "ins" : "del",
+          { key: index, "data-revision": node.kind, title: revisionLabel(node) },
+          <Inlines content={node.content} verified={verified} />,
+        );
+      case "comment":
+        return <mark key={index} data-comment={node.ids.join(" ")}><Inlines content={node.content} verified={verified} /></mark>;
+      case "comment_ref":
+        return <sup key={index} data-comment-ref={node.id} aria-label={`Comment ${node.label}`}>{node.label}</sup>;
     }
   })}</>;
 }

@@ -106,6 +106,18 @@ function inlinesToMarkdown(content: readonly RichInline[]): string {
       case "image":
         output += `![${inline.alt}](${destination(inline.url)})`;
         break;
+      // Markdown has no tracked changes or comments: a deletion reads struck
+      // through, everything else as its own text.
+      case "revision": {
+        const inner = inlinesToMarkdown(inline.content);
+        if (inner) output += inline.kind === "delete" ? `~~${inner}~~` : inner;
+        break;
+      }
+      case "comment":
+        output += inlinesToMarkdown(inline.content);
+        break;
+      case "comment_ref":
+        break;
       case "break":
         output += "\n";
         break;
@@ -203,6 +215,10 @@ function inlinesToText(content: readonly RichInline[]): string {
       case "footnote_ref": return "";
       case "image": return inline.alt;
       case "break": return "\n";
+      // The words as they would stand with every change accepted.
+      case "revision": return inline.kind === "delete" ? "" : inlinesToText(inline.content);
+      case "comment": return inlinesToText(inline.content);
+      case "comment_ref": return "";
     }
   }).join("");
 }

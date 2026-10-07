@@ -18,7 +18,13 @@ export type RichMark = "bold" | "italic" | "underline" | "strike";
  * A run's own typeface, size and colour. They belong to the artifact (a
  * slide's run keeps the font its deck uses), never to the renderer.
  */
-export type RichTextStyle = { fontFamily?: string; fontSizePt?: number; color?: string };
+export type RichTextStyle = {
+  fontFamily?: string;
+  fontSizePt?: number;
+  color?: string;
+  /** A highlighter colour behind the run (Word's highlight), as a CSS colour. */
+  highlight?: string;
+};
 
 export type RichAlign = "left" | "center" | "right" | "justify";
 
@@ -34,7 +40,16 @@ export type RichInline =
   | { type: "reference"; workId: string; label?: string }
   | { type: "footnote_ref"; id: string }
   | { type: "image"; url: string; alt: string }
-  | { type: "break" };
+  | { type: "break" }
+  /** A tracked change from Word: text someone inserted or deleted, not yet accepted. */
+  | { type: "revision"; kind: "insert" | "delete"; author?: string; date?: string; content: RichInline[] }
+  /** Text a comment is about. `ids` are the comments open over it, innermost last. */
+  | { type: "comment"; ids: string[]; content: RichInline[] }
+  /** Where a comment is anchored; `label` is the number its thread shows. */
+  | { type: "comment_ref"; id: string; label: string };
+
+/** A comment thread read from a file, shown beside the text it is about. */
+export type RichComment = { id: string; label: string; author?: string; initials?: string; date?: string; text: string };
 
 /** A list item. `checked` is set on checklist items only. */
 export type RichListItem = { checked?: boolean; blocks: RichBlock[] };

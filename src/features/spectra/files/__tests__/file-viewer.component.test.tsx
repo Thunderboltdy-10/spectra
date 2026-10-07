@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Button } from "@/components/ui/button";
 import type { PresentationContent } from "../../presentation/model";
-import { richContentFromProseMirror } from "../../rich-content/prosemirror";
+import { richDocumentFromProseMirror } from "../../rich-content/prosemirror";
 import { FileViewer } from "../file-viewer";
 import { fileViewKind, officeSizeRefusal } from "../file-kind";
 import type { OfficePreview } from "../office-preview";
@@ -151,23 +151,54 @@ describe("FileViewer: Office files", () => {
     await vi.waitFor(() => expect(reader.load).toHaveBeenCalled());
     expect(reader.load).toHaveBeenCalledWith({ kind: "document", url: "https://files.example/essay", bytes: 2048 }, expect.any(AbortSignal));
 
+    const { ast, comments } = richDocumentFromProseMirror({
+      type: "doc",
+      content: [
+        { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "Lab report" }] },
+        { type: "paragraph", content: [{ type: "text", text: "Enzymes ", marks: [{ type: "bold" }] }, { type: "text", text: "speed reactions." }] },
+        {
+          type: "paragraph",
+          content: [
+            { type: "wordCommentBoundary", attrs: { native: { kind: "commentBoundary", commentId: "4", boundary: "start", comment: { author: "Ms Ortiz", date: "2026-03-02T10:00:00Z", text: "Cite the source." } } } },
+            { type: "text", text: "Catalase " },
+            { type: "wordRevision", attrs: { native: { kind: "revision", revisionId: "7", revisionKind: "ins", author: "Ada", date: "2026-03-01T09:00:00Z", text: "quickly " } } },
+            { type: "wordRevision", attrs: { native: { kind: "revision", revisionId: "8", revisionKind: "del", author: "Ada", text: "slowly " } } },
+            { type: "text", text: "splits peroxide." },
+            { type: "wordCommentBoundary", attrs: { native: { kind: "commentBoundary", commentId: "4", boundary: "end" } } },
+          ],
+        },
+      ],
+    });
     await act(async () => {
       load.resolve({
         kind: "document",
         media: [],
-        ast: richContentFromProseMirror({
-          type: "doc",
-          content: [
-            { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "Lab report" }] },
-            { type: "paragraph", content: [{ type: "text", text: "Enzymes ", marks: [{ type: "bold" }] }, { type: "text", text: "speed reactions." }] },
-          ],
-        }),
+        ast,
+        comments,
+        header: "Lab 3\tBiology\tSpring term",
+        footer: "\tPage 1\t",
+        unshown: ["SmartArt", "text boxes"],
       });
     });
     expect(screen.queryByRole("status", { name: "Opening essay.docx" })).toBeNull();
     const view = document.querySelector("[data-file-view='document']")!;
     expect(view.querySelector(".spectra-prose h1")?.textContent).toBe("Lab report");
     expect(view.querySelector(".spectra-prose strong")?.textContent).toBe("Enzymes ");
+    // Tracked changes read in Spectra's tones, with who made them.
+    const inserted = view.querySelector<HTMLElement>("ins[data-revision='insert']")!;
+    expect(inserted.textContent).toBe("quickly ");
+    expect(inserted.title).toBe("Inserted by Ada on 2026-03-01");
+    expect(view.querySelector<HTMLElement>("del[data-revision='delete']")!.title).toBe("Deleted by Ada");
+    // The commented text is marked, numbered, and its thread sits beside the page.
+    expect(view.querySelector("mark[data-comment='4']")?.textContent).toBe("Catalase quickly slowly splits peroxide.");
+    expect(view.querySelector("sup[data-comment-ref='4']")?.textContent).toBe("1");
+    const thread = within(screen.getByRole("complementary", { name: "Comments" })).getByRole("listitem");
+    expect(thread.textContent).toContain("Ms Ortiz");
+    expect(thread.textContent).toContain("Cite the source.");
+    const header = screen.getByLabelText("Page header");
+    expect([...header.querySelectorAll("span")].map((span) => span.textContent)).toEqual(["Lab 3", "Biology", "Spring term"]);
+    expect([...screen.getByLabelText("Page footer").querySelectorAll("span")].map((span) => span.textContent)).toEqual(["", "Page 1", ""]);
+    expect(screen.getByRole("note").textContent).toBe("This file also has SmartArt and text boxes. They stay in the file; open it in Word to see them.");
   });
 
   it("shows a deck as thumbnails and the current slide, and moves with the arrow keys as a morph", async () => {

@@ -19,13 +19,12 @@ import { SpectraRichContent } from "../components/spectra-rich-content";
 import type { SpectraArtifactAsset } from "../data/api";
 import { launchFrom, useLifeLanding } from "../life/use-life";
 import { presentationSlideLabel, type PresentationContent } from "../presentation/model";
-import type { SpectraRichContentAst } from "../rich-content/ast";
 import { cellVisualStyle } from "../sheets/cell-style";
 import { conditionalCellCss } from "../sheets/conditional-format";
 import { EXCEL_DEFAULT_COLUMN_PIXELS, EXCEL_DEFAULT_ROW_PIXELS } from "../sheets/excel-units";
 import { columnName } from "../sheets/model";
 import type { OfficeViewKind } from "./file-kind";
-import { isPreviewMediaId, SHEET_PREVIEW_LIMITS, type OfficePreview, type OfficePreviewMedia, type SheetPreview, type SheetPreviewMerge, type SheetPreviewPlacement, type SheetPreviewSheet } from "./office-preview";
+import { isPreviewMediaId, SHEET_PREVIEW_LIMITS, type DocumentPreview, type OfficePreview, type OfficePreviewMedia, type SheetPreview, type SheetPreviewMerge, type SheetPreviewPlacement, type SheetPreviewSheet } from "./office-preview";
 import { loadOfficePreview, OfficePreviewRefusal } from "./office-preview-client";
 import { OfficeGhost } from "./office-ghost";
 
@@ -77,7 +76,7 @@ export default function OfficeView({ kind, url, filename, bytes }: { kind: Offic
   if (state.status === "refused")
     return <ProblemState compact title={`${filename} didn't show here.`} detail={`${state.message} Open it in a new tab instead.`} className="h-full" />;
   const { preview, urls } = state;
-  if (preview.kind === "document") return <DocumentView ast={preview.ast} urls={urls} />;
+  if (preview.kind === "document") return <DocumentView document={preview} urls={urls} />;
   if (preview.kind === "slides") return <SlidesView deck={preview.deck} media={preview.media} urls={urls} />;
   return <WorkbookView workbook={preview} urls={urls} />;
 }
@@ -97,17 +96,82 @@ function withMedia<T>(value: T, urls: ReadonlyMap<string, string>): T {
   ) as T;
 }
 
-function DocumentView({ ast, urls }: { ast: SpectraRichContentAst; urls: ReadonlyMap<string, string> }) {
-  const shown = useMemo(() => withMedia(ast, urls), [ast, urls]);
+/**
+ * A header or footer line as Word lays it out: text before the first tab
+ * sits left, the next centred, the rest right, on Word's default tab stops.
+ */
+function PageChrome({ text, slot }: { text: string; slot: "header" | "footer" }) {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  if (!lines.length) return null;
+  return (
+    <div className="file-viewer-page-chrome" data-slot={slot} aria-label={slot === "header" ? "Page header" : "Page footer"}>
+      {lines.map((line, index) => {
+        const [left = "", center = "", ...right] = line.split("\t").map((part) => part.trim());
+        return (
+          <p key={index} className="file-viewer-page-chrome-line">
+            <span>{left}</span>
+            <span>{center}</span>
+            <span>{right.filter(Boolean).join(" ")}</span>
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function commentDate(value: string | undefined) {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+const LIST = new Intl.ListFormat("en", { type: "conjunction" });
+
+function DocumentView({ document, urls }: { document: DocumentPreview; urls: ReadonlyMap<string, string> }) {
+  const shown = useMemo(() => withMedia(document.ast, urls), [document.ast, urls]);
+  const { comments, header, footer, unshown } = document;
+  if (!shown.blocks.length) {
+    return (
+      <div className="file-viewer-document" data-file-view="document">
+        <EmptyState compact icon="document" title="This document is empty." />
+      </div>
+    );
+  }
   return (
     <div className="file-viewer-document" data-file-view="document">
-      {shown.blocks.length ? (
+      {unshown.length ? (
+        <p className="file-viewer-document-note" role="note">
+          {`This file also has ${LIST.format(unshown)}. They stay in the file; open it in Word to see them.`}
+        </p>
+      ) : null}
+      <div className={cn("file-viewer-document-layout", comments.length > 0 && "has-comments")}>
         <article className="file-viewer-page">
+          {header ? <PageChrome text={header} slot="header" /> : null}
           <SpectraRichContent ast={shown} />
+          {footer ? <PageChrome text={footer} slot="footer" /> : null}
         </article>
-      ) : (
-        <EmptyState compact icon="document" title="This document is empty." />
-      )}
+        {comments.length ? (
+          <aside className="file-viewer-comments" aria-label="Comments">
+            <ol>
+              {comments.map((comment) => (
+                <li key={comment.id} className="file-viewer-comment" data-comment-id={comment.id}>
+                  <span className="file-viewer-comment-label" aria-hidden>
+                    {comment.label}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="file-viewer-comment-meta">
+                      <span className="sr-only">{`Comment ${comment.label}, `}</span>
+                      {comment.author || "Word"}
+                      {commentDate(comment.date) ? <span>{` · ${commentDate(comment.date)}`}</span> : null}
+                    </p>
+                    <p className="file-viewer-comment-text">{comment.text || "This comment has no text."}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </aside>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import {
   type RichBlock,
   type RichBlockDraft,
   type RichCalloutTone,
+  type RichComment,
   type RichInline,
   type RichMark,
   type RichTextStyle,
@@ -40,14 +41,152 @@ function styleOf(attrs: Record<string, unknown> | undefined): RichTextStyle | un
   return Object.keys(style).length ? style : undefined;
 }
 
-function inlinesFrom(nodes: readonly Json[] | undefined): RichInline[] {
+/*
+ * What reading a document collects beside its blocks: its footnotes and
+ * endnotes, numbered in the order the text calls them as Word numbers them
+ * (1, 2, 3 and i, ii, iii), and its comment threads with the comments still
+ * open at the point being read. A comment can span paragraphs, so this lives
+ * for the whole document.
+ */
+type ReadContext = {
+  footnotes: RichBlockDraft[];
+  endnotes: RichBlockDraft[];
+  comments: RichComment[];
+  open: string[];
+  anchored: Set<string>;
+};
+
+function readContext(): ReadContext {
+  return { footnotes: [], endnotes: [], comments: [], open: [], anchored: new Set() };
+}
+
+function roman(value: number) {
+  const numerals: Array<[number, string]> = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]];
+  let rest = value;
+  let output = "";
+  for (const [amount, numeral] of numerals)
+    while (rest >= amount) {
+      output += numeral;
+      rest -= amount;
+    }
+  return output;
+}
+
+/** A run Word stored inside a note or a revision. */
+type WordRun = { text?: unknown; bold?: unknown; italic?: unknown; underline?: unknown };
+
+function wordRunInline(run: WordRun): RichInline | null {
+  const text = typeof run.text === "string" ? run.text : "";
+  if (!text) return null;
+  const marks: RichMark[] = [...(run.bold === true ? ["bold" as const] : []), ...(run.italic === true ? ["italic" as const] : []), ...(run.underline === true ? ["underline" as const] : [])];
+  return { type: "text", text, ...(marks.length ? { marks } : {}) };
+}
+
+function wordRunsInline(runs: unknown, fallback: unknown): RichInline[] {
+  const list = Array.isArray(runs) ? (runs as WordRun[]).flatMap((run) => wordRunInline(run) ?? []) : [];
+  if (list.length) return list;
+  return typeof fallback === "string" && fallback ? [{ type: "text", text: fallback }] : [];
+}
+
+/** Word's highlighter names as CSS colours. CSS keywords ignore case; dark yellow is CSS's olive. */
+function highlightOf(marks: NonNullable<Json["marks"]>) {
+  const value = marks.find((mark) => mark.type === "highlight")?.attrs?.color;
+  if (typeof value !== "string" || !value || value === "none") return undefined;
+  if (/^#[0-9a-f]{3,8}$/i.test(value)) return value;
+  if (!/^[a-z]{3,24}$/i.test(value)) return undefined;
+  return value === "darkYellow" ? "olive" : value.toLowerCase();
+}
+
+function noteFrom(node: Json, context: ReadContext): RichInline {
+  const endnote = node.type === "endnote";
+  const list = endnote ? context.endnotes : context.footnotes;
+  const label = endnote ? roman(list.length + 1) : String(list.length + 1);
+  const paragraphs = Array.isArray(node.attrs?.noteContent) ? (node.attrs.noteContent as unknown[]) : [];
+  const content = paragraphs.length
+    ? paragraphs.flatMap((runs, index) => [...(index ? [{ type: "break" } as const] : []), ...wordRunsInline(runs, "")])
+    : wordRunsInline(undefined, node.attrs?.text);
+  // Word starts a note's text with a space after its own number.
+  const first = content[0];
+  if (first?.type === "text") content[0] = { ...first, text: first.text.replace(/^\s+/, "") };
+  list.push({ type: "footnote", footnoteId: label, content });
+  return { type: "footnote_ref", id: label };
+}
+
+function revisionFrom(native: unknown): RichInline | null {
+  if (!native || typeof native !== "object") return null;
+  const item = native as Record<string, unknown>;
+  const kind = item.revisionKind === "del" ? "delete" : item.revisionKind === "ins" ? "insert" : null;
+  if (!kind) return null;
+  const content = wordRunsInline(item.content, item.text);
+  return {
+    type: "revision",
+    kind,
+    ...(typeof item.author === "string" && item.author ? { author: item.author } : {}),
+    ...(typeof item.date === "string" && item.date ? { date: item.date } : {}),
+    content,
+  };
+}
+
+/** Follows a comment's start, end and anchor; returns the anchor to draw, once per thread. */
+function commentBoundary(native: unknown, context: ReadContext): RichInline | null {
+  if (!native || typeof native !== "object") return null;
+  const item = native as Record<string, unknown>;
+  const id = typeof item.commentId === "string" ? item.commentId : "";
+  if (!id) return null;
+  let thread = context.comments.find((comment) => comment.id === id);
+  if (!thread) {
+    thread = { id, label: String(context.comments.length + 1), text: "" };
+    context.comments.push(thread);
+  }
+  const data = item.comment && typeof item.comment === "object" ? (item.comment as Record<string, unknown>) : null;
+  if (data) {
+    if (typeof data.author === "string" && data.author) thread.author = data.author;
+    if (typeof data.initials === "string" && data.initials) thread.initials = data.initials;
+    if (typeof data.date === "string" && data.date) thread.date = data.date;
+    if (typeof data.text === "string") thread.text = data.text;
+  }
+  if (item.boundary === "start") {
+    if (!context.open.includes(id)) context.open.push(id);
+    return null;
+  }
+  if (item.boundary === "end") context.open = context.open.filter((open) => open !== id);
+  if (context.anchored.has(id)) return null;
+  context.anchored.add(id);
+  return { type: "comment_ref", id, label: thread.label };
+}
+
+function sameIds(left: readonly string[], right: readonly string[]) {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
+function inlinesFrom(nodes: readonly Json[] | undefined, context: ReadContext = readContext()): RichInline[] {
   const output: RichInline[] = [];
+  // Where the next inline goes: inside the comment open over it, if any.
+  const target = (): RichInline[] => {
+    if (!context.open.length) return output;
+    const last = output[output.length - 1];
+    if (last?.type === "comment" && sameIds(last.ids, context.open)) return last.content;
+    const wrapper: Extract<RichInline, { type: "comment" }> = { type: "comment", ids: [...context.open], content: [] };
+    output.push(wrapper);
+    return wrapper.content;
+  };
   for (const node of nodes ?? []) {
-    if (node.type === "hardBreak") { output.push({ type: "break" }); continue; }
-    if (node.type === "inlineEquation") { output.push({ type: "inline_math", math: String(node.attrs?.latex ?? ""), complete: true }); continue; }
+    if (node.type === "hardBreak") { target().push({ type: "break" }); continue; }
+    if (node.type === "inlineEquation") { target().push({ type: "inline_math", math: String(node.attrs?.latex ?? ""), complete: true }); continue; }
+    if (node.type === "wordCommentBoundary") {
+      const anchor = commentBoundary(node.attrs?.native, context);
+      if (anchor) target().push(anchor);
+      continue;
+    }
+    if (node.type === "wordRevision") {
+      const revision = revisionFrom(node.attrs?.native);
+      if (revision) target().push(revision);
+      continue;
+    }
+    if (node.type === "footnote" || node.type === "endnote") { target().push(noteFrom(node, context)); continue; }
     if (node.type === "spectraCitation") {
       const evidence = node.attrs?.evidenceSpanId;
-      output.push({
+      target().push({
         type: "citation",
         sourceId: String(node.attrs?.sourceId ?? ""),
         evidenceIds: typeof evidence === "string" && evidence ? [evidence] : [],
@@ -55,21 +194,24 @@ function inlinesFrom(nodes: readonly Json[] | undefined): RichInline[] {
       });
       continue;
     }
-    if (node.type === "image") { output.push({ type: "image", url: String(node.attrs?.src ?? ""), alt: String(node.attrs?.alt ?? "") }); continue; }
+    if (node.type === "image") { target().push({ type: "image", url: String(node.attrs?.src ?? ""), alt: String(node.attrs?.alt ?? "") }); continue; }
     if (node.type !== "text" || !node.text) continue;
     const marks = node.marks ?? [];
-    if (marks.some((mark) => mark.type === "code")) { output.push({ type: "inline_code", code: node.text }); continue; }
+    if (marks.some((mark) => mark.type === "code")) { target().push({ type: "inline_code", code: node.text }); continue; }
     const richMarks = marks.flatMap((mark) => (MARK_NAMES[mark.type] ? [MARK_NAMES[mark.type]!] : []));
-    const style = styleOf(marks.find((mark) => mark.type === "textStyle")?.attrs);
+    const highlight = highlightOf(marks);
+    const runStyle = styleOf(marks.find((mark) => mark.type === "textStyle")?.attrs);
+    const style = highlight ? { ...runStyle, highlight } : runStyle;
     const text: RichInline = { type: "text", text: node.text, ...(richMarks.length ? { marks: richMarks } : {}), ...(style ? { style } : {}) };
     const link = marks.find((mark) => mark.type === "link")?.attrs?.href;
-    const last = output[output.length - 1];
+    const list = target();
+    const last = list[list.length - 1];
     if (typeof link === "string" && link) {
       if (last?.type === "link" && last.href === link) last.content.push(text);
-      else output.push({ type: "link", href: link, content: [text] });
+      else list.push({ type: "link", href: link, content: [text] });
       continue;
     }
-    output.push(text);
+    list.push(text);
   }
   return output;
 }
@@ -87,17 +229,17 @@ function withoutFiller(nodes: readonly Json[] | undefined): readonly Json[] | un
   return first?.type === "paragraph" && first.attrs?.[LIST_FILLER] === true && !first.content?.length && rest.length ? rest : nodes;
 }
 
-function blocksFrom(nodes: readonly Json[] | undefined): RichBlockDraft[] {
+function blocksFrom(nodes: readonly Json[] | undefined, context: ReadContext): RichBlockDraft[] {
   const blocks: RichBlockDraft[] = [];
   for (const node of nodes ?? []) {
     const align = alignOf(node);
     switch (node.type) {
       case "paragraph":
-        blocks.push({ type: "paragraph", content: inlinesFrom(node.content), ...(align ? { align } : {}) });
+        blocks.push({ type: "paragraph", content: inlinesFrom(node.content, context), ...(align ? { align } : {}) });
         break;
       case "heading": {
         const level = Math.min(6, Math.max(1, Number(node.attrs?.level ?? 1))) as 1 | 2 | 3 | 4 | 5 | 6;
-        blocks.push({ type: "heading", level, content: inlinesFrom(node.content), ...(align ? { align } : {}) });
+        blocks.push({ type: "heading", level, content: inlinesFrom(node.content, context), ...(align ? { align } : {}) });
         break;
       }
       case "bulletList":
@@ -111,17 +253,17 @@ function blocksFrom(nodes: readonly Json[] | undefined): RichBlockDraft[] {
           ...(kind === "ordered" && Number.isInteger(start) && start > 1 ? { start } : {}),
           items: (node.content ?? []).map((item) => ({
             ...(kind === "task" ? { checked: Boolean(item.attrs?.checked) } : {}),
-            blocks: blocksFrom(withoutFiller(item.content)) as RichBlock[],
+            blocks: blocksFrom(withoutFiller(item.content), context) as RichBlock[],
           })),
         });
         break;
       }
       case "blockquote":
-        blocks.push({ type: "quote", blocks: blocksFrom(node.content) as RichBlock[] });
+        blocks.push({ type: "quote", blocks: blocksFrom(node.content, context) as RichBlock[] });
         break;
       case "callout": {
         const tone = node.attrs?.type as RichCalloutTone;
-        blocks.push({ type: "callout", tone: TONES.has(tone) ? tone : "info", blocks: blocksFrom(node.content) as RichBlock[] });
+        blocks.push({ type: "callout", tone: TONES.has(tone) ? tone : "info", blocks: blocksFrom(node.content, context) as RichBlock[] });
         break;
       }
       case "codeBlock":
@@ -146,19 +288,31 @@ function blocksFrom(nodes: readonly Json[] | undefined): RichBlockDraft[] {
         blocks.push({
           type: "table",
           header: Boolean(node.content?.[0]?.content?.some((cell) => cell.type === "tableHeader")),
-          rows: (node.content ?? []).map((row) => (row.content ?? []).map((cell) => inlinesFrom((cell.content ?? []).flatMap((block, index) => (index ? [{ type: "hardBreak" }, ...(block.content ?? [])] : block.content ?? []))))),
+          rows: (node.content ?? []).map((row) => (row.content ?? []).map((cell) => inlinesFrom((cell.content ?? []).flatMap((block, index) => (index ? [{ type: "hardBreak" }, ...(block.content ?? [])] : block.content ?? [])), context))),
         });
         break;
       default:
-        if (node.content?.length) blocks.push(...blocksFrom(node.content));
+        if (node.content?.length) blocks.push(...blocksFrom(node.content, context));
     }
   }
   return blocks;
 }
 
+/**
+ * A ProseMirror document as the shared model, with the comment threads its
+ * text points at. Footnotes and endnotes follow the text, after a rule, as a
+ * page that scrolls instead of breaking shows them.
+ */
+export function richDocumentFromProseMirror(doc: Json): { ast: SpectraRichContentAst; comments: RichComment[] } {
+  const context = readContext();
+  const blocks = blocksFrom(doc.content, context);
+  const notes = [...context.footnotes, ...context.endnotes];
+  return { ast: richContentAst(notes.length ? [...blocks, { type: "rule" }, ...notes] : blocks), comments: context.comments };
+}
+
 /** A ProseMirror document (an editor's `getJSON()`) as the shared model. */
 export function richContentFromProseMirror(doc: Json): SpectraRichContentAst {
-  return richContentAst(blocksFrom(doc.content));
+  return richDocumentFromProseMirror(doc).ast;
 }
 
 // ---------------------------------------------------------------------------
@@ -213,9 +367,23 @@ function inlinesTo(content: readonly RichInline[], href?: string): Json[] {
       case "image":
         output.push({ type: "text", text: inline.alt });
         break;
+      // A field editor has no tracked changes: a deletion stays, struck through.
+      case "revision":
+        output.push(...inlinesTo(inline.kind === "delete" ? inline.content.map(struck) : inline.content, href));
+        break;
+      case "comment":
+        output.push(...inlinesTo(inline.content, href));
+        break;
+      case "comment_ref":
+        break;
     }
   }
   return output;
+}
+
+function struck(inline: RichInline): RichInline {
+  if (inline.type !== "text") return inline;
+  return inline.marks?.includes("strike") ? inline : { ...inline, marks: [...(inline.marks ?? []), "strike"] };
 }
 
 function paragraph(content: readonly RichInline[], align?: RichAlign): Json {

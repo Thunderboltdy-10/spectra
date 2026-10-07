@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { SpectraMark } from "@/components/spectra-mark";
 import { drawPrism, PrismBody, PRISM_PALETTES, type PrismMode } from "@/features/spectra/life/prism";
 
 /*
@@ -9,7 +10,12 @@ import { drawPrism, PrismBody, PRISM_PALETTES, type PrismMode } from "@/features
  * while it waits, turns twice and settles when done, and shakes and greys on
  * a problem, with its status dot beside its corner. It draws only while it
  * moves and is on screen; under reduced motion it holds still and only its
- * colours change.
+ * colours change. Until its canvas has drawn, the still mark stands in, so a
+ * server-rendered page never shows a gap.
+ *
+ * `interactive` (the rail's brand): it answers the control it sits in as the
+ * island's prism does: it leans toward the pointer, turns once on hover,
+ * squashes on press and rebounds with a half turn.
  */
 
 export type PrismOptics = "dormant" | "working" | "waiting" | "completed" | "failed";
@@ -35,14 +41,17 @@ export function PrismLoader({
   optics = "working",
   className,
   label,
+  interactive = false,
 }: {
   size?: number;
   optics?: PrismOptics;
   className?: string;
   label?: string;
+  interactive?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bodyRef = useRef<PrismBody | null>(null);
+  const [drawn, setDrawn] = useState(false);
   const box = Math.round(size * ROOM);
 
   useEffect(() => {
@@ -58,6 +67,7 @@ export function PrismLoader({
     let frame = 0;
     let last = 0;
     let visible = true;
+    let shown = false;
     const draw = () => {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
@@ -70,6 +80,10 @@ export function PrismLoader({
         pixelRatio: ratio,
         detail: size < 24 ? "mark" : "live",
       });
+      if (!shown) {
+        shown = true;
+        setDrawn(true);
+      }
     };
     const tick = (now: number) => {
       const dt = last ? Math.min(0.05, (now - last) / 1000) : 1 / 60;
@@ -94,12 +108,48 @@ export function PrismLoader({
     seen?.observe(canvas);
     const theme = new MutationObserver(draw);
     theme.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    // The control it sits in is what the pointer touches.
+    const host = interactive ? (canvas.parentElement?.closest<HTMLElement>("a, button") ?? canvas.parentElement) : null;
+    const lean = (event: PointerEvent) => {
+      const r = canvas.getBoundingClientRect();
+      if (!r.width) return;
+      body.setLean((event.clientX - (r.x + r.width / 2)) / (size * 1.2), (event.clientY - (r.y + r.height / 2)) / (size * 1.2));
+      wake();
+    };
+    const enter = (event: PointerEvent) => {
+      lean(event);
+      body.hover(true);
+      wake();
+    };
+    const leave = () => {
+      body.hover(false);
+      body.release();
+      wake();
+    };
+    const press = () => {
+      body.press();
+      wake();
+    };
+    const lift = () => {
+      body.release();
+      wake();
+    };
+    host?.addEventListener("pointerenter", enter);
+    host?.addEventListener("pointermove", lean);
+    host?.addEventListener("pointerleave", leave);
+    host?.addEventListener("pointerdown", press);
+    host?.addEventListener("pointerup", lift);
     return () => {
       cancelAnimationFrame(frame);
       seen?.disconnect();
       theme.disconnect();
+      host?.removeEventListener("pointerenter", enter);
+      host?.removeEventListener("pointermove", lean);
+      host?.removeEventListener("pointerleave", leave);
+      host?.removeEventListener("pointerdown", press);
+      host?.removeEventListener("pointerup", lift);
     };
-  }, [box, optics, size]);
+  }, [box, interactive, optics, size]);
 
   return (
     <span
@@ -110,6 +160,7 @@ export function PrismLoader({
       aria-hidden={label ? undefined : true}
       style={{ width: size, height: size }}
     >
+      {drawn ? null : <SpectraMark size={size} />}
       <canvas ref={canvasRef} style={{ width: box, height: box, left: (size - box) / 2, top: (size - box) / 2 }} />
     </span>
   );

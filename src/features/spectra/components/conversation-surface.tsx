@@ -2359,12 +2359,9 @@ export function ConversationSurface({
                       {trace.run.status === "running" ||
                       trace.run.status === "queued" ? (
                         <PrismLoader size={14} optics="working" />
-                      ) : trace.run.status === "awaiting_resolution" ? (
-                        <GitCompareArrows className="h-3.5 w-3.5 text-[var(--warning)]" />
                       ) : (
-                        <AlertCircle
-                          className={`h-3.5 w-3.5 ${trace.run.retryable === false ? "text-[var(--danger)]" : "text-[var(--warning)]"}`}
-                        />
+                        // The prism's own states: it faces you while it waits on you, and greys on a problem.
+                        <PrismLoader size={14} optics={trace.run.status === "awaiting_resolution" ? "waiting" : "failed"} />
                       )}
                       <span className="capitalize">
                         {trace.run.status.replaceAll("_", " ")}

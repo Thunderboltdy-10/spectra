@@ -14,7 +14,7 @@ vi.mock("next/link", () => ({
   },
 }));
 vi.mock("@/features/spectra/hooks/use-spectra-router", () => ({ useSpectraRouter: () => ({ push: route.push, replace: vi.fn() }) }));
-vi.mock("@/components/spectra-logo", () => ({ SpectraLogo: () => null }));
+vi.mock("@/components/spectra-prism-optic", () => ({ PrismLoader: () => null }));
 vi.mock("@/components/ui/dropdown-menu", () => {
   const Pass = ({ children }: { children?: ReactNode }) => <>{children}</>;
   const Nothing = () => null;

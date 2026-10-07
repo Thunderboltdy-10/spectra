@@ -25,7 +25,7 @@ vi.mock("@/components/providers", () => ({ Providers: ({ children }: { children:
 vi.mock("../account-storage-boundary", () => ({ useAccountStorageReady: () => route.ready }));
 vi.mock("@/features/spectra/data/use-catalog-pages", () => ({ useWorkspaceCatalog: () => ({ items: [] }) }));
 vi.mock("@/features/spectra/components/catalog-progress", () => ({ CatalogProgress: () => null }));
-vi.mock("@/components/spectra-logo", () => ({ SpectraLogo: () => null }));
+vi.mock("@/components/spectra-prism-optic", () => ({ PrismLoader: () => null }));
 vi.mock("@/components/signed-in-continue", () => ({ SignedInContinue: () => null }));
 vi.mock("@/components/keyboard-shortcuts", () => ({ KeyboardShortcutsRegistrar: () => null, KeyboardShortcutsHelp: () => null }));
 vi.mock("@/features/spectra/components/universal-kbar", () => ({ UniversalKBar: () => null }));

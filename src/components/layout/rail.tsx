@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Icon, type IconName } from "@/components/icons";
-import { SpectraLogo } from "@/components/spectra-logo";
+import { PrismLoader } from "@/components/spectra-prism-optic";
 import { IconButton } from "@/components/ui/icon-button";
 import { Tooltip } from "@/components/ui/tooltip";
 import {
@@ -222,7 +222,7 @@ export function Rail() {
               onClick={(event) => pulseFrom(event.currentTarget, 1)}
               className="grid size-8 shrink-0 place-items-center rounded-control outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
             >
-              <SpectraLogo size={22} />
+              <PrismLoader size={22} optics="dormant" interactive />
             </Link>
           </Tooltip>
           {collapsed ? null : (

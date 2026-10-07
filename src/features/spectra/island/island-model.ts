@@ -164,6 +164,22 @@ export function islandStatus(tabs: readonly IslandTab[], { offline = false }: { 
   return best;
 }
 
+/** A message sent from here starts work with its own light (it travels into the prism); later starts are someone else's. */
+export const SENT_START_MS = 3000;
+
+/**
+ * The light the prism lets out when its status changes, if any: a question
+ * for you (warm), or work that starts without a message from here, such as an
+ * agent or a schedule (spectrum). Endings answer per run, with the notice.
+ * `before` is undefined on the first status, which is simply how things are.
+ */
+export function statusLight(before: PrismStatus | null | undefined, status: PrismStatus | null, sinceSend: number): "needs" | "spectrum" | null {
+  if (before === undefined || before === status) return null;
+  if (status === "needs") return "needs";
+  if (status === "working" && !before && sinceSend > SENT_START_MS) return "spectrum";
+  return null;
+}
+
 /** A title cut at a word boundary, about 26 characters (a tab is at most 180 px). */
 export function tabTitle(title: string, limit = 26) {
   const clean = title.trim();

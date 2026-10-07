@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SpectraRunTab } from "../../data/api";
-import { arrangeTabs, islandStatus, MAX_DONE, sideFor, tabStatus, tabTitle } from "../island-model";
+import { arrangeTabs, islandStatus, MAX_DONE, SENT_START_MS, sideFor, statusLight, tabStatus, tabTitle } from "../island-model";
 import { pendingQuestions, splitAlwaysAllow } from "../questions";
 import type { SpectraRunEngine } from "../engine";
 
@@ -145,5 +145,29 @@ describe("island questions", () => {
 
   it("asks nothing when nothing is waiting", () => {
     expect(pendingQuestions(null, [tab("a", { status: "running" })])).toEqual([]);
+  });
+});
+
+describe("the light a status change lets out of the prism", () => {
+  it("is nothing for the status the page opens with", () => {
+    expect(statusLight(undefined, "needs", 10_000)).toBeNull();
+    expect(statusLight(undefined, "working", 10_000)).toBeNull();
+  });
+
+  it("is warm when a question arrives", () => {
+    expect(statusLight("working", "needs", 0)).toBe("needs");
+    expect(statusLight(null, "needs", 0)).toBe("needs");
+    expect(statusLight("needs", "needs", 0)).toBeNull();
+  });
+
+  it("is the spectrum when work starts without a message from here", () => {
+    expect(statusLight(null, "working", SENT_START_MS + 1)).toBe("spectrum");
+    expect(statusLight(null, "working", 200)).toBeNull();
+    expect(statusLight("needs", "working", SENT_START_MS + 1)).toBeNull();
+  });
+
+  it("leaves endings to the run's own notice", () => {
+    expect(statusLight("working", "done", 0)).toBeNull();
+    expect(statusLight("working", "problem", 0)).toBeNull();
   });
 });

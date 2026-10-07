@@ -22,7 +22,7 @@ import { IslandComposer, type ComposerHandle, type ComposerSend } from "./compos
 import { useIslandEngine } from "./engine";
 import { forgetThread, placeThread, useArrangement } from "./arrange";
 import { IslandHistory } from "./history";
-import { arrangeTabs, dropTab, islandStatus, stepTab, tabTitle, type IslandSide, type IslandTab } from "./island-model";
+import { arrangeTabs, dropTab, islandStatus, statusLight, stepTab, tabTitle, type IslandSide, type IslandTab } from "./island-model";
 import { useIslandPrism } from "./island-prism";
 import { IslandNotice, NOTICE_COLOUR, type IslandNoticeData, type NoticeTone } from "./notice";
 import { QuestionCard } from "./question-card";
@@ -257,11 +257,21 @@ export function Island() {
     return fromTabs;
   }, [allTabs, live, questions.length]);
 
+  const statusBefore = useRef<PrismStatus | null | undefined>(undefined);
+  const sentAt = useRef(0);
   useEffect(() => {
     const p = prismRef.current;
     p.setMode(status ? MODE_FOR_STATUS[status] : "rest");
     p.setStatus(status);
     spectraBus.setQuery("prism.status", { status });
+    const before = statusBefore.current;
+    statusBefore.current = status;
+    // The prism lets the light out and turns, so a glance away still catches it.
+    const light = statusLight(before, status, performance.now() - sentAt.current);
+    if (!light || !life.on || shownRef.current !== "prism") return;
+    p.spin(0.5);
+    if (light === "needs") life.radiate(p.figure(), { colour: STATUS_COLOURS.needs, count: 12, reach: 20 });
+    else life.radiate(p.figure(), { colour: "spectrum", count: 10, reach: 16 });
   }, [status]);
   useEffect(() => () => spectraBus.setQuery("prism.status", { status: null }), []);
 
@@ -597,6 +607,7 @@ export function Island() {
     (message: ComposerSend) => {
       if (!engine) return;
       const p = prismRef.current;
+      sentAt.current = performance.now();
       if (life.on && message.wordsRect) {
         const r = message.wordsRect;
         const lines = Math.min(4, message.lineCount);

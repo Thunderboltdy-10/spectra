@@ -21,7 +21,7 @@
  *     displacing it when the pane narrows.
  */
 
-import { ArrowRight, Loader2, RotateCcw, ShieldAlert, AlertTriangle, Check, ChevronDown, Lock, Plus, Trash2, X, CircleSlash, FlaskConical, Gauge, Play, ScrollText } from "@/components/icons/glyph-icons";
+import { ArrowRight, Loader2, RotateCcw, ShieldAlert, AlertTriangle, Check, ChevronDown, Lock, Plus, Trash2, X, CircleSlash, FlaskConical, Gauge, Play, ScrollText, Square } from "@/components/icons/glyph-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StatusBadge, statusToneFor } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -87,7 +87,7 @@ import { ArtifactWorkbar, type CommandBinding, WorkbarItemSelector } from "./art
 import { projectBindingsFromIr } from "../capabilities";
 import { useStudioContract } from "./artifact-studio-shell";
 import { targetAttrs } from "../collaboration/target-attributes";
-import { AgentBench, useAgentBench } from "./agent-bench";
+import { AgentBench, benchBarAction, useAgentBench } from "./agent-bench";
 import { spectraBus } from "../events";
 export { canPublishAgentArtifact } from "./agent-publish-gates";
 
@@ -2027,6 +2027,7 @@ export function AgentFoundry({
           ],
     );
 
+  const benchBar = benchBarAction(bench, canEdit);
   const barPrimary =
     view === "overview"
       ? {
@@ -2038,13 +2039,11 @@ export function AgentFoundry({
         }
       : view === "bench"
         ? {
-            label: bench.runningAll ? "Running" : "Run all",
-            icon: Play,
-            disabled:
-              !canEdit || bench.runningAll || bench.entries.length === 0,
-            busy: bench.runningAll,
+            label: benchBar.label,
+            icon: benchBar.stops ? Square : Play,
+            disabled: benchBar.disabled,
             requires: "edit" as const,
-            onSelect: () => void bench.runAll(),
+            onSelect: benchBar.onSelect,
           }
       : view === "checks"
         ? {

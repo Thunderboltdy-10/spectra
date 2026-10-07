@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyBenchEdits,
   applyBenchInstructions,
   applySuggestion,
+  benchSuggestionMessages,
+  describeBenchEdit,
+  parseBenchSuggestions,
   benchCaseToEvaluationCase,
   benchChecksEmpty,
   benchEntries,
@@ -288,5 +292,164 @@ describe("adjusting the instructions", () => {
 
   it("has nothing to suggest without a skill", () => {
     expect(suggestAdjustments("x", gradeBenchChecks({ mustInclude: ["a"], mustNotInclude: [] }, ""), [])).toEqual([]);
+  });
+});
+
+describe("suggestions the model writes", () => {
+  // Ids a creator never sees, to prove the copy never shows them.
+  function named() {
+    const content = agent();
+    return {
+      ...content,
+      foundry: {
+        ...content.foundry,
+        skills: content.foundry.skills.map((entry) => ({ ...entry, id: `sk_${entry.id}_7f3a` })),
+      },
+    };
+  }
+
+  it("asks with the instructions, the answer and the failing checks, naming skills and never their ids", () => {
+    const instructions = readBenchInstructions(named());
+    const [system, user] = benchSuggestionMessages({
+      instructions,
+      prompt: "Mark this paragraph",
+      output: "It is perfect.",
+      checks: savedCase.checks,
+    });
+    expect(system!.role).toBe("system");
+    expect(system!.content).toContain('{"suggestions":[]}');
+    expect(user!.content).toContain('### Skill "Essay feedback"');
+    expect(user!.content).toContain('Includes "thesis": fails');
+    expect(user!.content).toContain('Leaves out "perfect": fails');
+    expect(user!.content).toContain("What a good answer does: Names one concrete fix");
+    expect(user!.content).toContain("It is perfect.");
+    expect(`${system!.content}${user!.content}`).not.toContain("7f3a");
+  });
+
+  it("reads a fenced reply into edits on the skills it names, and drops what cannot apply", () => {
+    const instructions = readBenchInstructions(named());
+    const reply = [
+      "Here you go:",
+      "```json",
+      JSON.stringify({
+        suggestions: [
+          {
+            reason: "  It never names a  next step. ",
+            edits: [
+              { field: "include", skill: "essay FEEDBACK", value: "one concrete next step" },
+              { field: "step", skill: "Essay feedback", value: "End with one question" },
+              { field: "include", skill: "Essay feedback", value: "next step" },
+              { field: "include", skill: "History coach", value: "dates" },
+              { field: "tone", value: "Warm" },
+              { field: "tone", value: "direct" },
+              { field: "length", value: "huge" },
+              { field: "avoid", value: "Write the essay for them" },
+              { field: "rename", value: "x" },
+            ],
+          },
+          { reason: "Nothing left to do.", edits: [{ field: "objective", value: instructions.objective }] },
+          { reason: "Shorter.", edits: [{ field: "length", value: "concise" }, { field: "avoid", value: "long lists" }] },
+        ],
+      }),
+      "```",
+    ].join("\n");
+    const suggestions = parseBenchSuggestions(reply, instructions);
+    expect(suggestions).toHaveLength(2);
+    expect(suggestions[0]!.reason).toBe("It never names a next step.");
+    expect(suggestions[0]!.edits).toEqual([
+      { kind: "include", skillId: "sk_essay_7f3a", skillName: "Essay feedback", value: "one concrete next step" },
+      { kind: "step", skillId: "sk_essay_7f3a", skillName: "Essay feedback", value: "End with one question" },
+      { kind: "tone", value: "warm" },
+    ]);
+    expect(suggestions[1]!.edits).toEqual([
+      { kind: "length", value: "concise" },
+      { kind: "avoid", value: "long lists" },
+    ]);
+    expect(new Set(suggestions.map((entry) => entry.key)).size).toBe(2);
+    expect(parseBenchSuggestions("Sorry, I cannot help.", instructions)).toEqual([]);
+    expect(parseBenchSuggestions('{"suggestions": "none"}', instructions)).toEqual([]);
+  });
+
+  it("keeps a reply to four suggestions of four edits", () => {
+    const instructions = readBenchInstructions(named());
+    const edits = Array.from({ length: 6 }, (_, index) => ({ field: "avoid", value: `habit ${index}` }));
+    const reply = JSON.stringify({
+      suggestions: Array.from({ length: 6 }, (_, index) => ({
+        reason: `r${index}`,
+        edits: edits.map((edit) => ({ ...edit, value: `${edit.value} ${index}` })),
+      })),
+    });
+    const suggestions = parseBenchSuggestions(reply, instructions);
+    expect(suggestions).toHaveLength(4);
+    expect(suggestions.every((entry) => entry.edits.length === 4)).toBe(true);
+  });
+
+  it("words each edit with the skill's name and the creator's labels", () => {
+    const edits = parseBenchSuggestions(
+      JSON.stringify({
+        suggestions: [
+          {
+            edits: [
+              { field: "objective", value: "Coach, never mark." },
+              { field: "tone", value: "socratic" },
+              { field: "length", value: "detailed" },
+              { field: "avoid", value: "grades" },
+            ],
+          },
+          {
+            edits: [
+              { field: "purpose", skill: "Lab report review", value: "Check the method" },
+              { field: "exclude", skill: "Lab report review", value: "well done" },
+            ],
+          },
+        ],
+      }),
+      readBenchInstructions(named()),
+    ).flatMap((suggestion) => suggestion.edits);
+    const words = edits.map(describeBenchEdit);
+    expect(words).toEqual([
+      "Objective: “Coach, never mark.”",
+      "Tone: Asks questions back",
+      "Length: Detailed",
+      "It must not: “grades”",
+      "Lab report review is for: “Check the method”",
+      "Lab report review answers leave out “well done”",
+    ]);
+    expect(words.join(" ")).not.toContain("7f3a");
+  });
+
+  it("applies a suggestion's edits to the draft, keeping each step's tools", () => {
+    const content = named();
+    const instructions = readBenchInstructions(content);
+    const [suggestion] = parseBenchSuggestions(
+      JSON.stringify({
+        suggestions: [
+          {
+            edits: [
+              { field: "include", skill: "Essay feedback", value: "one question to think about" },
+              { field: "step", skill: "Essay feedback", value: "End with one question" },
+              { field: "tone", value: "warm" },
+              { field: "avoid", value: "grades" },
+            ],
+          },
+        ],
+      }),
+      instructions,
+    );
+    const next = applyBenchEdits(content, suggestion!.edits, 9);
+    const essay = next.foundry.skills.find((entry) => entry.id === "sk_essay_7f3a")!;
+    expect(essay.outputContract.mustInclude).toEqual(["next step", "one question to think about"]);
+    expect(essay.procedure.map((step) => step.action)).toEqual([
+      "Read the essay",
+      "Mark against the rubric",
+      "End with one question",
+    ]);
+    expect(essay.procedure[0]!.tools).toEqual(["artifact_read"]);
+    expect(next.foundry.mission.interactionStyle.tone).toBe("warm");
+    expect(next.foundry.mission.exclusions).toEqual(["write the essay for them", "grades"]);
+    // The other skill is untouched.
+    expect(next.foundry.skills.find((entry) => entry.id === "sk_lab_7f3a")).toBe(
+      content.foundry.skills.find((entry) => entry.id === "sk_lab_7f3a"),
+    );
   });
 });

@@ -261,6 +261,42 @@ describe("the release a draft is compared with", () => {
     expect(release).toMatchObject({ releaseNumber: 1, title: "Essay coach" });
     expect(JSON.stringify(release?.content)).toContain("one clear next step");
   });
+
+  it("is any older release the creator picks, even one suspended since", async () => {
+    const t = convexTest(schema, modules);
+    const f = await seed(t);
+    const me = t.withIdentity(owner);
+    await me.mutation(api.spectraArtifacts.publishAgent, { agentId: f.agentId, rollout: "internal_test" });
+    await t.run(async (ctx) => {
+      const agent = await ctx.db.get(f.agentId);
+      const content = agent!.content as Record<string, unknown>;
+      await ctx.db.patch(f.agentId, {
+        content: {
+          ...content,
+          instructions: { text: "Give students warm essay feedback and always end with a question to think about." },
+        },
+      });
+    });
+    await me.mutation(api.spectraArtifacts.publishAgent, { agentId: f.agentId, rollout: "internal_test" });
+    const newest = await me.query(api.spectraArtifacts.agentBenchRelease, { agentId: f.agentId });
+    expect(newest).toMatchObject({ releaseNumber: 2 });
+    expect(JSON.stringify(newest?.content)).toContain("a question to think about");
+
+    await t.run(async (ctx) => {
+      const first = await ctx.db
+        .query("agentReleases")
+        .withIndex("by_agent_number", (q) => q.eq("agentId", f.agentId).eq("releaseNumber", 1))
+        .first();
+      await ctx.db.patch(first!._id, { status: "suspended" });
+    });
+    const older = await me.query(api.spectraArtifacts.agentBenchRelease, { agentId: f.agentId, releaseNumber: 1 });
+    expect(older).toMatchObject({ releaseNumber: 1 });
+    expect(JSON.stringify(older?.content)).toContain("one clear next step");
+    expect(await me.query(api.spectraArtifacts.agentBenchRelease, { agentId: f.agentId, releaseNumber: 9 })).toBeNull();
+    await expect(
+      t.withIdentity(stranger).query(api.spectraArtifacts.agentBenchRelease, { agentId: f.agentId, releaseNumber: 1 }),
+    ).rejects.toThrow();
+  });
 });
 
 describe("publishing after saving a test", () => {

@@ -41,6 +41,7 @@ describe("staging an application command", () => {
     ["write_memory", { action: "create", content: "Prefers short answers." }, false],
     ["write_memory", { action: "forget", memoryId: "m1" }, true],
     ["run_agent_checks", { agentId: "ag1" }, false],
+    ["import_managebac_resource", { sourceRecordId: "r1" }, true],
     ["respond_share_invitation", { invitationId: "i1", response: "accept" }, true],
     ["respond_share_invitation", { invitationId: "i1", response: "decline" }, true],
   ] as const)("records %s %j as needing approval: %s", async (command, args, asks) => {

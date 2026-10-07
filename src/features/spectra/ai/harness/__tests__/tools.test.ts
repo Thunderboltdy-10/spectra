@@ -279,6 +279,8 @@ describe("harness tools", () => {
     ["manage_comment", { artifactId: "wx1", commentId: "c1", action: "delete" }, { command: "manage_comment", args: { artifactId: "wx1", commentId: "c1", action: "delete" } }],
     ["managebac", { action: "sync", purpose: "grades" }, { command: "trigger_managebac_sync", args: { purpose: "grades" } }],
     ["managebac", { action: "select_classes", classIds: ["r1"] }, { command: "select_managebac_classes", args: { recordIds: ["r1"] } }],
+    ["managebac", { action: "import_resource", resourceId: "res1" }, { command: "import_managebac_resource", args: { sourceRecordId: "res1" } }],
+    ["managebac", { action: "import_resource", resourceId: "res1", refresh: true }, { command: "import_managebac_resource", args: { sourceRecordId: "res1", refresh: true } }],
     ["change_settings", { patch: { appearance: { theme: "dark" } } }, { command: "change_spectra_settings", args: { patch: { appearance: { theme: "dark" } } } }],
     ["devices", { action: "pair" }, { command: "pair_device", args: {} }],
     ["devices", { action: "remove_device", deviceId: "d1" }, { command: "remove_device", args: { deviceId: "d1" } }],

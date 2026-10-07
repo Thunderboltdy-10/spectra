@@ -449,6 +449,10 @@ export async function executeApplicationCommand(
   }
   if (command === "run_agent_checks")
     return runAgentChecks({ actorClerkId, agentId: String(parsed.agentId), signal, onUiEvent });
+  if (command === "import_managebac_resource")
+    return importSchoolResource({
+      actorClerkId, sourceRecordId: String(parsed.sourceRecordId), refresh: parsed.refresh === true, signal, onUiEvent,
+    });
   if (command === "release_agent") {
     const agentId = String(parsed.agentId);
     const action = String(parsed.action);
@@ -864,6 +868,48 @@ async function runAgentChecks(input: {
   };
 }
 
+/**
+ * A class resource copied into the Library through the same server module as
+ * the class shelf's Import, as the run's owner. The import is idempotent per
+ * revision of the resource, so a retried step returns the copy already made.
+ */
+async function importSchoolResource(input: {
+  actorClerkId: string;
+  sourceRecordId: string;
+  refresh: boolean;
+  signal?: AbortSignal;
+  onUiEvent?: (event: { key: string; payload?: Record<string, unknown> }) => void;
+}) {
+  throwIfAborted(input.signal);
+  const { importManageBacResourceAs } = await import("@/app/api/spectra/managebac/resource-import");
+  const result = await importManageBacResourceAs({
+    clerkId: input.actorClerkId,
+    sourceRecordId: input.sourceRecordId,
+    refresh: input.refresh,
+  }) as Record<string, unknown>;
+  const status = String(result.status ?? "");
+  if (status === "update_available")
+    return {
+      state: "update_available",
+      ...(typeof result.priorArtifactId === "string" ? { artifactId: result.priorArtifactId } : {}),
+      note: "This resource changed in ManageBac since it was imported. Importing it again with refresh true makes a new copy; the earlier copy stays in the Library.",
+    };
+  const artifactId = typeof result.artifactId === "string" ? result.artifactId : undefined;
+  if (status === "source_unavailable")
+    return {
+      state: "source_unavailable",
+      ...(artifactId ? { artifactId } : {}),
+      note: "ManageBac no longer offers this resource. The copy imported earlier is still in the Library.",
+    };
+  const replayed = result.replayed === true;
+  if (artifactId)
+    input.onUiEvent?.({
+      key: "managebac_resource_imported",
+      payload: { targetId: artifactId, note: replayed ? "This school resource is already in your Library" : "Copied a school resource into your Library" },
+    });
+  return { state: replayed ? "already_imported" : "imported", ...(artifactId ? { artifactId } : {}) };
+}
+
 const AGENT_RELEASE_NOTES: Record<string, string> = {
   release_private: "Made release{n} for you only",
   publish: "Published release{n}",
@@ -1099,7 +1145,9 @@ export async function executeOperation(
         ? [{ type: "artifact", id: String(operation.input.args.hostWorkId) }]
         : ARTIFACT_COMMANDS.has(operation.input.command)
           ? [{ type: "artifact", id: String(operation.input.args.artifactId) }]
-          : [];
+          : operation.input.command === "import_managebac_resource" && typeof output.artifactId === "string"
+            ? [{ type: "artifact", id: output.artifactId }]
+            : [];
   } else {
     throw new Error(`The harness does not apply ${operation.type} operations.`);
   }

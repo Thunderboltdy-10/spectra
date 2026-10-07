@@ -1,5 +1,7 @@
 import type {
   BenchCase,
+  BenchChecks,
+  BenchModelSuggestion,
   BenchRun,
   BenchStreamEvent,
   BenchTarget,
@@ -9,8 +11,8 @@ import { requestSpectra } from "./request";
 
 /*
  * The agent bench's client: the saved tests and recent answers through the
- * main Spectra route, and one answer at a time through the bench route's
- * stream.
+ * main Spectra route, one answer at a time through the bench route's stream,
+ * and model-written suggestions for an answer through its suggest route.
  */
 
 /** The newest release a draft can be compared with. */
@@ -21,10 +23,20 @@ export type BenchRelease = {
   content: unknown;
 };
 
+/** A release the draft can be compared with, newest first. */
+export type BenchReleaseOption = {
+  releaseNumber: number;
+  status: "published" | "suspended" | "deprecated";
+  rollout?: "internal_test" | "limited" | "published";
+  publishedAt: number;
+};
+
 export type AgentBenchState = {
   cases: BenchCase[];
   runs: BenchRun[];
   release: BenchRelease | null;
+  /** Every release, so the creator can compare with an older one. */
+  releases?: BenchReleaseOption[];
 };
 
 /** A failure the bench route or Convex worded for the person reading it. */
@@ -131,6 +143,8 @@ export async function streamAgentBench(input: {
   agentId: string;
   prompt: string;
   target: BenchTarget;
+  /** The release to answer as; the newest when left out. */
+  releaseNumber?: number;
   /** The editor's newest draft, so a rerun right after an edit uses it. */
   content?: unknown;
   signal?: AbortSignal;
@@ -145,6 +159,9 @@ export async function streamAgentBench(input: {
       target: input.target,
       ...(input.target === "draft" && input.content !== undefined
         ? { content: input.content }
+        : {}),
+      ...(input.target === "release" && input.releaseNumber !== undefined
+        ? { releaseNumber: input.releaseNumber }
         : {}),
     }),
     signal: input.signal,
@@ -163,6 +180,36 @@ export async function streamAgentBench(input: {
       throw new BenchError(event.message, { message: event.message });
   }
   throw new BenchError("");
+}
+
+/**
+ * Asks the model how the draft's instructions could make this answer better.
+ * The suggestions come back for the creator to read; applying one is theirs.
+ */
+export async function suggestBenchImprovements(input: {
+  agentId: string;
+  prompt: string;
+  output: string;
+  checks?: BenchChecks;
+  /** The editor's newest draft, so suggestions fit what it shows. */
+  content?: unknown;
+  signal?: AbortSignal;
+}) {
+  const body = await readBody<{ suggestions: BenchModelSuggestion[] }>(
+    await requestSpectra("/api/spectra/agents/bench/suggest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agentId: input.agentId,
+        prompt: input.prompt,
+        output: input.output,
+        ...(input.checks ? { checks: input.checks } : {}),
+        ...(input.content !== undefined ? { content: input.content } : {}),
+      }),
+      signal: input.signal,
+    }),
+  );
+  return Array.isArray(body.suggestions) ? body.suggestions : [];
 }
 
 /**

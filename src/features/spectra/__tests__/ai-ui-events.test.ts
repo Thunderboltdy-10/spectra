@@ -283,6 +283,13 @@ describe("AI UI events", () => {
     expect(getAiLocation()).toMatchObject({ artifactId: "agent-1" });
   });
 
+  it("points Follow at a school resource Spectra copied into the Library, and ignores an event with no work", () => {
+    handleSpectraAiUiEvent({ key: "managebac_resource_imported", runId: "run-1", payload: { note: "Copied a school resource into your Library" } });
+    expect(getAiLocation()).toBeNull();
+    handleSpectraAiUiEvent({ key: "managebac_resource_imported", runId: "run-1", payload: { targetId: "work-9", note: "Copied a school resource into your Library" } });
+    expect(getAiLocation()).toMatchObject({ artifactId: "work-9", note: "Copied a school resource into your Library" });
+  });
+
   it("refreshes the notifications when Spectra answers an invitation", () => {
     let refreshed = 0;
     const off = spectraBus.on("notifications.changed", () => { refreshed += 1; });

@@ -53,6 +53,31 @@ describe("Spectra API route", () => {
     expect(convexQuery).toHaveBeenCalledWith("spectraArtifacts:listPage", { scope: "school", placement: "shared", blueprintKey: "document", status: "active", search: "essay", cursor: "encrypted-current", limit: 12 });
   });
 
+  it("reads the agent bench with every release a draft can be compared with, without their ids", async () => {
+    const convexQuery = vi.fn(async (name: string) => {
+      if (name === "spectraArtifacts:listAgentReleases")
+        return [
+          { releaseId: "release_2", versionId: "version_2", releaseNumber: 2, status: "published", rollout: "internal_test", publishedAt: 20, releaseNotes: "n" },
+          { releaseId: "release_1", versionId: "version_1", releaseNumber: 1, status: "suspended", publishedAt: 10 },
+        ];
+      if (name === "spectraArtifacts:agentBenchRelease") return { releaseNumber: 2, title: "Coach", content: {} };
+      return [];
+    });
+    vi.doMock("@/lib/auth-server", () => mockAuth());
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation: vi.fn() }));
+    const route = await import("@/app/api/spectra/route");
+    const response = await route.GET(new NextRequest("http://localhost/api/spectra?action=agentBench&agentId=agent_1"));
+    expect(await response.json()).toEqual({
+      cases: [],
+      runs: [],
+      release: { releaseNumber: 2, title: "Coach", content: {} },
+      releases: [
+        { releaseNumber: 2, status: "published", rollout: "internal_test", publishedAt: 20 },
+        { releaseNumber: 1, status: "suspended", publishedAt: 10 },
+      ],
+    });
+  });
+
   it("rejects invalid catalog page sizes before a database query", async () => {
     const convexQuery = vi.fn();
     vi.doMock("@/lib/auth-server", () => mockAuth());

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   remove: vi.fn(),
   stream: vi.fn(),
+  suggest: vi.fn(),
   glow: vi.fn(),
   arrival: vi.fn(),
   toastSuccess: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock("../data/agent-bench", async (original) => ({
   saveAgentBenchCase: mocks.save,
   removeAgentBenchCase: mocks.remove,
   streamAgentBench: mocks.stream,
+  suggestBenchImprovements: mocks.suggest,
 }));
 vi.mock("../life/use-life", async (original) => ({
   ...(await original<typeof import("../life/use-life")>()),
@@ -39,8 +41,8 @@ vi.mock("@/components/ui/toast", () => ({
   toast: Object.assign(vi.fn(), { success: mocks.toastSuccess, error: mocks.toastError }),
 }));
 
-import { AgentBench, useAgentBench } from "../components/agent-bench";
-import { BenchError } from "../data/agent-bench";
+import { AgentBench, benchBarAction, useAgentBench, type AgentBenchController } from "../components/agent-bench";
+import { BenchError, type BenchReleaseOption } from "../data/agent-bench";
 
 function agent(): AgentFoundryContent {
   return normalizeFoundryContent({
@@ -82,13 +84,29 @@ function run(prompt: string, output: string, createdAt: number, target: BenchTar
   return { id: `r${createdAt}`, prompt, target, output, createdAt, ...(releaseNumber ? { releaseNumber } : {}) };
 }
 
+/** The bench as the editor holds it, so a test can press the bar's Stop. */
+const held: { bench?: AgentBenchController } = {};
+
 function Harness({ content, onApply }: { content: AgentFoundryContent; onApply: (next: AgentFoundryContent) => void }) {
   const bench = useAgentBench({ agentId: "agent_1", enabled: true, content });
+  held.bench = bench;
   return <AgentBench bench={bench} content={content} suite={[]} canEdit onApply={onApply} />;
 }
 
-function setup(state: { cases?: BenchCase[]; runs?: BenchRun[]; release?: { releaseNumber: number; title: string; content: unknown } | null } = {}) {
-  mocks.get.mockResolvedValue({ cases: state.cases ?? [], runs: state.runs ?? [], release: state.release ?? null });
+function setup(
+  state: {
+    cases?: BenchCase[];
+    runs?: BenchRun[];
+    release?: { releaseNumber: number; title: string; content: unknown } | null;
+    releases?: BenchReleaseOption[];
+  } = {},
+) {
+  mocks.get.mockResolvedValue({
+    cases: state.cases ?? [],
+    runs: state.runs ?? [],
+    release: state.release ?? null,
+    ...(state.releases ? { releases: state.releases } : {}),
+  });
   const onApply = vi.fn();
   const view = render(<Harness content={agent()} onApply={onApply} />);
   return { ...view, onApply };
@@ -96,16 +114,45 @@ function setup(state: { cases?: BenchCase[]; runs?: BenchRun[]; release?: { rele
 
 /** A stream the test finishes by hand, so the middle of an answer can be seen. */
 function controlledStream() {
-  const calls: Array<{ target: BenchTarget; prompt: string; content?: unknown; write: (text: string) => void; finish: (output: string) => void; fail: (error: unknown) => void }> = [];
+  const calls: Array<{
+    target: BenchTarget;
+    prompt: string;
+    content?: unknown;
+    releaseNumber?: number;
+    signal?: AbortSignal;
+    write: (text: string) => void;
+    finish: (output: string) => void;
+    fail: (error: unknown) => void;
+  }> = [];
   mocks.stream.mockImplementation(
-    (input: { prompt: string; target: BenchTarget; content?: unknown; onText: (text: string) => void }) =>
+    (input: {
+      prompt: string;
+      target: BenchTarget;
+      content?: unknown;
+      releaseNumber?: number;
+      signal?: AbortSignal;
+      onText: (text: string) => void;
+    }) =>
       new Promise<BenchRun>((resolve, reject) => {
+        // As fetch does: a stopped request ends the stream with an abort.
+        input.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
         calls.push({
           target: input.target,
           prompt: input.prompt,
           content: input.content,
+          releaseNumber: input.releaseNumber,
+          signal: input.signal,
           write: input.onText,
-          finish: (output) => resolve(run(input.prompt, output, 100 + calls.length, input.target, input.target === "release" ? 2 : undefined)),
+          finish: (output) =>
+            resolve(
+              run(
+                input.prompt,
+                output,
+                100 + calls.length,
+                input.target,
+                input.target === "release" ? (input.releaseNumber ?? 2) : undefined,
+              ),
+            ),
           fail: reject,
         });
       }),
@@ -246,6 +293,156 @@ describe("the agent bench", () => {
     await waitFor(() => expect(calls).toHaveLength(1));
     await act(async () => calls[0]!.fail(new BenchError("Your school reached its AI usage limit for today.")));
     expect(screen.getByRole("alert").textContent).toBe("Your school reached its AI usage limit for today.");
+  });
+
+  it("stops a running answer, says so without alarm, and runs it again", async () => {
+    const calls = controlledStream();
+    setup({ runs: [run("Mark it", "Old.", 1)] });
+    fireEvent.click(await screen.findByRole("button", { name: /Run again/ }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    act(() => calls[0]!.write("Half an ans"));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Stop" })));
+    expect(calls[0]!.signal?.aborted).toBe(true);
+    expect(screen.getByText(/Stopped before the answer finished/)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(document.querySelector('[data-ai-region="true"]')).toBeNull();
+    // The answer before is still there, and the question can run again.
+    expect(screen.getByText("Old.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Run again/ }));
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(screen.queryByText(/Stopped before the answer finished/)).toBeNull();
+  });
+
+  it("stops Run all before it asks the next question", async () => {
+    const calls = controlledStream();
+    setup({ runs: [run("First question", "One.", 2), run("Second question", "Two.", 1)] });
+    await screen.findByText("Two.");
+    expect(benchBarAction(held.bench!, true)).toMatchObject({ label: "Run all", stops: false, disabled: false });
+    expect(benchBarAction(held.bench!, false).disabled).toBe(true);
+    let pending: Promise<void> | undefined;
+    act(() => {
+      pending = held.bench!.runAll();
+    });
+    await waitFor(() => expect(calls).toHaveLength(1));
+    // While it runs, the editor bar's main action is Stop.
+    const bar = benchBarAction(held.bench!, true);
+    expect(bar).toMatchObject({ label: "Stop", stops: true, disabled: false });
+    await act(async () => {
+      bar.onSelect();
+      await pending;
+    });
+    expect(benchBarAction(held.bench!, true).label).toBe("Run all");
+    expect(held.bench!.runningAll).toBe(false);
+    expect(calls).toHaveLength(1);
+    expect(screen.getAllByText(/Stopped before the answer finished/)).toHaveLength(1);
+  });
+
+  it("compares with an older release the creator picks", async () => {
+    const calls = controlledStream();
+    setup({
+      runs: [run("Mark it", "Draft answer.", 1), run("Mark it", "Release three answer.", 0, "release", 3)],
+      release: { releaseNumber: 3, title: "Coach", content: {} },
+      releases: [
+        { releaseNumber: 3, status: "published", rollout: "published", publishedAt: 30 },
+        { releaseNumber: 2, status: "suspended", publishedAt: 20 },
+        { releaseNumber: 1, status: "deprecated", publishedAt: 10 },
+      ],
+    });
+    fireEvent.click(await screen.findByRole("radio", { name: "A release" }));
+    // The newest release is compared first, from the answer it already gave.
+    expect(screen.getByRole("combobox", { name: "Which release" }).textContent).toContain("Release 3");
+    expect(document.querySelector(".agent-bench-answer")?.textContent).toBe("Release 3Release three answer.");
+    act(() => held.bench!.setCompareRelease(1));
+    expect(screen.getByRole("combobox", { name: "Which release" }).textContent).toContain("Release 1, retired");
+    expect(screen.getByText("Run it to see how the release answers.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Run again/ }));
+    await waitFor(() => expect(calls.map((call) => call.target).sort()).toEqual(["draft", "release"]));
+    const asked = calls.find((call) => call.target === "release")!;
+    expect(asked.releaseNumber).toBe(1);
+    await act(async () => {
+      asked.finish("Release one answer.");
+      calls.find((call) => call.target === "draft")!.finish("New draft answer.");
+    });
+    const answers = [...document.querySelectorAll(".agent-bench-answer")].map((node) => node.textContent);
+    expect(answers).toEqual(["Release 1Release one answer.", "This draftNew draft answer."]);
+  });
+
+  it("does not name the newest release to the route, so the default still answers", async () => {
+    const calls = controlledStream();
+    setup({ runs: [run("Mark it", "Draft answer.", 1)], release: { releaseNumber: 2, title: "Coach", content: {} } });
+    fireEvent.click(await screen.findByRole("radio", { name: "Release 2" }));
+    expect(screen.queryByRole("combobox", { name: "Which release" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Run again/ }));
+    await waitFor(() => expect(calls.some((call) => call.target === "release")).toBe(true));
+    expect(mocks.stream.mock.calls.find(([input]) => input.target === "release")![0]).not.toHaveProperty("releaseNumber");
+  });
+
+  it("asks Spectra for improvements, shows them arriving as Spectra's, and applies one only when asked", async () => {
+    mocks.suggest.mockResolvedValue([
+      {
+        key: "include:essay:next step",
+        reason: "The answer never tells the student what to do next.",
+        edits: [{ kind: "include", skillId: "essay", skillName: "Essay feedback", value: "one next step" }],
+      },
+      { key: "tone:warm", reason: "Students respond better to warmth.", edits: [{ kind: "tone", value: "warm" }] },
+    ]);
+    const { onApply } = setup({ cases: [savedCase], runs: [run("Mark my essay intro", "Your intro is fine.", 1)] });
+    fireEvent.click(await screen.findByRole("button", { name: /Suggest improvements/ }));
+    const list = await screen.findByRole("list", { name: "Spectra's suggestions" });
+    expect(mocks.suggest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "agent_1",
+        prompt: "Mark my essay intro",
+        output: "Your intro is fine.",
+        checks: savedCase.checks,
+      }),
+    );
+    expect(within(list).getByText("The answer never tells the student what to do next.")).toBeTruthy();
+    expect(within(list).getByText("Essay feedback answers include \u201cone next step\u201d")).toBeTruthy();
+    expect(within(list).getByText("Tone: Warm")).toBeTruthy();
+    expect(mocks.arrival).toHaveBeenCalledWith(
+      expect.anything(),
+      "bench-idea:agent_1:mark my essay intro:r1:include:essay:next step",
+      "ai",
+    );
+    // Nothing reaches the draft until the creator applies it.
+    expect(onApply).not.toHaveBeenCalled();
+    fireEvent.click(within(list).getAllByRole("button", { name: "Apply to the draft" })[1]!);
+    const next = onApply.mock.calls[0]![0] as AgentFoundryContent;
+    expect(next.foundry.mission.interactionStyle.tone).toBe("warm");
+    expect(next.foundry.skills[0]!.outputContract.mustInclude).toEqual([]);
+    expect(within(list).getByText("Applied")).toBeTruthy();
+    expect(within(list).getAllByRole("button", { name: "Apply to the draft" })).toHaveLength(1);
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Applied to the draft. Run it again to see the difference.");
+  });
+
+  it("says when Spectra has nothing to suggest, and words a failure plainly", async () => {
+    mocks.suggest.mockResolvedValueOnce([]);
+    setup({ runs: [run("Mark it", "Fine.", 1)] });
+    fireEvent.click(await screen.findByRole("button", { name: /Suggest improvements/ }));
+    expect(await screen.findByText("Spectra has nothing to change for this answer.")).toBeTruthy();
+    mocks.suggest.mockRejectedValueOnce(new BenchError("Your school reached its AI usage limit for today."));
+    fireEvent.click(screen.getByRole("button", { name: /Suggest again/ }));
+    expect((await screen.findByRole("alert")).textContent).toBe("Your school reached its AI usage limit for today.");
+    mocks.suggest.mockRejectedValueOnce(new Error("AGENT_X_FAILED"));
+    fireEvent.click(screen.getByRole("button", { name: /Suggest improvements/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toBe("Spectra could not suggest changes this time. Try again."),
+    );
+  });
+
+  it("stops asking for suggestions when the creator stops it", async () => {
+    let signal: AbortSignal | undefined;
+    mocks.suggest.mockImplementation((input: { signal?: AbortSignal }) => {
+      signal = input.signal;
+      return new Promise(() => undefined);
+    });
+    setup({ runs: [run("Mark it", "Fine.", 1)] });
+    fireEvent.click(await screen.findByRole("button", { name: /Suggest improvements/ }));
+    expect(await screen.findByText(/Spectra is reading the answer/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(signal?.aborted).toBe(true);
+    expect(screen.getByRole("button", { name: /Suggest improvements/ })).toBeTruthy();
   });
 
   it("says so when the bench cannot load, and tries again", async () => {

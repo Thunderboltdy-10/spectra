@@ -8419,6 +8419,34 @@ button[data-spectra-context-trigger="true"]::after {
   color: var(--text-secondary);
 }
 
+.agent-bench-ideas {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.agent-bench-ideas > .agent-bench-suggestions {
+  align-self: stretch;
+}
+
+.agent-bench-idea {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.agent-bench-idea > p {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.agent-bench-idea > ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
 .agent-bench-problem {
   margin: 0;
   color: color-mix(in oklab, var(--danger) 80%, var(--text-primary));

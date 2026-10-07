@@ -808,10 +808,11 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     id: "managebac.import_resource",
     area: "managebac",
     title: "Import a school resource",
-    description: "Import a resource from a ManageBac class shelf into the library.",
+    description: "Copy a resource from a ManageBac class shelf into the Library, as an editable work when it is an Office file.",
+    keywords: ["class shelf", "worksheet", "teacher file", "download", "copy into library"],
     ui: ["app.managebac.import-resource"],
     server: ["managebac:beginResourceImport"],
-    reach: gap("The import downloads the file with the school's ManageBac token inside the signed-in school route, which a run cannot call yet. Import it from the class shelf; Spectra can refresh school records with a ManageBac sync."),
+    reach: tool("managebac", { fixed: { action: "import_resource" }, appCommand: "import_managebac_resource", example: { resourceId: "r1" } }),
   },
   {
     id: "managebac.mapping",

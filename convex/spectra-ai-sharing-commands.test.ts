@@ -115,6 +115,7 @@ describe("Spectra AI sharing and publishing commands", () => {
     ["manage_comment", { action: "delete", commentId: "c1" }, "permanent_delete"],
     ["set_school_sync_mode", { kind: "grades", mode: "off" }, "managebac"],
     ["manage_class_workspaces", { action: "create", recordIds: ["r1"] }, "managebac"],
+    ["import_managebac_resource", { sourceRecordId: "r1" }, "managebac"],
     ["control_device", { action: "remove_folder", grantId: "g1" }, "settings"],
   ] as const)("lets \"Always allow\" stand in for asking before %s %j only under %s", async (command, args, category) => {
     const { t, ids, user } = await seed();

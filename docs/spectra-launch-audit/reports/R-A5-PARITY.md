@@ -95,13 +95,7 @@ The web app must ship with them. The worker stages steps with the same table tha
 
 ## Remaining gaps
 
-Only two entries are gaps: things a user can do that Spectra cannot yet do, for engineering reasons and not by policy.
-
-- **`managebac.import_resource`.** The import downloads the file with the school's ManageBac token, inside the signed-in school route (`requireActor`, Clerk). A run cannot call that route. Closing the gap needs one of two changes:
-  - move `importManageBacResource` out of `managebac/route.ts` into a server module, the way `agents/evaluate/checks.ts` was;
-  - or queue the import for the scheduled ManageBac worker.
-
-  Until then Spectra refreshes school records with Sync ManageBac.
+Only one entry is a gap: something a user can do that Spectra cannot yet do, for engineering reasons and not by policy. (Counts updated by lane L2: `managebac.import_resource` was the second gap. The import moved to `managebac/resource-import.ts`, and a run reaches it through `managebac` {"action":"import_resource"} -> `import_managebac_resource`. See [R-L2-FINISH](R-L2-FINISH.md).)
 - **`agents.studio`.** The bench (`saveBenchCase`, `removeBenchCase`, `recordBenchRun`) and the Foundry compiler (`beginCompilerJob`, `updateCompilerJob`, `cancelCompilerJob`) are streamed, interactive model work in the studio. Spectra edits agents with `edit_artifact` and runs their checks with `run_agent_checks`.
 
 Every other entry with no AI path is user-only by policy. Each has its reason in the catalog table below. They fall into these groups:
@@ -165,9 +159,9 @@ The tables below are generated from the catalog. They list Convex writes only, n
 
 The catalog has 98 entries:
 
-- 66 reach a tool;
+- 67 reach a tool;
 - 30 are user-only, each with a reason;
-- 2 are gaps;
+- 1 is a gap;
 - 98 server functions are written plumbing.
 
 The route tables below hold 74 `postSpectra` write rows and 82 rows from other routes. Uncovered writes: 0.
@@ -257,7 +251,7 @@ The route tables below hold 74 `postSpectra` write rows and 82 rows from other r
 | `sharing.public_link` Make or turn off a public link |  | `authority:createPublicLink`, `authority:revokePublicLink` | `share` {"action":"create_public_link"} -> `change_sharing` |
 | `managebac.sync` Sync ManageBac | `app.managebac.sync` | `managebac:requestAiRefresh` | `managebac` {"action":"sync"} -> `trigger_managebac_sync` |
 | `managebac.select_classes` Choose ManageBac classes | `app.managebac.select-classes` | `managebac:setSelectedClasses` | `managebac` {"action":"select_classes"} -> `select_managebac_classes` |
-| `managebac.import_resource` Import a school resource | `app.managebac.import-resource` | `managebac:beginResourceImport` | Gap: The import downloads the file with the school's ManageBac token inside the signed-in school route, which a run cannot call yet. Import it from the class shelf; Spectra can refresh school records with a ManageBac sync. |
+| `managebac.import_resource` Import a school resource | `app.managebac.import-resource` | `managebac:beginResourceImport` | `managebac` {"action":"import_resource"} -> `import_managebac_resource` (lane L2) |
 | `managebac.mapping` Change ManageBac mapping | `app.managebac.mapping` | `managebac:upsertCalendarPeriodMap`, `managebac:removeCalendarPeriodMap`, `managebac:setOverlay`, `managebac:resolveConflict` | User only: Mapping changes use the dedicated school flow, where the user checks each record. |
 | `managebac.class_workspaces` Class workspaces |  | `managebac:materializeClassWorkspaces`, `managebac:releaseClassWorkspaces` | `managebac` {"action":"create_class_workspaces"} -> `manage_class_workspaces` |
 | `managebac.purge_class_workspaces` Remove auto-created class workspaces |  | `managebac:purgeAutoCreatedClassWorkspaces` | User only: It removes every auto-created class workspace at once, behind a phrase the user types on the ManageBac page. Spectra releases class workspaces one class at a time with the managebac tool. |
@@ -418,7 +412,7 @@ The route tables below hold 74 `postSpectra` write rows and 82 rows from other r
 | `spectra/managebac/route.ts` | `payloads:issueUpload` | plumbing | Plumbing: Upload protocol. |
 | `spectra/managebac/route.ts` | `payloads:put` | plumbing | Plumbing: Upload protocol. |
 | `spectra/managebac/route.ts` | `replicas:attachPortablePayload` | plumbing | Plumbing: Spectra Bridge replica protocol. |
-| `spectra/managebac/route.ts` | `managebac:beginResourceImport` | `managebac.import_resource` | Gap: The import downloads the file with the school's ManageBac token inside the signed-in school route, which a run cannot call yet. Import it from the class shelf; Spectra can refresh school records with a ManageBac sync. |
+| `spectra/managebac/route.ts` | `managebac:beginResourceImport` | `managebac.import_resource` | `managebac` {"action":"import_resource"} -> `import_managebac_resource` (lane L2; the import now lives in `managebac/resource-import.ts`) |
 | `spectra/managebac/route.ts` | `spectraArtifacts:create` | `work.create` | `create_artifact` |
 | `spectra/managebac/route.ts` | `spectraArtifacts:createImportedResource` | `library.import` | User only: Files come from the browser's file picker, which only the user can open. |
 | `spectra/managebac/route.ts` | `managebac:attachResourceImportArtifact` | plumbing | Plumbing: Steps of a resource import the user started. |

@@ -1785,8 +1785,16 @@ export const listAgentsForSwitch = query({
  * The newest release the bench can compare a draft with: whatever rollout it
  * went out on, since the creator tests their own agent.
  */
+/**
+ * The release the bench compares a draft with: the newest live one, or, when
+ * the creator picked one, that release whatever has happened to it since
+ * (suspended and retired releases are still this agent's history).
+ */
 export const agentBenchRelease = query({
-  args: { agentId: v.id("spectraArtifacts") },
+  args: {
+    agentId: v.id("spectraArtifacts"),
+    releaseNumber: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
     const { artifact } = await requireArtifactCapability(
       ctx,
@@ -1794,12 +1802,21 @@ export const agentBenchRelease = query({
       "modify",
     );
     if (artifact.blueprintKey !== "agent") return null;
-    const release = await latestPublishedAgentRelease(ctx, artifact._id, [
-      "internal_test",
-      "limited",
-      "published",
-    ]);
-    if (!release) return null;
+    const releaseNumber = args.releaseNumber;
+    const release =
+      releaseNumber === undefined
+        ? await latestPublishedAgentRelease(ctx, artifact._id, [
+            "internal_test",
+            "limited",
+            "published",
+          ])
+        : await ctx.db
+            .query("agentReleases")
+            .withIndex("by_agent_number", (q) =>
+              q.eq("agentId", artifact._id).eq("releaseNumber", releaseNumber),
+            )
+            .first();
+    if (!release || release.agentId !== artifact._id) return null;
     const version = await ctx.db.get(release.versionId);
     if (
       !version ||

@@ -226,6 +226,11 @@ const COMMANDS: Record<string, ApplicationCommand> = {
     }),
     authority: "managebac_selection",
   },
+  // A class resource from the shelf, copied into the Library; a retry reuses the copy already made.
+  import_managebac_resource: {
+    input: z.object({ sourceRecordId: z.string().trim().min(1).max(200), refresh: z.boolean().optional() }),
+    authority: "managebac_resource_import",
+  },
   insert_reference: {
     input: z.object({ hostWorkId: z.string(), targetWorkId: z.string(), label: z.string().max(160).optional() }),
     authority: "content",

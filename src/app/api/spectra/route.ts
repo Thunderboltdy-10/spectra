@@ -561,12 +561,24 @@ export async function GET(request: NextRequest) {
 
     if (action === "agentBench") {
       const agentId = requireString(params.get("agentId"), "agentId");
-      const [cases, runs, release] = await Promise.all([
+      const [cases, runs, release, history] = await Promise.all([
         spectraQuery("agents:benchCases", { agentId }),
         spectraQuery("agents:benchRuns", { agentId }),
         spectraQuery("spectraArtifacts:agentBenchRelease", { agentId }),
+        spectraQuery<
+          { agentId: string },
+          Array<{ releaseNumber: number; status: string; rollout?: string; publishedAt: number }>
+        >("spectraArtifacts:listAgentReleases", { agentId }),
       ]);
-      return ok({ cases, runs, release });
+      // Every release the draft can be compared with, newest first, without
+      // the ids and notes the bench has no use for.
+      const releases = (history ?? []).map((entry) => ({
+        releaseNumber: entry.releaseNumber,
+        status: entry.status,
+        ...(entry.rollout ? { rollout: entry.rollout } : {}),
+        publishedAt: entry.publishedAt,
+      }));
+      return ok({ cases, runs, release, releases });
     }
 
     if (action === "agentResourceHealth") {

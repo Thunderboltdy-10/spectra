@@ -40,6 +40,8 @@ export function applicationCommandCategory(command: string, args: Args): Permiss
     case "select_managebac_classes":
     case "set_school_sync_mode":
     case "manage_class_workspaces":
+    // A class resource copied into the Library, downloaded with the school's ManageBac key.
+    case "import_managebac_resource":
       return "managebac";
     case "change_sync_policy":
       return "bridge_files";

@@ -12,9 +12,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@clerk/nextjs/server", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/convex-server", () => ({ convexQuery: mocks.convexQuery }));
 vi.mock("@/features/spectra/ai/harness/model", () => ({ callSpectraModel: mocks.callSpectraModel }));
-vi.mock("../../model-work", () => ({
+vi.mock("../../model-work", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../model-work")>()),
   admitAgentModelWork: mocks.admit,
-  recordAgentModelWork: mocks.meter,
+  recordHarnessModelWork: mocks.meter,
 }));
 import { POST } from "./route";
 
@@ -44,12 +45,13 @@ function foundryContent(established = true) {
   };
 }
 
-function post(body: unknown) {
+function post(body: unknown, signal?: AbortSignal) {
   return POST(
     new Request("https://example.test/api/spectra/agents/bench/suggest", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      ...(signal ? { signal } : {}),
     }),
   );
 }
@@ -142,6 +144,21 @@ describe("the bench's suggestions route", () => {
     expect(down.status).toBe(503);
     expect((await down.json()).error.message).toBe("Spectra could not reach the AI model. Try again in a moment.");
     expect(mocks.meter).not.toHaveBeenCalled();
+  });
+
+  it("meters an estimate of what a stopped suggestion spent", async () => {
+    const controller = new AbortController();
+    mocks.callSpectraModel.mockImplementation(async (request: { onText: (delta: string) => void }) => {
+      request.onText("Fourteen chars");
+      controller.abort();
+      throw new DOMException("Stopped", "AbortError");
+    });
+    await post({ agentId: "agent_1", prompt: "Hi", output: "Hello." }, controller.signal).catch(() => null);
+    expect(mocks.meter).toHaveBeenCalledTimes(1);
+    const [userId, agentId, purpose, spent, options] = mocks.meter.mock.calls[0]!;
+    expect([userId, agentId, purpose, options]).toEqual(["user_1", "agent_1", "agent_bench", { stopped: true }]);
+    expect(spent.outputTokens).toBe(4);
+    expect(spent.inputTokens).toBeGreaterThan(0);
   });
 
   it("returns no suggestions when the model's reply is not usable", async () => {

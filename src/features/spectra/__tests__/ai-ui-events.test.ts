@@ -283,6 +283,26 @@ describe("AI UI events", () => {
     expect(getAiLocation()).toMatchObject({ artifactId: "agent-1" });
   });
 
+  it("tells an open agent studio that Spectra used or changed the agent's bench", () => {
+    const changed: string[] = [];
+    const off = spectraBus.on("agent.benchChanged", ({ agentId }) => changed.push(agentId));
+    handleSpectraAiUiEvent({ key: "agent_bench_changed", runId: "run-1", payload: { targetId: "agent-2", note: "The draft answered on the bench" } });
+    handleSpectraAiUiEvent({ key: "agent_bench_changed", runId: "run-1", payload: { note: "No agent" } });
+    off();
+    expect(changed).toEqual(["agent-2"]);
+    expect(getAiLocation()).toMatchObject({ artifactId: "agent-2", note: "The draft answered on the bench" });
+  });
+
+  it("tells an open agent studio that Spectra compiled the agent", () => {
+    const compiled: string[] = [];
+    const off = spectraBus.on("agent.compiled", ({ agentId }) => compiled.push(agentId));
+    handleSpectraAiUiEvent({ key: "agent_compiled", runId: "run-1", payload: { targetId: "agent-3", note: "Drafted 2 skills in the Foundry" } });
+    handleSpectraAiUiEvent({ key: "agent_compiled", runId: "run-1", payload: { note: "No agent" } });
+    off();
+    expect(compiled).toEqual(["agent-3"]);
+    expect(getAiLocation()).toMatchObject({ artifactId: "agent-3", note: "Drafted 2 skills in the Foundry" });
+  });
+
   it("points Follow at a school resource Spectra copied into the Library, and ignores an event with no work", () => {
     handleSpectraAiUiEvent({ key: "managebac_resource_imported", runId: "run-1", payload: { note: "Copied a school resource into your Library" } });
     expect(getAiLocation()).toBeNull();

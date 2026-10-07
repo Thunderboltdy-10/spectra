@@ -5,9 +5,7 @@
  * - A "tool" action runs through a harness tool, the same server path the
  *   user's own control uses. The AI can find it with find_commands and run it
  *   with run_command; most also have a first-class tool.
- * - A "user" action is only the user's, with the reason written down. A
- *   reason marked `gap` means nothing forbids an AI path; it does not exist
- *   yet.
+ * - A "user" action is only the user's, with the reason written down.
  *
  * Buttons, menus and the command bar run the `app.*` commands in
  * app-registry.ts. Each one names its action here through `ui`, and the AI
@@ -56,8 +54,6 @@ export type AiReach =
   | {
       kind: "user";
       reason: string;
-      /** No rule keeps the AI out; the path does not exist yet. */
-      gap?: true;
     };
 
 export type CatalogCommand = {
@@ -81,7 +77,6 @@ const tool = (name: string, extra: Omit<Extract<AiReach, { kind: "tool" }>, "kin
   ...extra,
 });
 const user = (reason: string): AiReach => ({ kind: "user", reason });
-const gap = (reason: string): AiReach => ({ kind: "user", reason, gap: true });
 
 const PERMISSION_REASON =
   "It changes what Spectra AI may do. Only the user changes that, in Settings, so the AI can never grant itself more.";
@@ -940,15 +935,59 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     reach: tool("run_agent_checks", { appCommand: "run_agent_checks", example: { agentId: "ag1" } }),
   },
   {
-    id: "agents.studio",
+    id: "agents.bench_run",
     area: "agents",
-    title: "Try an agent on the bench or compile it",
-    description: "Try an agent live on the bench and keep answers as tests, or compile it from its sources in the Foundry.",
-    keywords: ["bench", "compile", "foundry", "save test"],
-    server: ["agents:saveBenchCase", "agents:removeBenchCase", "agents:recordBenchRun", "agents:beginCompilerJob", "agents:updateCompilerJob", "agents:cancelCompilerJob"],
-    reach: gap(
-      "The bench and the Foundry compiler are the studio's interactive model work, streamed to the creator; the harness has no path to them yet. Spectra edits the agent with edit_artifact and runs its checks with run_agent_checks.",
-    ),
+    title: "Try an agent on the bench",
+    description: "Ask an agent's draft, or one of its releases, a question on the bench and read its answer.",
+    keywords: ["bench", "try agent", "test question", "ask my agent", "compare with release"],
+    server: ["agents:recordBenchRun"],
+    reach: tool("run_agent_bench", { appCommand: "run_agent_bench", example: { agentId: "ag1", prompt: "Mark my essay" } }),
+  },
+  {
+    id: "agents.bench_read",
+    area: "agents",
+    title: "Read an agent's bench",
+    description: "See the tests kept from an agent's bench and its recent bench answers.",
+    keywords: ["bench tests", "saved tests", "bench answers"],
+    reach: tool("read_agent_bench", { example: { agentId: "ag1" } }),
+  },
+  {
+    id: "agents.bench_save_test",
+    area: "agents",
+    title: "Keep a bench question as a test",
+    description: "Keep a bench question as one of an agent's tests, with what a good answer must or must not say, or change a kept test.",
+    keywords: ["save test", "keep as test", "must include", "must not say", "regression"],
+    server: ["agents:saveBenchCase"],
+    reach: tool("save_agent_bench_case", {
+      appCommand: "save_agent_bench_case",
+      example: { agentId: "ag1", prompt: "Mark my essay", mustInclude: ["one next step"] },
+    }),
+  },
+  {
+    id: "agents.bench_remove_test",
+    area: "agents",
+    title: "Remove a bench test",
+    description: "Delete one of the tests kept from an agent's bench, so its checks no longer include it.",
+    keywords: ["delete test", "drop test"],
+    server: ["agents:removeBenchCase"],
+    reach: tool("remove_agent_bench_case", { appCommand: "remove_agent_bench_case", example: { agentId: "ag1", caseId: "case1" } }),
+  },
+  {
+    id: "agents.compile",
+    area: "agents",
+    title: "Compile an agent in the Foundry",
+    description: "Compile an agent's skills, routing and release notes from its mission, answers and sources in the Foundry.",
+    keywords: ["compile", "foundry", "skills", "draft skills", "routing"],
+    server: ["agents:beginCompilerJob", "agents:updateCompilerJob", "agents:cancelCompilerJob"],
+    reach: tool("compile_agent", { appCommand: "compile_agent", example: { agentId: "ag1" } }),
+  },
+  {
+    id: "agents.approve_skills",
+    area: "agents",
+    title: "Approve an agent's drafted skills",
+    description: "Approve the skills the Foundry drafted for an agent, with its compiled routing and release notes.",
+    keywords: ["approve skills", "accept skills", "drafted skills"],
+    reach: tool("approve_agent_skills", { example: { agentId: "ag1" } }),
   },
   {
     id: "agents.manage",

@@ -138,6 +138,16 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
       }
       break;
     }
+    case "save_agent_bench_case": return { name: "agents:saveBenchCase", args: {
+      agentId: String(args.agentId ?? ""),
+      ...(typeof args.caseId === "string" ? { caseId: args.caseId } : {}),
+      prompt: String(args.prompt ?? ""),
+      mustInclude: strings(args.mustInclude),
+      mustNotInclude: strings(args.mustNotInclude),
+      ...(typeof args.rubric === "string" && args.rubric.trim() ? { rubric: args.rubric } : {}),
+      ...(typeof args.required === "boolean" ? { required: args.required } : {}),
+    } };
+    case "remove_agent_bench_case": return { name: "agents:removeBenchCase", args: { agentId: String(args.agentId ?? ""), caseId: String(args.caseId ?? "") } };
     case "trigger_managebac_sync": return { name: "managebac:requestAiRefresh", args: aiRefreshRequest(args.purpose, args.force) };
     case "select_managebac_classes": return { name: "managebac:setSelectedClasses", args: {
       recordIds: strings(args.recordIds),

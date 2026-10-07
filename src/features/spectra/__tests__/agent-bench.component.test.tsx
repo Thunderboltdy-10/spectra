@@ -42,6 +42,7 @@ vi.mock("@/components/ui/toast", () => ({
 }));
 
 import { AgentBench, benchBarAction, useAgentBench, type AgentBenchController } from "../components/agent-bench";
+import { spectraBus } from "../events";
 import { BenchError, type BenchReleaseOption } from "../data/agent-bench";
 
 function agent(): AgentFoundryContent {
@@ -306,11 +307,35 @@ describe("the agent bench", () => {
     expect(screen.getByText(/Stopped before the answer finished/)).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(document.querySelector('[data-ai-region="true"]')).toBeNull();
+    // What it wrote stays, marked stopped, and is not compared with the answer before.
+    expect(screen.getByText("Half an ans")).toBeTruthy();
+    expect(screen.getByText("Stopped", { selector: ".agent-bench-tag" })).toBeTruthy();
+    expect(screen.queryByText("What changed")).toBeNull();
     // The answer before is still there, and the question can run again.
     expect(screen.getByText("Old.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Run again/ }));
     await waitFor(() => expect(calls).toHaveLength(2));
     expect(screen.queryByText(/Stopped before the answer finished/)).toBeNull();
+  });
+
+  it("does not grade a stopped answer against its test", async () => {
+    controlledStream();
+    setup({
+      cases: [
+        {
+          id: "case_1",
+          prompt: "Mark it",
+          checks: { mustInclude: ["next step"], mustNotInclude: [] },
+          required: true,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+      runs: [{ ...run("Mark it", "Half", 2), stopped: true }],
+    });
+    expect(await screen.findByText("Half")).toBeTruthy();
+    expect(screen.getByText("Stopped", { selector: ".agent-bench-tag" })).toBeTruthy();
+    expect(screen.queryByText(/checks hold/)).toBeNull();
   });
 
   it("stops Run all before it asks the next question", async () => {
@@ -443,6 +468,16 @@ describe("the agent bench", () => {
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     expect(signal?.aborted).toBe(true);
     expect(screen.getByRole("button", { name: /Suggest improvements/ })).toBeTruthy();
+  });
+
+  it("shows what Spectra asked this agent, or kept as its test, without a reload", async () => {
+    setup({ runs: [run("Mark it", "Old.", 1)] });
+    expect(await screen.findByText("Old.")).toBeTruthy();
+    mocks.get.mockResolvedValue({ cases: [], runs: [run("Mark it", "Spectra asked this.", 2), run("Mark it", "Old.", 1)], release: null });
+    act(() => spectraBus.emit("agent.benchChanged", { agentId: "someone-else" }));
+    expect(mocks.get).toHaveBeenCalledTimes(1);
+    act(() => spectraBus.emit("agent.benchChanged", { agentId: "agent_1" }));
+    expect(await screen.findByText("Spectra asked this.", { selector: "p" })).toBeTruthy();
   });
 
   it("says so when the bench cannot load, and tries again", async () => {

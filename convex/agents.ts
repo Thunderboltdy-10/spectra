@@ -650,6 +650,7 @@ export const benchRuns = query({
         : {}),
       output: row.output,
       createdAt: row.createdAt,
+      ...(row.stopped ? { stopped: true as const } : {}),
     }));
   },
 });
@@ -665,6 +666,7 @@ export const recordBenchRun = mutation({
     target: v.union(v.literal("draft"), v.literal("release")),
     releaseNumber: v.optional(v.number()),
     output: v.string(),
+    stopped: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const { actor, schoolId } = await requireBenchAgent(ctx, args.agentId);
@@ -682,6 +684,7 @@ export const recordBenchRun = mutation({
         ? { releaseNumber: args.releaseNumber }
         : {}),
       output: args.output.slice(0, BENCH_LIMITS.output),
+      ...(args.stopped ? { stopped: true } : {}),
       createdAt: now,
     });
     const recent = await ctx.db

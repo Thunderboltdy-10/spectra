@@ -62,6 +62,7 @@ import {
   type BenchRelease,
   type BenchReleaseOption,
 } from "../data/agent-bench";
+import { spectraBus } from "../events";
 import { useLifeArrival, useLifeDeparture, useLifeGlow, useWritingFront } from "../life/use-life";
 import { SpectraRichContent } from "./spectra-rich-content";
 
@@ -154,6 +155,14 @@ export function useAgentBench({
     void load();
   }, [enabled, load]);
 
+  // Spectra can ask this agent questions and keep or remove its tests; show what it did.
+  useEffect(() => {
+    if (!enabled) return;
+    return spectraBus.on("agent.benchChanged", (detail) => {
+      if (detail.agentId === agentId) void load();
+    });
+  }, [agentId, enabled, load]);
+
   useEffect(() => {
     const open = controllers.current;
     return () => {
@@ -178,6 +187,8 @@ export function useAgentBench({
       const controller = new AbortController();
       controllers.current.set(controller, key);
       setLive((current) => ({ ...current, [key]: { ...current[key], [target]: "" } }));
+      const asked = target === "release" ? (releaseNumber ?? releaseRef.current?.releaseNumber) : undefined;
+      let written = "";
       try {
         const run = await streamAgentBench({
           agentId,
@@ -191,13 +202,30 @@ export function useAgentBench({
             ? { releaseNumber }
             : {}),
           signal: controller.signal,
-          onText: (text) =>
-            setLive((current) => ({ ...current, [key]: { ...current[key], [target]: text } })),
+          onText: (text) => {
+            written = text;
+            setLive((current) => ({ ...current, [key]: { ...current[key], [target]: text } }));
+          },
         });
         setRuns((current) => [run, ...current]);
       } catch (error) {
         if (controller.signal.aborted) {
           setStopped((current) => ({ ...current, [key]: true }));
+          // What it wrote before Stop stays, marked stopped; the route keeps it too.
+          const partial = written.trim();
+          if (partial)
+            setRuns((current) => [
+              {
+                id: `stopped-${Date.now()}`,
+                prompt,
+                target,
+                ...(asked !== undefined ? { releaseNumber: asked } : {}),
+                output: partial,
+                createdAt: Date.now(),
+                stopped: true,
+              },
+              ...current,
+            ]);
           return;
         }
         setProblems((current) => ({
@@ -234,7 +262,9 @@ export function useAgentBench({
       const releaseNumber = compareReleaseRef.current;
       if (compare === "release" && releaseNumber !== undefined) {
         const answered = runsRef.current.filter((run) => benchPromptKey(run.prompt) === key);
-        if (!benchPair(answered, "release", releaseNumber).baseline) targets.push("release");
+        // A release answer that was stopped is asked again.
+        const { baseline } = benchPair(answered, "release", releaseNumber);
+        if (!baseline || baseline.stopped) targets.push("release");
       }
       await Promise.all(
         targets.map((target) => ask(text, target, draft, target === "release" ? releaseNumber : undefined)),
@@ -403,11 +433,14 @@ function BenchAnswer({
   label,
   text,
   streaming,
+  stopped = false,
   empty,
 }: {
   label: string;
   text?: string;
   streaming: boolean;
+  /** Stopped before it finished: the text is what it had written. */
+  stopped?: boolean;
   empty: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -420,7 +453,10 @@ function BenchAnswer({
       data-ai-region={streaming ? "true" : undefined}
       aria-busy={streaming || undefined}
     >
-      <p className="agent-bench-label">{label}</p>
+      <p className="agent-bench-label">
+        {label}
+        {stopped && !streaming && <span className="agent-bench-tag">Stopped</span>}
+      </p>
       {text ? (
         <SpectraRichContent content={text} className="agent-bench-rich" />
       ) : (
@@ -715,15 +751,19 @@ function BenchCard({
         : "Last release"
       : "Its answer before";
   const settled = live.draft === undefined && live.release === undefined;
+  // A stopped answer is shown as it stood, but it is not graded or compared.
+  const finished = current && !current.stopped ? current : undefined;
 
   const comparison = useMemo(
     () =>
-      settled && baseline && current ? compareBenchOutputs(baseline.output, current.output) : null,
-    [baseline, current, settled],
+      settled && baseline && !baseline.stopped && finished
+        ? compareBenchOutputs(baseline.output, finished.output)
+        : null,
+    [baseline, finished, settled],
   );
   const grade = useMemo(
-    () => (entry.saved && current && settled ? gradeBenchChecks(entry.saved.checks, current.output) : null),
-    [entry.saved, current, settled],
+    () => (entry.saved && finished && settled ? gradeBenchChecks(entry.saved.checks, finished.output) : null),
+    [entry.saved, finished, settled],
   );
   const suggestions = useMemo(
     () => (grade ? suggestAdjustments(entry.prompt, grade, content.foundry.skills) : []),
@@ -780,6 +820,7 @@ function BenchCard({
             label={baselineLabel}
             text={baselineText}
             streaming={live.release !== undefined}
+            stopped={live.release === undefined && Boolean(baseline?.stopped)}
             empty={
               bench.compare === "release"
                 ? releaseNumber !== undefined
@@ -792,6 +833,7 @@ function BenchCard({
             label="This draft"
             text={draftText}
             streaming={live.draft !== undefined}
+            stopped={live.draft === undefined && Boolean(current?.stopped)}
             empty="Run it to see the draft's answer."
           />
         </div>
@@ -863,11 +905,11 @@ function BenchCard({
         </ul>
       )}
 
-      {canEdit && settled && current && content.foundry.foundationEstablished && (
+      {canEdit && settled && finished && content.foundry.foundationEstablished && (
         <BenchIdeas
           agentId={bench.agentId}
           entry={entry}
-          answer={current}
+          answer={finished}
           content={content}
           onApply={onApplyIdea}
         />

@@ -211,6 +211,15 @@ describe("which answers sit side by side", () => {
     expect(benchPair(runs, "release")).toEqual({ current: runs[2] });
   });
 
+  it("shows a stopped answer as the latest, but compares with a finished one", () => {
+    const stopped: BenchRun = { id: "e", prompt: "p", target: "draft", output: "half", createdAt: 5, stopped: true };
+    const stoppedRelease: BenchRun = { ...stopped, id: "f", target: "release", releaseNumber: 2, createdAt: 6 };
+    expect(benchPair([...runs, stopped], "previous")).toEqual({ current: stopped, baseline: runs[2] });
+    expect(benchPair([...runs, { ...stopped, createdAt: 2.5 }], "previous").baseline).toBe(runs[0]);
+    expect(benchPair([...runs, stoppedRelease], "release", 2).baseline).toBe(runs[1]);
+    expect(benchPair([stoppedRelease], "release", 2).baseline).toBe(stoppedRelease);
+  });
+
   it("lists kept tests first, then recent prompts, then new ones, once each", () => {
     const entries = benchEntries({
       cases: [{ ...savedCase, prompt: "Mark  this paragraph" }],

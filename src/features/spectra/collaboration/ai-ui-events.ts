@@ -302,6 +302,28 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     });
     return;
   }
+  if (event.key === "agent_compiled") {
+    const agentId = event.payload?.targetId;
+    if (typeof agentId !== "string" || !agentId) return;
+    spectraBus.emit("agent.compiled", { agentId });
+    noteAiLocation({
+      ...(event.runId ? { actorId: event.runId } : {}),
+      artifactId: agentId,
+      note: typeof event.payload?.note === "string" ? event.payload.note : "Compiled the agent in the Foundry",
+    });
+    return;
+  }
+  if (event.key === "agent_bench_changed") {
+    const agentId = event.payload?.targetId;
+    if (typeof agentId !== "string" || !agentId) return;
+    spectraBus.emit("agent.benchChanged", { agentId });
+    noteAiLocation({
+      ...(event.runId ? { actorId: event.runId } : {}),
+      artifactId: agentId,
+      note: typeof event.payload?.note === "string" ? event.payload.note : "Changed the agent's bench",
+    });
+    return;
+  }
   if (event.key === "comment_changed" || event.key === "embed_changed") {
     const artifactId = event.payload?.targetId;
     if (typeof artifactId !== "string" || !artifactId) return;

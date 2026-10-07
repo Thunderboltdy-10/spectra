@@ -70,7 +70,7 @@ They disagreed in two ways.
   - `read_share_invitations` lists pending invitations. Titles, names and notes are evidence.
   - `respond_to_share` maps to `respond_share_invitation`, then to `authority:acceptShareInvitation` or `declineShareInvitation`. It asks under `sharing`. The UI's notifications refresh afterwards.
   - Joining a school (`memberships:acceptInvitation`) is a separate user-only entry, `sharing.join_school`.
-- **Catalog fix.** `agents:*` had wrongly covered follow and feedback. The agent studio's bench and compiler mutations are now listed by name, under the `agents.studio` gap.
+- **Catalog fix.** `agents:*` had wrongly covered follow and feedback. The agent studio's bench and compiler mutations are now listed by name, under the `agents.studio` gap, which lane L3 closed.
 
 Every new command has:
 
@@ -95,8 +95,9 @@ The web app must ship with them. The worker stages steps with the same table tha
 
 ## Remaining gaps
 
-Only one entry is a gap: something a user can do that Spectra cannot yet do, for engineering reasons and not by policy. (Counts updated by lane L2: `managebac.import_resource` was the second gap. The import moved to `managebac/resource-import.ts`, and a run reaches it through `managebac` {"action":"import_resource"} -> `import_managebac_resource`. See [R-L2-FINISH](R-L2-FINISH.md).)
-- **`agents.studio`.** The bench (`saveBenchCase`, `removeBenchCase`, `recordBenchRun`) and the Foundry compiler (`beginCompilerJob`, `updateCompilerJob`, `cancelCompilerJob`) are streamed, interactive model work in the studio. Spectra edits agents with `edit_artifact` and runs their checks with `run_agent_checks`.
+No entry is a gap any more: nothing a user can do is out of Spectra's reach for engineering reasons alone, so the catalog's `gap` marker was removed.
+- Lane L2 closed `managebac.import_resource`. The import moved to `managebac/resource-import.ts`, and a run reaches it through `managebac` {"action":"import_resource"} -> `import_managebac_resource`. See [R-L2-FINISH](R-L2-FINISH.md).
+- Lane L3 closed `agents.studio`. It split into `agents.bench_run`, `agents.bench_read`, `agents.bench_save_test`, `agents.bench_remove_test`, `agents.compile` and `agents.approve_skills`, all reached by tools. See [R-L3-STUDIO-PARITY](R-L3-STUDIO-PARITY.md).
 
 Every other entry with no AI path is user-only by policy. Each has its reason in the catalog table below. They fall into these groups:
 
@@ -157,14 +158,14 @@ Each was checked against the registries: `ai-reach.ts` `COMMAND_CATALOG`, `tools
 
 The tables below are generated from the catalog. They list Convex writes only, not queries. Result: **0 uncovered writes**.
 
-The catalog has 98 entries:
+The catalog has 103 entries (counts updated by lane L3):
 
-- 67 reach a tool;
+- 73 reach a tool;
 - 30 are user-only, each with a reason;
-- 1 is a gap;
+- none is a gap;
 - 98 server functions are written plumbing.
 
-The route tables below hold 74 `postSpectra` write rows and 82 rows from other routes. Uncovered writes: 0.
+The route tables below hold 74 `postSpectra` write rows and 83 rows from other routes. Uncovered writes: 0.
 
 ### Catalog: every action, its AI path or the reason it has none
 
@@ -266,7 +267,12 @@ The route tables below hold 74 `postSpectra` write rows and 82 rows from other r
 | `agents.releases` Read an agent's releases |  |  | `read_agent_releases` |
 | `agents.release` Release an agent |  | `spectraArtifacts:publishAgent`, `spectraArtifacts:manageAgentRelease` | `release_agent` -> `release_agent` |
 | `agents.checks` Run an agent's checks |  | `agents:beginEvalRun`, `agents:settleEvalRun`, `agents:admitModelWork`, `agents:recordModelWork` | `run_agent_checks` -> `run_agent_checks` |
-| `agents.studio` Try an agent on the bench or compile it |  | `agents:saveBenchCase`, `agents:removeBenchCase`, `agents:recordBenchRun`, `agents:beginCompilerJob`, `agents:updateCompilerJob`, `agents:cancelCompilerJob` | Gap: The bench and the Foundry compiler are the studio's interactive model work, streamed to the creator; the harness has no path to them yet. Spectra edits the agent with edit_artifact and runs its checks with run_agent_checks. |
+| `agents.bench_run` Try an agent on the bench |  | `agents:recordBenchRun` | `run_agent_bench` -> `run_agent_bench` |
+| `agents.bench_read` Read an agent's bench |  |  | `read_agent_bench` |
+| `agents.bench_save_test` Keep a bench question as a test |  | `agents:saveBenchCase` | `save_agent_bench_case` -> `save_agent_bench_case` |
+| `agents.bench_remove_test` Remove a bench test |  | `agents:removeBenchCase` | `remove_agent_bench_case` -> `remove_agent_bench_case` |
+| `agents.compile` Compile an agent in the Foundry |  | `agents:beginCompilerJob`, `agents:updateCompilerJob`, `agents:cancelCompilerJob` | `compile_agent` -> `compile_agent` |
+| `agents.approve_skills` Approve an agent's drafted skills |  |  | `approve_agent_skills` |
 | `agents.manage` Follow or improve agents |  | `agents:follow`, `agents:submitFeedback`, `agents:proposeImprovement`, `agents:decideImprovement`, `spectraArtifacts:addPublicAgent` | User only: Following an agent, rating its answers and accepting an improvement are the user's own judgment of it. Spectra builds agents as work with create_artifact and edit_artifact. |
 | `study.practice` Practise a quiz or deck |  | `quizPractice:*`, `flashcardStudy:*` | User only: These are the learner's own answers. Spectra answering them would fake the learner's progress. |
 | `school.administration` School administration |  | `administration:*`, `schools:*`, `memberships:invite`, `metering:setLimitPolicy` | User only: School administration belongs to school admins in the admin console. Spectra AI acts for one person's own account. |
@@ -319,8 +325,8 @@ The route tables below hold 74 `postSpectra` write rows and 82 rows from other r
 | `followAgent` | `agents:follow` | `agents.manage` | User only: Following an agent, rating its answers and accepting an improvement are the user's own judgment of it. Spectra builds agents as work with create_artifact and edit_artifact. |
 | `submitAgentFeedback` | `agents:submitFeedback` | `agents.manage` | User only: Following an agent, rating its answers and accepting an improvement are the user's own judgment of it. Spectra builds agents as work with create_artifact and edit_artifact. |
 | `proposeAgentImprovement` | `agents:proposeImprovement` | `agents.manage` | User only: Following an agent, rating its answers and accepting an improvement are the user's own judgment of it. Spectra builds agents as work with create_artifact and edit_artifact. |
-| `saveAgentBenchCase` | `agents:saveBenchCase` | `agents.studio` | Gap: The bench and the Foundry compiler are the studio's interactive model work, streamed to the creator; the harness has no path to them yet. Spectra edits the agent with edit_artifact and runs its checks with run_agent_checks. |
-| `removeAgentBenchCase` | `agents:removeBenchCase` | `agents.studio` | Gap: The bench and the Foundry compiler are the studio's interactive model work, streamed to the creator; the harness has no path to them yet. Spectra edits the agent with edit_artifact and runs its checks with run_agent_checks. |
+| `saveAgentBenchCase` | `agents:saveBenchCase` | `agents.bench_save_test` | `save_agent_bench_case` -> `save_agent_bench_case` |
+| `removeAgentBenchCase` | `agents:removeBenchCase` | `agents.bench_remove_test` | `remove_agent_bench_case` -> `remove_agent_bench_case` |
 | `decideAgentImprovement` | `agents:decideImprovement` | `agents.manage` | User only: Following an agent, rating its answers and accepting an improvement are the user's own judgment of it. Spectra builds agents as work with create_artifact and edit_artifact. |
 | `addPublicAgent` | `spectraArtifacts:addPublicAgent` | `agents.manage` | User only: Following an agent, rating its answers and accepting an improvement are the user's own judgment of it. Spectra builds agents as work with create_artifact and edit_artifact. |
 | `reviewFlashcard` | `flashcardStudy:review` | `study.practice` | User only: These are the learner's own answers. Spectra answering them would fake the learner's progress. |
@@ -384,9 +390,10 @@ The route tables below hold 74 `postSpectra` write rows and 82 rows from other r
 | `spectra/administration/route.ts` | `administration:requestLifecycleJob` | `school.administration` | User only: School administration belongs to school admins in the admin console. Spectra AI acts for one person's own account. |
 | `spectra/administration/route.ts` | `administration:approveLifecycleJob` | `school.administration` | User only: School administration belongs to school admins in the admin console. Spectra AI acts for one person's own account. |
 | `spectra/administration/route.ts` | `administration:cancelLifecycleJob` | `school.administration` | User only: School administration belongs to school admins in the admin console. Spectra AI acts for one person's own account. |
-| `spectra/agents/bench/route.ts` | `agents:recordBenchRun` | `agents.studio` | Gap: The bench and the Foundry compiler are the studio's interactive model work, streamed to the creator; the harness has no path to them yet. Spectra edits the agent with edit_artifact and runs its checks with run_agent_checks. |
-| `spectra/agents/foundry/route.ts` | `agents:beginCompilerJob` | `agents.studio` | Gap: The bench and the Foundry compiler are the studio's interactive model work, streamed to the creator; the harness has no path to them yet. Spectra edits the agent with edit_artifact and runs its checks with run_agent_checks. |
-| `spectra/agents/foundry/route.ts` | `agents:updateCompilerJob` | `agents.studio` | Gap: The bench and the Foundry compiler are the studio's interactive model work, streamed to the creator; the harness has no path to them yet. Spectra edits the agent with edit_artifact and runs its checks with run_agent_checks. |
+| `spectra/agents/bench/answer.ts` | `agents:recordBenchRun` | `agents.bench_run` | `run_agent_bench` -> `run_agent_bench` |
+| `spectra/agents/foundry/compile.ts` | `agents:beginCompilerJob` | `agents.compile` | `compile_agent` -> `compile_agent` |
+| `spectra/agents/foundry/compile.ts` | `agents:updateCompilerJob` | `agents.compile` | `compile_agent` -> `compile_agent` |
+| `spectra/agents/foundry/compile.ts` | `agents:cancelCompilerJob` | `agents.compile` | `compile_agent` -> `compile_agent` |
 | `spectra/assets/route.ts` | `artifactAssets:beginUpload` | plumbing | Plumbing: Upload protocol for work assets. |
 | `spectra/assets/route.ts` | `artifactIntakeActions:verifyUploadedStorage` | plumbing | Plumbing: Upload verification. |
 | `spectra/assets/route.ts` | `artifactAssets:revoke` | plumbing | Plumbing: Upload protocol for work assets. |

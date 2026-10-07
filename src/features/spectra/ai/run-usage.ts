@@ -24,6 +24,11 @@ export function withRunUsageLedger<T>(task: () => Promise<T>) {
   );
 }
 
+/** True inside a run execution, where every provider response is already counted. */
+export function insideRunUsageLedger() {
+  return ledger.getStore() !== undefined;
+}
+
 function count(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
 }

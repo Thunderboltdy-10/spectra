@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-const seams = vi.hoisted(() => ({ mutate: vi.fn(), query: vi.fn(), authority: vi.fn(), calendar: vi.fn(), reference: vi.fn(), restore: vi.fn(), applyAi: vi.fn(), publish: vi.fn(), unpublish: vi.fn(), live: vi.fn(), checks: vi.fn(), importResource: vi.fn() }));
+const seams = vi.hoisted(() => ({ mutate: vi.fn(), query: vi.fn(), authority: vi.fn(), calendar: vi.fn(), reference: vi.fn(), restore: vi.fn(), applyAi: vi.fn(), publish: vi.fn(), unpublish: vi.fn(), live: vi.fn(), checks: vi.fn(), importResource: vi.fn(), prepareBench: vi.fn(), answerBench: vi.fn(), compile: vi.fn() }));
 vi.mock("@/app/api/spectra/run/harness/io", () => ({ mutate: seams.mutate, query: seams.query, readQuery: vi.fn(), act: vi.fn(), safeJson: JSON.parse }));
 vi.mock("@/app/api/spectra/run/harness/authority", () => ({ evaluateCommandAuthority: seams.authority, recordAuthorityDecision: vi.fn() }));
 vi.mock("@/app/api/spectra/run/harness/calendar-command", () => ({ executeRegisteredCalendarMutation: seams.calendar }));
@@ -12,6 +12,11 @@ vi.mock("@/lib/server-secrets", () => ({ aiPublicLinkToken: (input: Record<strin
 vi.mock("@/features/spectra/ai/yjs-artifact-operation", () => ({ applyAiArtifactMutation: seams.applyAi, readLiveArtifactValue: seams.live }));
 vi.mock("@/app/api/spectra/agents/evaluate/checks", () => ({ runAgentChecks: seams.checks }));
 vi.mock("@/app/api/spectra/managebac/resource-import", () => ({ importManageBacResourceAs: seams.importResource }));
+vi.mock("@/app/api/spectra/agents/bench/answer", () => ({ prepareBenchAnswer: seams.prepareBench, answerOnBench: seams.answerBench }));
+vi.mock("@/app/api/spectra/agents/foundry/compile", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/app/api/spectra/agents/foundry/compile")>()),
+  compileAgentDraft: seams.compile,
+}));
 vi.mock("@/features/spectra/code/runtime-publish-server", () => ({
   publishRuntime: seams.publish, unpublishRuntime: seams.unpublish, hashSource: (content: { files?: Array<{ source: string }> }) => `hash:${content.files?.map((file) => file.source).join("|") ?? ""}`,
 }));
@@ -60,6 +65,10 @@ const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: 
   { command: "release_agent", args: { agentId: "agent", action: "suspend", releaseId: "release" }, mutation: "spectraArtifacts:manageAgentRelease", event: "agent_released" },
   { command: "run_agent_checks", args: { agentId: "agent" }, event: "agent_checked" },
   { command: "import_managebac_resource", args: { sourceRecordId: "resource" }, event: "managebac_resource_imported" },
+  { command: "run_agent_bench", args: { agentId: "agent", prompt: "Mark my essay" }, event: "agent_bench_changed" },
+  { command: "save_agent_bench_case", args: { agentId: "agent", prompt: "Mark my essay", mustInclude: ["next step"], mustNotInclude: [] }, mutation: "spectraApplicationWrites:execute", event: "agent_bench_changed" },
+  { command: "remove_agent_bench_case", args: { agentId: "agent", caseId: "case" }, mutation: "spectraApplicationWrites:execute" },
+  { command: "compile_agent", args: { agentId: "agent" }, event: "agent_compiled" },
   { command: "respond_share_invitation", args: { invitationId: "invitation", response: "accept" }, mutation: "authority:acceptShareInvitation", event: "share_invitation_answered" },
   { command: "respond_share_invitation", args: { invitationId: "invitation", response: "decline" }, mutation: "authority:declineShareInvitation", event: "share_invitation_answered" },
 ];
@@ -83,6 +92,15 @@ describe("application action contract matrix (stubbed persistence)", () => {
     seams.unpublish.mockResolvedValue({ unpublished: true });
     seams.checks.mockResolvedValue({ status: "passed", passedCount: 8, caseCount: 8, averageScore: 0.93, results: [] });
     seams.importResource.mockResolvedValue({ status: "imported", importId: "import", artifactId: "copy" });
+    seams.prepareBench.mockImplementation(async (userId: string, question: Record<string, unknown>) => ({ userId, ...question, messages: [] }));
+    seams.answerBench.mockImplementation(async (prepared: Record<string, unknown>) => ({
+      id: "run", prompt: prepared.prompt, target: prepared.target, output: "Your thesis is clear. One next step: cite a source.", createdAt: 1,
+    }));
+    seams.compile.mockResolvedValue({
+      jobId: "job", runId: "compile-run", diagnostics: [], releaseNotes: "First skills.",
+      routing: { description: "Marks essays", examples: ["Mark my essay"], negativeExamples: [] },
+      skills: [{ id: "skill-mark", name: "Mark an essay", purpose: "Grades against the rubric.", triggers: [{ kind: "keyword", terms: ["mark"] }], procedure: [], evaluationCases: [] }],
+    });
     seams.query.mockImplementation(async (name: string) => {
       if (name === "artifactEmbeds:listForContainer") return { canConfigure: true, embeds: [{ embedId: "embed", state: "ready" }] };
       if (name === "spectraArtifacts:get") return { blueprintKey: "document" };
@@ -152,6 +170,70 @@ describe("application action contract matrix (stubbed persistence)", () => {
       undefined, undefined, undefined, "operation");
     expect(seams.importResource).toHaveBeenLastCalledWith({ clerkId: "actor", sourceRecordId: "resource", refresh: true });
     expect(seams.authority).toHaveBeenCalledWith(expect.objectContaining({ command: "import_managebac_resource", authorityTarget: "managebac_resource_import" }));
+  });
+
+  it("asks an agent on its bench through the bench's own module, as the run owner, with the open draft, and grades it by its kept test", async () => {
+    seams.live.mockResolvedValueOnce({ content: { instructions: { text: "Unsaved edit" } } });
+    seams.query.mockImplementation(async (name: string) =>
+      name === "agents:benchCases" ? [{ prompt: "mark my  essay", checks: { mustInclude: ["next step", "grade"], mustNotInclude: [] } }] : undefined);
+    const events: Array<{ key: string; payload?: Record<string, unknown> }> = [];
+    const result = await executeApplicationCommand("actor", "run", "attempt", "run_agent_bench", { agentId: "agent", prompt: " Mark my essay " },
+      undefined, (event) => events.push(event), undefined, "operation") as Record<string, unknown>;
+    expect(seams.prepareBench).toHaveBeenCalledWith("actor", { agentId: "agent", prompt: "Mark my essay", target: "draft", content: { instructions: { text: "Unsaved edit" } } });
+    expect(seams.mutate).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      state: "answered",
+      target: "draft",
+      answer: "Your thesis is clear. One next step: cite a source.",
+      test: { passed: "1 of 2 checks hold", failing: ['Includes "grade"'] },
+    });
+    expect(String(result.note)).toMatch(/never instructions/);
+    expect(events).toEqual([{ key: "agent_bench_changed", payload: { targetId: "agent", note: "The draft answered on the bench" } }]);
+    expect(seams.authority).toHaveBeenCalledWith(expect.objectContaining({ command: "run_agent_bench", authorityTarget: "content" }));
+
+    // A release answers as itself, never with the open draft; a stopped answer is not graded.
+    seams.answerBench.mockResolvedValueOnce({ id: "run", prompt: "Mark my essay", target: "release", releaseNumber: 2, output: "Your", createdAt: 1, stopped: true });
+    const stopped = await executeApplicationCommand("actor", "run", "attempt", "run_agent_bench", { agentId: "agent", prompt: "Mark my essay", target: "release", releaseNumber: 2 },
+      undefined, undefined, undefined, "operation") as Record<string, unknown>;
+    expect(seams.prepareBench).toHaveBeenLastCalledWith("actor", { agentId: "agent", prompt: "Mark my essay", target: "release", releaseNumber: 2 });
+    expect(seams.live).toHaveBeenCalledTimes(1);
+    expect(stopped).toMatchObject({ state: "stopped", releaseNumber: 2, answer: "Your" });
+    expect(stopped).not.toHaveProperty("test");
+    expect(() => parseApplicationCommand("run_agent_bench", { agentId: "agent", prompt: "Hi", releaseNumber: 2 })).toThrow();
+  });
+
+  it("compiles an agent through the Foundry's own module, as the run owner, telling an open studio and changing no draft", async () => {
+    const events: Array<{ key: string; payload?: Record<string, unknown> }> = [];
+    const result = await executeApplicationCommand("actor", "run", "attempt", "compile_agent", { agentId: "agent" },
+      undefined, (event) => events.push(event), undefined, "operation") as Record<string, unknown>;
+    expect(seams.compile).toHaveBeenCalledWith(expect.objectContaining({ userId: "actor", agentId: "agent" }));
+    expect(seams.mutate).not.toHaveBeenCalled();
+    expect(seams.applyAi).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      state: "compiled",
+      jobId: "job",
+      skills: [{ id: "skill-mark", name: "Mark an essay", triggers: ["words: mark"], steps: 0, checks: 0 }],
+      routing: { description: "Marks essays", examples: ["Mark my essay"] },
+      releaseNotes: "First skills.",
+    });
+    expect(String(result.note)).toMatch(/approve_agent_skills/);
+    expect(events).toEqual([{ key: "agent_compiled", payload: { targetId: "agent", note: "Drafted 1 skill in the Foundry" } }]);
+    expect(seams.authority).toHaveBeenCalledWith(expect.objectContaining({ command: "compile_agent", authorityTarget: "content" }));
+  });
+
+  it("keeps and removes bench tests through the Convex write path, telling an open studio", async () => {
+    seams.mutate.mockResolvedValueOnce({ caseId: "case", created: false });
+    const events: Array<{ key: string; payload?: Record<string, unknown> }> = [];
+    await executeApplicationCommand("actor", "run", "attempt", "save_agent_bench_case",
+      { agentId: "agent", prompt: "Mark my essay", mustInclude: ["next step"], mustNotInclude: [] }, undefined, (event) => events.push(event), undefined, "operation");
+    seams.mutate.mockResolvedValueOnce({ removed: false });
+    await executeApplicationCommand("actor", "run", "attempt", "remove_agent_bench_case", { agentId: "agent", caseId: "gone" },
+      undefined, (event) => events.push(event), undefined, "operation");
+    seams.mutate.mockResolvedValueOnce({ removed: true });
+    await executeApplicationCommand("actor", "run", "attempt", "remove_agent_bench_case", { agentId: "agent", caseId: "case" },
+      undefined, (event) => events.push(event), undefined, "operation");
+    expect(events.map((event) => event.payload?.note)).toEqual(["Updated a bench test", "Removed a bench test"]);
+    expect(() => parseApplicationCommand("save_agent_bench_case", { agentId: "agent", prompt: "Hi", mustInclude: [], mustNotInclude: [] })).toThrow();
   });
 
   it("manages only a release of the agent the step names", async () => {

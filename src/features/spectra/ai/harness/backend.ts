@@ -1,4 +1,6 @@
 import type { ArtifactTypeKey } from "../../artifacts/types";
+import type { AgentBenchState } from "./agent-bench";
+import type { AgentCompilationState } from "./agent-compilation";
 import type { AgentReleaseState } from "./agent-releases";
 import type { CommentRow } from "./comments";
 import type { EmbedRow } from "./embeds";
@@ -159,6 +161,10 @@ export interface HarnessBackend {
   readShareInvitations(signal: AbortSignal): Promise<IncomingInvitation[]>;
   /** An agent's releases and its current draft's checks; null when the user cannot open the agent. */
   readAgentReleases(input: { agentId: string }, signal: AbortSignal): Promise<AgentReleaseState | null>;
+  /** An agent's bench tests and the user's recent bench answers; null when the user cannot edit the agent. */
+  readAgentBench(input: { agentId: string }, signal: AbortSignal): Promise<AgentBenchState | null>;
+  /** An agent's latest Foundry compilation; null when there is none or the user cannot open the agent. */
+  readAgentCompilation(input: { agentId: string }, signal: AbortSignal): Promise<AgentCompilationState | null>;
   /** School records: deadlines, resources, timetable, classes, past tasks, grades, CAS, or one task or CAS experience by recordId. */
   readSchoolData(input: { purpose: string; classId?: string; recordId?: string }, signal: AbortSignal): Promise<string>;
   runCommand(request: CommandRequest, signal: AbortSignal): Promise<CommandResult>;

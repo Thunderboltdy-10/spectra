@@ -18,9 +18,10 @@ vi.mock("@/lib/convex-server", () => ({
 vi.mock("@/features/spectra/ai/harness/model", () => ({
   callSpectraModel: mocks.callSpectraModel,
 }));
-vi.mock("../model-work", () => ({
+vi.mock("../model-work", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../model-work")>()),
   admitAgentModelWork: mocks.admit,
-  recordAgentModelWork: mocks.meter,
+  recordHarnessModelWork: mocks.meter,
 }));
 import { POST } from "./route";
 
@@ -31,12 +32,13 @@ const draft = {
   content: { instructions: { text: "Be precise." } },
 };
 
-function post(body: unknown) {
+function post(body: unknown, signal?: AbortSignal) {
   return POST(
     new Request("https://example.test/api/spectra/agents/bench", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      ...(signal ? { signal } : {}),
     }),
   );
 }
@@ -180,6 +182,45 @@ describe("the bench route", () => {
     mocks.callSpectraModel.mockRejectedValue(new ProviderUnavailableError("down"));
     const stream = await events(await post({ agentId: "agent_1", prompt: "Hi" }));
     expect(stream.at(-1)).toEqual({ type: "error", message: "Spectra could not reach the AI model. Try again in a moment." });
+    expect(mocks.convexMutation).not.toHaveBeenCalled();
+  });
+
+  it("keeps a stopped answer's text, marked stopped, and meters what it spent", async () => {
+    const stop = new AbortController();
+    mocks.callSpectraModel.mockImplementation(async (request: { onText?: (d: string) => void; signal: AbortSignal }) => {
+      request.onText?.("Your thesis");
+      stop.abort();
+      throw request.signal.reason;
+    });
+    const stream = await events(await post({ agentId: "agent_1", prompt: "Mark my essay" }, stop.signal));
+    expect(stream.at(-1)).toEqual({
+      type: "done",
+      run: { id: "run_1", prompt: "Mark my essay", target: "draft", output: "Your thesis", createdAt: 42, stopped: true },
+    });
+    expect(mocks.convexMutation).toHaveBeenCalledWith("agents:recordBenchRun", {
+      agentId: "agent_1",
+      prompt: "Mark my essay",
+      target: "draft",
+      output: "Your thesis",
+      stopped: true,
+    });
+    // The provider reports usage only at the end, so a stopped answer's is estimated.
+    const [, , purpose, spent, options] = mocks.meter.mock.calls[0]!;
+    expect(purpose).toBe("agent_bench");
+    expect(spent).toMatchObject({ outputTokens: 4 });
+    expect(spent.inputTokens).toBeGreaterThan(0);
+    expect(options).toEqual({ stopped: true });
+  });
+
+  it("meters an answer stopped before it wrote anything, and keeps nothing", async () => {
+    const stop = new AbortController();
+    mocks.callSpectraModel.mockImplementation(async (request: { signal: AbortSignal }) => {
+      stop.abort();
+      throw request.signal.reason;
+    });
+    const stream = await events(await post({ agentId: "agent_1", prompt: "Hi" }, stop.signal));
+    expect(stream.at(-1)).toMatchObject({ type: "error" });
+    expect(mocks.meter).toHaveBeenCalledWith("user_1", "agent_1", "agent_bench", expect.objectContaining({ outputTokens: 0 }), { stopped: true });
     expect(mocks.convexMutation).not.toHaveBeenCalled();
   });
 

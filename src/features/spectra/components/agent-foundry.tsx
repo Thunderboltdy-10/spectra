@@ -33,8 +33,10 @@ import {
   type MetricReading,
 } from "@/components/ui/truthful-state";
 import {
+  acceptCompiledSkill,
   addSection,
   answerSection,
+  applyCompiledRouting,
   assessSufficiency,
   benchCaseToEvaluationCase,
   buildEvaluationSuite,
@@ -46,6 +48,7 @@ import {
   isBenchEvaluationCase,
   isEmptyValue,
   normalizeFoundryContent,
+  pendingCompiledSkills,
   planFacetWeights,
   projectFoundryToLegacy,
   restoreSection,
@@ -1066,6 +1069,11 @@ export function AgentFoundry({
 
   const foundry = agent.foundry;
   const established = foundry.foundationEstablished;
+  // A drafted skill approved since (here, or by Spectra) no longer waits.
+  const waiting = useMemo(
+    () => pendingCompiledSkills(proposed, foundry.skills),
+    [foundry.skills, proposed],
+  );
 
   // A mode the viewer cannot enter is never left selected.
   useEffect(() => {
@@ -1177,6 +1185,32 @@ export function AgentFoundry({
       commit({ ...agent, foundry: { ...agent.foundry, ...patch } });
     },
     [agent, commit],
+  );
+
+  /* Spectra compiled this agent: its drafted skills wait here as the studio's
+     own Compile leaves them, and the compiled routing and notes apply. */
+  const latestAgent = useRef(agent);
+  useEffect(() => {
+    latestAgent.current = agent;
+  }, [agent]);
+  useEffect(
+    () =>
+      spectraBus.on("agent.compiled", (detail) => {
+        if (detail.agentId !== artifactId || readOnly) return;
+        void getSpectraFoundryCompilerJob(artifactId)
+          .then(({ job }) => {
+            setCompilerJob(job);
+            if (job?.status !== "completed" || !job.result) return;
+            const result = job.result;
+            setProposed(result.skills);
+            if (canEdit) commit(applyCompiledRouting(latestAgent.current, result));
+            setNotice(
+              `Spectra drafted ${result.skills.length} skill${result.skills.length === 1 ? "" : "s"}. Approve the ones that match how you work.`,
+            );
+          })
+          .catch(() => undefined);
+      }),
+    [artifactId, canEdit, commit, readOnly],
   );
 
   /* The operating brief is compiled, never typed, so it can fall behind a
@@ -1385,40 +1419,15 @@ export function AgentFoundry({
       .then((response) => setCompilerJob(response.job))
       .catch(() => undefined);
     if (!result) return;
-    setProposed(result.skills as SpectraSkill[]);
-    commit({
-      ...agent,
-      routing: {
-        ...agent.routing,
-        description: result.routing.description || agent.routing.description,
-        examples: result.routing.examples.length
-          ? result.routing.examples
-          : agent.routing.examples,
-        negativeExamples: result.routing.negativeExamples.length
-          ? result.routing.negativeExamples
-          : agent.routing.negativeExamples,
-      },
-      foundry: {
-        ...agent.foundry,
-        draftReleaseNotes: result.releaseNotes || agent.foundry.draftReleaseNotes,
-      },
-    });
+    setProposed(result.skills);
+    commit(applyCompiledRouting(agent, result));
     setNotice(
       `${result.skills.length} skill${result.skills.length === 1 ? "" : "s"} drafted. Approve the ones that match how you work.`,
     );
   }
 
   function acceptSkill(skill: SpectraSkill) {
-    const existing = foundry.skills.find((entry) => entry.id === skill.id);
-    const merged: SpectraSkill = existing
-      ? { ...skill, version: existing.version + 1, supersedesVersion: existing.version }
-      : skill;
-    patchFoundry({
-      skills: [
-        ...foundry.skills.filter((entry) => entry.id !== skill.id),
-        { ...merged, status: "verified" },
-      ],
-    });
+    patchFoundry({ skills: acceptCompiledSkill(foundry.skills, skill) });
     setProposed((current) => current.filter((entry) => entry.id !== skill.id));
   }
 
@@ -2449,9 +2458,9 @@ export function AgentFoundry({
 
           <CompilerTrace job={compilerJob} running={busy === "compile"} />
 
-          {proposed.length > 0 && (
+          {waiting.length > 0 && (
             <ul className="foundry-skill-list is-proposed">
-              {proposed.map((skill) => (
+              {waiting.map((skill) => (
                 <li key={skill.id} className="foundry-skill">
                   <div className="foundry-skill-head">
                     <span className="foundry-skill-name">{skill.name}</span>
@@ -2523,7 +2532,7 @@ export function AgentFoundry({
             ))}
           </ul>
 
-          {foundry.skills.length === 0 && proposed.length === 0 && (
+          {foundry.skills.length === 0 && waiting.length === 0 && (
             <p className="foundry-empty">
               Nothing compiled yet. Answer enough about the mission, then compile.
             </p>

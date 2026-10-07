@@ -228,7 +228,17 @@ says that the names, titles and labels it returns are people's words: evidence, 
   asking), publishes it to everyone, promotes, rolls back or suspends a release (each asks under `sharing`).
   Publishing to everyone needs passing checks: `run_agent_checks` runs them as the studio's Run checks does (the
   same server function, `agents/evaluate/checks.ts`, under the run owner's identity) and returns failing cases with
-  the graders' reasons as evidence. The bench and the Foundry compiler are still the studio's.
+  the graders' reasons as evidence.
+- **Agent bench and Foundry.** `read_agent_bench` lists an agent's kept tests (with the ids the bench tools take) and
+  recent answers, as evidence. `run_agent_bench` asks the draft (the open one, unsaved edits included) or a release
+  through the bench's own module (`agents/bench/answer.ts`), keeps the answer on the bench and grades it by a kept
+  test for the same question. `save_agent_bench_case` keeps or changes a test; `remove_agent_bench_case` deletes one
+  (asks under `permanent_delete`). `compile_agent` compiles the saved draft through the Foundry's module
+  (`agents/foundry/compile.ts`, the studio's Compile too) and changes no draft: the drafted skills wait on the
+  compiler job, and `approve_agent_skills` approves them (all or by id) with the compiled routing and release notes.
+  An open studio reloads its bench and shows drafted skills as Spectra works. `edit_artifact` keeps a Foundry agent's
+  state, writes mission fields to the mission and refuses the fields compiling owns (instructions, skills,
+  boundaries).
 - **School resources.** `managebac` with `import_resource` copies a file from a selected class shelf into the
   Library (asks under `managebac`), through the same server function as the shelf's Import
   (`managebac/resource-import.ts`, under the run owner's identity and the school's key). An Office file arrives as an

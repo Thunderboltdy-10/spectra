@@ -48,6 +48,9 @@ export function applicationCommandCategory(command: string, args: Args): Permiss
     // A deleted comment is gone for everyone; the other comment changes can be undone.
     case "manage_comment":
       return args.action === "delete" ? "permanent_delete" : null;
+    // A removed bench test is deleted, not trashed, and it leaves the agent's checks.
+    case "remove_agent_bench_case":
+      return "permanent_delete";
     // A forgotten memory is erased, not hidden; saving or revising one can be undone.
     case "write_memory":
       return args.action === "forget" ? "permanent_delete" : null;

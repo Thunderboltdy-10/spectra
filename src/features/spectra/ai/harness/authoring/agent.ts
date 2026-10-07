@@ -1,9 +1,17 @@
+import { normalizeFoundryContent, projectFoundryToLegacy, type AgentFoundryContent } from "../../../agents/foundry";
 import { agentConfigurationIssues, normalizeAgentContent, type AgentContent } from "../../../agents/model";
 import { AuthoringError, type IdFactory, defaultIdFactory, truncate } from "./shared";
 
 /*
  * A custom agent is a profile, instructions and a few behaviour fields. It is
  * authored by naming those fields; instructions are prose.
+ *
+ * An agent built in the Agent Foundry keeps its Foundry state (mission,
+ * answers, sources, approved skills) beside those fields, and its
+ * instructions, skills and boundaries are compiled from it. An edit keeps
+ * that state: the fields the mission holds are written to the mission and the
+ * agent is compiled again, as the studio does, and the compiled fields are
+ * refused rather than silently replaced by the next compilation.
  */
 
 const TONES = ["warm", "direct", "socratic", "formal", "playful"] as const;
@@ -69,8 +77,55 @@ function applyFields(agent: AgentContent, fields: AgentFields, label: string, id
   return normalizeAgentContent(next);
 }
 
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+/** Whether the agent was built in the Agent Foundry, so its brief is compiled from its mission. */
+export function builtInFoundry(content: unknown) {
+  return record(record(content).foundry).foundationEstablished === true;
+}
+
+const COMPILED_FIELDS = ["instructions", "skills", "boundaries"] as const;
+const FOUNDRY_NOTE =
+  "this agent is built in the Agent Foundry, so its instructions, skills and boundaries are compiled from its mission and approved skills. Set purpose, outcomes, inScope, outOfScope, tone or responseLength to change the mission; compile_agent and approve_agent_skills change its skills.";
+
+function applyFoundryEdits(content: unknown, ops: AgentEditOp[], ids: IdFactory) {
+  let agent: AgentFoundryContent = normalizeFoundryContent(structuredClone(content));
+  ops.forEach((op, index) => {
+    const label = `Edit ${index + 1} (${String(op?.op)})`;
+    if (op?.op === "replace") throw new AuthoringError(`${label}: ${FOUNDRY_NOTE}`);
+    if (op?.op !== "set") throw new AuthoringError(`${label}: unknown operation. Use set.`);
+    const compiled = COMPILED_FIELDS.filter((field) => op[field] !== undefined);
+    if (compiled.length) throw new AuthoringError(`${label}: ${compiled.join(", ")} cannot be set: ${FOUNDRY_NOTE}`);
+    const mission = structuredClone(agent.foundry.mission);
+    if (op.purpose !== undefined) mission.objective = String(op.purpose);
+    mission.domains = strings(op.inScope, label, "inScope") ?? mission.domains;
+    mission.exclusions = strings(op.outOfScope, label, "outOfScope") ?? mission.exclusions;
+    const outcomes = strings(op.outcomes, label, "outcomes");
+    if (outcomes)
+      mission.expectedOutputs = outcomes.map(
+        (description) => mission.expectedOutputs.find((output) => output.description === description) ?? { kind: "response", description },
+      );
+    if (op.tone !== undefined) {
+      if (!TONES.includes(op.tone)) throw new AuthoringError(`${label}: tone must be one of ${TONES.join(", ")}.`);
+      mission.interactionStyle.tone = op.tone;
+    }
+    if (op.responseLength !== undefined) {
+      if (!LENGTHS.includes(op.responseLength))
+        throw new AuthoringError(`${label}: responseLength must be one of ${LENGTHS.join(", ")}.`);
+      mission.interactionStyle.responseLength = op.responseLength;
+    }
+    // The audience and routing are the agent's own fields, which compiling leaves alone.
+    const own = applyFields(agent, { audience: op.audience, routingDescription: op.routingDescription, routingExamples: op.routingExamples }, label, ids);
+    agent = { ...agent, profile: own.profile, routing: own.routing, foundry: { ...agent.foundry, mission } };
+  });
+  return projectFoundryToLegacy(agent);
+}
+
 export function applyAgentEdits(content: unknown, ops: AgentEditOp[], ids: IdFactory = defaultIdFactory()) {
   if (!Array.isArray(ops) || !ops.length) throw new AuthoringError("No operations were given.");
+  if (builtInFoundry(content)) return applyFoundryEdits(content, ops, ids);
   let agent = normalizeAgentContent(structuredClone(content ?? {}));
   ops.forEach((op, index) => {
     const label = `Edit ${index + 1} (${String(op?.op)})`;
@@ -90,7 +145,8 @@ export function applyAgentEdits(content: unknown, ops: AgentEditOp[], ids: IdFac
     }
     throw new AuthoringError(`${label}: unknown operation. Use set or replace.`);
   });
-  return agent;
+  // What these fields do not cover (Foundry state not yet established, among others) stays as it was.
+  return { ...record(content), ...agent };
 }
 
 export function agentFromSpec(spec: AgentFields, ids: IdFactory = defaultIdFactory()) {
@@ -109,6 +165,9 @@ export function agentFromSpec(spec: AgentFields, ids: IdFactory = defaultIdFacto
 export function agentOutline(content: unknown) {
   const agent = normalizeAgentContent(content);
   return [
+    ...(builtInFoundry(content)
+      ? ["Built in the Agent Foundry: its instructions, skills and boundaries are compiled from its mission and approved skills."]
+      : []),
     `Purpose: ${agent.profile.purpose || "(none)"}`,
     ...(agent.profile.outcomes.length ? [`Outcomes: ${agent.profile.outcomes.join("; ")}`] : []),
     ...(agent.profile.inScope.length ? [`In scope: ${agent.profile.inScope.join("; ")}`] : []),

@@ -99,6 +99,10 @@ export type SpectraEvents = {
   "code.publishedChanged": { artifactId: string };
   /** An agent's releases or checks changed (Spectra ran its checks, or released, promoted, rolled back or suspended one). */
   "agent.releasesChanged": { agentId: string };
+  /** An agent's bench changed (Spectra asked it a question, or kept or removed a test). */
+  "agent.benchChanged": { agentId: string };
+  /** Spectra compiled an agent in the Foundry: its drafted skills wait on the compiler job. */
+  "agent.compiled": { agentId: string };
   "notifications.changed": Record<string, never>;
   /* Open the pending share invitations in the Library (a notification's
      Review), including when the Library already shows them. */

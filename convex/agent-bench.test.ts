@@ -220,6 +220,23 @@ describe("bench answers in Convex", () => {
     expect(runs.find((run) => run.target === "release")).toMatchObject({ releaseNumber: 2, output: "Released answer" });
   });
 
+  it("keeps a stopped answer's partial text, marked stopped", async () => {
+    const t = convexTest(schema, modules);
+    const f = await seed(t);
+    const me = t.withIdentity(owner);
+    await me.mutation(api.agents.recordBenchRun, { agentId: f.agentId, prompt: "Mark my essay", target: "draft", output: "Done." });
+    await me.mutation(api.agents.recordBenchRun, {
+      agentId: f.agentId,
+      prompt: "Mark my essay",
+      target: "draft",
+      output: "Your thesis",
+      stopped: true,
+    });
+    const runs = await me.query(api.agents.benchRuns, { agentId: f.agentId });
+    expect(runs[0]).toMatchObject({ output: "Your thesis", stopped: true });
+    expect(runs[1]).not.toHaveProperty("stopped");
+  });
+
   it("shows each person only their own answers", async () => {
     const t = convexTest(schema, modules);
     const f = await seed(t);

@@ -1,5 +1,6 @@
 import type { ArtifactTypeKey } from "../artifacts/types";
 import type { CompilerStageState as FoundryCompilerStageState } from "../agents/foundry/compiler";
+import type { CompiledAgentResult } from "../agents/foundry/foundry-document";
 import type { ArtifactCardView } from "../components/artifact-card";
 import type { PublishedCodeBuildProjection } from "../code/published-build";
 import type { QuizExperience } from "../quiz/experience";
@@ -2325,20 +2326,17 @@ export type SpectraFoundryCompilerJob = {
   updatedAt: number;
   completedAt?: number;
   stale: boolean;
+  /** What a completed compilation drafted; null until one completes. */
+  result: CompiledAgentResult | null;
 };
 
 export async function compileSpectraFoundrySkills(agentId: string) {
-  return foundryRequest<{
-    skills: unknown[];
-    routing: {
-      description: string;
-      examples: string[];
-      negativeExamples: string[];
-    };
-    releaseNotes: string;
-    jobId?: string;
-    diagnostics?: SpectraFoundryCompilerJob["diagnostics"];
-  }>({ operation: "compile", agentId });
+  return foundryRequest<
+    CompiledAgentResult & {
+      jobId: string;
+      diagnostics: SpectraFoundryCompilerJob["diagnostics"];
+    }
+  >({ operation: "compile", agentId });
 }
 
 /** Latest background compilation, shown inside Foundry rather than the Live Dock. */

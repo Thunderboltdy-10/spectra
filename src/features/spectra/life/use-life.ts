@@ -520,6 +520,94 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
   }, [key]);
 }
 
+/* ------------------------------------------------------------ joining a list */
+
+/** More joining one list at once than this is the list filling in (data, a filter, a tab), not things being made. */
+export const JOIN_BATCH = 2;
+/** What each list has shown, by its element; `opening` while its first items are still mounting. */
+const listsShown = new WeakMap<Element, { keys: Set<string>; opening: boolean }>();
+type Joiner = { element: HTMLElement; figure: ElementFigureOptions; kind: ArrivalKind; from?: Point; show: () => void };
+let joining = new Map<Element, Joiner[]>();
+let joinFrame = 0;
+
+function flushJoining() {
+  joinFrame = 0;
+  const lists = joining;
+  joining = new Map();
+  for (const joiners of lists.values()) {
+    for (const joiner of joiners) {
+      if (joiners.length > JOIN_BATCH || !joiner.element.isConnected) {
+        joiner.show();
+        continue;
+      }
+      const shape = figureOf(joiner.element, { bars: "h2, h3, h4, [data-card-title], [data-row-title], strong, p", maxBars: 6, ...joiner.figure });
+      const formed = joiner.kind === "ai" ? life.travel(prismPoint(), shape, { colour: "spectrum" }) : life.form(shape, { from: joiner.from });
+      void formed.formed.then(joiner.show);
+    }
+  }
+}
+
+/** Something around it is forming itself (a panel, a page header): it brings the list with it. */
+function withinForming(element: Element) {
+  for (let node: Element | null = element; node && node !== document.body; node = node.parentElement) {
+    if (node instanceof HTMLElement && isVeiled(node)) return true;
+  }
+  return false;
+}
+
+/** Spectra is at work right now: the island's prism says so. */
+function prismWorking() {
+  return document.querySelector("[data-island-prism]")?.getAttribute("data-status") === "working";
+}
+
+/**
+ * An item of any list, under `key` (LIFE.md, Create by hand; Spectra creates
+ * an artifact): what the list opened with is simply content. An item that
+ * joins it later because of what the reader just did forms from that press;
+ * one that joins while Spectra is working arrives as light from the prism.
+ * Several joining one list at once is the list filling in, and they are
+ * simply there. Each key joins a list once per visit.
+ */
+export function useLifeJoin(ref: RefObject<HTMLElement | null>, key: string, figure: ElementFigureOptions = {}) {
+  useLayoutEffect(() => {
+    const element = ref.current;
+    const list = element?.parentElement;
+    if (!element || !list) return;
+    let shown = listsShown.get(list);
+    const firstSight = !shown;
+    if (!shown) {
+      // A list seen for the first time with many items opened with them; with one or two, they may be new
+      // (the first thing made in an empty list), and the rules below decide.
+      const opened = { keys: new Set<string>(), opening: list.children.length > JOIN_BATCH };
+      listsShown.set(list, opened);
+      requestAnimationFrame(() => {
+        opened.opening = false;
+      });
+      shown = opened;
+    }
+    if (shown.keys.has(key)) return;
+    shown.keys.add(key);
+    if (shown.opening || !life.on || performance.now() - navigatedAt < 1600 || withinForming(list)) return;
+    const from = recentCause();
+    // A list seen for the first time came with the view unless the reader just made it; Spectra's work arrives in a list already there.
+    const kind: ArrivalKind | null = from ? "human" : !firstSight && prismWorking() ? "ai" : null;
+    if (!kind) return;
+    const show = veil(element);
+    const joiners = joining.get(list) ?? [];
+    joining.set(list, joiners);
+    joiners.push({ element, figure, kind, from, show });
+    if (!joinFrame) joinFrame = requestAnimationFrame(flushJoining);
+    // The item never waits on the field for long.
+    const fallback = window.setTimeout(show, kind === "ai" ? 1700 : 1000);
+    return () => {
+      window.clearTimeout(fallback);
+      show();
+    };
+    // Once per key: joining is a moment, not a state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+}
+
 /* ------------------------------------------------------------ departures */
 
 /** More leaving at once than this is a change of view (a filter, a folder), not things being removed. */
@@ -625,12 +713,14 @@ function useDeparture(
       if (!r.width || r.bottom < 0 || r.top > window.innerHeight) return;
       const shape = figureOf(element, { bars: "h2, h3, h4, [data-card-title], [data-row-title], p", maxBars: 6, ...figureRef.current });
       const where = window.location.pathname + window.location.search;
+      // When what holds the list goes too, the view changed (a tab, a collapsed group): nothing was removed.
+      const scope = element.parentElement?.parentElement ?? null;
       departures.push({
         key: keyRef.current,
         shape,
         rect: { x: r.x, y: r.y, width: r.width, height: r.height },
         leave: () => {
-          if (element.isConnected || window.location.pathname + window.location.search !== where) return;
+          if (element.isConnected || (scope && !scope.isConnected) || window.location.pathname + window.location.search !== where) return;
           const content = handover ? replacementOf(new DOMRect(r.x, r.y, r.width, r.height)) : null;
           // Whatever arrives there may be forming itself (hidden until it has): then it brings its own light.
           if (content && !isVeiled(content)) {

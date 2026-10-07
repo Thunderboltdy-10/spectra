@@ -904,6 +904,7 @@ export function Island() {
         <div className="pointer-events-auto relative col-start-1 row-start-1 justify-self-center">
           <canvas
             data-island-prism
+            data-status={status ?? undefined}
             ref={prism.canvasRef}
             role="button"
             tabIndex={target === "prism" ? 0 : -1}

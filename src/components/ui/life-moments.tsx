@@ -1,7 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
-import { recentCause, useLifeEntrance, useLifeVerdict, type Verdict } from "@/features/spectra/life/use-life";
+import { recentCause, useLifeDeparture, useLifeEntrance, useLifeJoin, useLifeVerdict, type Verdict } from "@/features/spectra/life/use-life";
 
 /** The element this anchor sits in, known before the hooks that need it run. */
 function useParent() {
@@ -33,5 +33,25 @@ export function LifeForm({ bars }: { bars?: string }) {
 export function LifeVerdict({ verdict, immediate }: { verdict: Verdict | null | undefined; immediate?: boolean }) {
   const { anchor, host } = useParent();
   useLifeVerdict(host, verdict, { immediate });
+  return <span ref={anchor} hidden />;
+}
+
+/**
+ * Put inside an item of a list, with what it shows as `id` (or inside a
+ * table cell, with `of="tr"`): made just now by the reader, it forms from
+ * their press; made by Spectra while it works, it arrives as light from the
+ * prism; removed, it parts where it was (LIFE.md, Create by hand, Delete).
+ * What the list opened with, or many at once, is simply there.
+ */
+export function LifeKey({ id, of, bars }: { id: string; of?: string; bars?: string }) {
+  const anchor = useRef<HTMLSpanElement>(null);
+  const host = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const parent = anchor.current?.parentElement ?? null;
+    host.current = of ? (parent?.closest<HTMLElement>(of) ?? parent) : parent;
+  }, [of]);
+  const figure = bars ? { bars } : {};
+  useLifeJoin(host, id, figure);
+  useLifeDeparture(host, true, figure);
   return <span ref={anchor} hidden />;
 }

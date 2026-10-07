@@ -21,6 +21,7 @@ import { metricDefinition } from "@/features/spectra/administration/metric-regis
 import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { PageBody, PageHeader } from "@/components/ui/page-header";
 import { LoadingRows } from "@/components/ui/page-state";
+import { LifeKey } from "@/components/ui/life-moments";
 import { PanelTabs, SidePanel, type PanelTab } from "@/components/ui/side-panel";
 import {
   AdminButton,
@@ -1067,6 +1068,7 @@ function PeopleSurface({
                 key={invite.invitationId}
                 className="flex flex-wrap items-center gap-3 border-b border-[var(--border-subtle)] py-2.5 last:border-0"
               >
+                <LifeKey id={`invitation:${invite.invitationId}`} />
                 <Mail size={13} className="text-[var(--text-tertiary)]" />
                 <span className="min-w-0 flex-1">
                   <strong className="block truncate text-micro">
@@ -1267,6 +1269,7 @@ function GroupsSurface({
                 key={group.groupId}
                 className="rounded-control border border-[var(--border-subtle)] p-4"
               >
+                <LifeKey id={`group:${group.groupId}`} />
                 <div className="flex items-start justify-between gap-3">
                   <span className="grid size-9 place-items-center rounded-card bg-[color-mix(in_oklab,var(--accent-mint)_10%,var(--bg-primary))] text-[var(--accent-mint)]">
                     <UsersRound size={16} />
@@ -1485,6 +1488,7 @@ function CommunicationSurface({
                     className="rounded-card transition-colors hover:bg-[var(--bg-secondary)]"
                   >
                     <td className="py-3">
+                      <LifeKey id={`announcement:${row.announcementId}`} of="tr" />
                       <strong className="block font-medium">{row.title}</strong>
                       <span className="text-micro text-[var(--text-tertiary)]">
                         {row.sentAt

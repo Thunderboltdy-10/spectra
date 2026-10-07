@@ -5,6 +5,7 @@ import { BookOpen, CircleHelp, Clock3, Code2, FileClock, LoaderCircle, Play, Rot
 import { cn } from "@/lib/utils";
 import { readConvexError } from "../../../../shared/convex-error.mjs";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { LifeKey } from "@/components/ui/life-moments";
 import {
   Dialog,
   DialogContent,
@@ -538,6 +539,7 @@ function PeriodMapPanel({
           <div className="space-y-1">
             {periodMaps.slice().sort((a, b) => a.startMinutes - b.startMinutes).map((period) => (
               <article key={period._id} className="group flex items-center gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-[var(--bg-secondary)]">
+                <LifeKey id={`period:${period._id}`} />
                 <span className="grid size-8 shrink-0 place-items-center text-micro font-bold text-[var(--accent-mint)]">{period.periodKey.slice(0, 3).toUpperCase()}</span>
                 <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><strong className="truncate text-micro">{period.label}</strong><StatusPill state="good">Verified</StatusPill></div><p className="mt-1 text-micro text-[var(--text-tertiary)]">{timeFromMinutes(period.startMinutes)}–{timeFromMinutes(period.endMinutes)} · {period.timezone} · {period.weekdays.map((day) => weekdays[day]).join(", ")}</p></div>
                 <button type="button" disabled={Boolean(busy)} onClick={() => void onRemove(period._id)} className="grid size-7 place-items-center rounded-md text-[var(--text-tertiary)] opacity-0 hover:bg-[color-mix(in_oklab,var(--accent-coral)_10%,var(--bg-elevated))] hover:text-[var(--accent-coral)] group-hover:opacity-100 focus:opacity-100 disabled:opacity-45" aria-label={`Remove ${period.label}`}><X size={13} /></button>
@@ -1115,6 +1117,7 @@ export function ManageBacIntegrationShell() {
             <RightCard title="Recent sync activity">
               {(data?.syncRuns ?? []).slice(0, 8).map((run) => (
                 <div key={run._id} className="flex gap-2.5 rounded-control px-1 py-2.5">
+                  <LifeKey id={`sync:${run._id}`} />
                   <Icon name="activity" size={14} className="mt-0.5 shrink-0" />
                   <div className="min-w-0">
                     <strong className="block text-caption font-medium">
@@ -1290,6 +1293,7 @@ function ConflictList({
         const nextSource = object(conflict.newSource);
         return (
           <article key={conflict._id} className="rounded-xl px-3 py-3 transition-colors hover:bg-[var(--bg-secondary)]">
+            <LifeKey id={`conflict:${conflict._id}`} />
             <div className="flex items-start gap-2.5">
               <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-[color-mix(in_oklab,var(--accent-gold)_18%,var(--bg-elevated))] text-[var(--accent-gold)]">
                 <AlertCircle size={12} />

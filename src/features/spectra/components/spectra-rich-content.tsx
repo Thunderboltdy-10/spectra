@@ -50,6 +50,14 @@ function safeHref(value: string) {
   return webUrl(value) ?? (value.startsWith("mailto:") ? value : null);
 }
 
+/**
+ * Where a picture may come from: a link's places, plus the page's own object
+ * URLs, which is how a file read in the viewer shows its embedded pictures.
+ */
+function safeMediaSrc(value: string) {
+  return value.startsWith("blob:") ? value : safeHref(value);
+}
+
 /** Opens a verified source where it lives. */
 export function openCitationSource(source: CitationSource) {
   if ("workId" in source) {
@@ -117,7 +125,7 @@ function Inlines({ content, verified }: { content: readonly RichInline[]; verifi
       case "image":
         // User-authored media URLs are not known at build time.
         // eslint-disable-next-line @next/next/no-img-element
-        return safeHref(node.url) ? <img key={index} src={node.url} alt={node.alt} /> : <Fragment key={index}>{node.alt}</Fragment>;
+        return safeMediaSrc(node.url) ? <img key={index} src={node.url} alt={node.alt} /> : <Fragment key={index}>{node.alt}</Fragment>;
       case "break":
         return <br key={index} />;
     }
@@ -207,7 +215,7 @@ function Block({ block, verified }: { block: RichBlock; verified: Verified }): R
       </table></div>;
     }
     case "media":
-      return safeHref(block.url)
+      return safeMediaSrc(block.url)
         // User-authored media URLs are not known at build time.
         // eslint-disable-next-line @next/next/no-img-element
         ? <figure><img src={block.url} alt={block.alt} /></figure>

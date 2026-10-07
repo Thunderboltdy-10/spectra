@@ -183,12 +183,94 @@ describe("rich content: slides", () => {
     expect(RICH_CONTENT_ADAPTERS.slides.write(RICH_CONTENT_ADAPTERS.prosemirror.read(doc))).toEqual(spectraOnly);
   });
 
-  it("writes a callout as a quote and keeps a separate equation per paragraph", () => {
+  it("keeps a callout and its tone, and a separate equation per paragraph", () => {
     const ast = parseSpectraRichContent("> [!TIP]\n> Mind the units\n\n$$a$$\n\n$$b$$");
-    expect(richContentToSlideParagraphs(ast)).toEqual([
-      { runs: [{ text: "Mind the units" }], block: "quote" },
+    const paragraphs = richContentToSlideParagraphs(ast);
+    expect(paragraphs).toEqual([
+      { runs: [{ text: "Mind the units" }], block: "callout", tone: "tip" },
       { runs: [{ text: "a" }], block: "math" },
       { runs: [{ text: "b" }], block: "math" },
+    ]);
+    const read = richContentFromSlideParagraphs(paragraphs);
+    expect(read.blocks[0]).toMatchObject({ type: "callout", tone: "tip", blocks: [{ type: "paragraph" }] });
+    expect(richContentToSlideParagraphs(read)).toEqual(paragraphs);
+  });
+
+  // Each of these used to change the first time the box was edited in its field.
+  const throughField = (paragraphs: PresentationParagraph[]) =>
+    RICH_CONTENT_ADAPTERS.slides.write(RICH_CONTENT_ADAPTERS.prosemirror.read(richContentToProseMirror(RICH_CONTENT_ADAPTERS.slides.read(paragraphs))));
+
+  it("reads a callout back as a callout, not a quote, next to a quote", () => {
+    const paragraphs: PresentationParagraph[] = [
+      { runs: [{ text: "Careful" }], block: "callout", tone: "warning" },
+      { runs: [{ text: "Hot plate" }], block: "callout", tone: "warning" },
+      { runs: [{ text: "Info" }], block: "callout", tone: "info" },
+      { runs: [{ text: "Said once" }], block: "quote" },
+    ];
+    const ast = richContentFromSlideParagraphs(paragraphs);
+    expect(ast.blocks.map((block) => (block.type === "callout" ? `callout:${block.tone}` : block.type))).toEqual(["callout:warning", "callout:info", "quote"]);
+    expect(throughField(paragraphs)).toEqual(paragraphs);
+  });
+
+  it("keeps a code block and an equation inside the list item they were written in", () => {
+    const paragraphs: PresentationParagraph[] = [
+      { runs: [{ text: "Run it" }], bullet: "bullet" },
+      { runs: [{ text: "npm test" }], bullet: "none", block: "code" },
+      { runs: [{ text: "npm run lint" }], bullet: "none", block: "code" },
+      { runs: [{ text: "Then" }], bullet: "bullet" },
+      { runs: [{ text: "Solve" }], bullet: "bullet", level: 1 },
+      { runs: [{ text: "x^2 = 4" }], bullet: "none", level: 1, block: "math" },
+      { runs: [{ text: "Last" }], bullet: "bullet" },
+      { runs: [{ text: "After the list" }] },
+    ];
+    const ast = richContentFromSlideParagraphs(paragraphs);
+    expect(ast.blocks.map((block) => block.type)).toEqual(["list", "paragraph"]);
+    const list = ast.blocks[0]!;
+    if (list.type !== "list") throw new Error("expected a list");
+    expect(list.items.map((item) => item.blocks.map((block) => block.type))).toEqual([["paragraph", "code_block"], ["paragraph", "list"], ["paragraph"]]);
+    expect(list.items[0]!.blocks[1]).toMatchObject({ code: "npm test\nnpm run lint" });
+    const nested = list.items[1]!.blocks[1]!;
+    expect(nested.type === "list" && nested.items[0]!.blocks.map((block) => block.type)).toEqual(["paragraph", "math_block"]);
+    expect(richContentToSlideParagraphs(ast)).toEqual(paragraphs);
+    expect(throughField(paragraphs)).toEqual(paragraphs);
+  });
+
+  it("keeps a quote inside its list item, and a code line that opens an item keeps the bullet", () => {
+    const paragraphs: PresentationParagraph[] = [
+      { runs: [{ text: "Point" }], bullet: "bullet" },
+      { runs: [{ text: "As quoted" }], bullet: "none", block: "quote" },
+      { runs: [{ text: "x = 1" }], bullet: "bullet", block: "code" },
+      { runs: [{ text: "y = 2" }], bullet: "none", block: "code" },
+      { runs: [{ text: "Plain" }] },
+    ];
+    const ast = richContentFromSlideParagraphs(paragraphs);
+    const list = ast.blocks[0]!;
+    if (list.type !== "list") throw new Error("expected a list");
+    expect(list.items.map((item) => item.blocks.map((block) => block.type))).toEqual([["paragraph", "quote"], ["code_block"]]);
+    expect(richContentToSlideParagraphs(ast)).toEqual(paragraphs);
+    expect(throughField(paragraphs)).toEqual(paragraphs);
+  });
+
+  it("keeps an empty parent bullet above a deeper one, and a deeper one with no parent stays so", () => {
+    const withParent: PresentationParagraph[] = [
+      { runs: [], bullet: "bullet" },
+      { runs: [{ text: "Deeper" }], bullet: "bullet", level: 1 },
+    ];
+    expect(throughField(withParent)).toEqual(withParent);
+    expect(slideParagraphsAfterEdit(withParent, throughField(withParent))).toEqual(withParent);
+    const orphan: PresentationParagraph[] = [{ runs: [{ text: "Deeper" }], bullet: "bullet", level: 1 }];
+    expect(throughField(orphan)).toEqual(orphan);
+  });
+
+  it("marks only the editor's own filler line, and reads it away while it is empty", () => {
+    const doc = richContentToProseMirror(richContentFromSlideParagraphs([{ runs: [{ text: "Deeper" }], bullet: "bullet", level: 1 }]));
+    const item = doc.content![0]!.content![0]!;
+    expect(item.content![0]).toEqual({ type: "paragraph", attrs: { listFiller: true } });
+    // Typed into, the line is the item's own words.
+    item.content![0] = { ...item.content![0]!, content: [{ type: "text", text: "Parent" }] };
+    expect(RICH_CONTENT_ADAPTERS.slides.write(RICH_CONTENT_ADAPTERS.prosemirror.read(doc))).toEqual([
+      { runs: [{ text: "Parent" }], bullet: "bullet" },
+      { runs: [{ text: "Deeper" }], bullet: "bullet", level: 1 },
     ]);
   });
 });

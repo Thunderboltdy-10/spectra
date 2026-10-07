@@ -5,7 +5,7 @@ import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spec
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
-import { Download, Loader2, FileText, X } from "@/components/icons/glyph-icons";
+import { Download, Eye, Loader2, FileText, X } from "@/components/icons/glyph-icons";
 import { Button } from "@/components/ui/button";
 import type { SpectraArtifact } from "../data/api";
 import { spectraBus } from "../events";
@@ -17,6 +17,8 @@ import { DEVICES_HREF } from "./client";
 import { ReconnectAction } from "./storage-toggle-group";
 import { FileStorageControls } from "./file-storage-controls";
 import { readConvexError } from "../../../../shared/convex-error.mjs";
+import { FileViewer, type ViewedFile } from "../files/file-viewer";
+import { fileViewKind } from "../files/file-kind";
 
 const DOCUMENT_LENS = new Set(["docx", "docm", "dotx", "dotm"]);
 const OFFICE_LENS = new Set([
@@ -47,6 +49,7 @@ export function ResourceSurface({
   const [fileAction, setFileAction] = useState<
     "download" | "materialize" | null
   >(null);
+  const [viewing, setViewing] = useState<ViewedFile | null>(null);
   const truth = useQuery(
     api.replicas.forWork,
     useAuthedArgs({
@@ -84,6 +87,15 @@ export function ResourceSurface({
           ].includes(format)
         ? "text"
         : "identity";
+  const nativeUrl = `/api/spectra/native?artifactId=${encodeURIComponent(artifact._id)}`;
+  const hasPayload =
+    truth?.replicas.some((replica) => Boolean(replica.payloadRef)) ?? false;
+  // The same viewer as school files: photos, PDFs and Office files read-only,
+  // from the kept copy. An Office file also opens as editable work; when the
+  // lens cannot, this is still a way to read it.
+  const viewKind = fileViewKind(undefined, `file.${format}`);
+  const legacy = viewKind === "legacy";
+  const viewable = hasPayload && viewKind && !legacy ? viewKind : null;
   const protectedPending =
     truth?.replicas.some(
       (replica) =>
@@ -228,11 +240,10 @@ export function ResourceSurface({
         <div className="mx-auto grid max-w-[860px] gap-5 lg:grid-cols-[minmax(0,1fr)_260px]">
           <div className="flex min-h-[360px] items-center justify-center rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 text-center">
             <div>
-              {previewKind === "image" &&
-              truth?.replicas.some((replica) => Boolean(replica.payloadRef)) ? (
+              {previewKind === "image" && hasPayload ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={`/api/spectra/native?artifactId=${encodeURIComponent(artifact._id)}`}
+                  src={nativeUrl}
                   alt=""
                   className="mx-auto max-h-[320px] max-w-full rounded-control object-contain"
                 />
@@ -240,8 +251,7 @@ export function ResourceSurface({
                 <FileText className="mx-auto size-10 text-[var(--text-tertiary)]" />
               )}
               <p className="mt-4 text-caption font-medium text-[var(--text-primary)]">
-                {previewKind === "image" &&
-                truth?.replicas.some((replica) => Boolean(replica.payloadRef))
+                {previewKind === "image" && hasPayload
                   ? artifact.title
                   : `${format.toUpperCase()} file`}
               </p>
@@ -250,7 +260,9 @@ export function ResourceSurface({
                   ? "Open this file as an editable Spectra Document. Unsupported Word features remain in the original package and unrelated edits do not rewrite them."
                   : OFFICE_LENS.has(format)
                     ? `Open this file as editable Spectra ${["xlsx", "xlsm", "xltx", "xltm", "xlam"].includes(format) ? "Sheets" : "Presentation"}. Native features Spectra cannot edit remain preserved in the original package.`
-                    : bridge.reachability === "connected"
+                    : legacy
+                      ? "Spectra shows Word, PowerPoint and Excel files saved as .docx, .pptx or .xlsx. Download this older file to open it in its own app, or save it in the newer format and add it again."
+                      : bridge.reachability === "connected"
                       ? "This file is in a selected folder on this PC."
                       : bridge.reachability === "running"
                         ? "Spectra Bridge is running on this PC. Connect this device to use this file."
@@ -274,6 +286,18 @@ export function ResourceSurface({
                     <FileText className="size-3.5" />
                   )}
                   {opening ? "Opening safely…" : "Open in Spectra"}
+                </Button>
+              ) : null}
+              {viewable ? (
+                <Button
+                  variant={DOCUMENT_LENS.has(format) || OFFICE_LENS.has(format) ? "secondary" : "primary"}
+                  className={DOCUMENT_LENS.has(format) || OFFICE_LENS.has(format) ? "ml-2 mt-5 px-4" : "mt-5 px-4"}
+                  onClick={() =>
+                    setViewing({ key: artifact._id, filename: artifact.title, kind: viewable, url: nativeUrl })
+                  }
+                >
+                  <Eye className="size-3.5" />
+                  View read-only
                 </Button>
               ) : null}
               {openError ? (
@@ -390,6 +414,7 @@ export function ResourceSurface({
           </aside>
         </div>
       </div>
+      <FileViewer file={viewing} onClose={() => setViewing(null)} />
     </section>
   );
 }

@@ -74,6 +74,19 @@ function inlinesFrom(nodes: readonly Json[] | undefined): RichInline[] {
   return output;
 }
 
+/**
+ * The attribute on the empty line `richContentToProseMirror` puts at the top
+ * of a list item that opens with something else (a deeper list, a code
+ * block): the editor needs it, the content does not have it.
+ */
+export const LIST_FILLER = "listFiller";
+
+/** A list item's content without the editor's own filler line, while it is still empty. */
+function withoutFiller(nodes: readonly Json[] | undefined): readonly Json[] | undefined {
+  const [first, ...rest] = nodes ?? [];
+  return first?.type === "paragraph" && first.attrs?.[LIST_FILLER] === true && !first.content?.length && rest.length ? rest : nodes;
+}
+
 function blocksFrom(nodes: readonly Json[] | undefined): RichBlockDraft[] {
   const blocks: RichBlockDraft[] = [];
   for (const node of nodes ?? []) {
@@ -98,7 +111,7 @@ function blocksFrom(nodes: readonly Json[] | undefined): RichBlockDraft[] {
           ...(kind === "ordered" && Number.isInteger(start) && start > 1 ? { start } : {}),
           items: (node.content ?? []).map((item) => ({
             ...(kind === "task" ? { checked: Boolean(item.attrs?.checked) } : {}),
-            blocks: blocksFrom(item.content) as RichBlock[],
+            blocks: blocksFrom(withoutFiller(item.content)) as RichBlock[],
           })),
         });
         break;
@@ -227,8 +240,9 @@ function blocksTo(blocks: readonly RichBlock[]): Json[] {
           ...(block.start ? { attrs: { start: block.start } } : {}),
           content: block.items.map((entry) => {
             const content = blocksTo(entry.blocks);
-            // A list item starts with a paragraph in every editor schema.
-            if (!content.length || content[0]!.type !== "paragraph") content.unshift({ type: "paragraph" });
+            // A list item starts with a paragraph in every editor schema. One
+            // made up here is marked, so it never reads back as an empty line.
+            if (!content.length || content[0]!.type !== "paragraph") content.unshift({ type: "paragraph", attrs: { [LIST_FILLER]: true } });
             return { type: item, ...(block.kind === "task" ? { attrs: { checked: Boolean(entry.checked) } } : {}), content };
           }),
         }];

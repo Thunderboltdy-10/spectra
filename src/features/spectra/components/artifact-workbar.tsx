@@ -211,6 +211,7 @@ export function ArtifactWorkbar({
   const [customizing, setCustomizing] = useState(false);
   const [collapse, setCollapse] = useState(EMPTY_LAYOUT);
   const [dragging, setDragging] = useState<{ kind: "command" | "group"; id: string } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const commandsHostRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const previousSelectionContext = useRef<string | undefined>(undefined);
@@ -255,7 +256,7 @@ export function ArtifactWorkbar({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
-      if (!eventBelongsToFocusedStudio(event, contract.artifactId)) return;
+      if (!eventBelongsToFocusedStudio(event, contract.artifactId, rootRef.current)) return;
       const match = commands.find(({ command }) =>
         shortcutMatchesEvent(event, command.shortcut),
       );
@@ -446,6 +447,7 @@ export function ArtifactWorkbar({
 
   return (
     <div
+      ref={rootRef}
       className={cn("spectra-editor-workbar spectra-artifact-workbar", className)}
       role="toolbar"
       aria-label={label}

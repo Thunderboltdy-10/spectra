@@ -121,6 +121,7 @@ describe("Spectra-only slide text", () => {
   const paragraphs: PresentationParagraph[] = [
     { runs: [{ text: "Pack", bold: true, hyperlink: { kind: "external", url: "https://a.b" } }], bullet: "bullet", checked: true, level: 1 },
     { runs: [{ text: "Quoted" }, { text: " not italic", italic: false }], block: "quote" },
+    { runs: [{ text: "Mind the units" }], bullet: "none", block: "callout", tone: "warning" },
     { runs: [{ text: "let x" }], block: "code" },
     { runs: [{ text: "\\frac{a}\n{b}" }], block: "math" },
     { runs: [{ text: "run " }, { text: "f()", code: true }, { text: "x^2", math: true }] },
@@ -131,6 +132,23 @@ describe("Spectra-only slide text", () => {
     expect(presentationObjectParagraphs(object)).toEqual(paragraphs);
   });
 
+  it("keeps a tone only on a callout, and only one the editor offers", () => {
+    const object = {
+      ...createPresentationObject("text"),
+      content: {
+        text: "",
+        paragraphs: [
+          { runs: [{ text: "a" }], block: "callout", tone: "loud" },
+          { runs: [{ text: "b" }], block: "quote", tone: "tip" },
+        ],
+      },
+    };
+    expect(presentationObjectParagraphs(object)).toEqual([
+      { runs: [{ text: "a" }], block: "callout" },
+      { runs: [{ text: "b" }], block: "quote" },
+    ]);
+  });
+
   it("gives PowerPoint the nearest thing DrawingML holds", () => {
     expect(presentationParagraphsAreNative(paragraphs)).toBe(false);
     const native = nativePresentationParagraphs(paragraphs);
@@ -138,6 +156,8 @@ describe("Spectra-only slide text", () => {
     expect(native).toEqual([
       { runs: [{ text: "☑ ", bold: true }, { text: "Pack", bold: true, hyperlink: { kind: "external", url: "https://a.b" } }], bullet: "none", level: 1 },
       { runs: [{ text: "Quoted", italic: true }, { text: " not italic", italic: false }] },
+      // A callout reads as a quote in PowerPoint; its tone stays out of the file.
+      { runs: [{ text: "Mind the units", italic: true }], bullet: "none" },
       { runs: [{ text: "let x", fontFamily: "Consolas" }] },
       { runs: [{ text: "\\frac{a} {b}", fontFamily: "Cambria Math" }] },
       { runs: [{ text: "run " }, { text: "f()", fontFamily: "Consolas" }, { text: "x^2", fontFamily: "Cambria Math" }] },

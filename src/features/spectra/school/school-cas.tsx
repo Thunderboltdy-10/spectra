@@ -15,7 +15,8 @@ import type { Id } from "../../../../convex/_generated/dataModel";
 import { useLifeArrival } from "../life/use-life";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { dateLabel, sentenceOf, sizeLabel, strands, type SchoolExperience, type SchoolExperienceDetail, type SchoolPreferences } from "./school-model";
-import { SchoolFileViewer, schoolFileKind, type ViewedSchoolFile } from "./school-file-viewer";
+import { FileViewer, type ViewedFile } from "../files/file-viewer";
+import { fileViewKind } from "../files/file-kind";
 import { DetailHeading, SectionHeading, pressable } from "./school-tasks";
 
 function experienceMeta(experience: SchoolExperience, now: number) {
@@ -162,7 +163,7 @@ export function ExperienceDetails({ recordId, now, onNotice }: { recordId: strin
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState<Reflection | null>(null);
   const [removing, setRemoving] = useState(false);
-  const [viewing, setViewing] = useState<ViewedSchoolFile | null>(null);
+  const [viewing, setViewing] = useState<ViewedFile | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   if (experience === undefined) return <LoadingRows label="Loading the experience" count={4} />;
@@ -236,9 +237,9 @@ export function ExperienceDetails({ recordId, now, onNotice }: { recordId: strin
   }
 
   async function openEvidence(schoolFileId: string, filename: string, mimeType: string) {
-    const kind = schoolFileKind(mimeType, filename);
+    const kind = fileViewKind(mimeType, filename);
     if (kind) {
-      // Photos and PDFs open in Spectra; the viewer holds a ghost until the kept copy is ready.
+      // Photos, PDFs and Office files open in Spectra; the viewer holds a ghost until the kept copy is ready.
       setViewing({ key: schoolFileId, filename, kind });
       try {
         const kept = await convex.query(api.school.fileUrl, { schoolFileId: schoolFileId as Id<"schoolFiles"> });
@@ -398,7 +399,7 @@ export function ExperienceDetails({ recordId, now, onNotice }: { recordId: strin
         onCancel={() => setDeleting(null)}
         onConfirm={() => void confirmDelete()}
       />
-      <SchoolFileViewer file={viewing} onClose={() => setViewing(null)} />
+      <FileViewer file={viewing} onClose={() => setViewing(null)} />
     </article>
   );
 }

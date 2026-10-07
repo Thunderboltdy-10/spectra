@@ -54,6 +54,7 @@ import { SpectraTiptapAutocomplete } from "../compute/autocomplete";
 import {
   commandContext,
   commandForBinding,
+  eventBelongsToFocusedStudio,
   type CommandBinding,
   type CommandParam,
 } from "../commands";
@@ -881,6 +882,7 @@ export function DocumentStudio({
     "notes" | "essay" | "lab" | null
   >(null);
   const importRef = useRef<HTMLInputElement>(null);
+  const studioRef = useRef<HTMLDivElement>(null);
   const editorReadyForUserChanges = useRef(false);
   const lastDecorationKeyRef = useRef<string>("");
   const editorJsonKeyRef = useRef(JSON.stringify(initialContent));
@@ -941,13 +943,22 @@ export function DocumentStudio({
     if (!focusMode) return;
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
+      const root = studioRef.current;
+      // Escape in a work edited in place inside this document is that work's,
+      // and this document's Escape is not a host's or another copy's.
+      const unfocused =
+        event.target === document.body || event.target === document.documentElement;
+      const ours =
+        eventBelongsToFocusedStudio(event, artifactId, root) ||
+        (unfocused && !root?.closest("[data-embed-editor]"));
+      if (!ours) return;
       event.preventDefault();
       event.stopPropagation();
       setDocMode("write");
     }
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [focusMode]);
+  }, [artifactId, focusMode]);
 
   useEffect(() => {
     // Losing edit access mid-session drops the surface to Read rather than
@@ -3184,6 +3195,7 @@ export function DocumentStudio({
 
   return (
     <div
+      ref={studioRef}
       className="spectra-document-studio flex h-full min-h-0 flex-col bg-[var(--bg-primary)]"
       data-focus={focusMode || undefined}
       data-doc-mode={docMode}

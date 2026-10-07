@@ -119,6 +119,7 @@ export function InlineEmbedEditor({
         <ArtifactStudio
           mode="tab"
           compact
+          instanceKey={embedId}
           artifact={loaded.artifact}
           artifacts={[loaded.artifact]}
           tabs={[]}

@@ -17,7 +17,9 @@ import type { SchoolSyncKind } from "../../../../shared/school-sync";
 import { fetchSpectraSchoolFile } from "../data/api";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { handOffToLibrary } from "../workbench/library-handoff";
-import { SchoolFileViewer, schoolFileKind, type ViewedSchoolFile } from "./school-file-viewer";
+import type { IconName } from "@/components/icons";
+import { FileViewer, type ViewedFile } from "../files/file-viewer";
+import { fileViewKind, type FileViewKind } from "../files/file-kind";
 import {
   dateLabel,
   dueLabel,
@@ -214,12 +216,14 @@ export function DetailHeading({ children }: { children: React.ReactNode }) {
 
 type SubmittedFile = NonNullable<SchoolTaskDetail["submission"]>["files"][number];
 
+const FILE_GLYPHS = { image: "image", pdf: "pdf", document: "document", slides: "slides", sheet: "sheet", legacy: "document" } as const satisfies Record<FileViewKind, IconName>;
+
 export function TaskDetails({ recordId, now, onNotice }: { recordId: string; now: number; onNotice: (message: string) => void }) {
   const task = useQuery(api.school.task, useAuthedArgs({ recordId: recordId as Id<"externalRecords"> }));
   const convex = useConvex();
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
-  const [viewing, setViewing] = useState<ViewedSchoolFile | null>(null);
+  const [viewing, setViewing] = useState<ViewedFile | null>(null);
 
   if (task === undefined) return <LoadingRows label="Loading the task" count={4} />;
   if (task === null)
@@ -246,11 +250,13 @@ export function TaskDetails({ recordId, now, onNotice }: { recordId: string; now
   }
 
   async function openFile(file: SubmittedFile) {
-    const kind = schoolFileKind(file.mimeType, file.filename);
+    const kind = fileViewKind(file.mimeType, file.filename);
     if (kind) {
-      // Photos and PDFs open in Spectra; the viewer holds a ghost until the kept copy is ready.
+      // Photos, PDFs and Office files open in Spectra; the viewer holds a ghost
+      // until the kept copy is ready. An older Office file opens to a line that
+      // says why it can't show, with the same ways out.
       const key = file.providerFileId;
-      setViewing({ key, filename: file.filename, kind });
+      setViewing({ key, filename: file.filename, kind, bytes: file.bytes ?? undefined });
       setBusy(`open:${key}`);
       try {
         const kept = await keptCopy(file);
@@ -352,7 +358,7 @@ export function TaskDetails({ recordId, now, onNotice }: { recordId: string; now
           {submission.files.map((file) => (
             <Row
               key={file.providerFileId}
-              glyph={file.mimeType === "application/pdf" ? "pdf" : "document"}
+              glyph={FILE_GLYPHS[fileViewKind(file.mimeType, file.filename) ?? "legacy"]}
               title={file.filename}
               meta={file.tooLarge ? "Too large to keep in Spectra (over 50 MB)" : [sizeLabel(file.bytes), file.state === "cached" ? "Kept in Spectra" : null].filter(Boolean).join(" · ") || undefined}
               actionsVisible
@@ -407,7 +413,7 @@ export function TaskDetails({ recordId, now, onNotice }: { recordId: string; now
           </div>
         </>
       ) : null}
-      <SchoolFileViewer
+      <FileViewer
         file={viewing}
         onClose={() => setViewing(null)}
         actions={

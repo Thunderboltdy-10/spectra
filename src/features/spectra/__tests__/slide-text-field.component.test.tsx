@@ -96,6 +96,22 @@ describe("slide text on the shared rich field", () => {
     expect(next[1]).toEqual(deckText[1]);
   });
 
+  it("keeps an empty parent bullet, a callout and a code block in its list item through the first edit", async () => {
+    const paragraphs: PresentationParagraph[] = [
+      { bullet: "bullet", runs: [] },
+      { bullet: "bullet", level: 1, runs: [{ text: "Deeper" }] },
+      { bullet: "bullet", runs: [{ text: "Run" }] },
+      { bullet: "none", block: "code", runs: [{ text: "npm test" }] },
+      { block: "callout", tone: "warning", runs: [{ text: "Hot" }] },
+    ];
+    const { editor, onChange } = await mount({ paragraphs });
+    fireEvent.focus(editor.view.dom);
+    act(() => {
+      editor.chain().focus("end").insertContent(" plate").run();
+    });
+    expect(last(onChange)).toEqual([...paragraphs.slice(0, 4), { block: "callout", tone: "warning", runs: [{ text: "Hot plate" }] }]);
+  });
+
   it("stores bold, checklists, quotes, code and equations from the same commands as every editor", async () => {
     const { editor, onChange } = await mount({ paragraphs: [{ runs: [{ text: "Hello" }] }] });
     fireEvent.focus(editor.view.dom);

@@ -235,6 +235,7 @@ import { dispatchFormatChrome } from "../commands";
 import { fidelityRegionMap } from "../commands/office/fidelity-regions";
 import type { ApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import {
+  closeRequestReaches,
   decideRemoteStudioIncoming,
   createReconciliationSnapshotKey,
   incomingReconciliationKey,
@@ -2569,6 +2570,7 @@ export function ArtifactStudio({
   onOpenChats,
   continuedThreadId,
   compact = false,
+  instanceKey,
   executeApplicationCommand,
 }: {
   mode: "split" | "tab";
@@ -2593,6 +2595,8 @@ export function ArtifactStudio({
   onOpenChats?: () => void;
   continuedThreadId?: string | null;
   compact?: boolean;
+  /** Names a copy edited in place inside another work, so close requests reach only it. */
+  instanceKey?: string;
   executeApplicationCommand?: ApplicationCommandDispatcher;
 }) {
   const router = useRouter();
@@ -2784,6 +2788,7 @@ export function ArtifactStudio({
           onDirtyChange={handleDirtyChange}
           onOpenChats={onOpenChats}
           compact={compact}
+          instanceKey={instanceKey}
           executeApplicationCommand={executeApplicationCommand}
         />
       </div>
@@ -2843,6 +2848,7 @@ function ArtifactStudioEditor({
   onDirtyChange,
   onOpenChats,
   compact,
+  instanceKey,
   executeApplicationCommand,
 }: {
   mode: "split" | "tab";
@@ -2858,6 +2864,7 @@ function ArtifactStudioEditor({
   onDirtyChange: (dirty: boolean) => void;
   onOpenChats?: () => void;
   compact: boolean;
+  instanceKey?: string;
   executeApplicationCommand?: ApplicationCommandDispatcher;
 }) {
   const [editorReady, setEditorReady] = useState(false);
@@ -5028,8 +5035,9 @@ function ArtifactStudioEditor({
   );
 
   useEffect(() => {
-    function requestClose({ workId }: { workId: string }) {
-      if (workId === artifact._id) requestStudioClose();
+    function requestClose(request: { workId: string; instance?: string }) {
+      if (closeRequestReaches(request, { workId: artifact._id, instanceKey }))
+        requestStudioClose();
     }
     function beforeUnload(event: BeforeUnloadEvent) {
       if (!dirty) return;
@@ -5082,7 +5090,7 @@ function ArtifactStudioEditor({
     };
     // requestStudioClose reads latest dirty/panel flags via this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- close handler closes over latest studio state
-  }, [artifact._id, commentsOpen, dirty, embedsOpen, historyOpen, live.unsynchronizedChanges]);
+  }, [artifact._id, commentsOpen, dirty, embedsOpen, historyOpen, instanceKey, live.unsynchronizedChanges]);
 
   const shellHistoryEnabled =
     !readOnly && SHELL_HISTORY_TYPES.has(artifact.blueprintKey);

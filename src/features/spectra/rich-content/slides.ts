@@ -23,9 +23,10 @@ import {
  * flattens them back. A run's typeface, size and colour travel as the text's
  * own style, so editing a word never loses the deck's formatting.
  *
- * Checklists, quotes, code and equations are Spectra's own: a paragraph
- * carries `checked` or `block`, a run `code` or `math`, and PowerPoint gets
- * the nearest thing it has (`nativePresentationParagraph`).
+ * Checklists, quotes, callouts, code and equations are Spectra's own: a
+ * paragraph carries `checked` or `block` (and a callout's `tone`), a run
+ * `code` or `math`, and PowerPoint gets the nearest thing it has
+ * (`nativePresentationParagraph`).
  */
 
 const SLIDE_LINK = "slide:";
@@ -85,19 +86,60 @@ function listKind(paragraph: PresentationParagraph): SlideList["kind"] | null {
   return paragraph.checked === undefined ? "bullet" : "task";
 }
 
-/** Paragraphs that are neither quote, code nor equation: plain paragraphs and the lists they make. */
-function listBlocks(paragraphs: readonly PresentationParagraph[]): RichBlockDraft[] {
+const paragraphText = (paragraph: PresentationParagraph) => paragraph.runs.map((run) => run.text).join("");
+const levelOf = (paragraph: PresentationParagraph) => Math.max(0, Math.min(8, paragraph.level ?? 0));
+
+/**
+ * The lines of one quote, callout, code block or equation, from `index`.
+ * Consecutive lines of a quote, a callout of one tone or a code block are one
+ * block; each equation is its own. A code block inside a list item stays with
+ * its own lines (each with `bullet: "none"`) and stops at the next item.
+ */
+function groupEnd(paragraphs: readonly PresentationParagraph[], index: number): number {
+  const first = paragraphs[index]!;
+  let end = index + 1;
+  if (first.block === "math") return end;
+  while (end < paragraphs.length) {
+    const next = paragraphs[end]!;
+    if (next.block !== first.block || next.tone !== first.tone) break;
+    if (first.block === "code" && (listKind(next) || (next.bullet === undefined) !== (first.bullet === undefined) || levelOf(next) !== levelOf(first))) break;
+    // A quote written from inside a list item ends where its unbulleted lines end.
+    if (first.bullet === "none" && next.bullet === undefined) break;
+    end += 1;
+  }
+  return end;
+}
+
+function groupBlock(group: readonly PresentationParagraph[]): RichBlockDraft {
+  const first = group[0]!;
+  // Inside, the lines are plain again: a list in a quote is a list.
+  const inner = () => slideBlocks(group.map(({ block: _block, tone: _tone, ...paragraph }) => paragraph)) as RichBlock[];
+  switch (first.block) {
+    case "quote":
+      return { type: "quote", blocks: inner() };
+    case "callout":
+      return { type: "callout", tone: first.tone ?? "info", blocks: inner() };
+    case "code":
+      return { type: "code_block", code: group.map(paragraphText).join("\n") };
+    default:
+      return { type: "math_block", math: paragraphText(first) };
+  }
+}
+
+/**
+ * Slide paragraphs as blocks, in one pass. Consecutive bulleted paragraphs
+ * nest into lists by level. A quote, callout, code block or equation written
+ * from inside a list item carries an explicit `bullet: "none"` at the item's
+ * level, so it goes back into that item rather than ending the list.
+ */
+function slideBlocks(paragraphs: readonly PresentationParagraph[]): RichBlockDraft[] {
   const blocks: RichBlockDraft[] = [];
-  // The open list at each level while consecutive bulleted paragraphs run.
+  // The open list at each level while a list runs.
   let stack: SlideList[] = [];
-  for (const paragraph of paragraphs) {
-    const kind = listKind(paragraph);
-    if (!kind) {
-      stack = [];
-      blocks.push(paragraphBlock(paragraph));
-      continue;
-    }
-    const level = Math.max(0, Math.min(8, paragraph.level ?? 0));
+  const lastItem = (list: SlideList) => list.items[list.items.length - 1]!.blocks as RichBlockDraft[];
+
+  /** Adds an item holding `itemBlocks` to the list of `kind` at `level`, opening lists as needed. */
+  const addItem = (kind: SlideList["kind"], level: number, checked: boolean | undefined, itemBlocks: RichBlockDraft[]) => {
     stack = stack.slice(0, level + 1);
     while (stack.length <= level) {
       const parent = stack[stack.length - 1];
@@ -107,7 +149,7 @@ function listBlocks(paragraphs: readonly PresentationParagraph[]): RichBlockDraf
         // A deeper paragraph with no item above it at its parent level still
         // needs an item to hang from.
         if (!parent.items.length) parent.items.push({ blocks: [] });
-        (parent.items[parent.items.length - 1]!.blocks as RichBlockDraft[]).push(list);
+        lastItem(parent).push(list);
       }
       stack.push(list);
     }
@@ -116,34 +158,32 @@ function listBlocks(paragraphs: readonly PresentationParagraph[]): RichBlockDraf
       // A numbered run after a bulleted one at the same level is a new list.
       const parent = stack[level - 1];
       const next: SlideList = { type: "list", kind, items: [] };
-      if (parent) (parent.items[parent.items.length - 1]!.blocks as RichBlockDraft[]).push(next);
+      if (parent) lastItem(parent).push(next);
       else blocks.push(next);
       stack[level] = next;
       list = next;
     }
-    list.items.push({
-      ...(kind === "task" ? { checked: paragraph.checked === true } : {}),
-      blocks: [paragraphBlock(paragraph)] as RichBlock[],
-    });
-  }
-  return blocks;
-}
+    list.items.push({ ...(kind === "task" ? { checked: checked === true } : {}), blocks: itemBlocks as RichBlock[] });
+  };
 
-const paragraphText = (paragraph: PresentationParagraph) => paragraph.runs.map((run) => run.text).join("");
-
-function slideBlocks(paragraphs: readonly PresentationParagraph[]): RichBlockDraft[] {
-  const blocks: RichBlockDraft[] = [];
   let index = 0;
   while (index < paragraphs.length) {
-    const kind = paragraphs[index]!.block;
-    let end = index + 1;
-    // Consecutive lines of a quote or a code block are one block; each equation is its own.
-    if (kind !== "math") while (end < paragraphs.length && paragraphs[end]!.block === kind) end += 1;
-    const group = paragraphs.slice(index, end);
-    if (kind === "quote") blocks.push({ type: "quote", blocks: slideBlocks(group.map(({ block: _block, ...paragraph }) => paragraph)) as RichBlock[] });
-    else if (kind === "code") blocks.push({ type: "code_block", code: group.map(paragraphText).join("\n") });
-    else if (kind === "math") blocks.push({ type: "math_block", math: paragraphText(group[0]!) });
-    else blocks.push(...listBlocks(group));
+    const paragraph = paragraphs[index]!;
+    const end = paragraph.block ? groupEnd(paragraphs, index) : index + 1;
+    const block = paragraph.block ? groupBlock(paragraphs.slice(index, end)) : paragraphBlock(paragraph);
+    const kind = listKind(paragraph);
+    const level = levelOf(paragraph);
+    const owner = paragraph.block && paragraph.bullet === "none" ? stack[level] : undefined;
+    if (kind && !(paragraph.block === "quote" || paragraph.block === "callout")) {
+      addItem(kind, level, paragraph.checked, [block]);
+    } else if (owner?.items.length) {
+      // The rest of a list item: back into the item it was written from.
+      stack = stack.slice(0, level + 1);
+      lastItem(owner).push(block);
+    } else {
+      stack = [];
+      blocks.push(block);
+    }
     index = end;
   }
   return blocks;
@@ -255,13 +295,13 @@ function flatten(blocks: readonly RichBlock[], level: number | undefined, listIt
       ...(first && listItem.checked !== undefined ? { checked: listItem.checked } : {}),
     };
   };
-  for (const [index, block] of blocks.entries()) {
+  for (const block of blocks) {
     switch (block.type) {
       case "paragraph":
       case "heading":
-        // A list item cannot open with a nested list in the editor, so it
-        // carries an empty line there: a deeper bullet with no parent of its own.
-        if (leading && listItem && !block.content.length && blocks[index + 1]?.type === "list") break;
+        // An empty line here is the item's own empty bullet. The editor's
+        // filler line (a list item must open with one) never reaches here:
+        // `richContentFromProseMirror` drops it.
         output.push(...paragraphsOf(block.content, shapeFor(block.align)));
         break;
       case "list":
@@ -275,9 +315,17 @@ function flatten(blocks: readonly RichBlock[], level: number | undefined, listIt
         break;
       case "quote":
       case "callout": {
-        // A callout has no slide form of its own: it reads as a quote.
-        const inner = flatten(block.blocks, level, leading && listItem ? listItem : undefined);
-        output.push(...inner.map((paragraph) => (paragraph.block ? paragraph : { ...paragraph, block: "quote" as const })));
+        const opens = leading && Boolean(listItem);
+        const inner = flatten(block.blocks, level, opens ? listItem : undefined);
+        const own: Pick<PresentationParagraph, "block" | "tone"> =
+          block.type === "callout" ? { block: "callout", tone: block.tone } : { block: "quote" };
+        output.push(
+          ...inner.map((paragraph) => {
+            // Later in a list item, its lines say so, so they read back into the item.
+            const placed = listItem && !opens && !paragraph.bullet ? { ...paragraph, bullet: "none" as const } : paragraph;
+            return placed.block ? placed : { ...placed, ...own };
+          }),
+        );
         leading = false;
         break;
       }
@@ -313,7 +361,7 @@ export function richContentToSlideParagraphs(ast: SpectraRichContentAst): Presen
 // ---------------------------------------------------------------------------
 
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
-const PARAGRAPH_KEYS = ["alignment", "level", "bullet", "checked", "block"] as const;
+const PARAGRAPH_KEYS = ["alignment", "level", "bullet", "checked", "block", "tone"] as const;
 
 /**
  * What a run looked like before the field: every key the field did not

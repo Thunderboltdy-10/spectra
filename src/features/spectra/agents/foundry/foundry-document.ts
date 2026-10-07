@@ -544,3 +544,63 @@ export function projectFoundryToLegacy(
     skills: legacySkills.length > 0 ? legacySkills : content.skills,
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* Approving a compilation                                             */
+/* ------------------------------------------------------------------ */
+
+/** What the Foundry compiler drafted for an agent: kept on its compiler job until approved. */
+export type CompiledAgentResult = {
+  skills: SpectraSkill[];
+  routing: { description: string; examples: string[]; negativeExamples: string[] };
+  releaseNotes: string;
+};
+
+/**
+ * Approving one drafted skill: a skill the agent already has under the same
+ * id becomes its next version; a new one joins as verified. The studio's
+ * Approve and Spectra's approve_agent_skills both come here.
+ */
+export function acceptCompiledSkill(skills: readonly SpectraSkill[], skill: SpectraSkill): SpectraSkill[] {
+  const existing = skills.find((entry) => entry.id === skill.id);
+  const merged: SpectraSkill = existing
+    ? { ...skill, version: existing.version + 1, supersedesVersion: existing.version }
+    : skill;
+  return [...skills.filter((entry) => entry.id !== skill.id), { ...merged, status: "verified" }];
+}
+
+/** The compiled routing signature and release notes, where the compiler wrote any. */
+export function applyCompiledRouting(
+  content: AgentFoundryContent,
+  result: Pick<CompiledAgentResult, "routing" | "releaseNotes">,
+): AgentFoundryContent {
+  return {
+    ...content,
+    routing: {
+      ...content.routing,
+      description: result.routing.description || content.routing.description,
+      examples: result.routing.examples.length ? result.routing.examples : content.routing.examples,
+      negativeExamples: result.routing.negativeExamples.length
+        ? result.routing.negativeExamples
+        : content.routing.negativeExamples,
+    },
+    foundry: {
+      ...content.foundry,
+      draftReleaseNotes: result.releaseNotes || content.foundry.draftReleaseNotes,
+    },
+  };
+}
+
+/**
+ * Drafted skills still waiting for approval: a skill approved from this
+ * compilation, by the creator or by Spectra, carries its draft's timestamp,
+ * so it no longer waits.
+ */
+export function pendingCompiledSkills(
+  drafted: readonly SpectraSkill[],
+  skills: readonly SpectraSkill[],
+): SpectraSkill[] {
+  return drafted.filter(
+    (skill) => !skills.some((entry) => entry.id === skill.id && entry.updatedAt >= skill.updatedAt),
+  );
+}

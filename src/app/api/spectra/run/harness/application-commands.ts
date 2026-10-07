@@ -215,6 +215,11 @@ const COMMANDS: Record<string, ApplicationCommand> = {
     input: z.object({ agentId: z.string().trim().min(1).max(200), caseId: z.string().trim().min(1).max(200) }),
     authority: "content",
   },
+  // Compiling drafts skills, routing and notes on a compiler job: it spends model tokens and changes no draft.
+  compile_agent: {
+    input: z.object({ agentId: z.string().trim().min(1).max(200) }),
+    authority: "content",
+  },
   // A release decides which version of an agent people reach; a private one reaches only the owner.
   release_agent: {
     input: z

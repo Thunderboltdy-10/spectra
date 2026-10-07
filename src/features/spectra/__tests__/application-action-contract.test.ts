@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-const seams = vi.hoisted(() => ({ mutate: vi.fn(), query: vi.fn(), authority: vi.fn(), calendar: vi.fn(), reference: vi.fn(), restore: vi.fn(), applyAi: vi.fn(), publish: vi.fn(), unpublish: vi.fn(), live: vi.fn(), checks: vi.fn(), importResource: vi.fn(), prepareBench: vi.fn(), answerBench: vi.fn() }));
+const seams = vi.hoisted(() => ({ mutate: vi.fn(), query: vi.fn(), authority: vi.fn(), calendar: vi.fn(), reference: vi.fn(), restore: vi.fn(), applyAi: vi.fn(), publish: vi.fn(), unpublish: vi.fn(), live: vi.fn(), checks: vi.fn(), importResource: vi.fn(), prepareBench: vi.fn(), answerBench: vi.fn(), compile: vi.fn() }));
 vi.mock("@/app/api/spectra/run/harness/io", () => ({ mutate: seams.mutate, query: seams.query, readQuery: vi.fn(), act: vi.fn(), safeJson: JSON.parse }));
 vi.mock("@/app/api/spectra/run/harness/authority", () => ({ evaluateCommandAuthority: seams.authority, recordAuthorityDecision: vi.fn() }));
 vi.mock("@/app/api/spectra/run/harness/calendar-command", () => ({ executeRegisteredCalendarMutation: seams.calendar }));
@@ -13,6 +13,10 @@ vi.mock("@/features/spectra/ai/yjs-artifact-operation", () => ({ applyAiArtifact
 vi.mock("@/app/api/spectra/agents/evaluate/checks", () => ({ runAgentChecks: seams.checks }));
 vi.mock("@/app/api/spectra/managebac/resource-import", () => ({ importManageBacResourceAs: seams.importResource }));
 vi.mock("@/app/api/spectra/agents/bench/answer", () => ({ prepareBenchAnswer: seams.prepareBench, answerOnBench: seams.answerBench }));
+vi.mock("@/app/api/spectra/agents/foundry/compile", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/app/api/spectra/agents/foundry/compile")>()),
+  compileAgentDraft: seams.compile,
+}));
 vi.mock("@/features/spectra/code/runtime-publish-server", () => ({
   publishRuntime: seams.publish, unpublishRuntime: seams.unpublish, hashSource: (content: { files?: Array<{ source: string }> }) => `hash:${content.files?.map((file) => file.source).join("|") ?? ""}`,
 }));
@@ -64,6 +68,7 @@ const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: 
   { command: "run_agent_bench", args: { agentId: "agent", prompt: "Mark my essay" }, event: "agent_bench_changed" },
   { command: "save_agent_bench_case", args: { agentId: "agent", prompt: "Mark my essay", mustInclude: ["next step"], mustNotInclude: [] }, mutation: "spectraApplicationWrites:execute", event: "agent_bench_changed" },
   { command: "remove_agent_bench_case", args: { agentId: "agent", caseId: "case" }, mutation: "spectraApplicationWrites:execute" },
+  { command: "compile_agent", args: { agentId: "agent" }, event: "agent_compiled" },
   { command: "respond_share_invitation", args: { invitationId: "invitation", response: "accept" }, mutation: "authority:acceptShareInvitation", event: "share_invitation_answered" },
   { command: "respond_share_invitation", args: { invitationId: "invitation", response: "decline" }, mutation: "authority:declineShareInvitation", event: "share_invitation_answered" },
 ];
@@ -91,6 +96,11 @@ describe("application action contract matrix (stubbed persistence)", () => {
     seams.answerBench.mockImplementation(async (prepared: Record<string, unknown>) => ({
       id: "run", prompt: prepared.prompt, target: prepared.target, output: "Your thesis is clear. One next step: cite a source.", createdAt: 1,
     }));
+    seams.compile.mockResolvedValue({
+      jobId: "job", runId: "compile-run", diagnostics: [], releaseNotes: "First skills.",
+      routing: { description: "Marks essays", examples: ["Mark my essay"], negativeExamples: [] },
+      skills: [{ id: "skill-mark", name: "Mark an essay", purpose: "Grades against the rubric.", triggers: [{ kind: "keyword", terms: ["mark"] }], procedure: [], evaluationCases: [] }],
+    });
     seams.query.mockImplementation(async (name: string) => {
       if (name === "artifactEmbeds:listForContainer") return { canConfigure: true, embeds: [{ embedId: "embed", state: "ready" }] };
       if (name === "spectraArtifacts:get") return { blueprintKey: "document" };
@@ -190,6 +200,25 @@ describe("application action contract matrix (stubbed persistence)", () => {
     expect(stopped).toMatchObject({ state: "stopped", releaseNumber: 2, answer: "Your" });
     expect(stopped).not.toHaveProperty("test");
     expect(() => parseApplicationCommand("run_agent_bench", { agentId: "agent", prompt: "Hi", releaseNumber: 2 })).toThrow();
+  });
+
+  it("compiles an agent through the Foundry's own module, as the run owner, telling an open studio and changing no draft", async () => {
+    const events: Array<{ key: string; payload?: Record<string, unknown> }> = [];
+    const result = await executeApplicationCommand("actor", "run", "attempt", "compile_agent", { agentId: "agent" },
+      undefined, (event) => events.push(event), undefined, "operation") as Record<string, unknown>;
+    expect(seams.compile).toHaveBeenCalledWith(expect.objectContaining({ userId: "actor", agentId: "agent" }));
+    expect(seams.mutate).not.toHaveBeenCalled();
+    expect(seams.applyAi).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      state: "compiled",
+      jobId: "job",
+      skills: [{ id: "skill-mark", name: "Mark an essay", triggers: ["words: mark"], steps: 0, checks: 0 }],
+      routing: { description: "Marks essays", examples: ["Mark my essay"] },
+      releaseNotes: "First skills.",
+    });
+    expect(String(result.note)).toMatch(/approve_agent_skills/);
+    expect(events).toEqual([{ key: "agent_compiled", payload: { targetId: "agent", note: "Drafted 1 skill in the Foundry" } }]);
+    expect(seams.authority).toHaveBeenCalledWith(expect.objectContaining({ command: "compile_agent", authorityTarget: "content" }));
   });
 
   it("keeps and removes bench tests through the Convex write path, telling an open studio", async () => {

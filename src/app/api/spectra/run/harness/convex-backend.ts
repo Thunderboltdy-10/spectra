@@ -11,6 +11,7 @@ import type {
   WebResult,
 } from "@/features/spectra/ai/harness/backend";
 import type { AgentBenchState } from "@/features/spectra/ai/harness/agent-bench";
+import type { AgentCompilationState } from "@/features/spectra/ai/harness/agent-compilation";
 import type { AgentDraftChecks, AgentReleaseRow, AgentReleaseState } from "@/features/spectra/ai/harness/agent-releases";
 import { ARTIFACT_TYPE_KEYS, type ArtifactTypeKey } from "@/features/spectra/artifacts/types";
 import type { CommentRow } from "@/features/spectra/ai/harness/comments";
@@ -60,7 +61,7 @@ const VERSION_SOURCES = new Set<string>(["manual", "ai", "revert", "import", "re
 const EMBED_STATES = new Set<string>(["ready", "no_access", "deleted", "archived", "version_unavailable", "removed"]);
 
 /** Commands whose result the model needs more of: an agent's answer, a compiled draft. */
-const LONG_RESULTS: Readonly<Record<string, number>> = { run_agent_bench: 6_000 };
+const LONG_RESULTS: Readonly<Record<string, number>> = { run_agent_bench: 6_000, compile_agent: 8_000 };
 
 function clip(value: string, max = 12_000) {
   return value.length > max ? `${value.slice(0, max)}\n… (cut short; ask for a narrower range)` : value;
@@ -827,6 +828,18 @@ export class ConvexHarnessBackend implements HarnessBackend {
     ]);
     if (!Array.isArray(cases) || !Array.isArray(runs)) return null;
     return { cases: cases as AgentBenchState["cases"], runs: runs as AgentBenchState["runs"] };
+  }
+
+  async readAgentCompilation(input: { agentId: string }): Promise<AgentCompilationState | null> {
+    // The Foundry's own read: the latest compiler job, with whether the draft moved on since.
+    const job = await query<unknown & object, Record<string, unknown> | null>("agents:compilerJob", { agentId: input.agentId }).catch(() => null);
+    if (!job || typeof job.jobId !== "string") return null;
+    return {
+      jobId: job.jobId,
+      status: job.status as AgentCompilationState["status"],
+      stale: job.stale === true,
+      result: job.result && typeof job.result === "object" ? (job.result as AgentCompilationState["result"]) : null,
+    };
   }
 
   async readCalendar(input: { from: number; to: number; title?: string }): Promise<string> {

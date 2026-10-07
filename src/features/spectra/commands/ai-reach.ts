@@ -5,9 +5,7 @@
  * - A "tool" action runs through a harness tool, the same server path the
  *   user's own control uses. The AI can find it with find_commands and run it
  *   with run_command; most also have a first-class tool.
- * - A "user" action is only the user's, with the reason written down. A
- *   reason marked `gap` means nothing forbids an AI path; it does not exist
- *   yet.
+ * - A "user" action is only the user's, with the reason written down.
  *
  * Buttons, menus and the command bar run the `app.*` commands in
  * app-registry.ts. Each one names its action here through `ui`, and the AI
@@ -56,8 +54,6 @@ export type AiReach =
   | {
       kind: "user";
       reason: string;
-      /** No rule keeps the AI out; the path does not exist yet. */
-      gap?: true;
     };
 
 export type CatalogCommand = {
@@ -81,7 +77,6 @@ const tool = (name: string, extra: Omit<Extract<AiReach, { kind: "tool" }>, "kin
   ...extra,
 });
 const user = (reason: string): AiReach => ({ kind: "user", reason });
-const gap = (reason: string): AiReach => ({ kind: "user", reason, gap: true });
 
 const PERMISSION_REASON =
   "It changes what Spectra AI may do. Only the user changes that, in Settings, so the AI can never grant itself more.";
@@ -981,12 +976,18 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     id: "agents.compile",
     area: "agents",
     title: "Compile an agent in the Foundry",
-    description: "Compile an agent's skills and routing from its mission and sources in the Foundry.",
-    keywords: ["compile", "foundry", "skills"],
+    description: "Compile an agent's skills, routing and release notes from its mission, answers and sources in the Foundry.",
+    keywords: ["compile", "foundry", "skills", "draft skills", "routing"],
     server: ["agents:beginCompilerJob", "agents:updateCompilerJob", "agents:cancelCompilerJob"],
-    reach: gap(
-      "The Foundry compiler is the studio's interactive model work, streamed to the creator; the harness has no path to it yet. Spectra edits the agent with edit_artifact and runs its checks with run_agent_checks.",
-    ),
+    reach: tool("compile_agent", { appCommand: "compile_agent", example: { agentId: "ag1" } }),
+  },
+  {
+    id: "agents.approve_skills",
+    area: "agents",
+    title: "Approve an agent's drafted skills",
+    description: "Approve the skills the Foundry drafted for an agent, with its compiled routing and release notes.",
+    keywords: ["approve skills", "accept skills", "drafted skills"],
+    reach: tool("approve_agent_skills", { example: { agentId: "ag1" } }),
   },
   {
     id: "agents.manage",

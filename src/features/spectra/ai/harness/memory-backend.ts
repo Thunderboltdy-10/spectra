@@ -1,5 +1,6 @@
 import type { ArtifactTypeKey } from "../../artifacts/types";
 import type { AgentBenchState } from "./agent-bench";
+import type { AgentCompilationState } from "./agent-compilation";
 import type { AgentReleaseState } from "./agent-releases";
 import type { CommentRow } from "./comments";
 import type { EmbedRow } from "./embeds";
@@ -50,6 +51,8 @@ export type MemoryBackendOptions = {
   agentReleases?: Record<string, AgentReleaseState>;
   /** Bench tests and answers by agent id. */
   agentBench?: Record<string, AgentBenchState>;
+  /** The latest Foundry compilation by agent id. */
+  agentCompilations?: Record<string, AgentCompilationState>;
   /** Simulate the semantic layer answering with words only, or with a degraded index. */
   searchMode?: SearchResponse["mode"];
   searchDegraded?: SearchResponse["degraded"];
@@ -233,6 +236,10 @@ export class MemoryBackend implements HarnessBackend {
 
   async readAgentBench(input: { agentId: string }) {
     return this.options.agentBench?.[input.agentId] ?? null;
+  }
+
+  async readAgentCompilation(input: { agentId: string }) {
+    return this.options.agentCompilations?.[input.agentId] ?? null;
   }
 
   async readSchoolData() {

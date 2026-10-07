@@ -65,6 +65,8 @@ describe("find_commands", () => {
     expect(top("try my agent on the bench with a question")).toBe("agents.bench_run");
     expect(top("keep this question as a test for my agent")).toBe("agents.bench_save_test");
     expect(top("delete that bench test")).toBe("agents.bench_remove_test");
+    expect(top("compile my agent in the foundry")).toBe("agents.compile");
+    expect(top("approve the drafted skills")).toBe("agents.approve_skills");
     expect(top("accept the invitation Ana sent me")).toBe("sharing.respond");
     expect(top("what have people invited me to")).toBe("sharing.invitations");
     expect(top("remember that I like short answers")).toBe("memory.remember");

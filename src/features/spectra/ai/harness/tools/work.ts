@@ -1,12 +1,13 @@
 import { BENCH_LIMITS } from "../../../agents/foundry/bench";
 import { formatAgentBench } from "../agent-bench";
+import { approveCompiledSkills } from "../agent-compilation";
 import { formatAgentReleases } from "../agent-releases";
 import { formatEmbeds } from "../embeds";
 import { formatIncomingInvitations, formatSharing } from "../sharing";
 import { formatVersions } from "../versions";
 import { ToolInputError, type AnyHarnessTool, type HarnessTool } from "../types";
 import { commandTool } from "./app";
-import { oneOf, optionalNumber, optionalString, requireString, titled, type HarnessSession } from "./shared";
+import { oneOf, optionalNumber, optionalString, rememberTitle, requireString, titled, type HarnessSession } from "./shared";
 
 /*
  * A work's history, embeds, sharing and releases, reached through find_commands and
@@ -162,6 +163,80 @@ function readAgentBenchTool(session: HarnessSession): HarnessTool<AgentReleasesA
         ok: true,
         content: formatAgentBench(found, session.titles.get(args.agentId)?.title ?? "This agent"),
         doneLabel: `Read the bench of ${titled(session, args.agentId, "your agent")}`,
+      };
+    },
+  };
+}
+
+type ApproveSkillsArgs = { agentId: string; skillIds?: string[] };
+
+function approveAgentSkillsTool(session: HarnessSession): HarnessTool<ApproveSkillsArgs> {
+  return {
+    name: "approve_agent_skills",
+    description:
+      "Approve the skills compile_agent drafted for an agent, as the agent studio's Approve does: each joins the agent as verified (the next version of a skill it already has), and the compiled routing and release notes apply with them. skillIds approves only those; left out, every drafted skill still waiting is approved. Read what was drafted in compile_agent's result first, and approve only skills that match what the user wants the agent to do.",
+    parameters: {
+      type: "object",
+      properties: {
+        agentId: { type: "string" },
+        skillIds: { type: "array", items: { type: "string" }, description: "Drafted skill ids from compile_agent; all waiting skills when left out." },
+      },
+      required: ["agentId"],
+      additionalProperties: false,
+    },
+    effect: "write",
+    targets: (args) => [args.agentId],
+    label: (args) => `Approving skills for ${titled(session, args.agentId, "your agent")}`,
+    parse: (raw) => {
+      const ids = raw.skillIds;
+      if (ids !== undefined && (!Array.isArray(ids) || !ids.length || ids.some((id) => typeof id !== "string" || !id.trim())))
+        throw new ToolInputError("skillIds is a non-empty list of drafted skill ids; leave it out to approve every waiting skill.");
+      return {
+        agentId: requireString(raw, "agentId", 200),
+        ...(Array.isArray(ids) ? { skillIds: [...new Set(ids.map((id) => String(id).trim()))].slice(0, 24) } : {}),
+      };
+    },
+    execute: async (args, ctx) => {
+      const current = await session.backend.getArtifact(args.agentId, ctx.signal);
+      if (!current || current.type !== "agent")
+        return { ok: false, content: `No agent has id "${args.agentId}", or the user cannot open it. Find it with list_library or search.` };
+      rememberTitle(session, current.id, current.title, current.type);
+      if (!current.canEdit) return { ok: false, content: `*${current.title}* is shared with the user as read-only, so its skills cannot be approved.` };
+      const compilation = await session.backend.readAgentCompilation({ agentId: args.agentId }, ctx.signal);
+      if (!compilation?.result || compilation.status !== "completed")
+        return {
+          ok: false,
+          content: `*${current.title}* has no finished compilation to approve${compilation ? ` (the latest one ${compilation.status === "cancelled" ? "was stopped" : compilation.status === "failed" ? "failed" : "is still running"})` : ""}. compile_agent drafts its skills.`,
+        };
+      const approval = approveCompiledSkills(current.content, compilation.result, args.skillIds);
+      if (approval.unknown.length)
+        return {
+          ok: false,
+          content: `The latest compilation did not draft ${approval.unknown.map((id) => `"${id}"`).join(", ")}. It drafted: ${compilation.result.skills.map((skill) => `${skill.id} (${skill.name})`).join(", ") || "no skills"}.`,
+        };
+      if (!approval.approved.length)
+        return { ok: false, content: `No drafted skill of *${current.title}* is waiting for approval: they were approved already.` };
+      await session.backend.updateArtifact(
+        {
+          id: current.id,
+          type: current.type,
+          content: approval.content as unknown as Record<string, unknown>,
+          toolCallId: ctx.toolCallId,
+          approved: Boolean(ctx.approved),
+        },
+        ctx.signal,
+      );
+      const names = approval.approved.map((skill) => skill.name);
+      const change = `Approved ${names.length} skill${names.length === 1 ? "" : "s"}`;
+      return {
+        ok: true,
+        content: [
+          `Approved on *${current.title}*: ${names.join(", ")}. The compiled routing and release notes apply with them.`,
+          ...(approval.already.length ? [`Already approved: ${approval.already.join(", ")}.`] : []),
+          ...(compilation.stale ? ["The draft changed after this compilation began; run_agent_checks shows whether it still holds together."] : []),
+        ].join("\n"),
+        artifacts: [{ id: current.id, type: current.type, title: current.title, action: "edited", change }],
+        doneLabel: `${change} for *${current.title}*`,
       };
     },
   };
@@ -393,6 +468,24 @@ export function workTools(session: HarnessSession): AnyHarnessTool[] {
       parse: (raw): BenchCaseRef => ({ agentId: requireString(raw, "agentId", 200), caseId: requireString(raw, "caseId", 200) }),
       command: (args) => ({ command: "remove_agent_bench_case", args }),
     }),
+    commandTool(session, {
+      name: "compile_agent",
+      description:
+        "Compile an agent in the Foundry, as the agent studio's Compile does: from its saved mission, the user's answers and the sources it was given, the compiler drafts skills, a routing signature and release notes. It takes a minute or two and uses the school's AI allowance. Nothing on the agent changes: the drafted skills wait for approval in the studio, and approve_agent_skills approves them.",
+      parameters: {
+        type: "object",
+        properties: { agentId: { type: "string" } },
+        required: ["agentId"],
+        additionalProperties: false,
+      },
+      effect: "write",
+      targets: (args: { agentId: string }) => [args.agentId],
+      label: (args: { agentId: string }) => `Compiling ${titled(session, args.agentId, "your agent")}`,
+      doneLabel: (args: { agentId: string }) => `Compiled ${titled(session, args.agentId, "your agent")}`,
+      parse: (raw) => ({ agentId: requireString(raw, "agentId", 200) }),
+      command: (args) => ({ command: "compile_agent", args }),
+    }),
+    approveAgentSkillsTool(session),
     commandTool(session, {
       name: "release_agent",
       description:

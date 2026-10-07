@@ -10,6 +10,7 @@ import {
 } from "../field/surface-field";
 import { SpectraMark } from "@/components/spectra-mark";
 import { PrismLoader } from "@/components/spectra-prism-optic";
+import { MARK_POSE, PRISM_PALETTES, prismSvg } from "../life/prism";
 import { choosePrismClaim } from "@/app/landing/prism/prism-slot";
 import { ArtifactCard } from "../components/artifact-card";
 import type { InteractionState } from "../collaboration/interaction-model";
@@ -329,18 +330,18 @@ describe("one field engine", () => {
     expect(storyCanvas).toContain("window.cancelAnimationFrame(raf)");
   });
 
-  it("static and active prism variants render the same three faces", () => {
-    const staticMark = render(<SpectraMark size={24} />).container;
-    const activeMark = render(
-      <PrismLoader size={24} optics="working" />,
-    ).container;
-    const points = (root: HTMLElement) =>
-      [...root.querySelectorAll("polygon")].map((node) =>
-        node.getAttribute("points"),
-      );
-    expect(points(activeMark)).toEqual(points(staticMark));
-    expect(new Set(points(staticMark))).toHaveLength(3);
-    expect(activeMark.querySelector(".spectra-prism-body")).not.toBeNull();
+  it("the mark is the island's prism in both themes, and the live prism is the same body on a canvas", () => {
+    const lines = (markup: string) => (markup.match(/<poly(gon|line)/g) ?? []).length;
+    const single = lines(prismSvg(MARK_POSE, { size: 64, palette: PRISM_PALETTES.light, detail: "mark" }));
+    const mark = render(<SpectraMark size={24} />).container;
+    expect(single).toBeGreaterThan(3);
+    expect(mark.querySelectorAll(".spectra-mark-light polygon, .spectra-mark-light polyline")).toHaveLength(single);
+    expect(mark.querySelectorAll(".spectra-mark-dark polygon, .spectra-mark-dark polyline")).toHaveLength(single);
+    const mono = render(<SpectraMark mono size={12} />).container.innerHTML;
+    expect(mono).toContain("currentColor");
+    expect(mono).not.toContain("url(#");
+    const live = render(<PrismLoader size={24} optics="working" />).container;
+    expect(live.querySelector(".spectra-prism-optic > canvas")).not.toBeNull();
   });
 });
 

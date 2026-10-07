@@ -433,128 +433,29 @@
 }
 
 /* ==================================================================
-   THE PRODUCT PRISM FAMILY.
+   THE PRISM IN THE PAGE.
 
-   One true 3D prism exists, and it lives on the landing page. Everything
-   inside the application draws the same object as clipped SVG with CSS
-   motion, so a 24px run indicator costs nothing.
-
-   Motion is finite where the work is finite: a completed run resolves to
-   one coherent warm edge rather than looping forever.
+   The mark and the live prism draw the island's prism (LIFE.md, "The
+   prism"). The mark carries both themes' drawings; the page's theme shows
+   one. The live prism is a canvas a little larger than its box, so its turn
+   and status dot are never clipped.
    ================================================================== */
 
+.dark .spectra-mark-light,
+:root:not(.dark) .spectra-mark-dark {
+  display: none;
+}
+
 .spectra-prism-optic {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
   overflow: visible;
 }
 
-.spectra-mark-body,
-.spectra-prism-body {
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-.spectra-prism-pool {
-  opacity: 0.58;
-  transform-box: fill-box;
-  transform-origin: center;
-  transition: opacity var(--motion-slow) var(--ease-standard);
-}
-
-.spectra-prism-refractions {
-  opacity: 0.68;
-  transition: opacity var(--motion-base) var(--ease-standard);
-}
-
-.spectra-prism-fault {
-  opacity: 0;
-  transition: opacity var(--motion-base) var(--ease-standard);
-}
-
-/* A linked static mark answers by lifting its internal light, not moving the
-   identity itself. */
-a:hover .spectra-mark .spectra-prism-refractions,
-button:hover .spectra-mark .spectra-prism-refractions,
-.spectra-mark:hover .spectra-prism-refractions {
-  opacity: 0.92;
-}
-
-/* Working turns the same solid object, slowly enough to remain legible. */
-.spectra-prism-optic[data-optics="working"] .spectra-prism-body {
-  animation: spectra-prism-turn calc(var(--motion-slow) * 14) var(--ease-in-out)
-    infinite;
-}
-.spectra-prism-optic[data-optics="working"] .spectra-prism-ray {
-  animation: spectra-prism-refract calc(var(--motion-slow) * 5)
-    var(--ease-in-out) infinite;
-  animation-delay: calc(var(--ray-i) * var(--motion-fast));
-}
-.spectra-prism-optic[data-optics="working"] .spectra-prism-pool {
-  animation: spectra-prism-pool calc(var(--motion-slow) * 7) var(--ease-in-out)
-    infinite;
-}
-
-/* Waiting holds its pose and breathes much more slowly. */
-.spectra-prism-optic[data-optics="waiting"] .spectra-prism-pool {
-  animation: spectra-prism-pool calc(var(--motion-slow) * 18) var(--ease-in-out)
-    infinite;
-}
-
-/* Completion resolves once to the familiar three-quarter pose. */
-.spectra-prism-optic[data-optics="completed"] .spectra-prism-body {
-  animation: spectra-prism-resolve calc(var(--motion-slow) * 3)
-    var(--ease-out-expo) 1 both;
-}
-.spectra-prism-optic[data-optics="completed"] .spectra-prism-pool {
-  opacity: 0.9;
-}
-
-.spectra-prism-optic[data-optics="failed"] .spectra-prism-fault {
-  opacity: 0.75;
-}
-
-.spectra-prism-optic[data-optics="dormant"] .spectra-prism-refractions {
-  opacity: 0.34;
-}
-
-@keyframes spectra-prism-turn {
-  0%,
-  100% {
-    transform: perspective(90px) rotateY(-5deg) rotateZ(-0.5deg);
-  }
-  50% {
-    transform: perspective(90px) rotateY(18deg) rotateZ(1deg);
-  }
-}
-
-@keyframes spectra-prism-pool {
-  0%,
-  100% {
-    opacity: 0.5;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.95;
-    transform: scale(1.1);
-  }
-}
-
-@keyframes spectra-prism-refract {
-  0%,
-  100% {
-    opacity: 0.35;
-  }
-  50% {
-    opacity: 0.95;
-  }
-}
-
-@keyframes spectra-prism-resolve {
-  from {
-    transform: perspective(90px) rotateY(14deg) scale(0.94);
-  }
-  to {
-    transform: perspective(90px) rotateY(0deg) scale(1);
-  }
+.spectra-prism-optic > canvas {
+  position: absolute;
+  pointer-events: none;
 }
 
 .spectra-prism-slot {
@@ -567,23 +468,9 @@ button:hover .spectra-mark .spectra-prism-refractions,
 
 /* While the landing story docks its true 3D prism here, the lightweight
    stand-in steps aside rather than doubling the object. */
-.spectra-prism-slot[data-occupied="true"] > svg {
+.spectra-prism-slot[data-occupied="true"] > * {
   opacity: 0;
   transition: opacity var(--motion-slow) var(--ease-standard);
-}
-html[data-spectra-motion="reduced"]
-  .spectra-prism-optic[data-optics="working"]
-  .spectra-prism-pool,
-html[data-spectra-motion="none"]
-  .spectra-prism-optic[data-optics="working"]
-  .spectra-prism-pool {
-  opacity: 0.8;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .spectra-prism-optic[data-optics="working"] .spectra-prism-pool {
-    opacity: 0.8;
-  }
 }
 
 /* Artifact editors are one continuous product canvas. Work types may arrange

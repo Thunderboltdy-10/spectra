@@ -9,22 +9,19 @@ import { spectraBus } from "@/features/spectra/events";
 const WORKING_RGB: [number, number, number] = [139, 108, 246];
 
 // ── SpectraLogo ──────────────────────────────────────────────────────────────
-/** The prism mark. Kept API-compatible with the previous ribbon logo. */
+/** The prism mark, named for assistive technology. */
 export function SpectraLogo({
   size = 32,
   className,
-  showTile = false,
   style,
 }: {
   size?: number;
   className?: string;
-  showTile?: boolean;
   style?: React.CSSProperties;
 }) {
   return (
     <SpectraMark
       size={size}
-      tile={showTile}
       title="Spectra"
       className={className}
       style={style}

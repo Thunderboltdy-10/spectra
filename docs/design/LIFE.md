@@ -286,6 +286,7 @@ The reference is the user's own code-made model (2026-10-03): a thin, clean, dar
 | Size | Where | How |
 | --- | --- | --- |
 | 16–32 px | Rail brand, favicon, tray and app icons | The static mark: `prismSvg` or one canvas draw. In the rail it is live on hover. |
+| 11–28 px in the page | Sign-in, chat avatars, Spectra in presence chips, a running trace | `SpectraMark` is the static mark (both themes in its markup; `mono` in the surrounding colour). `PrismLoader` is the live body on a small canvas: it turns while working, warms while waiting, settles when done, and draws only while it moves and is on screen. There is no other prism drawing. |
 | 28–40 px | The island and the agent switch | Live, drawn only while its body is moving |
 | 64–200 px | Empty states, sign-in, onboarding | Live, the full detail |
 

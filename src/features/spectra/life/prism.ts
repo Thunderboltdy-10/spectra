@@ -649,6 +649,20 @@ export function drawPrism(
 /** The prism as a standalone SVG, for the favicon, the tray and app icons. */
 export function prismSvg(pose: PrismPose, options: Omit<PrismDrawOptions, "x" | "y">): string {
   const box = options.size;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${box} ${box}">${prismSvgMarkup(pose, options)}</svg>`;
+}
+
+/**
+ * The prism's SVG content, without its `<svg>`: for marks drawn inline in the
+ * page. Gradient ids start with `id`, so several marks can share a page;
+ * `mono` draws every line and face in `currentColor` at its own opacity.
+ */
+export function prismSvgMarkup(
+  pose: PrismPose,
+  options: Omit<PrismDrawOptions, "x" | "y">,
+  { id = "p", mono = false }: { id?: string; mono?: boolean } = {},
+): string {
+  const box = options.size;
   const ops = prismOps(pose, { ...options, x: box / 2, y: box / 2 });
   const n = (v: number) => Number(v.toFixed(2));
   const rgb = (c: Rgb) => `rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`;
@@ -657,22 +671,27 @@ export function prismSvg(pose: PrismPose, options: Omit<PrismDrawOptions, "x" | 
   const body: string[] = [];
   ops.forEach((op, index) => {
     if (op.kind === "dot") {
-      body.push(`<circle cx="${n(op.points[0][0])}" cy="${n(op.points[0][1])}" r="${n(op.radius)}" fill="${rgb(op.rgb)}" fill-opacity="${n(op.a)}"/>`);
+      body.push(`<circle cx="${n(op.points[0][0])}" cy="${n(op.points[0][1])}" r="${n(op.radius)}" fill="${mono ? "currentColor" : rgb(op.rgb)}" fill-opacity="${n(op.a)}"/>`);
       return;
     }
     const paint = op.kind === "fill" ? op.fill : op.paint;
     let colour: string;
     let opacity = "";
-    if ("rgb" in paint) {
+    if (mono) {
+      // One ink: a face or bevel keeps how present it is, not its hue.
+      const a = "rgb" in paint ? paint.a : paint.stops.reduce((sum, [, , alpha]) => sum + alpha, 0) / paint.stops.length;
+      colour = "currentColor";
+      opacity = ` ${op.kind}-opacity="${n(a * (op.kind === "fill" ? 0.32 : 1))}"`;
+    } else if ("rgb" in paint) {
       colour = rgb(paint.rgb);
       opacity = ` ${op.kind}-opacity="${n(paint.a)}"`;
     } else {
-      const id = `p${index}`;
+      const gradient = `${id}${index}`;
       const stops = paint.stops.map(([t, c, a]) => `<stop offset="${n(t)}" stop-color="${rgb(c)}" stop-opacity="${n(a)}"/>`);
       defs.push(
-        `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${n(paint.from[0])}" y1="${n(paint.from[1])}" x2="${n(paint.to[0])}" y2="${n(paint.to[1])}">${stops.join("")}</linearGradient>`,
+        `<linearGradient id="${gradient}" gradientUnits="userSpaceOnUse" x1="${n(paint.from[0])}" y1="${n(paint.from[1])}" x2="${n(paint.to[0])}" y2="${n(paint.to[1])}">${stops.join("")}</linearGradient>`,
       );
-      colour = `url(#${id})`;
+      colour = `url(#${gradient})`;
     }
     if (op.kind === "fill") body.push(`<polygon points="${pts(op.points)}" fill="${colour}"${opacity}/>`);
     else {
@@ -682,7 +701,7 @@ export function prismSvg(pose: PrismPose, options: Omit<PrismDrawOptions, "x" | 
       );
     }
   });
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${box} ${box}"><defs>${defs.join("")}</defs>${body.join("")}</svg>`;
+  return `${defs.length ? `<defs>${defs.join("")}</defs>` : ""}${body.join("")}`;
 }
 
 /* ---------------------------------------------------------------- motion */

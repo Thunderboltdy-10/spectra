@@ -2,6 +2,7 @@
 
 import { Loader2, ChevronDown, Mail, Share2, LayoutGrid } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
+import { LifeKey } from "@/components/ui/life-moments";
 import { workTypeMeta } from "./artifact-card";
 import type { SpectraShareInvitation } from "../data/api";
 
@@ -99,6 +100,7 @@ function InvitationInbox({
               key={invitation.invitationId}
               className="rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-sm)]"
             >
+              <LifeKey id={`invitation:${invitation.invitationId}`} />
               <div className="flex items-start gap-3.5">
                 <span
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-card bg-[var(--bg-secondary)]"

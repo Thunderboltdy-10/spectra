@@ -3,6 +3,7 @@
 import { Copy, Loader2, ShieldCheck, UserPlus, Check, Link2, Search, Share2, X, Building2, Globe2, Inbox } from "@/components/icons/glyph-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
+import { LifeKey } from "@/components/ui/life-moments";
 import { readConvexError } from "../../../../shared/convex-error.mjs";
 import {
   Dialog,
@@ -566,6 +567,7 @@ export function ShareDialog({
                       key={request.requestId}
                       className="border-b border-[var(--border-subtle)] px-4 py-3 last:border-b-0"
                     >
+                      <LifeKey id={`access-request:${request.requestId}`} />
                       <div className="flex items-start gap-3">
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--bg-elevated)] text-micro font-semibold text-[var(--text-secondary)]">
                           {request.requester?.name
@@ -667,6 +669,7 @@ export function ShareDialog({
                   key={share.invitationId}
                   className="flex items-center gap-3 border-b border-[var(--border-subtle)] px-3 py-2.5 last:border-b-0"
                 >
+                  <LifeKey id={`share:${share.invitationId}`} />
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--bg-secondary)] text-micro font-semibold text-[var(--text-secondary)]">
                     {share.account?.name
                       .split(/\s+/)
@@ -877,6 +880,7 @@ export function ShareDialog({
                     key={link.linkId}
                     className="flex items-center gap-3 rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-2.5"
                   >
+                    <LifeKey id={`public-link:${link.linkId}`} />
                     <Link2 className="h-3.5 w-3.5 text-[var(--brand-primary)]" />
                     <div className="min-w-0 flex-1">
                       <div className="text-micro font-medium text-[var(--text-primary)]">

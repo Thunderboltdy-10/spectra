@@ -40,6 +40,8 @@ const MAX_GRANTED_TITLE_CHECKS = 60;
 const RELATED_DEFAULT_LIMIT = 8;
 const RELATED_NEIGHBORS = 32;
 const RELATED_TTL_MS = 30 * 60_000;
+/** Passages searched with the item's centroid to find each neighbour's closest one (the item's own come first). */
+const RELATED_PASSAGE_HITS = 96;
 const CLOCK_SKEW_MS = 86_400_000;
 
 const vSearchKind = v.union(...SEMANTIC_KINDS.map((kind) => v.literal(kind))) as unknown as Validator<SemanticKind, "required", never>;
@@ -381,7 +383,7 @@ export const relatedPrepare = internalQuery({
   },
 });
 
-const vNeighbor = v.object({ itemKind: vSemanticKind, itemId: v.string(), similarity: v.number() });
+const vNeighbor = v.object({ itemKind: vSemanticKind, itemId: v.string(), similarity: v.number(), chunkKey: v.optional(v.string()) });
 
 /** Scheduled by `related` (no auth in scheduled functions, so the viewer comes from relatedPrepare). */
 export const storeRelated = internalMutation({
@@ -409,6 +411,8 @@ export const relatedHydrate = internalQuery({
     const selfKey = itemKeyOf(args.item.kind, args.item.itemId);
     const self = await semanticItemRow(ctx, args.item.kind, args.item.itemId);
     const similar = args.neighbors.filter((neighbor) => neighbor.similarity >= SEMANTIC_TUNING.relatedMinSimilarity);
+    const passages = new Map(similar.flatMap((neighbor) =>
+      neighbor.chunkKey ? [[itemKeyOf(neighbor.itemKind, neighbor.itemId), neighbor.chunkKey] as const] : []));
     const refs = [...args.links.map((link) => ({ kind: link.kind, itemId: link.itemId })),
       ...similar.map((neighbor) => ({ kind: neighbor.itemKind, itemId: neighbor.itemId }))];
     const readable = await readableItems(ctx, actor, refs);
@@ -447,11 +451,20 @@ export const relatedHydrate = internalQuery({
     const workspaceOf = workspaceResolver(ctx, actor);
     return Promise.all(ordered.map(async ([key, entry]): Promise<RelatedResult> => {
       const row = rows.get(key);
-      const best = await ctx.db.query("semanticChunks")
-        .withIndex("by_item", (q) => q.eq("itemKind", entry.item.kind).eq("itemId", entry.item.itemId).eq("chunkKey", "title")).unique();
-      const snippet = best && (!best.ownerOnly || best.ownerAccountId === actor.accountId) ? snippetFor(best.text, "", 160) : undefined;
+      const readableChunk = async (chunkKey: string) => {
+        const chunk = await ctx.db.query("semanticChunks")
+          .withIndex("by_item", (q) => q.eq("itemKind", entry.item.kind).eq("itemId", entry.item.itemId).eq("chunkKey", chunkKey)).unique();
+        return chunk && (!chunk.ownerOnly || chunk.ownerAccountId === actor.accountId) ? chunk : null;
+      };
+      // The neighbour's passage most like this item, when one was found: its place and words.
+      const passageKey = passages.get(key);
+      const passage = passageKey ? await readableChunk(passageKey) : null;
+      const placed = passage?.regionId ? passage : null;
+      const best = placed ?? await readableChunk("title");
+      const snippet = best ? snippetFor(best.text, "", 160) : undefined;
       return { kind: entry.item.kind, itemId: entry.item.itemId, title: entry.item.title, typeLabel: entry.item.typeLabel,
-        subtype: entry.item.subtype, snippet, anchor: anchorFor(entry.item.kind, entry.item.itemId), reasons: entry.reasons,
+        subtype: entry.item.subtype, snippet, ...(placed?.label ? { location: placed.label } : {}),
+        anchor: anchorFor(entry.item.kind, entry.item.itemId, placed ?? undefined), reasons: entry.reasons,
         score: entry.explicit ? 1 : Math.round((entry.similarity ?? 0) * 1_000) / 1_000, status: entry.item.status,
         updatedAt: entry.item.updatedAt, timeAt: entry.item.timeAt ?? row?.timeAt, workspace: await workspaceOf(row?.workspaceId),
         ownership: entry.item.ownership };
@@ -482,6 +495,7 @@ export const related = action({
         return row && !(row.itemKind === prepared.kind && row.itemId === args.itemId)
           ? [{ itemKind: row.itemKind, itemId: row.itemId, similarity: hit.similarity }] : [];
       }).slice(0, RELATED_NEIGHBORS);
+      neighbors = await withPassages(ctx, neighbors, prepared.centroid, prepared.version, prepared.keys);
       if (prepared.generation !== undefined)
         await ctx.scheduler.runAfter(0, internal.semantic.storeRelated, { accountId: prepared.accountId, schoolId: prepared.schoolId,
           itemKind: prepared.kind, itemId: args.itemId,
@@ -493,6 +507,40 @@ export const related = action({
       links: prepared.links, neighbors: neighbors ?? [], limit });
     return { results, mode: neighbors ? "hybrid" : "links_only", ...(degraded ? { degraded: { reason: degraded } } : {}),
       cached: Boolean(prepared.cachedNeighbors), tookMs: Date.now() - started };
+  },
+});
+
+/**
+ * Each neighbour's passage closest to the item: one search over passages with
+ * the item's centroid, keeping per neighbour its best passage that names a
+ * place (a block, slide, range, card). Readability is checked when it is shown.
+ */
+async function withPassages(ctx: ActionCtx, neighbors: Array<{ itemKind: IndexedSemanticKind; itemId: string; similarity: number }>,
+  centroid: number[], version: string, keys: string[]) {
+  if (!neighbors.some((neighbor) => neighbor.itemKind === "artifact")) return neighbors;
+  const hits = await vectorHits(ctx, "semanticChunks", centroid, version, keys, RELATED_PASSAGE_HITS);
+  const refs = hits.length ? await ctx.runQuery(internal.semantic.chunkRefs, { ids: hits.map((hit) => hit.id as Id<"semanticChunks">) }) : [];
+  const byId = new Map(refs.map((ref) => [ref.id, ref]));
+  const best = new Map<string, string>();
+  for (const hit of hits) {
+    const ref = byId.get(hit.id);
+    if (!ref?.placed) continue;
+    const key = itemKeyOf(ref.itemKind, ref.itemId);
+    if (!best.has(key)) best.set(key, ref.chunkKey);
+  }
+  return neighbors.map((neighbor) => {
+    const chunkKey = neighbor.itemKind === "artifact" ? best.get(itemKeyOf(neighbor.itemKind, neighbor.itemId)) : undefined;
+    return chunkKey ? { ...neighbor, chunkKey } : neighbor;
+  });
+}
+
+/** Item and passage of chunk hits, and whether the passage names a place. */
+export const chunkRefs = internalQuery({
+  args: { ids: v.array(v.id("semanticChunks")) },
+  handler: async (ctx, args) => {
+    const rows = await Promise.all(args.ids.map((id) => ctx.db.get(id)));
+    return rows.flatMap((row) => row ? [{ id: String(row._id), itemKind: row.itemKind, itemId: row.itemId, chunkKey: row.chunkKey,
+      placed: Boolean(row.regionId) }] : []);
   },
 });
 

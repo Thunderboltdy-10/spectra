@@ -92,7 +92,10 @@ export type RelatedReason =
   | { type: "made_in_thread" };
 
 export type RelatedResult = Omit<SemanticResult, "matchedBy" | "snippet" | "location"> & {
+  /** The passage of the item most like the one it is related to, else its title passage. */
   snippet?: string;
+  /** Where that passage is ("Slide 3: Results"); `anchor.regionId` names it, so opening lands there. */
+  location?: string;
   /** Why the item is listed. Explicit links come first. */
   reasons: RelatedReason[];
 };

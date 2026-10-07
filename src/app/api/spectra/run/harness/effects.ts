@@ -543,11 +543,13 @@ export async function executeApplicationCommand(
     const destination = String(parsed.destination ?? "library");
     const targetId =
       typeof parsed.targetId === "string" ? parsed.targetId : undefined;
+    const region = destination === "artifact" && typeof parsed.region === "string" && parsed.region ? parsed.region : undefined;
     onUiEvent?.({
       key: "navigate_spectra",
       payload: {
         destination,
         ...(targetId ? { targetId } : {}),
+        ...(region ? { region } : {}),
         note: `Opening ${destination}`,
       },
     });

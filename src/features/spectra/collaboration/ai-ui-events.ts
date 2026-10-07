@@ -1,5 +1,6 @@
 import { noteAiLocation, noteAiSurface } from "./follow-ai";
 import { isFollowRoute } from "./follow-navigation";
+import { workRegionFrom } from "../anchors/locate";
 import { spectraBus } from "../events";
 import { handleSettingsObservationEvent } from "./settings-observation-client";
 import { DEVICES_HREF } from "../bridge/client";
@@ -355,9 +356,11 @@ function rememberEvent(event: SpectraAiUiEvent): void {
   const destination = event.payload?.destination;
   const targetId = event.payload?.targetId;
   if (destination === "artifact" && typeof targetId === "string" && targetId) {
+    const region = workRegionFrom(event.payload?.region);
     noteAiLocation({
       ...(event.runId ? { actorId: event.runId } : {}),
       artifactId: targetId,
+      ...(region ? { region } : {}),
       note: "Opening the requested work",
     });
     return;

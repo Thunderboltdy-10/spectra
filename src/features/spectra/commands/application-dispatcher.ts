@@ -7,6 +7,7 @@ import { runLocalDeviceAction } from "../devices/device-actions";
 import { devicePairing } from "../devices/pairing";
 import type { CommandEffectKind, CommandExecutionResult } from "./types";
 import { aiSyncPurpose } from "../../../../shared/school-sync";
+import { expectLanding } from "../anchors/open-anchor";
 
 export type ApplicationCommandDispatcher = (
   commandId: string,
@@ -194,6 +195,7 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
       case "app.work.open": {
         const workId = typeof params.workId === "string" ? params.workId.trim() : "";
         if (!workId) throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.work.open requires workId");
+        expectLanding(workId, params.region);
         const readiness = readinessFrom(await host.openArtifact(workId, params.surface === "tile" || params.surface === "full" || params.surface === "panel" ? params.surface : "panel"));
         return completed(commandId, "open", "Work opened.", readiness, { workId });
       }

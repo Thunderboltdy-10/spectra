@@ -17,6 +17,7 @@ vi.mock("../../../../convex/_generated/api", () => ({
 vi.mock("convex/react", () => ({ useAction: (name: string) => (name === "search" ? semantic.search : vi.fn()) }));
 
 import { GlobalSearch } from "../components/context-controls";
+import { clearLandings, pendingLanding } from "../anchors/open-anchor";
 
 const workspace = {
   _id: "ws-1",
@@ -95,6 +96,23 @@ describe("GlobalSearch", () => {
     expect(row.textContent).toContain("Document · Heading: Glycolysis");
     fireEvent.click(row);
     expect(onOpenArtifact).toHaveBeenCalledWith("work-1");
+  });
+
+  it("opens a work at the passage that matched", async () => {
+    clearLandings();
+    searchSpectra.mockResolvedValue({ artifacts: [], workspaces: [] });
+    semantic.search.mockResolvedValue({
+      results: [{ ...workResult, anchor: { kind: "artifact", artifactId: "work-1", regionId: "b7", label: "Heading: Glycolysis" } }],
+      mode: "hybrid",
+      tookMs: 3,
+    });
+    let landing: unknown;
+    const { onOpenArtifact } = renderSearch(vi.fn(), vi.fn((workId: string) => { landing = pendingLanding(workId)?.region; }));
+    await openAndSearch("respiration");
+    fireEvent.click(await screen.findByRole("button", { name: /Cell respiration notes/ }));
+    expect(onOpenArtifact).toHaveBeenCalledWith("work-1");
+    expect(landing).toEqual({ id: "b7", label: "Heading: Glycolysis", excerpt: "Glycolysis happens in the cytoplasm" });
+    clearLandings();
   });
 
   it("says quietly when only exact words could be matched", async () => {

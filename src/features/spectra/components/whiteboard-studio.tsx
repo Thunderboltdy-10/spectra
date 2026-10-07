@@ -98,6 +98,9 @@ import { getWorkDefinition } from "../work/registry";
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { suggestedEmbedInteraction } from "../capabilities";
 import { spectraBus } from "../events";
+import { bestByExcerpt, type WorkRegion } from "../anchors/locate";
+import { regionElement, useOpenAnchor, type AnchorLanding } from "../anchors/use-open-anchor";
+import { collectText } from "../../../../shared/semantic-chunks";
 import type { ReferenceNode } from "../references";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
@@ -458,6 +461,7 @@ function BoardNode({
     <div
       ref={nodeElementRef}
       className="whiteboard-node"
+      data-anchor-region={compact ? undefined : node.id}
       data-ai-region={aiRegionAttr(aiActive)}
       {...(path ? targetAttrs(path) : {})}
       data-type={node.type}
@@ -1381,6 +1385,33 @@ export function WhiteboardStudio({
       viewport.zoom,
     ],
   );
+
+  // Opened at a frame or object (a search hit, a citation): select it and
+  // frame it. The canvas pans rather than scrolls, so the landing only marks.
+  const landOnNode = useCallback(
+    (region: WorkRegion): AnchorLanding | null => {
+      const named =
+        board.nodes.find((node) => node.id === region.id && !node.hidden) ??
+        (() => {
+          const edge = board.edges.find((candidate) => candidate.id === region.id);
+          return edge ? board.nodes.find((node) => node.id === edge.from && !node.hidden) : undefined;
+        })();
+      if (!named) return null;
+      const members = named.type === "frame"
+        ? [named, ...board.nodes.filter((node) => node.frameId === named.id && !node.hidden)]
+        : [named];
+      const node =
+        bestByExcerpt(members, (member) => [member.semanticLabel ?? "", collectText(member.content, 1_500)].join(" "), region.excerpt) ??
+        named;
+      return {
+        select: () => revealNode(node),
+        find: (root) => regionElement(root, node.id),
+        scroll: false,
+      };
+    },
+    [board.edges, board.nodes, revealNode],
+  );
+  useOpenAnchor(artifactId, landOnNode);
 
   function addNode(type: WhiteboardNodeType, x?: number, y?: number) {
     const layer = layers.find(

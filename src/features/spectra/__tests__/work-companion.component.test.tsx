@@ -16,6 +16,7 @@ vi.mock("../semantic/use-semantic", () => ({ useRelated: mocks.related }));
 
 import { CompanionSheet, WorkCompanionPanel, relatedReasonText, type CompanionTab } from "../components/work-companion";
 import { spectraBus } from "../events";
+import { clearLandings, pendingLanding } from "../anchors/open-anchor";
 
 const work = {
   _id: "work-1",
@@ -123,6 +124,28 @@ describe("Work companion", () => {
     fireEvent.click(screen.getByText("Chlorophyll quiz"));
     expect(opened).toHaveBeenCalledWith({ workId: "work-9", surface: "panel" });
     stop();
+  });
+
+  it("opens related work at its passage most like this one", () => {
+    clearLandings();
+    mocks.related.mockReturnValue(relatedState({
+      results: [
+        { kind: "artifact", itemId: "work-2", title: "Light reactions", typeLabel: "Slides", subtype: "presentation", snippet: "Chlorophyll absorbs light", location: "Slide 2: Pigments", anchor: { kind: "artifact", artifactId: "work-2", regionId: "s2", label: "Slide 2: Pigments" }, score: 1, ownership: "mine", reasons: [{ type: "similar", similarity: 0.8 }] },
+        { kind: "artifact", itemId: "work-9", title: "Chlorophyll quiz", typeLabel: "Quiz", subtype: "quiz", snippet: "Which pigment", location: "Question 1", anchor: { kind: "artifact", artifactId: "work-9", regionId: "q1", label: "Question 1" }, score: 0.8, ownership: "shared", reasons: [{ type: "similar", similarity: 0.8 }] },
+      ],
+    }));
+    let landing: unknown;
+    const onOpenWork = vi.fn((work: SpectraArtifact) => { landing = pendingLanding(work._id)?.region; });
+    const opened = vi.fn();
+    const stop = spectraBus.handle("work.open", opened);
+    render(<Panel onOpenThread={() => {}} onOpenWork={onOpenWork} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Related" }));
+    fireEvent.click(screen.getByText("Light reactions"));
+    expect(landing).toEqual({ id: "s2", label: "Slide 2: Pigments", excerpt: "Chlorophyll absorbs light" });
+    fireEvent.click(screen.getByText("Chlorophyll quiz"));
+    expect(opened).toHaveBeenCalledWith({ workId: "work-9", surface: "panel", region: { id: "q1", label: "Question 1", excerpt: "Which pigment" } });
+    stop();
+    clearLandings();
   });
 
   it("shows a ghost while related work loads, a retry when it fails, and a quiet note when only links answer", () => {

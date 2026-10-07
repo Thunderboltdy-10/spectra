@@ -81,6 +81,16 @@ describe("contextual K-bar registry", () => {
     expect(entries[0]?.command.id).toBe("app.work.open");
   });
 
+  it("opens a work at the place a result matched", () => {
+    const [result] = semanticKBarResults([
+      { kind: "artifact", itemId: "work-3", title: "Budget", typeLabel: "Sheets", subtype: "sheets", snippet: "…Lunch · 8", location: "Budget A1:B6", anchor: { kind: "artifact", artifactId: "work-3", regionId: "sheet-2", label: "Budget A1:B6" }, score: 0.9, matchedBy: ["meaning"], ownership: "mine" },
+    ]);
+    expect(result?.params).toEqual({ workId: "work-3", surface: "panel", region: { id: "sheet-2", label: "Budget A1:B6", excerpt: "…Lunch · 8" } });
+    // The command keeps the region when it parses the result's parameters.
+    const open = APP_COMMANDS.find((command) => command.id === "app.work.open")!;
+    expect(open.params!.parse(result!.params)).toMatchObject({ region: { id: "sheet-2", label: "Budget A1:B6" } });
+  });
+
   it("finds workspaces by name and merges them without duplicates", async () => {
     const search = vi.spyOn(spectraApi, "searchSpectra").mockResolvedValue({ artifacts: [], workspaces: [{ _id: "ws-1", title: "Biology" } as never] });
     const signal = new AbortController().signal;

@@ -5,6 +5,7 @@ import { createElement, Fragment, useEffect, useMemo, useRef, useState, type CSS
 import { cn } from "@/lib/utils";
 import { EquationPreview } from "../editor/equation-preview";
 import { spectraBus } from "../events";
+import { workRegionFrom } from "../anchors/locate";
 import {
   IncrementalRichContentParser,
   richContentFromStored,
@@ -58,14 +59,25 @@ function safeMediaSrc(value: string) {
   return value.startsWith("blob:") ? value : safeHref(value);
 }
 
-/** Opens a verified source where it lives. */
-export function openCitationSource(source: CitationSource) {
+/**
+ * Opens a verified source where it lives. A work source opens at the place
+ * the citation names (its WHERE: a region a search gave, "slide-3", a range,
+ * a heading), when the work can find it.
+ */
+export function openCitationSource(source: CitationSource, where?: string) {
   if ("workId" in source) {
-    void spectraBus.command("work.open", { workId: source.workId, surface: "panel" });
+    const region = citationRegion(where);
+    void spectraBus.command("work.open", { workId: source.workId, surface: "panel", ...(region ? { region } : {}) });
     return;
   }
   const url = webUrl(source.url);
   if (url) window.open(url, "_blank", "noopener,noreferrer");
+}
+
+/** The place a citation's WHERE names; "source" is the writer's placeholder for "the whole source". */
+export function citationRegion(where: string | undefined) {
+  const id = where?.trim();
+  return id && id.toLowerCase() !== "source" ? workRegionFrom(id) : undefined;
 }
 
 function Citation({ node, verified }: { node: Extract<RichInline, { type: "citation" }>; verified: Verified }) {
@@ -75,7 +87,7 @@ function Citation({ node, verified }: { node: Extract<RichInline, { type: "citat
   if (source && opens) {
     const where = "workId" in source ? "in the Side" : "in a new tab";
     // A work opens in the Side out of the citation (MOTION.md, "Shared elements").
-    return <button type="button" data-spectra-citation="" {...("workId" in source ? { "data-life-launch": "" } : {})} onClick={() => openCitationSource(source)} title={source.title ? `Verified source: ${source.title}` : "Verified source"} aria-label={`Open the source ${source.title ?? node.label ?? ""} ${where}`.replace(/\s+/g, " ")}>{text}</button>;
+    return <button type="button" data-spectra-citation="" {...("workId" in source ? { "data-life-launch": "" } : {})} onClick={() => openCitationSource(source, node.evidenceIds[0])} title={source.title ? `Verified source: ${source.title}` : "Verified source"} aria-label={`Open the source ${source.title ?? node.label ?? ""} ${where}`.replace(/\s+/g, " ")}>{text}</button>;
   }
   // Verified, but with nowhere to open: no button that does nothing.
   if (source || verified.ids.has(node.sourceId)) return <span data-spectra-citation="" title="Verified source">{text}</span>;

@@ -17,6 +17,8 @@ import type { RelatedReason } from "../semantic/types";
 import { artifactPlacements, formatRelativeTime } from "./spectra-view-model";
 import { previewText } from "./preview-text";
 import { WorkbenchInspectorTabs } from "./workbench-inspector-tabs";
+import { expectLanding } from "../anchors/open-anchor";
+import { regionOfResult } from "../anchors/locate";
 
 /*
  * The companion (SHELL.md, "Workspace and fullscreen"): everything about a
@@ -280,9 +282,13 @@ function RelatedWork({
               accent={meta?.color}
               title={result.title}
               meta={[why, meta?.label ?? result.typeLabel, result.updatedAt ? formatRelativeTime(result.updatedAt) : null].filter(Boolean).join(" · ")}
-              onOpen={() =>
-                known ? onOpenWork(known) : void spectraBus.command("work.open", { workId: result.itemId, surface: "panel" })
-              }
+              onOpen={() => {
+                const region = regionOfResult(result);
+                if (known) {
+                  expectLanding(result.itemId, region);
+                  onOpenWork(known);
+                } else void spectraBus.command("work.open", { workId: result.itemId, surface: "panel", ...(region ? { region } : {}) });
+              }}
             />
           );
         })}

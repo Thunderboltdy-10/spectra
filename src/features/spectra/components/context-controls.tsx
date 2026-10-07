@@ -8,6 +8,8 @@ import { workTypeMeta } from "./artifact-card";
 import { searchSpectra, type SpectraWorkspace } from "../data/api";
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { SEMANTIC_DEBOUNCE_MS, useSemanticSearch } from "../semantic/use-semantic";
+import { expectLanding } from "../anchors/open-anchor";
+import { regionOfResult } from "../anchors/locate";
 import { toast } from "@/components/ui/toast";
 
 export function showContinuationConflict({
@@ -325,6 +327,7 @@ export function GlobalSearch({
                       key={result.itemId}
                       type="button"
                       onClick={() => {
+                        expectLanding(result.itemId, regionOfResult(result));
                         onOpenArtifact(result.itemId);
                         setOpen(false);
                       }}

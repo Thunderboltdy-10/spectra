@@ -68,6 +68,24 @@ describe("AI UI events", () => {
     expect(opened).toEqual(["artifact-7"]);
   });
 
+  it("opens a followed view at the place Spectra named, and drops a malformed one", () => {
+    const regions: unknown[] = [];
+    const remove = spectraBus.handle("work.open", ({ region }) => {
+      regions.push(region);
+    });
+    setFollowingAi(true);
+    handleSpectraAiUiEvent({
+      key: "navigate",
+      payload: { destination: "artifact", targetId: "artifact-8", region: "slide-3" },
+    });
+    handleSpectraAiUiEvent({
+      key: "navigate",
+      payload: { destination: "artifact", targetId: "artifact-9", region: { label: 4 } },
+    });
+    expect(regions).toEqual([{ id: "slide-3" }, undefined]);
+    remove();
+  });
+
   it("waits for a committed artifact id before Follow AI opens a new artifact", () => {
     const opened: string[] = [];
     const remove = spectraBus.handle("work.open", ({ workId }) => {

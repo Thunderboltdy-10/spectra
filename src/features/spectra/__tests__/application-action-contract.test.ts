@@ -132,6 +132,18 @@ describe("application action contract matrix (stubbed persistence)", () => {
     if (status) expect(result.status).toBe(status);
   });
 
+  it("asks the user's view to open a work at the region Spectra named, and only a work", async () => {
+    const events: Array<{ key: string; payload?: Record<string, unknown> }> = [];
+    await executeApplicationCommand("actor", "run", "attempt", "navigate_spectra", { destination: "artifact", targetId: "work", region: "slide-3" },
+      undefined, (event) => events.push(event), undefined, "operation");
+    await executeApplicationCommand("actor", "run", "attempt", "navigate_spectra", { destination: "calendar", region: "slide-3" },
+      undefined, (event) => events.push(event), undefined, "operation");
+    expect(events.map((event) => event.payload)).toEqual([
+      { destination: "artifact", targetId: "work", region: "slide-3", note: "Opening artifact" },
+      { destination: "calendar", note: "Opening calendar" },
+    ]);
+  });
+
   it("runs an agent's checks as the studio does, under the run owner's identity, and returns the failing cases as evidence", async () => {
     seams.checks.mockResolvedValueOnce({
       status: "failed", passedCount: 6, caseCount: 8, averageScore: 0.71,

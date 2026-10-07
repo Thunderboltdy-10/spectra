@@ -1,4 +1,5 @@
 import type { WorkAnchor } from "../work/registry";
+import type { WorkRegion } from "../anchors/locate";
 import type { SpectraPreferences } from "../settings/schema";
 import type { ReferenceNode } from "../references";
 import type { AiSyncPurpose } from "../../../../shared/school-sync";
@@ -23,7 +24,8 @@ export type SpectraCommands = {
   "work.open": {
     workId: string;
     surface?: "full" | "panel" | "tile";
-    anchor?: WorkAnchor;
+    /** Land on this place inside the work (a search hit, a citation); unknown places open the work as usual. */
+    region?: WorkRegion;
   };
   "document.executeCommand": {
     artifactId: string;

@@ -88,6 +88,9 @@ import {
   sheetsAiTouchesColumn,
 } from "./ai-region-path";
 import { partAttrs, targetAttrs } from "../collaboration/target-attributes";
+import type { WorkRegion } from "../anchors/locate";
+import { sheetLandingFor } from "../anchors/sheet-region";
+import { attributeSelector, paintedFirst, useOpenAnchor, type AnchorLanding } from "../anchors/use-open-anchor";
 import { SelectField } from "@/components/ui/select";
 import {
   ArtifactWorkbar,
@@ -1987,6 +1990,56 @@ export const SheetsStudio = memo(function SheetsStudio({
       return next;
     });
   }, [bounds.columns, columnOffsets, rowOffsets, visibleRowIndices.length]);
+
+  // Opened at a range (a search hit, a citation): show its sheet, select the
+  // range, and bring it into the virtualised grid before landing on it.
+  const landingGeometry = useRef({ sheetId: activeSheet.id, rowOffsets, columnOffsets, visibleRowIndices });
+  landingGeometry.current = { sheetId: activeSheet.id, rowOffsets, columnOffsets, visibleRowIndices };
+  const landOnRange = useCallback(
+    (region: WorkRegion): AnchorLanding | null => {
+      const landing = sheetLandingFor(workbook.sheets, activeSheet.id, region);
+      if (!landing) return null;
+      const { sheetId, range } = landing;
+      const cellIn = (address: string) => {
+        const grid = gridRef.current;
+        return grid ? paintedFirst(grid.querySelectorAll(attributeSelector("data-address", address))) : null;
+      };
+      const startAddress = `${columnName(range.start.column)}${range.start.row + 1}`;
+      const endAddress = `${columnName(range.end.column)}${range.end.row + 1}`;
+      let scrolled = false;
+      return {
+        select: () => {
+          if (sheetId !== activeSheet.id) showSheet(sheetId);
+          setRange(range);
+        },
+        find: () => {
+          const geometry = landingGeometry.current;
+          const grid = gridRef.current;
+          if (geometry.sheetId !== sheetId || !grid) return null;
+          const cell = cellIn(startAddress);
+          if (cell || scrolled) return cell;
+          // Not rendered yet: scroll the grid's window to it and look again.
+          scrolled = true;
+          const position = geometry.visibleRowIndices.indexOf(range.start.row);
+          if (position < 0) return null;
+          grid.scrollTop = Math.max(0, (geometry.rowOffsets[position] ?? 0) - grid.clientHeight / 3);
+          grid.scrollLeft = Math.max(0, (geometry.columnOffsets[range.start.column] ?? 0) - grid.clientWidth / 4);
+          return null;
+        },
+        extent: (start) => {
+          const end = endAddress === startAddress ? null : cellIn(endAddress);
+          if (!end) return null;
+          const a = start.getBoundingClientRect();
+          const b = end.getBoundingClientRect();
+          const left = Math.min(a.left, b.left);
+          const top = Math.min(a.top, b.top);
+          return new DOMRect(left, top, Math.max(a.right, b.right) - left, Math.max(a.bottom, b.bottom) - top);
+        },
+      };
+    },
+    [activeSheet.id, showSheet, workbook.sheets],
+  );
+  useOpenAnchor(artifactId, landOnRange);
 
   /**
    * The window was only ever recomputed on scroll, so the first paint always

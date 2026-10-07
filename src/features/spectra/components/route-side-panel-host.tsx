@@ -30,6 +30,7 @@ import { launchFrom, useLifeLanding } from "../life/use-life";
 import { LiveThreadPanel } from "./live-thread-panel";
 import { CompanionSheet, type CompanionTab } from "./work-companion";
 import { createLatestStudioLoad } from "./latest-studio-load";
+import { expectLanding } from "../anchors/open-anchor";
 import {
   StudioSplitPlaceholder,
   useArtifactStudioState,
@@ -259,6 +260,7 @@ export function RouteSidePanelHost() {
   useEffect(() => {
     if (!eligible) return;
     const removeWork = spectraBus.handle("work.open", (command) => {
+      expectLanding(command.workId, command.region);
       if (command.surface === "full") {
         fullscreen(command.workId);
         return;

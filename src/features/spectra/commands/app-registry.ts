@@ -366,6 +366,13 @@ const APP_COMMAND_PRESENTATION: readonly Command<unknown>[] = [
     params: z.object({
       workId: z.string().trim().min(1),
       surface: z.enum(["full", "panel", "tile"]).optional(),
+      region: z
+        .object({
+          id: z.string().trim().min(1).max(400),
+          label: z.string().max(240).optional(),
+          excerpt: z.string().max(600).optional(),
+        })
+        .optional(),
     }),
     parameters: [{ name: "workId", label: "Work", kind: "item", required: true, placeholder: "Work ID" }],
     presentation: {

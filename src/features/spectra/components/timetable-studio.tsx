@@ -30,6 +30,9 @@ import {
 } from "react";
 import { useNow } from "@/hooks/use-now";
 import { spectraBus } from "../events";
+import { itemInPassage, plainOfMarkup, type WorkRegion } from "../anchors/locate";
+import { attributeSelector, paintedFirst, useOpenAnchor, type AnchorLanding } from "../anchors/use-open-anchor";
+import { TARGET_ATTRIBUTE } from "../collaboration/interaction-geometry";
 import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
@@ -907,6 +910,38 @@ export function TimetableStudio({
     );
     return mergedIndex >= 0 ? `/events/${mergedIndex}` : `/events/${eventId}`;
   };
+
+  // Opened at an event (a search hit, a citation): move to a week it is in
+  // when it is not in view, select it, and land on its card. The private view
+  // is the user's own, so it moves only once it has loaded.
+  useOpenAnchor(
+    artifactId,
+    (region: WorkRegion): AnchorLanding | null => {
+      const events = baseVisibleEvents;
+      const named = events.find((event) => event.id === region.id);
+      if (!named) return null;
+      const event =
+        itemInPassage(events, events.indexOf(named), (entry) =>
+          [entry.title, entry.location, plainOfMarkup(entry.notes)].filter(Boolean).join(" "),
+        region.excerpt) ?? named;
+      return {
+        select: () => {
+          if (!visibleEvents.some((shown) => shown.id === event.id)) {
+            const anchorDate = pickTimetableAnchorDate({ events: [event], timezone: timetable.timezone, now: new Date() });
+            if (anchorDate && anchorDate !== view.anchorDate) {
+              userMovedAnchorRef.current = true;
+              emit((draft) => {
+                draft.view!.anchorDate = anchorDate;
+              });
+            }
+          }
+          selectEvent(event);
+        },
+        find: (root) => paintedFirst(root.querySelectorAll(attributeSelector(TARGET_ATTRIBUTE, eventPath(event.id)))),
+      };
+    },
+    { ready: personalReady },
+  );
 
   const eventAiChanged = (eventId: string) => {
     if (!aiChangedPaths.length) return false;

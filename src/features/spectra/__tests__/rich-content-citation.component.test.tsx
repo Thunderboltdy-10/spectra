@@ -39,6 +39,20 @@ describe("verified citations", () => {
     expect(button.getAttribute("aria-label")).toBe("Open the source Biology textbook in the Side");
     act(() => (button as HTMLButtonElement).click());
     stop();
+    // The citation's WHERE is the place in the source it opens at.
+    expect(opened).toEqual([{ workId: "wx1", surface: "panel", region: { id: "e1" } }]);
+  });
+
+  it("opens the whole source when the citation names no place in it", () => {
+    const opened: unknown[] = [];
+    const stop = spectraBus.handle("work.open", (detail) => { opened.push(detail); });
+    act(() =>
+      root.render(
+        <SpectraRichContent content="Cells divide [[cite:book:source|1]]." sources={[{ id: "book", workId: "wx1", title: "Biology textbook" }]} />,
+      ),
+    );
+    act(() => (citation("1") as HTMLButtonElement).click());
+    stop();
     expect(opened).toEqual([{ workId: "wx1", surface: "panel" }]);
   });
 

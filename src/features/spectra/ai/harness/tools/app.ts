@@ -707,18 +707,19 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "open_in_spectra",
       description:
-        "Show the user a place in Spectra: library, calendar, settings, devices, agents (targetId: an agent to open its page), school, analytics, a workspace or an artifact (targetId). Use it when they ask to see something; whether their view follows depends on their Follow AI setting.",
+        "Show the user a place in Spectra: library, calendar, settings, devices, agents (targetId: an agent to open its page), school, analytics, a workspace or an artifact (targetId; region: the region a search result gives, to open it at that slide, range, block or card). Use it when they ask to see something; whether their view follows depends on their Follow AI setting.",
       parameters: {
         type: "object",
         properties: {
           destination: { type: "string", enum: [...OPEN_IN_SPECTRA_DESTINATIONS] },
           targetId: { type: "string" },
+          region: { type: "string" },
         },
         required: ["destination"],
         additionalProperties: false,
       },
       effect: "read",
-      label: (args: { destination: string; targetId?: string }) =>
+      label: (args: { destination: string; targetId?: string; region?: string }) =>
         args.destination === "artifact" ? `Opening ${titled(session, args.targetId, "your work")}` : `Opening ${args.destination}`,
       doneLabel: (args: { destination: string; targetId?: string }) =>
         args.destination === "artifact" ? `Opened ${titled(session, args.targetId, "your work")}` : `Opened ${args.destination}`,
@@ -726,7 +727,8 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
         const destination = oneOf(raw, "destination", OPEN_IN_SPECTRA_DESTINATIONS);
         const targetId = optionalString(raw, "targetId", 200);
         if ((destination === "artifact" || destination === "workspace") && !targetId) throw new ToolInputError("targetId is required.");
-        return { destination, ...(targetId ? { targetId } : {}) };
+        const region = destination === "artifact" ? optionalString(raw, "region", 400) : undefined;
+        return { destination, ...(targetId ? { targetId } : {}), ...(region ? { region } : {}) };
       },
       command: (args) => ({ command: "navigate_spectra", args }),
       after: (args) => {

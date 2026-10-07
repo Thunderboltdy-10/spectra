@@ -59,6 +59,7 @@ import {
 } from "../data/api";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { useTreeActions, useTreePlacement } from "../organization/tree-client";
+import { expectLanding } from "../anchors/open-anchor";
 import {
   acknowledgeViewportReady,
   requestViewportAction,
@@ -583,9 +584,10 @@ export function ChatShell() {
   });
 
   useEffect(() => {
-    const removeWork = spectraBus.handle("work.open", ({ workId }) =>
-      openArtifact(workId),
-    );
+    const removeWork = spectraBus.handle("work.open", ({ workId, region }) => {
+      expectLanding(workId, region);
+      return openArtifact(workId);
+    });
     const removeConversation = spectraBus.handle(
       "run.openConversation",
       async ({ runId, threadId }) => {

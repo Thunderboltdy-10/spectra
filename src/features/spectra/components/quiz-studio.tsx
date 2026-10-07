@@ -28,7 +28,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LifeForm, LifeVerdict } from "@/components/ui/life-moments";
 import { SelectField } from "@/components/ui/select";
 import { targetAttrs } from "../collaboration/target-attributes";
@@ -68,6 +68,11 @@ import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { SpectraStoredText } from "./spectra-rich-content";
 import { plainTextFromStored } from "../rich-content";
 import { spectraBus } from "../events";
+import { itemForRegion, itemInPassage, plainOfMarkup, QUESTION_NOUNS, type WorkRegion } from "../anchors/locate";
+import { regionElement, useOpenAnchor, type AnchorLanding } from "../anchors/use-open-anchor";
+
+/** The semantic layer's region for the quiz's learner instructions (shared/semantic-chunks.ts). */
+const QUIZ_INSTRUCTIONS_REGION = "quiz-setting:instructions";
 import {
   ArtifactRichTextEditor,
   Field,
@@ -578,6 +583,33 @@ export function QuizStudio({
     };
     return spectraBus.handle("work.reveal", reveal);
   }, [artifactId, questions]);
+  // Opened at a question or the instructions (a search hit, a citation):
+  // the builder shows it. A learner's attempt is never moved.
+  const landOnQuestion = useCallback(
+    (region: WorkRegion): AnchorLanding | null => {
+      if (!canEditQuiz) return null;
+      if (region.id === QUIZ_INSTRUCTIONS_REGION)
+        return {
+          select: () => setView("settings"),
+          find: (root) => regionElement(root, QUIZ_INSTRUCTIONS_REGION),
+        };
+      const named = itemForRegion(questions, region, QUESTION_NOUNS);
+      if (!named) return null;
+      const question =
+        itemInPassage(questions, questions.indexOf(named), (entry) =>
+          [plainOfMarkup(entry.prompt), ...entry.options, plainOfMarkup(entry.explanation)].join(" "),
+        region.excerpt) ?? named;
+      return {
+        select: () => {
+          setActiveQuestionId(question.id);
+          setView("builder");
+        },
+        find: (root) => regionElement(root, question.id),
+      };
+    },
+    [canEditQuiz, questions],
+  );
+  useOpenAnchor(artifactId, landOnQuestion);
   const quizImportRef = useRef<HTMLInputElement>(null);
   const quizWasReadOnly = useRef(!canEditQuiz);
   const [practiceClockNow, setPracticeClockNow] = useState(0);
@@ -2476,7 +2508,7 @@ export function QuizStudio({
                 readOnly={!canEditQuiz}
               />
             </div>
-            <div style={{ gridColumn: "1 / -1" }}>
+            <div style={{ gridColumn: "1 / -1" }} data-anchor-region={QUIZ_INSTRUCTIONS_REGION}>
               <Field label="Learner instructions">
                 <textarea
                   value={quizSettings.instructions}
@@ -3371,7 +3403,7 @@ function QuestionEditor({
     });
   }
   return (
-    <div className="spectra-quiz-question-editor">
+    <div className="spectra-quiz-question-editor" data-anchor-region={question.id}>
       <div className="mb-4 flex items-center justify-between">
         {/* Which question you are editing. The workbar already states the
             position in the set, so this does not repeat "of N". */}

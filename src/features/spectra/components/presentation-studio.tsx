@@ -447,21 +447,28 @@ function presentationHyperlinkValue(object: PresentationObject) {
   return object.hyperlink?.url ?? "";
 }
 
-const SlideRailPreview = memo(
-  function SlideRailPreview({
+/**
+ * A read-only picture of one slide. It draws again only when that slide, the
+ * deck's look or its media change, so an edit to one slide leaves every other
+ * picture (the rail, the notes view) alone.
+ */
+const StillSlide = memo(
+  function StillSlide({
     slide,
     deck,
     assets,
     artifacts,
+    className,
   }: {
     slide: PresentationSlide;
     deck: PresentationContent;
     assets: SpectraArtifactAsset[];
     artifacts: SpectraArtifact[];
+    className?: string;
   }) {
     return (
       <div
-        className="spectra-item-rail-preview"
+        className={className}
         data-spectra-hidden-target="true"
         data-slide-hidden={slide.hidden || undefined}
       >
@@ -482,7 +489,8 @@ const SlideRailPreview = memo(
     previous.artifacts === next.artifacts &&
     previous.deck.theme === next.deck.theme &&
     previous.deck.settings === next.deck.settings &&
-    previous.deck.nativeBinding === next.deck.nativeBinding,
+    previous.deck.nativeBinding === next.deck.nativeBinding &&
+    previous.className === next.className,
 );
 
 function PresentationObjectInspector({
@@ -3272,7 +3280,8 @@ export function PresentationStudio({
                     .join(" · ") || undefined,
                   active: slide.id === activeSlide.id,
                   preview: (
-                    <SlideRailPreview
+                    <StillSlide
+                      className="spectra-item-rail-preview"
                       slide={slide}
                       deck={deck}
                       assets={assets}
@@ -4240,16 +4249,12 @@ export function PresentationStudio({
                   }}
                   title={`Open slide ${index + 1} on the canvas`}
                 >
-                  <div data-spectra-hidden-target="true">
-                    <SlideCanvas
-                      slide={slide}
-                      deck={deck}
-                      assets={assets}
-                      artifacts={artifacts}
-                      readOnly
-                      compact
-                    />
-                  </div>
+                  <StillSlide
+                    slide={slide}
+                    deck={deck}
+                    assets={assets}
+                    artifacts={artifacts}
+                  />
                   <strong className="truncate text-caption font-semibold text-[var(--text-primary)]">
                     {index + 1} · {presentationSlideLabel(slide, index)}
                   </strong>

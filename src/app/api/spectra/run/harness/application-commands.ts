@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { AiTargetClass } from "@/features/spectra/ai/authority-policy";
+import { BENCH_LIMITS } from "@/features/spectra/agents/foundry/bench";
 import { normalizeCalendarCommand } from "@/features/spectra/calendar/domain/command";
 import { FOLDER_ACTIONS, LOCAL_DEVICE_ACTIONS } from "@/features/spectra/devices/actions";
 import { normalizeAiPreferencePatch, preferenceLayerValuesSchema } from "@/features/spectra/settings/schema/preferences";
@@ -179,6 +180,39 @@ const COMMANDS: Record<string, ApplicationCommand> = {
   // Checks run the agent's draft against its suite: they spend model tokens and record a run, nothing else.
   run_agent_checks: {
     input: z.object({ agentId: z.string().trim().min(1).max(200) }),
+    authority: "content",
+  },
+  // One bench answer from the agent's draft or a release: it spends model tokens and keeps the answer, nothing else.
+  run_agent_bench: {
+    input: z.object({
+      agentId: z.string().trim().min(1).max(200),
+      prompt: z.string().trim().min(1).max(BENCH_LIMITS.prompt),
+      target: z.enum(["draft", "release"]).optional(),
+      releaseNumber: z.number().int().min(1).optional(),
+    }).refine((value) => value.releaseNumber === undefined || value.target === "release", {
+      path: ["releaseNumber"],
+      message: "Only a release answer names a release.",
+    }),
+    authority: "content",
+  },
+  // A bench question kept as a test joins the agent's checks.
+  save_agent_bench_case: {
+    input: z.object({
+      agentId: z.string().trim().min(1).max(200),
+      caseId: z.string().trim().min(1).max(200).optional(),
+      prompt: z.string().trim().min(1).max(BENCH_LIMITS.prompt),
+      mustInclude: z.array(z.string().trim().min(1).max(BENCH_LIMITS.checkValue)).max(BENCH_LIMITS.checks),
+      mustNotInclude: z.array(z.string().trim().min(1).max(BENCH_LIMITS.checkValue)).max(BENCH_LIMITS.checks),
+      rubric: z.string().trim().max(BENCH_LIMITS.rubric).optional(),
+      required: z.boolean().optional(),
+    }).refine((value) => value.mustInclude.length + value.mustNotInclude.length > 0 || Boolean(value.rubric), {
+      path: ["mustInclude"],
+      message: "Say what a good answer must or must not do.",
+    }),
+    authority: "content",
+  },
+  remove_agent_bench_case: {
+    input: z.object({ agentId: z.string().trim().min(1).max(200), caseId: z.string().trim().min(1).max(200) }),
     authority: "content",
   },
   // A release decides which version of an agent people reach; a private one reaches only the owner.

@@ -10,6 +10,7 @@ import type {
   ThreadReadRequest,
   WebResult,
 } from "@/features/spectra/ai/harness/backend";
+import type { AgentBenchState } from "@/features/spectra/ai/harness/agent-bench";
 import type { AgentDraftChecks, AgentReleaseRow, AgentReleaseState } from "@/features/spectra/ai/harness/agent-releases";
 import { ARTIFACT_TYPE_KEYS, type ArtifactTypeKey } from "@/features/spectra/artifacts/types";
 import type { CommentRow } from "@/features/spectra/ai/harness/comments";
@@ -57,6 +58,9 @@ export type ConvexBackendInput = {
 const text = (value: unknown) => (typeof value === "string" ? value : "");
 const VERSION_SOURCES = new Set<string>(["manual", "ai", "revert", "import", "restore", "migration", "checkpoint"]);
 const EMBED_STATES = new Set<string>(["ready", "no_access", "deleted", "archived", "version_unavailable", "removed"]);
+
+/** Commands whose result the model needs more of: an agent's answer, a compiled draft. */
+const LONG_RESULTS: Readonly<Record<string, number>> = { run_agent_bench: 6_000 };
 
 function clip(value: string, max = 12_000) {
   return value.length > max ? `${value.slice(0, max)}\n… (cut short; ask for a narrower range)` : value;
@@ -451,7 +455,7 @@ export class ConvexHarnessBackend implements HarnessBackend {
       this.affected.push(...affected);
       return {
         ok: true,
-        content: clip(`Done. ${safeJson(output)}`, 3_000),
+        content: clip(`Done. ${safeJson(output)}`, LONG_RESULTS[request.command] ?? 3_000),
         ...(uiEvents.length && !this.input.onUiEvent ? { uiEvents } : {}),
       };
     } catch (error) {
@@ -813,6 +817,16 @@ export class ConvexHarnessBackend implements HarnessBackend {
         checked: Boolean(text(entry.evalRunId)),
       })),
     };
+  }
+
+  async readAgentBench(input: { agentId: string }): Promise<AgentBenchState | null> {
+    // The bench's own reads: both need edit access to the agent.
+    const [cases, runs] = await Promise.all([
+      query<unknown & object, unknown>("agents:benchCases", { agentId: input.agentId }).catch(() => null),
+      query<unknown & object, unknown>("agents:benchRuns", { agentId: input.agentId, limit: 40 }).catch(() => null),
+    ]);
+    if (!Array.isArray(cases) || !Array.isArray(runs)) return null;
+    return { cases: cases as AgentBenchState["cases"], runs: runs as AgentBenchState["runs"] };
   }
 
   async readCalendar(input: { from: number; to: number; title?: string }): Promise<string> {

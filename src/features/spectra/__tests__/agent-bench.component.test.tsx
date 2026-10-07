@@ -42,6 +42,7 @@ vi.mock("@/components/ui/toast", () => ({
 }));
 
 import { AgentBench, benchBarAction, useAgentBench, type AgentBenchController } from "../components/agent-bench";
+import { spectraBus } from "../events";
 import { BenchError, type BenchReleaseOption } from "../data/agent-bench";
 
 function agent(): AgentFoundryContent {
@@ -467,6 +468,16 @@ describe("the agent bench", () => {
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     expect(signal?.aborted).toBe(true);
     expect(screen.getByRole("button", { name: /Suggest improvements/ })).toBeTruthy();
+  });
+
+  it("shows what Spectra asked this agent, or kept as its test, without a reload", async () => {
+    setup({ runs: [run("Mark it", "Old.", 1)] });
+    expect(await screen.findByText("Old.")).toBeTruthy();
+    mocks.get.mockResolvedValue({ cases: [], runs: [run("Mark it", "Spectra asked this.", 2), run("Mark it", "Old.", 1)], release: null });
+    act(() => spectraBus.emit("agent.benchChanged", { agentId: "someone-else" }));
+    expect(mocks.get).toHaveBeenCalledTimes(1);
+    act(() => spectraBus.emit("agent.benchChanged", { agentId: "agent_1" }));
+    expect(await screen.findByText("Spectra asked this.", { selector: "p" })).toBeTruthy();
   });
 
   it("says so when the bench cannot load, and tries again", async () => {

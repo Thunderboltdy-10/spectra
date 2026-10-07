@@ -1,4 +1,5 @@
 import type { ArtifactTypeKey } from "../../artifacts/types";
+import type { AgentBenchState } from "./agent-bench";
 import type { AgentReleaseState } from "./agent-releases";
 import type { CommentRow } from "./comments";
 import type { EmbedRow } from "./embeds";
@@ -47,6 +48,8 @@ export type MemoryBackendOptions = {
   shareInvitations?: IncomingInvitation[];
   /** Releases by agent id. */
   agentReleases?: Record<string, AgentReleaseState>;
+  /** Bench tests and answers by agent id. */
+  agentBench?: Record<string, AgentBenchState>;
   /** Simulate the semantic layer answering with words only, or with a degraded index. */
   searchMode?: SearchResponse["mode"];
   searchDegraded?: SearchResponse["degraded"];
@@ -226,6 +229,10 @@ export class MemoryBackend implements HarnessBackend {
 
   async readAgentReleases(input: { agentId: string }) {
     return this.options.agentReleases?.[input.agentId] ?? null;
+  }
+
+  async readAgentBench(input: { agentId: string }) {
+    return this.options.agentBench?.[input.agentId] ?? null;
   }
 
   async readSchoolData() {

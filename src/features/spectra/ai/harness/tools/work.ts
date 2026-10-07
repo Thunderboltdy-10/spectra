@@ -1,3 +1,5 @@
+import { BENCH_LIMITS } from "../../../agents/foundry/bench";
+import { formatAgentBench } from "../agent-bench";
 import { formatAgentReleases } from "../agent-releases";
 import { formatEmbeds } from "../embeds";
 import { formatIncomingInvitations, formatSharing } from "../sharing";
@@ -143,6 +145,51 @@ function readAgentReleasesTool(session: HarnessSession): HarnessTool<AgentReleas
   };
 }
 
+function readAgentBenchTool(session: HarnessSession): HarnessTool<AgentReleasesArgs> {
+  return {
+    name: "read_agent_bench",
+    description:
+      "Read an agent's bench, as the agent studio shows it: the tests kept from it (ids, questions, what a good answer must or must not do) and the user's recent bench answers, newest first. Use it before save_agent_bench_case or remove_agent_bench_case.",
+    parameters: { type: "object", properties: { agentId: { type: "string" } }, required: ["agentId"], additionalProperties: false },
+    effect: "read",
+    label: (args) => `Reading the bench of ${titled(session, args.agentId, "your agent")}`,
+    parse: (raw) => ({ agentId: requireString(raw, "agentId", 200) }),
+    execute: async (args, ctx) => {
+      const found = await session.backend.readAgentBench(args, ctx.signal);
+      if (!found)
+        return { ok: false, content: `No agent has id "${args.agentId}" that the user can edit. Find it with list_library or search.` };
+      return {
+        ok: true,
+        content: formatAgentBench(found, session.titles.get(args.agentId)?.title ?? "This agent"),
+        doneLabel: `Read the bench of ${titled(session, args.agentId, "your agent")}`,
+      };
+    },
+  };
+}
+
+type BenchCaseRef = { agentId: string; caseId: string };
+type BenchArgs = { agentId: string; prompt: string; target?: "release"; releaseNumber?: number };
+type BenchCaseArgs = {
+  agentId: string;
+  caseId?: string;
+  prompt: string;
+  mustInclude: string[];
+  mustNotInclude: string[];
+  rubric?: string;
+  required?: boolean;
+};
+
+function checkList(raw: Record<string, unknown>, key: string) {
+  const value = raw[key] ?? [];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string"))
+    throw new ToolInputError(`${key} must be a list of short phrases.`);
+  const phrases = value.map((entry: string) => entry.trim()).filter(Boolean);
+  if (phrases.length > BENCH_LIMITS.checks) throw new ToolInputError(`${key} holds at most ${BENCH_LIMITS.checks} phrases.`);
+  if (phrases.some((phrase) => phrase.length > BENCH_LIMITS.checkValue))
+    throw new ToolInputError(`Each phrase in ${key} is at most ${BENCH_LIMITS.checkValue} characters.`);
+  return phrases;
+}
+
 const RELEASE_ACTIONS = ["release_private", "publish", "promote", "rollback", "suspend"] as const;
 type ReleaseArgs = { agentId: string; action: (typeof RELEASE_ACTIONS)[number]; releaseId?: string; releaseNotes?: string };
 const RELEASE_LABELS: Record<ReleaseArgs["action"], [string, string]> = {
@@ -248,6 +295,103 @@ export function workTools(session: HarnessSession): AnyHarnessTool[] {
       doneLabel: (args: { agentId: string }) => `Ran checks on ${titled(session, args.agentId, "your agent")}`,
       parse: (raw) => ({ agentId: requireString(raw, "agentId", 200) }),
       command: (args) => ({ command: "run_agent_checks", args }),
+    }),
+    readAgentBenchTool(session),
+    commandTool(session, {
+      name: "run_agent_bench",
+      description:
+        "Ask one of the user's agents a question on its bench, as the agent studio's bench does, and read its answer. target draft (the default) answers with the draft as it is now, unsaved edits included; release answers as a release (releaseNumber, the newest when left out). The answer is kept on the bench and shown in an open studio; a test kept for the same question grades it. It uses the school's AI allowance. Use it to see how a change to the agent behaves before running the checks.",
+      parameters: {
+        type: "object",
+        properties: {
+          agentId: { type: "string" },
+          prompt: { type: "string", description: "The question, as a person using the agent would ask it." },
+          target: { type: "string", enum: ["draft", "release"] },
+          releaseNumber: { type: "number" },
+        },
+        required: ["agentId", "prompt"],
+        additionalProperties: false,
+      },
+      effect: "write",
+      targets: (args: BenchArgs) => [args.agentId],
+      label: (args: BenchArgs) => `Asking ${titled(session, args.agentId, "your agent")} on the bench`,
+      doneLabel: (args: BenchArgs) => `Asked ${titled(session, args.agentId, "your agent")} on the bench`,
+      parse: (raw): BenchArgs => {
+        const target = raw.target === undefined ? "draft" : oneOf(raw, "target", ["draft", "release"] as const);
+        const releaseNumber = optionalNumber(raw, "releaseNumber");
+        if (releaseNumber !== undefined && target !== "release")
+          throw new ToolInputError("releaseNumber names a release to answer as; set target to release.");
+        if (releaseNumber !== undefined && (!Number.isInteger(releaseNumber) || releaseNumber < 1))
+          throw new ToolInputError("releaseNumber is a release's number, as read_agent_releases lists it.");
+        return {
+          agentId: requireString(raw, "agentId", 200),
+          prompt: requireString(raw, "prompt", BENCH_LIMITS.prompt),
+          ...(target === "release" ? { target } : {}),
+          ...(releaseNumber !== undefined ? { releaseNumber } : {}),
+        };
+      },
+      command: (args) => ({ command: "run_agent_bench", args }),
+    }),
+    commandTool(session, {
+      name: "save_agent_bench_case",
+      description:
+        "Keep a bench question as one of an agent's tests, as the studio's Save as test does: what a good answer must include (mustInclude) and must leave out (mustNotInclude), short phrases, and optionally a rubric a judge reads. Kept tests join the agent's checks, so a later draft cannot lose what the user accepted. The same question again, or caseId from read_agent_bench, updates that test. required false makes it optional.",
+      parameters: {
+        type: "object",
+        properties: {
+          agentId: { type: "string" },
+          caseId: { type: "string" },
+          prompt: { type: "string" },
+          mustInclude: { type: "array", items: { type: "string" } },
+          mustNotInclude: { type: "array", items: { type: "string" } },
+          rubric: { type: "string" },
+          required: { type: "boolean" },
+        },
+        required: ["agentId", "prompt"],
+        additionalProperties: false,
+      },
+      effect: "write",
+      targets: (args: BenchCaseArgs) => [args.agentId],
+      label: (args: BenchCaseArgs) => `Keeping a test for ${titled(session, args.agentId, "your agent")}`,
+      doneLabel: (args: BenchCaseArgs) => `Kept a test for ${titled(session, args.agentId, "your agent")}`,
+      parse: (raw): BenchCaseArgs => {
+        const mustInclude = checkList(raw, "mustInclude");
+        const mustNotInclude = checkList(raw, "mustNotInclude");
+        const rubric = optionalString(raw, "rubric", BENCH_LIMITS.rubric)?.trim();
+        if (!mustInclude.length && !mustNotInclude.length && !rubric)
+          throw new ToolInputError("Say what a good answer must include or leave out (mustInclude, mustNotInclude), or give a rubric.");
+        if (raw.required !== undefined && typeof raw.required !== "boolean") throw new ToolInputError("required is true or false.");
+        const caseId = optionalString(raw, "caseId", 200);
+        return {
+          agentId: requireString(raw, "agentId", 200),
+          ...(caseId ? { caseId } : {}),
+          prompt: requireString(raw, "prompt", BENCH_LIMITS.prompt),
+          mustInclude,
+          mustNotInclude,
+          ...(rubric ? { rubric } : {}),
+          ...(typeof raw.required === "boolean" ? { required: raw.required } : {}),
+        };
+      },
+      command: (args) => ({ command: "save_agent_bench_case", args }),
+    }),
+    commandTool(session, {
+      name: "remove_agent_bench_case",
+      description:
+        "Remove one of an agent's bench tests (caseId from read_agent_bench). It is deleted, not trashed, and leaves the agent's checks. Only when the user asks; the user approves it unless they allowed permanent deletions.",
+      parameters: {
+        type: "object",
+        properties: { agentId: { type: "string" }, caseId: { type: "string" } },
+        required: ["agentId", "caseId"],
+        additionalProperties: false,
+      },
+      effect: "irreversible",
+      targets: (args: BenchCaseRef) => [args.agentId],
+      label: (args: BenchCaseRef) => `Removing a test from ${titled(session, args.agentId, "your agent")}`,
+      doneLabel: (args: BenchCaseRef) => `Removed a test from ${titled(session, args.agentId, "your agent")}`,
+      question: (args: BenchCaseRef) =>
+        `Remove this test from ${titled(session, args.agentId, "this agent")}? Its checks will no longer include it.`,
+      parse: (raw): BenchCaseRef => ({ agentId: requireString(raw, "agentId", 200), caseId: requireString(raw, "caseId", 200) }),
+      command: (args) => ({ command: "remove_agent_bench_case", args }),
     }),
     commandTool(session, {
       name: "release_agent",

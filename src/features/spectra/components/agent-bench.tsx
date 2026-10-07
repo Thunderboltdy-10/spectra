@@ -62,6 +62,7 @@ import {
   type BenchRelease,
   type BenchReleaseOption,
 } from "../data/agent-bench";
+import { spectraBus } from "../events";
 import { useLifeArrival, useLifeDeparture, useLifeGlow, useWritingFront } from "../life/use-life";
 import { SpectraRichContent } from "./spectra-rich-content";
 
@@ -153,6 +154,14 @@ export function useAgentBench({
     if (!enabled) return;
     void load();
   }, [enabled, load]);
+
+  // Spectra can ask this agent questions and keep or remove its tests; show what it did.
+  useEffect(() => {
+    if (!enabled) return;
+    return spectraBus.on("agent.benchChanged", (detail) => {
+      if (detail.agentId === agentId) void load();
+    });
+  }, [agentId, enabled, load]);
 
   useEffect(() => {
     const open = controllers.current;

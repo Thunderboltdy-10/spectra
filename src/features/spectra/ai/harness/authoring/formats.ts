@@ -66,7 +66,7 @@ export const AUTHORING_FORMATS: Record<AuthoredType, { create: string; edit: str
   agent: {
     create:
       '{"purpose": "...", "instructions": "prose", "outcomes"?: [...], "audience"?, "inScope"?: [...], "outOfScope"?: [...], "tone"?: "warm"|"direct"|"socratic"|"formal"|"playful", "responseLength"?: "concise"|"balanced"|"detailed", "boundaries"?: [...], "skills"?: [{"name", "instructions"}], "routingDescription"?, "routingExamples"?: [...]}',
-    edit: "set {any create field} | replace {find, replace, all?} (in the instructions)",
+    edit: "set {any create field} | replace {find, replace, all?} (in the instructions). An agent built in the Agent Foundry compiles its instructions, skills and boundaries: set its other fields, and change skills with compile_agent",
     read: "the whole agent",
   },
 };

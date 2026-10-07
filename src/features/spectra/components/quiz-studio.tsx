@@ -1,5 +1,6 @@
 "use client";
 
+import { useMissingAssets } from "./use-missing-assets";
 import { currentTimeMs } from "@/lib/unique-token";
 import {
   AlertCircle,
@@ -700,6 +701,11 @@ export function QuizStudio({
 
   const quizAssetMap = new Map(
     quizAssets.map((asset) => [asset.assetId, asset]),
+  );
+  useMissingAssets(
+    questions.flatMap((question) => (question.media?.assetId ? [question.media.assetId] : [])),
+    quizAssetMap,
+    () => getArtifactAssets(artifactId).then((result) => setQuizAssets(result.assets)),
   );
 
   // The quiz as it is now. A media upload finishes after an await, when the

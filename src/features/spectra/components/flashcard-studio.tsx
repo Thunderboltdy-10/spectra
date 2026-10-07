@@ -1,5 +1,6 @@
 "use client";
 
+import { useMissingAssets } from "./use-missing-assets";
 import { currentTimeMs, shuffleInPlace, uniqueToken } from "@/lib/unique-token";
 import {
   AlertCircle,
@@ -598,6 +599,11 @@ export function FlashcardStudio({
   // silently drop every card edit made meanwhile, collaborators' included.
   const latestDeckRef = useRef({ content, cards });
   latestDeckRef.current = { content, cards };
+  useMissingAssets(
+    cards.flatMap((card) => (card.media?.assetId ? [card.media.assetId] : [])),
+    new Set(deckAssets.map((asset) => asset.assetId)),
+    () => getArtifactAssets(artifactId).then((result) => setDeckAssets(result.assets)),
+  );
 
   function commit(nextCards: DeckCard[]) {
     const latestContent = latestDeckRef.current.content;

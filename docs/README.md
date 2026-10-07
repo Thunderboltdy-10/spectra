@@ -9,6 +9,8 @@ Two specs are binding for all new work, ahead of anything older in this file:
 
 The redesign is being carried out through the plan in [`docs/spectra-launch-audit/REDESIGN-PLAN.md`](spectra-launch-audit/REDESIGN-PLAN.md).
 
+Going to the cloud follows [`docs/LAUNCH.md`](LAUNCH.md): Convex, the collaboration gateway, Vercel and the Bridge, in that order.
+
 ## What Spectra is
 
 Spectra is an AI-native school workspace. Students and teachers are peers: they keep their work (documents, spreadsheets, presentations, flashcard decks, quizzes, plans, timetables, whiteboards, code projects and agents) in workspaces and a library, and they edit it together in real time. They can also ask an AI to read and change that work. Schools are provisioned by a superadmin, invite their members, and can sync classes and resources from ManageBac.

@@ -176,7 +176,8 @@ async function slidesPreview(bytes: Uint8Array): Promise<SlidesPreview> {
         ? (object.content as Record<string, unknown>)
         : null;
       const part = typeof content?.nativeMediaPart === "string" ? content.nativeMediaPart : "";
-      if (!content || object.type !== "image" || !part) continue;
+      // Pictures, and the picture PowerPoint saved in place of an embedded object.
+      if (!content || (object.type !== "image" && object.type !== "embed") || !part) continue;
       const mediaType = typeof content.nativeMediaType === "string" ? content.nativeMediaType.toLowerCase() : "";
       if (!RASTER_TYPES.has(mediaType)) continue;
       if (!parts.has(part)) parts.set(part, { id: previewMediaId(parts.size), mediaType });

@@ -17,6 +17,7 @@ import { pptxOperationsBetween } from "./office-content";
 import type { LensCapabilitySet, LensCompatibilityProfile, LensExternalDiff, LensFidelityEntry, LensFidelityMap, LensOpenResult, LensPreservedCarry, SpectraLens } from "./types";
 import { pptxProjectionSchema, type PptxProjection, type PptxSemanticDelta } from "./projection-contracts";
 import { normalizePptxProjectionForReadback, pptxSemanticContent } from "./pptx-readback";
+import { colorIn, drawingColor, drawingFill, drawingPalette, withColorMapOverride, type DrawingPalette } from "./drawingml-colors";
 import { readPptxTransition, writePptxTransition } from "./pptx-transition";
 import { readPptxImageAsset, writePptxImage, type PptxMediaWriteOptions, type PptxMediaReadCache } from "./pptx-media";
 
@@ -50,30 +51,249 @@ function placeholderKey(root: XmlElement) {
   if (!placeholder) return undefined;
   return `${placeholder.getAttribute("type") ?? "body"}:${placeholder.getAttribute("idx") ?? "0"}`;
 }
+
+/** Every element a slide draws: shapes, pictures, frames, groups and connectors. */
+const SCENE_ELEMENTS = ["sp", "pic", "graphicFrame", "grpSp", "cxnSp"];
+
+/**
+ * A shape's own transform and nothing else's. Graphic frames hold `p:xfrm`;
+ * shapes, pictures and connectors hold `a:xfrm` in `p:spPr`; groups in
+ * `p:grpSpPr`. A group's first descendant transform is a child's, never its own.
+ */
+function ownXfrm(shape: XmlElement | undefined) {
+  if (!shape) return undefined;
+  if (shape.localName === "graphicFrame") return child(shape, PML_NAMESPACE, "xfrm");
+  const properties = child(shape, PML_NAMESPACE, shape.localName === "grpSp" ? "grpSpPr" : "spPr");
+  return properties ? child(properties, DRAWINGML_NAMESPACE, "xfrm") : undefined;
+}
+
+/** `slide = t + s × child`, per axis: how a group places its children. */
+type Affine = { sx: number; sy: number; tx: number; ty: number };
+const IDENTITY: Affine = { sx: 1, sy: 1, tx: 0, ty: 0 };
+
+/**
+ * A group's children live in its own coordinate space (`chOff`/`chExt`),
+ * which the group stretches onto its frame (`off`/`ext`).
+ */
+function groupAffine(group: XmlElement): Affine {
+  const xfrm = ownXfrm(group);
+  if (!xfrm) return IDENTITY;
+  const part = (name: string) => child(xfrm, DRAWINGML_NAMESPACE, name);
+  const scale = (outer: string | undefined, inner: string | undefined) => {
+    const size = emu(outer, 0);
+    const space = emu(inner, 0);
+    return size > 0 && space > 0 ? size / space : 1;
+  };
+  const sx = scale(part("ext")?.getAttribute("cx"), part("chExt")?.getAttribute("cx"));
+  const sy = scale(part("ext")?.getAttribute("cy"), part("chExt")?.getAttribute("cy"));
+  return {
+    sx,
+    sy,
+    tx: emu(part("off")?.getAttribute("x")) - emu(part("chOff")?.getAttribute("x")) * sx,
+    ty: emu(part("off")?.getAttribute("y")) - emu(part("chOff")?.getAttribute("y")) * sy,
+  };
+}
+
+/** Child space to slide space, through every group the shape sits in. */
+function slideAffine(shape: XmlElement): Affine {
+  let affine = IDENTITY;
+  for (let parent = shape.parent; parent && parent.localName !== "spTree"; parent = parent.parent) {
+    if (parent.namespaceUri() !== PML_NAMESPACE || parent.localName !== "grpSp") continue;
+    const outer = groupAffine(parent);
+    affine = { sx: outer.sx * affine.sx, sy: outer.sy * affine.sy, tx: outer.sx * affine.tx + outer.tx, ty: outer.sy * affine.ty + outer.ty };
+  }
+  return affine;
+}
+
 function shapeGeometry(
   root: XmlElement,
-  fallback?: XmlElement,
+  inherited: ReadonlyArray<XmlElement | undefined> = [],
   canvas = { width: 12192000, height: 6858000 },
 ) {
-  // Graphic frames store their transform as p:xfrm, while regular shapes
-  // store a:xfrm under p:spPr. Read both namespaces before falling back to a
-  // layout placeholder.
-  const xfrm = firstDescendant(root, PML_NAMESPACE, "xfrm") ??
-    firstDescendant(root, DRAWINGML_NAMESPACE, "xfrm");
-  const source = xfrm ? root : fallback;
-  const sourceXfrm = source
-    ? firstDescendant(source, PML_NAMESPACE, "xfrm") ?? firstDescendant(source, DRAWINGML_NAMESPACE, "xfrm")
-    : undefined;
-  const off = sourceXfrm ? firstDescendant(sourceXfrm, DRAWINGML_NAMESPACE, "off") : undefined;
-  const ext = sourceXfrm ? firstDescendant(sourceXfrm, DRAWINGML_NAMESPACE, "ext") : undefined;
+  // A placeholder with no transform of its own takes its layout's, and a
+  // layout placeholder with none takes its master's: PowerPoint's inheritance.
+  const own = ownXfrm(root);
+  const sourceXfrm = own ?? inherited.map(ownXfrm).find(Boolean);
+  const off = sourceXfrm ? child(sourceXfrm, DRAWINGML_NAMESPACE, "off") : undefined;
+  const ext = sourceXfrm ? child(sourceXfrm, DRAWINGML_NAMESPACE, "ext") : undefined;
+  const affine = own ? slideAffine(root) : IDENTITY;
+  const x = affine.tx + emu(off?.getAttribute("x")) * affine.sx;
+  const y = affine.ty + emu(off?.getAttribute("y")) * affine.sy;
+  const cx = emu(ext?.getAttribute("cx"), 914400) * affine.sx;
+  const cy = emu(ext?.getAttribute("cy"), 457200) * affine.sy;
   const canvasHeight = (canvas.height / canvas.width) * 1000;
   return {
-    x: Math.max(0, Math.min(1000, (emu(off?.getAttribute("x")) / canvas.width) * 1000)),
-    y: Math.max(0, Math.min(canvasHeight, (emu(off?.getAttribute("y")) / canvas.height) * canvasHeight)),
-    width: Math.max(10, Math.min(1000, (emu(ext?.getAttribute("cx"), 914400) / canvas.width) * 1000)),
-    height: Math.max(10, Math.min(canvasHeight, (emu(ext?.getAttribute("cy"), 457200) / canvas.height) * canvasHeight)),
+    x: Math.max(0, Math.min(1000, (x / canvas.width) * 1000)),
+    y: Math.max(0, Math.min(canvasHeight, (y / canvas.height) * canvasHeight)),
+    width: Math.max(10, Math.min(1000, (cx / canvas.width) * 1000)),
+    height: Math.max(10, Math.min(canvasHeight, (cy / canvas.height) * canvasHeight)),
     rotation: emu(sourceXfrm?.getAttribute("rot")) / 60000,
   };
+}
+
+/** The master placeholder type a layout or slide placeholder inherits from. */
+function masterPlaceholderType(type: string) {
+  if (type === "title" || type === "ctrTitle") return "title";
+  if (type === "dt" || type === "ftr" || type === "sldNum") return type;
+  return "body";
+}
+
+function placeholdersIn(root: XmlElement | undefined) {
+  if (!root) return [];
+  return descendants(root).filter((node) => node.namespaceUri() === PML_NAMESPACE && node.localName === "sp" && firstDescendant(node, PML_NAMESPACE, "ph"));
+}
+
+/**
+ * The layout placeholder a slide placeholder inherits from, then the master
+ * placeholder that one inherits from. Slides match their layout by `idx`
+ * (then type); layouts match their master by type, as PowerPoint does.
+ */
+function placeholderChain(shape: XmlElement, context: SlideContext): XmlElement[] {
+  const placeholder = firstDescendant(shape, PML_NAMESPACE, "ph");
+  if (!placeholder) return [];
+  const type = placeholder.getAttribute("type") ?? "body";
+  const index = placeholder.getAttribute("idx");
+  const sameType = (candidate: XmlElement) => {
+    const candidateType = firstDescendant(candidate, PML_NAMESPACE, "ph")?.getAttribute("type") ?? "body";
+    return candidateType === type || masterPlaceholderType(candidateType) === "title" && masterPlaceholderType(type) === "title";
+  };
+  const key = placeholderKey(shape);
+  const layout = context.layoutPlaceholders.find((candidate) => placeholderKey(candidate) === key) ??
+    (index !== undefined ? context.layoutPlaceholders.find((candidate) => firstDescendant(candidate, PML_NAMESPACE, "ph")?.getAttribute("idx") === index) : undefined) ??
+    context.layoutPlaceholders.find(sameType);
+  const layoutType = layout ? firstDescendant(layout, PML_NAMESPACE, "ph")?.getAttribute("type") ?? "body" : type;
+  const masterType = masterPlaceholderType(layoutType);
+  const master = context.masterPlaceholders.find((candidate) => masterPlaceholderType(firstDescendant(candidate, PML_NAMESPACE, "ph")?.getAttribute("type") ?? "body") === masterType);
+  return [layout, master].filter((entry): entry is XmlElement => Boolean(entry));
+}
+
+/** What a slide inherits: its layout's and master's placeholders and colours. */
+type SlideContext = {
+  layoutPlaceholders: XmlElement[];
+  masterPlaceholders: XmlElement[];
+  palette: DrawingPalette;
+  canvas: { width: number; height: number };
+};
+
+/**
+ * How PowerPoint paints a shape itself, apart from its text: its fill, its
+ * outline, its preset geometry, how its text sits, and the arrowheads of a
+ * line. Read from the shape's own properties first, then from its theme
+ * style references (`p:style`), then from the placeholders it inherits.
+ * Drawn by the canvas; never written back, so it stays out of every edit.
+ */
+export type PptxNativeAppearance = {
+  fill?: string;
+  line?: string;
+  /** In the canvas's thousandths of the slide width. */
+  lineWidth?: number;
+  dashed?: true;
+  geometry?: string;
+  straight?: "horizontal" | "vertical";
+  flipH?: true;
+  flipV?: true;
+  anchor?: "middle" | "bottom";
+  arrowStart?: true;
+  arrowEnd?: true;
+};
+
+function shapeAppearance(shape: XmlElement, inherited: readonly XmlElement[], context: SlideContext): PptxNativeAppearance | undefined {
+  const chain = [shape, ...inherited];
+  const properties = chain.map((node) => child(node, PML_NAMESPACE, "spPr"));
+  const style = child(shape, PML_NAMESPACE, "style");
+  const reference = (name: string) => (style ? child(style, DRAWINGML_NAMESPACE, name) : undefined);
+  const referenceIndex = (name: string) => Number(reference(name)?.getAttribute("idx") ?? 0);
+  const referenceColor = (name: string) => drawingColor(colorIn(reference(name)), context.palette);
+  const fill = properties.map((entry) => drawingFill(entry, context.palette)).find(Boolean) ??
+    (referenceIndex("fillRef") > 0 ? referenceColor("fillRef") : undefined);
+  const line = properties.map((entry) => (entry ? child(entry, DRAWINGML_NAMESPACE, "ln") : undefined)).find(Boolean);
+  const lineColor = drawingFill(line, context.palette, referenceColor("lnRef")) ??
+    (referenceIndex("lnRef") > 0 ? referenceColor("lnRef") : undefined);
+  const lineEmu = Number(line?.getAttribute("w") ?? (referenceIndex("lnRef") > 0 ? context.palette.lineWidths[referenceIndex("lnRef") - 1] ?? 9525 : 9525));
+  const geometry = properties.map((entry) => (entry ? child(entry, DRAWINGML_NAMESPACE, "prstGeom")?.getAttribute("prst") ?? (child(entry, DRAWINGML_NAMESPACE, "custGeom") ? "custom" : undefined) : undefined)).find(Boolean);
+  const xfrm = ownXfrm(shape);
+  const bodyProperties = chain.map((node) => {
+    const body = child(node, PML_NAMESPACE, "txBody");
+    return body ? child(body, DRAWINGML_NAMESPACE, "bodyPr") : undefined;
+  }).find((entry) => entry?.getAttribute("anchor"));
+  const anchor = bodyProperties?.getAttribute("anchor");
+  const dash = line ? child(line, DRAWINGML_NAMESPACE, "prstDash")?.getAttribute("val") : undefined;
+  const arrow = (name: string) => {
+    const end = line ? child(line, DRAWINGML_NAMESPACE, name) : undefined;
+    return Boolean(end?.getAttribute("type") && end.getAttribute("type") !== "none");
+  };
+  const appearance: PptxNativeAppearance = {
+    ...(fill && fill !== "none" ? { fill } : {}),
+    ...(lineColor && lineColor !== "none"
+      ? { line: lineColor, lineWidth: Math.max(0.1, ((Number.isFinite(lineEmu) ? lineEmu : 9525) / context.canvas.width) * 1000) }
+      : {}),
+    ...(lineColor && lineColor !== "none" && dash && dash !== "solid" ? { dashed: true as const } : {}),
+    ...(geometry && geometry !== "rect" ? { geometry } : {}),
+    // A level or plumb line has no height or width; its frame is widened to
+    // stay selectable, so the line says which edge it runs along.
+    ...(xfrm && emu(child(xfrm, DRAWINGML_NAMESPACE, "ext")?.getAttribute("cy"), 1) === 0 ? { straight: "horizontal" as const } : {}),
+    ...(xfrm && emu(child(xfrm, DRAWINGML_NAMESPACE, "ext")?.getAttribute("cx"), 1) === 0 ? { straight: "vertical" as const } : {}),
+    ...(xfrm?.getAttribute("flipH") === "1" ? { flipH: true as const } : {}),
+    ...(xfrm?.getAttribute("flipV") === "1" ? { flipV: true as const } : {}),
+    ...(anchor === "ctr" ? { anchor: "middle" as const } : anchor === "b" ? { anchor: "bottom" as const } : {}),
+    ...(lineColor && lineColor !== "none" && arrow("headEnd") ? { arrowStart: true as const } : {}),
+    ...(lineColor && lineColor !== "none" && arrow("tailEnd") ? { arrowEnd: true as const } : {}),
+  };
+  return Object.keys(appearance).length ? appearance : undefined;
+}
+
+const GRAPHIC_TABLE_URI = "http://schemas.openxmlformats.org/drawingml/2006/table";
+const GRAPHIC_DIAGRAM_URI = "http://schemas.openxmlformats.org/drawingml/2006/diagram";
+const GRAPHIC_OLE_URI = "http://schemas.openxmlformats.org/presentationml/2006/ole";
+
+/** What kind of thing an embedded object holds, in the reader's words. */
+function oleLabel(progId: string | undefined) {
+  const id = (progId ?? "").toLowerCase();
+  if (id.startsWith("msgraph.chart")) return "chart";
+  if (id.startsWith("excel.chart")) return "Excel chart";
+  if (id.startsWith("excel.")) return "Excel workbook";
+  if (id.startsWith("word.")) return "Word document";
+  if (id.startsWith("powerpoint.")) return "PowerPoint slide";
+  if (id.startsWith("equation.")) return "equation";
+  if (id.startsWith("acroexch.") || id.includes("pdf")) return "PDF";
+  if (id.startsWith("package")) return "attached file";
+  if (id.startsWith("visio.")) return "Visio drawing";
+  return "embedded object";
+}
+
+/**
+ * A graphic frame that is neither a table nor a chart: an OLE object or a
+ * SmartArt diagram. It keeps its part untouched; the projection says what it
+ * is, its fallback picture when PowerPoint saved one, and a SmartArt's words.
+ */
+async function nativeObjectFor(deck: Presentation, slidePartName: string, shape: XmlElement) {
+  const uri = firstDescendant(shape, DRAWINGML_NAMESPACE, "graphicData")?.getAttribute("uri") ?? "";
+  if (uri === GRAPHIC_OLE_URI) {
+    const ole = descendants(shape).find((node) => node.localName === "oleObj");
+    const name = ole?.getAttribute("name")?.trim();
+    return { kind: "ole" as const, label: oleLabel(ole?.getAttribute("progId")), ...(name ? { name } : {}) };
+  }
+  if (uri === GRAPHIC_DIAGRAM_URI) {
+    const relIds = descendants(shape).find((node) => node.localName === "relIds");
+    const dataId = relIds?.getAttributeNs(OFFICE_RELATIONSHIPS_NAMESPACE, "dm");
+    const slidePart = deck.office.package.getPart(slidePartName);
+    const dataPart = dataId && slidePart ? deck.office.package.relatedPart(slidePart, dataId) : undefined;
+    let items: string[] = [];
+    if (dataPart) {
+      try {
+        const data = (await deck.office.xml(dataPart.name)).root;
+        items = descendants(data)
+          .filter((node) => node.localName === "pt" && (node.getAttribute("type") ?? "node") === "node")
+          .map((point) => textNodes(point).map((node) => node.text()).join("").trim())
+          .filter(Boolean)
+          .slice(0, 12);
+      } catch {
+        items = [];
+      }
+    }
+    return { kind: "smartArt" as const, label: "SmartArt", ...(items.length ? { items } : {}) };
+  }
+  return { kind: "other" as const, label: "embedded object" };
 }
 function pictureMedia(
   deck: Presentation,
@@ -163,7 +383,7 @@ function cropFor(shape: XmlElement) {
   return { left: number("l"), top: number("t"), right: number("r"), bottom: number("b") };
 }
 
-function tableCells(deck: Presentation, slidePartName: string, shape: XmlElement): Array<Array<PresentationTableCell>> {
+function tableCells(deck: Presentation, slidePartName: string, shape: XmlElement, palette?: DrawingPalette): Array<Array<PresentationTableCell>> {
   return descendants(shape)
     .filter((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "tr")
     .map((row) => descendants(row)
@@ -173,8 +393,15 @@ function tableCells(deck: Presentation, slidePartName: string, shape: XmlElement
         paragraphs: richParagraphs(deck, slidePartName, cell),
         style: (() => {
           const properties = child(cell, DRAWINGML_NAMESPACE, "tcPr");
-          const fill = properties && child(properties, DRAWINGML_NAMESPACE, "solidFill")?.elements().find((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "srgbClr")?.getAttribute("val");
-          return fill ? { fill: `#${fill}` } : undefined;
+          // Theme colours resolve through the deck's palette; without one only
+          // an explicit RGB fill can be named.
+          const fill = palette
+            ? drawingFill(properties, palette)
+            : (() => {
+                const value = properties && child(properties, DRAWINGML_NAMESPACE, "solidFill")?.elements().find((node) => node.namespaceUri() === DRAWINGML_NAMESPACE && node.localName === "srgbClr")?.getAttribute("val");
+                return value ? `#${value}` : undefined;
+              })();
+          return fill && fill !== "none" ? { fill } : undefined;
         })(),
         ...(Number(cell.getAttribute("rowSpan")) > 1 ? { rowSpan: Number(cell.getAttribute("rowSpan")) } : {}),
         ...(Number(cell.getAttribute("gridSpan")) > 1 ? { colSpan: Number(cell.getAttribute("gridSpan")) } : {}),
@@ -262,7 +489,7 @@ function sceneNodes(root: XmlElement) {
   const walk = (parent: XmlElement, parentId?: string) => {
     for (const node of parent.elements()) {
       if (node.namespaceUri() !== PML_NAMESPACE) continue;
-      if (["sp", "pic", "graphicFrame"].includes(node.localName)) result.push({ node, parentId });
+      if (["sp", "pic", "graphicFrame", "cxnSp"].includes(node.localName)) result.push({ node, parentId });
       else if (node.localName === "grpSp") {
         result.push({ node, parentId });
         const groupId = shapeId(node);
@@ -279,15 +506,10 @@ async function slideObjects(
   slidePartName: string,
   root: XmlElement,
   slideId: string,
-  layoutRoot?: XmlElement,
-  canvas?: { width: number; height: number },
+  context: SlideContext,
   mediaCache?: PptxMediaReadCache,
 ): Promise<PresentationObject[]> {
-  const layoutPlaceholders = new Map<string, XmlElement>();
-  if (layoutRoot) descendants(layoutRoot).filter((node) => node.namespaceUri() === PML_NAMESPACE && node.localName === "sp").forEach((shape) => {
-    const key = placeholderKey(shape);
-    if (key) layoutPlaceholders.set(key, shape);
-  });
+  const canvas = context.canvas;
   const objects: PresentationObject[] = [];
   const scenes = sceneNodes(root);
   for (const { node: shape, parentId } of scenes) {
@@ -301,7 +523,7 @@ async function slideObjects(
       objects.push({
         id: `${slideId}:shape:${nativeShapeId}`,
         type: "group",
-        ...shapeGeometry(shape, undefined, canvas),
+        ...shapeGeometry(shape, [], canvas),
         content: { nativeShapeId, childIds },
         // Nested groups use the same object-id parent reference as every other child.
         ...(parentId ? { parentId: `${slideId}:shape:${parentId}` } : {}),
@@ -311,7 +533,18 @@ async function slideObjects(
     }
     const placeholder = firstDescendant(shape, PML_NAMESPACE, "ph");
     const isTitle = ["title", "ctrTitle"].includes(placeholder?.getAttribute("type") ?? "");
-    const type = shape.localName === "pic" ? "image" : shape.localName === "graphicFrame" ? (descendants(shape).some((node) => node.localName === "chart") ? "chart" : "table") : "text";
+    const inherited = placeholderChain(shape, context);
+    const graphicUri = shape.localName === "graphicFrame" ? firstDescendant(shape, DRAWINGML_NAMESPACE, "graphicData")?.getAttribute("uri") ?? "" : "";
+    const type = shape.localName === "pic"
+      ? "image"
+      : shape.localName === "cxnSp"
+        ? "shape"
+        : shape.localName === "graphicFrame"
+          ? descendants(shape).some((node) => node.localName === "chart")
+            ? "chart"
+            : graphicUri === GRAPHIC_TABLE_URI || firstDescendant(shape, DRAWINGML_NAMESPACE, "tbl") ? "table" : "embed"
+          : "text";
+    const appearance = shape.localName === "sp" || shape.localName === "cxnSp" ? shapeAppearance(shape, inherited, context) : undefined;
     const authoredImage = type === "image" ? await readPptxImageAsset(deck, slidePartName, shape, mediaCache) : undefined;
     // `descr` is PowerPoint's own alt text, so reading it here is what lets a
     // Spectra description round-trip instead of being invented alongside one.
@@ -319,8 +552,12 @@ async function slideObjects(
     const content = type === "chart"
       ? { ...(await chartFor(deck, slidePartName, shape)), nativeShapeId }
       : type === "table"
-        ? { rows: tableCells(deck, slidePartName, shape), nativeTable: true, nativeShapeId }
-        : {
+        ? { rows: tableCells(deck, slidePartName, shape, context.palette), nativeTable: true, nativeShapeId }
+        : type === "embed"
+          ? { nativeShapeId, nativeObject: await nativeObjectFor(deck, slidePartName, shape), ...pictureMedia(deck, slidePartName, shape) }
+          : type === "shape"
+            ? { nativeShapeId, nativeShapeKind: "shape" as const, ...(appearance ? { nativeAppearance: appearance } : {}) }
+            : {
             text: shapeText(shape),
             paragraphs: richParagraphs(deck, slidePartName, shape),
             nativeShapeId,
@@ -328,6 +565,7 @@ async function slideObjects(
             nativeShapeKind: isTitle ? "placeholder" as const : "shape" as const,
             ...(type === "image" ? { ...pictureMedia(deck, slidePartName, shape), ...(cropFor(shape) ? { crop: cropFor(shape) } : {}) } : {}),
             ...(authoredImage ? { ...authoredImage.image, nativeMediaSha256: authoredImage.image.sha256 } : {}),
+            ...(appearance ? { nativeAppearance: appearance } : {}),
           };
     const nativeObjectLink = hyperlinkFor(deck, slidePartName, firstDescendant(shape, PML_NAMESPACE, "cNvPr"));
     const uniformTextLink = type === "text"
@@ -343,7 +581,7 @@ async function slideObjects(
     objects.push({
       id: authoredImage?.objectId ?? `${slideId}:shape:${nativeShapeId}`,
       type,
-      ...shapeGeometry(shape, layoutPlaceholders.get(placeholderKey(shape) ?? ""), canvas),
+      ...shapeGeometry(shape, inherited, canvas),
       content,
       ...(chart?.sourceArtifactId ? {
         sourceBinding: {
@@ -365,6 +603,33 @@ async function slideObjects(
     } satisfies PresentationObject);
   }
   return objects;
+}
+
+const SLIDE_MASTER_RELATIONSHIP = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster";
+
+/** A layout, its master and the master's theme: what every slide on that layout inherits. */
+type InheritedParts = { layoutRoot?: XmlElement; masterRoot?: XmlElement; themeRoot?: XmlElement };
+
+function inheritedParts(deck: Presentation, layoutPartName: string | undefined, cache: Map<string, Promise<InheritedParts>>) {
+  const key = layoutPartName ?? "";
+  let entry = cache.get(key);
+  if (!entry) {
+    entry = (async (): Promise<InheritedParts> => {
+      if (!layoutPartName) return {};
+      const pkg = deck.office.package;
+      const layoutPart = pkg.getPart(layoutPartName);
+      const layoutRoot = (await deck.office.xml(layoutPartName)).root;
+      const masterRelationship = layoutPart?.relationships().byType(SLIDE_MASTER_RELATIONSHIP)[0];
+      const masterPart = layoutPart && masterRelationship ? pkg.relatedPart(layoutPart, masterRelationship.id) : undefined;
+      const masterRoot = masterPart ? (await deck.office.xml(masterPart.name)).root : undefined;
+      const themeRelationship = masterPart?.relationships().byType(THEME_RELATIONSHIP)[0];
+      const themePart = masterPart && themeRelationship ? pkg.relatedPart(masterPart, themeRelationship.id) : undefined;
+      const themeRoot = themePart ? (await deck.office.xml(themePart.name)).root : undefined;
+      return { layoutRoot, masterRoot, themeRoot };
+    })();
+    cache.set(key, entry);
+  }
+  return entry;
 }
 
 async function presentationThemeFonts(deck: Presentation) {
@@ -389,6 +654,7 @@ async function presentationThemeFonts(deck: Presentation) {
 async function projectPresentation(deck: Presentation, profile: LensCompatibilityProfile) {
   const entries: LensFidelityEntry[] = [];
   const mediaCache: PptxMediaReadCache = new Map();
+  const inheritedCache = new Map<string, Promise<InheritedParts>>();
   const presentationXml = await deck.office.xml("/ppt/presentation.xml");
   const slideSize = firstDescendant(presentationXml.root, PML_NAMESPACE, "sldSz");
   const canvas = {
@@ -413,13 +679,26 @@ async function projectPresentation(deck: Presentation, profile: LensCompatibilit
       entries.push(claim);
     }
     if (timing) entries.push({ regionId: `${id}:animation`, feature: "animation", class: "PRESERVED", partName: slide.partName, pathPattern: "timing", namespaceUri: PML_NAMESPACE, readOnly: true });
-    const layoutRoot = slide.layoutPartName ? (await deck.office.xml(slide.layoutPartName)).root : undefined;
+    const inherited = await inheritedParts(deck, slide.layoutPartName, inheritedCache);
+    const palette = withColorMapOverride(
+      withColorMapOverride(
+        drawingPalette(inherited.themeRoot, inherited.masterRoot ? child(inherited.masterRoot, PML_NAMESPACE, "clrMap") : undefined),
+        inherited.layoutRoot ? child(inherited.layoutRoot, PML_NAMESPACE, "clrMapOvr") : undefined,
+      ),
+      child(root, PML_NAMESPACE, "clrMapOvr"),
+    );
+    const context: SlideContext = {
+      layoutPlaceholders: placeholdersIn(inherited.layoutRoot),
+      masterPlaceholders: placeholdersIn(inherited.masterRoot),
+      palette,
+      canvas,
+    };
     const notesPartName = notesPartNameFor(deck, slide.partName);
     const speakerNotes = notesPartName ? notesText((await deck.office.xml(notesPartName)).root) : "";
     const hidden = ["0", "false", "off"].includes(
       (root.getAttribute("show") ?? "").toLowerCase(),
     );
-    return { id, index, title: title ? firstText(title) : (slide.text()[0] ?? ""), text: [...slide.text()], objects: await slideObjects(deck, slide.partName, root, id, layoutRoot, canvas, mediaCache), ...(slide.layoutPartName ? { layoutPartName: slide.layoutPartName } : {}), hasTransition: Boolean(transition), ...(modeledTransition ? { transition: modeledTransition } : {}), hasTiming: Boolean(timing), ...(hidden ? { hidden: true } : {}), speakerNotes, ...(notesPartName ? { notesPartName } : {}) };
+    return { id, index, title: title ? firstText(title) : (slide.text()[0] ?? ""), text: [...slide.text()], objects: await slideObjects(deck, slide.partName, root, id, context, mediaCache), ...(slide.layoutPartName ? { layoutPartName: slide.layoutPartName } : {}), hasTransition: Boolean(transition), ...(modeledTransition ? { transition: modeledTransition } : {}), hasTiming: Boolean(timing), ...(hidden ? { hidden: true } : {}), speakerNotes, ...(notesPartName ? { notesPartName } : {}) };
   }));
   const partNames = deck.office.package.parts().map((part) => part.name);
   for (const [feature, pattern] of [["master", /\/slideMasters\//i], ["layout", /\/slideLayouts\//i], ["media", /\/media\//i], ["ole", /\/embeddings\//i], ["macro", /\/vbaProject\.bin$/i], ["smartArt", /\/diagrams\//i], ["chart", /\/charts\//i], ["notes", /\/notesSlides\//i], ["unknown-extension", /unknown|future|extension/i]] as const) {
@@ -755,7 +1034,7 @@ async function ensureNotesPage(deck: Presentation, slidePartName: string) {
 }
 
 function shapeIn(root: XmlElement, id: string) {
-  return descendants(root).find((node) => node.namespaceUri() === PML_NAMESPACE && ["sp", "pic", "graphicFrame", "grpSp"].includes(node.localName) && shapeId(node) === id);
+  return descendants(root).find((node) => node.namespaceUri() === PML_NAMESPACE && SCENE_ELEMENTS.includes(node.localName) && shapeId(node) === id);
 }
 
 /** PowerPoint's own alt text lives on `p:cNvPr/@descr`, so that is what moves. */
@@ -773,26 +1052,36 @@ function setAltText(shape: XmlElement, text: string) {
  * what PowerPoint itself writes in that case.
  */
 function setShapeGeometry(shape: XmlElement, geometry: { x: number; y: number; width: number; height: number; rotation: number }, canvas = { width: 12192000, height: 6858000 }) {
+  // The shape's own transform only: a group's first descendant transform is a
+  // child's, and moving the group must never move one member instead.
   const container = shape.localName === "graphicFrame"
-    ? firstDescendant(shape, PML_NAMESPACE, "xfrm") ?? shape
-    : firstDescendant(shape, PML_NAMESPACE, "spPr") ?? firstDescendant(shape, PML_NAMESPACE, "grpSpPr");
+    ? shape
+    : child(shape, PML_NAMESPACE, shape.localName === "grpSp" ? "grpSpPr" : "spPr");
   if (!container) throw new PptxLensError("PPTX_SHAPE_PROPS_MISSING", "This shape has no properties element to hold its position.");
-  let xfrm = container.namespaceUri() === PML_NAMESPACE && container.localName === "xfrm"
-    ? container
-    : firstDescendant(container, DRAWINGML_NAMESPACE, "xfrm");
+  let xfrm = ownXfrm(shape);
   if (!xfrm) {
-    xfrm = new XmlElement("xfrm", "a");
-    container.insertBefore(xfrm, container.elements()[0] ?? null);
+    if (shape.localName === "graphicFrame") {
+      xfrm = new XmlElement("xfrm", "p");
+      container.insertBefore(xfrm, child(shape, DRAWINGML_NAMESPACE, "graphic") ?? null);
+    } else {
+      xfrm = new XmlElement("xfrm", "a");
+      container.insertBefore(xfrm, container.elements()[0] ?? null);
+    }
   }
-  let off = firstDescendant(xfrm, DRAWINGML_NAMESPACE, "off");
+  let off = child(xfrm, DRAWINGML_NAMESPACE, "off");
   if (!off) { off = new XmlElement("off", "a"); xfrm.insertBefore(off, xfrm.elements()[0] ?? null); }
-  let ext = firstDescendant(xfrm, DRAWINGML_NAMESPACE, "ext");
-  if (!ext) { ext = new XmlElement("ext", "a"); xfrm.appendChild(ext); }
+  let ext = child(xfrm, DRAWINGML_NAMESPACE, "ext");
+  if (!ext) { ext = new XmlElement("ext", "a"); xfrm.insertBefore(ext, off ? xfrm.elements()[xfrm.elements().indexOf(off) + 1] ?? null : null); }
+  // Geometry arrives in slide space; a grouped shape stores it in its
+  // group's child space, so it goes back through every enclosing group.
+  const affine = slideAffine(shape);
   const canvasHeight = (canvas.height / canvas.width) * 1000;
-  off.setAttribute("x", String(Math.round((geometry.x / 1000) * canvas.width)));
-  off.setAttribute("y", String(Math.round((geometry.y / canvasHeight) * canvas.height)));
-  ext.setAttribute("cx", String(Math.max(1, Math.round((geometry.width / 1000) * canvas.width))));
-  ext.setAttribute("cy", String(Math.max(1, Math.round((geometry.height / canvasHeight) * canvas.height))));
+  const x = (geometry.x / 1000) * canvas.width;
+  const y = (geometry.y / canvasHeight) * canvas.height;
+  off.setAttribute("x", String(Math.round((x - affine.tx) / affine.sx)));
+  off.setAttribute("y", String(Math.round((y - affine.ty) / affine.sy)));
+  ext.setAttribute("cx", String(Math.max(1, Math.round(((geometry.width / 1000) * canvas.width) / affine.sx))));
+  ext.setAttribute("cy", String(Math.max(1, Math.round(((geometry.height / canvasHeight) * canvas.height) / affine.sy))));
   const rotation = Math.round(geometry.rotation * 60000);
   if (rotation) xfrm.setAttribute("rot", String(rotation));
   else xfrm.removeAttribute("rot");
@@ -966,11 +1255,11 @@ function replaceShapeText(shape: XmlElement, value: string) {
 
 function moveShapeToOrder(root: XmlElement, shapeIdValue: string, order: number) {
   const tree = descendants(root).find((node) => node.namespaceUri() === PML_NAMESPACE && node.localName === "spTree");
-  const shape = tree?.elements().find((node) => ["sp", "pic", "graphicFrame", "grpSp"].includes(node.localName) && shapeId(node) === shapeIdValue);
+  const shape = tree?.elements().find((node) => SCENE_ELEMENTS.includes(node.localName) && shapeId(node) === shapeIdValue);
   if (!tree || !shape) return;
   // `order` is the shape's final index. Resolve it among the other shapes so a
   // later target lands after the shape currently holding that index.
-  const others = tree.elements().filter((node) => node !== shape && ["sp", "pic", "graphicFrame", "grpSp"].includes(node.localName));
+  const others = tree.elements().filter((node) => node !== shape && SCENE_ELEMENTS.includes(node.localName));
   const bounded = Math.max(0, Math.min(others.length, order));
   tree.removeChild(shape);
   // After the last shape, stay before any trailing spTree extension element.
@@ -988,9 +1277,23 @@ function removeShape(root: XmlElement, shapeIdValue: string) {
     // while keeping its members. Moving the native children out first gives
     // those two actions the same semantics in PowerPoint and in Spectra.
     const parent = shape.parent;
-    const children = shape.elements().filter((node) => ["sp", "pic", "graphicFrame", "grpSp"].includes(node.localName));
+    const children = shape.elements().filter((node) => SCENE_ELEMENTS.includes(node.localName));
     const reference = shape;
+    // Members leave the group's child space, so each frame is carried
+    // through the group's transform and lands where it was drawn.
+    const affine = groupAffine(shape);
     for (const childNode of children) {
+      const xfrm = ownXfrm(childNode);
+      const off = xfrm ? child(xfrm, DRAWINGML_NAMESPACE, "off") : undefined;
+      const ext = xfrm ? child(xfrm, DRAWINGML_NAMESPACE, "ext") : undefined;
+      if (off) {
+        off.setAttribute("x", String(Math.round(affine.tx + emu(off.getAttribute("x")) * affine.sx)));
+        off.setAttribute("y", String(Math.round(affine.ty + emu(off.getAttribute("y")) * affine.sy)));
+      }
+      if (ext) {
+        ext.setAttribute("cx", String(Math.max(1, Math.round(emu(ext.getAttribute("cx")) * affine.sx))));
+        ext.setAttribute("cy", String(Math.max(1, Math.round(emu(ext.getAttribute("cy")) * affine.sy))));
+      }
       shape.removeChild(childNode);
       parent.insertBefore(childNode, reference);
     }
@@ -1013,10 +1316,10 @@ function addNativeGroup(root: XmlElement, operation: {
   height: number;
   rotation: number;
   readingOrder?: number;
-}) {
+}, canvas = { width: 12192000, height: 6858000 }) {
   const tree = descendants(root).find((node) => node.namespaceUri() === PML_NAMESPACE && node.localName === "spTree");
   if (!tree) throw new PptxLensError("PPTX_SHAPE_TREE_MISSING", "The slide has no editable shape tree.");
-  const children = operation.childShapeIds.map((id) => tree.elements().find((node) => ["sp", "pic", "graphicFrame", "grpSp"].includes(node.localName) && shapeId(node) === id));
+  const children = operation.childShapeIds.map((id) => tree.elements().find((node) => SCENE_ELEMENTS.includes(node.localName) && shapeId(node) === id));
   if (children.some((node) => !node)) throw new PptxLensError("PPTX_SHAPE_MISSING", "A grouped PowerPoint object no longer exists on this slide.");
   const ids = descendants(tree).filter((node) => node.localName === "cNvPr").map((node) => Number(node.getAttribute("id") ?? 0));
   const id = Math.max(1, ...ids) + 1;
@@ -1047,7 +1350,12 @@ function addNativeGroup(root: XmlElement, operation: {
     group.appendChild(childNode);
   }
   tree.appendChild(group);
-  setShapeGeometry(group, operation);
+  setShapeGeometry(group, operation, canvas);
+  // The members stay in slide space, so the group's child space is its frame.
+  childOff.setAttribute("x", off.getAttribute("x") ?? "0");
+  childOff.setAttribute("y", off.getAttribute("y") ?? "0");
+  childExt.setAttribute("cx", ext.getAttribute("cx") ?? "1");
+  childExt.setAttribute("cy", ext.getAttribute("cy") ?? "1");
   if (operation.readingOrder !== undefined) moveShapeToOrder(root, String(id), operation.readingOrder);
   return group;
 }
@@ -1822,7 +2130,10 @@ async function applyDelta(carry: LensPreservedCarry<PptxProjection>, delta: Pptx
       deck.office.markDirty(slide.partName);
     }
     else if (operation.kind === "group-objects") {
-      addNativeGroup((await deck.office.xml(slide.partName)).root, operation);
+      addNativeGroup((await deck.office.xml(slide.partName)).root, operation, {
+        width: carry.projection.nativeBinding.canvasWidthEmu ?? 12192000,
+        height: carry.projection.nativeBinding.canvasHeightEmu ?? 6858000,
+      });
       deck.office.markDirty(slide.partName);
     }
     else if (operation.kind === "set-title") {

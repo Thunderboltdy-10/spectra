@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Button } from "@/components/ui/button";
-import type { PresentationContent } from "../../presentation/model";
+import type { PresentationContent, PresentationObject } from "../../presentation/model";
 import { richDocumentFromProseMirror } from "../../rich-content/prosemirror";
 import { FileViewer } from "../file-viewer";
 import { fileViewKind, officeSizeRefusal } from "../file-kind";
@@ -231,6 +231,40 @@ describe("FileViewer: Office files", () => {
     expect(life.launchFrom).toHaveBeenLastCalledWith(thumb);
     expect(screen.getByText("Slide 1 of 3")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Previous slide" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("paints a deck's own shapes, lines and embedded objects", async () => {
+    const native = (id: string, type: PresentationObject["type"], content: Record<string, unknown>) =>
+      ({ id, type, x: 100, y: 100, width: 200, height: 100, rotation: 0, content: { nativeShapeId: id, ...content } }) as PresentationObject;
+    reader.load.mockResolvedValue({
+      kind: "slides",
+      media: [],
+      deck: {
+        ...DECK,
+        slides: [{
+          id: "n1",
+          title: "Network",
+          objects: [
+            native("oval", "text", { text: "Workgroup", paragraphs: [{ runs: [{ text: "Workgroup" }] }], nativeAppearance: { fill: "var(--accent)", line: "var(--border-strong)", lineWidth: 2, geometry: "ellipse", anchor: "middle" } }),
+            native("arrow", "shape", { nativeAppearance: { line: "var(--text-primary)", lineWidth: 2, geometry: "straightConnector1", flipH: true, arrowEnd: true } }),
+            native("ole", "embed", { nativeObject: { kind: "ole", label: "chart", name: "Chart" } }),
+            native("art", "embed", { nativeObject: { kind: "smartArt", label: "SmartArt", items: ["Plan", "Build", "Ship"] } }),
+          ],
+        }],
+      },
+    });
+    render(<FileViewer file={{ key: "p3", filename: "network.pptx", kind: "slides", url: "https://files.example/network" }} onClose={() => {}} />);
+    await screen.findByRole("group", { name: /Slides/ });
+    const stage = document.querySelector(".file-viewer-stage")!;
+    const oval = stage.querySelector<HTMLElement>("[data-native-shape='ellipse']")!;
+    expect(oval.textContent).toBe("Workgroup");
+    expect(oval.style.background).toBe("var(--accent)");
+    expect(oval.style.justifyContent).toBe("center");
+    const line = stage.querySelector("svg.presentation-native-line line")!;
+    expect([line.getAttribute("x1"), line.getAttribute("x2")]).toEqual(["100", "0"]);
+    expect(stage.querySelectorAll("svg.presentation-native-line polygon")).toHaveLength(1);
+    expect(within(stage as HTMLElement).getByRole("img", { name: "Chart kept in the file" }).textContent).toContain("Chart. Kept in the file; open it in PowerPoint to see it.");
+    expect(within(stage as HTMLElement).getByRole("img", { name: "SmartArt kept in the file" }).textContent).toContain("Plan · Build · Ship");
   });
 
   it("shows a workbook as a read-only grid with its sheet tabs", async () => {

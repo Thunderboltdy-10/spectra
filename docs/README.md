@@ -154,6 +154,8 @@ This list reflects main after Phase 3 (`853e4a12`). A tag in brackets names the 
 - **Keep off:** the Cloudflare realtime provider has no admission receipt. [WRITE-PATHS]
 - **Bridge:** a delete it has already carried out cannot be undone by a Library restore. [P3-SURFACES-2 X2]
 - **Editors:** a sheet save still forces one full rebuild, kept deliberately until a "no foreign update since the last rebuild" guard exists. [P3-CLIENT-PERF 1]
+- **Office viewers:** slide backgrounds, the theme's text colour, table styles, freeform shapes and Word's first-page headers are not drawn yet. [R-D4e-OFFICE-DEPTH]
+- **Search anchors:** a thread result opens the conversation, not the message. [R-L6-ANCHORS]
 - **Surfaces:**
   - the "Not reached" surfaces are `/agents/[id]`, `/analytics` and most of `/superadmin`.
   - [P3-SURFACES-2]

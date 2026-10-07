@@ -97,6 +97,15 @@ describe("GlobalSearch", () => {
     expect(onOpenArtifact).toHaveBeenCalledWith("work-1");
   });
 
+  it("says quietly when only exact words could be matched", async () => {
+    searchSpectra.mockResolvedValue({ artifacts: [], workspaces: [] });
+    semantic.search.mockResolvedValue({ results: [workResult], mode: "words_only", degraded: { reason: "embeddings_unavailable" }, tookMs: 3 });
+    renderSearch();
+    await openAndSearch("respiration");
+    expect(await screen.findByText("Matching exact words only right now.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Cell respiration notes/ })).toBeTruthy();
+  });
+
   it("says why the search failed and searches again on retry", async () => {
     searchSpectra.mockResolvedValue({ artifacts: [], workspaces: [] });
     semantic.search.mockRejectedValueOnce(new Error("Search is busy. Try again in a moment."));

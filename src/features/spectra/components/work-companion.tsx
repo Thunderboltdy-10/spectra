@@ -11,7 +11,10 @@ import { useLifeLanding } from "../life/use-life";
 import { workTypeMeta } from "../artifacts/presentation";
 import { getSpectraThreads, type SpectraArtifact, type SpectraThread } from "../data/api";
 import { spectraBus } from "../events";
-import { artifactPlacements, formatRelativeTime, linkedArtifacts } from "./spectra-view-model";
+import { isArtifactTypeKey } from "../artifacts/registry";
+import { useRelated } from "../semantic/use-semantic";
+import type { RelatedReason } from "../semantic/types";
+import { artifactPlacements, formatRelativeTime } from "./spectra-view-model";
 import { previewText } from "./preview-text";
 import { WorkbenchInspectorTabs } from "./workbench-inspector-tabs";
 
@@ -213,6 +216,17 @@ function CompanionRow({
   );
 }
 
+/** Why a related work is listed, in a few words. */
+export function relatedReasonText(reasons: readonly RelatedReason[]) {
+  const link = reasons.find((reason) => reason.type === "link");
+  if (link?.type === "link") return link.label?.trim() || (link.direction === "outgoing" ? "Linked from this work" : "Links to this work");
+  return reasons.some((reason) => reason.type === "similar") ? "Similar" : null;
+}
+
+/**
+ * Related work (HARNESS.md, "Semantic layer"): explicit links first, then the
+ * nearest neighbours by meaning, each saying why it is listed.
+ */
 function RelatedWork({
   work,
   artifacts,
@@ -222,32 +236,58 @@ function RelatedWork({
   artifacts: SpectraArtifact[];
   onOpenWork: (work: SpectraArtifact) => void;
 }) {
-  const links = linkedArtifacts(work, artifacts);
-  if (!links.length)
+  const related = useRelated(work._id, { limit: 12 });
+  const works = related.results.filter((result) => result.kind === "artifact" && result.itemId !== work._id);
+  if (related.status === "idle" || (related.status === "loading" && !works.length))
+    return <LoadingRows label="Finding related work" count={3} className="pt-2" />;
+  if (related.status === "error")
+    return (
+      <ProblemState
+        compact
+        title="Related work couldn't load"
+        detail="Check your connection, then try again."
+        action={
+          <Button variant="secondary" size="sm" onClick={related.refresh}>
+            Try again
+          </Button>
+        }
+      />
+    );
+  if (!works.length)
     return (
       <EmptyState
         compact
         icon="link"
-        title="Nothing linked yet"
-        detail="Work this one mentions, and work that mentions it, shows up here."
+        title="Nothing related yet"
+        detail="Work this one links to, work that links here, and work about the same things shows up here."
       />
     );
+  const byId = new Map(artifacts.map((artifact) => [artifact._id, artifact]));
   return (
-    <ul className="-mx-1 space-y-0.5 pt-2">
-      {links.map(({ artifact }) => {
-        const meta = workTypeMeta[artifact.blueprintKey];
-        return (
-          <CompanionRow
-            key={artifact._id}
-            glyph={meta.glyph}
-            accent={meta.color}
-            title={artifact.title}
-            meta={`${meta.label} · ${formatRelativeTime(artifact.updatedAt)}`}
-            onOpen={() => onOpenWork(artifact)}
-          />
-        );
-      })}
-    </ul>
+    <>
+      {related.degraded && related.degraded !== "index_partial" ? (
+        <p role="status" className="px-1 pt-2 text-caption text-[var(--text-tertiary)]">Showing linked work only right now.</p>
+      ) : null}
+      <ul className="-mx-1 space-y-0.5 pt-2">
+        {works.map((result) => {
+          const meta = result.subtype && isArtifactTypeKey(result.subtype) ? workTypeMeta[result.subtype] : null;
+          const why = relatedReasonText(result.reasons);
+          const known = byId.get(result.itemId);
+          return (
+            <CompanionRow
+              key={result.itemId}
+              glyph={meta?.glyph ?? "document"}
+              accent={meta?.color}
+              title={result.title}
+              meta={[why, meta?.label ?? result.typeLabel, result.updatedAt ? formatRelativeTime(result.updatedAt) : null].filter(Boolean).join(" · ")}
+              onOpen={() =>
+                known ? onOpenWork(known) : void spectraBus.command("work.open", { workId: result.itemId, surface: "panel" })
+              }
+            />
+          );
+        })}
+      </ul>
+    </>
   );
 }
 

@@ -38,12 +38,17 @@ The throwaway probe was deleted before this report. Each fix has a regression te
    - Keep callbacks stable, with `useCallback` or by id-based handlers.
 
    A peer or AI edit to one item then re-renders one item instead of all N.
+
+   **Done (2026-10-07):** whiteboard nodes (`BoardNodeItem`, id-based actions) and the presentation notes view (`StillSlide`, shared with the rail). Quiz and flashcard studios render one item at a time, so they gain nothing.
 4. **Debug traces in files I don't own.**
    - `components/artifact-native-sync.ts:196-212` still writes `__spectraNativeProjection`. Its `syncRejected` check (line 61) is dead, because synchronize now always resolves `{applied:true}`.
    - `components/document-studio.tsx:1593` also writes `__spectraNativeProjection`.
 
    Delete both.
+
+   **Done (2026-10-07):** both traces and the dead `syncRejected` checks are gone.
 5. **`document-studio.tsx:1148-1149`** runs `documentReferenceIds(transaction.before/doc)` on every transaction. That is two whole-document walks per keystroke on a 60-page essay. Suggested fix: run it only when the transaction's steps touch reference nodes.
+   **Done (2026-10-07):** reference ids are cached per ProseMirror node (`document-reference-ids.ts`), so a keystroke walks only the edited path.
 6. **Per-frame highlight memos** in `artifact-studio.tsx` (`materializeAiChangedPaths` ×4) recompute on every streaming frame. They are cheap now that `streamingContent` shares structure; I did not measure them separately.
 7. **`textApproachBeats`/`dropdownBeats`** (`collaboration/interaction-choreography.ts:552`) still do one full `structuredClone` per text or atomic change, about 2 ms each on a large board. This is minor now.
 

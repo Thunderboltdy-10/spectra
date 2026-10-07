@@ -152,7 +152,7 @@ This list reflects main after Phase 3 (`853e4a12`). A tag in brackets names the 
 **Known residuals (Low/Medium, listed in the reports)**
 
 - **Keep off:** the Cloudflare realtime provider has no admission receipt. [WRITE-PATHS]
-- **Bridge:** a delete it has already carried out cannot be undone by a Library restore, and a permanently failing upload retries forever. [P3-SURFACES-2 X2, P3-SYNC-DURABILITY D1]
+- **Bridge:** a delete it has already carried out cannot be undone by a Library restore. [P3-SURFACES-2 X2]
 - **Editors:**
   - memoising per-item studio components would cut re-renders on big artifacts;
   - a sheet save still forces one full rebuild.

@@ -19,9 +19,9 @@ use spectra_bridge_core::protocol::{
 use spectra_bridge_core::retry::bridge_mount_repair_delay_ms;
 use spectra_bridge_core::server::{LocalBridgeControl, ServerState, serve};
 use spectra_bridge_core::sync::{
-    Backoff, ClaimPrecondition, ClaimedFsRequest, ClaimedPayloadUpload, ClaimedWrite,
-    DeliveredChange, DiscoveredRegistration, DiscoveredResource, MAX_NATIVE_PAYLOAD_BYTES,
-    DeviceHealthReport, QueuedChangeEnvelope, ReplicaMigrationPage, ReportedChange,
+    Backoff, ClaimPrecondition, ClaimedFsRequest, ClaimedPayloadUpload, ClaimedWrite, CloudRefused,
+    DeliveredChange, DeviceHealthReport, DiscoveredRegistration, DiscoveredResource,
+    MAX_NATIVE_PAYLOAD_BYTES, QueuedChangeEnvelope, ReplicaMigrationPage, ReportedChange,
     WriteCompletion, claim_fs_request, claim_pending_payload_upload, claim_write,
     complete_fs_request_with_claim, complete_write_with_claim, detach_mount,
     discover_resources_page, drain_cloud_queue_holding, exchange_pairing, inspect_write_target,
@@ -1891,6 +1891,13 @@ async fn finish_delivered_change(
             &delivery.item,
             &delivery.envelope.change.resource_id,
             Some(&hash),
+        ),
+        // The cloud said no to these exact bytes; asking again gets the same
+        // answer. The file stays on disk and its next change is a new upload.
+        Err(error) if error.downcast_ref::<CloudRefused>().is_some() => journal.fail_queue(
+            &delivery.item,
+            "upload-refused",
+            "Spectra did not accept this version of the file, so it is no longer being sent. Saving the file again sends the new version.",
         ),
         Err(_) => journal.retry_queue(
             delivery.item.id,

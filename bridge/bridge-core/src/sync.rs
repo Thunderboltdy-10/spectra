@@ -156,6 +156,30 @@ struct ConvexResponse<T> {
     error_message: Option<String>,
 }
 
+/// The cloud answered and said no: a function threw, or storage refused the
+/// request itself. Sending the same request again gets the same answer, so a
+/// queue holding it should give up instead of retrying forever. Network
+/// failures, timeouts and server errors are never this.
+#[derive(Debug)]
+pub struct CloudRefused(pub String);
+
+impl std::fmt::Display for CloudRefused {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for CloudRefused {}
+
+const CONVEX_FUNCTION_FAILED: u16 = 560;
+
+/// A 4xx other than a timeout or a rate limit names the request, not the moment.
+fn status_refuses(status: reqwest::StatusCode) -> bool {
+    status.is_client_error()
+        && status != reqwest::StatusCode::REQUEST_TIMEOUT
+        && status != reqwest::StatusCode::TOO_MANY_REQUESTS
+}
+
 async fn mutation<T: for<'de> Deserialize<'de>>(
     deployment_url: &str,
     path: &str,
@@ -179,26 +203,41 @@ async fn mutation<T: for<'de> Deserialize<'de>>(
                 "failed"
             };
             anyhow::anyhow!("{path} request {phase}: {error}")
-        })?
-        .error_for_status()
-        .map_err(|error| anyhow::anyhow!("{path} returned an HTTP error: {error}"))?;
+        })?;
+    // Convex answers a function that threw with 560 and the usual error body.
+    let function_failed = response.status().as_u16() == CONVEX_FUNCTION_FAILED;
+    let response = if function_failed {
+        response
+    } else {
+        response
+            .error_for_status()
+            .map_err(|error| anyhow::anyhow!("{path} returned an HTTP error: {error}"))?
+    };
     let body = response
         .text()
         .await
         .map_err(|error| anyhow::anyhow!("{path} response could not be read: {error}"))?;
+    if function_failed {
+        let message = serde_json::from_str::<ConvexResponse<serde_json::Value>>(&body)
+            .ok()
+            .and_then(|response| response.error_message)
+            .unwrap_or_else(|| format!("{path} failed"));
+        return Err(CloudRefused(message).into());
+    }
     let response = serde_json::from_str::<ConvexResponse<T>>(&body).map_err(|error| {
         anyhow::anyhow!(
             "{path} returned an invalid response: {error}; body={}",
             body.chars().take(500).collect::<String>()
         )
     })?;
-    anyhow::ensure!(
-        response.status == "success",
-        "{}",
-        response
-            .error_message
-            .unwrap_or_else(|| format!("{path} failed"))
-    );
+    if response.status != "success" {
+        return Err(CloudRefused(
+            response
+                .error_message
+                .unwrap_or_else(|| format!("{path} failed")),
+        )
+        .into());
+    }
     response
         .value
         .ok_or_else(|| anyhow::anyhow!("{path} returned no value"))
@@ -553,8 +592,15 @@ pub async fn upload_resource_payload(
             .header(reqwest::header::CONTENT_TYPE, media_type)
             .body(bytes.to_vec())
             .send()
-            .await?
-            .error_for_status()?;
+            .await?;
+        if status_refuses(response.status()) {
+            return Err(CloudRefused(format!(
+                "storage refused the upload ({})",
+                response.status()
+            ))
+            .into());
+        }
+        let response = response.error_for_status()?;
         let stored: serde_json::Value = response.json().await?;
         let storage_id = stored
             .get("storageId")
@@ -1060,6 +1106,60 @@ pub async fn drain_cloud_queue_holding(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Answers one request with `status` and `body`, then closes.
+    async fn answer_once(status: &'static str, body: &'static str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = vec![0_u8; 16 * 1024];
+            let _ = socket.read(&mut request).await;
+            let response = format!(
+                "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
+        });
+        format!("http://{address}")
+    }
+
+    async fn refusal_of(deployment: &str) -> anyhow::Error {
+        upload_resource_payload(deployment, "credential", "replica", b"x", "h", "text/plain")
+            .await
+            .unwrap_err()
+    }
+
+    #[tokio::test]
+    async fn a_function_that_threw_is_a_refusal_with_its_own_message() {
+        let deployment = answer_once(
+            "560 Function Failed",
+            r#"{"status":"error","errorMessage":"PAYLOAD_HASH_QUARANTINED"}"#,
+        )
+        .await;
+        let error = refusal_of(&deployment).await;
+        let refused = error.downcast_ref::<CloudRefused>().expect("a refusal");
+        assert_eq!(refused.0, "PAYLOAD_HASH_QUARANTINED");
+    }
+
+    #[tokio::test]
+    async fn server_errors_and_lost_connections_stay_retryable() {
+        let deployment = answer_once("503 Service Unavailable", "{}").await;
+        let error = refusal_of(&deployment).await;
+        assert!(error.downcast_ref::<CloudRefused>().is_none());
+        let error = refusal_of("http://127.0.0.1:1").await;
+        assert!(error.downcast_ref::<CloudRefused>().is_none());
+    }
+
+    #[test]
+    fn only_request_shaped_client_errors_refuse() {
+        assert!(status_refuses(reqwest::StatusCode::FORBIDDEN));
+        assert!(status_refuses(reqwest::StatusCode::PAYLOAD_TOO_LARGE));
+        assert!(!status_refuses(reqwest::StatusCode::TOO_MANY_REQUESTS));
+        assert!(!status_refuses(reqwest::StatusCode::REQUEST_TIMEOUT));
+        assert!(!status_refuses(reqwest::StatusCode::BAD_GATEWAY));
+    }
 
     #[test]
     fn claimed_write_accepts_convex_float_encoded_integral_lease_generation() {

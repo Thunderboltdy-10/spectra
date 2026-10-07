@@ -6,9 +6,9 @@
  * vector index is declared with it. Every vector is stamped with `embeddingVersion()`.
  */
 import { getEmbeddingModelSetting, getOpenRouterApiKey } from "./env";
+import { EMBEDDING_DIMENSIONS } from "./embeddingDimensions";
 
-/** Vector size requested from the provider and declared by every vector index. */
-export const EMBEDDING_DIMENSIONS = 256;
+export { EMBEDDING_DIMENSIONS };
 /** Whole inputs only: anything larger is rejected, never truncated. Always under 8191 tokens. */
 export const EMBEDDING_INPUT_MAX_BYTES = 8_000;
 export const EMBEDDING_BATCH_SIZE = 32;

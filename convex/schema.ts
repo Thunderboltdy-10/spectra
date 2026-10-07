@@ -2,7 +2,7 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { vUiObservation, vUiObserverInterests } from "./spectraUiObservationSchema";
 import { providerProjectionIntent, providerProjectionReceipt } from "./managebacProjectionContract";
-import { EMBEDDING_DIMENSIONS } from "./embeddingProvider";
+import { EMBEDDING_DIMENSIONS } from "./embeddingDimensions";
 import { vSemanticKind as semanticIndexedKind } from "./semanticKeys";
 import { vSchoolSyncKind, vSchoolSyncMode, vSchoolSyncState, vSchoolSyncTrigger } from "./schoolSyncSchema";
 import {

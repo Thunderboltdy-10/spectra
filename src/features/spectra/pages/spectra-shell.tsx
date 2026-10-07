@@ -1,5 +1,6 @@
 "use client";
 
+import { hubTabsWithoutWorkspace, type WorkspaceHubTab } from "./hub-tabs";
 import { subscribeShellWorkAvailability } from "../components/use-work-availability";
 import { retireShellArtifactLocation } from "./shell-location";
 
@@ -195,7 +196,6 @@ type WorkspaceEntry = {
   thread?: SpectraThread;
   card?: NonNullable<ReturnType<typeof workspaceItemToCard>>;
 };
-type WorkspaceHubTab = { id: string; label: string; workspaceId?: string };
 const EMPTY_ARTIFACTS: SpectraArtifact[] = [];
 
 const AI_EDITED_FLASH_FALLBACK_MS = 90_000;
@@ -4105,6 +4105,7 @@ export function SpectraShell({
 
   async function permanentlyDeleteWorkspace() {
     if (!selectedWorkspaceId || !workspace) return;
+    const deletedWorkspaceId = selectedWorkspaceId;
     const expected = `Remove ${workspace.title} permanently`;
     if (workspaceDeleteConfirmation !== expected) return;
     setBusyKey(`workspace:delete:${selectedWorkspaceId}`);
@@ -4122,6 +4123,12 @@ export function SpectraShell({
       setSelection(null);
       setViewMode("list");
       setActiveHubDestination("Home");
+      // Its tabs close and the address leaves it, so a reload never lands on a workspace that is gone.
+      const next = hubTabsWithoutWorkspace(hubTabs, activeHubTabId, deletedWorkspaceId, () => workspaceHubTab());
+      setHubTabs(next.tabs);
+      setActiveHubTabId(next.activeId);
+      setSelectedWorkspaceId(undefined);
+      replaceWorkspaceLocation();
       await loadOverview(undefined, true);
     } catch (error) {
       toast.error(

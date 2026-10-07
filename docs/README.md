@@ -159,7 +159,6 @@ This list reflects main after Phase 3 (`853e4a12`). A tag in brackets names the 
   - a sheet save still forces one full rebuild.
   - [P3-EDITORS-2, P3-CLIENT-PERF]
 - **Surfaces:**
-  - a deleted workspace leaves its tab open;
   - some admin lists flash on refresh;
   - the "Not reached" surfaces are `/agents/[id]`, `/analytics` and most of `/superadmin`.
   - [P3-SURFACES-2]

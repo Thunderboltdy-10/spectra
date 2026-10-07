@@ -153,6 +153,123 @@ function savedChartValues(object: PresentationObject) {
     : [];
 }
 
+/**
+ * How PowerPoint paints a native shape apart from its text, as the lens
+ * reads it: fill, outline, preset geometry, text anchor and arrowheads.
+ * Line widths are in the canvas's thousandths of the slide width.
+ */
+type NativeAppearance = {
+  fill?: string;
+  line?: string;
+  lineWidth?: number;
+  dashed?: boolean;
+  geometry?: string;
+  straight?: "horizontal" | "vertical";
+  flipH?: boolean;
+  flipV?: boolean;
+  anchor?: "middle" | "bottom";
+  arrowStart?: boolean;
+  arrowEnd?: boolean;
+};
+
+function nativeAppearance(object: PresentationObject): NativeAppearance | undefined {
+  const content = object.content && typeof object.content === "object" && !Array.isArray(object.content)
+    ? (object.content as Record<string, unknown>)
+    : {};
+  const value = content.nativeAppearance;
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as NativeAppearance) : undefined;
+}
+
+/** DrawingML's line and connector presets: drawn corner to corner of the frame. */
+const NATIVE_LINES = /^(line|straightConnector1|bentConnector\d|curvedConnector\d)$/;
+
+function nativeStroke(appearance: NativeAppearance) {
+  return `max(1px, ${(appearance.lineWidth ?? 1) / 10}cqw)`;
+}
+
+/** The fill and outline a native shape draws behind its text. */
+function nativeFrameStyle(appearance: NativeAppearance | undefined): CSSProperties {
+  if (!appearance) return {};
+  // A line has no interior: its stroke is the drawing, not an outline.
+  const line = Boolean(appearance.geometry && NATIVE_LINES.test(appearance.geometry));
+  return {
+    ...(appearance.fill && !line ? { background: appearance.fill } : {}),
+    ...(appearance.line && !line
+      ? { border: `${nativeStroke(appearance)} ${appearance.dashed ? "dashed" : "solid"} ${appearance.line}` }
+      : {}),
+    ...(appearance.anchor
+      ? { display: "flex", flexDirection: "column", justifyContent: appearance.anchor === "middle" ? "center" : "flex-end" }
+      : {}),
+  };
+}
+
+/** A native line or connector, with its arrowheads, at any frame size. */
+function NativeLine({ appearance }: { appearance: NativeAppearance }) {
+  // Level and plumb lines run along the frame's top or left edge.
+  const across = appearance.straight === "vertical" ? 0 : 100;
+  const down = appearance.straight === "horizontal" ? 0 : 100;
+  const x1 = appearance.flipH ? across : 0;
+  const x2 = appearance.flipH ? 0 : across;
+  const y1 = appearance.flipV ? down : 0;
+  const y2 = appearance.flipV ? 0 : down;
+  const color = appearance.line ?? "currentColor";
+  const marker = (at: number, toward: number, atY: number, towardY: number) => {
+    const angle = Math.atan2(towardY - atY, toward - at);
+    const size = 6;
+    const left = angle + Math.PI / 7;
+    const right = angle - Math.PI / 7;
+    return `${at},${atY} ${at + Math.cos(left) * size},${atY + Math.sin(left) * size} ${at + Math.cos(right) * size},${atY + Math.sin(right) * size}`;
+  };
+  return (
+    <svg className="presentation-native-line" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      <line
+        x1={x1}
+        y1={y1}
+        x2={x2}
+        y2={y2}
+        stroke={color}
+        strokeDasharray={appearance.dashed ? "4 3" : undefined}
+        vectorEffect="non-scaling-stroke"
+        style={{ strokeWidth: nativeStroke(appearance) }}
+      />
+      {appearance.arrowEnd ? <polygon points={marker(x2, x1, y2, y1)} fill={color} /> : null}
+      {appearance.arrowStart ? <polygon points={marker(x1, x2, y1, y2)} fill={color} /> : null}
+    </svg>
+  );
+}
+
+/**
+ * An object the file keeps but a browser can't draw, an OLE object or a
+ * SmartArt diagram: PowerPoint's own picture of it when the file has one,
+ * otherwise what it is and, for SmartArt, its words.
+ */
+function NativeObjectCard({
+  object,
+  asset,
+}: {
+  object: PresentationObject;
+  asset?: SpectraArtifactAsset;
+}) {
+  const content = object.content as Record<string, unknown>;
+  const native = content.nativeObject as { kind?: string; label?: string; name?: string; items?: string[] };
+  if (asset?.downloadUrl)
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={asset.downloadUrl} alt={object.altText ?? native.label ?? ""} draggable={false} className="h-full w-full object-contain" />
+    );
+  const label = native.label ?? "embedded object";
+  return (
+    <div className="presentation-native-object" data-native-kind={native.kind} role="img" aria-label={object.altText || `${label[0]!.toUpperCase()}${label.slice(1)} kept in the file`}>
+      <strong>{`${label[0]!.toUpperCase()}${label.slice(1)}`}</strong>
+      {native.items?.length ? (
+        <span>{native.items.join(" · ")}</span>
+      ) : (
+        <span>{native.name ? `${native.name}. ` : ""}Kept in the file; open it in PowerPoint to see it.</span>
+      )}
+    </div>
+  );
+}
+
 function PresentationObjectView({
   object,
   themeFonts,
@@ -199,6 +316,11 @@ function PresentationObjectView({
 }) {
   const textRef = useRef<HTMLDivElement>(null);
   const [textOverflow, setTextOverflow] = useState(false);
+  const appearance = nativeAppearance(object);
+  const objectContent =
+    object.content && typeof object.content === "object" && !Array.isArray(object.content)
+      ? (object.content as Record<string, unknown>)
+      : {};
   const paragraphs = useMemo(
     () => (object.type === "text" ? presentationObjectParagraphs(object) : []),
     // The paragraphs are the object's content; nothing else shapes them.
@@ -303,12 +425,14 @@ function PresentationObjectView({
         // reader without edit rights) draws its runs: bold, colour, links,
         // bullets and levels from the deck, through the shared renderer.
         <div
-          className="presentation-object-text"
+          className={appearance ? "presentation-object-text presentation-native-shape" : "presentation-object-text"}
           data-text-preset={textPreset}
+          data-native-shape={appearance?.geometry}
           data-ai-region={aiRegionAttr(aiActive)}
           {...(path ? targetAttrs(`${path}/text`) : {})}
-          style={textStyle}
+          style={{ ...textStyle, ...nativeFrameStyle(appearance) }}
         >
+          {appearance?.geometry && NATIVE_LINES.test(appearance.geometry) ? <NativeLine appearance={appearance} /> : null}
           <SpectraRichContent
             ast={richContentFromSlideParagraphs(paragraphs)}
             className="spectra-prose-inherit presentation-object-copy"
@@ -331,6 +455,16 @@ function PresentationObjectView({
           onBlur={onTextBlur}
           onChange={onTextChange}
         />
+      ) : object.type === "shape" && appearance ? (
+        appearance.geometry && NATIVE_LINES.test(appearance.geometry) ? (
+          <NativeLine appearance={appearance} />
+        ) : (
+          <div
+            className="presentation-native-shape h-full w-full"
+            data-native-shape={appearance.geometry}
+            style={nativeFrameStyle(appearance)}
+          />
+        )
       ) : object.type === "shape" ? (
         <div
           className="presentation-shape"
@@ -451,6 +585,8 @@ function PresentationObjectView({
             ))}
           </tbody>
         </table>
+      ) : object.type === "embed" && objectContent.nativeObject ? (
+        <NativeObjectCard object={object} asset={asset} />
       ) : object.type === "embed" ? (
         <div
           className="presentation-linked-artifact"

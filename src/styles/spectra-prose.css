@@ -436,6 +436,38 @@
     font-size: 0.8em;
   }
 
+  .spectra-prose :where(sup[data-footnote-ref]) {
+    color: var(--prose-link);
+    font-weight: 600;
+  }
+
+  /* Word's review, read-only: an insertion underlined in the success tone, a
+     deletion struck in the danger tone, and commented text washed in the
+     warning tone with its thread's number. */
+  .spectra-prose :where(ins[data-revision]) {
+    color: var(--success);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--success) 55%, transparent);
+    text-underline-offset: 0.18em;
+  }
+
+  .spectra-prose :where(del[data-revision]) {
+    color: var(--danger);
+    text-decoration-color: color-mix(in oklab, var(--danger) 70%, transparent);
+  }
+
+  .spectra-prose :where(mark[data-comment]) {
+    border-bottom: 1px solid color-mix(in oklab, var(--warning) 55%, transparent);
+    background: color-mix(in oklab, var(--warning) 16%, transparent);
+    color: inherit;
+  }
+
+  .spectra-prose :where(sup[data-comment-ref]) {
+    margin-inline-start: 0.12em;
+    color: var(--warning);
+    font-weight: 600;
+  }
+
   /* -- In an editor --------------------------------------------------------- */
 
   .spectra-prose.ProseMirror :where(p.is-editor-empty:first-child)::before {

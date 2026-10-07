@@ -2,8 +2,8 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Button } from "@/components/ui/button";
-import type { PresentationContent } from "../../presentation/model";
-import { richContentFromProseMirror } from "../../rich-content/prosemirror";
+import type { PresentationContent, PresentationObject } from "../../presentation/model";
+import { richDocumentFromProseMirror } from "../../rich-content/prosemirror";
 import { FileViewer } from "../file-viewer";
 import { fileViewKind, officeSizeRefusal } from "../file-kind";
 import type { OfficePreview } from "../office-preview";
@@ -151,23 +151,54 @@ describe("FileViewer: Office files", () => {
     await vi.waitFor(() => expect(reader.load).toHaveBeenCalled());
     expect(reader.load).toHaveBeenCalledWith({ kind: "document", url: "https://files.example/essay", bytes: 2048 }, expect.any(AbortSignal));
 
+    const { ast, comments } = richDocumentFromProseMirror({
+      type: "doc",
+      content: [
+        { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "Lab report" }] },
+        { type: "paragraph", content: [{ type: "text", text: "Enzymes ", marks: [{ type: "bold" }] }, { type: "text", text: "speed reactions." }] },
+        {
+          type: "paragraph",
+          content: [
+            { type: "wordCommentBoundary", attrs: { native: { kind: "commentBoundary", commentId: "4", boundary: "start", comment: { author: "Ms Ortiz", date: "2026-03-02T10:00:00Z", text: "Cite the source." } } } },
+            { type: "text", text: "Catalase " },
+            { type: "wordRevision", attrs: { native: { kind: "revision", revisionId: "7", revisionKind: "ins", author: "Ada", date: "2026-03-01T09:00:00Z", text: "quickly " } } },
+            { type: "wordRevision", attrs: { native: { kind: "revision", revisionId: "8", revisionKind: "del", author: "Ada", text: "slowly " } } },
+            { type: "text", text: "splits peroxide." },
+            { type: "wordCommentBoundary", attrs: { native: { kind: "commentBoundary", commentId: "4", boundary: "end" } } },
+          ],
+        },
+      ],
+    });
     await act(async () => {
       load.resolve({
         kind: "document",
         media: [],
-        ast: richContentFromProseMirror({
-          type: "doc",
-          content: [
-            { type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "Lab report" }] },
-            { type: "paragraph", content: [{ type: "text", text: "Enzymes ", marks: [{ type: "bold" }] }, { type: "text", text: "speed reactions." }] },
-          ],
-        }),
+        ast,
+        comments,
+        header: "Lab 3\tBiology\tSpring term",
+        footer: "\tPage 1\t",
+        unshown: ["SmartArt", "text boxes"],
       });
     });
     expect(screen.queryByRole("status", { name: "Opening essay.docx" })).toBeNull();
     const view = document.querySelector("[data-file-view='document']")!;
     expect(view.querySelector(".spectra-prose h1")?.textContent).toBe("Lab report");
     expect(view.querySelector(".spectra-prose strong")?.textContent).toBe("Enzymes ");
+    // Tracked changes read in Spectra's tones, with who made them.
+    const inserted = view.querySelector<HTMLElement>("ins[data-revision='insert']")!;
+    expect(inserted.textContent).toBe("quickly ");
+    expect(inserted.title).toBe("Inserted by Ada on 2026-03-01");
+    expect(view.querySelector<HTMLElement>("del[data-revision='delete']")!.title).toBe("Deleted by Ada");
+    // The commented text is marked, numbered, and its thread sits beside the page.
+    expect(view.querySelector("mark[data-comment='4']")?.textContent).toBe("Catalase quickly slowly splits peroxide.");
+    expect(view.querySelector("sup[data-comment-ref='4']")?.textContent).toBe("1");
+    const thread = within(screen.getByRole("complementary", { name: "Comments" })).getByRole("listitem");
+    expect(thread.textContent).toContain("Ms Ortiz");
+    expect(thread.textContent).toContain("Cite the source.");
+    const header = screen.getByLabelText("Page header");
+    expect([...header.querySelectorAll("span")].map((span) => span.textContent)).toEqual(["Lab 3", "Biology", "Spring term"]);
+    expect([...screen.getByLabelText("Page footer").querySelectorAll("span")].map((span) => span.textContent)).toEqual(["", "Page 1", ""]);
+    expect(screen.getByRole("note").textContent).toBe("This file also has SmartArt and text boxes. They stay in the file; open it in Word to see them.");
   });
 
   it("shows a deck as thumbnails and the current slide, and moves with the arrow keys as a morph", async () => {
@@ -202,6 +233,40 @@ describe("FileViewer: Office files", () => {
     expect(screen.getByRole("button", { name: "Previous slide" }).hasAttribute("disabled")).toBe(true);
   });
 
+  it("paints a deck's own shapes, lines and embedded objects", async () => {
+    const native = (id: string, type: PresentationObject["type"], content: Record<string, unknown>) =>
+      ({ id, type, x: 100, y: 100, width: 200, height: 100, rotation: 0, content: { nativeShapeId: id, ...content } }) as PresentationObject;
+    reader.load.mockResolvedValue({
+      kind: "slides",
+      media: [],
+      deck: {
+        ...DECK,
+        slides: [{
+          id: "n1",
+          title: "Network",
+          objects: [
+            native("oval", "text", { text: "Workgroup", paragraphs: [{ runs: [{ text: "Workgroup" }] }], nativeAppearance: { fill: "var(--accent)", line: "var(--border-strong)", lineWidth: 2, geometry: "ellipse", anchor: "middle" } }),
+            native("arrow", "shape", { nativeAppearance: { line: "var(--text-primary)", lineWidth: 2, geometry: "straightConnector1", flipH: true, arrowEnd: true } }),
+            native("ole", "embed", { nativeObject: { kind: "ole", label: "chart", name: "Chart" } }),
+            native("art", "embed", { nativeObject: { kind: "smartArt", label: "SmartArt", items: ["Plan", "Build", "Ship"] } }),
+          ],
+        }],
+      },
+    });
+    render(<FileViewer file={{ key: "p3", filename: "network.pptx", kind: "slides", url: "https://files.example/network" }} onClose={() => {}} />);
+    await screen.findByRole("group", { name: /Slides/ });
+    const stage = document.querySelector(".file-viewer-stage")!;
+    const oval = stage.querySelector<HTMLElement>("[data-native-shape='ellipse']")!;
+    expect(oval.textContent).toBe("Workgroup");
+    expect(oval.style.background).toBe("var(--accent)");
+    expect(oval.style.justifyContent).toBe("center");
+    const line = stage.querySelector("svg.presentation-native-line line")!;
+    expect([line.getAttribute("x1"), line.getAttribute("x2")]).toEqual(["100", "0"]);
+    expect(stage.querySelectorAll("svg.presentation-native-line polygon")).toHaveLength(1);
+    expect(within(stage as HTMLElement).getByRole("img", { name: "Chart kept in the file" }).textContent).toContain("Chart. Kept in the file; open it in PowerPoint to see it.");
+    expect(within(stage as HTMLElement).getByRole("img", { name: "SmartArt kept in the file" }).textContent).toContain("Plan · Build · Ship");
+  });
+
   it("shows a workbook as a read-only grid with its sheet tabs", async () => {
     reader.load.mockResolvedValue({
       kind: "sheet",
@@ -210,14 +275,26 @@ describe("FileViewer: Office files", () => {
         {
           id: "a", name: "Marks", rowCount: 24, columnCount: 8, frozenRows: 1, frozenColumns: 0, hiddenRows: [], hiddenColumns: [],
           columnWidths: {}, rowHeights: {}, merges: [{ row: 3, column: 0, rows: 1, columns: 2 }], showGridlines: true, clipped: false,
-          cells: { A1: { text: "Student", format: { bold: true } }, B2: { text: "7", numeric: true }, A4: { text: "Merged note" } },
+          cells: { A1: { text: "Student", format: { bold: true } }, B2: { text: "7", numeric: true }, A4: { text: "Merged note" }, B3: { text: "9", numeric: true } },
+          conditional: { B2: { backgroundColor: "var(--danger)" }, B3: { bar: { color: "var(--accent)", ratio: 0.5 } } },
+          notes: { C2: { author: "Ms Ade", text: "Check this mark" } },
+          charts: [],
+          pictures: [
+            { id: "p1", label: "School crest", mediaId: "spectra-preview-media:0", position: { x: 0, y: 0, width: 10, height: 10 }, anchor: { from: { column: 1, row: 4, x: 4, y: 2 }, to: { column: 3, row: 8, x: 0, y: 0 } } },
+            { id: "p2", label: "Old logo", position: { x: 0, y: 0, width: 10, height: 10 }, anchor: { from: { column: 4, row: 4, x: 0, y: 0 }, width: 80, height: 40 } },
+          ],
         },
         {
           id: "b", name: "Summary", tabColor: "var(--accent-mint)", rowCount: 24, columnCount: 8, frozenRows: 0, frozenColumns: 0, hiddenRows: [], hiddenColumns: [],
           columnWidths: {}, rowHeights: {}, merges: [], showGridlines: false, clipped: true, cells: { C3: { text: "Mean" } },
+          conditional: {}, notes: {}, charts: [], pictures: [],
         },
       ],
+      media: [{ id: "spectra-preview-media:0", mediaType: "image/png", bytes: new Uint8Array([137, 80, 78, 71]).buffer }],
     } satisfies OfficePreview);
+    // jsdom has no object URLs; the viewer only needs one per picture.
+    URL.createObjectURL = vi.fn(() => "blob:crest");
+    URL.revokeObjectURL = vi.fn();
     render(<FileViewer file={{ key: "x1", filename: "marks.xlsx", kind: "sheet", url: "https://files.example/marks" }} onClose={() => {}} />);
     const grid = await screen.findByRole("region", { name: "Marks, read-only" });
     const cell = (address: string) => grid.querySelector<HTMLElement>(`[data-address='${address}']`)!;
@@ -226,12 +303,23 @@ describe("FileViewer: Office files", () => {
     // Numbers sit to the right, as in Excel.
     expect(cell("B2").textContent).toBe("7");
     expect(cell("B2").style.textAlign).toBe("right");
-    // A merge spans the columns it covers, and the cell under it is not drawn.
-    expect(cell("A4").style.width).toBe("244px");
+    // A merge spans the columns it covers (Excel's 64px default), and the cell under it is not drawn.
+    expect(cell("A4").style.width).toBe("128px");
     expect(cell("B4")).toBeNull();
     // The frozen row is drawn in its own pane, which stays put while the body scrolls.
     expect(grid.querySelector(".is-frozen-rows [data-address='A1']")).toBeTruthy();
     expect(grid.querySelector(".is-body [data-address='B2']")).toBeTruthy();
+    // Conditional formats arrive evaluated: a fill, and a data bar as long as its value.
+    expect(cell("B2").style.backgroundColor).toBe("var(--danger)");
+    expect(cell("B3").style.backgroundSize).toBe("50% 72%");
+    // Excel's notes mark their cell and read on hover.
+    expect(cell("C2").getAttribute("title")).toBe("Ms Ade: Check this mark");
+    expect(cell("C2").querySelector(".file-viewer-note-mark")).toBeTruthy();
+    // Pictures sit on their cells; one the browser can't draw says so.
+    const crest = within(grid).getByRole("img", { name: "School crest" });
+    expect(crest.style.left).toBe("68px");
+    expect(crest.style.width).toBe("124px");
+    expect(within(grid).getByRole("img", { name: "Old logo" }).textContent).toContain("doesn't show here");
 
     const tabs = screen.getByRole("tablist", { name: "Sheets" });
     expect(within(tabs).getByRole("tab", { name: "Marks" }).getAttribute("aria-selected")).toBe("true");

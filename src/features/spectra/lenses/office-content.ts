@@ -12,6 +12,7 @@ import {
   encodeArtifactContentForStorage,
   sheetCellEntries,
 } from "../../../../shared/sheet-cells";
+import { convertSizes, excelWidthToPixels, pixelsToExcelWidth, pixelsToPoints, pointsToPixels, sizesToExcel } from "../sheets/excel-units";
 import { dateToSerial } from "../sheets/excel-serial";
 import { z } from "zod";
 import {
@@ -357,33 +358,58 @@ function validationMapFromProjection(projection: XlsxProjection, sheet: XlsxProj
   return result;
 }
 
+/** The editor rule id for one range of a native rule that covers several. */
+function conditionalRangeId(ruleId: string, rangeIndex: number) {
+  return rangeIndex ? `${ruleId}:range-${rangeIndex + 1}` : ruleId;
+}
+
+function nativeConditionalRuleId(editorId: string) {
+  return editorId.replace(/:range-\d+$/, "");
+}
+
+/**
+ * Excel's conditional formats as the editor's rules, one per range of each
+ * native rule. Colours arrive resolved (`#RRGGBB`, theme and tint applied) by
+ * the importer. Data bars are shown but not authored here: the workbook keeps
+ * Excel's own rule.
+ */
 function editorConditionalFormatsFromProjection(sheet: XlsxProjection["sheets"][number]) {
-  const result: Array<SheetConditionalFormat & { nativeRuleId?: string }> = [];
+  const result: SheetConditionalFormat[] = [];
   for (const group of sheet.conditionalFormats ?? []) {
-    const range = typeof group.sqref === "string" ? group.sqref.split(/\s+/)[0] : undefined;
-    if (!range || !Array.isArray(group.rules)) continue;
+    const ranges = typeof group.sqref === "string" ? group.sqref.split(/\s+/).filter(Boolean) : [];
+    if (!ranges.length || !Array.isArray(group.rules)) continue;
     for (const raw of group.rules) {
       const rule = raw as NativeRule;
       const priority = nativeNumber(rule.priority);
       const stopIfTrue = rule.stopIfTrue !== undefined ? nativeBool(rule.stopIfTrue) : undefined;
+      const ruleId = typeof rule.id === "string" ? rule.id : `conditional-${result.length + 1}`;
+      const common = (rangeIndex: number) => ({
+        id: conditionalRangeId(ruleId, rangeIndex),
+        range: ranges[rangeIndex]!,
+        ...(priority !== undefined ? { priority } : {}),
+        ...(stopIfTrue !== undefined ? { stopIfTrue } : {}),
+      });
       const type = rule.type;
       const formulas = Array.isArray(rule.formulas) ? rule.formulas.filter((value): value is string => typeof value === "string") : [];
       const colorScale = rule.colorScale as NativeRule | undefined;
       const colors = Array.isArray(colorScale?.colors) ? colorScale.colors.filter((value): value is string => typeof value === "string") : [];
-      if (type === "colorScale" && colors.length === 2) {
-        result.push({
-          id: typeof rule.id === "string" ? rule.id : `conditional-${result.length + 1}`,
-          range,
+      const fillColor = typeof rule.fillColor === "string" ? rule.fillColor : typeof rule.textColor === "string" ? "transparent" : "#DDF4EA";
+      const paint = { fillColor, ...(typeof rule.textColor === "string" ? { textColor: rule.textColor } : {}) };
+      let make: ((rangeIndex: number) => SheetConditionalFormat) | undefined;
+      if (type === "colorScale" && (colors.length === 2 || colors.length === 3)) {
+        make = (rangeIndex) => ({
+          ...common(rangeIndex),
           kind: "color_scale",
           minimumColor: colors[0]!,
-          maximumColor: colors[1]!,
-          ...(priority !== undefined ? { priority } : {}),
-          ...(stopIfTrue !== undefined ? { stopIfTrue } : {}),
+          ...(colors.length === 3 ? { midpointColor: colors[1]! } : {}),
+          maximumColor: colors.at(-1)!,
         });
-        continue;
-      }
-      if (type === "cellIs" && typeof rule.operator === "string") {
-        const mapped = {
+      } else if (type === "dataBar") {
+        const bar = rule.dataBar as NativeRule | undefined;
+        const color = typeof bar?.color === "string" ? bar.color : "#638EC6";
+        make = (rangeIndex) => ({ ...common(rangeIndex), kind: "data_bar", color });
+      } else if (type === "cellIs" && typeof rule.operator === "string") {
+        const mapped = ({
           greaterThan: "greater_than",
           lessThan: "less_than",
           equal: "equal_to",
@@ -391,45 +417,23 @@ function editorConditionalFormatsFromProjection(sheet: XlsxProjection["sheets"][
           greaterThanOrEqual: "greater_equal",
           lessThanOrEqual: "less_equal",
           between: "between",
-        }[rule.operator] as
-          | "greater_than"
-          | "less_than"
-          | "equal_to"
-          | "not_equal_to"
-          | "greater_equal"
-          | "less_equal"
-          | "between"
-          | undefined;
+        } as const)[rule.operator as "greaterThan"];
         const value = nativeFormulaNumber(formulas[0]);
         const secondValue = nativeFormulaNumber(formulas[1]);
-        if (mapped && value !== undefined) {
-          result.push({
-            id: typeof rule.id === "string" ? rule.id : `conditional-${result.length + 1}`,
-            range,
+        if (mapped && value !== undefined)
+          make = (rangeIndex) => ({
+            ...common(rangeIndex),
             kind: "cell_is",
             operator: mapped,
             value,
             ...(secondValue !== undefined ? { secondValue } : {}),
-            fillColor: typeof rule.fillColor === "string" ? rule.fillColor : "#DDF4EA",
-            ...(typeof rule.textColor === "string" ? { textColor: rule.textColor } : {}),
-            ...(priority !== undefined ? { priority } : {}),
-            ...(stopIfTrue !== undefined ? { stopIfTrue } : {}),
+            ...paint,
           });
-        }
-        continue;
+      } else if (type === "containsText" && typeof rule.text === "string" && rule.text) {
+        const text = rule.text;
+        make = (rangeIndex) => ({ ...common(rangeIndex), kind: "text_contains", text, ...paint });
       }
-      if (type === "containsText" && typeof rule.text === "string" && rule.text) {
-        result.push({
-          id: typeof rule.id === "string" ? rule.id : `conditional-${result.length + 1}`,
-          range,
-          kind: "text_contains",
-          text: rule.text,
-          fillColor: typeof rule.fillColor === "string" ? rule.fillColor : "#DDF4EA",
-          ...(typeof rule.textColor === "string" ? { textColor: rule.textColor } : {}),
-          ...(priority !== undefined ? { priority } : {}),
-          ...(stopIfTrue !== undefined ? { stopIfTrue } : {}),
-        });
-      }
+      if (make) for (let index = 0; index < ranges.length; index += 1) result.push(make(index));
     }
   }
   return result;
@@ -471,18 +475,30 @@ function editorValidationRules(contentSheet: Record<string, unknown>) {
   }));
 }
 
-function editorConditionalRules(contentSheet: Record<string, unknown>) {
+function editorConditionalRules(contentSheet: Record<string, unknown>, baseRules: ReadonlyMap<string, NativeRule> = new Map()) {
   const rules = Array.isArray(contentSheet.conditionalFormats) ? contentSheet.conditionalFormats : [];
   return rules.flatMap((candidate, index) => {
     const rule = candidate as Record<string, unknown>;
-    if (typeof rule.range !== "string" || typeof rule.kind !== "string") return [];
+    // Data bars are Excel's own rules, kept in the workbook as they are.
+    if (typeof rule.range !== "string" || typeof rule.kind !== "string" || rule.kind === "data_bar") return [];
+    const colors = rule.kind === "color_scale"
+      ? [String(rule.minimumColor), ...(typeof rule.midpointColor === "string" ? [rule.midpointColor] : []), String(rule.maximumColor)]
+      : [];
+    // A scale keeps the thresholds Excel gave it (a number, a percentile)
+    // when it still has as many colours; a new scale runs low to high.
+    const baseScale = record(baseRules.get(nativeConditionalRuleId(String(rule.id ?? "")))?.colorScale);
+    const cfvo = Array.isArray(baseScale.cfvo) && baseScale.cfvo.length === colors.length
+      ? baseScale.cfvo
+      : colors.length === 3
+        ? [{ type: "min" }, { type: "percentile", value: "50" }, { type: "max" }]
+        : [{ type: "min" }, { type: "max" }];
     const native: NativeRule = {
       id: typeof rule.id === "string" ? rule.id : `conditional:editor:${index + 1}`,
       type: rule.kind === "color_scale" ? "colorScale" : rule.kind === "text_contains" ? "containsText" : "cellIs",
       ...(typeof rule.priority === "number" ? { priority: String(rule.priority) } : {}),
       ...(typeof rule.stopIfTrue === "boolean" ? { stopIfTrue: rule.stopIfTrue ? "1" : "0" } : {}),
       ...(rule.kind === "color_scale" ? {
-        colorScale: { cfvo: [{ type: "min" }, { type: "max" }], colors: [String(rule.minimumColor), String(rule.maximumColor)] },
+        colorScale: { cfvo, colors },
       } : rule.kind === "text_contains" ? {
         text: String(rule.text),
         formulas: [`NOT(ISERROR(SEARCH("${String(rule.text).replaceAll('"', '""')}",A1)))`],
@@ -593,8 +609,9 @@ export function xlsxArtifactContent(projection: XlsxProjection): SheetsContent {
       columnCount: sheet.columnCount,
       hiddenRows: sheet.hiddenRows ?? [],
       hiddenColumns: sheet.hiddenColumns ?? [],
-      columnWidths: sheet.columnWidths ?? {},
-      rowHeights: sheet.rowHeights ?? {},
+      // The editor draws pixels; Excel stores characters and points.
+      columnWidths: convertSizes(sheet.columnWidths, excelWidthToPixels),
+      rowHeights: convertSizes(sheet.rowHeights, pointsToPixels),
       ...(sheet.hidden ? { hidden: true } : {}),
       ...(sheet.showGridlines !== undefined ? { showGridlines: sheet.showGridlines } : {}),
       ...(sheet.showHeadings !== undefined ? { showHeadings: sheet.showHeadings } : {}),
@@ -954,7 +971,7 @@ function isEditableNativeConditional(rule: NativeRule) {
   if (rule.type === "containsText") return true;
   if (rule.type !== "colorScale") return false;
   const scale = record(rule.colorScale);
-  return Array.isArray(scale.colors) && scale.colors.length === 2;
+  return Array.isArray(scale.colors) && (scale.colors.length === 2 || scale.colors.length === 3);
 }
 
 function validationMapSignature(map: Map<string, SheetValidation>) {
@@ -962,10 +979,13 @@ function validationMapSignature(map: Map<string, SheetValidation>) {
 }
 
 function conditionalModelSignature(value: unknown) {
+  // Key order is not meaning: the editor's normalizer and the importer build
+  // the same rule in different orders.
   return JSON.stringify(
     (Array.isArray(value) ? value : [])
       .map((candidate) => candidate as Record<string, unknown>)
-      .sort((left, right) => String(left.id ?? "").localeCompare(String(right.id ?? ""))),
+      .sort((left, right) => String(left.id ?? "").localeCompare(String(right.id ?? "")))
+      .map((rule) => Object.fromEntries(Object.entries(rule).filter(([, entry]) => entry !== undefined).sort(([left], [right]) => left.localeCompare(right)))),
   );
 }
 
@@ -1008,7 +1028,15 @@ function nativeConditionalFormatsForContent(
       ...group,
       rules: Array.isArray(group.rules) ? group.rules.filter((rule) => !isEditableNativeConditional(rule as NativeRule)) : [],
     })).filter((group) => Array.isArray(group.rules) && group.rules.length),
-    ...editorConditionalRules(contentSheet),
+    ...editorConditionalRules(
+      contentSheet,
+      new Map((baseSheet.conditionalFormats ?? []).flatMap((group) =>
+        (Array.isArray(group.rules) ? group.rules : []).flatMap((rule) => {
+          const native = rule as NativeRule;
+          return typeof native.id === "string" ? [[native.id, native] as const] : [];
+        }),
+      )),
+    ),
   ];
 }
 
@@ -1167,8 +1195,8 @@ export function xlsxProjectionFromContent(
         frozenColumns: next.frozenColumns ?? sheet.frozenColumns,
         ...(Array.isArray(nextRecord.hiddenRows) ? { hiddenRows: nextRecord.hiddenRows.filter((entry): entry is number => typeof entry === "number") } : {}),
         ...(Array.isArray(nextRecord.hiddenColumns) ? { hiddenColumns: nextRecord.hiddenColumns.filter((entry): entry is number => typeof entry === "number") } : {}),
-        ...(nextRecord.columnWidths && typeof nextRecord.columnWidths === "object" ? { columnWidths: record(nextRecord.columnWidths) as Record<string, number> } : {}),
-        ...(nextRecord.rowHeights && typeof nextRecord.rowHeights === "object" ? { rowHeights: record(nextRecord.rowHeights) as Record<string, number> } : {}),
+        ...(nextRecord.columnWidths && typeof nextRecord.columnWidths === "object" ? { columnWidths: sizesToExcel(record(nextRecord.columnWidths) as Record<string, number>, sheet.columnWidths, excelWidthToPixels, pixelsToExcelWidth) } : {}),
+        ...(nextRecord.rowHeights && typeof nextRecord.rowHeights === "object" ? { rowHeights: sizesToExcel(record(nextRecord.rowHeights) as Record<string, number>, sheet.rowHeights, pointsToPixels, pixelsToPoints) } : {}),
         ...(Object.prototype.hasOwnProperty.call(nextRecord, "hidden")
           ? (typeof nextRecord.hidden === "boolean" ? { hidden: nextRecord.hidden } : { hidden: undefined })
           : {}),

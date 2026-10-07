@@ -6,6 +6,7 @@ import {
   parseSpectraRichContent,
   richContentFromHtml,
   richContentFromProseMirror,
+  richDocumentFromProseMirror,
   richContentFromSlideParagraphs,
   richContentFromStored,
   richContentToMarkdown,
@@ -318,5 +319,45 @@ describe("rich content: a slide text box after its field changed", () => {
 describe("rich content: plain text", () => {
   it("keeps the words and one block per line", () => {
     expect(richContentToPlainText(parseSpectraRichContent("# Title\n\n- **a**\n- $x$\n\nend [link](https://a.b)"))).toBe("Title\na\nx\nend link");
+  });
+});
+
+describe("rich content: Word review", () => {
+  const boundary = (commentId: string, edge: "start" | "end" | "reference", comment?: Record<string, string>) => ({
+    type: "wordCommentBoundary",
+    attrs: { native: { kind: "commentBoundary", commentId, boundary: edge, ...(comment ? { comment } : {}) } },
+  });
+  const revision = (revisionKind: "ins" | "del", text: string) => ({
+    type: "wordRevision",
+    attrs: { native: { kind: "revision", revisionId: "3", revisionKind, author: "Ada", text, content: [{ text, bold: true }] } },
+  });
+  const review = richDocumentFromProseMirror({
+    type: "doc",
+    content: [
+      { type: "paragraph", content: [{ type: "text", text: "Before " }, boundary("9", "start", { author: "Ms Ortiz", text: "Spans two." }), { type: "text", text: "first", marks: [{ type: "highlight", attrs: { color: "darkYellow" } }] }] },
+      { type: "paragraph", content: [{ type: "text", text: "second" }, boundary("9", "end"), boundary("9", "reference"), revision("ins", "new"), revision("del", "old")] },
+    ],
+  });
+
+  it("keeps a comment open across paragraphs and numbers its thread once", () => {
+    expect(review.comments).toEqual([{ id: "9", label: "1", author: "Ms Ortiz", text: "Spans two." }]);
+    const [first, second] = review.ast.blocks as Array<Extract<RichBlock, { type: "paragraph" }>>;
+    expect(first!.content).toEqual([
+      { type: "text", text: "Before " },
+      { type: "comment", ids: ["9"], content: [{ type: "text", text: "first", style: { highlight: "olive" } }] },
+    ]);
+    expect(second!.content).toEqual([
+      { type: "comment", ids: ["9"], content: [{ type: "text", text: "second" }] },
+      { type: "comment_ref", id: "9", label: "1" },
+      { type: "revision", kind: "insert", author: "Ada", content: [{ type: "text", text: "new", marks: ["bold"] }] },
+      { type: "revision", kind: "delete", author: "Ada", content: [{ type: "text", text: "old", marks: ["bold"] }] },
+    ]);
+  });
+
+  it("reads as accepted text, struck Markdown, and a struck deletion in a field editor", () => {
+    expect(richContentToPlainText(review.ast)).toBe("Before first\nsecondnew");
+    expect(richContentToMarkdown(review.ast)).toContain("second**new**~~**old**~~");
+    const field = richContentToProseMirror(review.ast);
+    expect(field.content?.[1]?.content?.at(-1)).toEqual({ type: "text", text: "old", marks: [{ type: "bold" }, { type: "strike" }] });
   });
 });

@@ -158,6 +158,78 @@
 }
 
 /* ---------------------------------------------------------------------------
+   PowerPoint's own shapes, as the file paints them: the lens reads each
+   shape's fill, outline and preset geometry, and these give the common
+   presets their outline. Other presets draw as their frame.
+   --------------------------------------------------------------------------- */
+
+.presentation-native-shape {
+  position: relative;
+}
+
+.presentation-native-shape[data-native-shape="roundRect"] {
+  border-radius: 1.2cqw;
+}
+
+.presentation-native-shape[data-native-shape="ellipse"] {
+  border-radius: 50%;
+}
+
+.presentation-native-shape[data-native-shape="triangle"] {
+  border: 0;
+  clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+}
+
+.presentation-native-shape[data-native-shape="diamond"] {
+  border: 0;
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+}
+
+.presentation-native-shape[data-native-shape="chevron"],
+.presentation-native-shape[data-native-shape="homePlate"] {
+  border: 0;
+  clip-path: polygon(0% 0%, 75% 0%, 100% 50%, 75% 100%, 0% 100%, 25% 50%);
+}
+
+.presentation-native-shape[data-native-shape="rightArrow"] {
+  border: 0;
+  clip-path: polygon(0% 28%, 62% 28%, 62% 0%, 100% 50%, 62% 100%, 62% 72%, 0% 72%);
+}
+
+.presentation-native-line {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* An OLE object or SmartArt the file keeps and a browser can't draw. */
+.presentation-native-object {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4cqw;
+  overflow: hidden;
+  border: 1px dashed var(--border-default);
+  border-radius: var(--chip-radius);
+  background: color-mix(in oklab, var(--bg-secondary) 80%, transparent);
+  padding: 1cqw;
+  color: var(--text-secondary);
+  font-size: 1.1cqw;
+  text-align: center;
+}
+
+.presentation-native-object > strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------------
    Find in deck.
 
    The rail is where slides live, so finding a slide filters the rail rather

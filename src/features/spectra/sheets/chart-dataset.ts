@@ -221,3 +221,100 @@ export function histogramDataset(
   }));
 }
 
+
+/** Everything a chart needs to draw, computed away from the page that draws it. */
+export type ChartPlotData = {
+  data: Array<Record<string, string | number>>;
+  keys: string[];
+  category: string;
+  /** A histogram's buckets, when the chart is one. */
+  histogram?: Array<{ bucket: string; count: number }>;
+};
+
+function referenceSheetName(reference: string) {
+  const bang = reference.lastIndexOf("!");
+  if (bang < 0) return undefined;
+  return reference.slice(0, bang).replace(/^'|'$/g, "").replaceAll("''", "'");
+}
+
+function referenceRange(reference: string | undefined) {
+  if (!reference) return null;
+  const range = parseRange((reference.split("!").at(-1) ?? "").replaceAll("$", ""));
+  return range ? normalizeRange(range) : null;
+}
+
+/** The sheet a reference such as `'Sales 2024'!$B$2:$B$9` reads, or `fallback`. */
+export function sheetForReference(
+  sheets: readonly WorkbookSheet[],
+  reference: string | undefined,
+  fallback: WorkbookSheet,
+) {
+  const name = reference ? referenceSheetName(reference) : undefined;
+  if (!name) return fallback;
+  return sheets.find((sheet) => sheet.name.toLowerCase() === name.toLowerCase()) ?? fallback;
+}
+
+/** The cells of a one-row or one-column reference, in order. */
+function referenceCells(reference: string | undefined) {
+  const range = referenceRange(reference);
+  if (!range) return [];
+  const cells: Array<{ row: number; column: number }> = [];
+  for (let row = range.start.row; row <= range.end.row; row += 1)
+    for (let column = range.start.column; column <= range.end.column; column += 1)
+      cells.push({ row, column });
+  return cells.slice(0, 2_000);
+}
+
+/**
+ * A chart's data from its own series, as Excel draws it: each series reads
+ * its values (and the first series its categories) from wherever the file
+ * points, on any sheet. Charts without series fall back to their source range.
+ */
+export function chartPlotData(
+  sheets: readonly WorkbookSheet[],
+  owner: WorkbookSheet,
+  chart: SheetChart,
+  calculated: SheetsCalculation,
+  locale = "en-US",
+): ChartPlotData {
+  const source = sheetForReference(sheets, chart.sourceRange, owner);
+  if (chart.type === "histogram") {
+    const values = chart.series?.[0]?.values;
+    const target = values ? { ...chart, sourceRange: values } : chart;
+    const sheet = sheetForReference(sheets, target.sourceRange, owner);
+    return { data: [], keys: [], category: "Category", histogram: histogramDataset(sheet, target, calculated) };
+  }
+  const series = (chart.series ?? []).filter((entry) => referenceCells(entry.values).length);
+  if (!series.length) return chartDataset(source, chart, calculated);
+  const text = (sheet: WorkbookSheet, row: number, column: number) => {
+    const address = coordinateToAddress({ row, column });
+    return formatCalculatedCell(sheet.cells[address], calculated.get(`${sheet.id}:${address}`), locale);
+  };
+  const categoryReference = series.find((entry) => entry.categories)?.categories;
+  const categorySheet = sheetForReference(sheets, categoryReference, owner);
+  const categories = referenceCells(categoryReference).map(({ row, column }) => text(categorySheet, row, column));
+  const used = new Set<string>(["Category"]);
+  const keys = series.map((entry, index) => {
+    const base = entry.name?.trim() || `Series ${index + 1}`;
+    let key = base;
+    for (let suffix = 2; used.has(key); suffix += 1) key = `${base} (${suffix})`;
+    used.add(key);
+    return key;
+  });
+  const columns = series.map((entry) => {
+    const sheet = sheetForReference(sheets, entry.values, owner);
+    return referenceCells(entry.values).map(({ row, column }) => {
+      const value = chartCellValue(sheet, calculated, row, column);
+      return typeof value === "number" && Number.isFinite(value) ? value : 0;
+    });
+  });
+  const length = Math.max(categories.length, ...columns.map((values) => values.length));
+  const data = Array.from({ length }, (_, index) => {
+    const entry: Record<string, string | number> = { Category: categories[index] || String(index + 1) };
+    keys.forEach((key, seriesIndex) => {
+      entry[key] = columns[seriesIndex]![index] ?? 0;
+    });
+    return entry;
+  });
+  return { data, keys, category: "Category" };
+}

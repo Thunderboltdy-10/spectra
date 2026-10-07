@@ -237,12 +237,23 @@ function runsOf(content: readonly RichInline[], href?: string): PresentationText
       case "image":
         push({ text: inline.alt, ...link });
         break;
-      case "link": {
-        const [first, ...rest] = runsOf(inline.content, inline.href);
+      case "link":
+      case "comment": {
+        const [first, ...rest] = runsOf(inline.content, inline.type === "link" ? inline.href : href);
         lines[lines.length - 1]!.push(...(first ?? []));
         lines.push(...rest);
         break;
       }
+      case "revision": {
+        // A slide has no tracked changes: it keeps the text as accepted.
+        if (inline.kind === "delete") break;
+        const [first, ...rest] = runsOf(inline.content, href);
+        lines[lines.length - 1]!.push(...(first ?? []));
+        lines.push(...rest);
+        break;
+      }
+      case "comment_ref":
+        break;
       case "break":
         lines.push([]);
         break;

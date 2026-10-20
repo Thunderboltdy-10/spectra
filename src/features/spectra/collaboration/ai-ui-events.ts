@@ -1,4 +1,5 @@
-import { noteAiLocation, noteAiSurface } from "./follow-ai";
+import { isFollowingAi, noteAiLocation, noteAiSurface } from "./follow-ai";
+import { touchOnScreen } from "./ai-touch";
 import { isFollowRoute } from "./follow-navigation";
 import { workRegionFrom } from "../anchors/locate";
 import { spectraBus } from "../events";
@@ -74,6 +75,13 @@ async function showAiPublicLink(runId: string, operationId: string) {
   });
 }
 
+/** Outside following, a change to something on screen gets one band pass where it is. */
+function touchTarget(event: SpectraAiUiEvent) {
+  const targetId = event.payload?.targetId;
+  // The list re-renders with the change a moment after the event; mark it once it has.
+  if (!isFollowingAi() && typeof targetId === "string" && targetId) window.setTimeout(() => touchOnScreen(targetId), 350);
+}
+
 function rememberEvent(event: SpectraAiUiEvent): void {
   if (event.key === "public_link_created") {
     const operationId = event.payload?.operationId;
@@ -88,6 +96,7 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     return;
   }
   if (event.key === "organize_library") {
+    touchTarget(event);
     const targetId = event.payload?.targetId;
     noteAiSurface({
       ...(event.runId ? { actorId: event.runId } : {}),
@@ -101,6 +110,7 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     return;
   }
   if (event.key === "settings_changed") {
+    touchTarget(event);
     const targetId = event.payload?.targetId;
     noteAiSurface({
       ...(event.runId ? { actorId: event.runId } : {}),
@@ -114,6 +124,7 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     return;
   }
   if (event.key === "sync_policy_changed") {
+    touchTarget(event);
     const targetId = event.payload?.targetId;
     noteAiSurface({
       ...(event.runId ? { actorId: event.runId } : {}),

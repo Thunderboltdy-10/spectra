@@ -15,6 +15,7 @@ import {
 import { Icon } from "@/components/icons";
 import type { BarCommand } from "@/components/ui/adaptive-bar";
 import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/toast";
 import { IconButton } from "@/components/ui/icon-button";
 import { PageBody, PageHeader } from "@/components/ui/page-header";
 import { EmptyState as PageEmptyState, LoadingRows } from "@/components/ui/page-state";
@@ -24,6 +25,7 @@ import { fetchMyClassCandidates } from "../components/class-shelf-picker";
 import {
   configureSpectraManageBac,
   disconnectSpectraManageBac,
+  recheckSpectraManageBac,
   getSpectraManageBacOverview,
   importSpectraManageBacReference,
   replaceSpectraManageBacManifest,
@@ -222,22 +224,22 @@ export function integrationConnectionMessage(
   let detail: string;
   switch (integration.status) {
     case "connected":
-      detail = "The read-only connection is ready for school updates.";
+      detail = "Spectra reads your school's classes, tasks and calendar from ManageBac.";
       break;
     case "validating":
-      detail = "Spectra is checking the tenant reference and readable capabilities. Sync stays paused until validation finishes.";
+      detail = "Spectra is checking what it can read from ManageBac. Syncing starts once that is done.";
       break;
     case "draft":
-      detail = "Finish connecting with a verified tenant token and capability manifest before syncing.";
+      detail = "Add your school's ManageBac API key to start syncing.";
       break;
     case "blocked":
-      detail = integration.blockedReason || "Ask a school administrator to review the connection and its verified read-only routes before syncing.";
+      detail = "ManageBac turned down the saved API key, so syncing is paused. Check the connection again, or save a new key if the old one was changed.";
       break;
     case "revoked":
-      detail = "The school connection was disconnected. Ask a school administrator to reconnect before syncing.";
+      detail = "ManageBac is disconnected. Add the API key again to resume syncing.";
       break;
     default:
-      detail = "The connection needs attention. Review the latest sync details before retrying.";
+      detail = "Some data didn't sync last time. The sync history says what happened.";
   }
   return integration.lastSyncAt === undefined
     ? `${detail} No synchronization has completed yet.`
@@ -249,13 +251,13 @@ function integrationStatusLabel(status: string | undefined) {
     case "connected":
       return "Connected";
     case "validating":
-      return "Validating capabilities";
+      return "Checking";
     case "draft":
-      return "Draft — not connected yet";
+      return "Not connected yet";
     case "degraded":
-      return "Connected with gaps";
+      return "Partly syncing";
     case "blocked":
-      return "Blocked";
+      return "Paused";
     case "revoked":
       return "Disconnected";
     default:
@@ -772,7 +774,7 @@ export function ManageBacIntegrationShell() {
           : [];
       if (!capabilities.length)
         throw new Error(
-          "Paste an OpenAPI tenant reference or a verified Spectra capability manifest.",
+          "Paste your school's ManageBac API reference, or a list of routes Spectra has checked.",
         );
       await replaceSpectraManageBacManifest({
         integrationId: integration._id,
@@ -821,8 +823,8 @@ export function ManageBacIntegrationShell() {
             barLabel="ManageBac commands"
             description={
               overview?.admin
-                ? "The school's connection to ManageBac and how it syncs. Students see their own tasks, classes and CAS in School."
-                : "What Spectra reads from ManageBac for you. Your tasks, classes and CAS are in School."
+                ? "The school's connection to ManageBac and how it syncs. Students see their own tasks and classes in School."
+                : "What Spectra reads from ManageBac for you. Your tasks and classes are in School."
             }
           />
 
@@ -865,7 +867,7 @@ export function ManageBacIntegrationShell() {
                   <p className="mt-1 max-w-xl text-caption leading-5 text-[var(--text-secondary)]">
                     {overview?.admin
                       ? "Spectra only reads from ManageBac. It never writes to it, and the school token never leaves the server."
-                      : "Once a school administrator connects ManageBac, your classes, tasks and CAS come into School."}
+                      : "Once a school administrator connects ManageBac, your classes and tasks come into School."}
                   </p>
                 </div>
               </div>
@@ -919,10 +921,12 @@ export function ManageBacIntegrationShell() {
                         {integration.status === "connected"
                           ? "ManageBac is connected"
                           : integration.status === "validating"
-                            ? "Validating ManageBac capabilities"
+                            ? "Checking ManageBac"
                             : integration.status === "draft"
                               ? "ManageBac is not connected yet"
-                              : "The connection needs attention"}
+                              : integration.status === "blocked"
+                                ? "Syncing is paused"
+                                : "The connection needs attention"}
                       </h3>
                       <p className="mt-2 max-w-xl text-caption leading-5 text-[var(--text-secondary)]">{integrationConnectionMessage(integration)}</p>
                       <p className="mt-3 text-caption text-[var(--text-tertiary)]">
@@ -930,6 +934,24 @@ export function ManageBacIntegrationShell() {
                         {data?.conflicts.length ? ` · ${data.conflicts.length} to review` : ""}
                       </p>
                       <div className="-ml-2 mt-4 flex flex-wrap gap-1">
+                        {integration.status === "blocked" ? (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            disabled={busy === "recheck"}
+                            onClick={() =>
+                              void runAction("recheck", async () => {
+                                const { outcome } = await recheckSpectraManageBac();
+                                if (outcome === "reopened") toast.success("ManageBac took the saved key. Syncing again.");
+                                else if (outcome === "key_refused") toast.error("ManageBac still turns down the saved key. Save a new one under Settings.");
+                                else if (outcome === "key_missing") toast.error("No key is saved. Add your school's ManageBac API key.");
+                                else if (outcome === "unreachable") toast.error("ManageBac didn't answer. Try again in a few minutes.");
+                              })
+                            }
+                          >
+                            {busy === "recheck" ? "Checking…" : "Check the connection again"}
+                          </Button>
+                        ) : null}
                         <Button variant="ghost" size="sm" onClick={() => setTab("history")}>Sync history</Button>
                         <Button variant="ghost" size="sm" onClick={() => setTab("conflicts")}>Review conflicts</Button>
                       </div>
@@ -1425,7 +1447,7 @@ function ProvenancePanel({
               className="mt-6"
             >
               <div className="mb-2 flex items-center justify-between">
-                <strong className="text-micro uppercase tracking-[.08em] text-[var(--text-tertiary)]">
+                <strong className="text-micro text-[var(--text-tertiary)]">
                   {category}
                 </strong>
                 <span className="text-micro text-[var(--text-tertiary)]">
@@ -1608,7 +1630,7 @@ function RightCard({
 }) {
   return (
     <section>
-      <h3 className="mb-2.5 text-micro font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
+      <h3 className="mb-2.5 text-micro font-semibold text-[var(--text-tertiary)]">
         {title}
       </h3>
       {children}

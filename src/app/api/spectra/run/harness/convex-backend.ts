@@ -302,7 +302,7 @@ export class ConvexHarnessBackend implements HarnessBackend {
       this.executedAny = true;
       this.affected.push(...affected);
       const id = affected.find((entry) => entry.type === "artifact")?.id;
-      if (!id) throw new Error("The new artifact was not saved.");
+      if (!id) throw new Error("Your new work wasn't saved.");
       return { id, title: input.title };
     } catch (error) {
       await this.markFailed(operationId!, error);

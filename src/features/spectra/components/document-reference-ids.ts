@@ -1,3 +1,5 @@
+import { stackedEmbedIds } from "../editor/reference-stack";
+
 /** The part of a ProseMirror node the reference walk reads. */
 export type ReferenceNode = {
   type: { name: string };
@@ -12,8 +14,10 @@ function nodeReferenceIds(node: ReferenceNode): readonly string[] {
   const cached = idsByNode.get(node);
   if (cached) return cached;
   let ids: string[] | undefined;
-  if (node.type.name === "spectraReference" && typeof node.attrs.embedId === "string" && node.attrs.embedId)
-    ids = [node.attrs.embedId];
+  if (node.type.name === "spectraReference") {
+    const stacked = stackedEmbedIds(node.attrs);
+    if (stacked.length) ids = stacked;
+  }
   node.forEach((child) => {
     const childIds = nodeReferenceIds(child);
     if (childIds.length) (ids ??= []).push(...childIds);

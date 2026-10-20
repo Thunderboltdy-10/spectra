@@ -5,7 +5,7 @@ import { useRef } from "react";
 import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Tooltip } from "@/components/ui/tooltip";
-import { useLifeArrival, useLifeDeparture, useLifeGlow, type ArrivalKind } from "../life/use-life";
+import { useLifeArrival, useLifeDeparture, type ArrivalKind } from "../life/use-life";
 
 export type SpectraCardVariant =
   | "artifact"
@@ -42,9 +42,6 @@ export function spectraCardClass(variant: SpectraCardVariant, className?: string
   return cn("spectra-card", `spectra-card--${variant}`, className);
 }
 
-/** States in which Spectra is working on the card, so the field glows around it (LIFE.md, glow). */
-const CARD_WORKING: ReadonlySet<SpectraCardState> = new Set(["creating", "updating"]);
-
 export function SpectraCard({
   variant,
   state = "normal",
@@ -66,7 +63,6 @@ export function SpectraCard({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLElement>(null);
-  useLifeGlow(ref, CARD_WORKING.has(state));
   useLifeArrival(ref, lifeKey, arrival);
   useLifeDeparture(ref, Boolean(lifeKey), undefined, lifeKey);
 

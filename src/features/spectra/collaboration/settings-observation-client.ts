@@ -228,7 +228,7 @@ async function performPrepared(snapshot: UiObservationSnapshot) {
             noteAiSurface({ actorId: action.runId, route: "settings", target: "writing", note: "Updating Smart completion" });
             navigated = true;
           }
-          if (following(action.runId)) settingsToggleControls()[0]?.element.scrollIntoView({ block: "nearest", behavior: "instant" });
+          if (following(action.runId)) settingsToggleControls()[0]?.element.scrollIntoView({ block: "nearest", behavior: "smooth" });
           await pause(context.signal, 50);
           continue;
         }

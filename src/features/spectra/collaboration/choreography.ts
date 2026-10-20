@@ -43,8 +43,8 @@ export type ChoreographyPlan = {
  * Time for the cursor to travel to a control before acting. Short enough to feel
  * immediate, long enough that the movement is legible as intent.
  */
-const APPROACH_MS = 180;
-const SETTLE_MS = 260;
+const APPROACH_MS = 220;
+const SETTLE_MS = 300;
 
 export type ChoreographyRequest = {
   target: SemanticTarget;

@@ -1,19 +1,54 @@
 "use client";
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from "react";
-import { AlertTriangle, BookMarked, CheckSquare, Code, Columns3, Heading1, Heading2, Heading3, ImageIcon, Info, Lightbulb, Link2, List, ListOrdered, Minus, Quote, Sigma, Table, Text } from "lucide-react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from "react";
+import { AlertTriangle, BookMarked, ImageIcon, Info, Lightbulb, Link2, Table } from "lucide-react";
 import type { SlashCommandItem } from "./slash-command-extension";
 
-const icons = { H1: Heading1, H2: Heading2, H3: Heading3, text: Text, list: List, "list-ordered": ListOrdered, "check-square": CheckSquare, quote: Quote, code: Code, sigma: Sigma, minus: Minus, columns: Columns3, table: Table, image: ImageIcon, link: Link2, book: BookMarked, info: Info, "alert-triangle": AlertTriangle, lightbulb: Lightbulb };
+/*
+ * A type case, not a launcher. Each row's mark is a small specimen of what the
+ * row makes — a bullet, a numeral, a quote rule, a heading set at its size — so
+ * the menu reads like the page it is about to change. Objects that are not
+ * type (a table, a picture) keep a quiet line icon. No tiles.
+ */
+const glyph = (text: string, kind?: string) => <span className="slash-command-glyph" data-kind={kind}>{text}</span>;
+const rule = (kind: string) => <span className="slash-command-rule" data-kind={kind} />;
+const icon = (Icon: typeof Table) => <Icon className="size-[15px]" strokeWidth={1.6} aria-hidden />;
+
+const marks: Record<string, ReactNode> = {
+  H1: glyph("H1", "heading"),
+  H2: glyph("H2", "heading"),
+  H3: glyph("H3", "heading"),
+  text: glyph("Aa"),
+  list: glyph("•", "bullet"),
+  "list-ordered": glyph("1."),
+  "check-square": rule("task"),
+  quote: rule("quote"),
+  code: glyph("{ }", "code"),
+  sigma: glyph("∑", "math"),
+  minus: rule("divider"),
+  columns: rule("section"),
+  table: icon(Table),
+  image: icon(ImageIcon),
+  link: icon(Link2),
+  book: icon(BookMarked),
+  info: icon(Info),
+  "alert-triangle": icon(AlertTriangle),
+  lightbulb: icon(Lightbulb),
+};
 
 export type SlashCommandListRef = { onKeyDown: (props: { event: KeyboardEvent }) => boolean };
 
-export const SlashCommandList = forwardRef<SlashCommandListRef, { items: SlashCommandItem[]; command: (item: SlashCommandItem) => void }>(function SlashCommandList({ items, command }, ref) {
+export const SlashCommandList = forwardRef<SlashCommandListRef, { items: SlashCommandItem[]; command: (item: SlashCommandItem) => void; query?: string }>(function SlashCommandList({ items, command, query = "" }, ref) {
   const [selectedIndex, setSelectedIndex] = useState(0);
-  useEffect(() => setSelectedIndex(0), [items]);
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => setSelectedIndex(Math.max(0, items.findIndex((item) => !item.disabledReason))), [items]);
+  // The keyboard can walk past the fold; the chosen row follows it into view.
+  useEffect(() => {
+    listRef.current?.querySelector<HTMLElement>(`[data-index="${selectedIndex}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [selectedIndex]);
   // Arrow keys skip what cannot run. A disabled row is still listed — the
-  // sentence on it is the answer to "why can't I do this here?" — but it never
-  // becomes the selection, so Enter always does something.
+  // sentence under the list is the answer to "why can't I do this here?" — but
+  // it never becomes the selection, so Enter always does something.
   const select = useCallback((index: number) => { const item = items[index]; if (item && !item.disabledReason) command(item); }, [command, items]);
   const step = useCallback((direction: number) => {
     setSelectedIndex((index) => {
@@ -35,19 +70,26 @@ export const SlashCommandList = forwardRef<SlashCommandListRef, { items: SlashCo
     },
   }), [select, selectedIndex, step]);
 
-  if (!items.length) return <div className="slash-command-dropdown"><p className="px-3 py-2 text-xs text-[var(--text-tertiary)]">No matching blocks</p></div>;
-  const sections = Array.from(Map.groupBy(items, (item) => item.section));
-  return <div className="slash-command-dropdown" role="listbox" aria-label="Insert a block">
-    {sections.map(([section, commands]) => <div key={section}>
-      <p className="px-3 pb-1 pt-2 text-micro font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">{section}</p>
-      {commands.map((item) => {
-        const index = items.indexOf(item);
-        const Icon = icons[item.icon as keyof typeof icons];
-        return <button key={item.id} type="button" role="option" aria-selected={index === selectedIndex} aria-disabled={Boolean(item.disabledReason) || undefined} data-disabled={Boolean(item.disabledReason) || undefined} title={item.disabledReason ?? undefined} className={`slash-command-item ${index === selectedIndex ? "is-selected" : ""}`} onMouseEnter={() => { if (!item.disabledReason) setSelectedIndex(index); }} onClick={() => select(index)}>
-          <span className="slash-command-icon">{Icon ? <Icon className="h-4 w-4" /> : item.icon}</span>
-          <span className="min-w-0 text-left"><span className="block text-sm font-medium text-[var(--text-primary)]">{item.label}</span><span className="block truncate text-micro text-[var(--text-tertiary)]">{item.disabledReason ?? item.description}</span></span>
-        </button>;
-      })}
-    </div>)}
+  if (!items.length) return <div className="slash-command-dropdown"><p className="slash-command-empty">Nothing by that name. Keep typing to write it as text.</p></div>;
+  // Browsing shows the case in its drawers; searching shows the best answers
+  // first, which a grouping would scatter.
+  const sections: [string, SlashCommandItem[]][] = query.trim() ? [["Matches", items]] : Array.from(Map.groupBy(items, (item) => item.section));
+  const chosen = items[selectedIndex];
+  return <div className="slash-command-dropdown">
+    <div ref={listRef} className="slash-command-scroll" role="listbox" aria-label="Insert a block">
+      {sections.map(([section, commands]) => <div key={section} role="group" aria-label={section} className="slash-command-section">
+        {query.trim() ? null : <p aria-hidden>{section}</p>}
+        {commands.map((item) => {
+          const index = items.indexOf(item);
+          const disabled = Boolean(item.disabledReason);
+          return <button key={item.id} type="button" role="option" data-index={index} data-command={item.id} aria-selected={index === selectedIndex} aria-disabled={disabled || undefined} data-disabled={disabled || undefined} title={item.disabledReason ?? undefined} className={`slash-command-item ${index === selectedIndex ? "is-selected" : ""}`} onMouseEnter={() => { if (!disabled) setSelectedIndex(index); }} onMouseDown={(event) => event.preventDefault()} onClick={() => select(index)}>
+            <span className="slash-command-mark" aria-hidden>{marks[item.icon] ?? glyph(item.icon)}</span>
+            <span className="slash-command-label">{item.label}</span>
+            {item.markdown ? <kbd className="slash-command-markdown" aria-label={`or type ${item.markdown}`}>{item.markdown}</kbd> : null}
+          </button>;
+        })}
+      </div>)}
+    </div>
+    {chosen ? <p className="slash-command-gist" data-disabled={Boolean(chosen.disabledReason) || undefined} aria-live="polite">{chosen.disabledReason ?? chosen.description}</p> : null}
   </div>;
 });

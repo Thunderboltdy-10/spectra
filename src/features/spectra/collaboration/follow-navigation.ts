@@ -10,6 +10,7 @@
 
 import { spectraBus } from "../events";
 import { getFollowedAiActorId, isFollowingAi } from "./follow-ai";
+import { workspaceHref } from "../pages/shell-location";
 
 export const FOLLOW_ROUTES = [
   "library",
@@ -44,7 +45,7 @@ export function followRouteHref(route: FollowRoute, target?: string): string {
     case "library":
       return "/library";
     case "workspace":
-      return target ? `/workspace/${segment(target)}` : "/workspace?home=1";
+      return workspaceHref(target);
     case "artifact":
       return target ? `/library/${segment(target)}` : "/library";
     case "settings":

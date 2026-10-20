@@ -88,34 +88,44 @@ export function useSpectraContext(
     });
   }, [artifactById, continuation?.id, visible]);
 
+  /*
+   * Picks work by id. Work the loaded overview does not hold (a shelf shows the
+   * whole tree) is kept by its row already in the selection, or named by
+   * `named`, so it can be picked like any other.
+   */
   const setSelectedContextIds = useCallback(
-    (action: SetStateAction<Set<string>>) => {
+    (action: SetStateAction<Set<string>>, named?: ReadonlyMap<string, string>) => {
+      // The selection as it is now, not as it was at the last render: picks in quick succession all count.
+      const draft = useSpectraContextStore.getState().selectionDraft;
       const next =
         typeof action === "function"
-          ? action(new Set(selectedContextIds))
+          ? action(new Set(draft.filter((row) => row.type === "artifact").map((row) => row.id)))
           : action;
       setSelectionDraft(
-        [...next].flatMap((id) => {
+        [...next].flatMap<SpectraContextObject>((id) => {
           const artifact = artifactById.get(id);
-          return artifact
-            ? [
-                {
-                  type: "artifact" as const,
-                  id,
-                  label: artifact.title,
-                  workspaceId: artifact.placements?.[0]?.workspaceId,
-                  source: "selected" as const,
-                  capability:
-                    artifact.blueprintKey === "thread_reference"
-                      ? ("context" as const)
-                      : ("tile" as const),
-                },
-              ]
-            : [];
+          if (!artifact) {
+            const kept = draft.find((row) => row.type === "artifact" && row.id === id);
+            const label = kept?.label ?? named?.get(id);
+            return label ? [{ type: "artifact" as const, id, label, source: "selected" as const, capability: "tile" as const }] : [];
+          }
+          return [
+            {
+              type: "artifact" as const,
+              id,
+              label: artifact.title,
+              workspaceId: artifact.placements?.[0]?.workspaceId,
+              source: "selected" as const,
+              capability:
+                artifact.blueprintKey === "thread_reference"
+                  ? ("context" as const)
+                  : ("tile" as const),
+            },
+          ];
         }),
       );
     },
-    [artifactById, selectedContextIds, setSelectionDraft],
+    [artifactById, setSelectionDraft],
   );
 
   const setComposerThread = useCallback(

@@ -8,21 +8,32 @@ import {
   AlignStartVertical,
   AlignVerticalDistributeCenter,
   ArrowDown,
+  ArrowRight,
   ArrowUp,
+  ArrowUpFromLine,
+  Ban,
   BarChart3,
+  Blend,
   BookOpen,
   Boxes,
   BringToFront,
+  Captions,
+  ChevronRight,
+  Circle,
   Clock3,
   Contrast,
   Copy,
   Crop,
+  Diamond,
   Droplet,
+  Eraser,
   EyeOff,
   FileArchive,
   Film,
   Frame,
   Group as GroupIcon,
+  Heading,
+  Heading2,
   ImagePlus,
   Layers3,
   LayoutGrid,
@@ -32,32 +43,45 @@ import {
   Lock,
   Magnet,
   Maximize2,
+  MessageSquare,
+  Minus,
+  Monitor,
   MonitorOff,
   MonitorPlay,
   MousePointer2,
   MoveHorizontal,
+  MoveRight,
   MoveVertical,
   PaintBucket,
   Palette,
   PenLine,
+  Pill,
   Play,
   Plus,
   Quote,
+  RectangleHorizontal,
   RefreshCw,
   RotateCw,
   Ruler,
+  Scaling,
   ScanText,
   SendToBack,
   Shapes,
+  Shrink,
   Sigma,
   SkipBack,
   SkipForward,
   SlidersHorizontal,
   Sparkles,
+  Square,
+  SquareRoundCorner,
   SquareStack,
   StickyNote,
   Table2,
+  Tablet,
+  Text,
   Trash2,
+  Triangle,
   Type,
   Ungroup,
 } from "lucide-react";
@@ -115,28 +139,28 @@ export { PRESENTATION_STRICT_REASONS };
 
 /** Transitions with native mappings; Push uses the editor's leftward direction. */
 export const PRESENTATION_TRANSITIONS: readonly CommandControlOption[] = [
-  { value: "none", label: "None" },
-  { value: "fade", label: "Fade" },
-  { value: "push", label: "Push" },
-  { value: "dissolve", label: "Dissolve" },
+  { value: "none", label: "None", icon: Ban },
+  { value: "fade", label: "Fade", icon: Blend },
+  { value: "push", label: "Push", icon: MoveRight },
+  { value: "dissolve", label: "Dissolve", icon: Sparkles },
 ];
 
 export const PRESENTATION_OBJECT_ANIMATIONS: readonly CommandControlOption[] = [
-  { value: "none", label: "None" },
-  { value: "fade", label: "Fade in" },
-  { value: "rise", label: "Rise" },
-  { value: "scale", label: "Scale up" },
-  { value: "wipe", label: "Wipe" },
+  { value: "none", label: "None", icon: Ban },
+  { value: "fade", label: "Fade in", icon: Blend },
+  { value: "rise", label: "Rise", icon: ArrowUpFromLine },
+  { value: "scale", label: "Scale up", icon: Scaling },
+  { value: "wipe", label: "Wipe", icon: Eraser },
 ];
 
 export const PRESENTATION_LAYOUTS: readonly CommandControlOption[] =
   PRESENTATION_LAYOUT_OPTIONS;
 
 export const PRESENTATION_TEXT_PRESETS: readonly CommandControlOption[] = [
-  { value: "title", label: "Title" },
-  { value: "subtitle", label: "Subtitle" },
-  { value: "body", label: "Body" },
-  { value: "caption", label: "Caption" },
+  { value: "title", label: "Title", icon: Heading },
+  { value: "subtitle", label: "Subtitle", icon: Heading2 },
+  { value: "body", label: "Body", icon: Text },
+  { value: "caption", label: "Caption", icon: Captions },
 ];
 
 /**
@@ -144,21 +168,21 @@ export const PRESENTATION_TEXT_PRESETS: readonly CommandControlOption[] = [
  * what the menu promises is what the slide renders.
  */
 export const PRESENTATION_SHAPES: readonly CommandControlOption[] = [
-  { value: "rounded-rectangle", label: "Rounded rectangle" },
-  { value: "rectangle", label: "Rectangle" },
-  { value: "ellipse", label: "Ellipse" },
-  { value: "pill", label: "Pill" },
-  { value: "triangle", label: "Triangle" },
-  { value: "diamond", label: "Diamond" },
-  { value: "chevron", label: "Chevron" },
-  { value: "arrow-right", label: "Arrow" },
-  { value: "callout", label: "Speech callout" },
-  { value: "line", label: "Line" },
+  { value: "rounded-rectangle", label: "Rounded rectangle", icon: RectangleHorizontal },
+  { value: "rectangle", label: "Rectangle", icon: Square },
+  { value: "ellipse", label: "Ellipse", icon: Circle },
+  { value: "pill", label: "Pill", icon: Pill },
+  { value: "triangle", label: "Triangle", icon: Triangle },
+  { value: "diamond", label: "Diamond", icon: Diamond },
+  { value: "chevron", label: "Chevron", icon: ChevronRight },
+  { value: "arrow-right", label: "Arrow", icon: ArrowRight },
+  { value: "callout", label: "Speech callout", icon: MessageSquare },
+  { value: "line", label: "Line", icon: Minus },
 ];
 
 export const PRESENTATION_IMAGE_FITS: readonly CommandControlOption[] = [
-  { value: "contain", label: "Fit inside" },
-  { value: "cover", label: "Crop to fill" },
+  { value: "contain", label: "Fit inside", icon: Shrink },
+  { value: "cover", label: "Crop to fill", icon: Crop },
 ];
 
 /** The alignment operations `arrange.align` performs, in reading order. */
@@ -185,14 +209,14 @@ export const PRESENTATION_DISTRIBUTIONS: readonly CommandControlOption[] = [
 ];
 
 export const PRESENTATION_IMAGE_MASKS: readonly CommandControlOption[] = [
-  { value: "none", label: "Square corners" },
-  { value: "rounded", label: "Rounded" },
-  { value: "circle", label: "Circle" },
+  { value: "none", label: "Square corners", icon: Square },
+  { value: "rounded", label: "Rounded", icon: SquareRoundCorner },
+  { value: "circle", label: "Circle", icon: Circle },
 ];
 
 export const PRESENTATION_ASPECT_RATIOS: readonly CommandControlOption[] = [
-  { value: "16:9", label: "16:9" },
-  { value: "4:3", label: "4:3" },
+  { value: "16:9", label: "16:9", icon: Monitor },
+  { value: "4:3", label: "4:3", icon: Tablet },
 ];
 
 /** Slide fills that stay legible under every theme's body ink. */
@@ -624,12 +648,12 @@ export function presentationCommandBindings(
     /* --------------------------------------------------- General · Design */
     {
       id: "design.open",
-      label: "Design",
-      icon: Palette,
+      label: "Designer",
+      icon: LayoutGrid,
       priority: "secondary",
       general: true,
       group: "Design",
-      hint: "Theme, background and slide size for the whole deck",
+      hint: "Finished looks for this slide and the whole deck, with the theme and slide size",
       undo: "none(explain)",
       onSelect: () => handlers.design.open(),
     },

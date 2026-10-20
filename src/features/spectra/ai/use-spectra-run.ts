@@ -20,7 +20,7 @@ import {
 import { requestSpectra, spectraFailureMessage } from "../data/request";
 import type { CommandAttachment } from "../components/command-attachments";
 import { getRunLedger, recordRunEvent } from "../collaboration/run-ledger";
-import { noteAiLocation } from "../collaboration/follow-ai";
+import { endFollowedRun, noteAiLocation } from "../collaboration/follow-ai";
 import {
   handleSpectraAiUiEvent,
   rememberCommittedArtifactResult,
@@ -52,6 +52,12 @@ function clearRunFeedActivity(runId: string): void {
   runFeedArtifacts.delete(runId);
 }
 
+function touchNote(touch: { title: string; action: "created" | "edited" | "referenced" }) {
+  if (touch.action === "created") return `Made ${touch.title}`;
+  if (touch.action === "edited") return `Editing ${touch.title}`;
+  return `Reading ${touch.title}`;
+}
+
 /**
  * Every parsed run event feeds the client ledger, whichever path delivered it
  * (the live SSE stream or the durable event poll). The ledger is what lets
@@ -77,6 +83,7 @@ function feedLedger(event: ReturnType<typeof parseSpectraStreamEvent>): void {
       ) {
         clearRunFeedActivity(runId);
         stopObservingUiRun(runId, true);
+        if (event.type !== "interrupted") endFollowedRun(runId);
       }
       break;
     case "operation_preview":
@@ -114,6 +121,14 @@ function feedLedger(event: ReturnType<typeof parseSpectraStreamEvent>): void {
       break;
     case "ui_event":
       handleSpectraAiUiEvent({ ...event, runId });
+      break;
+    case "step":
+      // Where the run is: a followed view opens the work as Spectra starts reading or editing it, so the edit lands in sight.
+      if (event.status === "running" && event.work) noteAiLocation({ actorId: runId, artifactId: event.work, note: event.label.replace(/\*/g, "") });
+      break;
+    case "artifact_touched":
+      // Work made or changed without a step that named it (a new artifact).
+      noteAiLocation({ actorId: runId, artifactId: event.artifact.id, note: touchNote(event.artifact) });
       break;
     case "operation_commit":
     case "operation_result":
@@ -264,7 +279,7 @@ function operationPreviewMessage(preview: {
                 ? "Placing"
                 : "Connecting";
   // A preview title can already describe an earlier phase of the same
-  // operation ("Preparing the focused artifact"). Prefixing that with the
+  // operation ("Opening your work"). Prefixing that with the
   // operation verb produced claims such as "Updating Preparing..." and, once
   // the next step arrived, "Updated Preparing...". Preserve any authored
   // present-progressive title so the trace says what is actually happening.
@@ -1281,7 +1296,8 @@ export function useSpectraRun({
           id: optimisticCardId,
           runId: `pending:${exchangeId}`,
           status: "running",
-          title: "Starting run",
+          // Until Spectra names it, the run is what was asked.
+          title: clean.split("\n")[0].slice(0, 80),
           summary: clean,
           variant: "status",
           actions: [],

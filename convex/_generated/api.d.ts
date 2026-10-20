@@ -54,6 +54,8 @@ import type * as collaborationGatewayStore from "../collaborationGatewayStore.js
 import type * as collaborationSnapshotCandidate from "../collaborationSnapshotCandidate.js";
 import type * as collaborationSnapshotVerification from "../collaborationSnapshotVerification.js";
 import type * as crons from "../crons.js";
+import type * as dailyBriefSchema from "../dailyBriefSchema.js";
+import type * as dailyBriefs from "../dailyBriefs.js";
 import type * as durableContentDependencies from "../durableContentDependencies.js";
 import type * as durablePayloadIntegrity from "../durablePayloadIntegrity.js";
 import type * as durablePayloadOwnership from "../durablePayloadOwnership.js";
@@ -89,7 +91,6 @@ import type * as operatorSessions from "../operatorSessions.js";
 import type * as orgNodeAggregates from "../orgNodeAggregates.js";
 import type * as orgNodeMutation from "../orgNodeMutation.js";
 import type * as orgTree from "../orgTree.js";
-import type * as orgTreeBoard from "../orgTreeBoard.js";
 import type * as orgTreeIntegrity from "../orgTreeIntegrity.js";
 import type * as orgTreePagination from "../orgTreePagination.js";
 import type * as orgTreeShared from "../orgTreeShared.js";
@@ -140,6 +141,7 @@ import type * as spectraWorkspaces from "../spectraWorkspaces.js";
 import type * as syncOperationLifecycle from "../syncOperationLifecycle.js";
 import type * as syncPolicy from "../syncPolicy.js";
 import type * as timetableReminders from "../timetableReminders.js";
+import type * as workStacks from "../workStacks.js";
 
 import type {
   ApiFromModules,
@@ -194,6 +196,8 @@ declare const fullApi: ApiFromModules<{
   collaborationSnapshotCandidate: typeof collaborationSnapshotCandidate;
   collaborationSnapshotVerification: typeof collaborationSnapshotVerification;
   crons: typeof crons;
+  dailyBriefSchema: typeof dailyBriefSchema;
+  dailyBriefs: typeof dailyBriefs;
   durableContentDependencies: typeof durableContentDependencies;
   durablePayloadIntegrity: typeof durablePayloadIntegrity;
   durablePayloadOwnership: typeof durablePayloadOwnership;
@@ -229,7 +233,6 @@ declare const fullApi: ApiFromModules<{
   orgNodeAggregates: typeof orgNodeAggregates;
   orgNodeMutation: typeof orgNodeMutation;
   orgTree: typeof orgTree;
-  orgTreeBoard: typeof orgTreeBoard;
   orgTreeIntegrity: typeof orgTreeIntegrity;
   orgTreePagination: typeof orgTreePagination;
   orgTreeShared: typeof orgTreeShared;
@@ -280,6 +283,7 @@ declare const fullApi: ApiFromModules<{
   syncOperationLifecycle: typeof syncOperationLifecycle;
   syncPolicy: typeof syncPolicy;
   timetableReminders: typeof timetableReminders;
+  workStacks: typeof workStacks;
 }>;
 
 /**

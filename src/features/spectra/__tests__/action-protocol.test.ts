@@ -13,6 +13,7 @@ import {
 } from "@/features/spectra/runs/background/internal-run-policy";
 import {
   conductParallelResearch,
+  INCLUDED_RESULTS,
   openRouterParallelSearch,
   PARALLEL_SEARCH_TIMEOUT_MS,
   type ParallelSearchResult,
@@ -244,12 +245,14 @@ describe("AI Action Protocol V2", () => {
       tools: Array<{ type: string; parameters: Record<string, unknown> }>;
       max_tool_calls: number;
     };
+    // Asked for twenty, it takes the ten Parallel includes in a request's price.
     expect(request.tools[0]).toMatchObject({
       type: "openrouter:web_search",
       parameters: {
         engine: "parallel",
-        max_results: 20,
-        max_total_results: 20,
+        mode: "fast",
+        max_results: INCLUDED_RESULTS,
+        max_total_results: INCLUDED_RESULTS,
         max_uses: 1,
       },
     });
@@ -303,7 +306,7 @@ describe("AI Action Protocol V2", () => {
       },
     });
     expect(empty.calls).toBe(5);
-    expect(calls).toEqual([20, 20, 20, 20, 20]);
+    expect(calls).toEqual(Array(5).fill(INCLUDED_RESULTS));
     const strong: ParallelSearchResult[] = Array.from(
       { length: 6 },
       (_, index) => ({

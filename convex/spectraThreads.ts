@@ -2,7 +2,7 @@ import { query } from "./functions";
 import { internalMutation, mutation } from "./orgNodeMutation";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { getAuthenticatedActor } from "./identityShared";
+import { getAuthenticatedActor, getOptionalAuthenticatedActor } from "./identityShared";
 import {
   ensureThreadWorkspacePlacement,
   requireArtifactCapability,
@@ -149,6 +149,9 @@ function childCursor(
     ...(after === undefined ? {} : { after }),
   });
 }
+
+/** The names a thread is born with, before its first message names it. */
+const BIRTH_TITLE = /^(new (thread|conversation|chat)|untitled)$/i;
 
 /** A one-line preview: a reply's citations drop out, and a reference reads as its label. */
 function previewContent(value: string) {
@@ -505,6 +508,45 @@ function withClarificationIdentity(metadata: unknown, messageId: Id<"spectraMess
   };
 }
 
+/** Run states a thread is still moving in. */
+const LIVE_RUN_STATUSES = ["queued", "running", "awaiting_confirmation", "awaiting_resolution"] as const;
+
+/**
+ * The account's live pulse: when its threads last changed and which runs are
+ * moving. Every open page subscribes to this one small read instead of
+ * polling lists; a change tells the page to refresh what it shows (the rail's
+ * threads, the island's run tabs). It reads one thread row and the few live
+ * runs, so it re-runs only when one of those moves.
+ */
+export const pulse = query({
+  args: {},
+  handler: async (ctx) => {
+    const actor = await getOptionalAuthenticatedActor(ctx);
+    if (!actor) return null;
+    const latest = await ctx.db
+      .query("spectraThreads")
+      .withIndex("by_account_school_status_updated", (q) =>
+        q.eq("ownerAccountId", actor.accountId).eq("schoolId", actor.schoolId).eq("status", "active"),
+      )
+      .order("desc")
+      .first();
+    const live = (
+      await Promise.all(
+        LIVE_RUN_STATUSES.map((status) =>
+          ctx.db
+            .query("spectraAiRuns")
+            .withIndex("by_account_status", (q) => q.eq("ownerAccountId", actor.accountId).eq("status", status))
+            .take(20),
+        ),
+      )
+    )
+      .flat()
+      .map((run) => `${run._id}:${run.status}`)
+      .sort();
+    return { threadsAt: latest?.updatedAt ?? 0, live };
+  },
+});
+
 async function requireActor(ctx: Parameters<typeof getAuthenticatedActor>[0]) {
   const actor = await getAuthenticatedActor(ctx);
   if (!actor)
@@ -725,7 +767,7 @@ export const appendMessage = mutation({
     const firstUserMessage = args.role === "user" && currentMessageCount === 0;
     await ctx.db.patch(args.threadId, {
       title:
-        firstUserMessage && thread.title === "New thread"
+        firstUserMessage && BIRTH_TITLE.test(thread.title.trim())
           ? cleanTitle(content)
           : thread.title,
       ...(currentMessageCount === undefined
@@ -1079,11 +1121,12 @@ export const list = query({
     return {
       threads: visible.map((thread) => ({
         ...compactThread(thread),
+        // The primary work or workspace is often in the context list too; each appears once.
         contexts: {
-          workspaces: [thread.workspaceId, ...(thread.contextWorkspaceIds ?? [])]
-            .filter(Boolean).map(String).map((id) => workspaceById.get(id)).filter(Boolean),
-          artifacts: [thread.artifactId, ...(thread.contextArtifactIds ?? [])]
-            .filter(Boolean).map(String).map((id) => artifactById.get(id)).filter(Boolean),
+          workspaces: [...new Set([thread.workspaceId, ...(thread.contextWorkspaceIds ?? [])].filter(Boolean).map(String))]
+            .map((id) => workspaceById.get(id)).filter(Boolean),
+          artifacts: [...new Set([thread.artifactId, ...(thread.contextArtifactIds ?? [])].filter(Boolean).map(String))]
+            .map((id) => artifactById.get(id)).filter(Boolean),
         },
       })),
       hasMore: nextCursor !== null,
@@ -1637,6 +1680,8 @@ export const applyGeneratedMetadata = mutation({
     executionId: v.string(),
     title: v.optional(v.string()),
     summary: v.optional(v.string()),
+    /** The workspace the title writer filed an unfiled thread in. */
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
   },
   handler: async (ctx, args) => {
     const { thread } = await requireOwnedThread(ctx, args.threadId);
@@ -1655,14 +1700,37 @@ export const applyGeneratedMetadata = mutation({
       args.summary?.replace(/\s+/g, " ").trim().slice(0, 320) ||
       thread.summaryShort;
     const now = Date.now();
+    // Filing is a suggestion for a thread that has no home yet; once the
+    // owner (or an earlier run) placed it, it stays where it is.
+    const workspace =
+      args.workspaceId && !thread.workspaceId ? await ctx.db.get(args.workspaceId) : null;
+    const fileIn =
+      workspace &&
+      workspace.ownerAccountId === thread.ownerAccountId &&
+      workspace.schoolId === thread.schoolId &&
+      workspace.status === "active"
+        ? workspace._id
+        : undefined;
     await ctx.db.patch(args.threadId, {
       title,
       ...(writeTitle ? { titleGeneratedAt: now } : {}),
+      ...(fileIn ? { workspaceId: fileIn } : {}),
       summaryShort: summary,
       updatedAt: now,
       readSchemaVersion: THREAD_READ_SCHEMA_VERSION,
     });
-    if (title !== thread.title)
+    if (fileIn)
+      await placeSourceNode(ctx, {
+        accountId: thread.ownerAccountId,
+        schoolId: thread.schoolId,
+        kind: "thread",
+        sourceId: args.threadId,
+        name: title,
+        target: { workspaceId: fileIn },
+        relocate: true,
+        pinned: thread.pinned,
+      });
+    else if (title !== thread.title)
       await syncSourceNodes(ctx, "thread", args.threadId, title);
     return { threadId: args.threadId, titled: writeTitle };
   },

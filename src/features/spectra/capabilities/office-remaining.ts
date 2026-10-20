@@ -607,6 +607,11 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     { params: bool, requires: false, exposed: false },
   ],
   [
+    "layout.pagesSideBySide",
+    "Lay the pages out side by side, as many as fit the screen.",
+    { params: bool, requires: false, exposed: false },
+  ],
+  [
     "layout.focus",
     "Hide everything except the text.",
     { params: bool, requires: false, exposed: false },
@@ -1457,7 +1462,7 @@ const PRESENTATION_SPECS: Spec<"presentation">[] = [
   ],
   [
     "design.open",
-    "Open theme, background and slide size for the whole deck.",
+    "Open Designer: looks for this slide and the deck, the theme and the slide size.",
     { requires: false, exposed: false },
   ],
   [

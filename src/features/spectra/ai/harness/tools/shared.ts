@@ -13,6 +13,8 @@ export type HarnessSession = {
   todos: TodoItem[];
   /** The user's agents, when they have any and none is active yet. */
   agents: Array<{ id: string; title: string }>;
+  /** Web searches this run has made; each one is a paid provider call. */
+  webSearches: number;
 };
 
 export function createSession(input: {
@@ -29,6 +31,7 @@ export function createSession(input: {
     titles: new Map((input.known ?? []).map((entry) => [entry.id, { title: entry.title, type: entry.type }])),
     todos: [],
     agents: input.agents ?? [],
+    webSearches: 0,
   };
 }
 

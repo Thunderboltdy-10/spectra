@@ -80,15 +80,18 @@ describe("Planner Reminder affordance", () => {
     ]);
   });
 
-  it("exposes minutesBefore Reminder controls in PlanStudio", () => {
+  it("exposes minutesBefore Reminder controls on a plan's task page", () => {
     const studio = readFileSync(
-      resolve(__dirname, "../components/plan-studio.tsx"),
+      resolve(__dirname, "../components/planner/plan-task-options.tsx"),
       "utf8",
     );
     expect(studio).toContain("Reminders");
-    expect(studio).toContain('ariaLabel="Add reminder"');
+    expect(studio).toContain("<TaskReminders");
     expect(studio).toContain("minutesBefore");
-    expect(studio).toContain("REMINDER_MINUTE_OPTIONS");
     expect(studio).not.toContain("reminderDraft");
+    // The reminder list is shared with every task page.
+    const reminders = readFileSync(resolve(__dirname, "../components/task/task-reminders.tsx"), "utf8");
+    expect(reminders).toContain('ariaLabel="Add a reminder"');
+    expect(reminders).toContain("REMINDER_MINUTE_OPTIONS");
   });
 });

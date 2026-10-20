@@ -11,7 +11,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
 import { createManagebacVisibilityReader } from "./managebacVisibility";
-import { purgeSyncKindPage, submissionFiles } from "./managebac";
+import { ensurePlannerProjection, purgeSyncKindPage, submissionFiles } from "./managebac";
 import { deleteStorageIfNoOtherBinding, storageHasOtherBinding } from "./durableStorageBindings";
 import { vSchoolSyncKind, vSchoolSyncMode } from "./schoolSyncSchema";
 import {
@@ -33,6 +33,8 @@ import {
 } from "../shared/school-sync";
 
 type Ctx = QueryCtx | MutationCtx;
+/** What sync makes task work for (managebac.ts, projectRecord). */
+const TASK_RECORD_TYPES = new Set(["assignment", "deadline", "assessment"]);
 type Actor = NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>;
 
 const NOT_FOUND = "SCHOOL_RECORD_NOT_FOUND: That isn't in your School data.";
@@ -179,10 +181,22 @@ export const preferences = query({
         kinds: SCHOOL_SYNC_KINDS.map((kind) => ({ kind, ...kindInfo(kind), mode: SCHOOL_SYNC_KIND_INFO[kind].availability === "available" ? SCHOOL_SYNC_KIND_INFO[kind].defaultMode : ("off" as const), chosen: false })),
         classOverrides: [],
       };
-    const prefs = await loadSyncPreferences(ctx, actor.accountId, integration._id);
+    const [prefs, states] = await Promise.all([
+      loadSyncPreferences(ctx, actor.accountId, integration._id),
+      ctx.db.query("schoolSyncStates")
+        .withIndex("by_account_integration_kind", (q) => q.eq("accountId", actor.accountId).eq("integrationId", integration._id))
+        .take(20),
+    ]);
+    const refused = refusedKinds(states);
     return {
       connected: integration.status === "connected" || integration.status === "degraded",
-      kinds: SCHOOL_SYNC_KINDS.map((kind) => ({ kind, ...kindInfo(kind), mode: prefs.modeFor(kind), chosen: prefs.chosen(kind) !== undefined })),
+      kinds: SCHOOL_SYNC_KINDS.map((kind) => ({
+        kind,
+        ...kindInfo(kind),
+        ...(refused.has(kind) ? { available: false, unavailableReason: REFUSED_REASON } : {}),
+        mode: prefs.modeFor(kind),
+        chosen: prefs.chosen(kind) !== undefined,
+      })),
       classOverrides: prefs.overrides
         .filter((row) => row.schoolId === actor.schoolId)
         .map((row) => ({ providerClassId: row.providerClassId, kind: row.kind, mode: row.mode }))
@@ -190,6 +204,26 @@ export const preferences = query({
     };
   },
 });
+
+/**
+ * Kinds the school's ManageBac can't give: its key was never granted the route,
+ * or the API has none. They leave School's choices rather than standing there
+ * failing; a key that gains the route brings them back with the next sync of it.
+ */
+const REFUSED_CODES = new Set(["INTEGRATION_PERMISSION_DENIED", "INTEGRATION_ENDPOINT_UNAVAILABLE"]);
+const REFUSED_REASON = "Your school's ManageBac doesn't share this with Spectra.";
+
+/** Codes that speak of the whole connection, not of one kind. */
+const CONNECTION_CODES = new Set([
+  "INTEGRATION_CREDENTIAL_REJECTED",
+  "INTEGRATION_TOKEN_REQUIRED",
+  "INTEGRATION_NOT_READY",
+  "INTEGRATION_NOT_CONNECTED",
+]);
+
+function refusedKinds(states: ReadonlyArray<{ kind: SchoolSyncKind; errorCode?: string }>) {
+  return new Set(states.filter((state) => state.errorCode && REFUSED_CODES.has(state.errorCode)).map((state) => state.kind));
+}
 
 function kindInfo(kind: SchoolSyncKind) {
   const info = SCHOOL_SYNC_KIND_INFO[kind];
@@ -228,15 +262,26 @@ export const syncStatus = query({
         : mapping?.status !== "verified"
           ? describeSchoolSyncProblem("INTEGRATION_IDENTITY_REQUIRED")
           : null;
+    const now = Date.now();
+    const refused = refusedKinds(states);
     const kinds = SCHOOL_SYNC_KINDS.map((kind) => {
-      const state = states.find((row) => row.kind === kind);
+      const row = states.find((candidate) => candidate.kind === kind);
+      // A run past its watchdog was cut off (the request died, the computer
+      // slept): it is not syncing, and the next sync continues where it stopped.
+      const cutOff = row?.state === "running" && row.dueAt !== undefined && row.dueAt <= now ? { ...row, state: "idle" as const } : row;
+      // A kind stopped by a problem with the whole connection (a refused key)
+      // is not stopped once the connection is working again: its next sync
+      // simply runs, and the old reason no longer applies.
+      const state = cutOff?.errorCode && CONNECTION_CODES.has(cutOff.errorCode) && !connectionProblem
+        ? { ...cutOff, state: cutOff.state === "blocked" ? ("idle" as const) : cutOff.state, errorCode: undefined, errorSummary: undefined }
+        : cutOff;
       const mode = prefs.modeFor(kind);
       const off = !prefs.hasAny(kind);
       return {
         kind,
         label: SCHOOL_SYNC_KIND_INFO[kind].label,
         mode,
-        available: SCHOOL_SYNC_KIND_INFO[kind].availability === "available",
+        available: SCHOOL_SYNC_KIND_INFO[kind].availability === "available" && !refused.has(kind),
         state: off ? ("off" as const) : (state?.state ?? ("idle" as const)),
         lastRunAt: state?.lastRunAt ?? null,
         lastSuccessAt: state?.lastSuccessAt ?? null,
@@ -396,12 +441,17 @@ export const classes = query({
         // A class row names it better than a membership row.
         if (!current || (current.recordType !== "class" && row.recordType === "class")) byClass.set(row.providerClassId, row);
       }
-    const classList = [...byClass.entries()].map(([providerClassId, row]) => {
+    // A membership ManageBac never named is not a class anyone can recognise.
+    const named = [...byClass.entries()].filter(([, row]) => {
+      const value = fields(row.normalized);
+      return Boolean(str(value.title) || str(value.name) || str(value.subject));
+    });
+    const classList = named.map(([providerClassId, row]) => {
       const value = fields(row.normalized);
       return {
         providerClassId,
         recordId: row._id,
-        title: str(value.title) || str(value.name) || str(value.subject) || "Class",
+        title: str(value.title) || str(value.name) || str(value.subject),
         subject: str(value.subject) || null,
         yearGroupId: str(value.yearGroupId, 40) || null,
         academicPeriodKey: row.academicPeriodKey ?? null,
@@ -437,6 +487,56 @@ export const tasks = query({
     return { tasks: rows };
   },
 });
+
+/**
+ * The planner work Spectra made for a task when it synced (SCHOOL.md, "A
+ * task"). A deadline on Home or in the Calendar opens as that work, so the
+ * student lands where they plan it; null when there is none to open.
+ */
+export const taskWork = query({
+  args: { recordId: v.id("externalRecords") },
+  handler: async (ctx, args) => {
+    const actor = await requireStudent(ctx);
+    const own = await ownRecord(ctx, actor, args.recordId);
+    if (!own) return null;
+    const projections = await ctx.db
+      .query("externalProjections")
+      .withIndex("by_account_record", (q) => q.eq("accountId", actor.accountId).eq("recordId", args.recordId))
+      .take(8);
+    const planner = projections.find((item) => item.projectionType === "planner_task" && item.state === "active" && item.schoolId === actor.schoolId);
+    if (!planner) return null;
+    const work = await ctx.db.get(planner.projectionId as Id<"spectraArtifacts">);
+    return work && work.status !== "deleted" && work.deletionRequestedAt === undefined ? work._id : null;
+  },
+});
+
+/**
+ * A school task as Spectra task work: the one sync made, or made now. Every
+ * ManageBac deadline opens as a task the student can add notes and steps to.
+ */
+export const ensureTaskWork = mutation({
+  args: { recordId: v.id("externalRecords") },
+  handler: async (ctx, args) => {
+    const actor = await requireStudent(ctx);
+    // The work is the student's own once made, so it opens even while the link to ManageBac is down.
+    const made = await ctx.db
+      .query("externalProjections")
+      .withIndex("by_record_type", (q) => q.eq("recordId", args.recordId).eq("projectionType", "planner_task"))
+      .take(4);
+    const mine = made.find((row) => row.accountId === actor.accountId && row.schoolId === actor.schoolId && row.state === "active");
+    if (mine) return liveWork(ctx, mine.projectionId);
+    const own = await ownRecord(ctx, actor, args.recordId);
+    if (!own || !TASK_RECORD_TYPES.has(own.record.recordType) || own.record.tombstone) return null;
+    const { projection } = await ensurePlannerProjection(ctx, own.integration, actor.accountId, own.record);
+    return liveWork(ctx, projection.projectionId);
+  },
+});
+
+async function liveWork(ctx: Ctx, projectionId: string) {
+  const id = ctx.db.normalizeId("spectraArtifacts", projectionId);
+  const work = id ? await ctx.db.get(id) : null;
+  return work && work.status !== "deleted" && work.deletionRequestedAt === undefined ? work._id : null;
+}
 
 /** One task with its brief, resources, the student's grade and feedback, and their submission. */
 export const task = query({

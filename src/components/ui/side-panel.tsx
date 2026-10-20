@@ -212,6 +212,7 @@ export function SidePanel({
   className,
   onOpenChange,
   revealKey,
+  onClose,
 }: {
   /** Remembers open and width under this key, per page. */
   id: string;
@@ -233,6 +234,11 @@ export function SidePanel({
   onOpenChange?: (open: boolean) => void;
   /** Each new value opens the panel, as if its tab were pressed: the page chose something to show in it. */
   revealKey?: string | number | null;
+  /**
+   * A panel for one chosen thing: it is open while the page has something in
+   * it, and hiding it lets the thing go instead of folding the panel to a tab.
+   */
+  onClose?: () => void;
 }) {
   const [stored, setStored] = React.useState<Stored>({ open: defaultOpen, width: defaultWidth });
   const [rowWidth, setRowWidth] = React.useState(0);
@@ -243,7 +249,8 @@ export function SidePanel({
   const panelRef = React.useRef<HTMLElement>(null);
   const tabRef = React.useRef<HTMLDivElement>(null);
 
-  React.useEffect(() => {
+  // Before the first paint, so a panel left open never arrives late and squeezes the page.
+  React.useLayoutEffect(() => {
     setStored(readStored(id, { open: defaultOpen, width: defaultWidth }));
   }, [defaultOpen, defaultWidth, id]);
 
@@ -264,7 +271,7 @@ export function SidePanel({
   // Tucked by the shell, not by the user: it comes back on its own.
   const tucked = held || short;
   React.useEffect(() => setOverride(false), [tucked]);
-  const shown = stored.open && (!tucked || override);
+  const shown = (onClose ? true : stored.open) && (!tucked || override);
   const floating = shown && short;
 
   React.useEffect(() => onOpenChange?.(shown), [onOpenChange, shown]);
@@ -374,7 +381,7 @@ export function SidePanel({
           plan={plan}
           control={
             <span data-life-launch className="inline-flex">
-              <IconButton icon="collapse" label={`Hide ${title.toLowerCase()}`} size="compact" onClick={() => setOpen(false)} />
+              <IconButton icon="sidePanel" label={`Hide ${title.toLowerCase()}`} size="compact" onClick={() => (onClose ? onClose() : setOpen(false))} />
             </span>
           }
         >

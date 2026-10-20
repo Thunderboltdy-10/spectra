@@ -217,7 +217,12 @@ async function graphPage(ctx: QueryCtx, args: Args) {
     if (migration?.state !== "complete" || migration.version !== ARTIFACT_SUMMARY_READ_MODEL_VERSION)
       throw new Error("CATALOG_READ_MODEL_REQUIRED: Library metadata needs its bounded migration.");
   }
-  const types = args.kind === "artifacts" ? ["artifact", "agent", "workspace"] as const : ["workspace"] as const;
+  // An agent is granted as an agent and any other work as an artifact, so a
+  // catalog of one type never needs to read the other kind's grants.
+  const types = args.kind === "workspaces" ? ["workspace"] as const
+    : args.blueprintKey === "agent" ? ["agent", "workspace"] as const
+    : args.blueprintKey ? ["artifact", "workspace"] as const
+    : ["artifact", "agent", "workspace"] as const;
   const streams = (["account", "school"] as const).flatMap(principal => types.map(type => ({ principal, type })));
   const maxStage = streams.length + 1;
   const scope = JSON.stringify(["actor-graph-v1", actor.accountId, actor.schoolId, actor.membershipId, args.kind,
@@ -268,12 +273,19 @@ async function graphPage(ctx: QueryCtx, args: Args) {
   // Shared-only discovery never emits an owned row; skip that stream outright.
   if (state.stage === 0 && args.kind === "artifacts" && args.placement === "shared") state.stage = 1;
   if (state.stage === 0) {
+    const blueprintKey = args.blueprintKey;
+    const owned = () => blueprintKey
+      ? ctx.db.query("spectraArtifactSummaries").withIndex("by_account_blueprint_status_updated_id", q => {
+        const prefix = q.eq("ownerAccountId", actor.accountId).eq("blueprintKey", blueprintKey).eq("status", args.status ?? "active");
+        return state.after ? prefix.lte("updatedAt", state.after.time) : prefix;
+      })
+      : ctx.db.query("spectraArtifactSummaries").withIndex("by_account_status_updated_id", q => {
+        const prefix = q.eq("ownerAccountId", actor.accountId).eq("status", args.status ?? "active");
+        return state.after ? prefix.lte("updatedAt", state.after.time) : prefix;
+      });
     const page = args.kind === "artifacts"
-      ? await budget.read(GRAPH_BATCH, () => ctx.db.query("spectraArtifactSummaries")
-        .withIndex("by_account_status_updated_id", q => {
-          const prefix = q.eq("ownerAccountId", actor.accountId).eq("status", args.status ?? "active");
-          return state.after ? prefix.lte("updatedAt", state.after.time) : prefix;
-        }).order("desc").paginate({ numItems: GRAPH_BATCH, cursor: state.native, maximumRowsRead: GRAPH_BATCH }), true)
+      ? await budget.read(GRAPH_BATCH, () => owned()
+        .order("desc").paginate({ numItems: GRAPH_BATCH, cursor: state.native, maximumRowsRead: GRAPH_BATCH }), true)
       : await budget.read(GRAPH_BATCH, () => (args.includeArchived
         ? ctx.db.query("spectraWorkspaces").withIndex("by_account_activity", q => q.eq("ownerAccountId", actor.accountId))
         : ctx.db.query("spectraWorkspaces").withIndex("by_account_status_activity", q => q.eq("ownerAccountId", actor.accountId).eq("status", "active")))

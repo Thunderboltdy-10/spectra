@@ -557,7 +557,7 @@ export function CollaborationCursorLayer({
             }}
           >
             <div
-              className="px-2.5 pb-1 pt-1 text-micro font-semibold uppercase tracking-[0.08em]"
+              className="px-2.5 pb-1 pt-1 text-micro font-semibold "
               style={{ color }}
             >
               {person.menu.label}
@@ -733,7 +733,7 @@ export function CollaborationPresenceIndicator({
     ? describeState(activeAi.interactionState)
     : activeAiLine != null
       ? activeAiRegion
-        ? `${activeAiRegion} · line ${activeAiLine}`
+        ? `${activeAiRegion}, line ${activeAiLine}`
         : `Line ${activeAiLine}`
       : activeAiRegion;
   const activeAiColor = activeAi ? presenceColor(activeAi) : null;
@@ -822,9 +822,8 @@ export function CollaborationPresenceIndicator({
             </span>
             <Users className="h-3.5 w-3.5 text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)]" />
             <span className="pr-1 text-micro font-medium text-[var(--text-secondary)]">
-              {activeAiName
-                ? `${activeAiName}${activeAiPlace ? ` · ${activeAiPlace}` : ""}`
-                : `${activeCount || collaborators.length} here`}
+              {activeAiName ?? `${activeCount || collaborators.length} here`}
+              {activeAiName && activeAiPlace ? <span className="ml-1.5 font-normal text-[var(--text-tertiary)]">{activeAiPlace}</span> : null}
             </span>
           </button>
         </PopoverTrigger>
@@ -867,7 +866,7 @@ export function CollaborationPresenceIndicator({
               const place =
                 typeof lineIndex === "number"
                   ? region
-                    ? `${region} · line ${lineIndex + 1}`
+                    ? `${region}, line ${lineIndex + 1}`
                     : `Line ${lineIndex + 1}`
                   : region;
               const followable = person.interactionState != null;

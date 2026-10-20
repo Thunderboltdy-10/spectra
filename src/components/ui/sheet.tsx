@@ -3,7 +3,6 @@
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Icon } from "@/components/icons";
-import { mergeRefs, useLifeSurface } from "@/features/spectra/life/use-life";
 import { cn } from "@/lib/utils";
 import { LAYER_CLASS, type SpectraLayer } from "./layers";
 import { HostLayer, useFocusReturn } from "./layer-context";
@@ -35,8 +34,6 @@ const SheetContent = React.forwardRef<
     ref,
   ) => {
     const focusReturn = useFocusReturn(onOpenAutoFocus, onCloseAutoFocus);
-    const surface = useLifeSurface<HTMLDivElement>({ wait: true });
-    const contentRef = React.useMemo(() => mergeRefs(ref, surface), [ref, surface]);
     return (
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
@@ -46,7 +43,7 @@ const SheetContent = React.forwardRef<
           )}
         />
         <DialogPrimitive.Content
-          ref={contentRef}
+          ref={ref}
           className={cn(
             "spectra-sheet fixed inset-y-0 right-0 flex h-dvh w-[min(380px,calc(100vw-24px))] flex-col overflow-hidden border-l border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[var(--shadow-lg)] outline-none xl:hidden",
             LAYER_CLASS[layer],

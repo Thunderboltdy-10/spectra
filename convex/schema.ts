@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { vUiObservation, vUiObserverInterests } from "./spectraUiObservationSchema";
 import { providerProjectionIntent, providerProjectionReceipt } from "./managebacProjectionContract";
 import { EMBEDDING_DIMENSIONS } from "./embeddingDimensions";
+import { briefSuggestionValidator } from "./dailyBriefSchema";
 import { vSemanticKind as semanticIndexedKind } from "./semanticKeys";
 import { vSchoolSyncKind, vSchoolSyncMode, vSchoolSyncState, vSchoolSyncTrigger } from "./schoolSyncSchema";
 import {
@@ -75,6 +76,32 @@ export default defineSchema({
   })
     .index("by_account", ["accountId"])
     .index("by_account_scope_key", ["accountId", "scope", "scopeKey"]),
+
+  /** Home's daily brief (HOME.md, "The daily brief"): one row per account, today's only, replaced each day. */
+  dailyBriefs: defineTable({
+    accountId: v.id("accounts"),
+    /** The reader's local day, "YYYY-MM-DD". */
+    day: v.string(),
+    state: v.union(v.literal("writing"), v.literal("ready"), v.literal("failed")),
+    claimedAt: v.number(),
+    recap: v.optional(v.string()),
+    suggestions: v.optional(v.array(briefSuggestionValidator)),
+    updatedAt: v.number(),
+  }).index("by_account", ["accountId"]),
+
+  /** When each student wakes, so the morning brief is written before then. */
+  briefSchedules: defineTable({
+    accountId: v.id("accounts"),
+    clerkId: v.string(),
+    /** "HH:MM" in `timeZone`. */
+    wakeTime: v.string(),
+    timeZone: v.string(),
+    /** The next instant the brief is written: a little before waking. */
+    nextAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_account", ["accountId"])
+    .index("by_next", ["nextAt"]),
 
   schoolMemberships: defineTable({
     accountId: v.id("accounts"),
@@ -2172,6 +2199,15 @@ export default defineSchema({
       "blueprintKey",
       "status",
       "updatedAt",
+    ])
+    // The catalog graph's owned stream for one type (the agent library), in
+    // the same (updatedAt, artifactId) order as the untyped stream above.
+    .index("by_account_blueprint_status_updated_id", [
+      "ownerAccountId",
+      "blueprintKey",
+      "status",
+      "updatedAt",
+      "artifactId",
     ])
     .index("by_created_thread", ["createdFromThreadId", "updatedAt"])
     .index("by_ai_run", ["aiRunId", "updatedAt"]),
@@ -4271,9 +4307,13 @@ export default defineSchema({
     deletedAt: v.optional(v.number()),
     trashedRootId: v.optional(v.id("orgNodes")),
     isTrashRoot: v.optional(v.boolean()),
+    // Works gathered on a shelf as one card with a tab each (LIBRARY.md,
+    // "Stacks"). Where each lives is unchanged; this only groups how they show.
+    stackId: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_account_stack", ["accountId", "stackId"])
     .index("by_account_parent_order", ["accountId", "parentId", "orderKey"])
     .index("by_account_parent_live_order", [
       "accountId",

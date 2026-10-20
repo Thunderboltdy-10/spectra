@@ -98,7 +98,6 @@ import {
   WorkbarItemSelector,
   type CommandBinding,
 } from "./artifact-workbar";
-import { getWorkDefinition } from "../work/registry";
 import { commandContext, dispatchStudioCommand } from "../commands";
 import type { CommandParam } from "../commands/types";
 import { SHEETS_EXPORT_COPIES } from "../capabilities";
@@ -209,9 +208,6 @@ function fittedRowHeight(
   );
 }
 
-/** The registry owns the empty-state words, so every surface says the same one. */
-const emptyState = getWorkDefinition("sheets").emptyState;
-
 /**
  * One shape rule for the inspector: the rail itself is flush with the frame it
  * overlays, every control inside it is `rounded-control`, and the only filled
@@ -280,11 +276,6 @@ type Viewport = {
   scrollLeft: number;
   scrollTop: number;
 };
-
-function sheetHasCells(cells: Record<string, SheetCell>) {
-  for (const key in cells) return true;
-  return false;
-}
 
 function cellInput(cell?: SheetCell) {
   if (cell?.formula)
@@ -379,6 +370,11 @@ function replaceSheet(
     ),
   };
 }
+
+/** How close to an edge the grid grows, and by how much each time. */
+const REACH_MARGIN = 480;
+const REACH_ROWS = 100;
+const REACH_COLUMNS = 10;
 
 function usedBounds(sheet: WorkbookSheet) {
   const declaredRows = Number(sheet.rowCount) || 0;
@@ -956,7 +952,21 @@ export const SheetsStudio = memo(function SheetsStudio({
    */
   const sheetProtected = Boolean(activeSheet.protection?.locked);
   const locked = grantLocked || sheetProtected;
-  const bounds = useMemo(() => usedBounds(activeSheet), [activeSheet]);
+  /**
+   * A sheet has no last row or column: scrolling near an edge lays down more.
+   * The reach is the view's, not the workbook's, so it is never saved; only
+   * cells and charts are.
+   */
+  const [reach, setReach] = useState({ sheetId: activeSheet.id, rows: 0, columns: 0 });
+  const sheetReach =
+    reach.sheetId === activeSheet.id ? reach : { sheetId: activeSheet.id, rows: 0, columns: 0 };
+  const bounds = useMemo(() => {
+    const used = usedBounds(activeSheet);
+    return {
+      rows: Math.max(used.rows, sheetReach.rows),
+      columns: Math.max(used.columns, sheetReach.columns),
+    };
+  }, [activeSheet, sheetReach.rows, sheetReach.columns]);
   /**
    * Calculation is lazy and per cell (D20). The grid asks for the cells it is
    * about to paint, so a keystroke costs one dependency walk rather than a pass
@@ -1873,6 +1883,17 @@ export const SheetsStudio = memo(function SheetsStudio({
       scrollLeft: element.scrollLeft,
       scrollTop: element.scrollTop,
     };
+    const nearBottom =
+      element.scrollTop + element.clientHeight > element.scrollHeight - REACH_MARGIN;
+    const nearRight =
+      element.scrollLeft + element.clientWidth > element.scrollWidth - REACH_MARGIN;
+    if (nearBottom || nearRight) {
+      setReach({
+        sheetId: activeSheet.id,
+        rows: nearBottom ? bounds.rows + REACH_ROWS : bounds.rows,
+        columns: nearRight ? bounds.columns + REACH_COLUMNS : bounds.columns,
+      });
+    }
     setViewport((current) => {
       if (
         current.rowStart === next.rowStart &&
@@ -1898,7 +1919,14 @@ export const SheetsStudio = memo(function SheetsStudio({
       }
       return next;
     });
-  }, [bounds.columns, columnOffsets, rowOffsets, visibleRowIndices.length]);
+  }, [
+    activeSheet.id,
+    bounds.columns,
+    bounds.rows,
+    columnOffsets,
+    rowOffsets,
+    visibleRowIndices.length,
+  ]);
 
   // Opened at a range (a search hit, a citation): show its sheet, select the
   // range, and bring it into the virtualised grid before landing on it.
@@ -2499,7 +2527,7 @@ export const SheetsStudio = memo(function SheetsStudio({
     }
     if (file.size < 1 || file.size > 100 * 1024 * 1024) {
       setImportNotice(
-        "Import quarantined: the file is empty or exceeds the 100 MB parsing safety ceiling.",
+        "Couldn't import: the file is empty or larger than 100 MB.",
         "warning",
       );
       return;
@@ -2824,8 +2852,6 @@ export const SheetsStudio = memo(function SheetsStudio({
     workbook.workbook.locale,
     workbook.workbook.date1904,
   ]);
-  const sheetIsEmpty =
-    !sheetHasCells(activeSheet.cells) && !activeSheet.charts.length;
   /**
    * The selection readout. It used to sit in a 28px bar of its own that also
    * repeated the address already shown in the name box; it is one readout in the
@@ -2836,9 +2862,10 @@ export const SheetsStudio = memo(function SheetsStudio({
     : selectedAddresses.length > 1
       ? `${selectedAddresses.length} cells selected`
       : undefined;
+  // The grid has no size to report; a filter hiding rows is worth saying.
   const dimensionLabel = filteredOutRows.size
-    ? `${visibleRowIndices.length.toLocaleString()} of ${bounds.rows.toLocaleString()} rows · ${bounds.columns.toLocaleString()} columns`
-    : `${bounds.rows.toLocaleString()} rows · ${bounds.columns.toLocaleString()} columns`;
+    ? `${filteredOutRows.size.toLocaleString()} rows hidden by the filter`
+    : undefined;
   const frozenRowCount = activeSheet.frozenRows ?? 0;
   const frozenColumnCount = activeSheet.frozenColumns ?? 0;
   const freezeRowTarget = normalizedSelection.start.row + 1;
@@ -4270,6 +4297,11 @@ export const SheetsStudio = memo(function SheetsStudio({
                   })
                 }
                 className="sheets-column-header"
+                data-selected={
+                  (column >= normalizedSelection.start.column &&
+                    column <= normalizedSelection.end.column) ||
+                  undefined
+                }
                 data-ai-region={aiRegionAttr(
                   sheetsAiTouchesColumn(
                     aiChangedPaths,
@@ -4326,6 +4358,11 @@ export const SheetsStudio = memo(function SheetsStudio({
                   })
                 }
                 className="sheets-row-header"
+                data-selected={
+                  (row >= normalizedSelection.start.row &&
+                    row <= normalizedSelection.end.row) ||
+                  undefined
+                }
                 data-frozen={row < (activeSheet.frozenRows ?? 0) || undefined}
                 data-freeze-edge={
                   row === (activeSheet.frozenRows ?? 0) - 1 || undefined
@@ -5820,31 +5857,6 @@ export const SheetsStudio = memo(function SheetsStudio({
               </>
             ) : null}
           </aside>
-        ) : null}
-
-        {/* The empty state invites rather than blocks: the grid underneath is
-            live, so the first keystroke lands in A1. */}
-        {sheetIsEmpty && !importing && !analysing ? (
-          <div className="pointer-events-none absolute inset-x-0 top-[34%] z-chrome flex justify-center px-6">
-            <div className="pointer-events-auto max-w-[302px] text-center">
-              <p className="text-subhead font-semibold text-[var(--text-primary)]">
-                {emptyState.headline}
-              </p>
-              <p className="mt-1 text-caption text-[var(--text-secondary)]">
-                {emptyState.body}
-              </p>
-              {locked ? null : (
-                <button
-                  type="button"
-                  disabled={!synchronizationReady}
-                  onClick={() => importRef.current?.click()}
-                  className="mt-2.5 inline-flex h-8 items-center rounded-control bg-[var(--text-primary)] px-3 text-caption font-semibold text-[var(--bg-primary)] transition-opacity hover:opacity-90 disabled:opacity-45"
-                >
-                  {emptyState.action}
-                </button>
-              )}
-            </div>
-          </div>
         ) : null}
 
         {/* Importing replaces the whole workbook, so the wait is stated over the

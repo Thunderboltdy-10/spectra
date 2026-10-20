@@ -37,10 +37,12 @@ import {
 import { postSpectra } from "../data/api";
 import { useSemanticSearch } from "../semantic/use-semantic";
 import { requestViewportAction, type ViewportView } from "../viewport-readiness";
+import { isHomePath, threadHref } from "../chat/home-routes";
+import { workspaceHref } from "../pages/shell-location";
 
 function routeTarget(href: string): { view: ViewportView; targetId: string } {
   const url = new URL(href, "http://spectra.local");
-  if (url.pathname.startsWith("/chat")) {
+  if (isHomePath(url.pathname)) {
     return { view: "conversation", targetId: url.searchParams.get("threadId") ?? "chat" };
   }
   if (url.pathname.startsWith("/settings")) {
@@ -50,6 +52,8 @@ function routeTarget(href: string): { view: ViewportView; targetId: string } {
   if (url.pathname.startsWith("/workspace")) {
     return { view: "workspace", targetId: url.pathname.split("/")[2] ?? "workspace" };
   }
+  const workspaceId = url.searchParams.get("workspaceId");
+  if (url.pathname === "/library" && workspaceId) return { view: "workspace", targetId: workspaceId };
   if (url.pathname.startsWith("/library")) {
     const artifactId = url.pathname.split("/")[2];
     return artifactId
@@ -268,7 +272,7 @@ export function UniversalKBar() {
     const href = destination === "library"
       ? targetId ? `/library/${encodeURIComponent(targetId)}` : "/library"
       : destination === "workspace"
-        ? targetId ? `/workspace/${encodeURIComponent(targetId)}` : "/workspace?home=1"
+        ? workspaceHref(targetId)
         : destination === "settings"
           ? targetId ? `/settings?section=${encodeURIComponent(targetId)}` : "/settings"
           : "/calendar";
@@ -279,7 +283,7 @@ export function UniversalKBar() {
     openArtifact,
     navigate,
     openRoute,
-    openThread: (threadId) => openRoute(`/chat?threadId=${encodeURIComponent(threadId)}`),
+    openThread: (threadId) => openRoute(threadHref(threadId)),
     addComment: ({ artifactId, body, regionId }) => postSpectra({
       action: "createArtifactComment",
       artifactId,

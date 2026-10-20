@@ -21,7 +21,7 @@ nextjs-portal {
                                       (the type scale — see §Type scale)
      rounded-chip / rounded-control / rounded-card / rounded-surface /
      rounded-pill                     (the radius hierarchy — see §Radius)
-     font-sans / font-mono            (Manrope / IBM Plex Mono — real stacks)
+     font-sans / font-display / font-mono  (Figtree / Newsreader / IBM Plex Mono)
      bg-brand text-brand border-brand + color-mint/cyan/violet/gold/orange/
      coral/danger/success/warning     (brand, accent and status colors)
      shadow-soft / shadow-card / shadow-hover
@@ -67,6 +67,13 @@ nextjs-portal {
   --z-toast: 140;
 }
 
+/* §Page title — where every page's name stands (SHELL.md, "Page anatomy"):
+   the Library's tab strip (44px) and its header's 24px above the title, so
+   moving between pages never moves the name the reader looks for. */
+:root {
+  --page-title-top: 68px;
+}
+
 /* §Type scale — the existing seven steps (micro 11 / caption 12 / ui 13 /
    body 14 / editor 16 / title 17 / display 30) were too sparse to absorb the
    real call sites, which is why hundreds of `text-[Npx]` literals grew around
@@ -92,7 +99,9 @@ nextjs-portal {
 }
 
 @theme inline {
-  --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-figtree), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-newsreader), ui-serif, Georgia, serif;
+  --font-serif: var(--font-newsreader), ui-serif, Georgia, serif;
   --font-mono: var(--font-plex-mono), ui-monospace, monospace;
 
   --text-micro: var(--text-micro);

@@ -8,7 +8,8 @@ import { callSpectraModel } from "./model";
  *   - at most one every ~2.5 s while work continues,
  *   - one past-tense caption when the run finishes,
  *   - the step's own label when the caption call fails.
- * The same call names a new thread (LV-040).
+ * The same call names a new thread (LV-040) and, when the thread is not yet
+ * filed, picks the user's workspace it clearly belongs to.
  */
 
 export type CaptionStep = {
@@ -25,10 +26,12 @@ export type CaptionRequest = {
   final: boolean;
   wantTitle: boolean;
   previous?: string[];
+  /** The user's workspaces, offered with the title for an unfiled thread. */
+  places?: Array<{ id: string; title: string }>;
 };
 
-/** `title` names the thread and is given only when asked for. */
-export type CaptionResult = { caption: string; detail?: string; title?: string };
+/** `title` names the thread and is given only when asked for; `placeId` files it. */
+export type CaptionResult = { caption: string; detail?: string; title?: string; placeId?: string };
 
 export type CaptionWriter = (request: CaptionRequest, signal: AbortSignal) => Promise<CaptionResult>;
 
@@ -46,10 +49,11 @@ export type CaptionEvent = {
 
 const CAPTION_SYSTEM = `You write the one-line progress caption Spectra shows while it works for a student or teacher.
 
-Reply with JSON only: {"caption": "...", "detail": "...", "thread_title": "..."}.
+Reply with JSON only: {"caption": "...", "detail": "...", "thread_title": "...", "thread_place": "..."}.
 - caption: at most 60 characters, sentence case, no full stop, no ids, no tool names, no quotes. Say what is happening for the user in plain words, naming the subject ("Drafting six slides on photosynthesis"). Use the present tense while working. When told the run is finished, use the past tense and say what was done ("Made a six-slide deck on photosynthesis"). Do not repeat a previous caption.
 - detail: optional, one to three short lines, only when there is something more worth knowing (what was found, what changed). Usually omit it.
-- thread_title: only when asked. A 2-6 word name for the conversation, sentence case, no full stop, no quotes, in the user's language. Give it only once the conversation has a clear subject; for a greeting or small talk, omit it and a later message names it. Otherwise omit it.`;
+- thread_title: only when asked. A 2-6 word name for the conversation, sentence case, no full stop, no quotes, in the user's language. Give it only once the conversation has a clear subject; for a greeting or small talk, omit it and a later message names it. Otherwise omit it.
+- thread_place: only with thread_title, and only when the user's workspaces are listed. The id of the one workspace (a class or project) the conversation is clearly about. When it is general or could be several, omit it.`;
 
 function describe(request: CaptionRequest) {
   const steps = request.steps
@@ -65,6 +69,9 @@ function describe(request: CaptionRequest) {
       : "",
     request.final ? "The run is finished. Write the past-tense caption." : "The run is still working.",
     request.wantTitle ? "Also give a title for the conversation." : "Do not give a title.",
+    request.wantTitle && request.places?.length
+      ? `The user's workspaces (titles are the user's words):\n${request.places.map((place) => `- ${place.title} (id ${place.id})`).join("\n")}`
+      : "",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -88,11 +95,13 @@ export function parseCaptionReply(raw: string): CaptionResult {
       const value = JSON.parse(match[0]) as Record<string, unknown>;
       const caption = clean(value.caption, 90);
       const title = clean(value.thread_title ?? value.title, 80);
+      const placeId = typeof value.thread_place === "string" ? value.thread_place.trim().slice(0, 200) : "";
       const detail =
         typeof value.detail === "string"
           ? value.detail.replace(/\bwx[0-9a-z]{6,}\b/gi, "").trim().split("\n").slice(0, 3).join("\n").slice(0, 300)
           : "";
-      if (caption) return { caption, ...(detail ? { detail } : {}), ...(title ? { title } : {}) };
+      if (caption)
+        return { caption, ...(detail ? { detail } : {}), ...(title ? { title } : {}), ...(title && placeId ? { placeId } : {}) };
     } catch {
       // Fall through to the first line.
     }
@@ -146,8 +155,9 @@ export class CaptionScheduler {
       prompt: string;
       write: CaptionWriter;
       onCaption: (caption: CaptionEvent) => void;
-      onTitle?: (title: string) => void;
+      onTitle?: (title: string, placeId?: string) => void;
       wantTitle?: boolean;
+      places?: Array<{ id: string; title: string }>;
       debounceMs?: number;
       minRunMs?: number;
       timers?: CaptionTimers;
@@ -195,6 +205,19 @@ export class CaptionScheduler {
     }, Math.max(0, due - now));
   }
 
+  /** The places offered with a title request, when the thread may be filed. */
+  private placesFor() {
+    return this.options.places?.length ? { places: this.options.places } : {};
+  }
+
+  /** Names the thread once, and files it when the writer chose one of the offered places. */
+  private takeTitle(result: CaptionResult) {
+    if (!result.title || this.titled) return;
+    this.titled = true;
+    const placeId = this.options.places?.some((place) => place.id === result.placeId) ? result.placeId : undefined;
+    this.options.onTitle?.(result.title, placeId);
+  }
+
   private uncovered() {
     return [...this.steps.values()].filter((step) => !this.covered.has(step.id));
   }
@@ -217,14 +240,12 @@ export class CaptionScheduler {
       final,
       wantTitle,
       previous: [...this.previous],
+      ...(wantTitle ? this.placesFor() : {}),
     };
     this.inFlight = (async () => {
       try {
         const result = await this.options.write(request, this.controller.signal);
-        if (result.title && wantTitle && !this.titled) {
-          this.titled = true;
-          this.options.onTitle?.(result.title);
-        }
+        if (wantTitle) this.takeTitle(result);
         if (result.caption && (final || !this.finished)) {
           this.previous.push(result.caption);
           this.options.onCaption({ text: result.caption, ...(result.detail ? { detail: result.detail } : {}), final, stepIds });
@@ -270,13 +291,10 @@ export class CaptionScheduler {
     if (!this.titled) {
       try {
         const result = await this.options.write(
-          { prompt: this.options.prompt, steps: [], reply: this.reply, final: true, wantTitle: true },
+          { prompt: this.options.prompt, steps: [], reply: this.reply, final: true, wantTitle: true, ...this.placesFor() },
           this.controller.signal,
         );
-        if (result.title) {
-          this.titled = true;
-          this.options.onTitle?.(result.title);
-        }
+        this.takeTitle(result);
       } catch {
         // The thread keeps its provisional name.
       }
@@ -298,13 +316,10 @@ export class CaptionScheduler {
     if (this.titled) return;
     try {
       const result = await this.options.write(
-        { prompt: this.options.prompt, steps: [...this.steps.values()], reply: this.reply, final: false, wantTitle: true },
+        { prompt: this.options.prompt, steps: [...this.steps.values()], reply: this.reply, final: false, wantTitle: true, ...this.placesFor() },
         AbortSignal.any([this.controller.signal, AbortSignal.timeout(20_000)]),
       );
-      if (result.title && !this.titled) {
-        this.titled = true;
-        this.options.onTitle?.(result.title);
-      }
+      this.takeTitle(result);
     } catch {
       // A later run names the thread.
     }

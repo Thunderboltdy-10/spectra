@@ -159,6 +159,7 @@ export function defaultArtifactContent(blueprintKey: BlueprintKey) {
       // Keep the empty shell schema-valid. Blank MCQ option strings fail
       // quizContentSchema (choice questions need >=2 non-empty options), which
       // blocked Yjs baseline seeding during AI create and left orphan shells.
+      // The studio turns this untouched shell into multiple choice on open.
       return {
         questions: [
           {
@@ -268,14 +269,14 @@ export function defaultArtifactContent(blueprintKey: BlueprintKey) {
     case "presentation":
       return {
         theme: {
-          id: "spectra-botanical",
-          name: "Botanical",
+          id: "spectra-plain",
+          name: "Plain",
           tokens: {
-            background: "#fbfaf5",
-            heading: "#173f35",
-            body: "#324b43",
-            accent: "#2f9a72",
-            soft: "#dfeee4",
+            background: "#ffffff",
+            heading: "#000000",
+            body: "#000000",
+            accent: "#c4501c",
+            soft: "#f2efe9",
           },
           fonts: { heading: "Georgia", body: "Arial" },
         },
@@ -304,7 +305,7 @@ export function defaultArtifactContent(blueprintKey: BlueprintKey) {
                 style: {
                   fontSize: 54,
                   fontWeight: 650,
-                  color: "#173f35",
+                  color: "#000000",
                   align: "left",
                 },
               },
@@ -397,7 +398,7 @@ export function defaultArtifactContent(blueprintKey: BlueprintKey) {
           title: "Interactive visualisation",
           description:
             "A safe, responsive Spectra-native interactive learning experience.",
-          openMode: "source",
+          openMode: "split",
           aspectRatio: 1.6,
         },
         dependencies: {},

@@ -17,6 +17,7 @@ import {
   Hand,
   Image as ImageIcon,
   ImagePlus,
+  Grid3X3,
   Layers3,
   LayoutTemplate,
   Link2,
@@ -113,6 +114,7 @@ import {
   type StudioHistoryEntry,
 } from "./artifact-studio-value-utils";
 import { StudioItemRail } from "./studio-item-rail";
+import { PageThumbnail } from "../whiteboard/page-thumbnail";
 import {
   ArtifactWorkbar,
   WorkbarItemSelector,
@@ -255,6 +257,10 @@ function boundsOf(nodes: readonly WhiteboardNode[]) {
   };
 }
 
+function objectCount(count: number) {
+  return `${count} ${count === 1 ? "object" : "objects"}`;
+}
+
 function styleValue(
   node: WhiteboardNode,
   key: string,
@@ -272,6 +278,15 @@ function styleValue(
  * boards carry appearance on `content`, native ones on `style`, and both have
  * to render the same way.
  */
+/* The near-whites boards were saved with before the board was drawn on card
+   paper. They mean "no colour chosen", so they get the paper, not a flat
+   white that ignores the theme. */
+const PAPER_DEFAULTS = new Set(["#fbfbf8", "#fbfaf7"]);
+
+function boardColor(chosen: string | undefined) {
+  return chosen && !PAPER_DEFAULTS.has(chosen.toLowerCase()) ? chosen : undefined;
+}
+
 function visual(
   node: WhiteboardNode,
   content: Record<string, unknown>,
@@ -348,6 +363,7 @@ function WhiteboardText({
   value,
   editing,
   label,
+  placeholder,
   style,
   onChange,
   onFocus,
@@ -358,6 +374,8 @@ function WhiteboardText({
   value: string;
   editing: boolean;
   label: string;
+  /** Shown, quietly, where an empty field would otherwise be nothing at all. */
+  placeholder?: string;
   style: CSSProperties;
   onChange: (value: string) => void;
   onFocus: () => void;
@@ -369,6 +387,7 @@ function WhiteboardText({
       className="whiteboard-node-text"
       {...(path ? targetAttrs(path) : {})}
       data-editing={editing || undefined}
+      data-empty={!value.trim() || undefined}
       {...(editing ? {} : { role: "group", "aria-label": label })}
       style={style}
       onPointerDown={onPointerDown}
@@ -381,10 +400,12 @@ function WhiteboardText({
           variant="bare"
           autoFocus
           label={label}
-          placeholder="Write something"
+          placeholder={placeholder ?? "Write something"}
           onFocus={onFocus}
           onChange={onChange}
         />
+      ) : !value.trim() && placeholder ? (
+        <p className="whiteboard-node-placeholder">{placeholder}</p>
       ) : (
         <SpectraStoredText value={value} />
       )}
@@ -407,6 +428,7 @@ function BoardNode({
   onTextChange,
   onContentChange,
   path,
+  startEditing,
 }: {
   node: WhiteboardNode;
   artifact?: SpectraArtifact;
@@ -424,8 +446,10 @@ function BoardNode({
   onContentChange: (change: Record<string, unknown>) => void;
   /** Canonical pointer for this node, e.g. `/nodes/3`. */
   path?: string;
+  /** A text or note just put down opens ready to write in. */
+  startEditing?: boolean;
 }) {
-  const [editingText, setEditingText] = useState(false);
+  const [editingText, setEditingText] = useState(Boolean(startEditing));
   const nodeElementRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!selected) setEditingText(false);
@@ -481,20 +505,38 @@ function BoardNode({
             content,
             "fill",
             ["fill"],
-            node.type === "note" ? "color-mix(in oklab, var(--accent-gold) 28%, var(--bg-elevated))" : "var(--bg-elevated)",
+            node.type === "note" ? "color-mix(in oklab, var(--accent-gold) 28%, var(--card-paper))" : "var(--card-paper)",
           ),
         ),
         borderColor: String(
-          visual(node, content, "stroke", ["stroke"], "#d5d7d2"),
+          visual(
+            node,
+            content,
+            "stroke",
+            ["stroke"],
+            node.type === "note" ? "transparent" : "var(--card-border)",
+          ),
         ),
         borderWidth: Number(
           visual(node, content, "strokeWidth", ["strokeWidth"], 1),
         ),
         borderRadius: Number(
-          visual(node, content, "borderRadius", ["borderRadius"], 11),
+          visual(
+            node,
+            content,
+            "borderRadius",
+            ["borderRadius"],
+            node.type === "note" ? 3 : 10,
+          ),
         ),
         color: String(
-          visual(node, content, "color", ["textColor", "color"], "#29352f"),
+          visual(
+            node,
+            content,
+            "color",
+            ["textColor", "color"],
+            "var(--text-primary)",
+          ),
         ),
       }}
       onClick={(event) => {
@@ -651,6 +693,13 @@ function BoardNode({
           value={whiteboardNodeText(node)}
           editing={editingText && !readOnly && !node.locked && !compact}
           label={node.semanticLabel || `${node.type} text`}
+          placeholder={
+            readOnly || compact
+              ? undefined
+              : node.type === "note"
+                ? "Write a thought"
+                : "Write here"
+          }
           onPointerDown={textPointerDown}
           onDoubleClick={beginTextEditing}
           onFocus={() => onSelect(false)}
@@ -791,7 +840,6 @@ export function WhiteboardStudio({
   // wide the pane actually is, and which inspectors exist. A studio that
   // re-derives any of these is how nine editors ended up disagreeing.
   const contract = useStudioContract();
-  const definition = getWorkDefinition("whiteboard");
   // CANON D1/D4: read-only means the viewer genuinely lacks `edit`. It is never
   // a consequence of pane width, so a split panel edits like fullscreen.
   const readOnly = readOnlyProp || contract.readOnly;
@@ -817,6 +865,11 @@ export function WhiteboardStudio({
   const [viewport, setViewport] = useState(board.viewport);
   const [tool, setTool] = useState<Tool>("select");
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  /** The text or note just put down, which opens already being written. */
+  const [freshNodeId, setFreshNodeId] = useState<string>();
+  useEffect(() => {
+    if (freshNodeId && !selectedNodeIds.includes(freshNodeId)) setFreshNodeId(undefined);
+  }, [freshNodeId, selectedNodeIds]);
   const selectedNodeId = selectedNodeIds.at(-1);
   const setSelectedNodeId = useCallback((nodeId?: string) => {
     setSelectedNodeIds(nodeId ? [nodeId] : []);
@@ -1537,6 +1590,7 @@ export function WhiteboardStudio({
     );
     mutate((draft) => draft.nodes.push(node));
     setSelectedNodeId(node.id);
+    setFreshNodeId(type === "text" || type === "note" ? node.id : undefined);
     onActiveRegionChange?.(node.id);
     setTool("select");
   }
@@ -1641,6 +1695,9 @@ export function WhiteboardStudio({
       return;
     event.preventDefault();
     event.stopPropagation();
+    // Preventing the press's default also prevents the focus it would give,
+    // and the board's keys (Delete, arrows, copy) listen on the canvas.
+    canvasRef.current?.focus({ preventScroll: true });
     selectionHandledRef.current = true;
     setSelectedEdgeId(undefined);
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -1716,6 +1773,7 @@ export function WhiteboardStudio({
     const panning = tool === "hand" || event.button === 1;
     if (!panning && (tool !== "select" || event.button !== 0)) return;
     event.preventDefault();
+    event.currentTarget.focus({ preventScroll: true });
     event.currentTarget.setPointerCapture(event.pointerId);
     if (panning) {
       dragRef.current = {
@@ -2304,6 +2362,7 @@ export function WhiteboardStudio({
       setSelectedNodeIds([]);
       setSelectedEdgeId(undefined);
       setConnectorFrom(undefined);
+      setTool("select");
       return;
     }
     if (
@@ -2456,7 +2515,7 @@ export function WhiteboardStudio({
     }
     if (file.type === "image/svg+xml" || /\.svgz?$/i.test(file.name)) {
       setAssetError(
-        "Use Import board for SVG files so active content and external resources can be quarantined before conversion.",
+        "Use Import board for SVG files, so anything unsafe in them is removed first.",
       );
       return;
     }
@@ -2988,14 +3047,23 @@ export function WhiteboardStudio({
         className="whiteboard-canvas"
         data-tool={compact ? "present" : tool}
         data-compact={compact || undefined}
+        // Escape first lets go of what is held here; only then does it close.
+        data-escape-claim={
+          !compact &&
+          (selectedNodeIds.length > 0 || selectedEdgeId || connectorFrom || tool !== "select")
+            ? ""
+            : undefined
+        }
+        data-dots={board.settings?.showGrid === true || undefined}
         style={
           {
             "--board-zoom": viewport.zoom,
             "--board-grid": `${board.settings?.gridSize ?? 24}px`,
             "--board-x": `${-viewport.x * viewport.zoom}px`,
             "--board-y": `${-viewport.y * viewport.zoom}px`,
-            backgroundColor:
-              page.background ?? board.settings?.canvasColor ?? "#fbfbf8",
+            backgroundColor: boardColor(
+              page.background ?? board.settings?.canvasColor,
+            ),
           } as CSSProperties
         }
         onClick={compact ? undefined : canvasClick}
@@ -3186,6 +3254,7 @@ export function WhiteboardStudio({
                   }
                   readOnly={readOnly || compact}
                   compact={compact}
+                  startEditing={!compact && freshNodeId === node.id}
                   actions={boardNodeActions}
                   aiActive={nodeAiActive}
                   path={index >= 0 ? `/nodes/${index}` : undefined}
@@ -3356,6 +3425,22 @@ export function WhiteboardStudio({
       onSelect: () => boardInputRef.current?.click(),
     },
     {
+      id: "dots",
+      label: "Dots",
+      icon: Grid3X3,
+      requires: "edit",
+      active: board.settings?.showGrid === true,
+      disabled: !canEdit,
+      hint: "Shows the board's grid as dots",
+      onSelect: () =>
+        mutate((draft) => {
+          draft.settings = {
+            ...draft.settings,
+            showGrid: draft.settings?.showGrid !== true,
+          };
+        }),
+    },
+    {
       id: "snap",
       label: "Snap to grid",
       icon: Magnet,
@@ -3505,8 +3590,14 @@ export function WhiteboardStudio({
             items={board.pages.map((candidate) => ({
               id: candidate.id,
               title: candidate.name,
-              subtitle: `${board.nodes.filter((node) => node.pageId === candidate.id).length} objects`,
+              subtitle: objectCount(board.nodes.filter((node) => node.pageId === candidate.id).length),
               active: candidate.id === page.id,
+              preview: (
+                <PageThumbnail
+                  nodes={board.nodes.filter((node) => node.pageId === candidate.id)}
+                  edges={board.edges.filter((edge) => edge.pageId === candidate.id)}
+                />
+              ),
             }))}
             onSelect={(pageId) => setViewport({ pageId, x: 0, y: 0, zoom: 1 })}
             onAdd={readOnly ? undefined : addPage}
@@ -3764,30 +3855,6 @@ export function WhiteboardStudio({
 
         <main>
           {renderCanvas()}
-          {!board.nodes.some((node) => node.pageId === page.id) ? (
-            /* The registry owns this copy, so an empty board says the same
-               thing here, in a tile and in a reference (D14). */
-            <div className="pointer-events-none absolute inset-0 grid place-items-center p-6">
-              <div className="pointer-events-auto flex max-w-[330px] flex-col items-center gap-2 rounded-card border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-5 py-4 text-center">
-                <strong className="text-ui font-semibold text-[var(--text-primary)]">
-                  {definition.emptyState.headline}
-                </strong>
-                <p className="text-caption text-[var(--text-secondary)]">
-                  {definition.emptyState.body}
-                </p>
-                {canEdit ? (
-                  <button
-                    type="button"
-                    className="spectra-workbar-primary mt-1 inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-control px-3 text-caption font-semibold"
-                    onClick={() => addNode("note")}
-                  >
-                    <StickyNote className="size-3.5" />
-                    {definition.emptyState.action}
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
           {!readOnly &&
           (selectedNodeIds.length > 1 || selectedNode?.type === "group") ? (
             <div

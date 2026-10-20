@@ -2,8 +2,7 @@
 
 import { describeFailure } from "@/components/ui/truthful-state";
 import { uniqueToken } from "@/lib/unique-token";
-import { cn } from "@/lib/utils";
-import type { JSONContent } from "@tiptap/core";
+import type { Editor, JSONContent } from "@tiptap/core";
 import Collaboration from "@tiptap/extension-collaboration";
 import { isLocalCollaborativeDocumentChange } from "../editor/collaboration-change";
 import { applyDocumentStudioProjection } from "../editor/document-studio-projection";
@@ -33,7 +32,6 @@ import StarterKit from "@tiptap/starter-kit";
 import {
   AlertCircle,
   ChevronDown,
-  FileText,
   History,
   ListOrdered,
   Pencil,
@@ -98,6 +96,7 @@ import { documentBlocksFromJson } from "../lenses/document-projection";
 import { nextWordNoteId, type WordTextAnchor } from "../lenses/docx-academic-schema";
 import type { WordSource } from "../lenses/docx-citation-schema";
 import { CitationSourcePickers } from "./document-citation-pickers";
+import { DocumentSpreadSheets, spreadStyle, useDocumentCanvas, useDocumentSpread } from "./document-spread";
 import { editNoteText } from "../editor/note-text-edit";
 import {
   PageBreak,
@@ -114,6 +113,7 @@ import {
 } from "../editor/reference-citation-nodes";
 import {
   SlashCommand,
+  caretPoint,
   documentSlashItems,
   filterSlashCommands,
   type SlashCommandDispatcher,
@@ -130,7 +130,6 @@ import { enforcePdfInput, OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../.
 import type { SourceRecord } from "../sources/records/source-record";
 import { createDocumentRelativeSelection } from "../work/models/yjs";
 import { availableWorkModes } from "../work/registry";
-import { DropdownMenuLabel } from "@/components/ui/dropdown-menu";
 import {
   documentContentFromJson,
   documentJsonFromContent,
@@ -145,7 +144,7 @@ import {
   markdownToDocumentHtml,
   sanitizeDocumentHtml,
 } from "./artifact-studio-file-utils";
-import { ArtifactWorkbar, workbarMenuItemClass } from "./artifact-workbar";
+import { ArtifactWorkbar } from "./artifact-workbar";
 import { WorkbarCommandControl, isRenderedControl } from "./workbar-controls";
 import { useStudioContract } from "./artifact-studio-shell";
 import { useStudioViewportReady } from "./studio-viewport-ready";
@@ -156,6 +155,7 @@ import {
 } from "../organization/library-import";
 import { requestSpectra } from "../data/request";
 import { documentReferenceIds } from "./document-reference-ids";
+import { entryOf, withStacked } from "../editor/reference-stack";
 
 function documentMarkdown(json: JSONContent) {
   const renderInline = (node: JSONContent): string => {
@@ -341,6 +341,27 @@ function blockParagraphFormat(node: JSONContent) {
  * a property the document already had does not survive this function, the next
  * save writes a change nobody asked for.
  */
+
+/** Lays a new reference on an existing card as another tab; false when that card is gone. */
+function stackReference(editor: Editor, ontoEmbedId: string, reference: Record<string, unknown>) {
+  const entry = entryOf(reference);
+  if (!entry) return false;
+  return editor
+    .chain()
+    .command(({ tr }) => {
+      let placed = false;
+      tr.doc.descendants((node, position) => {
+        if (placed) return false;
+        if (node.type.name !== "spectraReference" || node.attrs.embedId !== ontoEmbedId) return true;
+        tr.setNodeMarkup(position, undefined, withStacked(node.attrs, [entry]));
+        placed = true;
+        return false;
+      });
+      return placed;
+    })
+    .run();
+}
+
 export function withDocumentFormatting(
   content: Record<string, unknown>,
   json: JSONContent,
@@ -728,9 +749,11 @@ export function DocumentStudio({
     readOnly ? "read" : "write",
   );
   const focusMode = docMode === "focus";
-  const [pageLayout, setPageLayout] = useState<"page" | "continuous">(
-    "continuous",
-  );
+  const [canvasChoice, setPageLayout] = useDocumentCanvas(artifactId);
+  // Pages side by side need the width of the full screen; the side panel
+  // keeps the page view until the work is opened full.
+  const pageLayout = canvasChoice === "spread" && mode === "split" ? "page" : canvasChoice;
+  const deskRef = useRef<HTMLElement>(null);
   const [importReport, setImportReport] = useState<string>();
   const [importError, setImportError] = useState<string>();
   const createLiveReference = useCallback(
@@ -1249,6 +1272,7 @@ export function DocumentStudio({
   useStudioViewportReady(
     Boolean(editor && !editor.isDestroyed && editor.isInitialized && editor.view),
   );
+  const spread = useDocumentSpread(editor, deskRef, pageLayout === "spread");
 
   useEffect(() => {
     if (!editor || readOnly) return;
@@ -1398,7 +1422,7 @@ export function DocumentStudio({
     () =>
       spectraBus.handle(
         "reference.insert",
-        async ({ hostWorkId, target, reference: suppliedReference }) => {
+        async ({ hostWorkId, target, reference: suppliedReference, stackOnto }) => {
           if (hostWorkId !== artifactId) return;
           if (!editor || readOnly)
             throw new Error(
@@ -1425,11 +1449,13 @@ export function DocumentStudio({
                 schemaVersion: target!.schemaVersion,
               },
             }));
-          const inserted = editor
-            .chain()
-            .focus()
-            .insertContent({ type: "spectraReference", attrs: reference })
-            .run();
+          const inserted = stackOnto
+            ? stackReference(editor, stackOnto, reference as Record<string, unknown>)
+            : editor
+                .chain()
+                .focus()
+                .insertContent({ type: "spectraReference", attrs: reference })
+                .run();
           if (!inserted) {
             if (!suppliedReference)
               await removeReference({
@@ -2736,8 +2762,9 @@ export function DocumentStudio({
         withEdit(() => editor!.chain().focus().toggleTaskList().run()),
       taskListActive: editor?.isActive("taskList"),
       reference: () =>
-        spectraBus.command("reference.beginPicking", {
+        spectraBus.command("reference.add", {
           hostWorkId: artifactId,
+          at: editor ? caretPoint(editor.view) : undefined,
         }),
       citation: () => nativeBinding.format || !sourcesHaveWork ? openAcademic("citation") : insertCitation(),
       ...(sourcesHaveWork || nativeBinding.format
@@ -2913,8 +2940,8 @@ export function DocumentStudio({
         setChromeDraft({ slot: "footer", text: pageSetup.footer }),
       footerText: pageSetup.footer,
       canvas: pageLayout,
-      setCanvas: (canvas) =>
-        setPageLayout(canvas === "page" ? "page" : "continuous"),
+      setCanvas: setPageLayout,
+      spreadReason: mode === "split" ? "Open the document full to lay its pages side by side" : undefined,
       focus: focusMode,
       toggleFocus: () => {
         if (focusMode) {
@@ -3218,20 +3245,6 @@ export function DocumentStudio({
             }
           : {})}
         actions={documentCommands}
-        overflow={
-          <>
-            <DropdownMenuLabel>Document</DropdownMenuLabel>
-            <div className={workbarMenuItemClass()} role="note">
-              <span className="grid size-4 shrink-0 place-items-center text-[var(--text-secondary)]">
-                <FileText className="size-3.5" />
-              </span>
-              <span className="min-w-0 flex-1 truncate text-left">
-                {wordCount.toLocaleString()}{" "}
-                {wordCount === 1 ? "word" : "words"}
-              </span>
-            </div>
-          </>
-        }
       />
       {canEdit && editor ? (
         <BubbleMenu
@@ -3575,12 +3588,13 @@ export function DocumentStudio({
           >
             <span>
               <strong>
-                {importError ? "Import quarantined" : "Import complete"}
+                {importError ? "Couldn't import" : "Import complete"}
               </strong>
               <small>{importError || importReport}</small>
             </span>
             <button
               type="button"
+              aria-label="Dismiss"
               onClick={() => {
                 setImportError(undefined);
                 setImportReport(undefined);
@@ -3590,7 +3604,6 @@ export function DocumentStudio({
             </button>
           </div>
         ) : null}
-        {null}
         {pendingTemplate ? (
           <div className="spectra-document-confirm" role="status">
             <span>
@@ -3623,7 +3636,7 @@ export function DocumentStudio({
             <aside className="spectra-document-outline">
               <header>
                 <strong>Outline</strong>
-                <button type="button" onClick={() => setOutlineOpen(false)}>
+                <button type="button" aria-label="Close outline" onClick={() => setOutlineOpen(false)}>
                   <X className="h-4 w-4" />
                 </button>
               </header>
@@ -3659,7 +3672,7 @@ export function DocumentStudio({
             <aside className="spectra-document-sources spectra-panel-enter">
               <header>
                 <strong>Sources</strong>
-                <button type="button" onClick={() => setSourcesOpen(false)}>
+                <button type="button" aria-label="Close sources" onClick={() => setSourcesOpen(false)}>
                   <X className="h-4 w-4" />
                 </button>
               </header>
@@ -3816,31 +3829,40 @@ export function DocumentStudio({
               ) : null}
             </aside>
           ) : null}
-          <main>
-            {/* The hint row that used to sit here carried the word count and
-                the slash-command tip, and CSS hid it outright — so the one
-                number a writer checks constantly was in the DOM and invisible.
-                The count now lives in the work bar's context slot, where every
-                other studio puts its standing fact. */}
-            {pageLayout === "page" && pageSetup.header ? (
-              <p className="spectra-document-page-chrome" data-slot="header">
-                {pageSetup.header}
-              </p>
-            ) : null}
-            <EditorContent
-              editor={editor}
-              className={cn(
-                "tiptap-root spectra-document-canvas [&_.ProseMirror-focused]:outline-none [&_.ProseMirror]:outline-none",
-                pageLayout === "page"
-                  ? "mx-auto max-w-[920px]"
-                  : "h-full w-full",
-              )}
-            />
-            {pageLayout === "page" && pageSetup.footer ? (
-              <p className="spectra-document-page-chrome" data-slot="footer">
-                {pageSetup.footer}
-              </p>
-            ) : null}
+          {/* The document is a page on the desk (EDITORS.md, "Document"):
+              the running head and foot are printed on the paper, and the one
+              number a writer checks constantly sits under it. */}
+          <main ref={deskRef} className="document-desk">
+            <div
+              className="document-page"
+              style={pageLayout === "spread" ? spreadStyle(spread) : undefined}
+            >
+              {pageLayout === "spread" ? (
+                <DocumentSpreadSheets
+                  pages={spread.pages}
+                  header={pageSetup.header}
+                  footer={pageSetup.footer}
+                />
+              ) : null}
+              {pageLayout === "page" && pageSetup.header ? (
+                <p className="spectra-document-page-chrome" data-slot="header">
+                  {pageSetup.header}
+                </p>
+              ) : null}
+              <EditorContent
+                editor={editor}
+                className="tiptap-root spectra-document-canvas [&_.ProseMirror-focused]:outline-none [&_.ProseMirror]:outline-none"
+              />
+              {pageLayout === "page" && pageSetup.footer ? (
+                <p className="spectra-document-page-chrome" data-slot="footer">
+                  {pageSetup.footer}
+                </p>
+              ) : null}
+            </div>
+            <p className="document-page-foot" aria-live="polite">
+              {wordCount.toLocaleString()} {wordCount === 1 ? "word" : "words"}
+              {wordCount >= 200 ? `, about ${Math.round(wordCount / 200)} min to read` : null}
+            </p>
           </main>
         </div>
       </div>

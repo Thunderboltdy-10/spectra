@@ -38,10 +38,16 @@ should look like water moving, not like a stats card.
 Spectra's own visual language comes first. Load `spectra-design` for the palette and type. In a
 `show_widget` visual:
 
-- Use the theme variables, never hard-coded colours: `background: var(--paper-0)`,
-  `color: var(--ink-1)`, a highlighted series in `var(--blue)`. They follow light and dark mode.
+- It sits directly on the conversation's page, like a figure in a book, with a caption the app
+  adds beneath. Don't paint a page background, a border round the whole thing or a title card:
+  draw on the page, and give a panel `var(--paper-1)` only when it needs one.
+- Use the theme variables, never hard-coded colours: `color: var(--ink-1)`, quieter text in
+  `var(--ink-2)`, a highlighted series in `var(--blue)`, a soft fill in `var(--blue-tint)`.
+  They follow light and dark mode.
 - Fonts: `var(--font-ui)` for labels, `var(--font-reading)` for prose, `var(--font-mono)` for
-  numbers and code.
+  numbers and code. They are the app's own typefaces.
+- Buttons, sliders, inputs and selects are already styled like the app's: use the plain
+  elements and add only layout.
 - The widget runs in a sandbox with no network: no external scripts, fonts, images or fetch
   calls. Inline everything. Draw with SVG, canvas or CSS.
 - Keep it small: the whole document must fit the size limit, so prefer simple shapes and short

@@ -156,7 +156,7 @@ export function FileStorageControls({
       <h2
         className={
           embedded
-            ? "mb-3 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]"
+            ? "mb-3 text-micro font-semibold text-[var(--text-tertiary)]"
             : "text-caption font-semibold text-[var(--text-primary)]"
         }
       >

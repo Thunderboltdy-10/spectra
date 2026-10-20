@@ -10,7 +10,7 @@ export default async function SettingsPage({
 }) {
   const { section } = await searchParams;
   return (
-    <AppShell>
+    <AppShell fullBleed contentClassName="!p-0">
       <SettingsApplication initialSection={section} />
     </AppShell>
   );

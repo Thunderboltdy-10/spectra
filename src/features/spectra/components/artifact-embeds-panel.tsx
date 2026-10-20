@@ -17,14 +17,12 @@ import {
 } from "../data/api";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import type { CompatibilityProfile } from "../commands/types";
-import type { ReferenceNode } from "../references";
 import type { ArtifactEmbedInteraction } from "../../../../shared/artifact-embed";
 import type { ArtifactCommentRegion } from "./artifact-comments-panel";
 import { ArtifactEmbed } from "./artifact-embed";
 import { workTypeMeta } from "./artifact-card";
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { getWorkReferenceContract } from "../references";
-import { getWorkDefinition } from "../work/registry";
 import { spectraBus } from "../events";
 import type { SpectraCommandOutcome } from "../events/contracts";
 import { useSpectraMotion } from "../motion/motion-level";
@@ -34,6 +32,7 @@ import { embedCapabilitiesFor } from "../capabilities";
 import { useArtifactEmbedContainer } from "./artifact-embed-host";
 import { usePinVersionPicker } from "./use-pin-version-picker";
 import { rankEmbedCandidates } from "./embed-candidates";
+import { useAddReference } from "./use-add-reference";
 import { useRelated, useSemanticSearch } from "../semantic/use-semantic";
 import type { SemanticAnchor } from "../../../../shared/semantic-types";
 
@@ -70,7 +69,12 @@ export function ArtifactEmbedsPanel({
   const embeds = liveResult?.embeds ?? [];
   const canConfigure = liveResult?.canConfigure ?? false;
   const loading = open && liveResult === undefined;
-  const createReference = useMutation(api.artifactEmbeds.create);
+  const addReference = useAddReference({
+    containerType,
+    containerId,
+    containerWorkType,
+    compatibilityProfile,
+  });
   const updateReference = useMutation(api.artifactEmbeds.update);
   const removeReference = useMutation(api.artifactEmbeds.remove);
   const [creating, setCreating] = useState(false);
@@ -150,93 +154,26 @@ export function ArtifactEmbedsPanel({
 
   async function createEmbed() {
     if (
-      !sourceArtifactId ||
+      !selectedArtifact ||
       !containerRegionId ||
       (versionPolicy === "pinned" && !pinnedVersionId)
     )
       return;
-    if (compatibilityProfile === "strict-native") {
-      toast.error(
-        "This file keeps strict native compatibility. Change it to Enhanced before adding a live reference.",
-      );
-      return;
-    }
     setBusy("create");
-    let createdEmbedId: string | undefined;
-    const placementOperationId =
-      containerType === "artifact" ? crypto.randomUUID() : undefined;
     try {
-      const result = await createReference({
-        containerType,
-        containerId,
+      await addReference(selectedArtifact, {
         containerRegionId,
-        sourceArtifactId: sourceArtifactId as Id<"spectraArtifacts">,
         mode,
         interaction,
         versionPolicy,
-        pinnedVersionId:
-          versionPolicy === "pinned"
-            ? (pinnedVersionId as Id<"spectraArtifactVersions">)
-            : undefined,
-        contextPolicy: "summary",
-        displayPreferences:
-          referenceView || referenceViews[0]
-            ? { view: referenceView || referenceViews[0] }
-            : undefined,
-        placementOperationId,
+        pinnedVersionId,
+        view: referenceView || referenceViews[0],
       });
-      createdEmbedId = result.embedId;
-      if (
-        containerType === "artifact" &&
-        (containerWorkType === "document" ||
-          containerWorkType === "whiteboard") &&
-        selectedArtifact &&
-        isArtifactTypeKey(selectedArtifact.blueprintKey)
-      ) {
-        const reference: ReferenceNode = {
-          embedId: result.embedId,
-          placementOperationId,
-          containerType,
-          containerId,
-          containerRegionId,
-          sourceArtifactId,
-          mode,
-          interaction,
-          versionPolicy,
-          ...(versionPolicy === "pinned" ? { pinnedVersionId } : {}),
-          contextPolicy: "summary",
-          displayPreferences:
-            referenceView || referenceViews[0]
-              ? { view: referenceView || referenceViews[0] }
-              : undefined,
-          state: "ready",
-        };
-        const definition = getWorkDefinition(selectedArtifact.blueprintKey);
-        const listeners = await spectraBus.commandAsync("reference.insert", {
-          hostWorkId: containerId,
-          reference,
-          target: {
-            workId: selectedArtifact._id,
-            workType: selectedArtifact.blueprintKey,
-            kind: referenceContract?.targets[0]?.kind ?? "work:root",
-            path: ["work", "root"],
-            stableIds: { workId: selectedArtifact._id },
-            fallbackExcerpt: selectedArtifact.title,
-            schemaVersion: definition.model.schemaVersion,
-          },
-        });
-        if (listeners === 0)
-          throw new Error("The document editor is not ready for reference insertion.");
-      }
       setCreating(false);
       setSourceArtifactId("");
       setSearch("");
       toast.success("Reference added.");
     } catch (error) {
-      if (createdEmbedId)
-        await removeReference({
-          embedId: createdEmbedId as Id<"artifactEmbeds">,
-        }).catch(() => undefined);
       toast.error(
         describeFailure(error, { fallback: "Could not add this reference." }).message,
       );
@@ -474,7 +411,7 @@ export function ArtifactEmbedsPanel({
               <section className="shrink-0 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 py-4">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="sm:col-span-2">
-                    <span className="text-micro font-semibold uppercase tracking-[.09em] text-[var(--text-tertiary)]">
+                    <span className="text-micro font-semibold text-[var(--text-tertiary)]">
                       Referenced work
                     </span>
                     <div className="relative mt-1.5">

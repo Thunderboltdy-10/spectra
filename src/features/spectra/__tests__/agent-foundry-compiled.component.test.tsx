@@ -96,7 +96,7 @@ describe("the agent studio when Spectra compiles the agent", () => {
 
     expect(await screen.findByText("Mark an essay")).toBeTruthy();
     expect(screen.getByText("Plan a revision")).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toContain("Spectra drafted 2 skills");
+    expect(screen.getByRole("status").textContent).toContain("2 skills drafted");
     expect(held.content!.routing.description).toBe("Essay feedback");
     expect(held.content!.foundry.draftReleaseNotes).toBe("Two skills.");
 

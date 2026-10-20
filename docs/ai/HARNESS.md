@@ -132,6 +132,9 @@ The environment block is added every turn. It is small and factual:
 - the user's current selection, only when there is one;
 - the items the user referenced with @ in this message, each with its id, type and title;
 - Bridge status;
+- the user's workspaces they can write in (their classes and projects, most active first, titles and place ids) and
+  the one this conversation is filed in, so new work is filed with its class: `create_artifact` takes a `placeId`,
+  and `manage_conversation` moves a conversation when the user asks;
 - a one-line summary of the permission settings.
 
 Nothing else is injected. Earlier versions put summaries of everything on screen into context, and it confused the
@@ -164,10 +167,16 @@ Compaction works like Claude Code's:
 ### Agents
 
 The user's own agents (built in the Agents editor) are listed for the model in a short index: id, title and a one-line
-description.
+description (its routing description or purpose, a few requests it takes and what it is not for).
 
-- **Auto (the default).** The model decides. When a request clearly fits an agent, it calls `use_agent`, which loads
-  that agent's instructions for the rest of the run. A thread keeps the agent it last used.
+- **Only ready agents are offered.** An agent with under 80 characters of instructions or no stated purpose is still
+  blank: it runs only when the user picks it.
+- **Few, by meaning.** Up to five ready agents are offered as they are. With more, the request is searched by meaning
+  (`semantic:search`, agents are indexed works) and only the agents it matches, best first, are offered, at most five.
+  A long list never tempts the model into using an agent for everything.
+- **Auto (the default).** The model decides. When a request is squarely what an agent is for, it calls `use_agent`,
+  which loads that agent's instructions for the rest of the run. Most requests need no agent. A thread keeps the agent
+  it last used.
 - **Chosen by the user.** The island's agent switch (see [ISLAND.md](../design/ISLAND.md#the-agent-switch)) sends an
   explicit agent id with the message. The run loads that agent from the start and does not route elsewhere. The choice
   stays with the thread until the user switches back to Auto.
@@ -191,7 +200,7 @@ Tools are grouped by what the model is doing. Names below are indicative, so pic
 
 | Family | Tools | Notes |
 | --- | --- | --- |
-| Look | `search`, `read_artifact`, `list_library`, `read_thread`, `web_search`, `web_fetch` | `search` is semantic and hybrid across everything the user can see (see [Semantic layer](#semantic-layer)). `read_artifact` takes ranges, for example sections, slides or a sheet range. |
+| Look | `search`, `read_artifact`, `list_library`, `read_thread`, `web_search`, `web_fetch` | `search` is semantic and hybrid across everything the user can see (see [Semantic layer](#semantic-layer)). `read_artifact` takes ranges, for example sections, slides or a sheet range. `web_search` runs Parallel through OpenRouter: ten results with short excerpts, fast depth (deep asks for advanced), at most six searches per message, carried by `SPECTRA_SEARCH_MODEL_ID` when it is set. |
 | Make | `create_artifact` | The content is written in the type's authoring format, never a giant JSON schema. |
 | Edit | `edit_artifact` | Uses each editor's own command vocabulary (below). |
 | Organise | `move`, `rename`, `link`, `archive`, `delete` | Archive and trash can be undone. Permanent deletion asks first. |
@@ -351,7 +360,9 @@ progress view.
   - A caption expands only when it has detail.
 - **When it fails.** If the caption call fails, the tool's own `label(args)` is used. The user never sees an error for
   this.
-- **Thread titles.** The same cheap call names the thread after the first exchange, which fixes LV-040.
+- **Thread titles.** The same cheap call names the thread after the first exchange, which fixes LV-040. For a thread
+  that is not filed yet it is also offered the user's workspaces and may pick the one the conversation is clearly
+  about; `applyGeneratedMetadata` then files the thread there. A thread the owner or an earlier run placed never moves.
 
 ## Thread rendering
 

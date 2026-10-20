@@ -194,25 +194,25 @@ describe("the field in an editor", () => {
     expect(field.form.mock.calls[0][1]).toMatchObject({ from: [40, 50] });
   });
 
-  it("brings Spectra's new content from the prism through the field", async () => {
+  it("carries the band across what Spectra writes, without loose light from the prism", async () => {
     const prism = document.createElement("canvas");
     prism.setAttribute("role", "button");
     prism.setAttribute("aria-label", "Spectra is working");
-    prism.setAttribute("data-island-prism", "");
+    prism.setAttribute("data-island-home", "");
     document.body.appendChild(prism);
     render(<Studio />);
     await settle(WARM_UP_MS + 10);
     const item = addCard();
     item.setAttribute("data-ai-region", "true");
     await settle();
-    expect(field.travel).toHaveBeenCalledTimes(1);
-    expect(field.travel.mock.calls[0][0]).toEqual([RECT.x + RECT.width / 2, RECT.y + RECT.height / 2]);
-    // And holds light around the region while Spectra writes it.
-    expect(field.glow).toHaveBeenCalledTimes(1);
-    // Spectra finishes: the light lets go.
+    // Spectra's writing is the band across the region (LIFE.md), never dots flown from the prism.
+    expect(field.travel).not.toHaveBeenCalled();
+    expect(field.form).not.toHaveBeenCalled();
+    expect(item.hasAttribute("data-life-working")).toBe(true);
+    // Spectra finishes: the band lets go.
     item.removeAttribute("data-ai-region");
     await settle();
-    expect(field.glowStop).toHaveBeenCalled();
+    expect(item.hasAttribute("data-life-working")).toBe(false);
   });
 
   it("keeps a faint tint on what Spectra changed until it has been seen", async () => {

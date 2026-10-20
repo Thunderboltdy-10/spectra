@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, type RefObject } from "react";
-import { life, type GlowHandle, type Rect } from "../life/life";
+import { life, type Rect } from "../life/life";
+import { markArrival, markWorking } from "../life/use-life";
 import { barsOf, figureOf, inkOf } from "../life/figure-dom";
 import { outlineFigure, rowsFigure, type Figure, type Point } from "../life/figure";
 
@@ -10,12 +11,12 @@ import { outlineFigure, rowsFigure, type Figure, type Point } from "../life/figu
  *
  * Things in a work behave as physical things made of the field:
  * - something new forms out of the field where it was made: from your
- *   pointer or caret, from a collaborator's (or Spectra's) cursor, or, when
- *   Spectra writes without a cursor, as light that travels from the prism
- *   through the field and gathers into the new content's lines;
+ *   pointer or caret, or from a collaborator's (or Spectra's) cursor; what
+ *   Spectra writes without a cursor is crossed once by the skeleton's band
+ *   as it lands, the way loaded content settles;
  * - a deletion unforms where the thing was;
- * - a region Spectra is writing holds light around it in the field; inside
- *   the text, AI light stays CSS (MOTION.md), never dots;
+ * - a region Spectra is writing carries the band while it works
+ *   (spectra-field.css, "the band"), never loose dots;
  * - drags leave a wake, and a drop settles with a pulse.
  *
  * Over content every figure hands over within about 600 ms (the engine's
@@ -33,7 +34,6 @@ export const FIELD_OBJECTS = [
   ".sheets-chart-object",
   ".foundry-skill",
   ".foundry-pair",
-  ".spectra-plan-list article",
   ".ProseMirror > :is(table, .tableWrapper, figure, img, hr, pre, [data-type])",
 ].join(", ");
 
@@ -43,8 +43,8 @@ export const FIELD_TEXT_BLOCKS = ".ProseMirror > :is(p, h1, h2, h3, h4, h5, h6, 
 const AI_REGION = '[data-ai-region="true"]';
 /** Collaborators' cursors, and Spectra's spark when it drives the interface. */
 const CURSORS = ".spectra-presence-cursor, .spectra-ai-spark";
-/** The island's prism: where Spectra's matter comes from when it has no cursor here. */
-const PRISM = "[data-island-prism]";
+/** Spectra's light in the island: where its matter comes from when it has no cursor here. */
+const HOME = "[data-island-home]";
 
 /** Mounting, switching a slide or a tab: the content arrives at once, and is not "made". */
 export const WARM_UP_MS = 900;
@@ -56,7 +56,7 @@ export const BULK_BATCH = 12;
 export const MAX_MOMENTS = 4;
 /** How long a dropped thing takes to settle (MOTION.md --motion-slow). */
 const SETTLE_MS = 360;
-/** At most this many regions hold light at once. */
+/** At most this many regions carry the band at once. */
 export const MAX_GLOWS = 3;
 /** What Spectra changed counts as seen after this long half in view (MOTION.md, "Afterwards"). */
 export const SEEN_MS = 1500;
@@ -243,7 +243,7 @@ export function useEditorFieldMoments(rootRef: RefObject<HTMLElement | null>, { 
         const box = cursor.getBoundingClientRect();
         if (box.width || box.height) cursors.push({ point: [box.x, box.y], ai: cursor.getAttribute("data-ai") === "true" || cursor.classList.contains("spectra-ai-spark") });
       }
-      const prismElement = document.querySelector(PRISM);
+      const prismElement = document.querySelector(HOME);
       const prismBox = prismElement?.getBoundingClientRect();
       return chooseSource({
         local: recentLocal(),
@@ -264,8 +264,7 @@ export function useEditorFieldMoments(rootRef: RefObject<HTMLElement | null>, { 
       if (!figure.strokes.length) return;
       const source = sourceFor(rect);
       if (source.kind === "prism") {
-        // Spectra's matter crosses the field from the prism and gathers into the lines.
-        life.travel(source.point, figure, { colour: "spectrum" });
+        markArrival(element);
       } else {
         life.form(figure, {
           from: source.kind === "self" ? [rect.x, rect.y] : source.point,
@@ -282,12 +281,12 @@ export function useEditorFieldMoments(rootRef: RefObject<HTMLElement | null>, { 
       void life.unform(ghostFigure(place.rect, place.radius), { from: local ?? centreOf(place.rect) });
     };
 
-    /* Light held around what Spectra is writing. */
-    const glows = new Map<Element, GlowHandle>();
+    /* The band across what Spectra is writing. */
+    const glows = new Map<Element, () => void>();
     const syncGlows = (justMarked: readonly Element[]) => {
-      for (const [element, glow] of glows) {
+      for (const [element, release] of glows) {
         if (!element.isConnected || element.getAttribute("data-ai-region") !== "true") {
-          glow.stop();
+          release();
           glows.delete(element);
         }
       }
@@ -295,13 +294,10 @@ export function useEditorFieldMoments(rootRef: RefObject<HTMLElement | null>, { 
         if (glows.size >= MAX_GLOWS || glows.has(element) || !inContent(element)) continue;
         const rect = rectOf(element);
         if (!visible(rect)) continue;
-        glows.set(element, life.glow(rect, "spectrum", 0.7));
+        glows.set(element, markWorking(element));
         // The writing arrives from its source and gathers into the region's lines.
         formHere(element);
       }
-    };
-    const moveGlows = () => {
-      for (const [element, glow] of glows) glow.move(rectOf(element));
     };
 
     /* Afterwards: what Spectra changed keeps a faint tint until you have seen it, then it fades (CSS, [data-ai-unseen]). */
@@ -425,7 +421,7 @@ export function useEditorFieldMoments(rootRef: RefObject<HTMLElement | null>, { 
       // The tint is CSS: it stays even while the field is off.
       syncWriting(batch.marked);
       if (!life.on) {
-        for (const glow of glows.values()) glow.stop();
+        for (const release of glows.values()) release();
         glows.clear();
         return;
       }
@@ -542,7 +538,6 @@ export function useEditorFieldMoments(rootRef: RefObject<HTMLElement | null>, { 
     const onScroll = () => {
       if (!scrollFrame) scrollFrame = requestAnimationFrame(() => {
         scrollFrame = 0;
-        moveGlows();
         remember(true);
       });
     };
@@ -560,7 +555,7 @@ export function useEditorFieldMoments(rootRef: RefObject<HTMLElement | null>, { 
       cancelAnimationFrame(frame);
       cancelAnimationFrame(wakeFrame);
       cancelAnimationFrame(scrollFrame);
-      for (const glow of glows.values()) glow.stop();
+      for (const release of glows.values()) release();
       glows.clear();
       seenObserver?.disconnect();
       cancelAnimationFrame(bandFrame);

@@ -157,7 +157,7 @@ async function readAgents(params: AttemptParams, thread: Promise<ThreadSummary |
     return { agent: chosen, agents: [] };
   }
   const [index, retainedId] = await Promise.all([
-    readAgentIndex(params.actorClerkId),
+    readAgentIndex(params.actorClerkId, params.prompt),
     thread.then((summary) => summary?.retainedAgentId),
   ]);
   const retained =
@@ -201,6 +201,7 @@ async function readBeforeFirstTurn(params: AttemptParams) {
       selection: params.selection,
       references: params.references,
       surface: params.surface,
+      workspaceId: params.workspaceId,
       attachments: params.attachments,
     }),
     params.mode === "start" ? readThreadHistory(actorClerkId, params.threadId, runId) : Promise.resolve([]),
@@ -364,7 +365,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
           publish({ type: "text_replace", runId, content: event.text });
           return;
         case "step_start":
-          publish({ type: "step", runId, id: event.id, label: event.label, status: "running" });
+          publish({ type: "step", runId, id: event.id, label: event.label, status: "running", ...(event.work ? { work: event.work } : {}) });
           return;
         case "step_end":
           publish({ type: "step", runId, id: event.id, label: event.label, status: event.ok ? "done" : "error", durationMs: event.durationMs });
@@ -407,6 +408,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
                 runId,
                 executionId,
                 title: event.title,
+                ...(event.placeId ? { workspaceId: event.placeId } : {}),
               }).catch(() => null),
             );
           publish({ type: "thread_title", runId, title: event.title });

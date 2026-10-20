@@ -25,6 +25,7 @@ import { readCommandAttachment, type CommandAttachment } from "../components/com
 import { getSpectraInstalledAgents, searchSpectra, type SpectraArtifact, type SpectraInstalledAgent } from "../data/api";
 import { MARK_POSE, prismSvg, PRISM_PALETTES } from "../life/prism";
 import { useLifeArrival, useLifeDeparture } from "../life/use-life";
+import { useDictation } from "./dictation";
 
 /*
  * The island's composer (ISLAND.md, "The composer"): Spectra's only one.
@@ -49,6 +50,8 @@ export type ComposerHandle = {
   focus(): void;
   hasContent(): boolean;
   element(): HTMLDivElement | null;
+  /** Start the message written: a suggestion the student can still change before sending. */
+  prefill(text: string, references?: SpectraRunPointer[]): void;
 };
 
 const MAX_ATTACHMENTS = 4;
@@ -80,17 +83,13 @@ export const IslandComposer = forwardRef<
     /** The thread it writes into, for its draft and placeholder. */
     draftKey: string;
     placeholder: string;
-    /** The thread the page has in focus; the composer replies to it. */
-    thread?: { title: string } | null;
-    /** Lets go of that thread: the next message starts a new conversation. */
-    onLetGo?: () => void;
     visible: boolean;
     busy?: boolean;
     onSend: (send: ComposerSend) => void;
     onStop?: () => void;
     onCancel: () => void;
   }
->(function IslandComposer({ draftKey, placeholder, thread, onLetGo, visible, busy, onSend, onStop, onCancel }, forwarded) {
+>(function IslandComposer({ draftKey, placeholder, visible, busy, onSend, onStop, onCancel }, forwarded) {
   const rootRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -106,6 +105,15 @@ export const IslandComposer = forwardRef<
     focus: () => fieldRef.current?.focus({ preventScroll: true }),
     hasContent: () => Boolean(fieldRef.current?.value.trim()) || attachments.length > 0,
     element: () => rootRef.current,
+    prefill: (next, pointers) => {
+      setText(next);
+      if (pointers?.length) setReferences((current) => [...current, ...pointers.filter((pointer) => !current.some((existing) => existing.id === pointer.id))]);
+      requestAnimationFrame(() => {
+        const field = fieldRef.current;
+        field?.focus({ preventScroll: true });
+        field?.setSelectionRange(next.length, next.length);
+      });
+    },
   }));
 
   // Each thread keeps its own unsent words.
@@ -172,9 +180,14 @@ export const IslandComposer = forwardRef<
   };
 
   const sending = useRef(false);
+  // Each send turns the prism once: the message has gone to Spectra.
+  const [sends, setSends] = useState(0);
   const departs = useCallback(() => !sending.current, []);
+  const [heardTrouble, setHeardTrouble] = useState<string | null>(null);
+  const dictation = useDictation({ text, onText: setText, onFailure: setHeardTrouble });
 
   const send = () => {
+    dictation.stop();
     const clean = text.trim();
     if (!clean || attachments.some((attachment) => attachment.error)) return;
     const field = fieldRef.current;
@@ -191,6 +204,7 @@ export const IslandComposer = forwardRef<
     // What was sent goes into the prism with the words; it does not part here.
     sending.current = true;
     requestAnimationFrame(() => (sending.current = false));
+    setSends((count) => count + 1);
     setText("");
     setAttachments([]);
     setReferences([]);
@@ -266,26 +280,8 @@ export const IslandComposer = forwardRef<
       data-island-composer
       onDragOver={(event) => event.dataTransfer.types.includes("Files") && event.preventDefault()}
       onDrop={onDrop}
-      className="relative box-border flex w-[min(600px,calc(100vw-32px))] flex-col rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-lg)]"
+      className="relative box-border flex w-[min(600px,calc(100vw-32px))] flex-col rounded-surface border border-[var(--card-border)] bg-[var(--card-paper)] shadow-[var(--shadow-lg)]"
     >
-      {thread && onLetGo ? (
-        <div data-composer-thread className="flex items-center gap-1.5 px-3 pt-2 text-caption text-[var(--text-tertiary)]">
-          <Icon name="conversations" size={14} />
-          <span className="min-w-0 flex-1 truncate">
-            Replying in <span className="text-[var(--text-secondary)]">{thread.title}</span>
-          </span>
-          <Tooltip label="Start a new conversation instead">
-            <button
-              type="button"
-              onClick={onLetGo}
-              className="inline-flex h-6 items-center gap-1 rounded-control px-1.5 text-caption text-[var(--text-secondary)] outline-none hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
-            >
-              <Icon name="add" size={12} />
-              New
-            </button>
-          </Tooltip>
-        </div>
-      ) : null}
       {chips.length ? (
         <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
           {chips.map((chip) => (
@@ -322,7 +318,7 @@ export const IslandComposer = forwardRef<
         </div>
       ) : null}
       <div className="flex items-end gap-1.5 p-2">
-        <AgentSwitch label={agentLabel} agent={agent} agents={agents} onCycle={cycleAgent} onChoose={setAgentIndex} />
+        <AgentSwitch label={agentLabel} agent={agent} agents={agents} sends={sends} onCycle={cycleAgent} onChoose={setAgentIndex} />
         <textarea
           ref={fieldRef}
           data-composer-text
@@ -336,9 +332,28 @@ export const IslandComposer = forwardRef<
           className="min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-[7px] text-ui leading-[22px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
         />
         <input ref={fileRef} type="file" multiple hidden onChange={(event) => void addFiles(event.target.files).then(() => (event.target.value = ""))} />
-        <IconButton icon="attach" label="Attach files" onClick={() => fileRef.current?.click()} disabled={attachments.length >= MAX_ATTACHMENTS} className="size-9" />
+        <IconButton
+          icon={<Icon name="attach" size={19} />}
+          label="Attach files"
+          onClick={() => fileRef.current?.click()}
+          disabled={attachments.length >= MAX_ATTACHMENTS}
+          className="size-10 rounded-full"
+        />
+        {dictation.available ? (
+          <IconButton
+            icon={<Icon name="mic" size={21} />}
+            label={dictation.listening ? "Stop listening" : "Speak your message"}
+            pressed={dictation.listening}
+            data-listening={dictation.listening || undefined}
+            onClick={() => {
+              setHeardTrouble(null);
+              dictation.toggle();
+            }}
+            className="composer-mic size-10 rounded-full"
+          />
+        ) : null}
         {busy && !text.trim() && onStop ? (
-          <IconButton icon={<span className="size-2.5 rounded-sm bg-current" />} label="Stop" onClick={onStop} className="size-9 text-[var(--text-primary)]" />
+          <IconButton icon={<span className="size-2.5 rounded-sm bg-current" />} label="Stop" onClick={onStop} className="composer-send size-10 rounded-full" />
         ) : (
           <IconButton
             icon="send"
@@ -346,10 +361,16 @@ export const IslandComposer = forwardRef<
             shortcut="Enter"
             onClick={send}
             disabled={!text.trim()}
-            className="size-9 bg-[var(--text-primary)] [color:var(--bg-primary)] hover:bg-[var(--text-primary)] hover:opacity-90 hover:[color:var(--bg-primary)]"
+            data-ready={text.trim() ? true : undefined}
+            className="composer-send size-10 rounded-full"
           />
         )}
       </div>
+      {heardTrouble || dictation.listening ? (
+        <p role="status" className="composer-heard">
+          {heardTrouble ?? "Listening. Speak, then press the microphone or send."}
+        </p>
+      ) : null}
       {picker && picker.results.length ? (
         <div role="listbox" aria-label="Point Spectra at" className="absolute inset-x-2 bottom-[calc(100%+6px)] rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-lg)]">
           {picker.results.map((artifact, index) => {
@@ -380,20 +401,23 @@ function AgentSwitch({
   label,
   agent,
   agents,
+  sends,
   onCycle,
   onChoose,
 }: {
   label: string;
   agent: SpectraInstalledAgent | null;
   agents: SpectraInstalledAgent[];
+  /** Messages sent so far; each one spins the mark once. */
+  sends: number;
   onCycle: (event: MouseEvent) => void;
   onChoose: (index: number) => void;
 }) {
   const [mark, setMark] = useState<string | null>(autoMark);
   useEffect(() => setMark(autoMarkUrl()), []);
-  const face = agent ? (
-    <span className="grid size-6 place-items-center rounded-full bg-[color-mix(in_oklab,var(--accent-cyan)_14%,transparent)] text-micro font-semibold text-[var(--text-primary)]">
-      {agent.title.slice(0, 1).toUpperCase()}
+  const glyph = agent ? (
+    <span className="grid size-6 place-items-center rounded-full bg-[color-mix(in_oklab,var(--accent-cyan)_14%,transparent)] text-[var(--accent-cyan)]">
+      <Icon name="agent" size={15} />
     </span>
   ) : mark ? (
     // eslint-disable-next-line @next/next/no-img-element
@@ -401,10 +425,16 @@ function AgentSwitch({
   ) : (
     <Icon name="agent" size={18} />
   );
+  // Keyed by the count, so every send starts the turn afresh.
+  const face = (
+    <span key={sends} className="composer-mark grid place-items-center" data-sent={sends ? "" : undefined}>
+      {glyph}
+    </span>
+  );
   if (!agents.length) {
     return (
       <Tooltip label="Auto: Spectra picks the agent">
-        <span data-agent-switch className="grid size-9 shrink-0 place-items-center">
+        <span data-agent-switch data-island-home className="grid size-9 shrink-0 place-items-center">
           {face}
         </span>
       </Tooltip>

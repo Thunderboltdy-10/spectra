@@ -10,9 +10,9 @@ import { nodeIdentity } from "./node-identity";
  * The navigation rail: containers only, one subscription per open branch, so an
  * unopened folder costs nothing and an open one stays live.
  *
- * Quick views sit under the tree rather than beside it, because Recent and
- * Favorites are ways of looking at the same tree — not a second place where
- * things live.
+ * Recent, Favorites and Shared sit with the top rather than among the
+ * places, because they are ways of looking across the same tree, not a
+ * second place where things live.
  */
 
 export type OrganizerLocation =
@@ -21,7 +21,8 @@ export type OrganizerLocation =
   | { kind: "trash" };
 
 export type RailHandlers = {
-  onNavigate: (location: OrganizerLocation) => void;
+  /** `trail` is the way down to a folder from the top, the folder last. */
+  onNavigate: (location: OrganizerLocation, trail?: readonly TreeNode[]) => void;
   onToggle: (nodeId: string) => void;
   onBeginDrag: (event: React.PointerEvent, node: TreeNode) => void;
   onContextMenu: (event: React.MouseEvent, node: TreeNode) => void;
@@ -43,7 +44,7 @@ export function OrganizerRail({
   expanded,
   dropNodeId,
   floorId = null,
-  floorLabel = "Library",
+  floorLabel = "Home",
   handlers,
   className,
 }: {
@@ -58,37 +59,55 @@ export function OrganizerRail({
   className?: string;
 }) {
   const atFloor = location.kind === "folder" && location.nodeId === floorId;
+  const row = (active: boolean) =>
+    cn(
+      "flex h-9 w-full shrink-0 items-center gap-2.5 rounded-chip px-2 text-left text-body transition-colors",
+      active
+        ? "bg-[var(--bg-hover)] font-medium text-[var(--text-primary)]"
+        : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+    );
   return (
     <nav
-      aria-label="Library folders"
+      aria-label="Quick access"
       className={cn(
-        "flex w-[248px] shrink-0 flex-col overflow-y-auto px-2 py-3",
+        "flex w-[248px] shrink-0 flex-col overflow-hidden px-2 py-3",
         className,
       )}
     >
+      {/* The way File Explorer opens: the top, the ways of looking across
+          everything, then every place, with the Trash at the foot. */}
       <button
         type="button"
         data-drop-node={floorId ?? "root"}
         data-drop-kind="container"
         data-life-receive
         onClick={() => handlers.onNavigate({ kind: "folder", nodeId: floorId })}
-        className={cn(
-          "flex h-8 w-full items-center gap-2 rounded-chip px-2 text-left text-ui font-medium transition-colors",
-          atFloor
-            ? "bg-[var(--bg-hover)] text-[var(--text-primary)]"
-            : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
-          dropNodeId === (floorId ?? "root") &&
-            "ring-2 ring-brand",
-        )}
+        className={cn(row(atFloor), dropNodeId === (floorId ?? "root") && "ring-2 ring-brand")}
       >
-        <Home className="size-3.5 shrink-0" strokeWidth={1.9} />
+        <Home className="size-4 shrink-0" strokeWidth={1.9} />
         <span className="min-w-0 truncate">{floorLabel}</span>
       </button>
+      {QUICK_VIEWS.map(({ view, label, icon: Icon }) => (
+        <button
+          key={view}
+          type="button"
+          onClick={() => handlers.onNavigate({ kind: "quick", view })}
+          className={row(location.kind === "quick" && location.view === view)}
+        >
+          <Icon className="size-4 shrink-0" strokeWidth={1.9} />
+          {label}
+        </button>
+      ))}
 
-      <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
+      <div className="mt-4 shrink-0 px-2 pb-1 text-caption font-medium text-[var(--text-tertiary)]">
+        Places
+      </div>
+      {/* A long tree scrolls inside its own region instead of pushing the Trash away. */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
         <RailBranch
           parentId={floorId}
           depth={0}
+          trail={[]}
           location={location}
           expanded={expanded}
           dropNodeId={dropNodeId}
@@ -96,45 +115,14 @@ export function OrganizerRail({
         />
       </div>
 
-      {/* Quick views keep their own floor: a long tree scrolls inside its
-          region above instead of painting over them. */}
-      <div className="mt-4 shrink-0 px-2 text-micro font-semibold uppercase tracking-[0.09em] text-[var(--text-tertiary)]">
-        Quick views
-      </div>
-      <div className="mt-1 flex shrink-0 flex-col">
-        {QUICK_VIEWS.map(({ view, label, icon: Icon }) => {
-          const active = location.kind === "quick" && location.view === view;
-          return (
-            <button
-              key={view}
-              type="button"
-              onClick={() => handlers.onNavigate({ kind: "quick", view })}
-              className={cn(
-                "flex h-8 items-center gap-2 rounded-chip px-2 text-left text-ui transition-colors",
-                active
-                  ? "bg-[var(--bg-hover)] font-medium text-[var(--text-primary)]"
-                  : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
-              )}
-            >
-              <Icon className="size-3.5 shrink-0" strokeWidth={1.9} />
-              {label}
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          onClick={() => handlers.onNavigate({ kind: "trash" })}
-          className={cn(
-            "mt-1 flex h-8 items-center gap-2 rounded-chip px-2 text-left text-ui transition-colors",
-            location.kind === "trash"
-              ? "bg-[var(--bg-hover)] font-medium text-[var(--text-primary)]"
-              : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
-          )}
-        >
-          <Trash2 className="size-3.5 shrink-0" strokeWidth={1.9} />
-          Trash
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={() => handlers.onNavigate({ kind: "trash" })}
+        className={cn(row(location.kind === "trash"), "mt-2")}
+      >
+        <Trash2 className="size-4 shrink-0" strokeWidth={1.9} />
+        Trash
+      </button>
     </nav>
   );
 }
@@ -142,6 +130,7 @@ export function OrganizerRail({
 function RailBranch({
   parentId,
   depth,
+  trail,
   location,
   expanded,
   dropNodeId,
@@ -149,6 +138,7 @@ function RailBranch({
 }: {
   parentId: string | null;
   depth: number;
+  trail: readonly TreeNode[];
   location: OrganizerLocation;
   expanded: ReadonlySet<string>;
   dropNodeId: string | null | undefined;
@@ -196,13 +186,10 @@ function RailBranch({
               onPointerDown={(event) => handlers.onBeginDrag(event, node)}
               onContextMenu={(event) => handlers.onContextMenu(event, node)}
               onClick={() =>
-                handlers.onNavigate({ kind: "folder", nodeId: node.nodeId })
-              }
-              onDoubleClick={() =>
-                handlers.onNavigate({ kind: "folder", nodeId: node.nodeId })
+                handlers.onNavigate({ kind: "folder", nodeId: node.nodeId }, [...trail, node])
               }
               className={cn(
-                "group flex h-8 cursor-default items-center gap-1 rounded-chip pr-1.5 text-ui transition-colors",
+                "group flex h-9 cursor-default items-center gap-1.5 rounded-chip pr-1.5 text-body transition-colors",
                 selected
                   ? "bg-[var(--bg-hover)] font-medium text-[var(--text-primary)]"
                   : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
@@ -236,18 +223,18 @@ function RailBranch({
               </button>
               <span
                 aria-hidden
-                className="flex size-[19px] shrink-0 items-center justify-center rounded-chip"
+                className="flex size-[22px] shrink-0 items-center justify-center rounded-chip"
                 style={{ backgroundColor: identity.soft }}
               >
                 <Icon
-                  className="size-[12px]"
+                  className="size-[14px]"
                   style={{ color: identity.color }}
                   strokeWidth={1.9}
                 />
               </span>
               <span className="min-w-0 flex-1 truncate">{node.name}</span>
               {node.kind === "workspace" && node.workspace?.status === "archived" ? (
-                <span className="shrink-0 text-micro uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
+                <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
                   Archived
                 </span>
               ) : null}
@@ -256,6 +243,7 @@ function RailBranch({
               <RailBranch
                 parentId={node.nodeId}
                 depth={depth + 1}
+                trail={[...trail, node]}
                 location={location}
                 expanded={expanded}
                 dropNodeId={dropNodeId}

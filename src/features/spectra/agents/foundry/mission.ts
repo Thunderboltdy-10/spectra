@@ -57,7 +57,7 @@ export function createDefaultMission(): AgentMission {
   return {
     objective: "",
     domains: [],
-    intendedUsers: ["Any workspace member"],
+    intendedUsers: ["Anyone who uses it"],
     expectedInputs: [],
     expectedOutputs: [],
     decisionsAllowed: [],

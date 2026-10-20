@@ -49,6 +49,10 @@ function Tabs({ tab }: { tab: "a" | "b" }) {
   return <div>{tab === "a" ? <List ids={["t1", "t2"]} /> : <p>Other tab</p>}</div>;
 }
 
+/* What joins is there at once, and the skeleton's band crosses it once (markArrival). */
+let marking: ReturnType<typeof vi.spyOn>;
+const arrivals = () => (marking.mock.calls as Array<[string, string]>).filter(([name, value]) => name === "data-life-working" && value === "arrival").length;
+
 let frames: FrameRequestCallback[] = [];
 const flushFrames = () => {
   const pending = frames;
@@ -58,6 +62,7 @@ const flushFrames = () => {
 let now = 200_000;
 
 beforeEach(() => {
+  marking = vi.spyOn(Element.prototype, "setAttribute");
   frames = [];
   vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
     frames.push(callback);
@@ -76,7 +81,7 @@ afterEach(() => {
   field.form.mockClear();
   field.travel.mockClear();
   field.unform.mockClear();
-  document.querySelector("[data-island-prism]")?.remove();
+  document.querySelector("[data-island-home]")?.remove();
 });
 
 describe("an item joining a list", () => {
@@ -84,16 +89,16 @@ describe("an item joining a list", () => {
     markCause([5, 5]);
     render(<List ids={["a1", "a2", "a3"]} />);
     act(flushFrames);
-    expect(field.form).not.toHaveBeenCalled();
+    expect(arrivals()).toBe(0);
   });
 
-  it("forms the first thing made in a list that was empty", () => {
+  it("lands the first thing made in a list that was empty", () => {
     const view = render(<List ids={[]} />);
     act(flushFrames);
     markCause([40, 50]);
     view.rerender(<List ids={["a4"]} />);
     act(flushFrames);
-    expect(field.form).toHaveBeenCalledTimes(1);
+    expect(arrivals()).toBe(1);
   });
 
   it("is still while the page itself is arriving", () => {
@@ -101,31 +106,30 @@ describe("an item joining a list", () => {
     markCause([40, 50]);
     render(<List ids={["a5"]} />);
     act(flushFrames);
-    expect(field.form).not.toHaveBeenCalled();
+    expect(arrivals()).toBe(0);
   });
 
-  it("forms one made just now from the reader's press", () => {
+  it("lands one made just now by the reader", () => {
     const view = render(<List ids={["b1"]} />);
     act(flushFrames);
     markCause([40, 50]);
     view.rerender(<List ids={["b1", "b2"]} />);
     act(flushFrames);
-    expect(field.form).toHaveBeenCalledTimes(1);
-    expect(field.form.mock.calls[0]).toContainEqual({ from: [40, 50] });
+    expect(arrivals()).toBe(1);
   });
 
-  it("brings one Spectra made while working from the prism", () => {
-    const prism = document.createElement("canvas");
-    prism.setAttribute("data-island-prism", "");
-    prism.setAttribute("data-status", "working");
+  it("lands one Spectra made while working, without light from the island", () => {
+    const prism = document.createElement("div");
+    prism.setAttribute("data-island-home", "");
+    prism.setAttribute("data-island-status", "working");
     document.body.appendChild(prism);
     const view = render(<List ids={["c1"]} />);
     act(flushFrames);
     now += 5_000;
     view.rerender(<List ids={["c1", "c2"]} />);
     act(flushFrames);
-    expect(field.travel).toHaveBeenCalledTimes(1);
-    expect(field.form).not.toHaveBeenCalled();
+    expect(arrivals()).toBe(1);
+    expect(field.travel).not.toHaveBeenCalled();
   });
 
   it("is still when nobody made it here (someone else, a sync)", () => {
@@ -134,8 +138,7 @@ describe("an item joining a list", () => {
     now += 5_000;
     view.rerender(<List ids={["d1", "d2"]} />);
     act(flushFrames);
-    expect(field.form).not.toHaveBeenCalled();
-    expect(field.travel).not.toHaveBeenCalled();
+    expect(arrivals()).toBe(0);
   });
 
   it("treats many joining at once as the list filling in", () => {
@@ -144,27 +147,27 @@ describe("an item joining a list", () => {
     markCause([40, 50]);
     view.rerender(<List ids={["e1", "e2", "e3", "e4"]} />);
     act(flushFrames);
-    expect(field.form).not.toHaveBeenCalled();
+    expect(arrivals()).toBe(0);
   });
 });
 
 describe("a keyed row joining its list", () => {
-  it("forms from the reader's press like any other item", () => {
+  it("lands from the reader's press like any other item", () => {
     const view = render(<Rows ids={["g1"]} />);
     act(flushFrames);
     markCause([40, 50]);
     view.rerender(<Rows ids={["g1", "g2"]} />);
     act(flushFrames);
-    expect(field.form).toHaveBeenCalledTimes(1);
+    expect(arrivals()).toBe(1);
   });
 
-  it("forms once when its own arrival already brought it", () => {
+  it("lands once when its own arrival already brought it", () => {
     const view = render(<Rows ids={["h1"]} />);
     act(flushFrames);
     markCause([40, 50]);
     view.rerender(<Rows ids={["h1", "h2"]} fresh="h2" />);
     act(flushFrames);
-    expect(field.form).toHaveBeenCalledTimes(1);
+    expect(arrivals()).toBe(1);
   });
 });
 

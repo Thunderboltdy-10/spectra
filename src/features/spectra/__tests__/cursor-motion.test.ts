@@ -12,10 +12,10 @@ const reduced = () => true;
 
 describe("travelDuration", () => {
   it("scales with distance but stays inside a fast band", () => {
-    expect(travelDuration(0)).toBe(120);
-    expect(travelDuration(40)).toBeLessThan(160);
+    expect(travelDuration(0)).toBe(140);
+    expect(travelDuration(40)).toBeLessThan(240);
     expect(travelDuration(300)).toBeGreaterThan(180);
-    expect(travelDuration(5000)).toBe(460);
+    expect(travelDuration(5000)).toBe(560);
   });
 
   it("orders durations monotonically", () => {

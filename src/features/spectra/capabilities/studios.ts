@@ -169,6 +169,7 @@ const STUDIO_SPECS: readonly StudioSpec[] = [
   { type: "whiteboard", localId: "tool-embed", description: "Embed other work.", requires: "edit" },
   { type: "whiteboard", localId: "add-image", description: "Add an image.", requires: "edit" },
   { type: "whiteboard", localId: "import", description: "Import a board.", requires: "edit" },
+  { type: "whiteboard", localId: "dots", description: "Show or hide the grid as dots on the board.", requires: "edit" },
   { type: "whiteboard", localId: "snap", description: "Snap moves and resizes to the grid.", requires: "edit" },
   { type: "whiteboard", localId: "panel-layers", description: "Open pages and layers." },
   { type: "whiteboard", localId: "panel-templates", description: "Open board templates.", requires: "edit" },

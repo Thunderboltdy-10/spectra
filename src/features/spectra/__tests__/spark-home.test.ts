@@ -8,7 +8,7 @@ const field = vi.hoisted(() => ({
 }));
 
 vi.mock("../life/life", () => ({ life: { on: true, send: field.send, glow: field.glow, pulse: field.pulse } }));
-vi.mock("../life/use-life", () => ({ markCause: vi.fn(), prismPoint: () => [500, 700] }));
+vi.mock("../life/use-life", () => ({ markCause: vi.fn(), markWorking: vi.fn(() => () => {}), prismPoint: () => [500, 700] }));
 
 import { presentAppControl, SPARK_HOME_MS } from "../collaboration/app-choreography-host";
 
@@ -21,7 +21,7 @@ describe("Spectra's light after it works the interface", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     prism = document.createElement("div");
-    prism.setAttribute("data-island-prism", "");
+    prism.setAttribute("data-island-home", "");
     prism.getBoundingClientRect = () => rect(480, 680, 40, 40);
     document.body.append(prism);
   });

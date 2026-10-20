@@ -24,7 +24,6 @@ import {
   MonitorOff,
   MonitorPlay,
   MousePointer2,
-  Palette,
   Plus,
   Search,
   Square,
@@ -53,6 +52,7 @@ import { createPortal } from "react-dom";
 import { LocalAutocompleteTextarea } from "../compute/autocomplete";
 import {
   createPresentationObject,
+  createPresentationTextBox,
   createPresentationSlide,
   normalizePresentationContent,
   presentationObjectParagraphs,
@@ -125,6 +125,10 @@ import {
   type StudioHistoryEntry,
 } from "./artifact-studio-value-utils";
 import { StudioItemRail } from "./studio-item-rail";
+import { PresentationDesigner } from "./presentation-designer";
+import { PresentationRehearsalReport } from "./presentation-rehearsal-report";
+import { designDeck, type DeckFamily } from "../presentation/designer";
+import { rehearsalReport, type RehearsalReport } from "../presentation/rehearsal";
 import { FileViewer, type ViewedFile } from "../files/file-viewer";
 import { ImportOriginal } from "../files/import-original";
 import {
@@ -208,7 +212,7 @@ const NO_SELECTION = "__none__";
 const INSPECTOR_SECTIONS = [
   { value: "slide", label: "Slide and objects" },
   { value: "insert", label: "Insert" },
-  { value: "design", label: "Design" },
+  { value: "design", label: "Designer" },
   { value: "sources", label: "Sources" },
   { value: "files", label: "Files" },
 ] as const;
@@ -378,7 +382,21 @@ function smartGuide(
     : { position, guide: undefined };
 }
 
+/** Slide colours are the deck's own data, not the app's theme. */
+const PAPER = "#ffffff";
+
 const THEMES = [
+  {
+    id: "spectra-plain",
+    name: "Plain",
+    tokens: {
+      background: PAPER,
+      heading: "#000000",
+      body: "#000000",
+      accent: "#c4501c",
+      soft: "#f2efe9",
+    },
+  },
   {
     id: "spectra-botanical",
     name: "Botanical",
@@ -947,6 +965,8 @@ export function PresentationStudio({
   const [notesOpen, setNotesOpen] = useState(false);
   const [activeSlideId, setActiveSlideId] = useState(deck.slides[0]!.id);
   const [selectedObjectId, setSelectedObjectId] = useState<string>();
+  /** A text box just drawn, which takes the caret once it is on the slide. */
+  const [freshTextId, setFreshTextId] = useState<string>();
   const [layerSelection, setLayerSelection] = useState<string[]>([]);
   const [guides, setGuides] = useState<{ x?: number; y?: number }>({});
   const [draggingSlideId, setDraggingSlideId] = useState<string>();
@@ -969,16 +989,8 @@ export function PresentationStudio({
   const [presentChrome, setPresentChrome] = useState(true);
   const presentChromeHideRef = useRef(0);
   const [rehearsalMode, setRehearsalMode] = useState(false);
-  const [rehearsalReport, setRehearsalReport] = useState<{
-    slideDurations: number[];
-    totalMs: number;
-  }>();
-  const rehearsalReportRef = useRef<HTMLDivElement>(null);
+  const [rehearsal, setRehearsal] = useState<RehearsalReport>();
   const presenterRef = useRef<HTMLDivElement>(null);
-  useModalFocus(rehearsalReportRef, {
-    open: Boolean(rehearsalReport && !presentedDeck),
-    onClose: () => setRehearsalReport(undefined),
-  });
   // Present mode keeps its own window key handler (Escape stops presenting);
   // the hook traps Tab inside and returns focus when presenting ends.
   useModalFocus(presenterRef, { open: Boolean(presentedDeck) });
@@ -1224,7 +1236,10 @@ export function PresentationStudio({
       } else if (event.key === "b" || event.key === "B") {
         event.preventDefault();
         setPresentBlackout(true);
-      } else if (event.key === "Escape") stopPresenting();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        stopPresenting();
+      }
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
@@ -1295,6 +1310,30 @@ export function PresentationStudio({
     },
     [committedDeck],
   );
+  // Escape steps out one level at a time, as in PowerPoint: out of the words
+  // first, keeping the box selected; a second Escape lets go of the box. It is
+  // read on the way down, because ProseMirror marks every Escape it sees as
+  // handled; the slash menu and a ghost suggestion keep their own Escape.
+  useEffect(() => {
+    if (readOnly || surface !== "slides") return;
+    const leaveText = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest(".presentation-text-field")) return;
+      if (!studioRef.current?.contains(target)) return;
+      if (document.querySelector(".slash-command-portal")) return;
+      if (target.querySelector(".spectra-autocomplete-ghost")) return;
+      // A box that was just inserted asks for the caret; once left it must
+      // not, or it would take the caret straight back.
+      setFreshTextId(undefined);
+      target.blur();
+      studioRef.current
+        .querySelector<HTMLElement>(".presentation-stage")
+        ?.focus({ preventScroll: true });
+    };
+    window.addEventListener("keydown", leaveText, true);
+    return () => window.removeEventListener("keydown", leaveText, true);
+  }, [readOnly, surface]);
   useEffect(() => {
     if (readOnly || surface !== "slides" || !selectedObjectId) return;
     const keydown = (event: KeyboardEvent) => {
@@ -1306,6 +1345,12 @@ export function PresentationStudio({
         target?.isContentEditable
       )
         return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setSelectedObjectId(undefined);
+        setLayerSelection([]);
+        return;
+      }
       if (event.key === "Delete" || event.key === "Backspace") {
         event.preventDefault();
         runCommandRef.current("arrange.delete");
@@ -1458,23 +1503,26 @@ export function PresentationStudio({
     setDraggingSlideId(undefined);
   }
   function addObject(type: PresentationObjectType) {
-    const object = createPresentationObject(
-      type,
-      activeSlide.objects.length + 1,
-    );
+    const ordinal = activeSlide.objects.length + 1;
+    const object = type === "text" ? createPresentationTextBox(ordinal) : createPresentationObject(type, ordinal);
     mutate((draft) => {
       draft.slides[activeSlideIndex]!.objects.push(object);
     });
     setSelectedObjectId(object.id);
     setLayerSelection([object.id]);
     onActiveRegionChange?.(object.id);
+    // A new text box takes the caret, so writing starts where it was drawn.
+    if (type === "text") setFreshTextId(object.id);
   }
   function applyTextPreset(preset: "title" | "subtitle" | "body" | "caption") {
+    // Presets take the deck's own inks; a deck without a theme writes in black.
+    const heading = deck.theme.tokens?.heading ?? "#000000";
+    const body = deck.theme.tokens?.body ?? "#000000";
     const tokens = {
-      title: { fontSize: 54, fontWeight: 700, color: "var(--accent-mint)" },
-      subtitle: { fontSize: 27, fontWeight: 520, color: "var(--accent-mint)" },
-      body: { fontSize: 21, fontWeight: 430, color: "var(--text-primary)" },
-      caption: { fontSize: 15, fontWeight: 520, color: "var(--text-secondary)" },
+      title: { fontSize: 54, fontWeight: 700, color: heading },
+      subtitle: { fontSize: 27, fontWeight: 520, color: heading },
+      body: { fontSize: 21, fontWeight: 430, color: body },
+      caption: { fontSize: 15, fontWeight: 520, color: body },
     } as const;
     updateSelected((object) => {
       object.style = { ...object.style, ...tokens[preset] };
@@ -1643,6 +1691,21 @@ export function PresentationStudio({
         { createMissing: true, mode: "preserve" },
       );
     });
+  }
+  /** Wears one of Designer's looks on the open slide; undo takes it off. */
+  function applyDesign(designed: PresentationSlide) {
+    mutate((draft) => {
+      draft.slides[activeSlideIndex] = structuredClone(designed);
+    });
+    setSelectedObjectId(undefined);
+    setLayerSelection([]);
+  }
+  function applyDeckDesign(family: DeckFamily) {
+    mutate((draft) => {
+      draft.slides = structuredClone(designDeck(draft, family));
+    });
+    setSelectedObjectId(undefined);
+    setLayerSelection([]);
   }
   function applyTheme(theme: (typeof THEMES)[number]) {
     mutate((draft) => {
@@ -2025,6 +2088,7 @@ export function PresentationStudio({
   }
   function beginText(objectId: string) {
     beginTyping();
+    setFreshTextId(undefined);
     setSelectedObjectId(objectId);
     onActiveRegionChange?.(objectId);
   }
@@ -2365,7 +2429,7 @@ export function PresentationStudio({
     presentIndexRef.current = startIndex;
     presentSlideStartedAtRef.current = now;
     setRehearsalMode(rehearse);
-    if (rehearse) setRehearsalReport(undefined);
+    if (rehearse) setRehearsal(undefined);
     setPresentedDeck({ ...staged, slides: shown });
     setPresentIndex(startIndex);
     setPresentStartedAt(now);
@@ -2385,16 +2449,8 @@ export function PresentationStudio({
   function stopPresenting() {
     const now = Date.now();
     recordPresentedSlide(now);
-    if (rehearsalModeRef.current) {
-      const slideDurations = [...rehearsalDurationsRef.current];
-      setRehearsalReport({
-        slideDurations,
-        totalMs: slideDurations.reduce(
-          (total, duration) => total + duration,
-          0,
-        ),
-      });
-    }
+    if (rehearsalModeRef.current && presentedDeck)
+      setRehearsal(rehearsalReport(presentedDeck.slides, rehearsalDurationsRef.current));
     rehearsalModeRef.current = false;
     presentSlideStartedAtRef.current = 0;
     setRehearsalMode(false);
@@ -3152,7 +3208,12 @@ export function PresentationStudio({
   const commandBlocked = (id: string) => commandRefusal(id) !== undefined;
 
   return (
-    <section ref={studioRef} className="presentation-studio">
+    <section
+      ref={studioRef}
+      className="presentation-studio"
+      // A selected object is let go of before Escape closes the deck.
+      data-escape-claim={!readOnly && surface === "slides" && selectedObjectId ? "" : undefined}
+    >
       <ArtifactWorkbar
         label="Presentation"
         selectionContext={selectionContext}
@@ -3333,9 +3394,18 @@ export function PresentationStudio({
             ) : null}
             <div
               className="presentation-stage"
+              // Focus rests here when Escape steps out of a text box, so the
+              // next key still belongs to this deck.
+              tabIndex={-1}
               data-zoomed={stageZoom !== 1 || undefined}
               style={
-                { "--presentation-stage-zoom": stageZoom } as CSSProperties
+                {
+                  "--presentation-stage-zoom": stageZoom,
+                  // The slide is fitted to the stage by height as well as
+                  // width, so the whole page is always in view.
+                  "--presentation-ratio":
+                    deck.settings?.aspectRatio === "4:3" ? 4 / 3 : 16 / 9,
+                } as CSSProperties
               }
             >
               <SlideCanvas
@@ -3359,6 +3429,7 @@ export function PresentationStudio({
                 onTextChange={updateTextParagraphs}
                 onTextFocus={beginText}
                 onTextBlur={finishTyping}
+                focusTextId={freshTextId}
               />
               <section
                 className="presentation-notes"
@@ -3385,7 +3456,6 @@ export function PresentationStudio({
                   />
                 </button>
                 {notesOpen ? (
-                  <>
                     <LocalAutocompleteTextarea
                       surface="slide_text"
                       value={activeSlide.speakerNotes ?? ""}
@@ -3410,8 +3480,6 @@ export function PresentationStudio({
                       }
                       textareaClassName="w-full"
                     />
-                    {null}
-                  </>
                 ) : null}
               </section>
             </div>
@@ -3906,11 +3974,24 @@ export function PresentationStudio({
 
                   {inspectorSection === "design" ? (
                     <>
+                      <PresentationDesigner
+                        deck={deck}
+                        slideIndex={activeSlideIndex}
+                        readOnly={readOnly || commandBlocked("design.applyLayout")}
+                        preview={(slide) => (
+                          <StillSlide
+                            className="presentation-designer-still"
+                            slide={slide}
+                            deck={deck}
+                            assets={assets}
+                            artifacts={artifacts}
+                          />
+                        )}
+                        onApply={applyDesign}
+                        onApplyDeck={applyDeckDesign}
+                      />
                       <section>
-                        <div className="flex items-center gap-2">
-                          <Palette className="h-4 w-4" />
-                          <h4>Theme</h4>
-                        </div>
+                        <h4>Theme</h4>
                         <div
                           className="presentation-theme-grid mt-3"
                           style={{
@@ -4312,78 +4393,20 @@ export function PresentationStudio({
           `position: fixed`, so a fixed overlay rendered inside it is pinned to
           the pane rather than to the window. Present mode already portals for
           the same reason. */}
-      {rehearsalReport && !presentedDeck && typeof document !== "undefined"
-        ? createPortal(
-            <div
-              ref={rehearsalReportRef}
-              tabIndex={-1}
-              className="presentation-rehearsal-report"
-              role="dialog"
-              aria-modal="true"
-              aria-label="Rehearsal timing report"
-            >
-              <header>
-                <span>
-                  <Clock3 className="h-4 w-4" /> Private rehearsal
-                </span>
-                <button type="button" aria-label="Close rehearsal report" onClick={() => setRehearsalReport(undefined)}>
-                  <X className="h-4 w-4" />
-                </button>
-              </header>
-              <main>
-                <div>
-                  <strong>{durationLabel(rehearsalReport.totalMs)}</strong>
-                  <span>Total speaking time</span>
-                </div>
-                <div>
-                  <strong>{deck.slides.length}</strong>
-                  <span>Slides rehearsed</span>
-                </div>
-                <div>
-                  <strong>
-                    {durationLabel(
-                      rehearsalReport.totalMs /
-                        Math.max(1, rehearsalReport.slideDurations.length),
-                    )}
-                  </strong>
-                  <span>Average per slide</span>
-                </div>
-              </main>
-              <ol>
-                {deck.slides.map((slide, index) => {
-                  const duration = rehearsalReport.slideDurations[index] ?? 0;
-                  const target = (deck.settings?.autoAdvanceSeconds ?? 45) * 1_000;
-                  return (
-                    <li key={slide.id}>
-                      <span>{index + 1}</span>
-                      <strong>{presentationSlideLabel(slide, index)}</strong>
-                      <small data-over={duration > target * 1.25 || undefined}>
-                        {durationLabel(duration)}
-                      </small>
-                    </li>
-                  );
-                })}
-              </ol>
-              <footer>
-                <p>
-                  Timings are private and do not alter the shared presentation.
-                  Amber timings exceed the current per-slide target by more than
-                  25%.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRehearsalReport(undefined);
-                    startPresenting(true);
-                  }}
-                >
-                  Rehearse again
-                </button>
-              </footer>
-            </div>,
-            document.body,
-          )
-        : null}
+      {rehearsal && !presentedDeck && typeof document !== "undefined" ? (
+        <PresentationRehearsalReport
+          report={rehearsal}
+          targetMs={deck.settings?.autoAdvanceSeconds ? deck.settings.autoAdvanceSeconds * 1_000 : undefined}
+          preview={(slide) => (
+            <StillSlide className="presentation-rehearsal-still" slide={slide} deck={deck} assets={assets} artifacts={artifacts} />
+          )}
+          onClose={() => setRehearsal(undefined)}
+          onRehearseAgain={() => {
+            setRehearsal(undefined);
+            startPresenting(true);
+          }}
+        />
+      ) : null}
       {presentedDeck && typeof document !== "undefined"
         ? createPortal(
             <div
@@ -4420,7 +4443,7 @@ export function PresentationStudio({
                   </span>
                   {rehearsalMode ? " · Rehearsal" : ""}
                 </span>
-                <strong>{presentedDeck.slides[presentIndex]!.title}</strong>
+                <strong>{presentationSlideLabel(presentedDeck.slides[presentIndex]!, presentIndex)}</strong>
                 <span className="presentation-presenter-actions">
                   <button
                     type="button"

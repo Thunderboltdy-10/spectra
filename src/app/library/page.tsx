@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export default function LibraryPage() {
   return (
-    <AppShell fullBleed noScroll contentClassName="!p-0">
+    <AppShell fullBleed noScroll workTabs contentClassName="!p-0">
       <Suspense
         fallback={<div className="h-full min-h-0" />}
       >

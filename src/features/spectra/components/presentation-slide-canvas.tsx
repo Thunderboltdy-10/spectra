@@ -82,6 +82,16 @@ function objectStyle(
   };
 }
 
+/**
+ * A deck names one family (its theme's, or the run's own). When this computer
+ * does not have it, the slide falls back to the interface's sans rather than
+ * the browser's serif, the way PowerPoint substitutes a missing font.
+ */
+function slideFontStack(family: string) {
+  if (family.includes(",")) return family;
+  return `"${family.replace(/"/g, "")}", var(--font-figtree), "Segoe UI", system-ui, sans-serif`;
+}
+
 export function styleValue(
   object: PresentationObject,
   key: string,
@@ -288,6 +298,7 @@ function PresentationObjectView({
   onTextChange,
   onTextFocus,
   onTextBlur,
+  focusText = false,
   path,
 }: {
   object: PresentationObject;
@@ -311,6 +322,8 @@ function PresentationObjectView({
   onTextChange: (paragraphs: PresentationParagraph[]) => void;
   onTextFocus: () => void;
   onTextBlur: () => void;
+  /** Put the caret in this object's text as soon as it is drawn. */
+  focusText?: boolean;
   /** Canonical pointer for this object, e.g. `/slides/2/objects/1`. */
   path?: string;
 }) {
@@ -362,11 +375,9 @@ function PresentationObjectView({
     paragraphs,
   ]);
   const textStyle: CSSProperties = {
-    color: String(styleValue(object, "color", "#173f35")),
-    fontFamily: presentationFontFamily(
-      object.style?.fontFamily,
-      themeFonts,
-      textFontSize,
+    color: String(styleValue(object, "color", "#000000")),
+    fontFamily: slideFontStack(
+      presentationFontFamily(object.style?.fontFamily, themeFonts, textFontSize),
     ),
     // Presentation geometry uses a 1000-unit logical canvas. One cqw
     // represents ten of those units, so a 50-unit font maps to 5cqw.
@@ -399,6 +410,13 @@ function PresentationObjectView({
       data-selected={selected || undefined}
       data-locked={object.locked || undefined}
       data-overflow={textOverflow || undefined}
+      // A text box has no frame of its own, so while it is being written the
+      // stage draws one: dashed when the box is empty, and on hover otherwise.
+      data-text-frame={
+        object.type === "text" && !compact && !readOnly
+          ? presentationObjectText(object).trim() ? "hover" : "empty"
+          : undefined
+      }
       data-animation={
         animate && object.animation?.kind !== "none"
           ? object.animation?.kind
@@ -408,6 +426,9 @@ function PresentationObjectView({
         {
           "--presentation-animation-duration": `${object.animation?.durationMs ?? 450}ms`,
           "--presentation-animation-delay": `${object.animation?.delayMs ?? 0}ms`,
+          // The dashed frame round a text box is drawn in its own ink, so it
+          // shows on a dark band as well as on paper.
+          "--text-frame-ink": textStyle.color,
         } as CSSProperties
       }
       onClick={(event) => {
@@ -449,6 +470,8 @@ function PresentationObjectView({
           {...(path ? targetAttrs(`${path}/text`) : {})}
           paragraphs={paragraphs}
           editable={!object.locked}
+          autoFocus={focusText}
+          placeholder="Write here"
           native={nativeText}
           style={textStyle}
           onFocus={onTextFocus}
@@ -672,6 +695,7 @@ export function SlideCanvas({
   onTextChange,
   onTextFocus,
   onTextBlur,
+  focusTextId,
 }: {
   slide: PresentationSlide;
   deck: PresentationContent;
@@ -703,6 +727,8 @@ export function SlideCanvas({
   onTextChange?: (objectId: string, paragraphs: PresentationParagraph[]) => void;
   onTextFocus?: (objectId: string) => void;
   onTextBlur?: () => void;
+  /** A text object that takes the caret once drawn, such as a box just inserted. */
+  focusTextId?: string;
 }) {
   const canvasHeight = deck.settings?.aspectRatio === "4:3" ? 750 : 562.5;
   const tokens = deck.theme.tokens ?? {};
@@ -725,10 +751,12 @@ export function SlideCanvas({
         {
           aspectRatio:
             deck.settings?.aspectRatio === "4:3" ? "4 / 3" : "16 / 9",
+          // Behind the slide's own layers a slide is card paper, like every
+          // other page on the desk, unless the slide was given its own fill.
           background: compact
-            ? slide.background || tokens.background || "var(--bg-primary)"
-            : "var(--bg-primary)",
-          color: tokens.body || "#324b43",
+            ? slide.background || tokens.background || "var(--card-paper)"
+            : slide.background || "var(--card-paper)",
+          color: tokens.body || "#000000",
           animationDuration:
             animateObjects && slide.transition?.durationMs
               ? `${slide.transition.durationMs}ms`
@@ -870,6 +898,7 @@ export function SlideCanvas({
               onTextChange={(paragraphs) => onTextChange?.(object.id, paragraphs)}
               onTextFocus={() => onTextFocus?.(object.id)}
               onTextBlur={() => onTextBlur?.()}
+              focusText={focusTextId === object.id}
               path={`/slides/${slideIndex}/objects/${objectIndex}`}
             />
           </div>

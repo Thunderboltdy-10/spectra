@@ -75,7 +75,7 @@ export function kindLine(kind: Pick<SchoolKindStatus, "mode" | "state" | "availa
   if (kind.state === "queued") return "Waiting to sync";
   const last = kind.lastSuccessAt ? `Synced ${ago(kind.lastSuccessAt, now)}` : "Not synced yet";
   const next = kind.nextRunAt ? `next ${fromNow(kind.nextRunAt, now)}` : kind.mode === "manual" ? "next when you sync" : null;
-  return next ? `${last} · ${next}` : last;
+  return next ? `${last}, ${next}` : last;
 }
 
 /** The header's status control, in the artifact's pattern (EDITORS.md, "The status control"). */
@@ -160,19 +160,36 @@ export function groupPastTasks(tasks: readonly SchoolTask[]): TaskGroup[] {
   return [...classes.values()].sort((a, b) => a.className.localeCompare(b.className));
 }
 
-/** Current tasks by when they are due: overdue, this week, later, no date. */
+/** Midnight at the start of the day `at` falls in, local time. */
+export function startOfDay(at: number) {
+  const date = new Date(at);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+/** Days from today to the day `at` falls in: 0 today, 1 tomorrow, -1 yesterday. */
+export function daysFrom(at: number, now: number) {
+  return Math.round((startOfDay(at) - startOfDay(now)) / DAY);
+}
+
+/**
+ * Current tasks by when they are due: late, the coming seven days, later, and
+ * no date. Each ticket says its own day ("Today, 09:20"), so the week is one
+ * group rather than a heading a day.
+ */
 export function groupCurrentTasks(tasks: readonly SchoolTask[], now: number) {
-  const week = now + 7 * DAY;
   const groups = [
-    { key: "overdue", label: "Overdue", tasks: [] as SchoolTask[] },
+    { key: "late", label: "Late", tasks: [] as SchoolTask[] },
     { key: "week", label: "This week", tasks: [] as SchoolTask[] },
     { key: "later", label: "Later", tasks: [] as SchoolTask[] },
     { key: "undated", label: "No due date", tasks: [] as SchoolTask[] },
   ];
   for (const task of tasks) {
-    const index = !task.dueAt ? 3 : task.dueAt < now ? 0 : task.dueAt <= week ? 1 : 2;
+    if (task.past) continue;
+    const index = task.dueAt === null ? 3 : task.dueAt < now ? 0 : daysFrom(task.dueAt, now) < 7 ? 1 : 2;
     groups[index]!.tasks.push(task);
   }
+  for (const group of groups) group.tasks.sort((a, b) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity));
   return groups.filter((group) => group.tasks.length);
 }
 

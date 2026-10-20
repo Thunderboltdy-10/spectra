@@ -75,7 +75,7 @@ describe("treeFailureMessage LIBRARY_* humanization", () => {
     );
   });
 
-  it("SurfaceNewMenu explains why New is disabled outside a folder", () => {
+  it("SurfaceNewMenu offers only what can be made where the reader stands", () => {
     const organizer = readFileSync(
       resolve(__dirname, "../organization/library-organizer.tsx"),
       "utf8",
@@ -85,18 +85,15 @@ describe("treeFailureMessage LIBRARY_* humanization", () => {
       "utf8",
     );
     expect(organizer).toContain("const inFolder = location.kind === \"folder\"");
-    expect(organizer).toContain("disabled={!inFolder || busy}");
-    expect(organizer).toContain('disabledTitle={');
-    expect(organizer).toContain('"Open a folder to create here"');
-    // Recent / Favorites / Shared are quick views → !inFolder → disabled + reason.
-    expect(organizer).toContain('location.kind === "quick"');
+    // Recent, Favorites and Shared are ways of looking: new work still starts at
+    // the top, but folders, workspaces and imports appear only inside a place.
+    expect(organizer).toContain("onNewFolder={inFolder ? createFolderHere : undefined}");
+    expect(organizer).toContain("onNewWork={createWorkHere}");
+    // When New is unavailable the reason is visible, not hover-only.
     expect(chrome).toContain("disabledTitle");
     expect(chrome).toContain("aria-description");
-    // Visible honesty (not hover-only): muted status text when disabled.
     expect(chrome).toContain('role="status"');
     expect(chrome).toContain("{disabledTitle}");
-    expect(chrome).toContain("text-micro");
-    expect(chrome).toContain("--text-tertiary");
     expect(chrome).toContain("withDisabledReason");
   });
 });

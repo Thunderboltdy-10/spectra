@@ -1,8 +1,6 @@
 "use client";
 
 import {
-  ChevronLeft,
-  ChevronRight,
   Check,
   ChevronDown,
   GripVertical,
@@ -18,7 +16,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { moveKey, planGroupedLayout, type GroupedLayout } from "@/components/ui/adaptive-groups";
@@ -51,8 +51,11 @@ import {
   isRenderedControl,
 } from "./workbar-controls";
 import {
+  actionOnTab,
   arrangeWorkbar,
   groupedItemsOf,
+  rareGroupsOf,
+  rareSteps,
   type ArrangedAction,
   type ArrangedGroup,
   type WorkbarAction as PlacedAction,
@@ -62,6 +65,7 @@ import {
   WORKBAR_METRICS,
   estimateCommandWidths,
   estimateGroupMenuWidth,
+  isHistoryCommand,
   planStepsFor,
 } from "./workbar-plans";
 
@@ -210,11 +214,18 @@ export function ArtifactWorkbar({
   const [activeTab, setActiveTab] = useState("General");
   const [customizing, setCustomizing] = useState(false);
   const [collapse, setCollapse] = useState(EMPTY_LAYOUT);
+  // Pixels the last plan overran by on screen (a font that rendered wider than
+  // measured); the next plan leaves that much more room.
+  const [overrun, setOverrun] = useState(0);
   const [dragging, setDragging] = useState<{ kind: "command" | "group"; id: string } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const commandsHostRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
-  const previousSelectionContext = useRef<string | undefined>(undefined);
+  // The context a work opens in is its resting one (a deck with nothing
+  // selected): opening the work, or coming back to it, shows General, and
+  // only a selection after that raises its own tab.
+  const restingSelectionContext = useRef(selectionContext);
+  const previousSelectionContext = useRef(selectionContext);
   const commandCtx = useMemo(
     () => commandContext(contract.type, can, contract.role, selectionContext, {
       compatibilityProfile: contract.compatibilityProfile,
@@ -229,7 +240,7 @@ export function ArtifactWorkbar({
     })),
     [actions, contract.type, storedLayout],
   );
-  const tabs = useMemo(
+  const allTabs = useMemo(
     () => tabsFor(contract.type, selectionContext, storedLayout),
     [contract.type, selectionContext, storedLayout],
   );
@@ -237,22 +248,6 @@ export function ArtifactWorkbar({
     const permanent = COMMAND_TABS[contract.type];
     return new Set(contextualTabsFor(contract.type).filter((tab) => !permanent.includes(tab)));
   }, [contract.type]);
-  const tabSignature = tabs.join("\u001f");
-  useEffect(() => {
-    if (selectionContext !== previousSelectionContext.current) {
-      previousSelectionContext.current = selectionContext;
-      const next = selectionContext && tabs.includes(selectionContext)
-        ? selectionContext
-        : "General";
-      setActiveTab((current) => current === next ? current : next);
-      return;
-    }
-    setActiveTab((current) => tabs.includes(current) ? current : "General");
-    // tabSignature is the stable dependency for the derived tab list. The
-    // array itself is intentionally not used because tabsFor returns a new
-    // array when layout preferences are resolved.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectionContext, tabSignature]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
@@ -321,6 +316,30 @@ export function ArtifactWorkbar({
         onSelect: (value?: CommandParam) => executeCommand(command, commandCtx, value),
       };
     }), [commandCtx, commands]);
+  // A tab with nothing on it is not shown. While customising every tab stays,
+  // so a command can be dropped onto one that is empty.
+  const tabs = useMemo(
+    () => customizing
+      ? allTabs
+      : allTabs.filter((tab) => tab === "General" || placedActions.some((action) => !isHistoryCommand(contract.type, action.id) && actionOnTab(action, tab))),
+    [allTabs, contract.type, customizing, placedActions],
+  );
+  const tabSignature = tabs.join("\u001f");
+  useEffect(() => {
+    if (selectionContext !== previousSelectionContext.current) {
+      previousSelectionContext.current = selectionContext;
+      const next = selectionContext && selectionContext !== restingSelectionContext.current && tabs.includes(selectionContext)
+        ? selectionContext
+        : "General";
+      setActiveTab((current) => current === next ? current : next);
+      return;
+    }
+    setActiveTab((current) => tabs.includes(current) ? current : "General");
+    // tabSignature is the stable dependency for the derived tab list. The
+    // array itself is intentionally not used because tabsFor returns a new
+    // array when layout preferences are resolved.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionContext, tabSignature]);
 
   const arranged = useMemo(
     () => arrangeWorkbar({ type: contract.type, tab: activeTab, actions: placedActions, layout: storedLayout }),
@@ -333,8 +352,13 @@ export function ArtifactWorkbar({
     ],
     [arranged],
   );
-  const steps = useMemo(() => planStepsFor(contract.type, activeTab), [activeTab, contract.type]);
-  const moreAlways = arranged.advanced.length > 0 || Boolean(overflow);
+  // Rare commands give way first, then the tab's authored plan runs.
+  const steps = useMemo(
+    () => [...rareSteps(arranged), ...planStepsFor(contract.type, activeTab)],
+    [activeTab, arranged, contract.type],
+  );
+  const folded = useMemo(() => rareGroupsOf(arranged), [arranged]);
+  const moreAlways = Boolean(overflow);
   const measureSignature = barGroups
     .map((group) => `${group.name}:${group.actions.map((action) => `${action.id}/${action.label}/${action.disabled ? 1 : 0}`).join(",")}`)
     .join("\u001f");
@@ -349,7 +373,7 @@ export function ArtifactWorkbar({
       if (hostWidth < 40) return;
       const reserved = [...host.querySelectorAll<HTMLElement>("[data-workbar-reserved]")]
         .reduce((total, node) => total + node.offsetWidth + WORKBAR_METRICS.groupGap, 0);
-      const available = Math.max(0, hostWidth - reserved);
+      const available = Math.max(0, hostWidth - reserved - overrun);
       const measured = new Map<string, { full: number; icon: number }>();
       const groupMenu: Record<string, number> = {};
       for (const node of measure.querySelectorAll<HTMLElement>("[data-measure-id]")) {
@@ -374,6 +398,7 @@ export function ArtifactWorkbar({
       const next = planGroupedLayout({
         items,
         plan: steps,
+        folded,
         available,
         metrics: {
           ...WORKBAR_METRICS,
@@ -391,19 +416,28 @@ export function ArtifactWorkbar({
     // commands must not re-plan, or a selection that only changes state would
     // relayout the bar every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [measureSignature, steps, customizing, moreAlways]);
+  }, [measureSignature, customizing, moreAlways, overrun]);
+
+  // A new set of commands is planned from what is measured again.
+  useLayoutEffect(() => setOverrun(0), [measureSignature]);
+  // The plan is checked against the bar it produced: if the last group still
+  // runs past the edge, plan again with that much less room.
+  useLayoutEffect(() => {
+    const host = commandsHostRef.current;
+    if (!host || customizing) return;
+    const shown = [...host.children].filter((child) => !child.classList.contains("spectra-workbar-measure"));
+    const right = Math.max(...shown.map((child) => child.getBoundingClientRect().right));
+    const over = Math.ceil(right - host.getBoundingClientRect().right);
+    if (over > 0) setOverrun((current) => current + over);
+  }, [collapse, customizing]);
 
   const layout = customizing ? EMPTY_LAYOUT : collapse;
-  const moreGroups = useMemo(() => {
-    const shed = arranged.groups
+  const moreGroups = useMemo(
+    () => arranged.groups
       .map((group) => ({ name: group.name, actions: group.actions.filter((action) => layout.inMore.has(action.id)) }))
-      .filter((group) => group.actions.length);
-    const merged = new Map<string, ArrangedAction[]>();
-    for (const group of [...shed, ...arranged.advanced]) {
-      merged.set(group.name, [...(merged.get(group.name) ?? []), ...group.actions]);
-    }
-    return [...merged].map(([name, groupActions]) => ({ name, actions: groupActions }));
-  }, [arranged, layout.inMore]);
+      .filter((group) => group.actions.length),
+    [arranged, layout.inMore],
+  );
 
   const showPrimary = !primary?.requires || can(primary.requires);
 
@@ -619,16 +653,7 @@ export function ArtifactWorkbar({
               align="end"
               triggerClassName="spectra-workbar-overflow"
             >
-              {moreGroups.map((group) => (
-                <Fragment key={group.name}>
-                  {moreGroups.length > 1 ? (
-                    <DropdownMenuLabel className="spectra-workbar-menu-heading">{group.name}</DropdownMenuLabel>
-                  ) : null}
-                  {group.actions.map((action) => (
-                    <WorkbarMenuEntry key={action.id} action={action as BarAction} />
-                  ))}
-                </Fragment>
-              ))}
+              <MoreGroups groups={moreGroups} />
               {overflow}
             </WorkbarMenu>
           ) : null}
@@ -802,6 +827,38 @@ function WorkbarActionButton({ action, iconOnly }: { action: BarAction; iconOnly
   return !showLabel || action.hint ? <Tooltip label={tooltipOf(action)}>{button}</Tooltip> : button;
 }
 
+/**
+ * What More holds. One group is listed as it is; several are one row each that
+ * opens its commands beside the menu, so the list stays short. A group of one
+ * is just that command.
+ */
+function MoreGroups({ groups }: { groups: ReadonlyArray<{ name: string; actions: ArrangedAction[] }> }) {
+  if (groups.length === 1) {
+    return groups[0]!.actions.map((action) => <WorkbarMenuEntry key={action.id} action={action as BarAction} />);
+  }
+  return groups.map((group) => {
+    const only = group.actions.length === 1 ? (group.actions[0] as BarAction) : null;
+    // A lone command is just itself; a lone control still opens, to show its choices.
+    if (only && !isRenderedControl(only)) return <WorkbarMenuEntry key={group.name} action={only} />;
+    const Lead = group.actions.find((action) => action.icon)?.icon;
+    return (
+      <DropdownMenuSub key={group.name}>
+        <DropdownMenuSubTrigger className={workbarMenuItemClass()}>
+          <span className="grid size-4 shrink-0 place-items-center text-[var(--text-secondary)]">
+            {Lead ? <Lead className="size-3.5" /> : null}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-left">{only ? only.label : group.name}</span>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent layer="dropdown" className="spectra-workbar-menu" data-single-control={only ? "" : undefined}>
+          {group.actions.map((action) => (
+            <WorkbarMenuEntry key={action.id} action={action as BarAction} />
+          ))}
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+    );
+  });
+}
+
 /** A command inside a group's dropdown or More: the choice is already open. */
 function WorkbarMenuEntry({ action }: { action: BarAction }) {
   if (isRenderedControl(action)) {
@@ -823,77 +880,9 @@ function WorkbarMenuEntry({ action }: { action: BarAction }) {
   );
 }
 
-/**
- * The `‹ n · Title ⌄  n of N  ›` selector. Presentation at 850 and Quiz at
- * every width had independently arrived at this shape; this is the one
- * implementation both converge on.
- *
- * This control is a native `<select>`, not Radix. Sheet and slide pickers sit
- * in a ResizeObserver-driven studio: Radix SelectValue/ItemText will loop
- * `setState` when the trigger width or option identity flutters, and that
- * took down the whole Library. Native change events fire only on user action.
- */
-export function WorkbarItemSelector({
-  ariaLabel,
-  items,
-  value,
-  onChange,
-  itemNoun = "item",
-  className,
-}: {
-  ariaLabel: string;
-  items: ReadonlyArray<{ value: string; label: string; disabled?: boolean }>;
-  value: string;
-  onChange: (value: string) => void;
-  /** Used in "3 of 12 slides" and in the previous/next accessible names. */
-  itemNoun?: string;
-  className?: string;
-}) {
-  const index = items.findIndex((item) => item.value === value);
-  if (!items.length) return null;
-  return (
-    <div className={cn("spectra-workbar-item-selector", className)}>
-      <button
-        type="button"
-        className="spectra-workbar-step"
-        aria-label={`Previous ${itemNoun}`}
-        title={`Previous ${itemNoun}`}
-        disabled={index <= 0}
-        onClick={() => onChange(items[Math.max(0, index - 1)]!.value)}
-      >
-        <ChevronLeft className="size-3.5" />
-      </button>
-      <select
-        aria-label={ariaLabel}
-        className="spectra-workbar-item-trigger spectra-workbar-native-select min-w-0 flex-1"
-        data-workbar-picker="native"
-        value={index >= 0 ? value : items[0]!.value}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {items.map((item, position) => (
-          <option key={item.value} value={item.value} disabled={item.disabled}>
-            {position + 1} · {item.label}
-          </option>
-        ))}
-      </select>
-      <span className="spectra-workbar-count">
-        {index + 1} of {items.length}
-      </span>
-      <button
-        type="button"
-        className="spectra-workbar-step"
-        aria-label={`Next ${itemNoun}`}
-        title={`Next ${itemNoun}`}
-        disabled={index < 0 || index >= items.length - 1}
-        onClick={() =>
-          onChange(items[Math.min(items.length - 1, index + 1)]!.value)
-        }
-      >
-        <ChevronRight className="size-3.5" />
-      </button>
-    </div>
-  );
-}
+// The item picker lives in its own module; the bar re-exports it so every
+// studio keeps importing its tools from one place.
+export { WorkbarItemSelector } from "./workbar-item-selector";
 
 export type WorkbarOption<T extends string = string> = {
   value: T;
@@ -1041,5 +1030,5 @@ export function WorkbarMore({
 }
 
 export function workbarMenuItemClass() {
-  return "flex w-full items-center gap-2 rounded-chip px-2.5 py-1.5 text-left text-micro font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:pointer-events-none disabled:opacity-45";
+  return "flex w-full items-center gap-2.5 rounded-chip px-2.5 py-[7px] text-left text-ui font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:pointer-events-none disabled:opacity-45";
 }

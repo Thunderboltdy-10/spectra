@@ -702,7 +702,7 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     title: "Connect an account",
     description: "Connect or disconnect an outside service.",
     ui: ["app.providers.connect"],
-    server: ["managebac:configure", "managebac:disconnect"],
+    server: ["managebac:configure", "managebac:disconnect", "managebac:reopenBlocked"],
     reach: user("Connecting a service goes through its own sign-in, which only the user completes."),
   },
 
@@ -1040,6 +1040,11 @@ export const SERVER_PLUMBING: Readonly<Record<string, string>> = {
   "bridgeSync:*": "Spectra Bridge device protocol.",
   "calendar:ensureLegacyMigration": "One-time data migration.",
   "changeGroups:commitCurrent": "Saves edit history as the editors write.",
+  "dailyBriefs:claim": "Home's morning brief protocol: one writer per day.",
+  "dailyBriefs:save": "Home's morning brief protocol: the written brief.",
+  "dailyBriefs:mark": "Home's morning brief protocol: which suggestions the student has acted on.",
+  "dailyBriefs:setSchedule": "Keeps the brief's wake-up schedule in step with the student's settings.",
+  "school:ensureTaskWork": "Opens a school deadline as its task work, made on demand when the student opens it.",
   "changeGroups:commitImport": "Saves edit history for imports.",
   "changeGroups:commitRestore": "A refusing tombstone for older clients; restores run through the signed artifactRestore admission, which restore_version calls.",
   "changeGroups:reconcileImports": "Saves edit history for imports.",
@@ -1122,6 +1127,7 @@ export const SERVER_PLUMBING: Readonly<Record<string, string>> = {
   "spectraWorkspaces:resumePending": "Spectra's own run machinery.",
   "spectraWorkspaces:stageAiPatch": "Spectra's own run machinery.",
   "spectraWorkspaces:settleForRun": "Spectra's own run machinery.",
+  "workStacks:*": "How the shelf shows works laid on one another; it never moves a work, so there is nothing for Spectra to do.",
 };
 
 const BY_ID = new Map(COMMAND_CATALOG.map((command) => [command.id, command]));
@@ -1167,7 +1173,9 @@ export function serverFunctionCoverage(name: string): { kind: "command"; id: str
 /*
  * Editor commands (the artifact capabilities behind each studio's bar). Every
  * one that changes content is reached with edit_artifact, which writes the
- * whole authoring format of the type. The rest are only the user's; these
+ * whole authoring format of the type: a studio feature that changes work
+ * (Designer is one) lands in that format too, so the model can do whatever the
+ * bar can. The rest are only the user's; these
  * rules name which and why. They run in order and the first match wins.
  */
 const ARTIFACT_RULES: ReadonlyArray<{ match: RegExp; reach: AiReach }> = [
@@ -1183,7 +1191,7 @@ const ARTIFACT_RULES: ReadonlyArray<{ match: RegExp; reach: AiReach }> = [
   { match: /\.clipboard\.|\.copyStyle$/, reach: user("It uses the user's clipboard.") },
   { match: /\.protect\.sheet$/, reach: user("Protection guards a sheet against edits, including Spectra's, so only the user sets it.") },
   {
-    match: /^whiteboard\.fit$|^sheets\.format$|\.(view|zoom|navigate\.(find|outline)|layout\.(focus|pageCanvas|previewReader)|panel|tool\.(select|hand)|stage\.(guides|grid)|accessibility\.readingOrder|transition\.native)(\.|$)|\.(pages|rail|files|questions|question\.details|cohort|attempts|preview|build|settings|progress|filters|find|today|previous|next|calendars|dismissed|competence|brief|refresh|browse|notes\.panel|comments|spellcheck|outline|sources\.open|design\.open|design\.audit|library|explain|trace|summary|history|pivot|native|show|inspector|slidePreviews|notesPage|sources)$/,
+    match: /^whiteboard\.fit$|^sheets\.format$|\.(view|zoom|navigate\.(find|outline)|layout\.(focus|pageCanvas|pagesSideBySide|previewReader)|panel|tool\.(select|hand)|stage\.(guides|grid)|accessibility\.readingOrder|transition\.native)(\.|$)|\.(pages|rail|files|questions|question\.details|cohort|attempts|preview|build|settings|progress|filters|find|today|previous|next|calendars|dismissed|competence|brief|refresh|browse|notes\.panel|comments|spellcheck|outline|sources\.open|design\.audit|library|explain|trace|summary|history|pivot|native|show|inspector|slidePreviews|notesPage|sources)$/,
     reach: user("It changes only what the user sees, not the work. Spectra reads work with read_artifact and shows it with open_in_spectra."),
   },
 ];

@@ -51,7 +51,7 @@ export function ThreadCard({
           {selected ? <Check className="h-4 w-4" /> : running ? <Radio className="h-4 w-4 animate-pulse motion-reduce:animate-none" /> : <MessageSquare className="h-4 w-4" />}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5 text-micro font-semibold uppercase tracking-[0.09em] text-[var(--brand-primary)]"><span>Chat</span>{running ? <span className="normal-case tracking-normal">Live</span> : waiting ? <span className="normal-case tracking-normal text-[var(--warning)]">Needs you</span> : null}</span>
+          <span className="flex items-center gap-1.5 text-micro font-semibold text-[var(--brand-primary)]"><span>Chat</span>{running ? <span className="normal-case tracking-normal">Live</span> : waiting ? <span className="normal-case tracking-normal text-[var(--warning)]">Needs you</span> : null}</span>
           <span className="mt-1.5 block truncate font-display text-editor font-semibold text-[var(--text-primary)]" title={thread.title}>{thread.title}</span>
           {!compact ? <span className="mt-1.5 block line-clamp-2 text-micro leading-5 text-[var(--text-secondary)]">{previewText(thread.summaryShort, "Continue the thinking captured in this chat.")}</span> : null}
           <span className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-micro text-[var(--text-tertiary)]"><span className="inline-flex items-center gap-1"><MessagesSquare className="h-3 w-3" />{thread.messageCount ?? 0} messages</span><span>{workspaceLabel ?? "Inbox"}</span><span>{formatRelativeTime(thread.lastMessageAt ?? thread.updatedAt)}</span></span>

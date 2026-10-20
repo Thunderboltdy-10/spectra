@@ -1,23 +1,17 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, CheckCircle2, ExternalLink, Link2, LoaderCircle, LockKeyhole, Plus } from "@/components/icons/glyph-icons";
-import { Icon } from "@/components/icons";
+import { ChevronLeft, ChevronRight, LoaderCircle, LockKeyhole, Plus } from "@/components/icons/glyph-icons";
 import type { BarCommand } from "@/components/ui/adaptive-bar";
 import { IconButton } from "@/components/ui/icon-button";
-import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/ui/page-header";
-import { EmptyState, LoadingRows } from "@/components/ui/page-state";
-import { PanelTabs, SidePanel } from "@/components/ui/side-panel";
-import { SpectraStoredText } from "../../components/spectra-rich-content";
-import { plainTextFromStored } from "../../rich-content";
-import { beginCreation, useLifeArrival, useLifeDeparture, useLifeLanding } from "../../life/use-life";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { beginCreation, useLifeArrival, useLifeDeparture } from "../../life/use-life";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { uniqueToken } from "@/lib/unique-token";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { Button } from "@/components/ui/button";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
@@ -45,13 +39,23 @@ import {
 } from "../domain/local-days";
 import { requestSpectra } from "../../data/request";
 import { layoutTimedLanes, type TimedLane } from "../domain/timed-lanes";
+import { useDeadlineClasses, type DeadlineClass } from "../../school/use-deadline-classes";
+import { planWorkId } from "./calendar-plans";
+import { TaskPeek } from "./task-peek";
+import { schoolRecordOf, useTaskPeek } from "./use-task-peek";
+import { useOpenSchoolTask } from "../../school/open-school-task";
+import { formatTime, isDeadline, isReschedulable, layerFor } from "../domain/item-format";
+import { CalendarItemCard, type OpenedCalendarItem } from "./calendar-item-card";
 
 const HOUR = 60 * 60_000;
-const HOUR_PX = 48;
+// Tall enough that a school day, 07:00 to about 20:00, fills the grid and a lesson has room for its title.
+const HOUR_PX = 60;
 const WORKDAY_START_HOUR = 7;
 const HOURS = 24;
 const MIN_DAYS = 1;
 const MAX_DAYS = 10;
+/** The days the week narrows to while a work stands open beside it. */
+const BESIDE_SIDE_DAYS = 3;
 const EXTEND_DAYS = 7;
 const MAX_LOADED_DAYS = 42;
 const SCROLL_LOAD_PX = 280;
@@ -74,14 +78,6 @@ function daysAround(center: number) {
   return localDaysAround(center, EXTEND_DAYS, EXTEND_DAYS * 2);
 }
 
-function formatTime(value: number, timezone: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: timezone,
-  }).format(value);
-}
-
 function formatRange(rangeStart: number, span: number) {
   const start = new Date(rangeStart);
   const end = new Date(addLocalDays(rangeStart, span - 1));
@@ -93,16 +89,8 @@ function formatRange(rangeStart: number, span: number) {
       year: "numeric",
     }).format(start);
   }
-  const startLabel = new Intl.DateTimeFormat("en-GB", {
-    month: "short",
-    day: "numeric",
-  }).format(start);
-  const endLabel = new Intl.DateTimeFormat("en-GB", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(end);
-  return `${startLabel} · ${endLabel}`;
+  // "12–18 Oct 2026", "29 Sept – 5 Oct 2026": the range names what the two ends share once.
+  return new Intl.DateTimeFormat("en-GB", { month: "short", day: "numeric", year: "numeric" }).formatRange(start, end);
 }
 
 function monthCells(year: number, month: number) {
@@ -186,7 +174,7 @@ function CalendarDatePicker({
               setLevel((current) => (current === "days" ? "months" : "years"))
             }
           >
-            {level === "years" ? `${years[0]} · ${years[years.length - 1]}` : `${MONTHS[month]} ${year}`}
+            {level === "years" ? `${years[0]}–${years[years.length - 1]}` : `${MONTHS[month]} ${year}`}
           </button>
           <button
             type="button"
@@ -245,7 +233,7 @@ function CalendarDatePicker({
           </div>
         ) : (
           <>
-            <div className="spectra-calendar-date-grid mb-1 text-micro font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+            <div className="spectra-calendar-date-grid mb-1 text-micro font-bold text-[var(--text-tertiary)]">
               {["M", "T", "W", "T", "F", "S", "S"].map((day, index) => (
                 <span key={`${day}-${index}`} className="grid h-6 place-items-center">
                   {day}
@@ -282,20 +270,6 @@ function CalendarDatePicker({
   );
 }
 
-function planSubtitle(item: CalendarItem) {
-  const notes = item.notes ? plainTextFromStored(item.notes).replace(/\s+/g, " ").trim() : "";
-  if (notes && notes.length <= 48) return notes;
-  return "Plan";
-}
-
-function layerFor(item: CalendarItem): CalendarLayerKey {
-  if (item.kind === "official_event") return "classes";
-  if (item.kind === "official_deadline") return "deadlines";
-  if (item.kind === "scheduled_work_block") return "work";
-  if (item.kind === "personal_event") return "personal";
-  return "tasks";
-}
-
 function localDayKey(value: number) {
   const date = new Date(value);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -324,15 +298,6 @@ function minutesOnDay(value: number, timezone: string) {
   return Number(parts.hour) * 60 + Number(parts.minute);
 }
 
-/** The owner's own work blocks and personal events move and resize; official
-    and imported source events do not (the server enforces the same rule). */
-function isReschedulable(item: CalendarItem) {
-  return (
-    item.kind === "scheduled_work_block" ||
-    (item.kind === "personal_event" && !item.sourceLocked)
-  );
-}
-
 function isDayItem(item: CalendarItem) {
   return Boolean(
     item.startAt !== undefined &&
@@ -349,10 +314,6 @@ function isTimedItem(item: CalendarItem) {
       !isDayItem(item) &&
       item.timePrecision !== "unknown",
   );
-}
-
-function planWorkId(item: CalendarItem) {
-  return item.planArtifactId || (item.planTaskId ? item.linkedWorkIds[0] : undefined);
 }
 
 function mergeById(current: CalendarItem[], incoming: CalendarItem[]) {
@@ -435,22 +396,18 @@ export function CalendarApplication() {
   const [days, setDays] = useState(() => daysAround(initialStart));
   const [focusedStart, setFocusedStart] = useState(initialStart);
   const [overview, setOverview] = useState<CalendarOverview | null>(null);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [continuation, setContinuation] = useState<CalendarContinuation | null>(null);
   const overviewRequestRef = useRef<AbortController | null>(null);
   const [error, setError] = useState("");
-  const [selected, setSelected] = useState<CalendarItem | null>(null);
-  const [activePlanId, setActivePlanId] = useState<string | null>(null);
+  const [opened, setOpened] = useState<OpenedCalendarItem | null>(null);
+  const schoolTask = useOpenSchoolTask();
+  const taskPeek = useTaskPeek();
   const [composerOpen, setComposerOpen] = useState(false);
   const [visibleLayers, setVisibleLayers] = useState<Set<CalendarLayerKey>>(
     () => new Set(CALENDAR_LAYERS.map((layer) => layer.key)),
   );
-  const [sideTab, setSideTab] = useState<"plans" | "details">("plans");
-  const [reveal, setReveal] = useState(0);
   const [layersOpen, setLayersOpen] = useState(false);
-  const [planQuery, setPlanQuery] = useState("");
-  const [draggingPlanId, setDraggingPlanId] = useState<string>();
   const [gesturePreview, setGesturePreview] = useState<GesturePreview | null>(null);
   const [resizeGesture, setResizeGesture] = useState<ResizeGesture | null>(null);
   const [pendingItemIds, setPendingItemIds] = useState<Set<string>>(() => new Set());
@@ -537,7 +494,6 @@ export function CalendarApplication() {
       } finally {
         if (overviewRequestRef.current === request) {
           overviewRequestRef.current = null;
-          setLoading(false);
           setRefreshing(false);
         }
       }
@@ -549,12 +505,16 @@ export function CalendarApplication() {
   useEffect(() => () => overviewRequestRef.current?.abort(), []);
 
   useEffect(() => {
+    // The week loads at once; moving old timetables onto the calendar runs
+    // beside it, once, and reloads only if it moved something.
     let cancelled = false;
+    void loadRef.current("replace");
     void calendarPost({ action: "ensureMigration" })
-      .catch(() => undefined)
-      .finally(() => {
-        if (!cancelled) void loadRef.current("replace");
-      });
+      .then((result) => {
+        const moved = (result as { data?: { migratedEvents?: number } } | null)?.data?.migratedEvents ?? 0;
+        if (!cancelled && moved > 0) void loadRef.current("merge");
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -608,11 +568,12 @@ export function CalendarApplication() {
     return () => observer.disconnect();
   }, [daySpan, days.length, error]);
 
-  // The grid opens on working hours (SHELL.md): 07:00 just under the day heads.
+  // The grid opens on working hours (SHELL.md): 07:00 just under the day heads,
+  // before its first paint, so it never shows the night while the week loads.
   const openedOnHoursRef = useRef(false);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const scroller = scrollerRef.current;
-    if (openedOnHoursRef.current || !scroller || !overview) return;
+    if (openedOnHoursRef.current || !scroller) return;
     const hours = scroller.querySelector<HTMLElement>("[data-calendar-hours]");
     const head = scroller.querySelector<HTMLElement>(".spectra-calendar-day-head");
     if (!hours) return;
@@ -640,15 +601,38 @@ export function CalendarApplication() {
       ),
     [overview?.items, visibleLayers],
   );
-  const unscheduledPlans = useMemo(
-    () =>
-      (overview?.unscheduledTasks ?? []).filter(
-        (item) =>
-          Boolean(item.planArtifactId) &&
-          item.title.toLocaleLowerCase().includes(planQuery.trim().toLocaleLowerCase()),
-      ),
-    [overview?.unscheduledTasks, planQuery],
-  );
+  // A deadline, and time given to one, wears its class's ink.
+  const classOf = useDeadlineClasses();
+  const schoolClassOf = useMemo(() => {
+    const byId = new Map((overview?.items ?? []).map((item) => [item.id, item]));
+    return (item: CalendarItem) => {
+      const due = isDeadline(item) ? item : item.officialDeadlineItemId ? byId.get(item.officialDeadlineItemId) : undefined;
+      return due ? classOf(due.title, due.startAt) : null;
+    };
+  }, [classOf, overview?.items]);
+
+  // A school deadline cannot move, but the plan behind it can be given time:
+  // dragging the deadline into the week places that plan.
+  const planOfDeadline = useMemo(() => {
+    const plans = (overview?.unscheduledTasks ?? []).filter((item) => item.planArtifactId);
+    const byRecord = new Map<string, CalendarItem>();
+    const byTitle = new Map<string, CalendarItem | null>();
+    for (const plan of plans) {
+      const recordId = plan.source?.recordId;
+      if (recordId) byRecord.set(recordId, plan);
+      const title = plan.title.trim();
+      byTitle.set(title, byTitle.has(title) ? null : plan);
+    }
+    return (item: CalendarItem) => {
+      if (item.kind !== "official_deadline") return undefined;
+      const recordId = item.source?.recordId;
+      return (recordId ? byRecord.get(recordId) : undefined) ?? byTitle.get(item.title.trim()) ?? undefined;
+    };
+  }, [overview?.unscheduledTasks]);
+
+  function beginPlanDrag(plan: CalendarItem) {
+    dragRef.current = { type: "plan", item: plan, grabOffsetMinutes: 0 };
+  }
 
   function upsertItem(nextItem: CalendarItem, removeUnscheduled?: CalendarItem) {
     setOverview((current) => {
@@ -690,14 +674,14 @@ export function CalendarApplication() {
       if (wire && typeof wire === "object" && typeof (wire as Record<string, unknown>).id === "string") {
         const nextItem = calendarItemFromWire(wire as Record<string, unknown>);
         upsertItem(nextItem);
-        setSelected((current) => (current?.id === nextItem.id ? nextItem : current));
+        setOpened((current) => (current?.item.id === nextItem.id ? { ...current, item: nextItem } : current));
       } else {
         await load("merge", visibleRange.from, visibleRange.to, true);
       }
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : "Calendar action failed.";
       if (isGestureConflict(nextError)) {
-        setSelected(null);
+        setOpened(null);
         announceGestureConflict(true);
         await load("replace", visibleRange.from, visibleRange.to, true);
       } else {
@@ -720,7 +704,7 @@ export function CalendarApplication() {
         ? { ...current, items: current.items.filter((entry) => entry.id !== item.id) }
         : current,
     );
-    setSelected(null);
+    setOpened(null);
     // A removed work block returns its plan to the unscheduled list.
     if (item.kind === "scheduled_work_block")
       void load("merge", visibleRange.from, visibleRange.to);
@@ -824,7 +808,6 @@ export function CalendarApplication() {
     event.preventDefault();
     const payload = dragRef.current;
     dragRef.current = null;
-    setDraggingPlanId(undefined);
     setGesturePreview(null);
     if (!payload) return;
     const startAt = resolveDrop(event, day);
@@ -907,14 +890,19 @@ export function CalendarApplication() {
     window.addEventListener("pointerup", up, { once: true });
   }
 
+  // Beside an open work the week narrows to a few days around what was opened,
+  // and widens back when the Side closes.
+  const openedOn = useRef<number | undefined>(undefined);
+  const wideSpan = useRef<number | null>(null);
+
   function openWork(workId: string) {
-    setActivePlanId(workId);
-    setSelected(null);
+    setOpened(null);
     // Work opens in the Side (SHELL.md); its "Open full" goes on to Library.
     void spectraBus.command("work.open", { workId });
   }
 
-  function openItem(item: CalendarItem) {
+  function openItem(item: CalendarItem, from?: HTMLElement) {
+    openedOn.current = item.startAt;
     // A scheduled block has its own actions (duration, complete, remove); its
     // plan is one click away in the details. Only an unscheduled plan opens
     // straight into the plan.
@@ -923,9 +911,18 @@ export function CalendarApplication() {
       openWork(workId);
       return;
     }
-    setSelected(item);
-    setSideTab("details");
-    setReveal((count) => count + 1);
+    taskPeek.close();
+    // A school deadline opens as its task work, made now if sync has not made it.
+    const recordId = schoolRecordOf(item);
+    if (recordId) {
+      void schoolTask.workOf(recordId).then((planner) => (planner ? openWork(planner) : showDetails(item, from)));
+      return;
+    }
+    showDetails(item, from);
+  }
+
+  function showDetails(item: CalendarItem, from?: HTMLElement) {
+    if (from) setOpened({ item, anchor: from.getBoundingClientRect() });
   }
 
   function jumpTo(date: Date) {
@@ -937,12 +934,14 @@ export function CalendarApplication() {
     void load("replace", nextDays[0]!, endOfLocalDay(nextDays[nextDays.length - 1]!));
   }
 
-  const changeDaySpan = useCallback((next: number) => {
+  /** Sets how many days show; `around` keeps that day in view, one day in from the left. */
+  const changeDaySpan = useCallback((next: number, around?: number) => {
     const span = Math.max(MIN_DAYS, Math.min(MAX_DAYS, next));
     if (span === daySpanRef.current) return;
     setDaySpanState(span);
     const scroller = scrollerRef.current;
-    const index = daysRef.current.findIndex((day) => day === focusedStartRef.current);
+    const anchor = around === undefined ? -1 : daysRef.current.indexOf(startOfLocalDay(around));
+    const index = anchor >= 0 ? Math.max(0, anchor - (span > 1 ? 1 : 0)) : daysRef.current.findIndex((day) => day === focusedStartRef.current);
     requestAnimationFrame(() => {
       if (!scroller) return;
       const width = Math.max(88, (scroller.clientWidth - 54) / span);
@@ -951,6 +950,27 @@ export function CalendarApplication() {
       if (index >= 0) scroller.scrollLeft = index * width;
     });
   }, []);
+
+  useEffect(
+    () =>
+      spectraBus.subscribe("side.open", () => {
+        const open = Boolean(spectraBus.getQuery("side.open"));
+        if (open && wideSpan.current === null && daySpanRef.current > BESIDE_SIDE_DAYS) {
+          wideSpan.current = daySpanRef.current;
+          // Narrow around what was opened here; something opened from
+          // elsewhere (a thread, a search) keeps today in view when it shows.
+          const today = startOfLocalDay(Date.now());
+          const first = focusedStartRef.current;
+          const todayShows = today >= first && today < addLocalDays(first, daySpanRef.current);
+          changeDaySpan(BESIDE_SIDE_DAYS, openedOn.current ?? (todayShows ? today : undefined));
+          openedOn.current = undefined;
+        } else if (!open && wideSpan.current !== null) {
+          changeDaySpan(wideSpan.current);
+          wideSpan.current = null;
+        }
+      }),
+    [changeDaySpan],
+  );
 
   async function extendDays(direction: "before" | "after") {
     if (loadLockRef.current) return;
@@ -997,6 +1017,7 @@ export function CalendarApplication() {
   }
 
   function onScrollerScroll() {
+    setOpened(null);
     const scroller = scrollerRef.current;
     if (!scroller || ignoreScrollRef.current) return;
     const width = dayWidthRef.current || 140;
@@ -1029,7 +1050,13 @@ export function CalendarApplication() {
 
   const commands: BarCommand[] = [
     { id: "add", icon: "add", label: "Add event", pinned: true, onSelect: () => setComposerOpen(true) },
-    { id: "layers", icon: "layers", label: "Layers", active: layersOpen, onSelect: () => setLayersOpen((open) => !open) },
+    {
+      id: "layers",
+      icon: "layers",
+      label: "Layers",
+      active: layersOpen,
+      onSelect: () => setLayersOpen((open) => !open),
+    },
     {
       id: "refresh",
       icon: "retry",
@@ -1043,7 +1070,7 @@ export function CalendarApplication() {
   return (
     <div className="spectra-wave-y relative flex h-full min-h-0 overflow-hidden text-[var(--text-primary)]">
       <div className="spectra-calendar-page flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-spectra-app-surface="true">
-        <div className="shrink-0 px-4 pb-3 pt-5 sm:px-6 lg:px-8 lg:pt-7">
+        <div className="shrink-0 px-4 pb-3 pt-5 sm:px-6 lg:px-8 page-title-lane">
           <PageHeader title="Calendar" commands={commands} plan={CALENDAR_BAR_PLAN} barLabel="Calendar commands" />
           <div className="spectra-calendar-toolbar mt-4">
             <div className="spectra-calendar-week-nav">
@@ -1121,7 +1148,8 @@ export function CalendarApplication() {
             </div>
           ) : (
             <div ref={scrollerRef} className="spectra-calendar-scroll" onScroll={onScrollerScroll}>
-              {days.length ? (
+              {/* The week appears with what is in it, never empty first and filled after. */}
+              {days.length && overview ? (
                 <WeekGrid
                   days={days}
                   timezone={timezone}
@@ -1133,6 +1161,10 @@ export function CalendarApplication() {
                   onPreview={previewDrop}
                   onDrop={dropOnDay}
                   onOpen={openItem}
+                  onRest={taskPeek.rest}
+                  planOf={planOfDeadline}
+                  schoolClassOf={schoolClassOf}
+                  onPlanDragStart={beginPlanDrag}
                   onBlockDragStart={(item, offset) => {
                     dragRef.current = { type: "block", item, grabOffsetMinutes: offset };
                   }}
@@ -1142,7 +1174,9 @@ export function CalendarApplication() {
                   }}
                   onResizeStart={beginResize}
                 />
-              ) : null}
+              ) : (
+                <CalendarWeekGhost span={daySpan} />
+              )}
             </div>
           )}
         </section>
@@ -1158,121 +1192,52 @@ export function CalendarApplication() {
         />
       </div>
 
-      <SidePanel
-        id="calendar.plans"
-        title="Plans"
-        icon="checklist"
-        stageMin={640}
-        revealKey={reveal || null}
-        header={
-          <PanelTabs
-            label="Calendar side"
-            tabs={[
-              { id: "plans", label: "Plans", icon: "checklist" },
-              { id: "details", label: "Details", icon: "info" },
-            ]}
-            value={sideTab}
-            onChange={(id) => setSideTab(id as "plans" | "details")}
-          />
-        }
-      >
-        {sideTab === "plans" ? (
-          <div data-life-receive className="min-w-0">
-            <Input value={planQuery} onChange={(event) => setPlanQuery(event.target.value)} placeholder="Find a plan" aria-label="Find a plan" />
-            <p className="px-1 pb-1 pt-3 text-caption text-[var(--text-tertiary)]">Drag a plan onto a day to give it time.</p>
-            {loading ? (
-              <LoadingRows label="Loading plans" count={4} />
-            ) : error ? (
-              <p className="px-1 py-3 text-caption leading-5 text-[var(--text-secondary)]">Plans could not be read just now.</p>
-            ) : !unscheduledPlans.length ? (
-              <p className="px-1 py-3 text-caption leading-5 text-[var(--text-secondary)]">
-                {continuation?.cursors.planner
-                  ? "Load more to finish checking plans."
-                  : planQuery
-                    ? `No plans match “${planQuery}”.`
-                    : "Every plan has its time. New plans from Library show up here."}
-              </p>
-            ) : (
-              <ul className="-mx-1.5 space-y-0.5">
-                {unscheduledPlans.map((item) => (
-                  <PlanRow
-                    key={item.id}
-                    item={item}
-                    active={Boolean(activePlanId && planWorkId(item) === activePlanId)}
-                    dragging={draggingPlanId === item.id}
-                    onOpen={() => openItem(item)}
-                    onDragStart={() => {
-                      setDraggingPlanId(item.id);
-                      dragRef.current = { type: "plan", item, grabOffsetMinutes: 0 };
-                    }}
-                    onDragEnd={() => {
-                      setDraggingPlanId(undefined);
-                      dragRef.current = null;
-                      setGesturePreview(null);
-                    }}
-                  />
-                ))}
-              </ul>
-            )}
-          </div>
-        ) : selected ? (
-          <CalendarItemDetails key={selected.id} item={selected} timezone={timezone} onCommit={commit} onRemove={removeItem} />
-        ) : (
-          <EmptyState compact icon="info" title="Nothing chosen" detail="Choose an event or a block of work to see its details." />
-        )}
-      </SidePanel>
+      {taskPeek.peek ? (
+        <TaskPeek
+          key={taskPeek.peek.item.id}
+          anchor={taskPeek.peek.anchor}
+          resolveWork={() => {
+            const item = taskPeek.peek!.item;
+            const workId = planWorkId(item);
+            const recordId = schoolRecordOf(item);
+            return workId ? Promise.resolve(workId) : recordId ? schoolTask.workOf(recordId) : Promise.resolve(null);
+          }}
+          onOpenFull={(workId) => {
+            taskPeek.close();
+            openWork(workId);
+          }}
+          onPointerEnter={taskPeek.hold}
+          onPointerLeave={taskPeek.release}
+          onClose={taskPeek.close}
+        />
+      ) : null}
+
+      <CalendarItemCard
+        opened={opened}
+        schoolClass={opened ? schoolClassOf(opened.item) : null}
+        timezone={timezone}
+        onCommit={commit}
+        onRemove={removeItem}
+        onClose={() => setOpened(null)}
+      />
     </div>
   );
 }
 
 const CALENDAR_BAR_PLAN = [{ hideLabel: "layers" }, { toMenu: "refresh" }, { toMenu: "layers" }] as const;
 
-/** An unscheduled plan: open it, or drag it onto a day. */
-function PlanRow({
-  item,
-  active,
-  dragging,
-  onOpen,
-  onDragStart,
-  onDragEnd,
-}: {
-  item: CalendarItem;
-  active: boolean;
-  dragging: boolean;
-  onOpen: () => void;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-}) {
-  const ref = useRef<HTMLLIElement>(null);
-  useLifeArrival(ref, item.id, "human");
-  const subtitle = planSubtitle(item);
+/** While the week loads: its days as ghosts, so it opens with what is in it rather than empty. */
+function CalendarWeekGhost({ span }: { span: number }) {
   return (
-    <li
-      ref={ref}
-      draggable
-      onDragStart={(event) => {
-        event.dataTransfer.effectAllowed = "copy";
-        event.dataTransfer.setData("text/plain", item.id);
-        onDragStart();
-      }}
-      onDragEnd={onDragEnd}
-      className={cn("group", dragging && "opacity-40")}
-    >
-      <button
-        type="button"
-        data-life-launch
-        onClick={onOpen}
-        aria-current={active ? "true" : undefined}
-        className="flex w-full min-w-0 items-center gap-2.5 rounded-control px-2 py-2 text-left outline-none transition-colors hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] aria-[current=true]:bg-[var(--bg-hover)]"
-      >
-        <Icon name="task" size={16} accent="var(--accent-gold)" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-ui font-medium text-[var(--text-primary)]">{item.title}</span>
-          {subtitle ? <span className="block truncate text-caption text-[var(--text-tertiary)]">{subtitle}</span> : null}
-        </span>
-        <Icon name="grip" size={14} className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
-      </button>
-    </li>
+    <div className="spectra-calendar-ghost" role="status" aria-label="Loading the week" style={{ ["--ghost-days" as string]: span }}>
+      {Array.from({ length: span }, (_, day) => (
+        <div key={day} data-life-ghost className="spectra-calendar-ghost-day">
+          <Skeleton bar className="h-4 w-1/3" />
+          <Skeleton bar className="h-6 w-2/3" />
+          {day % 2 ? <Skeleton bar className="mt-16 h-6 w-full" /> : <Skeleton bar className="mt-28 h-6 w-4/5" />}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -1287,6 +1252,10 @@ function WeekGrid({
   onPreview,
   onDrop,
   onOpen,
+  onRest,
+  planOf,
+  schoolClassOf,
+  onPlanDragStart,
   onBlockDragStart,
   onBlockDragEnd,
   onResizeStart,
@@ -1300,7 +1269,13 @@ function WeekGrid({
   resizeGesture: boolean;
   onPreview: (event: React.DragEvent<HTMLDivElement>, day: Date) => void;
   onDrop: (event: React.DragEvent<HTMLDivElement>, day: Date) => void;
-  onOpen: (item: CalendarItem) => void;
+  onOpen: (item: CalendarItem, from: HTMLElement) => void;
+  /** The pointer rests on an item (its element), or leaves it (null): a task opens beside it. */
+  onRest: (item: CalendarItem, element: HTMLElement | null) => void;
+  /** The plan a deadline's task has, which dragging the deadline places. */
+  planOf: (item: CalendarItem) => CalendarItem | undefined;
+  schoolClassOf: (item: CalendarItem) => DeadlineClass | null;
+  onPlanDragStart: (plan: CalendarItem) => void;
   onBlockDragStart: (item: CalendarItem, grabOffsetMinutes: number) => void;
   onBlockDragEnd: () => void;
   onResizeStart: (
@@ -1351,7 +1326,9 @@ function WeekGrid({
                     type="button"
                     title={item.title}
                     data-life-launch
-                    onClick={() => onOpen(item)}
+                    onClick={(event) => onOpen(item, event.currentTarget)}
+                    onPointerEnter={(event) => onRest(item, event.currentTarget)}
+                    onPointerLeave={() => onRest(item, null)}
                     className="spectra-calendar-chip"
                     style={{ boxShadow: `inset 3px 0 0 ${layer.color}` }}
                   >
@@ -1398,7 +1375,8 @@ function WeekGrid({
               onDragOver={(event) => onPreview(event, day)}
               onDrop={(event) => onDrop(event, day)}
               data-life-receive
-              className="relative border-r border-[var(--border-subtle)] last:border-r-0"
+              // Its own stacking context: blocks layer within their day and pass under the hour gutter.
+              className="relative isolate border-r border-[var(--border-subtle)] last:border-r-0"
               style={{ height: hoursHeight }}
             >
               {Array.from({ length: HOURS }, (_, hour) => (
@@ -1416,21 +1394,27 @@ function WeekGrid({
                 />
               ) : null}
               {preview ? <PreviewBlock preview={preview} timezone={timezone} /> : null}
-              {columnItems.map((item) => (
-                <TimedBlock
-                  key={item.id}
-                  item={item}
-                  lane={lanes.get(item.id) ?? { lane: 0, lanes: 1 }}
-                  timezone={timezone}
-                  previewing={gesturePreview?.itemId === item.id}
-                  pending={pendingItemIds.has(item.id)}
-                  canMove={isReschedulable(item) && !pendingItemIds.has(item.id) && !resizeGesture}
-                  onOpen={() => onOpen(item)}
-                  onDragStart={(offset) => onBlockDragStart(item, offset)}
-                  onDragEnd={onBlockDragEnd}
-                  onResizeStart={(event, edge) => onResizeStart(event, item, edge)}
-                />
-              ))}
+              {columnItems.map((item) => {
+                const plan = resizeGesture ? undefined : planOf(item);
+                return (
+                  <TimedBlock
+                    key={item.id}
+                    item={item}
+                    schoolClass={schoolClassOf(item)}
+                    lane={lanes.get(item.id) ?? { lane: 0, lanes: 1 }}
+                    timezone={timezone}
+                    previewing={gesturePreview?.itemId === item.id}
+                    pending={pendingItemIds.has(item.id)}
+                    canMove={isReschedulable(item) && !pendingItemIds.has(item.id) && !resizeGesture}
+                    givesTime={Boolean(plan)}
+                    onOpen={(from) => onOpen(item, from)}
+                    onRest={(element) => onRest(item, element)}
+                    onDragStart={(offset) => (plan ? onPlanDragStart(plan) : onBlockDragStart(item, offset))}
+                    onDragEnd={onBlockDragEnd}
+                    onResizeStart={(event, edge) => onResizeStart(event, item, edge)}
+                  />
+                );
+              })}
             </div>
           );
         })}
@@ -1477,23 +1461,31 @@ function timedBlockDuration(item: CalendarItem) {
 
 function TimedBlock({
   item,
+  schoolClass,
   lane,
   timezone,
   previewing,
   pending,
   canMove,
+  givesTime,
   onOpen,
+  onRest,
   onDragStart,
   onDragEnd,
   onResizeStart,
 }: {
   item: CalendarItem;
+  /** The class a deadline, or time given to it, belongs to, when School knows it. */
+  schoolClass: DeadlineClass | null;
   lane: TimedLane;
   timezone: string;
   previewing: boolean;
   pending: boolean;
   canMove: boolean;
-  onOpen: () => void;
+  /** A deadline whose plan can be dragged out of it into the week. */
+  givesTime: boolean;
+  onOpen: (from: HTMLElement) => void;
+  onRest: (element: HTMLElement | null) => void;
   onDragStart: (grabOffsetMinutes: number) => void;
   onDragEnd: () => void;
   onResizeStart: (
@@ -1512,30 +1504,43 @@ function TimedBlock({
   const height = Math.max(24, (duration / HOUR) * HOUR_PX);
   // Blocks sharing time sit side by side, so each one stays clickable.
   const laneWidth = 100 / lane.lanes;
+  const ink = schoolClass?.identity?.ink ?? layer.color;
+  /* A deadline is a moment, so it is a pin: when it is due and what, on one
+     line in its class's ink. A short block keeps its title on one line too. */
+  const due = isDeadline(item);
+  const short = due || height < 40;
   return (
     <button
       ref={ref}
       type="button"
-      title={item.title}
+      title={
+        due
+          ? `Due ${formatTime(item.startAt!, timezone)}: ${item.title}${givesTime ? ". Drag to give it time" : ""}`
+          : `${formatTime(item.startAt!, timezone)}${item.endAt ? ` – ${formatTime(item.endAt, timezone)}` : ""}: ${item.title}`
+      }
       data-life-launch
-      draggable={canMove}
+      draggable={canMove || givesTime}
       onDragStart={(event) => {
         const bounds = event.currentTarget.getBoundingClientRect();
         onDragStart(Math.round((((event.clientY - bounds.top) / HOUR_PX) * 60) / 15) * 15);
       }}
       onDragEnd={onDragEnd}
-      onClick={onOpen}
+      onClick={(event) => onOpen(event.currentTarget)}
+      onPointerEnter={(event) => onRest(event.currentTarget)}
+      onPointerLeave={() => onRest(null)}
+      data-due={due || undefined}
       className={cn(
-        "group absolute z-chrome overflow-hidden rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] py-1 pl-2.5 pr-2 text-left transition-shadow hover:shadow-[var(--shadow-sm)]",
+        "spectra-calendar-block group absolute z-chrome overflow-hidden text-left",
+        short && "spectra-calendar-block--short",
         previewing && "opacity-25",
         pending && "animate-pulse",
       )}
       style={{
         top,
-        height,
+        height: due ? 24 : height,
         left: `calc(${lane.lane * laneWidth}% + 4px)`,
         width: `calc(${laneWidth}% - 8px)`,
-        boxShadow: `inset 3px 0 0 ${layer.color}`,
+        ["--block-ink" as string]: ink,
       }}
     >
       {canMove ? (
@@ -1545,16 +1550,12 @@ function TimedBlock({
           className="absolute inset-x-1 top-0 z-chrome h-2 cursor-ns-resize rounded-t opacity-0 transition-opacity hover:bg-[var(--bg-hover)] group-hover:opacity-100"
         />
       ) : null}
-      <span className="flex items-center gap-1 text-micro tabular-nums text-[var(--text-secondary)]">
-        <span className="truncate">
-          {formatTime(item.startAt!, timezone)}
-          {item.endAt ? ` – ${formatTime(item.endAt, timezone)}` : ""}
-        </span>
-        {item.sourceLocked ? <LockKeyhole className="size-2.5" /> : null}
+      <span className="spectra-calendar-block-time">
+        {formatTime(item.startAt!, timezone)}
+        {item.endAt && !due && !short ? ` – ${formatTime(item.endAt, timezone)}` : ""}
+        {item.sourceLocked && !short ? <LockKeyhole className="ml-1 inline size-2.5" /> : null}
       </span>
-      <span className="block truncate text-caption font-medium text-[var(--text-primary)]">
-        {item.title}
-      </span>
+      <span className="spectra-calendar-block-title">{item.title}</span>
       {canMove ? (
         <span
           role="presentation"
@@ -1563,174 +1564,6 @@ function TimedBlock({
         />
       ) : null}
     </button>
-  );
-}
-
-function CalendarItemDetails({
-  item,
-  timezone,
-  onCommit,
-  onRemove,
-}: {
-  item: CalendarItem;
-  timezone: string;
-  onCommit: (action: Record<string, unknown>) => Promise<void>;
-  onRemove: (item: CalendarItem) => Promise<boolean>;
-}) {
-  const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
-  const [confirmRemove, setConfirmRemove] = useState(false);
-  const [removing, setRemoving] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  // The block it was opened from grows into these details.
-  useLifeLanding(ref, `calendar:${item.id}`);
-  // School records belong to their source; everything a person placed here
-  // (events, scheduled work) can be taken off again.
-  const removable = !item.sourceLocked;
-  // Notes arrive as editor HTML or Markdown from a plan, Spectra or ManageBac:
-  // they are drawn by the shared renderer, and an empty editor value shows nothing.
-  const hasNotes = item.notes ? Boolean(plainTextFromStored(item.notes)) : false;
-  return (
-    <div ref={ref} aria-label={`${item.title} details`} className="min-w-0 px-1 pb-4">
-      <span className="inline-flex items-center gap-2 text-caption font-medium text-[var(--text-secondary)]">
-        <span className="h-3 w-[3px] rounded-full" style={{ background: layer.color }} />
-        {layer.label}
-        {item.sourceLocked ? <LockKeyhole className="size-3" /> : null}
-      </span>
-      <h2 className="mt-2 text-title font-semibold leading-tight">{item.title}</h2>
-      <dl className="mt-4 space-y-3 text-ui">
-        <div>
-          <dt className="text-caption text-[var(--text-tertiary)]">Time</dt>
-          <dd className="mt-0.5">
-            {item.allDay
-              ? "All day"
-              : item.startAt !== undefined
-                ? `${formatTime(item.startAt, timezone)}${item.endAt !== undefined && item.endAt !== item.startAt ? ` – ${formatTime(item.endAt, timezone)}` : ""}`
-                : "Date only"}
-          </dd>
-        </div>
-        {item.location ? (
-          <div>
-            <dt className="text-caption text-[var(--text-tertiary)]">Location</dt>
-            <dd className="mt-0.5">{item.location}</dd>
-          </div>
-        ) : null}
-        {hasNotes ? (
-          <div>
-            <dt className="text-caption text-[var(--text-tertiary)]">Notes</dt>
-            <dd className="mt-0.5 text-[var(--text-secondary)]">
-              <SpectraStoredText value={item.notes!} className="text-ui" />
-            </dd>
-          </div>
-        ) : null}
-      </dl>
-      {isReschedulable(item) && item.endAt !== undefined ? (
-        <div className="mt-4">
-          <p className="text-caption text-[var(--text-tertiary)]">Duration</p>
-          <div className="mt-1.5 flex gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() =>
-                void onCommit({
-                  action: "resizeWorkBlock",
-                  itemId: item.id,
-                  endAt: Math.max((item.startAt ?? 0) + 15 * 60_000, item.endAt! - 30 * 60_000),
-                  expectedRevision: item.revision,
-                })
-              }
-            >
-              − 30 min
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() =>
-                void onCommit({
-                  action: "resizeWorkBlock",
-                  itemId: item.id,
-                  endAt: item.endAt! + 30 * 60_000,
-                  expectedRevision: item.revision,
-                })
-              }
-            >
-              + 30 min
-            </Button>
-          </div>
-        </div>
-      ) : null}
-      <div className="mt-5 flex flex-col gap-2">
-        {item.kind === "scheduled_work_block" ? (
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={item.status === "completed"}
-            onClick={() => void onCommit({ action: "completeWorkBlock", itemId: item.id, expectedRevision: item.revision })}
-          >
-            <CheckCircle2 className="size-3.5" />
-            {item.status === "completed" ? "Completed" : "Mark complete"}
-          </Button>
-        ) : null}
-        {item.linkedWorkIds.map((workId) => (
-          <Button
-            key={workId}
-            variant="secondary"
-            size="sm"
-            data-life-launch
-            onClick={() => void spectraBus.command("work.open", { workId })}
-          >
-            <Link2 className="size-3.5" />
-            {workId === item.planArtifactId ? "Open plan" : "Open linked work"}
-          </Button>
-        ))}
-        {removable ? (
-          <Button variant="ghost" size="sm" onClick={() => setConfirmRemove(true)}>
-            Remove from Calendar
-          </Button>
-        ) : null}
-      </div>
-      <ConfirmDialog
-        open={confirmRemove}
-        title={`Remove “${item.title}”?`}
-        detail={
-          item.kind === "scheduled_work_block"
-            ? "The scheduled time is removed from Calendar. The plan itself is kept and can be placed again."
-            : "This event is removed from your Calendar."
-        }
-        confirmLabel="Remove"
-        destructive
-        pending={removing}
-        onCancel={() => setConfirmRemove(false)}
-        onConfirm={() => {
-          setRemoving(true);
-          void onRemove(item).then((removed) => {
-            setRemoving(false);
-            if (!removed) setConfirmRemove(false);
-          });
-        }}
-      />
-      {item.source ? (
-        <div className="mt-5 border-t border-[var(--border-subtle)] pt-4">
-          <p className="flex items-center gap-2 text-caption font-medium">
-            <LockKeyhole className="size-3.5" />
-            From {item.source.provider}
-          </p>
-          <p className="mt-1 text-caption leading-5 text-[var(--text-secondary)]">
-            {item.source.provider} sets the official time and deadline. Schedule your own work separately.
-          </p>
-          {item.source.url ? (
-            <a
-              href={item.source.url}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-2 inline-flex items-center gap-1 text-caption font-medium underline underline-offset-2"
-            >
-              Open in {item.source.provider}
-              <ExternalLink className="size-3" />
-            </a>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
   );
 }
 

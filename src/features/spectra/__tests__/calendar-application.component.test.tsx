@@ -19,7 +19,19 @@ vi.mock("sonner", () => ({
   }),
 }));
 
+// A school task opens through the router and Convex; here it only needs to exist.
+vi.mock("../school/open-school-task", () => ({
+  schoolTaskHref: (recordId: string) => `/school?task=${recordId}`,
+  useOpenSchoolTask: () => ({ open: vi.fn(), onTaskClick: () => vi.fn(), workOf: () => Promise.resolve(null) }),
+}));
+
+// Class colours come from School's live query; with none, a class is coloured by its name.
+vi.mock("convex/react", () => ({ useConvexAuth: () => ({ isAuthenticated: false, isLoading: false }), useQuery: () => undefined, useMutation: () => vi.fn() }));
+
 import { CalendarApplication } from "../calendar/ui/calendar-application";
+
+/** A block's title leads with its time ("09:00 – 10:00: Essay draft"); match it by the event. */
+const blockTitled = (title: string) => new RegExp(`: ${title}$`);
 
 const ORIGINAL_TZ = process.env.TZ;
 
@@ -214,9 +226,9 @@ describe("Calendar application", () => {
       },
     ], "UTC");
     render(<CalendarApplication />);
-    const block = await screen.findByTitle("Chemistry revision");
+    const block = await screen.findByTitle(blockTitled("Chemistry revision"));
     expect(block.textContent).toMatch(/^11:00/);
-    expect(block.style.top).toBe(`${11 * 48}px`);
+    expect(block.style.top).toBe(`${11 * 60}px`);
   });
 
   it("restores the latest block after another tab changed it", async () => {
@@ -234,12 +246,12 @@ describe("Calendar application", () => {
       [workBlock()],
     );
     render(<CalendarApplication />);
-    fireEvent.click(await screen.findByTitle("Essay draft"));
+    fireEvent.click(await screen.findByTitle(blockTitled("Essay draft")));
     const loadsBefore = gets;
     // The notice must not wait for the reload: a slow reload left the block
     // jumping back with no explanation.
     holdGets = true;
-    fireEvent.click(screen.getByRole("button", { name: "+ 30 min" }));
+    fireEvent.click(screen.getByRole("button", { name: "30 minutes longer" }));
     await waitFor(() => expect(toastError).toHaveBeenCalled());
     expect(toastError.mock.calls[0]![0]).toMatch(/^Calendar changed/);
     expect(toastError.mock.calls[0]![1]).toMatchObject({
@@ -268,8 +280,8 @@ describe("Calendar application", () => {
       },
     ]);
     render(<CalendarApplication />);
-    const block = await screen.findByTitle("Essay draft");
-    const official = screen.getByTitle("Maths Unit 7 Test");
+    const block = await screen.findByTitle(blockTitled("Essay draft"));
+    const official = screen.getByTitle(blockTitled("Maths Unit 7 Test"));
     expect(block.style.width).toBe("calc(50% - 8px)");
     expect(official.style.width).toBe("calc(50% - 8px)");
     expect(new Set([block.style.left, official.style.left]).size).toBe(2);
@@ -297,7 +309,7 @@ describe("Calendar application", () => {
       ],
     );
     render(<CalendarApplication />);
-    fireEvent.click(await screen.findByTitle("Dentist"));
+    fireEvent.click(await screen.findByTitle(blockTitled("Dentist")));
     fireEvent.click(screen.getByRole("button", { name: "Remove from Calendar" }));
     fireEvent.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
@@ -307,7 +319,7 @@ describe("Calendar application", () => {
     await waitFor(() =>
       expect(posts.some((post) => post.action === "removePersonalItem" && post.itemId === "event-2")).toBe(true),
     );
-    await waitFor(() => expect(screen.queryByTitle("Dentist")).toBeNull());
+    await waitFor(() => expect(screen.queryByTitle(blockTitled("Dentist"))).toBeNull());
   });
 
   it("moves and lengthens a personal event, but never an official one", async () => {
@@ -337,12 +349,12 @@ describe("Calendar application", () => {
       ],
     );
     render(<CalendarApplication />);
-    const dentist = await screen.findByTitle("Dentist");
+    const dentist = await screen.findByTitle(blockTitled("Dentist"));
     expect(dentist.getAttribute("draggable")).toBe("true");
-    expect(screen.getByTitle("Assembly").getAttribute("draggable")).not.toBe("true");
+    expect(screen.getByTitle(blockTitled("Assembly")).getAttribute("draggable")).not.toBe("true");
 
     fireEvent.click(dentist);
-    fireEvent.click(screen.getByRole("button", { name: "+ 30 min" }));
+    fireEvent.click(screen.getByRole("button", { name: "30 minutes longer" }));
     await waitFor(() =>
       expect(
         posts.some(
@@ -367,9 +379,9 @@ describe("Calendar application", () => {
       },
     ]);
     render(<CalendarApplication />);
-    fireEvent.click(await screen.findByTitle("Essay draft"));
-    expect(screen.getByRole("button", { name: /Mark complete/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "+ 30 min" })).toBeTruthy();
+    fireEvent.click(await screen.findByTitle(blockTitled("Essay draft")));
+    expect(screen.getByRole("checkbox", { name: "Mark complete" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "30 minutes longer" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Open plan/ })).toBeTruthy();
   });
 
@@ -386,7 +398,7 @@ describe("Calendar application", () => {
       },
     ]);
     render(<CalendarApplication />);
-    fireEvent.click(await screen.findByTitle("Maths HL"));
+    fireEvent.click(await screen.findByTitle(blockTitled("Maths HL")));
     expect(screen.queryByRole("button", { name: "Remove from Calendar" })).toBeNull();
   });
 
@@ -396,7 +408,7 @@ describe("Calendar application", () => {
       { ...workBlock(), notes: "<p>Bring the <strong>lab book</strong></p><ul><li><p>Room 4</p></li></ul>" },
     ]);
     render(<CalendarApplication />);
-    fireEvent.click(await screen.findByTitle("Essay draft"));
+    fireEvent.click(await screen.findByTitle(blockTitled("Essay draft")));
     const details = screen.getByLabelText("Essay draft details");
     const prose = details.querySelector(".spectra-prose");
     expect(prose).toBeTruthy();
@@ -412,11 +424,11 @@ describe("Calendar application", () => {
       { ...workBlock(), id: "block-empty", title: "Empty notes", taskItemId: "task-2", notes: "<p></p>", startAt: Date.parse("2026-09-29T09:00:00Z"), endAt: Date.parse("2026-09-29T10:00:00Z") },
     ]);
     render(<CalendarApplication />);
-    fireEvent.click(await screen.findByTitle("Essay draft"));
+    fireEvent.click(await screen.findByTitle(blockTitled("Essay draft")));
     const details = screen.getByLabelText("Essay draft details");
     expect(details.querySelector(".spectra-prose strong")?.textContent).toBe("chapter 3");
     expect(details.textContent).not.toContain("**");
-    fireEvent.click(await screen.findByTitle("Empty notes"));
+    fireEvent.click(await screen.findByTitle(blockTitled("Empty notes")));
     expect(within(screen.getByLabelText("Empty notes details")).queryByText("Notes")).toBeNull();
   });
 
@@ -429,7 +441,7 @@ describe("Calendar application", () => {
       { ...workBlock(), taskItemId: undefined, planArtifactId: "plan-1", planTaskId: "task-1", linkedWorkIds: ["plan-1"] },
     ]);
     render(<CalendarApplication />);
-    fireEvent.click(await screen.findByTitle("Essay draft"));
+    fireEvent.click(await screen.findByTitle(blockTitled("Essay draft")));
     fireEvent.click(screen.getByRole("button", { name: /Open plan/ }));
     expect(opened).toHaveBeenCalledWith({ workId: "plan-1" });
     stop();

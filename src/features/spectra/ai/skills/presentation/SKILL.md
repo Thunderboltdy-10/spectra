@@ -40,6 +40,17 @@ the words.
 A layout that wants a visual needs one. Vary layouts when the content changes; keep them the
 same when slides are compared side by side.
 
+## Designer
+
+Designer is the studio's finishing pass: it lays each slide out again in the deck's own colours,
+with a flat accent (a rule, a band, a side panel, a dark ground) and pictures given room. It runs
+by itself at the end of every new deck in the look `design` names: `rule` (quiet, the default),
+`band`, `panel` or `night`. Give `"design": "none"` only when the user asks for plain slides or
+their own layout. Afterwards, `design {look}` re-finishes the whole deck, and
+`design {slide, look?}` gives one slide a different look (`cards` for points, `half`, `framed` or
+`stage` for a picture, `row` or `mosaic` for several). A designed slide keeps its look through
+later edits, and a slide the readback flags is left alone until its problem is fixed.
+
 ## Writing slides
 
 - Titles say the point, not the topic: "Renewables overtook coal in 2024", not "Energy data".

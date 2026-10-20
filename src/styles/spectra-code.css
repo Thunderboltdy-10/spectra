@@ -1,0 +1,253 @@
+/* ==========================================================================
+   Code on the desk (EDITORS.md, "Code")
+   --------------------------------------------------------------------------
+   The source and what it makes sit side by side on the desk, each inside a
+   plain border; in the side panel they stack. Line numbers are quiet and
+   narrow, with no rule beside them. The console is the tray along the foot:
+   a row of tabs that opens into a monospace log, read against the code that
+   wrote it. The files are the contents rail, as every editor's items are.
+   ========================================================================== */
+
+.spectra-artifact-studio[data-blueprint="code"] .code-studio {
+  --code-ink: var(--type-code);
+}
+
+.spectra-artifact-studio[data-blueprint="code"] .code-studio > .spectra-editor-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+  padding: 6px var(--spectra-studio-inline-inset) calc(var(--spectra-composer-safe-area, 72px) + 4px);
+}
+
+.spectra-artifact-studio[data-blueprint="code"] .code-editor-grid {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  gap: 0;
+}
+
+.spectra-artifact-studio[data-blueprint="code"] .code-source-body {
+  height: 100%;
+  min-height: 0;
+  gap: 12px;
+}
+
+/* The source ---------------------------------------------------------------- */
+
+.code-sheet {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: var(--bg-primary);
+}
+
+/* CodeMirror's wrapper is `cm-theme-light`; it fills the border so the
+   editor is the whole area, not just the written lines. */
+.code-sheet > [class^="cm-theme"] {
+  position: absolute;
+  inset: 0;
+}
+.code-sheet .cm-editor,
+.code-sheet .cm-scroller {
+  height: 100%;
+}
+.code-sheet .cm-editor,
+.code-sheet .cm-gutters {
+  background: transparent !important;
+}
+.code-sheet .cm-gutters {
+  min-height: 100% !important;
+  padding-left: 4px;
+  border-right: 0 !important;
+  color: color-mix(in oklab, var(--text-tertiary) 70%, transparent) !important;
+}
+.code-sheet .cm-lineNumbers .cm-gutterElement {
+  min-width: 2ch;
+  padding: 0 8px 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+.code-sheet .cm-activeLineGutter {
+  background: transparent !important;
+  color: var(--code-ink);
+}
+.code-sheet .cm-activeLine {
+  background: color-mix(in oklab, var(--code-ink) 5%, transparent) !important;
+}
+.code-sheet .cm-content {
+  padding-block: 10px;
+}
+.code-sheet .cm-line {
+  padding-left: 6px;
+}
+
+/* What the code makes ------------------------------------------------------- */
+
+.spectra-artifact-studio[data-blueprint="code"] .code-split-handle {
+  margin-inline: 2px;
+  border: 0;
+  background: transparent;
+}
+.spectra-artifact-studio[data-blueprint="code"] .code-split-handle:hover span {
+  background: var(--code-ink);
+}
+
+.spectra-artifact-studio[data-blueprint="code"] .code-preview-surface {
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: var(--bg-primary) !important;
+}
+
+/* Run again and full view wait in the corner and show with the pointer. */
+.code-preview-controls {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+.code-preview-surface:is(:hover, :focus-within) .code-preview-controls {
+  opacity: 1;
+}
+
+.code-preview-alert {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid color-mix(in oklab, var(--danger) 30%, var(--card-border));
+  background: color-mix(in oklab, var(--danger) 6%, var(--bg-primary));
+  color: var(--danger);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  text-align: left;
+}
+.code-preview-alert-link {
+  margin-left: auto;
+  flex: none;
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.code-preview-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--card-border);
+  color: var(--warning);
+  font-size: var(--text-caption);
+}
+
+/* The console tray ------------------------------------------------------------ */
+
+.code-tray {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: var(--bg-primary);
+}
+
+/* The top edge of an open tray drags to give the output more or less room. */
+.code-tray-grip {
+  position: absolute;
+  z-index: 1;
+  inset: 0 0 auto;
+  height: 7px;
+  cursor: row-resize;
+  touch-action: none;
+}
+.code-tray-grip::after {
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  width: 36px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--card-border);
+  content: "";
+  opacity: 0;
+  transform: translateX(-50%);
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+.code-tray-grip:hover::after,
+.code-tray-grip:active::after {
+  opacity: 1;
+}
+
+.code-tray-tabs {
+  display: flex;
+  height: 38px;
+  align-items: center;
+  gap: 2px;
+  padding-inline: 6px;
+}
+
+.code-tray .code-panel-tab {
+  height: 28px;
+  gap: 6px;
+  padding-inline: 10px;
+  border-radius: 6px;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.code-tray .code-panel-tab:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.code-tray .code-panel-tab.is-active {
+  background: color-mix(in oklab, var(--code-ink, var(--type-code)) 10%, var(--bg-primary));
+  color: var(--code-ink, var(--type-code));
+  box-shadow: none;
+}
+.code-tray .code-panel-tab > span {
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.code-tray-output {
+  height: clamp(140px, 26vh, 260px);
+  overflow: auto;
+  border-top: 1px solid var(--card-border);
+  padding: 8px 12px 10px;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: var(--text-caption);
+  line-height: 1.6;
+  animation: sheet-unfold var(--motion-fast) var(--ease-standard) both;
+}
+
+/* In the side panel the panes stack and run to the panel's edges. ---------- */
+
+.spectra-artifact-studio[data-blueprint="code"][data-studio-mode="split"] .code-studio > .spectra-editor-body {
+  gap: 8px;
+  padding: 0 12px calc(var(--spectra-composer-safe-area, 72px) + 4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .code-tray-output,
+  .code-preview-controls {
+    animation: none;
+    transition: none;
+  }
+}

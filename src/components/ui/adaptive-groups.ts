@@ -17,8 +17,14 @@ import type { CollapseStep, LabelPolicy } from "./adaptive-bar";
  *   { groupMenu: "<g>" }           the group becomes one dropdown
  *   { toMenu: "<id>" | "group:<g>" } the command or group moves into More
  *
+ * Groups named in `folded` start as dropdowns (a set of rare commands that
+ * reads better as one menu than as a row), and the steps run from there.
+ *
  * Steps never touch pinned commands, never hide an `always` label, and a group
- * holding a pinned command never folds. When an authored plan runs out, the bar
+ * holding a pinned command never folds. Once the bar fits, every step taken is
+ * tried back again, latest first, and kept back if the bar still fits: a late
+ * fold can free the room an early one needed, and room left over is never
+ * spent on a menu. When an authored plan runs out, the bar
  * still never wraps or clips: the remaining groups fold into dropdowns from the
  * end, then move into More from the end. A plan that relies on that fallback is
  * a plan to fix, and the plan tests say so.
@@ -97,51 +103,78 @@ export function planGroupedLayout({
   plan,
   available,
   metrics,
+  folded = [],
 }: {
   items: readonly GroupedItem[];
   plan: readonly GroupedStep[];
   available: number;
   metrics: GroupedMetrics;
+  folded?: readonly string[];
 }): GroupedLayout {
-  const labelHidden = new Set<string>();
-  const groupMenus = new Set<string>();
-  const inMore = new Set<string>();
   const byId = new Map(items.map((item) => [item.id, item]));
   const groups = groupOrderOf(items);
   const pinnedGroups = new Set(items.filter((item) => item.pinned).map((item) => item.group));
+  const labelHidden = new Set<string>();
+  const groupMenus = new Set(folded.filter((group) => groups.includes(group) && !pinnedGroups.has(group)));
+  const inMore = new Set<string>();
   const fits = () => groupedWidth(items, { labelHidden, groupMenus, inMore }, metrics) <= available + 0.5;
-  const done = (fellBack: boolean): GroupedLayout => ({ labelHidden, groupMenus, inMore, fellBack });
-  if (fits()) return done(false);
+  if (fits()) return { labelHidden, groupMenus, inMore, fellBack: false };
 
   const membersOf = (ref: string) =>
     ref.startsWith("group:") ? items.filter((item) => item.group === ref.slice(6)) : byId.has(ref) ? [byId.get(ref)!] : [];
 
+  // Each step records exactly what it changed, so it can be given back.
+  type Entry = [Set<string>, string];
+  type Change = { add: Entry[]; remove: Entry[] };
+  const taken: Change[] = [];
+  const apply = (change: Change) => {
+    for (const [set, key] of change.add) set.add(key);
+    for (const [set, key] of change.remove) set.delete(key);
+  };
+  const revert = (change: Change) => {
+    for (const [set, key] of change.add) set.delete(key);
+    for (const [set, key] of change.remove) set.add(key);
+  };
+  const take = (add: Entry[], remove: Entry[] = []) => {
+    const change = { add: add.filter(([set, key]) => !set.has(key)), remove: remove.filter(([set, key]) => set.has(key)) };
+    if (!change.add.length && !change.remove.length) return;
+    apply(change);
+    taken.push(change);
+  };
+  const settle = (fellBack: boolean): GroupedLayout => {
+    for (let index = taken.length - 1; index >= 0; index -= 1) {
+      revert(taken[index]!);
+      if (!fits()) apply(taken[index]!);
+    }
+    return { labelHidden, groupMenus, inMore, fellBack };
+  };
+
   for (const step of plan) {
     if ("hideLabel" in step) {
-      for (const item of membersOf(step.hideLabel)) {
-        if (item.pinned || item.labelPolicy === "always" || item.labelPolicy === "never") continue;
-        labelHidden.add(item.id);
-      }
+      take(
+        membersOf(step.hideLabel)
+          .filter((item) => !item.pinned && item.labelPolicy !== "always" && item.labelPolicy !== "never")
+          .map((item): Entry => [labelHidden, item.id]),
+      );
     } else if ("groupMenu" in step) {
-      if (groups.includes(step.groupMenu) && !pinnedGroups.has(step.groupMenu)) groupMenus.add(step.groupMenu);
+      if (groups.includes(step.groupMenu) && !pinnedGroups.has(step.groupMenu)) take([[groupMenus, step.groupMenu]]);
     } else {
-      for (const item of membersOf(step.toMenu)) if (!item.pinned) inMore.add(item.id);
+      take(membersOf(step.toMenu).filter((item) => !item.pinned).map((item): Entry => [inMore, item.id]));
     }
-    if (fits()) return done(false);
+    if (fits()) return settle(false);
   }
 
   // The plan ran out. Fold whole groups from the end, then move them into More.
   for (let index = groups.length - 1; index >= 0 && !fits(); index -= 1) {
     const group = groups[index]!;
-    if (!pinnedGroups.has(group)) groupMenus.add(group);
+    if (!pinnedGroups.has(group)) take([[groupMenus, group]]);
   }
   for (let index = groups.length - 1; index >= 0 && !fits(); index -= 1) {
     const group = groups[index]!;
     if (pinnedGroups.has(group)) continue;
-    for (const item of items) if (item.group === group) inMore.add(item.id);
-    groupMenus.delete(group);
+    take(items.filter((item) => item.group === group).map((item): Entry => [inMore, item.id]), [[groupMenus, group]]);
   }
-  return done(true);
+  return settle(true);
 }
 
 /**

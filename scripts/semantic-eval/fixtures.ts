@@ -107,8 +107,8 @@ export const FIXTURE_ITEMS: FixtureItem[] = [
   { key: "s-enzyme-report", kind: "school", recordType: "assignment", title: "Lab report: enzyme activity", audience: "class", updatedDaysAgo: 4,
     normalized: { className: "Biology HL", dueAt: daysFromNow(5),
       description: "Write up the catalase experiment: how temperature changes the rate of reaction." } },
-  { key: "s-cas-reflection", kind: "school", recordType: "cas_reflection", title: "CAS reflection: beach clean-up", audience: "mine", updatedDaysAgo: 18,
-    normalized: { description: "What I learned organising the beach clean-up with my service group." } },
+  { key: "s-feedback", kind: "school", recordType: "feedback", title: "Teacher feedback: beach clean-up proposal", audience: "mine", updatedDaysAgo: 18,
+    normalized: { description: "Clear aims for the beach clean-up; plan who your service group will contact first." } },
   { key: "s-library", kind: "school", recordType: "announcement", title: "Library closed for renovation", audience: "school", updatedDaysAgo: 2,
     normalized: { body: "The library is closed next week while the reading room is renovated. Books can be returned at reception." } },
 ];
@@ -149,7 +149,7 @@ export const FIXTURE_QUERIES: FixtureQuery[] = [
   { query: "when is my chemistry test", category: "vague", relevant: ["e-chem-test"] },
   { query: "enzyme lab report due", category: "vague", relevant: ["s-enzyme-report"] },
   { query: "the presentation", category: "vague", relevant: ["a-energy-deck"], hints: { open: ["a-energy-deck"] } },
-  { query: "CAS reflection", category: "exact", relevant: ["s-cas-reflection"] },
+  { query: "teacher feedback", category: "exact", relevant: ["s-feedback"] },
 ];
 
 /** Labelled pairs for the Related threshold: related work, and pairs that must stay apart. */

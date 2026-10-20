@@ -68,10 +68,87 @@ function strings(value: unknown) {
     : [];
 }
 
-/** Idempotently upgrades the historical one-task planner payload to a Plan. */
-/** A planner task is one task (TaskStudio); content already shaped as a plan of many tasks keeps the plan studio. */
+/**
+ * A planner task is one task (TaskStudio) until it holds more than one: a plan
+ * with a single task and no sections or milestones is still one thing to do,
+ * even once the room has given it the plan's collections (shared/planner-source).
+ */
 export function isSingleTask(content: unknown) {
-  return !(content && typeof content === "object" && Array.isArray((content as { tasks?: unknown }).tasks));
+  const row = object(content);
+  if (!Array.isArray(row.tasks)) return true;
+  return row.tasks.length <= 1 && !(Array.isArray(row.sections) && row.sections.length) && !(Array.isArray(row.milestones) && row.milestones.length);
+}
+
+const TASK_STATUS = { backlog: "todo", todo: "todo", doing: "doing", blocked: "doing", done: "done" } as const;
+
+/** The steps a plan's other tasks become when it is read as one task: each was a line to tick off. */
+function stepsOf(tasks: unknown[]) {
+  return tasks.map((value, index) => {
+    const task = object(value);
+    return {
+      id: typeof task.id === "string" && task.id ? task.id : `subtask-${index + 1}`,
+      title: typeof task.title === "string" ? task.title : "",
+      done: task.status === "done",
+    };
+  });
+}
+
+/**
+ * One task as the task studio reads it. A task is one thing to do; a plan
+ * made of several (an older shape) reads as its first task, with the others
+ * as steps to tick off.
+ */
+export function singleTaskView(content: unknown): Record<string, unknown> {
+  const row = object(content);
+  if (!Array.isArray(row.tasks)) return row;
+  const task = object(row.tasks[0]);
+  if (!row.tasks.length) return row;
+  const checklist = Array.isArray(task.checklist) ? task.checklist : Array.isArray(row.subtasks) ? row.subtasks : [];
+  const rest = stepsOf(row.tasks.slice(1));
+  return {
+    ...row,
+    taskTitle: typeof row.taskTitle === "string" && row.taskTitle ? row.taskTitle : task.title,
+    description: typeof task.description === "string" && task.description ? task.description : row.description,
+    status: TASK_STATUS[task.status as keyof typeof TASK_STATUS] ?? row.status ?? "todo",
+    estimateMinutes: Number.isFinite(task.estimateMinutes) ? task.estimateMinutes : row.estimateMinutes,
+    reminders: Array.isArray(task.reminders) ? task.reminders : row.reminders,
+    subtasks: rest.length ? [...checklist, ...rest] : checklist,
+    linkedArtifactIds: Array.isArray(task.referenceIds) && task.referenceIds.length ? task.referenceIds : row.linkedArtifactIds,
+    dueAt: row.dueAt ?? task.dueAt ?? null,
+  };
+}
+
+/**
+ * Writes what the task studio changed back to the shape it came in: the top
+ * fields, and the plan's one task when there is one (its other tasks now its
+ * steps). A school task's date and
+ * reference stay the school's (assertPlannerSourceEdit).
+ */
+export function applySingleTask(previous: unknown, next: Record<string, unknown>): Record<string, unknown> {
+  const before = object(previous);
+  if (!Array.isArray(before.tasks) || !before.tasks.length) return next;
+  const task = object(before.tasks[0]);
+  const shown = singleTaskView(before);
+  const fromSchool = object(before.source).provider === "managebac";
+  return {
+    ...next,
+    tasks: [
+      {
+        ...task,
+        title: typeof next.taskTitle === "string" && next.taskTitle.trim() ? next.taskTitle : task.title,
+        description: fromSchool ? task.description : next.description,
+        status: next.status === shown.status ? task.status : next.status,
+        estimateMinutes: next.estimateMinutes ?? undefined,
+        reminders: next.reminders,
+        checklist: next.subtasks,
+        referenceIds: next.linkedArtifactIds,
+        dueAt: fromSchool ? task.dueAt : (next.dueAt ?? undefined),
+      },
+    ],
+    // The plan's other tasks were read as steps, and are written back as them.
+    sections: [],
+    milestones: [],
+  };
 }
 
 export function normalizePlanContent(value: unknown): PlanContent {

@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 export default async function Devices() {
   return (
-    <AppShell>
+    <AppShell fullBleed contentClassName="!p-0">
       <DevicesPage />
     </AppShell>
   );

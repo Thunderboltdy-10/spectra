@@ -147,8 +147,8 @@ async function permissionWorld() {
     // Ben's verified ManageBac identity: his own records are his alone.
     await ctx.db.insert("externalIdentityMappings", { integrationId: world.integrationId, schoolId: world.schoolA, accountId: world.benId,
       providerUserId: "ben", verifiedEmailHash: "fixture", status: "verified", matchCount: 1, createdAt: Date.now(), updatedAt: Date.now() });
-    const benRecord = await insertSchoolRecord(ctx, { integrationId: world.integrationId, schoolId: world.schoolA, key: "ben-cas",
-      recordType: "cas_reflection", audience: "mine", mappedAccountId: world.benId, normalized: { title: "Photosynthesis garden CAS" } });
+    const benRecord = await insertSchoolRecord(ctx, { integrationId: world.integrationId, schoolId: world.schoolA, key: "ben-feedback",
+      recordType: "feedback", audience: "mine", mappedAccountId: world.benId, normalized: { title: "Photosynthesis garden feedback" } });
     const otherClass = await insertSchoolRecord(ctx, { integrationId: world.integrationId, schoolId: world.schoolA, key: "chem-task",
       recordType: "assignment", audience: "class", providerClassId: "chem-sl", normalized: { title: "Photosynthesis rates lab" } });
     return { groupWorkspace, own, trashed, benPrivate, benGroup, benShared, benQuiz, benThread, benEvent, carlaWork, schoolBRecord, benRecord, otherClass };

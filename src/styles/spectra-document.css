@@ -73,16 +73,12 @@
   --spectra-page-columns: 3;
 }
 
-/* Page view takes its width and padding from the paper, so what the writer
-   measures on screen is what comes out of the printer. */
-.spectra-document-studio[data-layout="page"] .tiptap-root {
-  width: min(100%, var(--spectra-page-width));
-  max-width: min(100%, var(--spectra-page-width));
-}
-
+/* Page view takes its width (spectra-document-desk.css) and padding from the
+   paper, so what the writer measures on screen is what comes out of the
+   printer. */
 .spectra-document-studio[data-layout="page"] .ProseMirror {
   min-height: var(--spectra-page-height);
-  padding: var(--spectra-page-margin) !important;
+  padding: var(--spectra-page-margin);
 }
 
 /* Columns are a section property in Word and a real multi-column flow here.
@@ -90,7 +86,7 @@
 .spectra-document-studio[data-layout="page"][data-columns] .ProseMirror {
   column-count: var(--spectra-page-columns);
   column-gap: 9mm;
-  column-rule: 1px solid #ecefe9;
+  column-rule: 1px solid var(--card-border-soft);
 }
 
 /* A heading should not sit alone at the foot of a column. */
@@ -113,7 +109,7 @@
   position: relative;
   height: 0;
   margin: 26px 0;
-  border-top: 1px dashed #c9d0c8;
+  border-top: 1px dashed var(--card-border);
   cursor: pointer;
   user-select: none;
 }
@@ -125,20 +121,18 @@
   left: 50%;
   padding: 1px 8px;
   transform: translate(-50%, -50%);
-  border: 1px solid #dfe4dd;
-  border-radius: var(--radius-pill);
-  background: #fff;
-  color: #6f7973;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-chip);
+  background: var(--card-paper);
+  color: var(--text-tertiary);
   content: "Page break";
   font-size: var(--text-micro);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   white-space: nowrap;
 }
 
 .spectra-document-studio .ProseMirror .spectra-section-break {
   border-top-style: solid;
-  border-top-color: #b9c3b8;
+  border-top-color: var(--border-strong);
 }
 
 .spectra-document-studio .ProseMirror .spectra-section-break::after {
@@ -151,7 +145,7 @@
 .spectra-document-studio
   .ProseMirror
   .spectra-section-break.ProseMirror-selectednode {
-  border-top-color: var(--accent-primary, #3c6d4f);
+  border-top-color: var(--type-document);
 }
 
 /* ---------------------------------------------------------------------------
@@ -187,28 +181,28 @@
 
 .spectra-document-studio .ProseMirror [data-border] {
   padding: 8px 10px;
-  border: 1px solid #ccd4cb;
+  border: 1px solid var(--card-border);
   border-radius: 3px;
 }
 
 .spectra-document-studio .ProseMirror [data-border="top"] {
   padding: 8px 0 0;
   border: 0;
-  border-top: 1px solid #ccd4cb;
+  border-top: 1px solid var(--card-border);
   border-radius: 0;
 }
 
 .spectra-document-studio .ProseMirror [data-border="bottom"] {
   padding: 0 0 8px;
   border: 0;
-  border-bottom: 1px solid #ccd4cb;
+  border-bottom: 1px solid var(--card-border);
   border-radius: 0;
 }
 
 .spectra-document-studio .ProseMirror [data-border="left"] {
   padding: 0 0 0 10px;
   border: 0;
-  border-left: 2px solid #ccd4cb;
+  border-left: 2px solid var(--card-border);
   border-radius: 0;
 }
 
@@ -221,7 +215,7 @@
    name rather than a bundle of inline properties. */
 .spectra-document-studio .ProseMirror [data-style="caption"] {
   margin-top: 6px !important;
-  color: #6f7973;
+  color: var(--text-tertiary);
   font-size: 0.86em;
   font-style: italic;
   text-align: center;
@@ -253,7 +247,7 @@
 
 .spectra-document-studio .ProseMirror .spectra-note-marker {
   padding: 0 1px;
-  color: var(--accent-primary, #3c6d4f);
+  color: var(--type-document);
   cursor: pointer;
   font-feature-settings: "sups" 0;
   font-weight: 640;
@@ -268,7 +262,7 @@
 }
 
 .spectra-document-studio .ProseMirror .spectra-note[data-empty="true"] .spectra-note-marker {
-  color: #b4802b;
+  color: var(--warning);
 }
 
 /* The note text is not hidden behind a hover: an unwritten note is visible work,
@@ -277,15 +271,15 @@
   margin-left: 2px;
   padding: 0 5px;
   border-radius: 4px;
-  background: #f3f5f1;
-  color: #5f6a63;
+  background: color-mix(in oklab, var(--type-document) 7%, var(--card-paper));
+  color: var(--text-secondary);
   font-size: 0.82em;
   vertical-align: 1px;
 }
 
 .spectra-document-studio .ProseMirror .spectra-note[data-empty="true"] .spectra-note-preview {
-  background: color-mix(in oklab, #d88922 12%, #fff);
-  color: #7a5312;
+  background: color-mix(in oklab, var(--warning) 12%, var(--card-paper));
+  color: var(--text-primary);
 }
 
 .spectra-document-studio .ProseMirror .spectra-note-editor {
@@ -297,9 +291,9 @@
 .spectra-document-studio .ProseMirror .spectra-note-editor textarea {
   width: 100%;
   padding: 6px 8px;
-  border: 1px solid #cfd6cd;
+  border: 1px solid var(--border-default);
   border-radius: var(--control-radius);
-  background: #fff;
+  background: var(--card-paper);
   color: var(--text-primary, #27312b);
   font-size: var(--text-micro);
   line-height: 1.45;
@@ -336,7 +330,7 @@
 }
 
 .spectra-document-studio .ProseMirror img.ProseMirror-selectednode {
-  outline: 2px solid var(--accent-primary, #3c6d4f);
+  outline: 2px solid var(--type-document);
   outline-offset: 2px;
 }
 
@@ -362,7 +356,7 @@
 .spectra-document-studio .ProseMirror table .selectedCell::after {
   position: absolute;
   inset: 0;
-  background: color-mix(in oklab, var(--accent-primary, #3c6d4f) 12%, transparent);
+  background: color-mix(in oklab, var(--type-document) 12%, transparent);
   content: "";
   pointer-events: none;
 }
@@ -373,7 +367,7 @@
   right: -2px;
   bottom: 0;
   width: 4px;
-  background: var(--accent-primary, #3c6d4f);
+  background: var(--type-document);
   pointer-events: none;
 }
 
@@ -383,9 +377,9 @@
 
 /* A read-only native region says so instead of quietly refusing keystrokes. */
 .spectra-document-studio .ProseMirror [data-native-read-only="true"] {
-  border-left: 2px solid #d8b26a;
+  border-left: 2px solid var(--warning);
   padding-left: 8px;
-  background: color-mix(in oklab, #d88922 5%, transparent);
+  background: color-mix(in oklab, var(--warning) 5%, transparent);
 }
 
 /* ---------------------------------------------------------------------------
@@ -417,23 +411,23 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--control-radius);
-  color: #4c5750;
+  color: var(--text-secondary);
   transition: background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
 }
 
 .spectra-document-selection-command:hover:not(:disabled) {
-  background: #eef1ec;
+  background: color-mix(in oklab, var(--text-primary) 6%, transparent);
 }
 
 .spectra-document-selection-command[data-active] {
-  background: color-mix(in oklab, var(--accent-primary, #3c6d4f) 14%, #fff);
-  color: var(--accent-primary, #3c6d4f);
+  background: color-mix(in oklab, var(--type-document) 14%, var(--card-paper));
+  color: var(--type-document);
 }
 
 /* Disabled means unavailable *and* explained — the title carries the sentence,
    so the button stays present rather than disappearing. */
 .spectra-document-selection-command:disabled {
-  color: #a8b0a9;
+  color: var(--text-placeholder);
   cursor: not-allowed;
 }
 
@@ -448,12 +442,6 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 0 14px 8px;
-  padding: 9px 11px;
-  border: 1px solid #dfe4dd;
-  border-radius: var(--card-radius);
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 8px 24px rgba(40, 50, 44, 0.05);
 }
 
 .spectra-document-inline-panel > span {
@@ -467,12 +455,10 @@
 .spectra-document-inline-panel strong {
   font-size: var(--text-micro);
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .spectra-document-inline-panel small {
-  color: #6f7973;
+  color: var(--text-tertiary);
   font-size: var(--text-micro);
   line-height: 1.35;
 }
@@ -481,29 +467,29 @@
   min-width: 0;
   flex: 1;
   padding: 6px 9px;
-  border: 1px solid #cfd6cd;
+  border: 1px solid var(--border-default);
   border-radius: var(--control-radius);
-  background: #fff;
+  background: var(--card-paper);
   font-size: var(--text-small, 0.8125rem);
 }
 
 .spectra-document-inline-panel :is(input, textarea):focus-visible {
-  border-color: var(--accent-primary, #3c6d4f);
+  border-color: var(--type-document);
   outline: none;
 }
 
 .spectra-document-inline-panel button:not([role="combobox"]) {
   flex: none;
   padding: 6px 11px;
-  border: 1px solid #cfd6cd;
+  border: 1px solid var(--border-default);
   border-radius: var(--control-radius);
   font-size: var(--text-micro);
   font-weight: 640;
 }
 
 .spectra-document-inline-panel button[data-confirm-panel] {
-  border-color: var(--accent-primary, #3c6d4f);
-  background: var(--accent-primary, #3c6d4f);
+  border-color: var(--type-document);
+  background: var(--type-document);
   color: #fff;
 }
 
@@ -538,93 +524,6 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Tracked changes.
-
-   Supported revisions, comments, citations and notes share this review rail.
-   Unmodeled native constructs retain their individual read-only explanation.
-   --------------------------------------------------------------------------- */
-
-.spectra-document-revisions {
-  display: flex;
-  width: 246px;
-  flex: 0 0 246px;
-  flex-direction: column;
-  gap: 6px;
-  margin-right: 14px;
-  /* This rail scrolls independently in continuous layout. Give its final
-     action the same measured composer clearance as the main scrollport. */
-  padding-bottom: calc(var(--spectra-composer-safe-area, 0px) + 16px);
-  scroll-padding-bottom: calc(var(--spectra-composer-safe-area, 0px) + 16px);
-  overflow-y: auto;
-  border: 1px solid #e3e6e0;
-  border-radius: var(--card-radius);
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 9px 28px rgba(40, 50, 44, 0.045);
-}
-
-.spectra-document-revisions > * {
-  flex-shrink: 0;
-}
-
-.spectra-document-revisions > header {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 12px;
-  border-bottom: 1px solid #eceeea;
-  background: rgba(255, 255, 255, 0.96);
-}
-
-.spectra-document-revisions > header strong {
-  flex: 1;
-  font-size: var(--text-micro);
-  font-weight: 760;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.spectra-document-revisions > header button {
-  display: inline-flex;
-  width: 28px;
-  height: 28px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--control-radius);
-  color: #6f7973;
-}
-
-.spectra-document-revisions > div {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0 10px;
-  padding: 8px 9px;
-  border: 1px solid #eceeea;
-  border-left: 2px solid #d8b26a;
-  border-radius: var(--control-radius);
-  background: color-mix(in oklab, #d88922 4%, #fff);
-}
-
-.spectra-document-revisions > div strong {
-  font-size: var(--text-micro);
-  font-weight: 700;
-}
-
-.spectra-document-revisions > div small,
-.spectra-document-revisions > p {
-  color: #6f7973;
-  font-size: var(--text-micro);
-  line-height: 1.45;
-}
-
-.spectra-document-revisions > p {
-  margin: 4px 12px 0;
-}
-
-/* ---------------------------------------------------------------------------
    Running head and foot.
 
    Word keeps these in their own parts, which Spectra preserves; a header
@@ -634,22 +533,18 @@
    --------------------------------------------------------------------------- */
 
 .spectra-document-page-chrome {
-  max-width: min(100%, var(--spectra-page-width, 210mm));
-  margin: 0 auto;
-  padding: 6px var(--spectra-page-margin, 25mm);
-  color: #7b857e;
+  padding: 10mm var(--spectra-page-margin, 25mm) 0;
+  color: var(--text-tertiary);
   font-size: var(--text-micro);
-  letter-spacing: 0.02em;
 }
 
 .spectra-document-page-chrome[data-slot="header"] {
-  padding-bottom: 0;
-  border-bottom: 1px solid #eceeea;
+  margin-bottom: calc(-1 * var(--spectra-page-margin, 25mm) + 8mm);
 }
 
 .spectra-document-page-chrome[data-slot="footer"] {
-  padding-top: 0;
-  border-top: 1px solid #eceeea;
+  margin-top: calc(-1 * var(--spectra-page-margin, 25mm) + 8mm);
+  padding: 0 var(--spectra-page-margin, 25mm) 10mm;
   text-align: center;
 }
 

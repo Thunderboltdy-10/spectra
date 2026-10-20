@@ -1,4 +1,5 @@
 import type { JSONContent } from "@tiptap/core";
+import { stackOf } from "../editor/reference-stack";
 import {
   richContentAst,
   type RichAlign,
@@ -282,6 +283,9 @@ function blocksFrom(nodes: readonly Json[] | undefined, context: ReadContext): R
         const embedId = node.attrs?.embedId;
         const workId = node.attrs?.sourceArtifactId ?? node.attrs?.workId;
         blocks.push({ type: "embed", ...(typeof embedId === "string" && embedId ? { embedId } : {}), ...(typeof workId === "string" && workId ? { workId } : {}) });
+        // A stack's other works are in the page just as much as its first.
+        for (const entry of stackOf(node.attrs ?? {}))
+          blocks.push({ type: "embed", embedId: entry.embedId, ...(entry.sourceArtifactId ? { workId: entry.sourceArtifactId } : {}) });
         break;
       }
       case "table":

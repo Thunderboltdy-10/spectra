@@ -1,0 +1,93 @@
+/* ==========================================================================
+   The board on the desk (EDITORS.md, "Whiteboard")
+   --------------------------------------------------------------------------
+   A whiteboard is open space on the desk, inside a plain border. Its grid
+   shows as dots only when asked for (the Dots tool): the spacing follows the
+   zoom so the dots stay on the snapping grid, and each dot keeps its size.
+   Notes are sticky notes: square-cornered paper with a curl of shadow under
+   the bottom edge. An empty board is just the board.
+   ========================================================================== */
+
+.spectra-artifact-studio[data-blueprint="whiteboard"] .whiteboard-shell {
+  --board-ink: var(--type-whiteboard);
+  padding: 6px var(--spectra-studio-inline-inset) calc(var(--spectra-composer-safe-area, 72px) + 4px);
+  gap: 18px;
+}
+
+.spectra-artifact-studio[data-blueprint="whiteboard"] .whiteboard-shell > main {
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: var(--bg-primary);
+}
+
+.whiteboard-canvas {
+  background-color: var(--bg-primary);
+  background-image: none;
+}
+.whiteboard-canvas[data-dots]:not([data-compact]) {
+  --board-dot: color-mix(in oklab, var(--board-ink, var(--type-whiteboard)) 30%, var(--card-border));
+  background-image: radial-gradient(circle at 1.5px 1.5px, var(--board-dot) 1.25px, transparent 1.5px);
+  background-size: calc(var(--board-grid) * var(--board-zoom, 1))
+    calc(var(--board-grid) * var(--board-zoom, 1));
+  background-position: var(--board-x) var(--board-y);
+}
+
+/* Connectors are drawn in pencil, not in a flat grey. */
+.whiteboard-edges line {
+  stroke: color-mix(in oklab, var(--text-secondary) 80%, var(--board-ink, var(--type-whiteboard)));
+}
+.whiteboard-edges circle {
+  fill: color-mix(in oklab, var(--text-secondary) 80%, var(--board-ink, var(--type-whiteboard)));
+}
+.whiteboard-edges text {
+  fill: var(--text-secondary);
+  stroke: var(--card-paper);
+}
+
+/* Objects ------------------------------------------------------------------ */
+
+.whiteboard-node {
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--text-primary) 6%, transparent),
+    0 10px 22px -16px color-mix(in oklab, var(--text-primary) 40%, transparent);
+}
+
+.whiteboard-node[data-type="note"] {
+  box-shadow:
+    0 1px 1px color-mix(in oklab, var(--text-primary) 10%, transparent),
+    0 12px 18px -14px color-mix(in oklab, var(--text-primary) 45%, transparent);
+}
+/* The curl: a sticky note lifts at its bottom corners, so the shadow under
+   them is deeper than under its middle. */
+.whiteboard-node[data-type="note"]::after {
+  content: "";
+  position: absolute;
+  inset: auto 8% -2px;
+  height: 14px;
+  z-index: -1;
+  border-radius: 50%;
+  box-shadow: 0 8px 10px -6px color-mix(in oklab, var(--text-primary) 35%, transparent);
+  pointer-events: none;
+}
+
+.whiteboard-node[data-type="frame"] {
+  border-color: color-mix(in oklab, var(--board-ink, var(--type-whiteboard)) 40%, var(--card-border)) !important;
+  background: color-mix(in oklab, var(--board-ink, var(--type-whiteboard)) 3%, transparent) !important;
+}
+
+.whiteboard-node[data-selected="true"] {
+  outline: 2px solid color-mix(in oklab, var(--board-ink, var(--type-whiteboard)) 70%, transparent);
+  outline-offset: 3px;
+}
+
+/* In the side panel the board is the panel. ---------------------------- */
+
+.spectra-artifact-studio[data-studio-mode="split"][data-blueprint="whiteboard"] .whiteboard-shell {
+  padding: 0 0 calc(var(--spectra-composer-safe-area, 72px) + 4px);
+}
+.spectra-artifact-studio[data-studio-mode="split"][data-blueprint="whiteboard"] .whiteboard-shell > main {
+  border-inline: 0;
+  border-radius: 0;
+}

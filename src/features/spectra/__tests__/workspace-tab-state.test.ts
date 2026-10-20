@@ -45,9 +45,9 @@ describe("workspace hub tab persistence", () => {
     ).toEqual([]);
   });
 
-  it("repairs duplicate destinations while preserving the active tab", () => {
+  it("repairs duplicate workspace tabs while preserving the active tab", () => {
     const result = parseWorkspaceHubTabs({
-      activeId: "home-active",
+      activeId: "workspace-new",
       tabs: [
         { id: "home-old", label: "Home" },
         { id: "workspace-old", label: "Biology", workspaceId: "workspace-1" },
@@ -56,10 +56,12 @@ describe("workspace hub tab persistence", () => {
       ],
     });
 
+    // A workspace has one tab; the Library may have several, each its own view.
     expect(result.tabs).toEqual([
-      { id: "home-active", label: "Home", workspaceId: undefined },
-      { id: "workspace-old", label: "Biology", workspaceId: "workspace-1" },
+      { id: "home-old", label: "Library", workspaceId: undefined },
+      { id: "workspace-new", label: "Biology", workspaceId: "workspace-1" },
+      { id: "home-active", label: "Library", workspaceId: undefined },
     ]);
-    expect(result.activeId).toBe("home-active");
+    expect(result.activeId).toBe("workspace-new");
   });
 });

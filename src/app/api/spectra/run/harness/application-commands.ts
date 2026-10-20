@@ -95,9 +95,10 @@ const COMMANDS: Record<string, ApplicationCommand> = {
         title: z.string().trim().min(1).max(200).optional(),
         pinned: z.boolean().optional(),
         archived: z.boolean().optional(),
+        placeId: z.string().trim().min(1).max(200).optional(),
       })
-      .refine((value) => value.title !== undefined || value.pinned !== undefined || value.archived !== undefined, {
-        message: "Say what changes: title, pinned or archived.",
+      .refine((value) => value.title !== undefined || value.pinned !== undefined || value.archived !== undefined || value.placeId !== undefined, {
+        message: "Say what changes: title, pinned, archived or placeId.",
       }),
     authority: "content",
   },

@@ -1,22 +1,14 @@
-import { Suspense } from "react";
-import { AppShell } from "@/components/layout/app-shell";
-import { SpectraShell } from "@/features/spectra/pages/spectra-shell";
+import { redirect } from "next/navigation";
+import { workspaceHref } from "@/features/spectra/pages/shell-location";
 
 export const dynamic = "force-dynamic";
 
+/** A workspace is a place in the Library; old links land there. */
 export default async function WorkspaceByIdPage({
   params,
 }: {
   params: Promise<{ workspaceId: string }>;
 }) {
   const { workspaceId } = await params;
-  return (
-    <AppShell fullBleed noScroll contentClassName="!p-0">
-      <Suspense
-        fallback={<div className="h-full min-h-0" />}
-      >
-        <SpectraShell surface="workspace" initialWorkspaceId={workspaceId} />
-      </Suspense>
-    </AppShell>
-  );
+  redirect(workspaceHref(workspaceId));
 }

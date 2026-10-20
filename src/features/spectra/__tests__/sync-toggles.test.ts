@@ -26,7 +26,7 @@ import {
   isCloudDiscoveryFailure,
 } from "../bridge/humanize";
 
-const settings = ["devices-page.tsx", "device-details.tsx", "devices-model.ts"]
+const settings = ["devices-page.tsx", "device-card.tsx", "native-writes-choice.tsx", "devices-model.ts"]
   .map((file) => fs.readFileSync(path.join(process.cwd(), "src/features/spectra/devices", file), "utf8"))
   .join("\n");
 const resource = fs.readFileSync(

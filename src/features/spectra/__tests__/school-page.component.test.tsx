@@ -64,15 +64,6 @@ beforeEach(() => {
         { recordId: "t1", title: "Lab report", providerClassId: "c1", className: "Chemistry", dueAt: NOW + 2 * DAY, status: null, taskType: null, term: null, past: false, sourceState: "available", provenanceUrl: null },
       ],
     },
-    "school:cas": {
-      writeBack: { available: false, reason: "" },
-      learningOutcomes: [],
-      experiences: [],
-      outcomeCoverage: [
-        { id: "a", label: "Strength", experienceIds: ["e1"], missing: false },
-        { id: "b", label: "Challenge", experienceIds: [], missing: true },
-      ],
-    },
   };
 });
 
@@ -84,12 +75,12 @@ afterEach(() => {
 });
 
 describe("School page", () => {
-  it("opens on an overview of what's coming up, CAS and sync", async () => {
+  it("opens on an overview of what's coming up and sync, with nothing ManageBac can't bring", async () => {
     render(<SchoolPage />);
     expect(screen.getByRole("heading", { level: 1, name: "School" })).toBeTruthy();
     expect(screen.getByText("Lab report")).toBeTruthy();
-    expect(screen.getByText("1 of 2 learning outcomes met")).toBeTruthy();
-    expect(screen.getByText(/Everything is up to date/)).toBeTruthy();
+    expect(screen.queryByText(/CAS/)).toBeNull();
+    expect(screen.getByText(/Up to date. Synced/)).toBeTruthy();
     // Admin-only connection settings stay hidden for a student.
     await waitFor(() => expect(mocks.identity).toHaveBeenCalled());
     expect(screen.queryByRole("button", { name: "Connection" })).toBeNull();
@@ -144,5 +135,15 @@ describe("School page", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Sync" }));
     expect(new URL(window.location.href).searchParams.get("section")).toBe("sync");
     expect(screen.getByText("Current tasks")).toBeTruthy();
+  });
+
+  it("offers only what ManageBac can bring in", () => {
+    const preferences = mocks.data["school:preferences"] as { kinds: Record<string, unknown>[] };
+    preferences.kinds.push({ ...preferences.kinds[0], kind: "cas", label: "CAS", available: false, unavailableReason: "Not shared.", mode: "off" });
+    render(<SchoolPage />);
+    expect(screen.queryByRole("tab", { name: "CAS" })).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Sync" }));
+    expect(screen.getByText("Current tasks")).toBeTruthy();
+    expect(screen.queryByText("CAS")).toBeNull();
   });
 });

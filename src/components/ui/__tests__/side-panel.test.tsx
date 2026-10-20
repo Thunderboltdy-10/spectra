@@ -97,7 +97,8 @@ describe("page anatomy", () => {
   it("puts the title in one heading on the header line", () => {
     render(<PageHeader title="School" />);
     const heading = screen.getByRole("heading", { level: 1, name: "School" });
-    expect(heading.className).toContain("font-display");
+    // A top-level title is set in the display serif by `.page-greeting`.
+    expect(heading.className).toContain("page-greeting");
   });
 
   it("gives every state a next step", () => {

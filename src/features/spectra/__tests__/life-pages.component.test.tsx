@@ -18,8 +18,15 @@ import { PageHeader } from "@/components/ui/page-header";
 import { recentCause } from "../life/use-life";
 
 let item: HTMLAnchorElement;
+/* The header is there at once; the skeleton's band crosses it as it lands (markArrival). */
+let marking: ReturnType<typeof vi.spyOn>;
+const landings = () => (marking.mock.calls as Array<[string, string]>).filter(([name, value]) => name === "data-life-working" && value === "arrival").length;
+const settleBands = () => {
+  for (const element of document.querySelectorAll("[data-life-working]")) element.removeAttribute("data-life-working");
+};
 
 beforeEach(() => {
+  marking = vi.spyOn(Element.prototype, "setAttribute");
   vi.spyOn(performance, "now").mockReturnValue(80_000);
   vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
     callback(80_000);
@@ -39,26 +46,26 @@ afterEach(() => {
 });
 
 describe("going to a page", () => {
-  it("the header grows out of the rail item that was pressed", () => {
+  it("the header lands when the rail item was pressed", () => {
     fireEvent.pointerDown(item);
-    render(<PageHeader title="Calendar" description="This week" />);
-    expect(field.morph).toHaveBeenCalledTimes(1);
-    expect(field.morph.mock.calls[0][0]).toEqual(expect.objectContaining({ of: "calendar" }));
-    expect(field.morph.mock.calls[0][1]).toEqual(expect.objectContaining({ of: "HEADER" }));
+    const view = render(<PageHeader title="Calendar" description="This week" />);
+    expect(field.morph).not.toHaveBeenCalled();
+    expect(view.container.querySelector("header")?.getAttribute("data-life-working")).toBe("arrival");
   });
 
   it("without a press, the page is simply there", () => {
     render(<PageHeader title="Calendar" />);
-    expect(field.morph).not.toHaveBeenCalled();
+    expect(landings()).toBe(0);
   });
 
   it("a header that stays lands again only under a new key", () => {
     fireEvent.pointerDown(item);
     const view = render(<PageHeader title="Workspace" lifeKey="ws-1" />);
     fireEvent.pointerDown(item);
+    settleBands();
     view.rerender(<PageHeader title="Workspace" lifeKey="ws-1" />);
-    expect(field.morph).toHaveBeenCalledTimes(1);
+    expect(landings()).toBe(1);
     view.rerender(<PageHeader title="Workspace" lifeKey="ws-2" />);
-    expect(field.morph).toHaveBeenCalledTimes(2);
+    expect(landings()).toBe(2);
   });
 });

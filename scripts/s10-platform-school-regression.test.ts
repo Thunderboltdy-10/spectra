@@ -70,7 +70,7 @@ function source(fixture: Fixture, key: string, fields: Partial<SourceFields> = {
   return {
     integrationId: fixture.integrationId, schoolId: fixture.schoolId,
     providerRecordId: key, providerRecordKey: key, sourceIdentityKey: key,
-    recordType: "class_resource", classification: "class", audienceScope: "class_members",
+    recordType: "timetable", classification: "class", audienceScope: "class_members",
     providerClassId: "math", academicPeriodKey: "2026", normalized: { title: key },
     payloadVersion: "fixture-v1", sourceHash: key, tombstone: false, sourceState: "available",
     fetchedAt: fixture.now, createdAt: fixture.now, updatedAt: fixture.now, ...fields,
@@ -111,7 +111,7 @@ describe("S10 School known-failure audit witnesses", () => {
     } : {};
     const targetId = await fixture.t.run(ctx => ctx.db.insert("externalRecords", source(fixture, "eligible-target", targetFields)));
     const args: PurposeArgs = {
-      purpose: dateCase ? "upcoming_deadlines" : "class_resources", classId: "math", limit: 50,
+      purpose: dateCase ? "upcoming_deadlines" : "timetable", classId: "math", limit: 50,
       ...(dateCase ? { from: fixture.now, to: fixture.now + 120_000 } : {}),
     };
     const read = () => observe(fixture, ctx => purposeHandler(ctx, args));
@@ -136,7 +136,8 @@ describe("S10 School known-failure audit witnesses", () => {
     const after = await read();
     expect(await fixture.t.run(ctx => ctx.db.get(targetId))).toMatchObject({ tombstone: false, providerClassId: "math" });
     expect(after.result.records).toEqual([]);
-    expect(after.result).toMatchObject({ connected: true, stale: true });
+    // An empty list of deadlines reads as stale; an empty timetable does not.
+    expect(after.result).toMatchObject({ connected: true, stale: dateCase });
     expect(after.result).not.toHaveProperty("continueCursor");
     expect(after.result).not.toHaveProperty("isDone");
     expect(after.externalDocuments).toBe(dateCase ? 1_001 : 501);
@@ -167,7 +168,7 @@ describe("S10 School known-failure audit witnesses", () => {
     });
     const membershipId = await addMembership(fixture);
     const targetId = await fixture.t.run(ctx => ctx.db.insert("externalRecords", source(fixture, "member-resource")));
-    const args: PurposeArgs = { purpose: "class_resources", classId: "math", limit: 50 };
+    const args: PurposeArgs = { purpose: "timetable", classId: "math", limit: 50 };
     const missing = await observe(fixture, ctx => purposeHandler(ctx, args));
     expect(await fixture.t.run(ctx => ctx.db.get(membershipId))).toMatchObject({ tombstone: false, providerClassId: "math" });
     expect(missing.result.records).toEqual([]);

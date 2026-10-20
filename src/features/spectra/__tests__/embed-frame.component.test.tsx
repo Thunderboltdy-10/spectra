@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const toastError = vi.hoisted(() => vi.fn());
@@ -37,6 +37,14 @@ function deckEmbed(): SpectraArtifactEmbed {
   } as unknown as SpectraArtifactEmbed;
 }
 
+/** Everything done to the embed itself waits in its one options menu. */
+async function chooseOption(title: string, item: string) {
+  await act(async () => {
+    fireEvent.keyDown(screen.getByRole("button", { name: `Options for ${title}` }), { key: "Enter" });
+  });
+  fireEvent.click(await screen.findByRole("menuitem", { name: new RegExp(item) }));
+}
+
 afterEach(() => {
   cleanup();
   toastError.mockClear();
@@ -44,14 +52,14 @@ afterEach(() => {
 });
 
 describe("the embed frame", () => {
-  it("opens the work from its name and from a named Open button", () => {
+  it("opens the work from its name and from its options menu", async () => {
     const open = vi.fn();
     render(<ArtifactEmbed embed={deckEmbed()} onOpenSource={open} />);
     fireEvent.click(screen.getByRole("button", { name: "Cell biology" }));
-    fireEvent.click(screen.getByRole("button", { name: "Open Cell biology" }));
+    await chooseOption("Cell biology", "Open");
     expect(open).toHaveBeenNthCalledWith(1, "deck-1");
     expect(open).toHaveBeenNthCalledWith(2, "deck-1");
-    // The name repeats the Open button for the pointer; the keyboard has one stop.
+    // The name repeats Open for the pointer; the keyboard has the menu.
     expect(screen.getByRole("button", { name: "Cell biology" }).tabIndex).toBe(-1);
     expect(screen.queryByText("Open source")).toBeNull();
   });
@@ -60,14 +68,14 @@ describe("the embed frame", () => {
     render(<ArtifactEmbed embed={deckEmbed()} />);
     expect(screen.getByRole("button", { name: "Previous slide" })).toHaveProperty("disabled", true);
     fireEvent.click(screen.getByRole("button", { name: "Next slide" }));
-    expect(screen.getByText("Organelles")).toBeTruthy();
     expect(screen.getByText("Slide 2 of 2")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Next slide" })).toHaveProperty("disabled", true);
   });
 
   it("says when a size change is refused instead of rejecting unhandled", async () => {
     update.mockRejectedValue(new Error("[CONVEX M(artifactEmbeds:update)] Server Error"));
     render(<ArtifactEmbedList containerType="thread" containerId="thread-1" />);
-    fireEvent.click(screen.getByRole("button", { name: "Collapse reference" }));
+    await chooseOption("Cell biology", "Show less");
     await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
     expect(String(toastError.mock.calls[0]?.[0])).toBe("The reference size could not be changed.");
   });

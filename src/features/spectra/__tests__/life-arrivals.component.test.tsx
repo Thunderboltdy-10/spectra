@@ -47,6 +47,15 @@ function List({ ids, kinds = {} }: { ids: string[]; kinds?: Record<string, "ai" 
   );
 }
 
+/* What lands is there at once, and the skeleton's band crosses it once (markArrival). */
+let marking: ReturnType<typeof vi.spyOn>;
+const arrivals = () => (marking.mock.calls as Array<[string, string]>).filter(([name, value]) => name === "data-life-working" && value === "arrival").length;
+/** The bands so far have finished: nothing is marked and nothing is counted. */
+const settleBands = () => {
+  for (const element of document.querySelectorAll("[data-life-working]")) element.removeAttribute("data-life-working");
+  marking.mockClear();
+};
+
 let frames: FrameRequestCallback[] = [];
 const flushFrames = () => {
   const pending = frames;
@@ -55,6 +64,7 @@ const flushFrames = () => {
 };
 
 beforeEach(() => {
+  marking = vi.spyOn(Element.prototype, "setAttribute");
   frames = [];
   vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
     frames.push(callback);
@@ -80,24 +90,26 @@ afterEach(() => {
 });
 
 describe("arrivals", () => {
-  it("lets what was already there be content, and forms only what is new", () => {
+  it("lets what was already there be content, and lands only what is new", () => {
     const view = render(<List ids={["a1", "a2"]} />);
-    expect(field.form).not.toHaveBeenCalled();
+    expect(arrivals()).toBe(0);
     view.rerender(<List ids={["a1", "a2", "a3"]} kinds={{ a3: "human" }} />);
-    expect(field.form).toHaveBeenCalledTimes(1);
-  });
-
-  it("brings Spectra's work from the prism through the field", () => {
-    render(<List ids={["b1"]} kinds={{ b1: "ai" }} />);
-    expect(field.travel).toHaveBeenCalledTimes(1);
+    expect(arrivals()).toBe(1);
     expect(field.form).not.toHaveBeenCalled();
   });
 
-  it("forms a key only once per visit", () => {
+  it("lands Spectra's work where it is, without loose light from the prism", () => {
+    render(<List ids={["b1"]} kinds={{ b1: "ai" }} />);
+    expect(arrivals()).toBe(1);
+    expect(field.travel).not.toHaveBeenCalled();
+    expect(field.form).not.toHaveBeenCalled();
+  });
+
+  it("lands a key only once per visit", () => {
     const view = render(<List ids={["c1"]} kinds={{ c1: "human" }} />);
     view.rerender(<List ids={[]} />);
     view.rerender(<List ids={["c1"]} kinds={{ c1: "human" }} />);
-    expect(field.form).toHaveBeenCalledTimes(1);
+    expect(arrivals()).toBe(1);
   });
 });
 
@@ -180,7 +192,7 @@ function Landing({ id }: { id: string | null }) {
 }
 
 describe("landings", () => {
-  it("grows what opens out of the card it was opened from, once", () => {
+  it("lands what opens from a card, once", () => {
     const card = document.createElement("div");
     card.setAttribute("data-spectra-card", "artifact");
     document.body.append(card);
@@ -188,18 +200,18 @@ describe("landings", () => {
 
     const view = render(<Landing id="work-1" />);
     act(flushFrames);
-    expect(field.morph).toHaveBeenCalledTimes(1);
+    expect(arrivals()).toBe(1);
 
     view.rerender(<Landing id="work-2" />);
     act(flushFrames);
-    expect(field.morph).toHaveBeenCalledTimes(1);
+    expect(arrivals()).toBe(1);
     card.remove();
   });
 
   it("lets a surface opened without a card make its own entrance", () => {
     render(<Landing id="work-3" />);
     act(flushFrames);
-    expect(field.morph).not.toHaveBeenCalled();
+    expect(arrivals()).toBe(0);
   });
 });
 
@@ -216,30 +228,32 @@ function Card({ id }: { id: string }) {
 }
 
 describe("returns", () => {
-  it("folds a closing work back into its card on the page", () => {
+  it("lands a closing work back on its card on the page", () => {
     const view = render(<><Surface id="r1" /><Card id="r1" /></>);
+    settleBands();
     view.rerender(<><Card id="r1" /></>);
     act(flushFrames);
     act(flushFrames);
-    expect(field.morph).toHaveBeenCalledTimes(1);
+    expect(arrivals()).toBe(1);
   });
 
-  it("folds into the card as it appears on the page the user returns to", () => {
+  it("lands on the card as it appears on the page the user returns to", () => {
     const view = render(<Surface id="r2" />);
     view.rerender(<></>);
     act(flushFrames);
     view.rerender(<Card id="r2" />);
     act(flushFrames);
-    expect(field.morph).toHaveBeenCalledTimes(1);
+    expect(arrivals()).toBe(1);
     expect(field.form).not.toHaveBeenCalled();
   });
 
-  it("does not fold a work another took the place of", () => {
+  it("does not land on a work another took the place of", () => {
     const view = render(<><Surface key="r3" id="r3" /><Card id="r3" /></>);
+    settleBands();
     view.rerender(<><Surface key="r4" id="r4" /><Card id="r3" /></>);
     act(flushFrames);
     act(flushFrames);
-    expect(field.morph).not.toHaveBeenCalled();
+    expect(arrivals()).toBe(0);
   });
 });
 

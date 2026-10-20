@@ -570,7 +570,7 @@
   flex-shrink: 0;
 }
 
-.spectra-editor-workbar .spectra-workbar-select {
+.spectra-editor-workbar :is(.spectra-workbar-select, .spectra-workbar-item-trigger) {
   min-width: 0;
   max-width: 100%;
   flex-shrink: 1;
@@ -712,4 +712,98 @@ html[data-spectra-sidebar-collapsed="true"]
 html[data-life="on"] [data-life-ghost],
 html[data-life="on"] [data-life-ghost] [data-life-ghost-bar] {
   animation: none;
+}
+
+/* ---------------------------------------------------------------- the band
+   Work in progress looks like loading (LIFE.md, "Ghosts"): the skeleton's
+   band of light, never loose dots. Lines of what is still coming carry it on
+   their own grey (`.life-ghost-line`, a reply being written); whatever
+   Spectra is working on has it cross over it (`[data-life-working]`, set by
+   useLifeGlow); and a thing Spectra just made is crossed by it once as it
+   lands (`[data-life-working="arrival"]`). The gradient is fixed to the
+   viewport, so lines mounted together share one band, crossing every 1.6 s
+   as the field's ghosts do. */
+:root {
+  --life-band-bar: color-mix(in oklab, var(--text-primary) 7%, transparent);
+  --life-band-light: color-mix(in oklab, var(--bg-elevated) 92%, transparent);
+  /* The band is the skeleton's light, never a colour sweeping over the work. */
+  --life-band-tint: color-mix(in oklab, var(--bg-elevated) 70%, transparent);
+  --life-band-period: 1.6s;
+}
+
+@keyframes life-band {
+  from {
+    background-position-x: -360px;
+  }
+  to {
+    background-position-x: calc(100vw + 40px);
+  }
+}
+
+.life-ghost-line {
+  display: block;
+  height: 0.6875rem;
+  border-radius: 4px;
+  background:
+    linear-gradient(90deg, transparent, var(--life-band-light), transparent) -360px 0 / 320px 100vh no-repeat fixed,
+    var(--life-band-bar);
+  animation: life-band var(--life-band-period) linear infinite;
+}
+
+/* A thread or a work Spectra is in: two short lines being written. */
+.life-working-mark {
+  display: inline-grid;
+  flex: none;
+  align-content: center;
+  gap: 2px;
+  width: 0.875rem;
+  height: 0.875rem;
+}
+.life-working-mark::before,
+.life-working-mark::after {
+  content: "";
+  height: 3px;
+  border-radius: 2px;
+  background:
+    linear-gradient(90deg, transparent, var(--brand-primary), transparent) -360px 0 / 320px 100vh no-repeat fixed,
+    color-mix(in oklab, var(--brand-primary) 26%, transparent);
+  animation: life-band var(--life-band-period) linear infinite;
+}
+.life-working-mark::after {
+  width: 64%;
+}
+
+/* Zero specificity: anything already placed (a board node, an event) keeps its position. */
+:where([data-life-working]) {
+  position: relative;
+}
+[data-life-working]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--life-band-tint), transparent) -360px 0 / 320px 100vh no-repeat fixed;
+  animation: life-band var(--life-band-period) linear infinite;
+}
+/* A thing that just landed is not swept: it settles into place, quietly, in no colour of its own. */
+[data-life-working="arrival"]::after {
+  content: none;
+}
+[data-life-working="arrival"] {
+  animation: life-settle 420ms var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1)) both;
+}
+
+@keyframes life-settle {
+  from {
+    opacity: 0.35;
+    translate: 0 4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-life-working="arrival"] {
+    animation: none;
+  }
 }

@@ -2,29 +2,24 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { Icon } from "@/components/icons";
 import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { IconButton } from "@/components/ui/icon-button";
 import { PageBody, PageHeader } from "@/components/ui/page-header";
-import { EmptyState } from "@/components/ui/page-state";
-import { SidePanel } from "@/components/ui/side-panel";
-import { Row } from "@/components/ui/row";
-import { cn } from "@/lib/utils";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { readConvexError } from "../../../../shared/convex-error.mjs";
 import { POLICY_PRESETS } from "../../../../shared/sync-policy";
-import { DEVICES_HREF, pairingFailureMessage, unpairBridge } from "../bridge/client";
+import { bridgeReachabilityCopy, DEVICES_HREF, pairingFailureMessage, unpairBridge } from "../bridge/client";
 import { useBridgeHealth } from "../bridge/use-bridge";
 import { spectraBus } from "../events";
 import { permissionChoicePatch } from "../settings/schema/ai-permissions";
 import { useSpectraPreferences } from "../settings/preference-store";
 import type { LocalDeviceRequest } from "./actions";
-import { DeviceDetails, TONE_GLYPH } from "./device-details";
+import { DeviceCard } from "./device-card";
 import { runLocalDeviceAction } from "./device-actions";
 import { devicesModel, nativeWritesChoice, nativeWritesPlan, type CloudOverview, type DeviceView, type NativeWrites } from "./devices-model";
+import { NativeWritesChoice } from "./native-writes-choice";
 import { PairingPanel, THIS_COMPUTER_LIFE_KEY } from "./pairing-panel";
 import { devicePairing } from "./pairing";
 
@@ -42,9 +37,11 @@ type Confirm =
   | { kind: "native-writes"; choice: NativeWrites };
 
 /*
- * Devices: this computer and the user's other computers, connected through
- * Spectra Bridge. Connecting starts here (or from the command bar and Spectra
- * AI, which ask this page to), and every action is also an app command.
+ * Devices: the user's computers connected through Spectra Bridge, in one
+ * list led by the one they are on. Here they connect a computer and see and
+ * set what is bridged; using those files happens in the Library. Connecting
+ * starts here (or from the command bar and Spectra AI, which ask this page
+ * to), and every action is also an app command.
  */
 export function DevicesPage() {
   const local = useBridgeHealth();
@@ -60,9 +57,6 @@ export function DevicesPage() {
   const pairingState = useSyncExternalStore(pairing.subscribe, pairing.get, pairing.get);
 
   const [now, setNow] = useState(() => Date.now());
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Choosing a device opens Details, even after the user folded it.
-  const [reveal, setReveal] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>();
   const [confirm, setConfirm] = useState<Confirm | null>(null);
@@ -80,8 +74,6 @@ export function DevicesPage() {
     () => devicesModel({ local: { reachability: local.reachability, status: local.status }, cloud, now }),
     [cloud, local.reachability, local.status, now],
   );
-  const all = useMemo(() => [...(model.thisComputer ? [model.thisComputer] : []), ...model.others], [model]);
-  const selected = all.find((device) => device.id === selectedId) ?? model.thisComputer ?? model.others[0] ?? null;
   const here = model.thisComputer;
   const stored = {
     permissionFullControl: preferences.ai.permissionFullControl,
@@ -126,11 +118,6 @@ export function DevicesPage() {
 
   const refresh = local.refresh;
   useEffect(() => spectraBus.on("devices.changed", () => void refresh()), [refresh]);
-
-  function showDetails(id: string | null) {
-    setSelectedId(id);
-    setReveal((value) => value + 1);
-  }
 
   async function act(request: LocalDeviceRequest) {
     if (request.action === "remove_folder" && request.grantId) {
@@ -178,7 +165,6 @@ export function DevicesPage() {
           local.forgetSession();
           void local.refresh();
         }
-        setSelectedId(null);
         setNotice(`Removed ${confirm.device.name}. Its files stay on the computer.`);
       }
     } catch (error) {
@@ -204,16 +190,17 @@ export function DevicesPage() {
           },
         ] satisfies BarCommand[]
       : []),
-    ...(!here?.live && !connecting
+    // Connecting for the first time is the page's own call to action; the bar offers it again only to reconnect.
+    ...(here && !here.live && !connecting
       ? [
           {
             id: "connect",
             icon: "devices",
-            label: here ? "Reconnect this computer" : "Connect this computer",
+            label: "Reconnect this computer",
             pinned: true,
             render: () => (
               <Button variant="primary" size="sm" disabled={!isAuthenticated} onClick={connect}>
-                {here ? "Reconnect this computer" : "Connect this computer"}
+                Reconnect this computer
               </Button>
             ),
           },
@@ -221,39 +208,21 @@ export function DevicesPage() {
       : []),
   ];
 
-  const deviceRow = (device: DeviceView) => (
-    <Row
+  const deviceCard = (device: DeviceView) => (
+    <DeviceCard
       key={device.id ?? "this-computer"}
-      data-device-row={device.isThisComputer ? "this" : "other"}
-      glyph="devices"
-      title={device.name}
-      meta={`${device.label} · ${device.detail}`}
-      selected={selected?.id === device.id}
+      device={device}
+      now={now}
+      busy={busy}
       fresh={device.isThisComputer && justPaired}
       lifeKey={device.isThisComputer ? THIS_COMPUTER_LIFE_KEY : `device:${device.id}`}
-      actionsVisible
-      onClick={() => showDetails(device.id)}
-      actions={
-        <>
-          <span className={cn("grid size-7 place-items-center", device.tone === "attention" ? "text-[var(--warning)]" : "text-[var(--text-tertiary)]")} aria-hidden>
-            <Icon name={TONE_GLYPH[device.tone]} size={14} />
-          </span>
-          <IconButton
-            icon="openSide"
-            label={`Details for ${device.name}`}
-            size="compact"
-            onClick={(event) => {
-              event.stopPropagation();
-              showDetails(device.id);
-            }}
-          />
-        </>
-      }
+      onAction={(request) => void act(request)}
+      onRemove={() => setConfirm({ kind: "remove-device", device })}
     />
   );
 
   return (
-    <main className="spectra-wave-y relative isolate flex h-full min-h-0 flex-1" data-spectra-app-surface="true" data-devices-page>
+    <div className="spectra-wave-y relative isolate flex h-full min-h-0 flex-1" data-spectra-app-surface="true" data-devices-page>
       <div className="min-w-0 flex-1 overflow-y-auto">
         <PageBody>
           <PageHeader
@@ -267,57 +236,40 @@ export function DevicesPage() {
             {notice}
           </p>
 
-          <div className="min-w-0 space-y-8">
-            <section aria-labelledby="devices-this" className="space-y-3">
-              <h2 id="devices-this" className="text-caption font-medium text-[var(--text-secondary)]">
-                This computer
+          <div className="devices-columns">
+            {/* One list of the user's computers: the one they are on leads, marked as such. */}
+            <section aria-labelledby="devices-list" className="min-w-0 space-y-4">
+              <h2 id="devices-list" className="device-section-heading">
+                Your computers
               </h2>
               <PairingPanel state={pairingState} onCancel={() => pairing.cancel()} onRetry={connect} />
               {here ? (
-                <div className="-mx-2.5">{deviceRow(here)}</div>
+                deviceCard(here)
               ) : !connecting ? (
-                <p className="max-w-xl text-caption text-[var(--text-secondary)]">
-                  {isAuthenticated
-                    ? "This computer isn't connected. Connect it to use its folders in Spectra."
-                    : "Sign in to connect this computer."}
-                </p>
+                <div className="device-connect">
+                  <p className="max-w-xl text-ui leading-6 text-[var(--text-secondary)]">
+                    {isAuthenticated
+                      ? // Pairing is per browser: Bridge can be running, even paired, while this browser isn't connected to it.
+                        bridgeReachabilityCopy(local.reachability).detail
+                      : "Sign in to connect this computer."}
+                  </p>
+                  <Button variant="primary" size="sm" disabled={!isAuthenticated} onClick={connect}>
+                    Connect this computer
+                  </Button>
+                </div>
+              ) : null}
+              {model.others.map(deviceCard)}
+              {!here && !model.others.length && cloud === undefined && cloudEnabled ? (
+                <p className="text-caption text-[var(--text-secondary)]">Loading your computers.</p>
               ) : null}
             </section>
 
-            <section aria-labelledby="devices-others" className="space-y-3">
-              <h2 id="devices-others" className="text-caption font-medium text-[var(--text-secondary)]">
-                Other devices
-              </h2>
-              {model.others.length ? (
-                <div className="-mx-2.5">{model.others.map(deviceRow)}</div>
-              ) : (
-                <p className="max-w-xl text-caption text-[var(--text-secondary)]">
-                  {cloud === undefined && cloudEnabled ? "Loading your devices." : "No other computers yet. Open Spectra on another computer to connect it."}
-                </p>
-              )}
-            </section>
+            <aside aria-label="For every device" className="min-w-0 xl:sticky xl:top-6">
+              <NativeWritesChoice value={nativeWrites} disabled={!policy} onChange={chooseNativeWrites} />
+            </aside>
           </div>
         </PageBody>
       </div>
-
-      <SidePanel id="devices.details" title="Details" label="Device details" icon="info" stageMin={520} defaultWidth={360} revealKey={reveal || null}>
-        {selected ? (
-          <div className="px-1 pb-6 pt-2">
-            <DeviceDetails
-              device={selected}
-              now={now}
-              busy={busy}
-              nativeWrites={nativeWrites}
-              nativeWritesDisabled={!policy}
-              onAction={(request) => void act(request)}
-              onNativeWrites={chooseNativeWrites}
-              onRemove={() => setConfirm({ kind: "remove-device", device: selected })}
-            />
-          </div>
-        ) : (
-          <EmptyState compact icon="devices" title="No devices yet" detail="Connect this computer to see its folders and choices here." />
-        )}
-      </SidePanel>
 
       <ConfirmDialog
         open={confirm !== null}
@@ -345,7 +297,7 @@ export function DevicesPage() {
         onCancel={() => setConfirm(null)}
         onConfirm={() => void confirmAction()}
       />
-    </main>
+    </div>
   );
 }
 

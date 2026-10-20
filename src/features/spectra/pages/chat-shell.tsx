@@ -1,25 +1,15 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
-import { ArrowRight, Clock3, CheckCircle2, FolderPlus, MessageSquare } from "@/components/icons/glyph-icons";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { PageHeader } from "@/components/ui/page-header";
-import { describeFailure } from "@/components/ui/truthful-state";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
-import { SpectraMark } from "@/components/spectra-mark";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import { useSpectraContext } from "../hooks/use-spectra-context";
 import { spectraBus } from "../events";
@@ -46,24 +36,30 @@ import {
 import {
   getSpectraArtifact,
   getSpectraOverview,
-  getSpectraResultCards,
   getSpectraRunDetail,
   getSpectraThread,
-  getSpectraThreads,
   postSpectra,
   type SpectraArtifact,
-  type SpectraResultCard,
-  type SpectraThread,
   type SpectraThreadDetail,
   type SpectraWorkspace,
 } from "../data/api";
 import { useSpectraPreferences } from "../settings/preference-store";
-import { useTreeActions, useTreePlacement } from "../organization/tree-client";
 import { expectLanding } from "../anchors/open-anchor";
 import {
   acknowledgeViewportReady,
   requestViewportAction,
 } from "../viewport-readiness";
+import type { ThreadsBrowserHandle } from "../threads/threads-view";
+import { threadName } from "../threads/threads-model";
+import { ChatRunsPanel } from "../chat/chat-runs-panel";
+import { ChatThreadColumn } from "../chat/chat-thread-column";
+import { HomeLead } from "../chat/home-lead";
+import { HomeDay } from "../today/home-day";
+import { ThreadRenameField } from "../chat/thread-rename-field";
+import { useThreadActions } from "../chat/use-thread-actions";
+import { useThreadColumn } from "../chat/use-thread-column";
+import { HOME_PATH, threadHref } from "../chat/home-routes";
+import { workspaceHref } from "./shell-location";
 
 const ArtifactStudio = dynamic(
   () =>
@@ -73,13 +69,20 @@ const ArtifactStudio = dynamic(
   { loading: () => <StudioSplitPlaceholder /> },
 );
 
-const CHAT_BAR_PLAN: readonly CollapseStep[] = [{ hideLabel: "runs" }, { toMenu: "delete" }, { toMenu: "rename" }, { toMenu: "pin" }, { hideLabel: "new" }, { toMenu: "runs" }];
+const CHAT_BAR_PLAN: readonly CollapseStep[] = [{ hideLabel: "runs" }, { toMenu: "delete" }, { toMenu: "rename" }, { toMenu: "pin" }, { toMenu: "runs" }];
 
 function chatLoadErrorMessage(threadId: string | null) {
   return threadId
-    ? "This conversation could not load. Try again."
-    : "Chat could not load. Try again.";
+    ? "This thread could not load. Try again."
+    : "Threads could not load. Try again.";
 }
+
+/*
+ * The chat page (SHELL.md, "The chat page"): every thread in a column on the
+ * left, the open one filling the sheet, and works opening beside it. The
+ * island is this page's composer. The column, the welcome, the runs panel
+ * and the thread's own actions live in features/spectra/chat.
+ */
 
 export function ChatShell() {
   const router = useRouter();
@@ -88,23 +91,20 @@ export function ChatShell() {
   const requestedThreadId = searchParams.get("threadId");
   const requestedPrompt = searchParams.get("prompt");
   const [threadId, setThreadId] = useState<string | null>(requestedThreadId);
-  const [threads, setThreads] = useState<SpectraThread[]>([]);
   const [detail, setDetail] = useState<SpectraThreadDetail | null>(null);
   const [workspaces, setWorkspaces] = useState<SpectraWorkspace[]>([]);
   const [artifacts, setArtifacts] = useState<SpectraArtifact[]>([]);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [history, setHistory] = useState<SpectraResultCard[]>([]);
+  const [runsOpen, setRunsOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [contextLoadError, setContextLoadError] = useState(false);
   const [loading, setLoading] = useState(Boolean(requestedThreadId));
   const [renaming, setRenaming] = useState(false);
-  const [titleDraft, setTitleDraft] = useState("");
   const [chatWorkspaceId, setChatWorkspaceId] = useState<string | null>(null);
-  const [welcome, setWelcome] = useState("Welcome back.");
   const [studioPanelWidth, setStudioPanelWidth] = useState(700);
+  const threadsRef = useRef<ThreadsBrowserHandle>(null);
   const activeThreadRef = useRef<string | null>(requestedThreadId);
   const loadGenerationRef = useRef(0);
-  const historyOpenerRef = useRef<HTMLElement | null>(null);
+  const runsOpenerRef = useRef<HTMLElement | null>(null);
   const syncedRequestedThreadRef = useRef<string | null | undefined>(undefined);
   const consumedPromptRef = useRef<string | null>(null);
   const closePresentation = useSpectraContextStore(
@@ -118,33 +118,15 @@ export function ChatShell() {
     setActiveWorkspaceContext,
   } = useSpectraContext(artifacts, workspaces);
 
-  useEffect(() => {
-    const now = new Date();
-    const hour = now.getHours();
-    setWelcome(
-      hour < 5
-        ? "A quiet hour for a clearer thought."
-        : hour < 12
-          ? "Good morning. What shall we make easier?"
-          : hour < 18
-            ? "Good afternoon. Let’s make something click."
-            : "Good evening. Let’s end on a satisfying note.",
-    );
-  }, []);
-
   const refresh = useCallback(
     async (nextThreadId?: string | null, generation = loadGenerationRef.current) => {
       const isCurrentLoad = () =>
         generation === loadGenerationRef.current &&
         (nextThreadId ?? null) === activeThreadRef.current;
-      // Catalogs hydrate independently; a selected conversation must not wait
-      // for the recent-chat list or the work/workspace overview.
-      const catalogs = Promise.all([
-        getSpectraThreads({ limit: 100 }),
-        getSpectraOverview(),
-      ]).then(([threadRows, overview]) => {
+      // The overview hydrates independently; a selected thread must not wait
+      // for the work and workspace catalog. The thread column reads its own list.
+      const catalogs = getSpectraOverview().then((overview) => {
         if (!isCurrentLoad()) return;
-        setThreads(threadRows.threads);
         setWorkspaces(overview.workspaces);
         setArtifacts((current) => {
           const next = new Map(
@@ -208,9 +190,9 @@ export function ChatShell() {
           setThreadId(null);
           setDetail(null);
           setComposerThread(null);
-          router.replace("/chat?new=1");
+          router.replace(HOME_PATH);
           toast.message(
-            "That conversation is no longer available. Opened a new conversation instead.",
+            "That thread is no longer available. Opened a new thread instead.",
           );
         })
         .catch(() => {
@@ -244,9 +226,9 @@ export function ChatShell() {
       )
         setLoadError(null);
     } catch {
-      // Background updates must leave the last known conversation rendered;
+      // Background updates must leave the last known thread rendered;
       // surface the failure beside those messages instead of replacing them
-      // with the empty-chat welcome state.
+      // with the new-thread welcome.
       if (
         loadGenerationRef.current === currentGeneration &&
         activeThreadRef.current === currentThreadId
@@ -265,7 +247,7 @@ export function ChatShell() {
     // thread and caused a request storm.
     setComposerThread(
       requestedThreadId
-        ? { id: requestedThreadId, title: "Conversation" }
+        ? { id: requestedThreadId, title: "Thread" }
         : null,
     );
     startRouteLoad(requestedThreadId, true);
@@ -303,24 +285,13 @@ export function ChatShell() {
     startRouteLoad(requestedThreadId, false);
   }, [requestedThreadId, startRouteLoad]);
 
-  const closeHistory = useCallback(() => {
-    setHistoryOpen(false);
-    window.requestAnimationFrame(() => historyOpenerRef.current?.focus());
+  const closeRuns = useCallback(() => {
+    setRunsOpen(false);
+    window.requestAnimationFrame(() => runsOpenerRef.current?.focus());
   }, []);
 
-  useEffect(() => {
-    if (!historyOpen) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      closeHistory();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeHistory, historyOpen]);
-
   const selectThread = useCallback(
-    (id: string | null) => {
+    (id: string | null, knownTitle?: string) => {
       // Reselecting the active thread does not change the URL or reload it.
       // Preserve its loaded messages rather than clearing them indefinitely.
       if (id && id === activeThreadRef.current) return;
@@ -328,111 +299,25 @@ export function ChatShell() {
       activeThreadRef.current = id;
       setDetail(null);
       setChatWorkspaceId(null);
-      setComposerThread(
-        id
-          ? {
-              id,
-              title:
-                threads.find((thread) => thread._id === id)?.title ??
-                "Conversation",
-            }
-          : null,
-      );
+      setComposerThread(id ? { id, title: knownTitle ?? "Thread" } : null);
       closePresentation("thread-panel");
       router.replace(
-        id ? `/chat?threadId=${encodeURIComponent(id)}` : "/chat?new=1",
+        id ? threadHref(id) : HOME_PATH,
       );
     },
-    [closePresentation, router, setComposerThread, threads],
+    [closePresentation, router, setComposerThread],
   );
 
-  /* Rename, pin and delete answer every time: a failure says so and leaves
-     the chat as it was, instead of an unhandled rejection and silence. */
-  const [threadBusy, setThreadBusy] = useState<"title" | "pin" | "trash" | null>(
-    null,
-  );
-  const threadPlacement = useTreePlacement("thread", threadId);
-  const treeActions = useTreeActions();
-  async function saveTitle() {
-    const title = titleDraft.trim();
-    if (!threadId || !title || threadBusy) return;
-    setThreadBusy("title");
-    try {
-      await postSpectra({ action: "updateThread", threadId, title });
+  const threadActions = useThreadActions({
+    threadId,
+    pinned: Boolean(detail?.thread.pinned),
+    onChanged: () => refresh(threadId),
+    onRenamed: (title) => {
       setRenaming(false);
-      if (composerThread?.id === threadId)
-        setComposerThread({ id: threadId, title });
-      await refresh(threadId).catch(() => undefined);
-    } catch (error) {
-      toast.error(
-        describeFailure(error, {
-          fallback: "Could not rename this chat. Try again.",
-        }).message,
-      );
-    } finally {
-      setThreadBusy(null);
-    }
-  }
-  async function togglePinned() {
-    if (!threadId || threadBusy) return;
-    setThreadBusy("pin");
-    try {
-      await postSpectra({
-        action: "updateThread",
-        threadId,
-        pinned: !detail?.thread.pinned,
-      });
-      await refresh(threadId).catch(() => undefined);
-    } catch (error) {
-      toast.error(
-        describeFailure(error, {
-          fallback: detail?.thread.pinned
-            ? "Could not unpin this chat. Try again."
-            : "Could not pin this chat. Try again.",
-        }).message,
-      );
-    } finally {
-      setThreadBusy(null);
-    }
-  }
-  async function trashThread() {
-    const nodeId = threadPlacement?.node.nodeId;
-    if (!threadId || !nodeId || threadBusy) return;
-    setThreadBusy("trash");
-    try {
-      await treeActions.trash([nodeId]);
-      spectraBus.emit("threads.changed", {});
-      selectThread(null);
-      toast.success("Chat moved to Trash.", {
-        action: {
-          label: "Undo",
-          onClick: () =>
-            void treeActions
-              .restore([nodeId])
-              .then(() => {
-                spectraBus.emit("threads.changed", {});
-                selectThread(threadId);
-              })
-              .catch((error: unknown) =>
-                toast.error(
-                  describeFailure(error, {
-                    fallback:
-                      "Could not restore this chat. Find it in the Library Trash.",
-                  }).message,
-                ),
-              ),
-        },
-      });
-    } catch (error) {
-      toast.error(
-        describeFailure(error, {
-          fallback: "Could not delete this chat. Try again.",
-        }).message,
-      );
-    } finally {
-      setThreadBusy(null);
-    }
-  }
+      if (threadId && composerThread?.id === threadId) setComposerThread({ id: threadId, title });
+    },
+    onSelect: selectThread,
+  });
 
   const selectWorkspaceContext = useCallback((workspaceId: string | null) => {
     setChatWorkspaceId(workspaceId);
@@ -460,23 +345,24 @@ export function ChatShell() {
         disengageFollow("user_input");
       }
       const artifact = artifacts.find((item) => item._id === artifactId);
-      if (!artifact) {
+      if (!artifact || artifact.content === undefined) {
         // Result cards can arrive before the broad overview projection includes a
-        // newly created Inbox artifact. Resolve the canonical object directly so
-        // its primary action never behaves like a dead focus-only click.
+        // newly created Inbox artifact, and the overview carries no content, so
+        // an editor seeded from it would open blank. Resolve the canonical
+        // object directly so the primary action always opens the real work.
         void getSpectraArtifact(artifactId)
           .then(({ artifact: resolved }) => {
             setArtifacts((current) => [
               ...current.filter((item) => item._id !== resolved._id),
               resolved,
             ]);
-            setHistoryOpen(false);
+            setRunsOpen(false);
             studio.openSplit(resolved);
           })
           .catch(() => toast.error("That work is no longer available."));
         return;
       }
-      setHistoryOpen(false);
+      setRunsOpen(false);
       if (artifact.blueprintKey === "thread_reference") {
         const content =
           artifact.content && typeof artifact.content === "object"
@@ -536,11 +422,7 @@ export function ChatShell() {
                 : "/settings",
             );
           } else {
-            router.push(
-              targetId
-                ? `/workspace/${encodeURIComponent(targetId)}`
-                : "/workspace?home=1",
-            );
+            router.push(workspaceHref(targetId));
           }
         },
         preferences,
@@ -568,13 +450,13 @@ export function ChatShell() {
         id,
         title:
           id === threadId
-            ? (detail?.thread.title ?? "Conversation")
-            : "New chat",
+            ? (detail?.thread.title ?? "Thread")
+            : "New thread",
       });
       if (id !== threadId) {
         setThreadId(id);
         activeThreadRef.current = id;
-        router.replace(`/chat?threadId=${encodeURIComponent(id)}`);
+        router.replace(threadHref(id));
       }
       await refreshActiveThread();
     },
@@ -601,7 +483,7 @@ export function ChatShell() {
         });
         return {
           status: readiness.status === "ready" ? "completed" : "failed",
-          message: readiness.status === "ready" ? "Conversation opened." : readiness.reason ?? "Conversation could not be opened.",
+          message: readiness.status === "ready" ? "Thread opened." : readiness.reason ?? "Thread could not be opened.",
           readiness,
         } satisfies SpectraCommandOutcome;
       },
@@ -641,8 +523,8 @@ export function ChatShell() {
     void runEngine.run(prompt);
     router.replace(
       threadId
-        ? `/chat?threadId=${encodeURIComponent(threadId)}`
-        : "/chat?new=1",
+        ? threadHref(threadId)
+        : HOME_PATH,
     );
   }, [
     composerThread?.id,
@@ -654,11 +536,10 @@ export function ChatShell() {
   ]);
 
   const visibleTitle =
-    detail?.thread.title ??
-    (threadId
-      ? loading ? "Loading conversation…" : "Conversation"
-      : "New conversation");
-  const title = composerThread?.title ?? visibleTitle;
+    (detail ? threadName(detail.thread) : undefined) ??
+    (threadId ? (loading ? "Opening thread…" : "Thread") : "New thread");
+  // The thread on screen is named the way its row and header name it.
+  const title = detail && composerThread?.id === detail.thread._id ? threadName(detail.thread) : (composerThread?.title ?? visibleTitle);
   const activeWorkspace = workspaces.find(
     (workspace) =>
       workspace._id === (chatWorkspaceId ?? detail?.thread.workspaceId),
@@ -680,12 +561,32 @@ export function ChatShell() {
         engine: runEngine,
         focus: composerThread ? { threadId: composerThread.id, title } : null,
         bindsThread: true,
-        restAsComposer: true,
         startNewThread: () => selectThread(null),
-        openThread: (_runId: string, id: string) => selectThread(id),
+        openThread: (_runId: string, id: string, threadTitle: string) => selectThread(id, threadTitle),
       }),
       [composerThread, runEngine, selectThread, title],
     ),
+  );
+
+  const studioBeside = studio.isOpen && studio.mode !== "tab";
+  const column = useThreadColumn(studioBeside);
+  // Home is this page before a thread: the day lifts away once one is sent or opened, and comes back with a new one.
+  const started = Boolean(threadId || detail || runEngine.liveExchange || loading);
+  const [leadState, setLeadState] = useState<"shown" | "leaving" | "gone">(requestedThreadId ? "gone" : "shown");
+  useEffect(() => {
+    if (started && leadState === "shown") setLeadState("leaving");
+    if (!started && leadState === "gone") setLeadState("shown");
+  }, [leadState, started]);
+  const atHome = leadState === "shown";
+  const showColumn = column.setOpen;
+  // "Search threads" from anywhere lands in this page's own column.
+  useEffect(
+    () =>
+      spectraBus.on("threads.open", ({ query }) => {
+        showColumn(true);
+        window.requestAnimationFrame(() => threadsRef.current?.focusSearch(query));
+      }),
+    [showColumn],
   );
 
   function toggleRuns() {
@@ -694,11 +595,9 @@ export function ChatShell() {
       return;
     }
     studio.closeStudio();
-    if (!historyOpen)
-      historyOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setHistoryOpen((value) => !value);
-    if (!historyOpen)
-      void getSpectraResultCards({ includeHidden: true, limit: 50 }).then((result) => setHistory(result.resultCards));
+    if (!runsOpen)
+      runsOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setRunsOpen((value) => !value);
   }
   const chatCommands: BarCommand[] = [
     {
@@ -714,96 +613,100 @@ export function ChatShell() {
         />
       ),
     },
-    { id: "new", icon: "add", label: "New chat", onSelect: () => selectThread(null) },
-    { id: "runs", icon: "activity", label: "Runs", active: historyOpen, onSelect: toggleRuns },
+    { id: "runs", icon: "activity", label: "Runs", active: runsOpen, onSelect: toggleRuns },
     ...(threadId
       ? ([
           {
             id: "rename",
             icon: "edit",
-            label: "Rename chat",
+            label: "Rename thread",
             labelPolicy: "never",
-            onSelect: () => {
-              setTitleDraft(visibleTitle);
-              setRenaming(true);
-            },
+            onSelect: () => setRenaming(true),
           },
           {
             id: "pin",
             icon: "pin",
-            label: detail?.thread.pinned ? "Unpin chat" : "Pin chat",
+            label: detail?.thread.pinned ? "Unpin thread" : "Pin thread",
             labelPolicy: "never",
             active: Boolean(detail?.thread.pinned),
-            disabled: threadBusy === "pin",
-            onSelect: () => void togglePinned(),
+            disabled: threadActions.busy === "pin",
+            onSelect: () => void threadActions.togglePinned(),
           },
           {
             id: "delete",
             icon: "trash",
-            label: "Delete chat",
+            label: "Delete thread",
             labelPolicy: "never",
-            disabled: !threadPlacement || threadBusy === "trash",
-            onSelect: () => void trashThread(),
+            disabled: !threadActions.canTrash || threadActions.busy === "trash",
+            onSelect: () => void threadActions.trash(),
           },
         ] satisfies BarCommand[])
       : []),
   ];
   return (
-    <div className="spectra-wave-y relative isolate flex h-full min-h-0">
+    <div className="relative isolate flex h-full min-h-0">
+      {column.open && studio.mode !== "tab" ? (
+        <ChatThreadColumn
+          ref={threadsRef}
+          selectedId={threadId}
+          onChoose={(thread) => selectThread(thread._id, threadName(thread))}
+          onNewThread={() => spectraBus.emit("island.compose", { fresh: true })}
+          onHide={() => column.setOpen(false)}
+        />
+      ) : null}
       <section
+        aria-label="Thread"
         className={
-          studio.mode === "tab" ? "hidden" : "flex min-w-0 flex-1 flex-col"
+          studio.mode === "tab" ? "hidden" : "chat-conversation relative flex min-w-0 flex-1 flex-col"
         }
       >
-        <div className="shrink-0 px-4 pt-3 sm:px-6 lg:px-8">
+        <div className={atHome ? "hidden" : "shrink-0 px-6 pt-2.5"}>
           <PageHeader
-            title={<CrossfadeText value={visibleTitle} primitive="reveal" className="block truncate" />}
+            level="nested"
+            lead={
+              column.open ? null : (
+                <IconButton icon="sidebar" label="Show threads" onClick={() => column.setOpen(true)} />
+              )
+            }
+            title={<CrossfadeText value={visibleTitle} primitive="reveal" className="chat-thread-title block truncate" />}
             commands={chatCommands}
             plan={CHAT_BAR_PLAN}
-            barLabel="Chat commands"
+            barLabel="Thread commands"
           />
         </div>
         {renaming && threadId ? (
-          <div className="absolute left-5 top-12 z-modal flex w-[min(420px,calc(100vw-40px))] items-center gap-1.5 rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-hover sm:left-7">
-            <input
-              autoFocus
-              value={titleDraft}
-              maxLength={64}
-              onChange={(event) => setTitleDraft(event.target.value)}
-              aria-label="Chat name"
-              onKeyDown={(event) => {
-                if (event.key === "Escape") setRenaming(false);
-                if (event.key === "Enter") void saveTitle();
-              }}
-              className="h-9 min-w-0 flex-1 bg-transparent px-2 text-ui font-medium text-[var(--text-primary)] outline-none"
-            />
-            <IconButton
-              icon="check"
-              label="Save name"
-              disabled={!titleDraft.trim() || threadBusy === "title"}
-              onClick={() => void saveTitle()}
-            />
-            <IconButton icon="close" label="Cancel" onClick={() => setRenaming(false)} />
-          </div>
+          <ThreadRenameField
+            initial={visibleTitle}
+            saving={threadActions.busy === "title"}
+            onSave={(next) => void threadActions.rename(next)}
+            onCancel={() => setRenaming(false)}
+          />
         ) : null}
         <ConversationSurface
           detail={detail}
           threadId={threadId ?? undefined}
           loading={loading}
+          lead={
+            leadState === "gone" ? undefined : (
+              <HomeLead leaving={leadState === "leaving"} onGone={() => setLeadState("gone")}>
+                <HomeDay onAllThreads={() => column.setOpen(true)} />
+              </HomeLead>
+            )
+          }
           loadError={
             detail && (loadError || contextLoadError) ? (
               <ProductErrorState
                 title={
                   loadError
                     ? requestedThreadId
-                      ? "This conversation could not refresh"
-                      : "Chat could not refresh"
-                    : "Chat context could not load"
+                      ? "This thread could not refresh"
+                      : "Threads could not refresh"
+                    : "Your work could not load"
                 }
                 detail={
                   loadError
-                    ? "The messages shown below are the last loaded copy. Try again to refresh this conversation."
-                    : "Your messages are available. Work and workspace information could not load. Try again."
+                    ? "The messages shown below are the last loaded copy. Try again to refresh this thread."
+                    : "Your messages are here. Works and workspaces could not load beside them. Try again."
                 }
                 className="mb-5 min-h-0 items-start rounded-card border border-[color-mix(in_oklab,var(--danger)_22%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_4%,var(--bg-primary))] px-4 py-3 text-left"
                 action={
@@ -860,8 +763,8 @@ export function ChatShell() {
               <ProductErrorState
                 title={
                   requestedThreadId
-                    ? "This conversation could not load"
-                    : "Chat could not load"
+                    ? "This thread could not load"
+                    : "Threads could not load"
                 }
                 detail={loadError}
                 className="mx-auto min-h-[clamp(420px,50vh,620px)] w-full max-w-[820px]"
@@ -871,76 +774,7 @@ export function ChatShell() {
                   </Button>
                 }
               />
-            ) : (
-              <div className="mx-auto flex min-h-[clamp(420px,50vh,620px)] w-full max-w-[820px] flex-col justify-center py-8 text-left">
-                <div className="mb-7 flex h-12 w-12 items-center justify-center rounded-surface border border-[color-mix(in_oklab,var(--brand-primary)_14%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--brand-primary)_5%,var(--bg-elevated))] shadow-soft">
-                  <SpectraMark size={28} />
-                </div>
-                <h1 className="max-w-[820px] font-display text-title font-semibold leading-[1.12] text-[var(--text-primary)]">
-                  {welcome}
-                </h1>
-                <p className="mt-3 max-w-[640px] text-body leading-6 text-[var(--text-secondary)]">
-                  Bring a half-formed question, a difficult topic, or a whole
-                  workspace. Spectra can explain, build, and revise alongside you.
-                </p>
-                {workspaces.length > 0 ? (
-                  <div className="mt-8 grid gap-3 sm:grid-cols-2">
-                    {workspaces.slice(0, 6).map((workspace) => {
-                      const selected = chatWorkspaceId === workspace._id;
-                      const count = artifacts.filter((artifact) =>
-                        artifact.placements?.some(
-                          (placement) => placement.workspaceId === workspace._id,
-                        ),
-                      ).length;
-                      return (
-                        <button
-                          key={workspace._id}
-                          type="button"
-                          data-spectra-card="workspace"
-                          data-card-state={selected ? "active" : "normal"}
-                          data-interactive="true"
-                          onClick={() =>
-                            selectWorkspaceContext(
-                              selected ? null : workspace._id,
-                            )
-                          }
-                          className="group min-h-[112px] p-4 text-left"
-                          style={
-                            {
-                              "--card-accent": "var(--accent-cyan)",
-                            } as CSSProperties
-                          }
-                        >
-                          <span className="relative flex items-start gap-3">
-                            <span className="spectra-card-type-icon h-9 w-9 text-[var(--accent-cyan)]">
-                              <FolderPlus className="h-4 w-4" />
-                            </span>
-                            <span className="min-w-0 flex-1">
-                              <span className="flex items-center gap-2 text-body font-semibold text-[var(--text-primary)]">
-                                {workspace.title}
-                                {selected ? (
-                                  <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
-                                ) : null}
-                              </span>
-                              <span className="mt-1 line-clamp-2 text-micro leading-5 text-[var(--text-secondary)]">
-                                {workspace.description ??
-                                  `${count} objects ready as context`}
-                              </span>
-                              <span className="mt-2 flex items-center gap-1 text-micro font-medium text-[var(--text-tertiary)]">
-                                {selected
-                                  ? "Context selected"
-                                  : `Start here · ${count} objects`}
-                                <ArrowRight className="h-3 w-3 transition group-hover:translate-x-0.5" />
-                              </span>
-                            </span>
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : null}
-              </div>
-            )
+            ) : null
           }
         />
       </section>
@@ -974,59 +808,7 @@ export function ChatShell() {
         </div>
       </div>
 
-      {historyOpen ? (
-        <aside aria-label="Runs and chats" className="absolute inset-y-0 right-0 z-panel w-[min(360px,92vw)] overflow-y-auto border-l border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4 shadow-[var(--shadow-lg)]">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <h2 className="text-ui font-semibold">Runs and chats</h2>
-              <p className="text-micro text-[var(--text-tertiary)]">
-                Hidden results remain inspectable.
-              </p>
-            </div>
-            <IconButton icon="close" label="Close runs" onClick={closeHistory} />
-          </div>
-          <div className="mb-5 space-y-1">
-            {threads.slice(0, 12).map((thread) => (
-              <button
-                type="button"
-                key={thread._id}
-                onClick={() => {
-                  selectThread(thread._id);
-                  setHistoryOpen(false);
-                }}
-                className="flex w-full items-center gap-2 rounded-control px-2 py-2 text-left hover:bg-[var(--bg-hover)]"
-              >
-                <MessageSquare className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
-                <span className="min-w-0 flex-1 truncate text-micro font-medium">
-                  {thread.title}
-                </span>
-                <span className="text-micro text-[var(--text-tertiary)]">
-                  {thread.messageCount ?? 0}
-                </span>
-              </button>
-            ))}
-          </div>
-          <h3 className="border-t border-[var(--border-subtle)] pt-3 text-caption font-medium text-[var(--text-secondary)]">
-            All runs
-          </h3>
-          <div className="mt-2 space-y-1.5">
-            {history.map((card) => (
-              <div
-                key={card._id}
-                className="rounded-control border border-[var(--border-default)] px-3 py-2"
-              >
-                <div className="flex items-center gap-2 text-micro font-medium">
-                  <Clock3 className="h-3 w-3" />
-                  {card.title}
-                </div>
-                <div className="mt-1 line-clamp-2 text-micro leading-4 text-[var(--text-tertiary)]">
-                  {card.summary}
-                </div>
-              </div>
-            ))}
-          </div>
-        </aside>
-      ) : null}
+      {runsOpen ? <ChatRunsPanel onClose={closeRuns} /> : null}
     </div>
   );
 }

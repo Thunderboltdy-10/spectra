@@ -144,18 +144,17 @@ describe("the status control in the field", () => {
     expect(colour).toBe(STATUS_COLOURS.done);
   });
 
-  it("holds light around itself while the desktop copy updates, and lets go after", () => {
-    const { rerender } = render(<ArtifactStatusControl status={SYNCING} onAction={() => {}} />);
-    expect(field.glow).toHaveBeenCalledTimes(1);
+  it("is marked as working while the desktop copy updates, and lets go after", () => {
+    const { container, rerender } = render(<ArtifactStatusControl status={SYNCING} onAction={() => {}} />);
+    expect(container.querySelector("[data-life-working]")).not.toBeNull();
     rerender(<ArtifactStatusControl status={SAVED} onAction={() => {}} />);
-    expect(field.glowStop).toHaveBeenCalledTimes(1);
+    expect(container.querySelector("[data-life-working]")).toBeNull();
   });
 
   it("answers a failure in the problem hue", () => {
     const { rerender } = render(<ArtifactStatusControl status={SAVING} onAction={() => {}} />);
     rerender(<ArtifactStatusControl status={PROBLEM} onAction={() => {}} />);
     expect(field.pulse.mock.calls.at(-1)?.[3]).toBe(STATUS_COLOURS.problem);
-    expect(field.glow.mock.calls.at(-1)?.[1]).toBe(STATUS_COLOURS.problem);
   });
 
   it("is still when the field is off", () => {

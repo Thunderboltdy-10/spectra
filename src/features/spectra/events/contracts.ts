@@ -55,9 +55,13 @@ export type SpectraCommands = {
     hostWorkId: string;
     target?: WorkAnchor;
     reference?: ReferenceNode;
+    /** Lay it on this embed's card as another tab instead of a new card. */
+    stackOnto?: string;
   };
   "reference.remove": { hostWorkId: string; embedId: string };
   "reference.beginPicking": { hostWorkId: string };
+  /** Finds work to add as a reference, in a picker at the caret (`at`, in viewport pixels). */
+  "reference.add": { hostWorkId: string; at?: { x: number; y: number }; stackOnto?: string };
   "settings.manageAccount": Record<string, never>;
   "settings.clearLocalComputeCache": Record<string, never>;
   "settings.change": { patch: Record<string, unknown>; section?: string };
@@ -117,17 +121,20 @@ export type SpectraEvents = {
   "shell.sidebarCrowd": { crowded: boolean };
   "shell.focusSidebarSearch": Record<string, never>;
   "shell.openCommandBar": Record<string, never>;
-  /* The threads view: every conversation, searchable (SHELL.md). */
+  /* Find a thread: the chat page's search, else the island's thread switcher (SHELL.md). */
   "threads.open": { query?: string };
+  /** Play Spectra's tour of the app from the start (the account menu's "Take the tour"). */
+  "tour.start": Record<string, never>;
   /** Open the island's composer; `fresh` lets go of the thread in focus first. */
-  "island.compose": { fresh?: boolean };
+  /** Open the composer; `text` and `references` start it written, for the student to edit and send. */
+  /** `send` sends the text at once, as if the student had pressed send (the daily brief's "Make it"). */
+  "island.compose": { fresh?: boolean; text?: string; references?: Array<{ id: string; type: string; title: string }>; send?: boolean };
   /** A thread opened from elsewhere arrives in the island: `from` is what it leaves (ISLAND.md, "Arriving threads"). */
   "island.arrive": { threadId: string; from?: Figure };
   /** A notification reaches the user through the island (SHELL.md). */
   "island.notify": { id: string; title: string; detail?: string; tone: "done" | "problem" | "needs" | "info" };
   /** The user opened a notification from the island; the account's notifications act on it. */
   "notifications.choose": { id: string };
-  "threads.close": Record<string, never>;
   "work.unavailable": { workId: string };
   "work.updated": { workId: string; origin: "human" | "ai" | "system" };
   "run.changed": { runId: string };
@@ -174,6 +181,4 @@ export type SpectraQueries = {
   /* Whether a closable panel (work or a conversation) holds the Side: a page's
      collapsible panel tucks into its edge tab until it closes (SHELL.md). */
   "side.open": { kind: "work" | "thread" } | null;
-  /* Whether the threads view is open, for the rail's Conversations entry. */
-  "threads.view": { open: boolean };
 };

@@ -85,6 +85,7 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
       ...(typeof args.title === "string" ? { title: args.title } : {}),
       ...(typeof args.pinned === "boolean" ? { pinned: args.pinned } : {}),
       ...(typeof args.archived === "boolean" ? { status: args.archived ? "archived" : "active" } : {}),
+      ...(typeof args.placeId === "string" ? { workspaceId: args.placeId === "none" ? null : args.placeId } : {}),
     } };
     case "save_version": return { name: "changeGroups:createNamedCheckpoint", args: { artifactId: String(args.artifactId ?? ""), name: String(args.name ?? "") } };
     case "remove_device": return { name: "bridge:revokeDevice", args: { deviceId: String(args.deviceId ?? "") } };

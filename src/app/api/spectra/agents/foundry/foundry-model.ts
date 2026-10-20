@@ -171,7 +171,14 @@ Return JSON with exactly this shape:
 
 Include "options" only when the section kind is a choice or permission selection. For text, long_text, file_attachment, work_reference and example_pair kinds, omit options entirely.
 
-The question must be answerable by someone who knows their own work but not AI systems. Never ask about prompts, models, tokens, temperature or retrieval.`;
+The question must be answerable by someone who knows their own work but not AI systems. Never ask about prompts, models, tokens, temperature or retrieval.
+
+Ask the way a thoughtful colleague would over coffee, not the way a form does:
+- One short question (under 25 words), about something concrete in this agent's world: a real piece of work, a real person, a real moment.
+- Prefer an indirect question when it gets a truer answer. Instead of "What tone should it use?", ask "A student hands in a weak draft the night before it is due. What should they hear first?" Instead of "What are the edge cases?", ask "Which request would you be uneasy letting it answer alone?"
+- Use the creator's words for things (students, reports, the mark scheme), never system words ("users", "workspace members", "outputs", "the agent's objective").
+- Never repeat or restate something already established; build on it.
+- "detail" is optional and, when present, is one plain sentence a person would say, not an explanation of the system.`;
 
 /* ------------------------------------------------------------------ */
 /* Compile                                                             */
@@ -267,6 +274,34 @@ export function facetGuidance(facet: FoundryFacet): string {
       return "Ask for a worked example so the agent can match judgement, not just describe it.";
     case "evaluation":
       return "Establish how the creator would know the agent is behaving correctly.";
+  }
+}
+
+/** The question asked when none could be written for this agent: plain, and still about the work. */
+export function facetQuestion(facet: FoundryFacet): string {
+  switch (facet) {
+    case "objective":
+      return "When it has done its job well, what is in someone's hands?";
+    case "interaction":
+      return "Someone is stuck and a little frustrated. How should it talk to them?";
+    case "inputs":
+      return "What will people usually give it to start from?";
+    case "outputs":
+      return "Picture the best answer it could give. What does it look like?";
+    case "criteria":
+      return "What separates work you would praise from work you would send back?";
+    case "evidence":
+      return "Is there a mark scheme, guide or example you would hand a new colleague doing this?";
+    case "procedure":
+      return "If you did this yourself, what would you do first, and then?";
+    case "boundaries":
+      return "Which requests would you be uneasy letting it answer alone?";
+    case "tools":
+      return "Should it be able to change anything itself, or only suggest?";
+    case "calibration":
+      return "Show it one real piece of work and what you would say about it.";
+    case "evaluation":
+      return "How would you notice it had started getting things wrong?";
   }
 }
 

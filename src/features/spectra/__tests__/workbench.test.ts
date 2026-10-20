@@ -156,11 +156,10 @@ describe("Inspector and navigation contracts", () => {
     expect(rail.match(/<aside/g)).toHaveLength(1);
     expect(rail).toContain("data-collapsed={collapsed}");
     expect(rail).toContain("RAIL_DESTINATIONS.map");
-    expect(rail).toContain("workspaces.map");
     expect(rail).toContain('spectraBus.on("shell.focusSidebarSearch", () => spectraBus.emit("threads.open", {}))');
     expect(rail).not.toContain("Search recent chats");
     const view = readFileSync("src/features/spectra/threads/threads-view.tsx", "utf8");
-    expect(view).toContain('placeholder="Find a conversation"');
+    expect(view).toContain('placeholder="Search threads by topic or words"');
     expect(view).toContain("useThreadSearch(query");
   });
 
@@ -169,7 +168,7 @@ describe("Inspector and navigation contracts", () => {
       "src/features/spectra/components/chat-browser-panel.tsx",
       "utf8",
     );
-    expect(chatBrowser).toContain('title="Chats couldn’t load"');
+    expect(chatBrowser).toContain('title="Threads couldn’t load"');
     expect(chatBrowser).toContain("setLoadError(true)");
     expect(chatBrowser).toContain('role={isMobile ? "dialog" : undefined}');
     expect(chatBrowser).toContain("restoreFocusRef.current?.focus()");

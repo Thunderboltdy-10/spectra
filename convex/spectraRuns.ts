@@ -979,7 +979,7 @@ export const beginRun = mutation({
     }
     // A neutral status label is replaced by the first structured model title.
     // Never fabricate a prompt-truncation title before the model responds.
-    const title = "New conversation";
+    const title = "New thread";
     const workspaceId = thread ? thread.workspaceId : requestedWorkspaceId;
     if (thread && args.clearRetainedAgent && thread.retainedAgentId) {
       await ctx.db.patch(thread._id, { retainedAgentId: undefined, retainedAgentVersionId: undefined, readSchemaVersion: 1 });
@@ -1096,7 +1096,7 @@ export const beginRun = mutation({
       status: "queued",
       variant: "status",
       title: "Queued",
-      summary: "Spectra is preparing this run.",
+      summary: "Spectra is getting started.",
       actions: [],
       provenance: {
         threadId,

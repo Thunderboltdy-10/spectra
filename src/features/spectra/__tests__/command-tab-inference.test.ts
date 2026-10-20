@@ -42,7 +42,7 @@ describe("workbar tab inference", () => {
     ["presentation", "ungroup", "Ungroup", "Arrange"],
     ["presentation", "reorder", "Reorder", "Arrange"],
     ["sheets", "unfreeze", "Unfreeze", "Data"],
-    ["code", "rerun", "Rerun", "Run"],
+    ["agent", "rerun", "Rerun", "Evaluate"],
     ["sheets", "review-comments", "Review comments", "Review"],
     ["sheets", "sort-rows", "Sort rows", "Data"],
   ] as const)("still reads whole words and their un-/re- forms (%s %s)", (type, id, label, tab) => {

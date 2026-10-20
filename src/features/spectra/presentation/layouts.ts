@@ -59,10 +59,14 @@ const NEEDS_ALT_TEXT = new Set<PresentationObjectType>([
   "embed",
 ]);
 
+/** Slide colours are the deck's own data, not the app's theme. */
+const PAPER = "#ffffff";
+
+/** A generated deck starts as a page does: black ink on white, colour left to the theme. */
 const GENERATED_THEME = {
-  background: "var(--bg-secondary)",
-  heading: "var(--accent-mint)",
-  body: "var(--text-primary)",
+  background: PAPER,
+  heading: "#000000",
+  body: "#000000",
 } as const;
 
 function canvasHeight(deck: PresentationContent) {

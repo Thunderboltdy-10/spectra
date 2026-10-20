@@ -20,6 +20,46 @@ export const REMINDER_MINUTE_OPTIONS: ReadonlyArray<{
 ];
 
 const MAX_MINUTES = 525_600;
+const DAY_MINUTES = 1440;
+
+/*
+ * A task with a day and no time is kept at the end of that day, so "an hour
+ * before" would ring near midnight. Its reminders are days instead, each at
+ * the learner's reminder time, stored as the same minutes-before so the
+ * scheduler needs no second shape.
+ */
+export const ALL_DAY_REMINDER_DAYS: ReadonlyArray<{ days: number; label: string }> = [
+  { days: 0, label: "On the day" },
+  { days: 1, label: "The day before" },
+  { days: 2, label: "Two days before" },
+  { days: 7, label: "A week before" },
+];
+
+function minuteOfDay(time: string) {
+  const [hour, minute] = time.split(":").map(Number);
+  return (hour ?? 0) * 60 + (minute ?? 0);
+}
+
+/**
+ * Minutes before a date-only due time (`dueTime`, "23:59" for new tasks) for
+ * a reminder `days` earlier at `reminderTime`; null when that falls after it.
+ */
+export function allDayMinutesBefore(days: number, reminderTime: string, dueTime: string) {
+  const minutes = days * DAY_MINUTES + minuteOfDay(dueTime) - minuteOfDay(reminderTime);
+  return minutes < 0 ? null : Math.min(MAX_MINUTES, minutes);
+}
+
+/** "The day before at 08:00": a date-only reminder, read back from its minutes. */
+export function formatAllDayReminder(minutesBefore: number, dueTime: string) {
+  const fromMidnight = minuteOfDay(dueTime) - minutesBefore;
+  const days = Math.ceil(-fromMidnight / DAY_MINUTES);
+  const atMinute = fromMidnight + days * DAY_MINUTES;
+  const time = `${String(Math.floor(atMinute / 60)).padStart(2, "0")}:${String(atMinute % 60).padStart(2, "0")}`;
+  const day =
+    ALL_DAY_REMINDER_DAYS.find((option) => option.days === days)?.label ??
+    `${days} days before`;
+  return `${day} at ${time}`;
+}
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)

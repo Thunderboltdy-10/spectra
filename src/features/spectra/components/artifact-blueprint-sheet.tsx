@@ -26,7 +26,7 @@ export const blueprintChoices: Array<{ key: EditableBlueprintKey; label: string;
   { key: "document", label: "Document", icon: FileText, description: "Notes, essay plans, and structured writing." },
   { key: "flashcard_deck", label: "Flashcard deck", icon: BookOpen, description: "A real deck with editable cards." },
   { key: "quiz", label: "Quiz", icon: HelpCircle, description: "Questions, answers, and review notes." },
-  { key: "planner_task", label: "Planner task", icon: CalendarCheck2, description: "Status, due date, and priority." },
+  { key: "planner_task", label: "Task", icon: CalendarCheck2, description: "One thing to do, and when." },
   { key: "agent", label: "Agent", icon: Bot, description: "A specialist with a purpose, skills, and sources." },
   { key: "presentation", label: "Presentation", icon: Presentation, description: "Slides for a talk or explanation." },
   { key: "sheets", label: "Sheets", icon: Table2, description: "A workbook with cells, formulas, and charts." },

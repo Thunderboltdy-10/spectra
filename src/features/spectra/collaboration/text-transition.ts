@@ -152,7 +152,10 @@ export function planTextTransition(
   const added = after.slice(prefixLength, after.length - suffixLength);
 
   const cleared = `${prefix}${suffix}`;
-  const maxChunks = Math.max(1, options.maxChunks ?? (code ? 8 : 6));
+  // Prose is typed a few words at a time, more steps for a longer change, so
+  // it reads as writing; the budget keeps even a long rewrite brisk.
+  const words = added.split(/\s+/).filter(Boolean).length;
+  const maxChunks = Math.max(1, options.maxChunks ?? (code ? 8 : Math.min(14, Math.max(6, Math.ceil(words / 3)))));
   const chunks = chunkReplacement(added, maxChunks, code);
 
   const frames: TextTransitionFrame[] = [];
@@ -177,8 +180,10 @@ export function planTextTransition(
   }
 
   let typed = "";
+  const typedChunks: string[] = [];
   for (const chunk of chunks) {
     typed += chunk;
+    typedChunks.push(chunk);
     frames.push({
       phase: removed ? "type" : "insert",
       value: `${prefix}${typed}${suffix}`,
@@ -204,7 +209,7 @@ export function planTextTransition(
     hold: 1,
   });
 
-  const totalMs = distributeTiming(frames, options.budgetMs ?? defaultBudget(added, removed));
+  const totalMs = distributeTiming(frames, options.budgetMs ?? defaultBudget(added, removed), typedChunks);
 
   return {
     frames,
@@ -223,13 +228,27 @@ function defaultBudget(added: string, removed: string): number {
 }
 
 /**
+ * How long a typed chunk holds, relative to an average one: a person takes
+ * longer over more letters and pauses after a sentence or a line, so typing
+ * reads as someone writing rather than text arriving in even jumps.
+ */
+function typingWeight(chunk: string, average: number) {
+  const length = 0.55 + 0.75 * Math.min(2.4, chunk.length / Math.max(1, average));
+  const pause = /[.!?]\s*$|\n\s*$/.test(chunk) ? 0.55 : /[,;:]\s*$/.test(chunk) ? 0.25 : 0;
+  return length + pause;
+}
+
+/**
  * Weight frames so the meaningful moments read clearly: the selection registers,
- * the removal lands, and typing carries the remaining time.
+ * the removal lands, and typing carries the remaining time at a human cadence.
  */
 function distributeTiming(
   frames: TextTransitionFrame[],
   budgetMs: number,
+  typedChunks: string[] = [],
 ): number {
+  const average = typedChunks.reduce((sum, chunk) => sum + chunk.length, 0) / Math.max(1, typedChunks.length);
+  let typing = 0;
   const weights = frames.map((frame) => {
     switch (frame.phase) {
       case "select":
@@ -238,8 +257,10 @@ function distributeTiming(
         return 1.1;
       case "settle":
         return 0.8;
-      default:
-        return 1;
+      default: {
+        const chunk = typedChunks[typing++];
+        return chunk === undefined ? 1 : typingWeight(chunk, average);
+      }
     }
   });
   const total = weights.reduce((sum, weight) => sum + weight, 0) || 1;

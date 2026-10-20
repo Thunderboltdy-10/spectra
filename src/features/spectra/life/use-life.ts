@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, type Ref, type RefCallback, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, type Ref, type RefCallback, type RefObject } from "react";
 import type { LightColour, Rect } from "./engine";
 import { figureOf, hasVisibleFrame, replacementOf, type ElementFigureOptions } from "./figure-dom";
-import { isVeiled, veil } from "./veil";
+import { isVeiled, veil, VEIL_MAX_MS } from "./veil";
 import { outlineFigure, rowsFigure, type Figure, type Point } from "./figure";
-import { life, type Formed, type GlowHandle } from "./life";
+import { life, type Formed } from "./life";
 import { STATUS_COLOURS } from "./prism";
 
 /*
@@ -19,58 +19,61 @@ const rectOf = (element: Element): Rect => {
   return { x: r.x, y: r.y, width: r.width, height: r.height };
 };
 
-/** Light held in the field around an element while `active`: Spectra working on it. */
-export function useLifeGlow(ref: RefObject<Element | null>, active: boolean, colour: LightColour = "spectrum", intensity = 1) {
+/**
+ * Spectra working on an element while `active`: the skeleton's band of light
+ * crosses it (spectra-field.css, "the band"), the same light a loading page
+ * carries, never loose dots. Several hooks may mark one element; the mark
+ * stays until the last lets go.
+ */
+export function useLifeGlow(ref: RefObject<Element | null>, active: boolean) {
   useEffect(() => {
     const element = ref.current;
-    if (!active || !element || !life.on) return;
-    const glow = life.glow(rectOf(element), colour, intensity);
-    let frame = 0;
-    const follow = () => {
-      if (frame) return;
-      frame = requestAnimationFrame(() => {
-        frame = 0;
-        glow.move(rectOf(element));
-      });
-    };
-    const observer = new ResizeObserver(follow);
-    observer.observe(element);
-    window.addEventListener("scroll", follow, { capture: true, passive: true });
-    return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-      window.removeEventListener("scroll", follow, { capture: true });
-      glow.stop();
-    };
-  }, [ref, active, colour, intensity]);
+    if (!active || !element) return;
+    return markWorking(element);
+  }, [ref, active]);
 }
 
-export type EntranceOptions = ElementFigureOptions & {
-  /** Where its matter comes from: a click, the prism. Defaults to its own top left. */
-  from?: Point;
-  enabled?: boolean;
-};
+const workingHolds = new WeakMap<Element, number>();
+
+/** The band is for things the size of a row or a card; across a page, a panel or a whole work it is a flash, not loading. */
+const BAND_MAX_AREA = 160_000;
+function bandFits(element: Element) {
+  const { width, height } = element.getBoundingClientRect();
+  return width * height <= BAND_MAX_AREA;
+}
+
+/** Marks `element` as being worked on until the returned function is called. */
+export function markWorking(element: Element) {
+  if (!bandFits(element)) return () => {};
+  workingHolds.set(element, (workingHolds.get(element) ?? 0) + 1);
+  element.setAttribute("data-life-working", "");
+  let held = true;
+  return () => {
+    if (!held) return;
+    held = false;
+    const left = (workingHolds.get(element) ?? 1) - 1;
+    workingHolds.set(element, left);
+    if (left <= 0) element.removeAttribute("data-life-working");
+  };
+}
+
+/** Something Spectra just made lands: the band crosses it once, the way a loaded page settles. */
+export function markArrival(element: Element) {
+  if (element.hasAttribute("data-life-working") || !bandFits(element)) return;
+  element.setAttribute("data-life-working", "arrival");
+  window.setTimeout(() => {
+    if (element.getAttribute("data-life-working") === "arrival") element.removeAttribute("data-life-working");
+  }, 950);
+}
 
 /**
- * Something new forms out of the field where it appears: its outline and
- * content bars rise from the dots and fuse, and the element takes over when
- * the figure is whole.
+ * Something new appears: it is there at once, whole and usable, and
+ * settles into place. Nothing waits on the field.
  */
-export function useLifeEntrance(ref: RefObject<HTMLElement | null>, { enabled = true, from, ...figure }: EntranceOptions = {}) {
+export function useLifeEntrance(ref: RefObject<HTMLElement | null>, enabled = true) {
   useLayoutEffect(() => {
     const element = ref.current;
-    if (!enabled || !element || !life.on) return;
-    const formed = life.form(figureOf(element, { bars: figure.bars, rows: figure.rows, colour: figure.colour, fill: figure.fill }), {
-      from: from ?? [element.getBoundingClientRect().x + 16, element.getBoundingClientRect().y + 16],
-    });
-    const show = veil(element);
-    // The element never waits on the field for long.
-    const fallback = window.setTimeout(show, 1400);
-    void formed.formed.then(show);
-    return () => {
-      window.clearTimeout(fallback);
-      show();
-    };
+    if (enabled && element) markArrival(element);
     // Mount only: an entrance happens once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -99,19 +102,21 @@ export function travelElement(from: Element | Point, to: Element | { absorb: Ele
 
 let lastPress: { point: Point; at: number } | null = null;
 let pressWatch = false;
-/** The card or row the user just opened something from: what opens next grows out of it (MOTION.md, "Shared elements"). */
-let launch: { figure: Figure | Formed; at: number } | null = null;
+/**
+ * The user just opened something from a card or a row (MOTION.md, "Shared
+ * elements"), or made something whose ghost is waiting for it (`seed`): the
+ * surface that opens next lands.
+ */
+let launch: { seed?: Formed; at: number } | null = null;
 const LAUNCHERS = "[data-spectra-card], [data-life-launch]";
-const LAUNCH_BARS = "h2, h3, h4, [data-card-title], [data-row-title], [data-thread-title], p";
 
-/** Open the next surface out of `element` (a Side panel going full, say), whatever was pressed. */
+/** The next surface opens out of `element` (a Side panel going full, say), whatever was pressed. */
 export function launchFrom(element: Element | null | undefined) {
-  if (element && life.on) launch = { figure: figureOf(element, { bars: LAUNCH_BARS, maxBars: 6 }), at: performance.now() };
+  if (element) launch = { at: performance.now() };
 }
 
 function rememberLaunch(target: EventTarget | null) {
-  const launcher = (target as Element | null)?.closest?.(LAUNCHERS);
-  if (launcher && life.on) launch = { figure: figureOf(launcher, { bars: LAUNCH_BARS, maxBars: 6 }), at: performance.now() };
+  if ((target as Element | null)?.closest?.(LAUNCHERS)) launch = { at: performance.now() };
 }
 
 /** What ticks something off: a task's done control, a checklist item in a work. */
@@ -347,11 +352,11 @@ export function beginCreation({ from, into = "surface" }: CreationOptions = {}):
       if (settled) return;
       settled = true;
       const at = performance.now();
-      if (into === "surface") launch = { figure: seed, at };
+      if (into === "surface") launch = { seed, at };
       else seeded = { figure: seed, at, key };
       // Nothing grew from it in time: the dots go back to the field.
       window.setTimeout(() => {
-        if (launch?.figure === seed) launch = null;
+        if (launch?.seed === seed) launch = null;
         if (seeded?.figure === seed) seeded = null;
         seed.release();
       }, LAUNCH_WINDOW_MS);
@@ -362,67 +367,6 @@ export function beginCreation({ from, into = "surface" }: CreationOptions = {}):
       void life.unform(seed);
     },
   };
-}
-
-export type SurfaceOptions = ElementFigureOptions & {
-  /**
-   * Hold the surface back until its figure is whole (dialogs, sheets), or let
-   * it be usable at once while its dots gather onto it (menus, popovers).
-   */
-  wait?: boolean;
-};
-
-const SURFACE_BARS = "h1, h2, h3, [role='heading'], [role='menuitem'], [role='menuitemradio'], [role='menuitemcheckbox'], [role='option'], label";
-
-type SurfaceState = { formed: ReturnType<typeof life.form> | null; leaving: boolean };
-const surfaces = new WeakMap<Element, SurfaceState>();
-
-/**
- * A floating surface (dialog, sheet, popover, menu) as a callback ref: it
- * forms from its cause when it mounts, and parts back into the field where
- * it was when it unmounts. Merge it with the component's own ref; a ref
- * re-attached to the same node in the same commit is not a new surface.
- */
-export function useLifeSurface<T extends HTMLElement>({ wait = false, bars = SURFACE_BARS, maxBars = 14, ...figure }: SurfaceOptions = {}) {
-  watchPresses();
-  return useCallback(
-    (node: T | null) => {
-      if (!node || !life.on) return;
-      const known = surfaces.get(node);
-      if (known) {
-        // Re-attached in the same commit: still here.
-        known.leaving = false;
-      } else {
-        const state: SurfaceState = { formed: null, leaving: false };
-        surfaces.set(node, state);
-        const from = recentCause();
-        const show = wait ? veil(node) : () => {};
-        // Measured after layout, so the figure is where the surface really is.
-        requestAnimationFrame(() => {
-          if (!node.isConnected) return show();
-          state.formed = life.form(figureOf(node, { bars, maxBars, ...figure }), { from });
-          void state.formed.formed.then(show);
-        });
-        window.setTimeout(show, wait ? 520 : 0);
-      }
-      return () => {
-        const state = surfaces.get(node);
-        if (!state) return;
-        state.leaving = true;
-        // Read while it is still in the page; part it only if React really let it go.
-        const leaving = node.isConnected && node.getBoundingClientRect().width > 0 ? figureOf(node, { bars, maxBars: 6, ...figure }) : null;
-        queueMicrotask(() => {
-          if (!state.leaving) return;
-          surfaces.delete(node);
-          if (leaving) void life.unform(leaving);
-          else state.formed?.release();
-        });
-      };
-    },
-    // Options are read once per surface.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
 }
 
 /** One callback ref from several: a component's forwarded ref and its own. */
@@ -455,10 +399,10 @@ export function markNavigation() {
   navigatedAt = typeof performance === "undefined" ? 0 : performance.now();
 }
 
-/** Where the prism is, for light that leaves it. */
+/** Where Spectra's light is in the island, for light that leaves it. */
 export function prismPoint(): Point {
-  const prism = typeof document === "undefined" ? null : document.querySelector<HTMLElement>("[data-island-prism]");
-  const r = prism?.getBoundingClientRect();
+  const home = typeof document === "undefined" ? null : document.querySelector<HTMLElement>("[data-island-home]");
+  const r = home?.getBoundingClientRect();
   return r && r.width ? [r.left + r.width / 2, r.top + r.height / 2] : [window.innerWidth / 2, window.innerHeight - 40];
 }
 
@@ -466,9 +410,10 @@ export type ArrivalKind = "ai" | "human";
 
 /**
  * Something new in a list or a board (LIFE.md, "Create by hand" and
- * "Spectra creates an artifact"): the first time `key` appears after the page
- * has settled, it forms there, from what the user did, or, when Spectra made
- * it, from light that leaves the prism and crosses the field to it. What was
+ * "Spectra makes something"): the first time `key` appears after the page
+ * has settled, what the user made grows out of the skeleton that held its
+ * place (beginCreation), and anything else new is there at once, crossed by
+ * the skeleton's band as it lands. What was
  * there when the page opened is simply content, and a key forms only once
  * per visit, so scrolling a long list never replays it.
  */
@@ -476,11 +421,10 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
   useLayoutEffect(() => {
     const element = ref.current;
     if (!key || !element) return;
-    const back = takeReturn(key);
-    if (back) {
+    if (takeReturn(key)) {
       arrived.add(key);
       arrivedHere.add(element);
-      return foldInto(element, back, figure);
+      return markArrival(element);
     }
     const moved = takeDeparture(key);
     if (moved) {
@@ -491,7 +435,7 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
     if (arrived.has(key)) return;
     arrived.add(key);
     if (!life.on) return;
-    // Made by hand just now: it grows out of the dots that gathered while it was on its way.
+    // Made by hand just now: the skeleton that gathered while it was on its way is waiting for it.
     const seed = takeSeed(key, kind);
     if (!seed) {
       if (!kind) return;
@@ -499,21 +443,12 @@ export function useLifeArrival(ref: RefObject<HTMLElement | null>, key: string |
       if (settling && kind !== "ai") return;
     }
     arrivedHere.add(element);
+    // Nothing stood in for it while it was on its way: it is simply there, settling into place.
+    if (!seed) return markArrival(element);
+    // The skeleton that held its place becomes it.
     const show = veil(element);
-    const shape = figureOf(element, { bars: "h2, h3, h4, [data-card-title], p", maxBars: 6, ...figure });
-    if (seed) {
-      void life.morph(seed, shape).formed.then(show);
-    } else if (kind === "ai") {
-      const trip = life.travel(prismPoint(), shape, { colour: "spectrum" });
-      void trip.formed.then(() => {
-        show();
-        const r = element.getBoundingClientRect();
-        life.pulse(r.left + r.width / 2, r.top + r.height / 2, 0.7, "spectrum");
-      });
-    } else {
-      void life.form(shape, { from: recentCause() }).formed.then(show);
-    }
-    const fallback = window.setTimeout(show, kind === "ai" ? 1700 : 800);
+    void life.morph(seed, figureOf(element, { bars: "h2, h3, h4, [data-card-title], p", maxBars: 6, ...figure })).formed.then(show);
+    const fallback = window.setTimeout(show, 800);
     return () => {
       window.clearTimeout(fallback);
       show();
@@ -531,27 +466,6 @@ const arrivedHere = new WeakSet<Element>();
 export const JOIN_BATCH = 2;
 /** What each list has shown, by its element; `opening` while its first items are still mounting. */
 const listsShown = new WeakMap<Element, { keys: Set<string>; opening: boolean }>();
-type Joiner = { element: HTMLElement; figure: ElementFigureOptions; kind: ArrivalKind; from?: Point; show: () => void };
-let joining = new Map<Element, Joiner[]>();
-let joinFrame = 0;
-
-function flushJoining() {
-  joinFrame = 0;
-  const lists = joining;
-  joining = new Map();
-  for (const joiners of lists.values()) {
-    for (const joiner of joiners) {
-      if (joiners.length > JOIN_BATCH || !joiner.element.isConnected) {
-        joiner.show();
-        continue;
-      }
-      const shape = figureOf(joiner.element, { bars: "h2, h3, h4, [data-card-title], [data-row-title], strong, p", maxBars: 6, ...joiner.figure });
-      const formed = joiner.kind === "ai" ? life.travel(prismPoint(), shape, { colour: "spectrum" }) : life.form(shape, { from: joiner.from });
-      void formed.formed.then(joiner.show);
-    }
-  }
-}
-
 /** Something around it is forming itself (a panel, a page header): it brings the list with it. */
 function withinForming(element: Element) {
   for (let node: Element | null = element; node && node !== document.body; node = node.parentElement) {
@@ -560,20 +474,19 @@ function withinForming(element: Element) {
   return false;
 }
 
-/** Spectra is at work right now: the island's prism says so. */
+/** Spectra is at work right now: the island says so. */
 function prismWorking() {
-  return document.querySelector("[data-island-prism]")?.getAttribute("data-status") === "working";
+  return document.querySelector("[data-island-status]")?.getAttribute("data-island-status") === "working";
 }
 
 /**
  * An item of any list, under `key` (LIFE.md, Create by hand; Spectra creates
  * an artifact): what the list opened with is simply content. An item that
- * joins it later because of what the reader just did forms from that press;
- * one that joins while Spectra is working arrives as light from the prism.
- * Several joining one list at once is the list filling in, and they are
- * simply there. Each key joins a list once per visit.
+ * joins it later, because of what the reader just did or while Spectra is
+ * working, is there at once, crossed by the skeleton's band as it lands.
+ * Each key joins a list once per visit.
  */
-export function useLifeJoin(ref: RefObject<HTMLElement | null>, key: string, figure: ElementFigureOptions = {}) {
+export function useLifeJoin(ref: RefObject<HTMLElement | null>, key: string) {
   useLayoutEffect(() => {
     const element = ref.current;
     const list = element?.parentElement;
@@ -593,21 +506,9 @@ export function useLifeJoin(ref: RefObject<HTMLElement | null>, key: string, fig
     if (shown.keys.has(key)) return;
     shown.keys.add(key);
     if (arrivedHere.has(element) || shown.opening || !life.on || performance.now() - navigatedAt < 1600 || withinForming(list)) return;
-    const from = recentCause();
     // A list seen for the first time came with the view unless the reader just made it; Spectra's work arrives in a list already there.
-    const kind: ArrivalKind | null = from ? "human" : !firstSight && prismWorking() ? "ai" : null;
-    if (!kind) return;
-    const show = veil(element);
-    const joiners = joining.get(list) ?? [];
-    joining.set(list, joiners);
-    joiners.push({ element, figure, kind, from, show });
-    if (!joinFrame) joinFrame = requestAnimationFrame(flushJoining);
-    // The item never waits on the field for long.
-    const fallback = window.setTimeout(show, kind === "ai" ? 1700 : 1000);
-    return () => {
-      window.clearTimeout(fallback);
-      show();
-    };
+    const kind: ArrivalKind | null = recentCause() ? "human" : !firstSight && prismWorking() ? "ai" : null;
+    if (kind) markArrival(element);
     // Once per key: joining is a moment, not a state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
@@ -729,7 +630,9 @@ function useDeparture(
           const content = handover ? replacementOf(new DOMRect(r.x, r.y, r.width, r.height)) : null;
           // Whatever arrives there may be forming itself (hidden until it has): then it brings its own light.
           if (content && !isVeiled(content)) {
-            void life.morph(shape, figureOf(content, { bars: TAKEOVER_BARS, maxBars: 12, frame: hasVisibleFrame(content) }));
+            // The content is already there: the lines set off toward it and give way, never standing over its text.
+            const morph = life.morph(shape, figureOf(content, { bars: TAKEOVER_BARS, maxBars: 12, frame: hasVisibleFrame(content) }));
+            window.setTimeout(() => morph.release(), VEIL_MAX_MS);
           } else {
             void life.unform(shape);
           }
@@ -740,117 +643,26 @@ function useDeparture(
   }, [ref, handover]);
 }
 
-/* ------------------------------------------------------------ writing front */
-
-/** The last text with something written in it, found from the end, so a long reply costs no more than a short one. */
-function lastWritten(node: Node): Text | null {
-  if (node.nodeType === Node.TEXT_NODE) return (node.textContent ?? "").trim() ? (node as Text) : null;
-  for (let child = node.lastChild; child; child = child.previousSibling) {
-    const found = lastWritten(child);
-    if (found) return found;
-  }
-  return null;
-}
-
-/** Where the last written character of `root` ends, on screen. */
-function writingEnd(root: Element): DOMRect | null {
-  const last = lastWritten(root);
-  if (!last) return null;
-  const range = document.createRange();
-  const length = last.length;
-  range.setStart(last, Math.max(0, length - 1));
-  range.setEnd(last, length);
-  const rects = range.getClientRects();
-  return rects.length ? rects[rects.length - 1] : null;
-}
-
-/** Replies whose light has already come out of the prism. */
-const writingFromPrism = new WeakSet<Element>();
-/** The writing front never waits on the crossing for longer than this. */
-export const WRITING_ARRIVAL_MS = 900;
-
-/**
- * Spectra writing in a thread (MOTION.md, "Streaming text"; LIFE.md, travel):
- * when a reply starts, light leaves the prism and crosses the field to where
- * the words begin. From there a little light follows the writing front while
- * words arrive, so the paper around the text feels the writing. When the reply
- * is complete it lets go, and the paper pulses softly where the words settled.
- */
-export function useWritingFront(ref: RefObject<HTMLElement | null>, active: boolean) {
-  useEffect(() => {
-    const root = ref.current;
-    if (!active || !root || !life.on) return;
-    let glow: GlowHandle | null = null;
-    let last = 0;
-    let frame = 0;
-    let settledAt: DOMRect | null = null;
-    let arrived = true;
-    let fallback = 0;
-    if (!writingFromPrism.has(root)) {
-      writingFromPrism.add(root);
-      const start = root.getBoundingClientRect();
-      if (start.width) {
-        arrived = false;
-        const land = () => {
-          arrived = true;
-          window.clearTimeout(fallback);
-        };
-        fallback = window.setTimeout(land, WRITING_ARRIVAL_MS);
-        void life.send(prismPoint(), [start.left + 12, start.top + 12], { colour: "spectrum", strength: 0.6 }).then(land);
-      }
-    }
-    const follow = (now: number) => {
-      frame = requestAnimationFrame(follow);
-      if (!arrived || now - last < 90) return;
-      last = now;
-      const end = writingEnd(root);
-      if (!end || (!end.width && !end.height)) return;
-      settledAt = end;
-      const rect = { x: end.right - 36, y: end.top - 8, width: 48, height: end.height + 16 };
-      if (glow) glow.move(rect);
-      else glow = life.glow(rect, "spectrum", 0.55);
-    };
-    frame = requestAnimationFrame(follow);
-    return () => {
-      cancelAnimationFrame(frame);
-      window.clearTimeout(fallback);
-      glow?.stop();
-      // Still on the page: the reply is complete, not gone.
-      if (settledAt && root.isConnected && life.on) life.pulse(settledAt.right, settledAt.top + settledAt.height / 2, 0.35, "spectrum");
-    };
-  }, [ref, active]);
-}
-
 /* ------------------------------------------------------------ shared elements */
 
 /** How long after the press an opening still grows from the card: works load before they open. */
 const LAUNCH_WINDOW_MS = 2500;
 
 /**
- * Something opened from a card or a row (MOTION.md, "Shared elements"): the
- * card's dots flow out of its frame and into the surface that opens, then the
- * surface is real. Call it on the opened surface, keyed by what it shows, so a
- * new key lands and the same key re-rendering does not. Without a recent
- * launch it does nothing; the surface's own entrance stands.
+ * Something opened from a card or a row, or made by hand (MOTION.md, "Shared
+ * elements"): the surface is there at once, and the skeleton's band crosses
+ * it as it lands while the ghost that waited for it fades. Call it on the
+ * opened surface, keyed by what it shows, so a new key lands and the same key
+ * re-rendering does not. Without a recent launch it does nothing; the
+ * surface's own entrance stands.
  */
-export function useLifeLanding(ref: RefObject<HTMLElement | null>, key: string | null | undefined, figure: ElementFigureOptions = {}) {
+export function useLifeLanding(ref: RefObject<HTMLElement | null>, key: string | null | undefined) {
   useLayoutEffect(() => {
     const element = ref.current;
-    if (!key || !element || !life.on || !launch || performance.now() - launch.at > LAUNCH_WINDOW_MS) return;
-    const from = launch.figure;
+    if (!key || !element || !launch || performance.now() - launch.at > LAUNCH_WINDOW_MS) return;
+    launch.seed?.release();
     launch = null;
-    const show = veil(element);
-    // A frame later, the surface has its final layout to grow into.
-    const frame = requestAnimationFrame(() => {
-      const target = figureOf(element, { bars: "h1, h2, [data-artifact-title], [data-thread-title], [data-panel-title]", maxBars: 8, ...figure });
-      void life.morph(from, target).formed.then(show);
-    });
-    const fallback = window.setTimeout(show, 900);
-    return () => {
-      cancelAnimationFrame(frame);
-      window.clearTimeout(fallback);
-      show();
-    };
+    markArrival(element);
     // Once per key: a landing is a moment.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
@@ -858,29 +670,12 @@ export function useLifeLanding(ref: RefObject<HTMLElement | null>, key: string |
 
 /** How long after a work closes its card may still appear to take it back: the page it returns to loads first. */
 const RETURN_WINDOW_MS = 1600;
-let returning: { key: string; figure: Figure; at: number } | null = null;
+let returning: { key: string; at: number } | null = null;
 
-function takeReturn(key: string): Figure | null {
-  if (!returning || returning.key !== key || performance.now() - returning.at > RETURN_WINDOW_MS) return null;
-  const { figure } = returning;
+function takeReturn(key: string) {
+  if (!returning || returning.key !== key || performance.now() - returning.at > RETURN_WINDOW_MS) return false;
   returning = null;
-  return figure;
-}
-
-/** The card is hidden while the closing work's dots flow back into its frame, and is real when they have. */
-function foldInto(element: HTMLElement, from: Figure, figure: ElementFigureOptions = {}) {
-  const show = veil(element);
-  const frame = requestAnimationFrame(() => {
-    const r = element.getBoundingClientRect();
-    if (!r.width || r.bottom < 0 || r.top > window.innerHeight) return show();
-    void life.morph(from, figureOf(element, { bars: LAUNCH_BARS, maxBars: 6, ...figure })).formed.then(show);
-  });
-  const fallback = window.setTimeout(show, 900);
-  return () => {
-    cancelAnimationFrame(frame);
-    window.clearTimeout(fallback);
-    show();
-  };
+  return true;
 }
 
 /** Two rects mostly over each other: another surface took this one's place. */
@@ -892,10 +687,9 @@ function replaced(a: Rect, b: DOMRect) {
 
 /**
  * The reverse of a landing (MOTION.md, "Shared elements"): when an opened
- * surface closes, its dots flow back into the card it shows, if that card is
- * on the page, or into the card as it appears on the page the user returns to.
- * A surface replaced by another in the same place (switching tabs) does not
- * fold.
+ * surface closes, the band crosses the card it shows, if that card is on the
+ * page, or the card as it appears on the page the user returns to. A surface
+ * replaced by another in the same place (switching tabs) does not fold.
  */
 /** `replacedBy` names the surfaces that can take this one's place. */
 export function useLifeReturn(ref: RefObject<HTMLElement | null>, key: string | null | undefined, replacedBy: string) {
@@ -906,7 +700,6 @@ export function useLifeReturn(ref: RefObject<HTMLElement | null>, key: string | 
       if (!life.on || !element.isConnected) return;
       const r = element.getBoundingClientRect();
       if (!r.width || !r.height) return;
-      const from = figureOf(element, { bars: "h1, h2, [data-artifact-title]", maxBars: 6 });
       const rect = rectOf(element);
       const at = performance.now();
       requestAnimationFrame(() => {
@@ -916,10 +709,10 @@ export function useLifeReturn(ref: RefObject<HTMLElement | null>, key: string | 
         }
         const card = document.querySelector<HTMLElement>(`[data-life-key="${key.replace(/["\\]/g, "\\$&")}"]`);
         if (card?.isConnected) {
-          foldInto(card, from);
+          markArrival(card);
           return;
         }
-        returning = { key, figure: from, at };
+        returning = { key, at };
       });
     };
   }, [ref, key, replacedBy]);

@@ -25,7 +25,7 @@
 /* Formula view is an audit view: the text is what matters, so it gets the
    monospace treatment and stops competing with the numbers around it. */
 .sheets-cell-formula-text {
-  color: color-mix(in oklab, var(--text-primary) 78%, var(--brand-primary));
+  color: color-mix(in oklab, var(--text-primary) 78%, var(--sheet-ink));
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: var(--text-micro);
 }
@@ -33,9 +33,9 @@
 /* Cells the active formula reads from. Dashed, so it never reads as a selection
    the arrow keys would move. */
 .sheets-cell[data-traced="true"] {
-  outline: 1px dashed color-mix(in oklab, var(--brand-primary) 70%, transparent);
+  outline: 1px dashed color-mix(in oklab, var(--sheet-ink) 70%, transparent);
   outline-offset: -1px;
-  background-color: color-mix(in oklab, var(--brand-primary) 5%, var(--bg-primary));
+  background-color: color-mix(in oklab, var(--sheet-ink) 5%, var(--bg-primary));
 }
 
 /* Cached Excel results whose precedents changed here. The number is still
@@ -122,4 +122,115 @@
 
 .sheets-formula-explanation .sheets-function-entry {
   cursor: default;
+}
+
+/* ==========================================================================
+   Ledger paper (EDITORS.md, "Sheets")
+   --------------------------------------------------------------------------
+   A workbook is a ledger laid on the desk: the formula line is its head, the
+   grid is ruled in the Sheets green, the column letters are set in the
+   display serif the way a ledger's columns are lettered by hand, and the
+   cell being written is ringed in the same green ink. In the side panel the
+   ledger is the panel.
+   ========================================================================== */
+
+.spectra-sheets-studio {
+  --sheet-ink: var(--type-sheets);
+  --sheet-grid-line: color-mix(in oklab, var(--type-sheets) 13%, var(--card-border-soft));
+  --sheet-header: color-mix(in oklab, var(--type-sheets) 5%, var(--bg-primary));
+  --sheet-paper: var(--card-paper);
+}
+
+.spectra-artifact-studio[data-blueprint="sheets"] .spectra-artifact-main {
+  background: transparent;
+}
+
+/* The head of the ledger: where the cell is, and what is written in it. */
+.spectra-sheets-studio > .sheets-formula-bar {
+  height: 40px;
+  margin: 14px var(--spectra-studio-inline-inset, 24px) 0;
+  border: 1px solid var(--card-border-soft);
+  border-bottom-color: var(--sheet-grid-line);
+  border-radius: 10px 10px 0 0;
+  background: var(--sheet-paper);
+}
+.spectra-sheets-studio .sheets-name-box {
+  width: 84px;
+  border-right-color: var(--sheet-grid-line);
+  color: color-mix(in oklab, var(--sheet-ink) 75%, var(--text-primary));
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 400;
+}
+.spectra-sheets-studio .sheets-formula-icon {
+  color: color-mix(in oklab, var(--sheet-ink) 60%, var(--text-tertiary));
+  font-family: var(--font-display);
+}
+.spectra-sheets-studio .sheets-formula-input {
+  border-left-color: var(--sheet-grid-line);
+  font-size: var(--text-caption);
+}
+.spectra-sheets-studio .sheets-formula-input:focus {
+  box-shadow: inset 0 -2px var(--sheet-ink);
+}
+
+/* The ruled page, joined to its head and running on below the fold. */
+.spectra-sheets-studio > .sheets-grid-frame {
+  position: relative;
+  margin: 0 var(--spectra-studio-inline-inset, 24px);
+  border: 1px solid var(--card-border-soft);
+  border-top: 0;
+  border-bottom: 0;
+  background: var(--sheet-paper);
+  box-shadow: 0 28px 56px -40px color-mix(in oklab, var(--text-primary) 45%, transparent);
+  animation: sheet-lay var(--motion-slow) var(--ease-standard) both;
+  transform-origin: 50% 0;
+}
+.spectra-sheets-studio .sheets-cell,
+.spectra-sheets-studio .sheets-cell[data-frozen-row="true"],
+.spectra-sheets-studio .sheets-cell[data-frozen-column="true"] {
+  background-color: var(--sheet-paper);
+}
+.spectra-sheets-studio .sheets-cell[data-selected="true"] {
+  background-color: color-mix(in oklab, var(--sheet-ink) 8%, var(--sheet-paper));
+}
+.spectra-sheets-studio .sheets-cell[data-table="true"] {
+  background-color: color-mix(in oklab, var(--sheet-ink) 3%, var(--sheet-paper));
+}
+.spectra-sheets-studio .sheets-column-header {
+  color: color-mix(in oklab, var(--sheet-ink) 55%, var(--text-secondary));
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 400;
+}
+.spectra-sheets-studio .sheets-row-header {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.spectra-sheets-studio .sheets-grid-corner {
+  background: var(--sheet-header);
+}
+/* The selected column and row are underlined in their headers in the ink. */
+.spectra-sheets-studio :is(.sheets-column-header, .sheets-row-header)[data-selected="true"] {
+  background: color-mix(in oklab, var(--sheet-ink) 12%, var(--sheet-header));
+  color: color-mix(in oklab, var(--sheet-ink) 80%, var(--text-primary));
+}
+
+/* In the side panel the ledger is the panel. */
+.spectra-sheets-studio[data-compact] > .sheets-formula-bar {
+  margin: 8px 0 0;
+  border-width: 1px 0;
+  border-radius: 0;
+}
+.spectra-sheets-studio[data-compact] > .sheets-grid-frame {
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spectra-sheets-studio > .sheets-grid-frame {
+    animation: none;
+  }
 }

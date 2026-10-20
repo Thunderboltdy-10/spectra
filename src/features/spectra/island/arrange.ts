@@ -7,11 +7,11 @@ import type { IslandSide } from "./island-model";
  * How the user arranged the island's tabs (ISLAND.md, "Arranging tabs"),
  * kept per browser. Threads, not runs, are what the user moves:
  *
- * - `sides`: a thread dragged across the +. A done thread pulled left stays
+ * - `sides`: a thread dragged across the divider. A done thread pulled left stays
  *   in play, pinned; a thread in play pushed right is put away. The choice
  *   belongs to the run it was made on: the thread's next run starts fresh.
- * - `order`: each side's threads, nearest the + first, as the user last left
- *   them. Threads the user never placed go nearest the +.
+ * - `order`: each side's threads, nearest the divider first, as the user last left
+ *   them. Threads the user never placed go nearest the divider.
  */
 
 export type SideChoice = { side: IslandSide; runId: string };
@@ -62,7 +62,7 @@ function commit(next: Arrangement) {
 
 /**
  * The user placed a thread: on `side`, at `order` (that side's threads,
- * nearest the + first, already including it).
+ * nearest the divider first, already including it).
  */
 export function placeThread(threadId: string, runId: string, side: IslandSide, order: readonly string[], automaticSide: IslandSide) {
   const before = load();

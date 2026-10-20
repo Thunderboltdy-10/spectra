@@ -3,8 +3,7 @@
 import * as React from "react";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { cn } from "@/lib/utils";
-import { mergeRefs, useLifeSurface } from "@/features/spectra/life/use-life";
-import { LAYER_CLASS, type SpectraLayer } from "./layers";
+import { clearOfIsland, LAYER_CLASS, type SpectraLayer } from "./layers";
 import { useFloatingLayer } from "./layer-context";
 
 /**
@@ -37,14 +36,12 @@ const PopoverContent = React.forwardRef<
   ) => {
     const layer = useFloatingLayer(explicitLayer);
     // Usable at once; its dots gather onto it from what opened it.
-    const surface = useLifeSurface<HTMLDivElement>();
-    const contentRef = React.useMemo(() => mergeRefs(ref, surface), [ref, surface]);
     return (
       <PopoverPrimitive.Portal>
         <PopoverPrimitive.Content
-          ref={contentRef}
+          ref={ref}
           sideOffset={sideOffset}
-          collisionPadding={collisionPadding}
+          collisionPadding={typeof collisionPadding === "number" ? clearOfIsland(layer, collisionPadding) : collisionPadding}
           className={cn(
             "max-h-[min(70dvh,32rem)] overflow-y-auto rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 text-[var(--text-primary)] shadow-[var(--shadow-lg)] outline-none",
             LAYER_CLASS[layer],

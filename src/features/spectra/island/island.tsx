@@ -1,53 +1,55 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "@/components/icons";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { setToastSink, type ToastTone } from "@/components/ui/toast";
-import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import type { SpectraRunPointer } from "../ai/use-spectra-run";
 import { postSpectra } from "../data/api";
 import { spectraBus } from "../events";
-import type { Figure, Point } from "../life/figure";
-import { figureOf } from "../life/figure-dom";
-import { life, type Formed } from "../life/life";
-import type { PrismMode, PrismStatus } from "../life/prism";
+import type { LightColour } from "../life/engine";
+import { life, rectOf } from "../life/life";
+import type { PrismStatus } from "../life/prism";
 import { STATUS_COLOURS } from "../life/prism";
-import { unformElement } from "../life/use-life";
+import { figureOf } from "../life/figure-dom";
+import { markArrival } from "../life/use-life";
 import { registerComposerBand } from "../components/composer-safe-area";
+import { useSpectraRouter } from "../hooks/use-spectra-router";
 import { useSpectraMotion } from "../motion";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { IslandComposer, type ComposerHandle, type ComposerSend } from "./composer";
 import { useIslandEngine } from "./engine";
 import { forgetThread, placeThread, useArrangement } from "./arrange";
-import { IslandHistory } from "./history";
-import { arrangeTabs, dropTab, islandStatus, statusLight, stepTab, tabTitle, type IslandSide, type IslandTab } from "./island-model";
-import { useIslandPrism } from "./island-prism";
+import { arrangeTabs, dropTab, islandStatus, statusLight, stepTab, type IslandSide, type IslandTab } from "./island-model";
+import { IslandRail, RAIL_DONE, RailGhost, useRailSeat, type RailHandlers } from "./island-rail";
+import { boxOf, morphShape } from "./shape-morph";
 import { IslandNotice, NOTICE_COLOUR, type IslandNoticeData, type NoticeTone } from "./notice";
 import { QuestionCard } from "./question-card";
 import { answerQuestion, pendingQuestions, type QuestionAnswer } from "./questions";
 import { refreshRunTabs, useRunTabs } from "./run-tabs";
 import { settleFirstVisit, useSeenRuns } from "./seen";
+import { ThreadSwitcher } from "./thread-switcher";
 import { ThreadView } from "./thread-view";
-import { useFlip, useTabDrag, type TabGhost as TabGhostRect } from "./use-tab-drag";
+import { useFlip, useTabDrag } from "./use-tab-drag";
+import { threadHref } from "../chat/home-routes";
 
 const TOAST_TONE: Record<ToastTone, NoticeTone> = { success: "done", error: "problem", warning: "needs", info: "info" };
 
 /*
  * The island (docs/design/ISLAND.md): where the user talks to Spectra, on
- * every page. At rest it is the prism; the pointer reaching for it turns the
- * prism into the pill of threads around the +; the + opens the composer.
- * Every change of shape is the field's matter rearranging: the shape the
- * user leaves parts into dots that travel and fuse into the next one.
+ * every page. It is the field to write in, always there to type into; its
+ * threads stand on its top edge as the rail of folder tabs. Hovering a tab
+ * shows its thread over the island; pressing it keeps the thread open and
+ * turns the field to it, so a reply is just typed.
  */
 
-type Shape = "prism" | "pill" | "composer";
+type Shape = "composer";
+type ReplyTo = { runId: string; threadId: string; title: string } | "new" | null;
 
-const OPEN_DELAY = 110;
 const CLOSE_DELAY = 450;
 const VIEW_DELAY = 250;
-const MORPH_TIMEOUT = 1400;
 const ARRIVAL_MS = 1600;
 
 /** The island's own centre line: the middle of the stage, between the rail and the Side. */
@@ -67,16 +69,6 @@ function stageHalf() {
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 const within = (promise: Promise<unknown>, ms: number) => Promise.race([promise, new Promise((resolve) => window.setTimeout(resolve, ms))]);
 
-const MODE_FOR_STATUS: Record<PrismStatus, PrismMode> = {
-  working: "working",
-  needs: "needs",
-  warning: "needs",
-  done: "done",
-  problem: "problem",
-  info: "rest",
-  offline: "rest",
-};
-
 function isEditable(target: EventTarget | null) {
   const element = target as HTMLElement | null;
   if (!element?.closest) return false;
@@ -91,11 +83,9 @@ function menuOpen() {
 export function Island() {
   const slot = useIslandEngine();
   const engine = slot?.engine ?? null;
+  const router = useSpectraRouter();
   const { preferences } = useSpectraPreferences();
   const motion = useSpectraMotion();
-  const prism = useIslandPrism({ still: motion.reduced });
-  const prismRef = useRef(prism);
-  prismRef.current = prism;
 
   const live = engine?.liveExchange ?? null;
   const demand = live && (live.status === "starting" || live.status === "streaming") ? `island:${live.runId ?? live.threadId ?? "new"}:${live.status}` : null;
@@ -104,7 +94,7 @@ export function Island() {
   const arrangement = useArrangement();
 
   const [hidden, setHidden] = useState(false);
-  const restShape: Shape | null = hidden ? null : slot?.restAsComposer ? "composer" : preferences.ai.islandWake === "edge" ? null : "prism";
+  const restShape: Shape | null = hidden || preferences.ai.islandWake === "edge" ? null : "composer";
   const restRef = useRef(restShape);
   restRef.current = restShape;
 
@@ -113,32 +103,49 @@ export function Island() {
   const targetRef = useRef(target);
   const shownRef = useRef(shown);
   const generation = useRef(0);
-  const inflight = useRef<Formed | null>(null);
-  const [breathing, setBreathing] = useState(false);
   const [faded, setFaded] = useState(false);
 
-  const pillRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
   const bandRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<ComposerHandle>(null);
   const questionRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<HTMLDivElement>(null);
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
-  const plusRef = useRef<HTMLButtonElement>(null);
+  const dividerRef = useRef<HTMLSpanElement>(null);
   const dragActive = useRef(false);
   const arrivingUntil = useRef(0);
-  const openTimer = useRef(0);
   const closeTimer = useRef(0);
   const viewTimer = useRef(0);
   const pointerInside = useRef(false);
+  const focusOnShow = useRef(false);
 
-  // Sides hold still while the user is looking at the pill.
+  // The island as the field sees it: its outline for light to leave from, Spectra's mark to take things in.
+  const islandFigure = useCallback(() => {
+    const element = composerRef.current?.element();
+    return element ? figureOf(element) : null;
+  }, []);
+  const islandHome = useCallback(() => {
+    const element = composerRef.current?.element();
+    const mark = element?.querySelector("[data-agent-switch]") ?? element;
+    return mark ? rectOf(mark) : null;
+  }, []);
+
+  // The hand is on the island (or the keyboard in it, or a thread just arrived): the rail stands up.
+  const [reaching, setReaching] = useState(false);
+  // The thread the composer writes into when the user picked it on the rail; otherwise the page's.
+  const [replyTo, setReplyTo] = useState<ReplyTo>(null);
+
+  // Sides hold still while the user is looking at the rail.
   const held = useRef<Map<string, IslandSide> | null>(null);
-  // `held` is a ref; a change of shape is what takes or releases it.
+  // `held` is a ref; reaching for the island is what takes or releases it.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const { play, done } = useMemo(() => arrangeTabs(tabs, { seen, held: held.current ?? undefined, arrangement }), [tabs, seen, target, arrangement]);
+  const { play, done } = useMemo(() => arrangeTabs(tabs, { seen, held: held.current ?? undefined, arrangement }), [tabs, seen, reaching, arrangement]);
   const allTabs = useMemo(() => [...play, ...done], [play, done]);
   const arrangedRef = useRef(allTabs);
   arrangedRef.current = allTabs;
+  useEffect(() => {
+    held.current = reaching ? held.current ?? new Map(arrangedRef.current.map((tab) => [tab.runId, tab.side])) : null;
+  }, [reaching]);
 
   // A first visit treats what already finished as seen.
   useEffect(() => {
@@ -146,8 +153,12 @@ export function Island() {
     settleFirstVisit(tabs.filter((tab) => !["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(tab.run.status)).map((tab) => tab.runId));
   }, [tabs]);
 
+  const focus = replyTo === "new" ? null : replyTo ?? slot?.focus ?? null;
+
   // A thread the page has open is seen.
   const focusThread = slot?.focus?.threadId ?? null;
+  // A thread opened elsewhere that was not on the rail: it joins the rail while open there and leaves with it.
+  const brought = useRef<string | null>(null);
   useEffect(() => {
     if (!focusThread) return;
     for (const tab of allTabs) if (tab.threadId === focusThread && !tab.seen && tab.status !== "working") markSeen(tab.runId);
@@ -160,80 +171,53 @@ export function Island() {
     setShown(next);
   }, []);
 
-  const figureFor = useCallback((shape: Shape | null): Figure | null => {
-    if (shape === "prism") return prismRef.current.figure();
-    if (shape === "pill") return pillRef.current ? figureOf(pillRef.current, { bars: "[data-tab-title], [data-plus]" }) : null;
-    if (shape === "composer") {
-      const element = composerRef.current?.element();
-      return element ? figureOf(element, { bars: "[data-agent-switch], [data-composer-thread]" }) : null;
-    }
-    return null;
-  }, []);
+  const elementOf = useCallback((shape: Shape | null) => (shape === "composer" ? composerRef.current?.element() : null), []);
+  const boxFor = useCallback((shape: Shape | null) => boxOf(elementOf(shape)), [elementOf]);
 
+  /**
+   * Changes the island's shape. Only a composer the user opened to write in
+   * (`focus`) takes the keyboard: one that comes to rest because the page
+   * changed, or that a hover raised, must never pull the typing out of an
+   * editor.
+   */
   const go = useCallback(
-    async (next: Shape | null) => {
-      if (next === targetRef.current) return;
-      const from = targetRef.current;
+    async (next: Shape | null, { focus = false }: { focus?: boolean } = {}) => {
+      if (next === targetRef.current) {
+        // Asked for again (Ctrl J on an open composer): it takes the keyboard back.
+        if (next === "composer" && focus) composerRef.current?.focus();
+        return;
+      }
       targetRef.current = next;
-      if (next === "pill" && !held.current) held.current = new Map(arrangedRef.current.map((tab) => [tab.runId, tab.side]));
-      if (next === restRef.current) held.current = null;
+      // A thread chosen to reply in holds while the composer is there.
+      if (!next) setReplyTo(null);
       setTarget(next);
       const gen = ++generation.current;
       // Let the next shape lay out at its real size before it is measured.
       await nextFrame();
       if (gen !== generation.current) return;
-      const source = inflight.current ?? figureFor(shownRef.current);
-      const destination = figureFor(next);
-      if (!life.on || (!source && !destination)) {
-        show(next);
-        if (next === "composer") composerRef.current?.focus();
-        return;
-      }
-      show(null);
-      let settled: Promise<unknown>;
-      if (source && destination) {
-        const morph = life.morph(source, destination);
-        inflight.current = morph;
-        settled = morph.formed;
-      } else if (destination) {
-        const rise: Point = [stageCentre(), window.innerHeight - 6];
-        const formed = life.form(destination, { from: rise });
-        inflight.current = formed;
-        settled = formed.formed;
-      } else {
-        inflight.current = null;
-        settled = life.unform(source!);
-      }
-      if (next === "composer") composerRef.current?.focus();
-      await within(settled, MORPH_TIMEOUT);
-      if (gen !== generation.current) return;
-      inflight.current = null;
+      if (next === "composer" && focus) focusOnShow.current = true;
+      // One object changing shape: the frame stretches from what was there to what comes, and the new contents arrive in it.
+      morphShape(frameRef.current, boxFor(shownRef.current), boxFor(next));
       show(next);
-      if (next === "prism" && from !== "prism") prismRef.current.spin(0.5);
     },
-    [figureFor, show],
+    [boxFor, show],
   );
 
   // The resting shape follows the page and the settings.
   useEffect(() => {
-    if (targetRef.current === "pill" || (targetRef.current === "composer" && restShape !== "composer")) return;
+    if (targetRef.current === "composer" && restShape !== "composer") return;
     void go(restShape);
   }, [go, restShape]);
 
-  /** The prism takes something in: it parts, breathes out and comes back together, turning. */
-  const receive = useCallback(async () => {
-    const p = prismRef.current;
-    if (!life.on || shownRef.current !== "prism") {
-      p.spin(1);
-      return;
-    }
-    const breath = life.breathe(p.figure(), 7);
-    setBreathing(true);
-    life.radiate(p.figure(), { colour: "spectrum", count: 16, reach: 26 });
-    await within(breath.formed, 1200);
-    setBreathing(false);
-    p.spin(1);
-  }, []);
+  /** Light going out from the island: what was sent reached Spectra, or something happened the user should glance at. */
+  const radiateFromIsland = useCallback(
+    (colour: LightColour, count: number, reach: number) => {
+      const figure = life.on && shownRef.current ? islandFigure() : null;
+      if (figure) life.radiate(figure, { colour, count, reach });
+    },
+    [islandFigure],
+  );
+  const receive = useCallback(() => radiateFromIsland("spectrum", 16, 26), [radiateFromIsland]);
 
   // Pages keep their last lines clear of the island's resting row.
   useEffect(() => {
@@ -260,22 +244,15 @@ export function Island() {
   const statusBefore = useRef<PrismStatus | null | undefined>(undefined);
   const sentAt = useRef(0);
   useEffect(() => {
-    const p = prismRef.current;
-    p.setMode(status ? MODE_FOR_STATUS[status] : "rest");
-    p.setStatus(status);
     spectraBus.setQuery("prism.status", { status });
     const before = statusBefore.current;
     statusBefore.current = status;
-    // The prism lets the light out and turns, so a glance away still catches it.
+    // The island lets the light out, so a glance away still catches it.
     const light = statusLight(before, status, performance.now() - sentAt.current);
-    if (!light || !life.on || shownRef.current !== "prism") return;
-    p.spin(0.5);
-    if (light === "needs") life.radiate(p.figure(), { colour: STATUS_COLOURS.needs, count: 12, reach: 20 });
-    else life.radiate(p.figure(), { colour: "spectrum", count: 10, reach: 16 });
-  }, [status]);
+    if (light === "needs") radiateFromIsland(STATUS_COLOURS.needs, 12, 20);
+    else if (light) radiateFromIsland("spectrum", 10, 16);
+  }, [radiateFromIsland, status]);
   useEffect(() => () => spectraBus.setQuery("prism.status", { status: null }), []);
-
-  const workingCount = allTabs.filter((tab) => tab.status === "working").length;
 
   /* ------------------------------------------------------------ notices */
 
@@ -292,17 +269,20 @@ export function Island() {
       const wasMoving = ["working", "waiting", "completing", "reconnecting", "needs_input"].includes(before);
       if (!wasMoving) continue;
       if (tab.state === "completed" || tab.state === "completed_limited") {
-        setNotice({ key: `run:${tab.runId}:done`, runId: tab.runId, text: `${tab.title} is ready`, tone: "done" });
-        setAnnouncement(`${tab.title} is ready.`);
-        if (life.on) life.radiate(prismRef.current.figure(), { colour: STATUS_COLOURS.done, count: 14, reach: 24 });
+        const ready = readyLine(tab);
+        setAnnouncement(`${ready}.`);
+        // A reply landing in the thread on screen is its own news; work it made elsewhere is still called out.
+        const watched = tab.threadId === focusThread && !tab.source.card?.provenance?.artifactTitles?.length;
+        if (!watched) setNotice({ key: `run:${tab.runId}:done`, runId: tab.runId, text: ready, tone: "done" });
+        radiateFromIsland(STATUS_COLOURS.done, 14, 24);
       } else if (tab.state === "failed_terminal" || tab.state === "paused") {
         setNotice({ key: `run:${tab.runId}:problem`, runId: tab.runId, text: `${tab.title} stopped with a problem`, tone: "problem" });
         setAnnouncement(`${tab.title} stopped with a problem.`);
-        if (life.on) life.radiate(prismRef.current.figure(), { colour: STATUS_COLOURS.problem, count: 8, reach: 14 });
+        radiateFromIsland(STATUS_COLOURS.problem, 8, 14);
       }
     }
     lastStates.current = next;
-  }, [allTabs]);
+  }, [allTabs, focusThread, radiateFromIsland]);
 
   // The app's own words reach the user here too, in the colour of what happened.
   useEffect(
@@ -312,24 +292,22 @@ export function Island() {
           const noticeTone = TOAST_TONE[tone];
           setNotice({ key: `toast:${id}`, toastId: id, text: message, detail: description, tone: noticeTone, action, duration, onGone: onDismiss });
           if (typeof message === "string") setAnnouncement(message);
-          if (life.on && shownRef.current === "prism" && noticeTone !== "info") life.radiate(prismRef.current.figure(), { colour: NOTICE_COLOUR[noticeTone], count: 8, reach: 14 });
+          if (noticeTone !== "info") radiateFromIsland(NOTICE_COLOUR[noticeTone], 8, 14);
         },
         dismiss: (id) => setNotice((current) => (current?.toastId !== undefined && (id === undefined || current.toastId === id) ? null : current)),
       }),
-    [],
+    [radiateFromIsland],
   );
 
-  // Notifications reach the user here (SHELL.md): the prism lights in their colour and the word forms from it.
+  // Notifications reach the user here (SHELL.md): the island lights in their colour and the words form from it.
   useEffect(
     () =>
       spectraBus.on("island.notify", ({ id, title, detail, tone }) => {
         setNotice({ key: `notification:${id}`, notificationId: id, text: title, detail, tone });
         setAnnouncement(title);
-        const p = prismRef.current;
-        p.spin(0.5);
-        if (life.on && shownRef.current === "prism") life.radiate(p.figure(), { colour: NOTICE_COLOUR[tone], count: 10, reach: 18 });
+        radiateFromIsland(NOTICE_COLOUR[tone], 10, 18);
       }),
-    [],
+    [radiateFromIsland],
   );
 
 
@@ -359,21 +337,9 @@ export function Island() {
       await nextFrame();
       const card = questionRef.current;
       if (!live || !card) return;
-      if (!life.on) {
-        setQuestionShown(true);
-        return;
-      }
-      const p = prismRef.current;
-      const fromPrism = shownRef.current === "prism";
-      if (fromPrism) {
-        const breath = life.breathe(p.figure(), 5);
-        setBreathing(true);
-        void within(breath.formed, 1200).then(() => setBreathing(false));
-      }
-      const start: Point = fromPrism ? p.apex() : [stageCentre(), window.innerHeight - 40];
-      const trip = life.travel(start, figureOf(card, { bars: "[data-question-text]" }), { colour: STATUS_COLOURS.needs });
-      await within(trip.formed, 1800);
-      if (live) setQuestionShown(true);
+      // The question is there at once; the band crosses it as it lands.
+      setQuestionShown(true);
+      markArrival(card);
     })();
     return () => {
       live = false;
@@ -387,18 +353,10 @@ export function Island() {
       if (!accepted) return false;
       markSeen(question.runId);
       setAnswered((current) => new Set(current).add(question.key));
-      const card = questionRef.current;
-      if (life.on && card) {
-        const trip = life.travel(figureOf(card, { bars: "[data-question-text]" }), { absorb: prismRef.current.rect() }, { colour: "spectrum" });
-        setQuestionShown(false);
-        await within(trip.arrived, 1600);
-        void receive();
-      } else {
-        setQuestionShown(false);
-      }
+      setQuestionShown(false);
       return true;
     },
-    [engine, markSeen, question, receive, tabs],
+    [engine, markSeen, question, tabs],
   );
 
   /* ------------------------------------------------------------ thread view */
@@ -417,18 +375,10 @@ export function Island() {
     let live = true;
     void (async () => {
       await nextFrame();
-      const card = viewRef.current;
-      const tab = view ? tabRefs.current.get(view.runId) : null;
-      if (!live || !card) return;
-      if (!life.on) {
-        setViewShown(true);
-        return;
-      }
-      const r = tab?.getBoundingClientRect();
-      const from: Point = r ? [r.x + r.width / 2, r.y] : [stageCentre(), window.innerHeight - 60];
-      const formed = life.form(figureOf(card, { bars: "[data-thread-title], [data-thread-caption]" }), { from });
-      await within(formed.formed, 1000);
-      if (live) setViewShown(true);
+      if (!live || !viewRef.current) return;
+      // The card grows out of its tab.
+      morphShape(frameRef.current, boxOf(tabRefs.current.get(view?.runId ?? "")), boxOf(viewRef.current));
+      setViewShown(true);
     })();
     return () => {
       live = false;
@@ -437,14 +387,13 @@ export function Island() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewOpen]);
 
-  const closeView = useCallback(async () => {
-    const card = viewRef.current;
-    if (card && life.on && viewShown) {
-      setViewShown(false);
-      void unformElement(card, { bars: "[data-thread-title], [data-thread-caption]" });
-    }
+  const closeView = useCallback(() => {
+    // It folds back into its tab, and the field lets go of the thread it was turned to.
+    if (viewShown) morphShape(frameRef.current, boxOf(viewRef.current), boxOf(tabRefs.current.get(view?.runId ?? "")));
+    setViewShown(false);
     setView(null);
-  }, [viewShown]);
+    setReplyTo((current) => (current && current !== "new" && current.runId === view?.runId ? null : current));
+  }, [view, viewShown]);
 
   const openView = useCallback(
     (runId: string, pinned: boolean) => {
@@ -473,16 +422,16 @@ export function Island() {
     (runId: string, threadId: string, title: string) => {
       markSeen(runId);
       if (slot?.openThread) slot.openThread(runId, threadId, title);
-      else void spectraBus.command("run.openConversation", { runId, threadId });
+      // The Side opens it where the page has one; where none answers, its own page does.
+      else if (!spectraBus.command("run.openConversation", { runId, threadId }))
+        router.push(threadHref(threadId));
     },
-    [markSeen, slot],
+    [markSeen, router, slot],
   );
 
   const dismiss = useCallback(
     async (runId: string) => {
-      const element = tabRefs.current.get(runId);
-      if (element) void unformElement(element, { bars: "[data-tab-title]" });
-      if (view?.runId === runId) void closeView();
+      if (view?.runId === runId) closeView();
       markSeen(runId);
       const threadId = arrangedRef.current.find((tab) => tab.runId === runId)?.threadId;
       if (threadId) forgetThread(threadId);
@@ -491,6 +440,17 @@ export function Island() {
     },
     [closeView, markSeen, view?.runId],
   );
+
+  useEffect(() => {
+    const leaving = brought.current;
+    if (leaving === focusThread) return;
+    brought.current = focusThread && !arrangedRef.current.some((tab) => tab.threadId === focusThread) ? focusThread : null;
+    const tab = leaving ? arrangedRef.current.find((candidate) => candidate.threadId === leaving) : undefined;
+    // Closed where it was opened, it goes again, unless it is still working.
+    if (tab && tab.status !== "working") void dismiss(tab.runId);
+    // Only the thread the page opens matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusThread]);
 
   /* ------------------------------------------------------------ arranging */
 
@@ -509,7 +469,7 @@ export function Island() {
     play,
     done,
     tabRefs,
-    plusRef,
+    dividerRef,
     onStart: () => {
       dragActive.current = true;
       window.clearTimeout(viewTimer.current);
@@ -527,7 +487,6 @@ export function Island() {
   useFlip(tabRefs, `${shownPlay.map((tab) => tab.runId).join(",")}|${shownDone.map((tab) => tab.runId).join(",")}`, motion.reduced);
 
   const [menu, setMenu] = useState<{ tab: IslandTab; x: number; y: number } | null>(null);
-  const onPill = useMemo(() => new Set(allTabs.map((tab) => tab.threadId)), [allTabs]);
 
   /* ------------------------------------------------------------ hover */
 
@@ -540,75 +499,74 @@ export function Island() {
         return;
       }
       if (view?.pinned) return;
+      // A keyboard in the island keeps it open as the hand does.
+      if (document.activeElement?.closest("[data-island]") && document.activeElement.matches(":focus-visible")) return;
       const composer = composerRef.current;
       const composing = targetRef.current === "composer" && (composer?.hasContent() || composer?.element()?.contains(document.activeElement));
       if (composing) return;
       setView(null);
+      setReaching(false);
       void go(restRef.current);
     }, CLOSE_DELAY);
   }, [go, view?.pinned]);
 
+  // Whatever held the rail up let go while the hand was elsewhere: it goes back down.
+  useEffect(() => {
+    if (reaching && !view && !pointerInside.current) scheduleClose();
+  }, [reaching, scheduleClose, view]);
+
   const onEnter = () => {
     pointerInside.current = true;
+    setReaching(true);
     setFaded(false);
     window.clearTimeout(closeTimer.current);
-    if (targetRef.current === restRef.current && restRef.current !== "composer") {
-      window.clearTimeout(openTimer.current);
-      openTimer.current = window.setTimeout(() => {
-        if (pointerInside.current) void go("pill");
-      }, OPEN_DELAY);
-    }
   };
   const onLeave = () => {
     pointerInside.current = false;
-    window.clearTimeout(openTimer.current);
     window.clearTimeout(viewTimer.current);
     scheduleClose();
   };
 
   /* ------------------------------------------------------------ arriving */
 
-  // A thread opened elsewhere: its light crosses the field, the pill opens and its tab forms where the light lands.
-  const [arriving, setArriving] = useState<string | null>(null);
+  // A thread opened elsewhere: the rail stands up and its tab lands there, crossed by the band.
   useEffect(
     () =>
-      spectraBus.on("island.arrive", ({ threadId, from }) => {
+      spectraBus.on("island.arrive", ({ threadId }) => {
         setHidden(false);
         arrivingUntil.current = performance.now() + ARRIVAL_MS;
-        void go("pill");
-        if (!pointerInside.current) scheduleClose();
+        setReaching(true);
+        if (!targetRef.current) void go("composer");
         void (async () => {
-          // The pill is always laid out, so its tabs can be measured before it shows.
           await nextFrame();
           const tab = arrangedRef.current.find((candidate) => candidate.threadId === threadId);
-          const element = tab ? tabRefs.current.get(tab.runId) : null;
-          const start: Point = [stageCentre(), window.innerHeight / 2];
-          if (!life.on) return;
-          if (tab && element) {
-            setArriving(tab.runId);
-            const trip = life.travel(from ?? start, figureOf(element, { bars: "[data-tab-title]" }), { colour: "spectrum" });
-            await within(trip.formed, 1400);
-            setArriving((current) => (current === tab.runId ? null : current));
-          } else if (plusRef.current) {
-            // No tab for it yet: the + takes the light in.
-            const trip = life.travel(from ?? start, { absorb: plusRef.current.getBoundingClientRect() }, { colour: "spectrum" });
-            await within(trip.arrived, 1400);
-            const r = plusRef.current?.getBoundingClientRect();
-            if (r) life.pulse(r.left + r.width / 2, r.top + r.height / 2, 0.9, "spectrum");
-          }
+          const element = tab ? tabRefs.current.get(tab.runId) : composerRef.current?.element();
+          // The tab is there at once; the band crosses it as it lands.
+          if (element) markArrival(element);
         })();
       }),
-    [go, scheduleClose],
+    [go],
   );
 
   /* ------------------------------------------------------------ sending */
 
+  // The run a new conversation started takes the card as soon as it has a tab.
+  const peekNext = useRef(false);
+  const activeRunId = engine?.activeRunId ?? null;
+  useEffect(() => {
+    if (!peekNext.current || !activeRunId || !allTabs.some((tab) => tab.runId === activeRunId)) return;
+    peekNext.current = false;
+    openView(activeRunId, true);
+  }, [activeRunId, allTabs, openView]);
+
   const send = useCallback(
     (message: ComposerSend) => {
       if (!engine) return;
-      const p = prismRef.current;
       sentAt.current = performance.now();
-      if (life.on && message.wordsRect) {
+      // Answered, a thread brought to the rail stays there.
+      if (focus?.threadId === brought.current) brought.current = null;
+      const home = islandHome();
+      if (life.on && message.wordsRect && home) {
         const r = message.wordsRect;
         const lines = Math.min(4, message.lineCount);
         const ink: [number, number, number] = document.documentElement.classList.contains("dark") ? [243, 241, 236] : [20, 19, 24];
@@ -617,36 +575,69 @@ export function Island() {
           const width = index === lines - 1 ? Math.min(r.width, Math.max(60, message.text.length * 7.2) % r.width || r.width) : r.width;
           return { points: [r.x + 4, y, r.x + Math.max(40, width), y], closed: false, width: 5, colour: ink, alpha: 0.22 };
         });
-        const trip = life.travel({ strokes }, { absorb: p.rect() }, { colour: "spectrum" });
-        void within(trip.arrived, 1600).then(() => void receive());
-      } else {
-        p.spin(1);
+        const trip = life.travel({ strokes }, { absorb: home }, { colour: "spectrum" });
+        void within(trip.arrived, 1600).then(receive);
       }
-      if (restRef.current !== "composer") void go(pointerInside.current ? "pill" : restRef.current);
-      const focus = slot?.focus ?? null;
+      // A new conversation has nowhere on the page to show yet: its card opens over its tab, so what was sent is seen
+      // working. A page that binds a thread (chat) shows it itself.
+      const unseen = !focus && !slot?.bindsThread;
+      peekNext.current = unseen;
+      if (unseen) setReaching(true);
       const options = {
         ...(slot?.bindsThread ? {} : { threadId: focus?.threadId ?? null }),
         ...(message.references.length ? { references: message.references } : {}),
         ...(message.agentId !== undefined ? { agentId: message.agentId } : {}),
       };
-      if (focus && engine.submitting && engine.activeRunId) void engine.steer(engine.activeRunId, message.text, message.attachments);
+      // Words for a thread still working join its run rather than starting another.
+      const working = focus ? allTabs.find((tab) => tab.threadId === focus.threadId && tab.status === "working") : undefined;
+      const steering = working?.runId ?? (focus && focus === slot?.focus && engine.submitting ? engine.activeRunId : null);
+      if (steering) void engine.steer(steering, message.text, message.attachments);
       else void engine.run(message.text, message.attachments, options);
     },
-    [engine, go, receive, slot],
+    [allTabs, engine, focus, islandHome, receive, slot],
   );
 
   /* ------------------------------------------------------------ keyboard */
 
   // Ctrl J, the global shortcuts and the rest of the app open the composer here.
+  const latestSend = useRef(send);
+  latestSend.current = send;
   const compose = useCallback(
-    (fresh = false) => {
+    (fresh = false, prefill?: { text?: string; references?: SpectraRunPointer[] }, sendNow = false) => {
       if (fresh) slot?.startNewThread?.();
       setHidden(false);
-      window.setTimeout(() => void go("composer"), 0);
+      window.setTimeout(() => {
+        void go("composer", { focus: true }).then(() => {
+          // Sent at once, the words go as the student's own message, from the thread now in focus.
+          if (sendNow && prefill?.text)
+            return latestSend.current({ text: prefill.text, references: prefill.references ?? [], attachments: [], wordsRect: null, lineCount: 1 });
+          // Work handed over without words (picked work to ask about) comes in as references, under an empty field.
+          if (prefill?.text || prefill?.references?.length) composerRef.current?.prefill(prefill.text ?? "", prefill.references);
+        });
+      }, 0);
     },
     [go, slot],
   );
-  useEffect(() => spectraBus.on("island.compose", ({ fresh }) => compose(fresh)), [compose]);
+  useEffect(
+    () => spectraBus.on("island.compose", ({ fresh, text, references, send: sendNow }) => compose(fresh, { text, references }, sendNow)),
+    [compose],
+  );
+
+  /* ------------------------------------------------------------ switcher */
+
+  // Every thread, from anywhere. A page that binds a thread (chat) has its own search and answers instead.
+  const [switcher, setSwitcher] = useState<{ query?: string } | null>(null);
+  const bindsThread = Boolean(slot?.bindsThread);
+  useEffect(
+    () =>
+      spectraBus.on("threads.open", ({ query }) => {
+        if (bindsThread) return;
+        setHidden(false);
+        setSwitcher({ query });
+      }),
+    [bindsThread],
+  );
+  const closeSwitcher = useCallback(() => setSwitcher(null), []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -662,20 +653,23 @@ export function Island() {
         return;
       }
       if (event.key === "Escape" && view) {
-        void closeView();
+        closeView();
         return;
       }
-      // Typing in an editor fades the island to a faint prism.
-      if (!mod && event.key.length === 1 && isEditable(event.target) && targetRef.current === "prism") setFaded(true);
+      // Typing in an editor fades the empty island away, so it never sits over the words;
+      // a hand near its place brings it back.
+      if (!mod && event.key.length === 1 && isEditable(event.target) && !composerRef.current?.hasContent()) setFaded(true);
     };
     const onPointer = (event: PointerEvent) => {
       if (event.clientY > window.innerHeight - 140 && Math.abs(event.clientX - stageCentre()) < 220) setFaded(false);
     };
+    // A press anywhere off the island puts the open card away, whether it was
+    // chosen or only shown on hover.
     const onDown = (event: PointerEvent) => {
-      if (!view?.pinned) return;
+      if (!view) return;
       const target = event.target as Element | null;
       if (target?.closest?.("[data-island], [role='menu']")) return;
-      void closeView();
+      closeView();
     };
     window.addEventListener("keydown", onKey);
     window.addEventListener("pointermove", onPointer, { passive: true });
@@ -687,8 +681,8 @@ export function Island() {
     };
   }, [closeView, compose, view]);
 
-  const onPillKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const buttons = Array.from(pillRef.current?.querySelectorAll<HTMLButtonElement>("[data-island-tab], [data-plus]") ?? []);
+  const onRailKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button[data-rail-tab]"));
     const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
     if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && event.altKey) {
       event.preventDefault();
@@ -697,7 +691,7 @@ export function Island() {
       const step = tab ? stepTab(play, done, tab.runId, event.key === "ArrowLeft" ? -1 : 1) : null;
       if (!tab || !step) return;
       place(tab, step.side, step.index);
-      // Crossing the + moves the button to the other side; keep the focus on it.
+      // Crossing the divider moves the button to the other side; keep the focus on it.
       requestAnimationFrame(() => tabRefs.current.get(tab.runId)?.focus());
     } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
       event.preventDefault();
@@ -713,75 +707,92 @@ export function Island() {
   /* ------------------------------------------------------------ render */
 
   const composerVisible = shown === "composer";
-  const pillVisible = shown === "pill";
-  const prismVisible = shown === "prism" && !breathing;
-  const focus = slot?.focus ?? null;
+  // Opened to write in: it takes the keyboard on the commit that makes it usable (no longer inert).
+  useEffect(() => {
+    if (!composerVisible || !focusOnShow.current) return;
+    focusOnShow.current = false;
+    composerRef.current?.focus();
+  }, [composerVisible]);
   const placeholder = focus ? `Reply to ${focus.title}` : "Ask Spectra anything";
 
-  const tabButton = (tab: IslandTab) => (
-    <button
-      key={tab.runId}
-      ref={(node) => {
-        if (node) tabRefs.current.set(tab.runId, node);
-        else tabRefs.current.delete(tab.runId);
-      }}
-      type="button"
-      data-island-tab
-      data-run-id={tab.runId}
-      aria-label={`${tab.title}: ${tab.caption}`}
-      aria-pressed={view?.runId === tab.runId}
-      aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight Delete"
-      onPointerEnter={() => {
-        if (tabDrag.dragging) return;
-        window.clearTimeout(viewTimer.current);
-        viewTimer.current = window.setTimeout(() => openView(tab.runId, false), view ? 60 : VIEW_DELAY);
-      }}
-      onPointerDown={(event) => tabDrag.onPointerDown(tab, event)}
-      onClick={() => {
-        if (tabDrag.consumeClick()) return;
-        openView(tab.runId, true);
-      }}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        window.clearTimeout(viewTimer.current);
-        setMenu({ tab, x: event.clientX, y: event.clientY });
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          openView(tab.runId, true);
-        }
-      }}
-      className={cn(
-        "inline-flex h-8 max-w-[180px] shrink-0 select-none items-center gap-1.5 rounded-full px-2.5 text-caption outline-none",
-        (tabDrag.dragging === tab.runId || arriving === tab.runId) && "opacity-0",
-        "transition-colors duration-[var(--motion-fast)] hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]",
-        view?.runId === tab.runId ? "bg-[var(--bg-hover)] text-[var(--text-primary)]" : "text-[var(--text-secondary)]",
-      )}
-    >
-      <TabCue tab={tab} />
-      <span data-tab-title className="min-w-0 truncate">
-        {tabTitle(tab.title)}
-      </span>
-    </button>
-  );
+  /* ------------------------------------------------------------ rail */
+
+  const findShown = useCallback(() => elementOf(shownRef.current), [elementOf]);
+  const seat = useRailSeat(shown, findShown);
+  const raised = Boolean(seat) && (composerVisible || reaching);
+  const railHas = composerVisible || allTabs.length > 0;
+  // The tab in hand: the thread whose card is open, else the thread the field writes into.
+  const focusTab = focus ? allTabs.find((tab) => tab.threadId === focus.threadId) : undefined;
+  const current = view?.runId ?? (composerVisible ? focusTab?.runId ?? null : null);
+  const inHand = shownDone.slice(RAIL_DONE).find((tab) => tab.runId === current);
+  // The tab in hand always stands on the rail, in the last place there is room for.
+  const railDone = inHand ? [...shownDone.slice(0, RAIL_DONE - 1), inHand] : shownDone.slice(0, RAIL_DONE);
+
+  /** Pressing a thread keeps it open over the island and turns the field to it: a reply is just typed. */
+  const pressTab = (tab: IslandTab) => {
+    markSeen(tab.runId);
+    // A page that shows one thread changes to it.
+    if (bindsThread) {
+      openThread(tab.runId, tab.threadId, tab.title);
+      composerRef.current?.focus();
+      return;
+    }
+    if (view?.pinned && view.runId === tab.runId) {
+      closeView();
+      return;
+    }
+    openView(tab.runId, true);
+    replyIn(tab);
+  };
+
+  const replyIn = (tab: IslandTab) => {
+    setReplyTo({ runId: tab.runId, threadId: tab.threadId, title: tab.title });
+    void go("composer", { focus: true }).then(() => composerRef.current?.focus());
+  };
+
+  const railHandlers: RailHandlers = {
+    onHover: (tab) => {
+      if (tabDrag.dragging) return;
+      window.clearTimeout(viewTimer.current);
+      viewTimer.current = window.setTimeout(() => openView(tab.runId, false), view ? 60 : VIEW_DELAY);
+    },
+    onPress: (tab) => {
+      if (tabDrag.consumeClick()) return;
+      pressTab(tab);
+    },
+    onMenu: (tab, x, y) => {
+      window.clearTimeout(viewTimer.current);
+      setMenu({ tab, x, y });
+    },
+    onPointerDown: tabDrag.onPointerDown,
+  };
 
   return (
     <div
       data-island
       data-island-root
+      data-island-status={status ?? undefined}
       onPointerEnter={onEnter}
       onPointerLeave={onLeave}
+      onFocus={() => {
+        setReaching(true);
+        setFaded(false);
+      }}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null) && !pointerInside.current) scheduleClose();
+      }}
       className={cn(
         // The island floats at the bottom centre of the stage: between the rail and the Side, gliding as they change.
-        "pointer-events-none fixed bottom-0 left-[var(--spectra-rail-width,0px)] right-[var(--spectra-side-width,0px)] z-composer-dock flex flex-col items-center gap-2",
+        "pointer-events-none fixed bottom-0 left-[calc(var(--spectra-rail-width,0px)+var(--spectra-lead-width,0px))] right-[calc(var(--spectra-side-width,0px)+8px)] z-composer-dock flex flex-col items-center gap-2",
         "transition-[opacity,left,right] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)]",
-        faded && "opacity-30 [&_*]:!pointer-events-none",
+        faded && "opacity-0 [&_*]:!pointer-events-none",
       )}
     >
       <div aria-live="polite" className="sr-only">
         {announcement}
       </div>
+      {/* The island's paper while it changes shape (shape-morph.ts). */}
+      <div ref={frameRef} aria-hidden className="island-morph" />
 
       {question ? (
         <div className="pointer-events-auto">
@@ -806,7 +817,19 @@ export function Island() {
             engine={engine}
             visible={viewShown}
             offset={viewOffset}
-            onOpenSide={() => openThread(viewTab.runId, viewTab.threadId, viewTab.title)}
+            onOpenSide={() => {
+              closeView();
+              openThread(viewTab.runId, viewTab.threadId, viewTab.title);
+            }}
+            onOpenPage={() => {
+              closeView();
+              markSeen(viewTab.runId);
+              router.push(threadHref(viewTab.threadId));
+            }}
+            onReply={() => {
+              openView(viewTab.runId, true);
+              replyIn(viewTab);
+            }}
             onDismiss={() => void dismiss(viewTab.runId)}
           />
         </div>
@@ -816,63 +839,60 @@ export function Island() {
         <IslandNotice
           key={notice.key}
           notice={notice}
-          from={shown === "prism" ? prism.apex() : undefined}
           onOpen={() => {
             setNotice(null);
             if (notice.notificationId) spectraBus.emit("notifications.choose", { id: notice.notificationId });
             else if (notice.runId) {
               const runId = notice.runId;
-              void go("pill").then(() => openView(runId, true));
+              setReaching(true);
+              void go(targetRef.current ?? "composer").then(() => openView(runId, true));
             }
           }}
           onDismiss={() => setNotice((current) => (current?.key === notice.key ? null : current))}
         />
       ) : null}
 
-      <div ref={bandRef} className="grid w-full place-items-end pb-4">
-        {/* The pill: threads in play, the +, threads done. */}
-        <div
-          ref={pillRef}
-          role="toolbar"
-          aria-label="Spectra threads"
-          inert={!pillVisible}
-          aria-hidden={!pillVisible}
-          onKeyDown={onPillKey}
-          className={cn(
-            "col-start-1 row-start-1 grid h-11 grid-cols-[1fr_auto_1fr] items-center gap-1 justify-self-center rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-1.5 shadow-[var(--shadow-card)]",
-            "transition-opacity duration-150",
-            pillVisible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
-          )}
-        >
-          <div data-island-play className="flex max-w-[min(40vw,560px)] items-center justify-end gap-0.5 overflow-x-auto [scrollbar-width:none]">
-            {shownPlay.map(tabButton)}
-          </div>
-          <Tooltip label="New conversation" shortcut="Ctrl J">
-            <button
-              type="button"
-              ref={plusRef}
-              data-plus
-              aria-label="New conversation"
-              onClick={() => void go("composer")}
-              className="grid size-8 place-items-center rounded-full bg-[var(--text-primary)] [color:var(--bg-primary)] outline-none transition-transform duration-[var(--motion-fast)] hover:scale-105 focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] focus-visible:ring-offset-2"
-            >
-              <Icon name="add" size={16} />
-            </button>
-          </Tooltip>
-          <div
-            data-island-done
-            onWheel={(event) => {
-              // A wheel over the done side scrolls on into history.
-              if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) event.currentTarget.scrollLeft += event.deltaY;
+      {switcher ? (
+        <ThreadSwitcher
+          initialQuery={switcher.query}
+          onClose={closeSwitcher}
+          onNewThread={() => {
+            setSwitcher(null);
+            compose(true);
+          }}
+          onChoose={(thread) => {
+            setSwitcher(null);
+            openThread(thread.lastRunId ?? thread._id, thread._id, thread.title);
+          }}
+        />
+      ) : null}
+
+      {/* The rail stands over the bar: what opens above the island makes room for it. */}
+      <div ref={bandRef} className={cn("relative grid w-full place-items-end pb-4", raised && railHas && "mt-8")}>
+        {seat && railHas ? (
+          <IslandRail
+            play={shownPlay}
+            done={railDone}
+            raised={raised}
+            current={current}
+            focusTitle={composerVisible && focus && !focusTab ? focus.title : null}
+            dragging={tabDrag.dragging}
+            tabRefs={tabRefs}
+            dividerRef={dividerRef}
+            bottom={16 + seat.height - 1}
+            maxWidth={seat.width - 2 * seat.radius}
+            handlers={railHandlers}
+            onKeyDown={onRailKey}
+            threadsOpen={Boolean(switcher)}
+            onThreads={() => setSwitcher((open) => (open ? null : {}))}
+            onNew={() => {
+              closeView();
+              if (bindsThread) slot?.startNewThread?.();
+              else setReplyTo("new");
+              composerRef.current?.focus();
             }}
-            className="flex max-w-[min(40vw,560px)] items-center justify-start gap-0.5 overflow-x-auto [mask-image:linear-gradient(to_right,black_85%,transparent)] [scrollbar-width:none]"
-          >
-            {shownDone.map(tabButton)}
-            {pillVisible ? (
-              <IslandHistory exclude={onPill} onOpen={(thread) => openThread(thread.lastRunId ?? thread._id, thread._id, thread.title)} />
-            ) : null}
-          </div>
-        </div>
+          />
+        ) : null}
 
         {/* The composer. */}
         <div
@@ -880,73 +900,28 @@ export function Island() {
           aria-hidden={!composerVisible}
           className={cn(
             "col-start-1 row-start-1 justify-self-center transition-opacity duration-150",
-            composerVisible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
+            composerVisible ? "pointer-events-auto opacity-100 delay-[110ms]" : "pointer-events-none opacity-0",
           )}
         >
           <IslandComposer
             ref={composerRef}
             draftKey={focus?.threadId ?? "new"}
             placeholder={placeholder}
-            thread={focus}
-            onLetGo={slot?.startNewThread}
             visible={composerVisible}
             busy={Boolean(focus && engine?.submitting)}
             onStop={engine ? () => void engine.stop() : undefined}
             onSend={send}
             onCancel={() => {
+              if (view) closeView();
               if (restRef.current === "composer") (document.activeElement as HTMLElement | null)?.blur();
-              else void go(pointerInside.current ? "pill" : restRef.current);
+              else void go(restRef.current);
             }}
           />
-        </div>
-
-        {/* The prism. */}
-        <div className="pointer-events-auto relative col-start-1 row-start-1 justify-self-center">
-          <canvas
-            data-island-prism
-            data-status={status ?? undefined}
-            ref={prism.canvasRef}
-            role="button"
-            tabIndex={target === "prism" ? 0 : -1}
-            aria-label={status === "needs" ? "Spectra needs you" : status === "working" ? "Spectra is working" : "Spectra"}
-            onPointerEnter={() => {
-              prism.body().hover(true);
-              prism.wake();
-            }}
-            onPointerLeave={() => {
-              prism.body().hover(false);
-              prism.wake();
-            }}
-            onPointerDown={() => {
-              prism.body().press();
-              prism.wake();
-            }}
-            onPointerUp={() => {
-              prism.body().release();
-              prism.wake();
-            }}
-            onClick={() => void go("composer")}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                void go("composer");
-              }
-            }}
-            className={cn(
-              "block size-14 cursor-pointer rounded-full outline-none transition-opacity duration-150 focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]",
-              prismVisible ? "opacity-100" : "pointer-events-none opacity-0",
-            )}
-          />
-          {prismVisible && workingCount > 1 ? (
-            <span aria-hidden className="absolute -right-1 bottom-2 rounded-full bg-[var(--bg-elevated)] px-1 text-micro tabular-nums text-[var(--text-secondary)]">
-              {workingCount}
-            </span>
-          ) : null}
         </div>
       </div>
 
-      {/* The tab being dragged, lifted above the pill. */}
-      {tabDrag.ghost ? createPortal(<TabGhost ghost={tabDrag.ghost} tab={allTabs.find((tab) => tab.runId === tabDrag.ghost?.runId)} ghostRef={tabDrag.ghostRef} />, document.body) : null}
+      {/* The tab being dragged, lifted off the rail. */}
+      {tabDrag.ghost ? createPortal(<RailGhost ghost={tabDrag.ghost} tab={allTabs.find((tab) => tab.runId === tabDrag.ghost?.runId)} ghostRef={tabDrag.ghostRef} />, document.body) : null}
 
       {/* A tab's context menu. */}
       <DropdownMenu open={Boolean(menu)} onOpenChange={(open) => !open && setMenu(null)} modal={false}>
@@ -961,7 +936,7 @@ export function Island() {
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => openThread(menu.tab.runId, menu.tab.threadId, menu.tab.title)}>
               <MenuGlyph name="openSide" />
-              Open the conversation
+              Open the thread
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             {menu.tab.side === "done" ? (
@@ -988,7 +963,7 @@ export function Island() {
 
       {/* Wake from the edge: a band along the bottom centre. */}
       {restShape === null && target === null ? (
-        <div aria-hidden className="pointer-events-auto absolute bottom-0 left-1/2 h-7 w-[360px] -translate-x-1/2" onPointerEnter={() => void go("pill")} />
+        <div aria-hidden className="pointer-events-auto absolute bottom-0 left-1/2 h-7 w-[360px] -translate-x-1/2" onPointerEnter={() => void go("composer")} />
       ) : null}
     </div>
   );
@@ -1002,26 +977,9 @@ function MenuGlyph({ name }: { name: IconName }) {
   );
 }
 
-function TabGhost({ ghost, tab, ghostRef }: { ghost: TabGhostRect; tab: IslandTab | undefined; ghostRef: RefObject<HTMLDivElement | null> }) {
-  return (
-    <div
-      ref={ghostRef}
-      aria-hidden
-      style={{ left: ghost.left, top: ghost.top, width: ghost.width, height: ghost.height }}
-      className="pointer-events-none fixed z-composer-dock inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-caption text-[var(--text-primary)] shadow-[var(--shadow-lg)] will-change-transform"
-    >
-      {tab ? <TabCue tab={tab} /> : null}
-      <span data-tab-title className="min-w-0 truncate">
-        {tab ? tabTitle(tab.title) : ""}
-      </span>
-    </div>
-  );
-}
-
-function TabCue({ tab }: { tab: IslandTab }) {
-  if (tab.status === "working") return <span aria-hidden className="island-working-light size-3 shrink-0 rounded-full" />;
-  if (tab.status === "needs") return <span aria-hidden className="island-needs-glint size-2 shrink-0 rounded-full" />;
-  if (tab.status === "problem") return <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--danger)]" />;
-  if (tab.state === "cancelled") return <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--text-tertiary)]" />;
-  return <Icon name="done" size={14} className={tab.seen ? "text-[var(--text-tertiary)]" : "text-[var(--success)]"} />;
+/** What a finished run made, by name: the work it wrote, or else its thread. A thread keeps its first title while later asks make other things. */
+function readyLine(tab: IslandTab) {
+  const made = tab.source.card?.provenance?.artifactTitles?.filter((title) => title.trim()) ?? [];
+  if (made.length > 1) return `${made.length} works are ready`;
+  return `${made[0] ?? tab.title} is ready`;
 }

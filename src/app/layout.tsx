@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
-import { Manrope, IBM_Plex_Mono } from "next/font/google";
+import { Figtree, IBM_Plex_Mono, Newsreader } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { SkipLink } from "@/components/ui/skip-link";
@@ -11,11 +11,20 @@ import { checkDeploymentConsistency } from "@/lib/boot-diagnostics";
 // deployment and public URL variables disagree on environment.
 checkDeploymentConsistency();
 
-const manrope = Manrope({
-  variable: "--font-manrope",
+// The type system (docs/design/LANGUAGE.md): Figtree for the interface, Newsreader for titles and
+// reading, Plex Mono for code and figures.
+const figtree = Figtree({
+  variable: "--font-figtree",
   subsets: ["latin"],
   display: "swap",
-  adjustFontFallback: false,
+});
+
+const newsreader = Newsreader({
+  variable: "--font-newsreader",
+  subsets: ["latin"],
+  style: ["normal", "italic"],
+  axes: ["opsz"],
+  display: "swap",
 });
 
 const plexMono = IBM_Plex_Mono({
@@ -50,7 +59,8 @@ export default function RootLayout({
   const publishableKey = getClerkPublishableKey();
 
   const content = (
-    <html lang="en" suppressHydrationWarning>
+    // The font variables sit on the root, where the tokens that name them (--font-sans, --font-display) are declared.
+    <html lang="en" suppressHydrationWarning className={`${figtree.variable} ${newsreader.variable} ${plexMono.variable}`}>
       <head>
         <meta name="color-scheme" content="light dark" />
         <script
@@ -60,7 +70,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${manrope.variable} ${plexMono.variable} antialiased`}>
+      <body className="antialiased">
         <SkipLink />
         <div id="page-content" tabIndex={-1}>
           <Providers>{children}</Providers>

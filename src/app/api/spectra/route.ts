@@ -88,7 +88,7 @@ function requireString(value: unknown, name: string) {
       name === "workspaceId"
         ? "Choose a workspace first."
         : name === "artifactId"
-          ? "Choose a document or artifact first."
+          ? "Choose a document or other work first."
           : name === "threadId"
             ? "Choose a thread first."
             : name === "action"

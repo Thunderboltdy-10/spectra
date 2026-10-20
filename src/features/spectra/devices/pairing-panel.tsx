@@ -40,10 +40,10 @@ function PairingCard({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const waiting = state.phase === "checking" || state.phase === "requesting" || state.phase === "download";
-  useLifeEntrance(ref, { bars: PANEL_BARS });
+  useLifeEntrance(ref);
   // Connected: the card flows into this computer's row, which arrives under the same key.
   useLifeDeparture(ref, true, { bars: PANEL_BARS }, THIS_COMPUTER_LIFE_KEY);
-  useLifeGlow(ref, waiting, "spectrum", 0.5);
+  useLifeGlow(ref, waiting);
   const phase = useRef(state.phase);
   useEffect(() => {
     if (phase.current === state.phase) return;

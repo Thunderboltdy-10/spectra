@@ -572,6 +572,11 @@ export function retextPresentationParagraphs(
 }
 
 /** The faces PowerPoint shows Spectra's code and equations in. */
+/** Slide colours are the deck's own data, not the app's theme: black ink, and a pale blue shape with a blue edge. */
+const INK = "#000000";
+const SHAPE_FILL = "#e9eef8";
+const SHAPE_EDGE = "#2b59c3";
+
 export const NATIVE_CODE_FACE = "Consolas";
 export const NATIVE_MATH_FACE = "Cambria Math";
 
@@ -683,7 +688,7 @@ export function createPresentationObject(
       style: {
         fontSize: 48,
         fontWeight: 650,
-        color: "var(--accent-mint)",
+        color: INK,
         align: "left",
       },
     };
@@ -691,7 +696,8 @@ export function createPresentationObject(
     return {
       ...base,
       content: { shape: "rounded-rectangle", text: "" },
-      style: { fill: "color-mix(in oklab, var(--accent-mint) 16%, var(--bg-elevated))", stroke: "var(--accent-mint)", radius: 24 },
+      // A pale blue with a blue edge: black text reads on it, and it prints.
+      style: { fill: SHAPE_FILL, stroke: SHAPE_EDGE, radius: 12 },
     };
   if (type === "chart")
     return {
@@ -721,6 +727,21 @@ export function createPresentationObject(
       altText: "Two-column table",
     };
   return { ...base, content: {} };
+}
+
+/**
+ * A text box the person draws in themselves: empty, at reading size, under
+ * the slide's title rather than on top of it, so it starts as a place to write.
+ */
+export function createPresentationTextBox(ordinal = 1): PresentationObject {
+  const box = createPresentationObject("text", ordinal);
+  return {
+    ...box,
+    y: box.y + 110,
+    height: 72,
+    content: { text: "" },
+    style: { ...box.style, fontSize: 24, fontWeight: 430 },
+  };
 }
 
 export function createPresentationSlide(ordinal: number): PresentationSlide {
@@ -1204,7 +1225,7 @@ export function createDefaultPresentationContent(): PresentationContent {
     style: {
       fontSize: 48,
       fontWeight: 700,
-      color: "var(--accent-mint)",
+      color: INK,
       align: "center",
     },
   };

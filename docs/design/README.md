@@ -12,6 +12,7 @@ them.
 | [LIFE.md](LIFE.md) | The field (the living dot lattice), its physics and events, and the prism drawn from it |
 | [MOTION.md](MOTION.md) | How interface elements move: tokens, controls, drag and drop, panels, AI light, captions |
 | [ICONS.md](ICONS.md) | Spectra's own glyphs, and the one place generic workbar symbols are allowed |
+| [LIBRARY.md](LIBRARY.md) | The Library: shelf and list views, the path, quick access, workspaces as places, previews |
 | [EDITORS.md](EDITORS.md) | Editor workbars, the artifact status control, shared rich content, embeds and per-artifact notes |
 | [../ai/HARNESS.md](../ai/HARNESS.md) | How Spectra's AI works, which shapes the thread, the island and every AI-facing surface |
 | [../product/](../product/README.md) | Product specs for Devices (Bridge) and School (ManageBac) |

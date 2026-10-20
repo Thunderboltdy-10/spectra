@@ -79,7 +79,7 @@ export async function promoteNativeAiContent(params: {
     throw promotionError("NATIVE_PROMOTION_IDENTITY_REQUIRED", "The native edit has no authenticated AI operation identity.");
   const kind = linkedOfficeKind(params.nativeFormat);
   if (!kind)
-    throw promotionError("NATIVE_PROMOTION_REFUSED", "This artifact has no supported native Office format.");
+    throw promotionError("NATIVE_PROMOTION_REFUSED", "This can't be saved as an Office file.");
   if (typeof params.commit?.prepareAdmittedUpdate !== "function")
     throw promotionError("NATIVE_PROMOTION_ADMISSION_REQUIRED", "The native edit has no atomic canonical admission boundary.");
   const options: NativeMaterializationOptions = {

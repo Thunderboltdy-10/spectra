@@ -1,0 +1,821 @@
+/* ==========================================================================
+   A plan (plan-studio.tsx, components/planner/, EDITORS.md "Plan")
+   --------------------------------------------------------------------------
+   A to-do page: dated today in the margin, a red margin line down the list,
+   and each task written on a ruled line with a round check that shows how far
+   along it is. A task opens on its own page; on a wide desk the two lie open
+   side by side like a notebook, the task page opening from the spine.
+   ========================================================================== */
+
+.plan-studio {
+  --plan-rule: color-mix(in oklab, var(--ink-blue) 16%, var(--card-border-soft));
+  --plan-margin: color-mix(in oklab, var(--ink-red) 38%, transparent);
+}
+.plan-studio .spectra-editor-body {
+  container: plan-desk / inline-size;
+}
+
+.plan-desk {
+  padding-bottom: 48px;
+}
+
+/* Find, filters, notes and the selection's tools: above the page they act on. */
+.plan-strip {
+  display: flex;
+  width: min(760px, calc(100% - 48px));
+  flex-direction: column;
+  gap: 8px;
+  margin: 20px auto 0;
+}
+.plan-strip + .editor-sheet,
+.plan-strip + .plan-board {
+  margin-top: 14px;
+}
+.plan-find {
+  display: flex;
+  height: 40px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 6px 0 14px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: var(--card-paper);
+  color: var(--text-tertiary);
+}
+.plan-find:focus-within {
+  border-color: color-mix(in oklab, var(--type-task) 60%, var(--card-border));
+}
+.plan-find input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-body);
+  outline: none;
+}
+.plan-filters,
+.plan-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+}
+.plan-bulk {
+  align-items: center;
+  padding: 8px 10px 8px 16px;
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--type-task) 12%, var(--card-paper));
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+}
+.plan-bulk .sheet-quiet {
+  margin-left: 0;
+  align-self: center;
+}
+.plan-bulk-delete {
+  color: var(--danger) !important;
+}
+.plan-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 14px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--ink-blue) 8%, var(--card-paper));
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+}
+.plan-note[data-tone="problem"] {
+  background: color-mix(in oklab, var(--danger) 9%, var(--card-paper));
+  color: color-mix(in oklab, var(--danger) 70%, var(--text-primary));
+}
+.plan-note p {
+  flex: 1;
+}
+
+/* --------------------------------------------------------------- the list */
+
+.plan-sheet {
+  --sheet-ink: var(--type-task);
+  gap: 22px;
+}
+.plan-sheet-head {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 18px;
+}
+.plan-sheet-head-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+.plan-sheet-title {
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: clamp(26px, 2.2vw, 32px);
+  font-weight: 400;
+  line-height: 1.2;
+}
+.plan-sheet-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+}
+.plan-sheet-sub .task-progress {
+  margin-left: 0;
+}
+.plan-sheet-next {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-sheet-next[data-overdue] {
+  color: var(--danger);
+}
+.plan-sheet-head > .sheet-tools {
+  align-items: center;
+}
+.plan-sheet-head .sheet-quiet {
+  margin-left: 0;
+}
+.plan-sheet-none {
+  padding: 4px 0;
+}
+
+/* A section: its name in the display face, and the margin line down its tasks. */
+.plan-section {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.plan-section::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 36px;
+  width: 1px;
+  background: var(--plan-margin);
+  pointer-events: none;
+}
+.plan-section-head {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-height: 40px;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 0 6px 6px 48px;
+  border-bottom: 1.5px solid color-mix(in oklab, var(--ink-red) 30%, var(--plan-rule));
+  background: var(--card-paper);
+}
+.plan-section + .plan-section {
+  margin-top: 6px;
+}
+.plan-section-head h3,
+.plan-section-name {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 1.3;
+  outline: none;
+}
+.plan-section-name {
+  border-radius: 4px;
+  text-decoration: underline transparent 1px;
+  text-underline-offset: 5px;
+  transition: text-decoration-color var(--motion-fast) var(--ease-standard);
+}
+.plan-section-name:hover,
+.plan-section-name:focus-visible {
+  text-decoration-color: var(--card-border);
+}
+.plan-section-count {
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+/* A task, on its ruled line. */
+.plan-row {
+  position: relative;
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 6px 4px calc(8px + var(--depth, 0) * 24px);
+  border-bottom: 1px solid var(--plan-rule);
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+.plan-row:hover {
+  background: color-mix(in oklab, var(--type-task) 5%, transparent);
+}
+.plan-row[data-open] {
+  background: color-mix(in oklab, var(--type-task) 12%, transparent);
+}
+.plan-row[data-open]::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  right: -1px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 3px 0 0 3px;
+  background: var(--type-task);
+}
+.plan-row[data-selected] {
+  background: color-mix(in oklab, var(--ink-blue) 10%, transparent);
+}
+.plan-row-select {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  place-items: center;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 5px;
+  color: #fff;
+}
+.plan-row-select[aria-pressed="true"] {
+  border-color: var(--ink-blue);
+  background: var(--ink-blue);
+}
+
+/* The check: how far along, at a glance, and done in one press. */
+.plan-check {
+  position: relative;
+  display: grid;
+  width: 21px;
+  height: 21px;
+  flex: none;
+  place-items: center;
+  margin-right: 14px;
+  border: 1.5px solid color-mix(in oklab, var(--status-ink) 70%, var(--border-default));
+  border-radius: var(--radius-pill);
+  background: var(--card-paper);
+  color: #fff;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+.plan-row[data-status="backlog"] .plan-check {
+  border-style: dotted;
+  border-width: 2px;
+}
+.plan-row[data-status="doing"] .plan-check {
+  background: conic-gradient(var(--status-ink) 0 50%, var(--card-paper) 0);
+}
+.plan-row[data-status="blocked"] .plan-check::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--status-ink);
+}
+.plan-row[data-status="done"] .plan-check {
+  border-color: var(--success);
+  background: var(--success);
+  animation: plan-check-in var(--motion-base) var(--ease-standard);
+}
+.plan-check:hover:not(:disabled) {
+  border-color: var(--success);
+  transform: scale(1.08);
+}
+.plan-check:active:not(:disabled) {
+  transform: scale(0.9);
+}
+@keyframes plan-check-in {
+  40% {
+    transform: scale(1.18);
+  }
+}
+
+.plan-row-title {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  padding: 4px 0;
+  color: var(--text-primary);
+  text-align: left;
+}
+.plan-row-text {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: var(--text-body);
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-row-title:hover .plan-row-text {
+  text-decoration: underline;
+  text-decoration-color: var(--card-border);
+  text-underline-offset: 4px;
+}
+.plan-row[data-status="done"] .plan-row-text {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklab, var(--text-tertiary) 60%, transparent);
+}
+.plan-row-meta {
+  display: inline-flex;
+  gap: 10px;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  white-space: nowrap;
+}
+.plan-row-meta [data-tone="blocked"] {
+  color: color-mix(in oklab, var(--warning) 75%, var(--text-primary));
+}
+
+/* A status other than the usual, said in its own ink; the usual ones only on hover. */
+.plan-row .plan-row-status {
+  width: auto;
+  field-sizing: content;
+  min-width: 0;
+  height: 26px;
+  flex: none;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  appearance: none;
+  background: transparent;
+  color: color-mix(in oklab, var(--status-ink) 85%, var(--text-primary));
+  font-size: var(--text-caption);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+.plan-row .plan-row-status:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--status-ink) 10%, transparent);
+}
+.plan-row-status[data-quiet] {
+  display: none;
+}
+.plan-row:is(:hover, :focus-within) .plan-row-status[data-quiet]:not(:disabled) {
+  display: block;
+}
+.plan-row-status:disabled {
+  cursor: default;
+}
+
+.plan-row-school {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in oklab, var(--type-task) 45%, var(--card-border));
+  border-radius: 4px;
+  color: color-mix(in oklab, var(--type-task) 70%, var(--text-primary));
+  font-size: var(--text-micro);
+  font-weight: 600;
+}
+.plan-row-blocks {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+}
+
+/* The date: the relative reading holds the slot; the picker lies over it. */
+.plan-row-date {
+  position: relative;
+  min-width: 76px;
+  flex: none;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.plan-row-date input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.plan-row-date input:disabled {
+  cursor: default;
+}
+.plan-row-date[data-overdue] {
+  color: var(--danger);
+  font-weight: 600;
+}
+.plan-row-date[data-empty] {
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+.plan-row:is(:hover, :focus-within) .plan-row-date[data-empty] {
+  opacity: 1;
+}
+
+/* The line waiting for the next task: its plus sits where the checks do. */
+.plan-add {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  gap: 26px;
+  padding: 0 6px 0 12px;
+  color: var(--text-tertiary);
+}
+.plan-add input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-body);
+  outline: none;
+}
+.plan-add input::placeholder {
+  color: var(--text-placeholder);
+}
+.plan-add:focus-within {
+  color: var(--type-task);
+}
+/* The line's day: there once it is chosen, or while a task is being written. */
+.plan-add-due {
+  flex: none;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
+}
+.plan-add:is(:hover, :focus-within, [data-drafting]) .plan-add-due,
+.plan-add-due:not([data-empty]),
+.plan-add-due[data-state="open"] {
+  opacity: 1;
+}
+.plan-add-due:not([data-empty]) {
+  color: var(--type-task);
+  font-weight: 600;
+}
+.plan-add-due:hover,
+.plan-add-due[data-state="open"] {
+  background: color-mix(in oklab, var(--type-task) 10%, transparent);
+}
+
+/* ---------------------------------------------------------- the task page */
+
+.plan-task-sheet .task-head {
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+}
+.plan-task-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.plan-task-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+.plan-task-back {
+  margin-bottom: -16px;
+}
+
+/* Narrow desks: the task page takes the list's place, with the way back above it. */
+.plan-desk[data-open] > .plan-desk-main {
+  display: none;
+}
+.plan-desk[data-open] > .plan-task-sheet {
+  animation-name: sheet-turn;
+  transform-origin: 0 50%;
+}
+
+[data-mode="split"] .plan-task-sheet .task-head {
+  grid-template-columns: 48px minmax(0, 1fr);
+}
+[data-mode="split"] .plan-task-side {
+  grid-column: 1 / -1;
+  flex-direction: row-reverse;
+  align-items: center;
+  justify-content: space-between;
+}
+[data-mode="split"] .plan-sheet-head {
+  grid-template-columns: 48px minmax(0, 1fr);
+}
+[data-mode="split"] .plan-sheet-head > .sheet-tools {
+  grid-column: 2;
+  margin-top: -6px;
+}
+[data-mode="split"] .plan-sheet-head .sheet-stamp {
+  width: 48px;
+  height: 54px;
+}
+
+/* A wide desk: the list and the task lie open side by side, a notebook at its spine. */
+@container plan-desk (min-width: 1180px) {
+  .plan-desk[data-open][data-view="list"] {
+    display: grid;
+    grid-template-columns: minmax(0, 640px) minmax(0, 720px);
+    align-items: stretch;
+    justify-content: center;
+    padding-top: 32px;
+    perspective: 2200px;
+  }
+  .plan-desk[data-open][data-view="list"] > .plan-desk-main {
+    display: flex;
+    flex-direction: column;
+  }
+  .plan-desk[data-open][data-view="list"] .plan-sheet {
+    flex: 1;
+  }
+  .plan-desk[data-open][data-view="list"] .plan-strip {
+    width: 100%;
+    margin: 0 0 14px;
+  }
+  .plan-desk[data-open][data-view="list"] .editor-sheet {
+    width: 100%;
+    margin: 0;
+  }
+  .plan-desk[data-open][data-view="list"] .plan-sheet {
+    border-right-width: 0;
+    border-radius: 10px 0 0 14px;
+    box-shadow:
+      inset -18px 0 22px -20px color-mix(in oklab, var(--text-primary) 30%, transparent),
+      0 24px 48px -32px color-mix(in oklab, var(--text-primary) 40%, transparent);
+    animation: none;
+  }
+  .plan-desk[data-open][data-view="list"] > .plan-task-sheet {
+    min-height: 100%;
+    border-left: 1px solid color-mix(in oklab, var(--text-primary) 10%, var(--card-border));
+    border-radius: 0 10px 14px 0;
+    box-shadow:
+      inset 18px 0 22px -20px color-mix(in oklab, var(--text-primary) 30%, transparent),
+      0 24px 48px -32px color-mix(in oklab, var(--text-primary) 40%, transparent);
+    transform-origin: 0 50%;
+    animation: plan-page-open var(--motion-slow) var(--ease-standard) both;
+  }
+  .plan-desk[data-open][data-view="list"] .plan-task-back {
+    display: none;
+  }
+  .plan-desk[data-open][data-view="list"] .plan-row[data-open]::after {
+    right: -49px;
+  }
+}
+
+/* The task page opens from the spine. */
+@keyframes plan-page-open {
+  from {
+    opacity: 0;
+    transform: rotateY(-38deg);
+  }
+  60% {
+    opacity: 1;
+  }
+  to {
+    transform: none;
+  }
+}
+
+/* -------------------------------------------------------------- the board */
+
+.plan-board {
+  display: grid;
+  width: min(1400px, calc(100% - 48px));
+  grid-template-columns: repeat(5, minmax(220px, 1fr));
+  align-items: start;
+  gap: 16px;
+  margin: 32px auto 0;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+/* Each column a folder: a tab in its status's ink, the slips filed inside. */
+.plan-column {
+  position: relative;
+  display: flex;
+  min-height: 180px;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 22px;
+  padding: 12px 10px 6px;
+  border: 1px solid var(--card-border-soft);
+  border-radius: 0 12px 12px 12px;
+  background: color-mix(in oklab, var(--status-ink) 6%, var(--card-paper));
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard);
+}
+.plan-column[data-dropping] {
+  border-color: color-mix(in oklab, var(--status-ink) 60%, var(--card-border));
+  background: color-mix(in oklab, var(--status-ink) 14%, var(--card-paper));
+}
+.plan-column-head {
+  position: absolute;
+  bottom: 100%;
+  left: -1px;
+  display: flex;
+  height: 24px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--card-border-soft);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: color-mix(in oklab, var(--status-ink) 6%, var(--card-paper));
+}
+.plan-column-head h3 {
+  color: color-mix(in oklab, var(--status-ink) 80%, var(--text-primary));
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+.plan-slip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--card-border-soft);
+  border-left: 3px solid var(--status-ink);
+  border-radius: 4px 8px 8px 4px;
+  background: var(--card-paper);
+  box-shadow: 0 1px 0 var(--card-border-soft);
+  text-align: left;
+  cursor: grab;
+  transition:
+    transform var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+.plan-slip:hover {
+  transform: translateY(-1px) rotate(-0.3deg);
+  box-shadow: 0 8px 18px -12px color-mix(in oklab, var(--text-primary) 40%, transparent);
+}
+.plan-slip[data-open] {
+  outline: 2px solid color-mix(in oklab, var(--type-task) 70%, transparent);
+  outline-offset: 1px;
+}
+.plan-slip strong {
+  color: var(--text-primary);
+  font-size: var(--text-body);
+  font-weight: 500;
+  line-height: 1.35;
+}
+.plan-slip-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+}
+.plan-slip-meta [data-overdue] {
+  color: var(--danger);
+  font-weight: 600;
+}
+.plan-column .plan-add {
+  min-height: 38px;
+  gap: 10px;
+  padding: 0 6px;
+}
+.plan-column .plan-add input {
+  font-size: var(--text-caption);
+}
+.plan-desk[data-open][data-view="board"] > .plan-task-sheet,
+.plan-desk[data-open][data-view="timeline"] > .plan-task-sheet {
+  margin-top: 32px;
+}
+
+/* ----------------------------------------------------------- the timeline */
+
+.plan-timeline.editor-sheet {
+  width: min(1120px, calc(100% - 48px));
+  gap: 20px;
+}
+.plan-lanes {
+  display: flex;
+  flex-direction: column;
+}
+.plan-axis,
+.plan-lane {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) minmax(0, 1fr) 64px;
+  align-items: center;
+  gap: 14px;
+}
+.plan-axis {
+  height: 28px;
+  border-bottom: 1.5px solid color-mix(in oklab, var(--ink-red) 30%, var(--plan-rule));
+}
+.plan-axis > div {
+  position: relative;
+  height: 100%;
+}
+.plan-axis > div > span {
+  position: absolute;
+  top: 4px;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+.plan-axis > div > span:first-child {
+  transform: none;
+}
+.plan-axis > div > span:last-child {
+  transform: translateX(-100%);
+}
+.plan-lane {
+  min-height: 40px;
+  border-bottom: 1px solid var(--plan-rule);
+}
+.plan-lane[data-open] {
+  background: color-mix(in oklab, var(--type-task) 10%, transparent);
+}
+.plan-lane-name,
+.plan-lane-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-lane-label {
+  color: var(--text-tertiary);
+}
+.plan-lane-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.plan-lane-track {
+  position: relative;
+  height: 40px;
+}
+.plan-today {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1.5px dashed color-mix(in oklab, var(--ink-red) 55%, transparent);
+}
+.plan-bar {
+  position: absolute;
+  top: 50%;
+  min-width: 8px;
+  height: 14px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklab, var(--status-ink) 70%, var(--card-paper));
+  transform: translateY(-50%);
+}
+.plan-bar[data-inferred] {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--card-paper);
+  background: var(--status-ink);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--status-ink) 60%, transparent);
+  transform: translate(-50%, -50%);
+}
+.plan-lane-date {
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.plan-milestone {
+  position: absolute;
+  top: 50%;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--ink-violet) 14%, var(--card-paper));
+  color: color-mix(in oklab, var(--ink-violet) 80%, var(--text-primary));
+  font-size: var(--text-micro);
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plan-desk[data-open] > .plan-task-sheet,
+  .plan-row[data-status="done"] .plan-check {
+    animation: none !important;
+  }
+}

@@ -39,7 +39,7 @@ import type {
 export type HarnessEvent =
   | { type: "text"; delta: string }
   | { type: "text_reset"; text: string }
-  | { type: "step_start"; id: string; label: string; effect: ToolEffect }
+  | { type: "step_start"; id: string; label: string; effect: ToolEffect; work?: string }
   | { type: "step_end"; id: string; ok: boolean; label: string; durationMs: number }
   | ({ type: "caption" } & CaptionEvent)
   | { type: "artifact"; artifact: ArtifactTouch }
@@ -50,7 +50,7 @@ export type HarnessEvent =
   | { type: "ui_event"; key: string; payload?: Record<string, unknown> }
   | { type: "compacted"; summary: string }
   | { type: "input_required"; pending: PendingInput }
-  | { type: "thread_title"; title: string };
+  | { type: "thread_title"; title: string; placeId?: string };
 
 export type RunCheckpoint = {
   state: LoopState;
@@ -176,8 +176,10 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
         prompt: input.prompt,
         write: writer,
         wantTitle: input.wantTitle,
+        // An unfiled thread is filed with its title, in the one place it is clearly about.
+        ...(input.environment.here ? {} : { places: input.environment.places }),
         onCaption: (caption) => emit({ type: "caption", ...caption }),
-        onTitle: (title) => emit({ type: "thread_title", title }),
+        onTitle: (title, placeId) => emit({ type: "thread_title", title, ...(placeId ? { placeId } : {}) }),
       })
     : null;
 
@@ -234,7 +236,8 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
         },
         onToolStart: (step) => {
           if (step.tool?.quiet) return;
-          emit({ type: "step_start", id: step.call.id, label: step.label, effect: step.effect });
+          const work = step.args ? step.tool?.shows?.(step.args) : undefined;
+          emit({ type: "step_start", id: step.call.id, label: step.label, effect: step.effect, ...(work ? { work } : {}) });
           captions?.stepStarted({ id: step.call.id, label: step.label });
         },
         onToolEnd: (step) => {

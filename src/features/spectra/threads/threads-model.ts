@@ -1,4 +1,5 @@
 import type { SpectraThread } from "../data/api";
+import { plainTextFromStored } from "../rich-content/adapters";
 
 /*
  * The threads view's groups (SHELL.md, "The threads view"): what is moving,
@@ -78,4 +79,35 @@ export function matchThreads(threads: readonly SpectraThread[], query: string) {
       .toLocaleLowerCase();
     return words.every((word) => text.includes(word));
   });
+}
+
+// A thread still wearing the name it was born with says nothing about itself.
+const PLACEHOLDER_TITLE = /^(new (conversation|thread|chat)|untitled)\b/i;
+const HEADING_LENGTH = 72;
+
+/**
+ * What a row shows: the thread's own title, or, while it still has the name
+ * it was born with, the start of what it is about, so a list of new threads
+ * does not read as one name over and over.
+ */
+export function threadHeading(title: string, summary: string): { title: string; summary: string | null } {
+  if (!PLACEHOLDER_TITLE.test(title.trim()) || !summary) return { title, summary: summary || null };
+  const sentence = summary.split(/(?<=[.!?])\s/)[0]!.trim();
+  const heading = sentence.length > HEADING_LENGTH ? `${sentence.slice(0, HEADING_LENGTH).replace(/\s+\S*$/, "")}…` : sentence;
+  const rest = summary.slice(sentence.length).trim();
+  return { title: heading, summary: rest || null };
+}
+
+/** A thread's name where it is named alone (a header, the rail, Home): the one its row shows. */
+export function threadName(thread: Pick<SpectraThread, "title" | "summaryShort" | "previewText">) {
+  return threadHeading(thread.title, plainTextFromStored(thread.summaryShort || thread.previewText || "")).title;
+}
+
+/** The first class workspace a thread worked in, by the name Spectra gave it. */
+export function threadClass<Identity>(thread: SpectraThread, named: (name: string) => Identity | null): Identity | null {
+  for (const workspace of thread.contexts?.workspaces ?? []) {
+    const identity = named(workspace.title);
+    if (identity) return identity;
+  }
+  return null;
 }

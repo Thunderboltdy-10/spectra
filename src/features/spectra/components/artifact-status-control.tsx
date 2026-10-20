@@ -6,7 +6,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip } from "@/components/ui/tooltip";
 import { life, rectOf } from "../life/life";
 import { STATUS_COLOURS } from "../life/prism";
-import type { Rgb } from "../life/spectrum";
 import { useLifeGlow } from "../life/use-life";
 import {
   statusMoment,
@@ -38,9 +37,6 @@ const STATE_NAME: Record<ArtifactStatusState, string> = {
 /** How long a glyph plays its change, and how long words take to slide back. */
 const CHANGE_MS = 900;
 const WORDS_OUT_MS = 200;
-
-/** The info hue: light held while the desktop copy catches up. */
-const SYNC_LIGHT: Rgb = [79, 159, 230];
 
 export function ArtifactStatusControl({
   status,
@@ -196,8 +192,7 @@ function useLingeringWords(words: string | undefined) {
 /** The field's answer to the work's state (LIFE.md: pulse, glow). */
 function useStatusLife(ref: RefObject<HTMLElement | null>, state: ArtifactStatusState) {
   const previous = useRef<ArtifactStatusState | null>(null);
-  useLifeGlow(ref, state === "syncing", SYNC_LIGHT, 0.55);
-  useLifeGlow(ref, state === "problem" || state === "versions", STATUS_COLOURS.problem, 0.35);
+  useLifeGlow(ref, state === "syncing");
   useEffect(() => {
     const before = previous.current;
     previous.current = state;

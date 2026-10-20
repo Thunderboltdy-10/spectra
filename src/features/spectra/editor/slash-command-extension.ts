@@ -1,6 +1,17 @@
 import { Extension, type Editor } from "@tiptap/core";
 import Suggestion, { type SuggestionOptions } from "@tiptap/suggestion";
 import { spectraBus } from "../events";
+import type { EditorView } from "@tiptap/pm/view";
+
+/** Where the caret sits on screen, so a picker opened from it can appear right there. */
+export function caretPoint(view: EditorView) {
+  try {
+    const at = view.coordsAtPos(view.state.selection.from);
+    return { x: at.left, y: at.bottom };
+  } catch {
+    return undefined;
+  }
+}
 
 export type SlashCommandItem = {
   id: string;
@@ -9,8 +20,12 @@ export type SlashCommandItem = {
   icon: string;
   section: string;
   aliases?: string[];
+  /** What to type at the start of a line to get the same block without the menu. */
+  markdown?: string;
   /** Set when the item is a disabled explanation rather than a verb. */
   disabledReason?: string;
+  /** The verb opens a picker of its own to finish elsewhere, so the typed "/word" goes at once. */
+  opensPicker?: boolean;
   action: (editor: Editor) => void | boolean | Promise<void | boolean>;
 };
 
@@ -35,26 +50,29 @@ export type SlashCommandSpec = {
   icon: string;
   section: string;
   aliases?: string[];
+  /** The markdown a person can type instead, shown so the menu teaches it. */
+  markdown?: string;
+  opensPicker?: boolean;
 };
 
 export const DOCUMENT_SLASH_COMMANDS: readonly SlashCommandSpec[] = [
-  { id: "heading1", commandId: "document.format.style", param: "h1", label: "Heading 1", description: "Large section heading", icon: "H1", section: "Text", aliases: ["h1", "title"] },
-  { id: "heading2", commandId: "document.format.style", param: "h2", label: "Heading 2", description: "Medium section heading", icon: "H2", section: "Text", aliases: ["h2", "subtitle"] },
-  { id: "heading3", commandId: "document.format.style", param: "h3", label: "Heading 3", description: "Small section heading", icon: "H3", section: "Text", aliases: ["h3"] },
+  { id: "heading1", markdown: "#", commandId: "document.format.style", param: "h1", label: "Heading 1", description: "Large section heading", icon: "H1", section: "Text", aliases: ["h1", "title"] },
+  { id: "heading2", markdown: "##", commandId: "document.format.style", param: "h2", label: "Heading 2", description: "Medium section heading", icon: "H2", section: "Text", aliases: ["h2", "subtitle"] },
+  { id: "heading3", markdown: "###", commandId: "document.format.style", param: "h3", label: "Heading 3", description: "Small section heading", icon: "H3", section: "Text", aliases: ["h3"] },
   { id: "body", commandId: "document.format.style", param: "paragraph", label: "Body text", description: "Return the block to body text", icon: "text", section: "Text", aliases: ["paragraph", "normal"] },
-  { id: "bullet", commandId: "document.format.list.bullet", label: "Bullet list", description: "Create a bulleted list", icon: "list", section: "Lists", aliases: ["ul", "bullets"] },
-  { id: "numbered", commandId: "document.format.list.numbered", label: "Numbered list", description: "Create an ordered list", icon: "list-ordered", section: "Lists", aliases: ["ol", "numbers"] },
-  { id: "todo", commandId: "document.insert.taskList", label: "Task list", description: "Create an interactive checklist", icon: "check-square", section: "Lists", aliases: ["checkbox", "tasks"] },
-  { id: "quote", commandId: "document.format.quote", label: "Quote", description: "Emphasise a quoted passage", icon: "quote", section: "Blocks", aliases: ["blockquote"] },
-  { id: "code", commandId: "document.format.code.block", label: "Code block", description: "Insert a code block", icon: "code", section: "Blocks", aliases: ["pre"] },
+  { id: "bullet", markdown: "-", commandId: "document.format.list.bullet", label: "Bullet list", description: "Create a bulleted list", icon: "list", section: "Lists", aliases: ["ul", "bullets"] },
+  { id: "numbered", markdown: "1.", commandId: "document.format.list.numbered", label: "Numbered list", description: "Create an ordered list", icon: "list-ordered", section: "Lists", aliases: ["ol", "numbers"] },
+  { id: "todo", markdown: "[ ]", commandId: "document.insert.taskList", label: "Task list", description: "Create an interactive checklist", icon: "check-square", section: "Lists", aliases: ["checkbox", "tasks"] },
+  { id: "quote", markdown: ">", commandId: "document.format.quote", label: "Quote", description: "Emphasise a quoted passage", icon: "quote", section: "Blocks", aliases: ["blockquote"] },
+  { id: "code", markdown: "```", commandId: "document.format.code.block", label: "Code block", description: "Insert a code block", icon: "code", section: "Blocks", aliases: ["pre"] },
   { id: "equation", commandId: "document.insert.equation", label: "Equation", description: "Insert an editable LaTeX equation", icon: "sigma", section: "Blocks", aliases: ["math", "latex", "formula"] },
   { id: "inline-equation", commandId: "document.insert.equation.inline", label: "Inline equation", description: "An equation inside the sentence", icon: "sigma", section: "Blocks", aliases: ["imath"] },
-  { id: "divider", commandId: "document.insert.divider", label: "Divider", description: "Separate sections visually", icon: "minus", section: "Blocks", aliases: ["hr", "separator"] },
+  { id: "divider", markdown: "---", commandId: "document.insert.divider", label: "Divider", description: "Separate sections visually", icon: "minus", section: "Blocks", aliases: ["hr", "separator"] },
   { id: "page-break", commandId: "document.insert.pageBreak", label: "Page break", description: "Start what follows on a new page", icon: "minus", section: "Blocks", aliases: ["pagebreak", "newpage"] },
   { id: "section-break", commandId: "document.insert.sectionBreak", label: "Section break", description: "Start a section with its own page setup", icon: "columns", section: "Blocks", aliases: ["section"] },
   { id: "table", commandId: "document.insert.table", label: "Table", description: "Insert a 3 × 3 table", icon: "table", section: "Media", aliases: ["grid"] },
   { id: "image", commandId: "document.insert.image", label: "Image", description: "Insert an image from your device", icon: "image", section: "Media", aliases: ["picture", "photo"] },
-  { id: "reference", commandId: "document.insert.reference", label: "Reference", description: "Insert visible work without copying it", icon: "link", section: "Media", aliases: ["embed", "work"] },
+  { id: "reference", commandId: "document.insert.reference", label: "Reference", description: "Show another work here, live, without copying it", icon: "link", section: "Media", aliases: ["embed", "work"], opensPicker: true },
   { id: "link", commandId: "document.insert.link", label: "Link", description: "Link the selection to a web address", icon: "link", section: "Media", aliases: ["url", "href"] },
   { id: "citation", commandId: "document.insert.citation", label: "Citation", description: "Insert a Spectra research citation (not a Word citation field)", icon: "book", section: "References", aliases: ["cite", "source"] },
   { id: "footnote", commandId: "document.insert.footnote", label: "Footnote", description: "A numbered note at the foot of the page", icon: "book", section: "References", aliases: ["note"] },
@@ -95,6 +113,8 @@ export function documentSlashItems(
         icon: spec.icon,
         section: spec.section,
         ...(spec.aliases ? { aliases: spec.aliases } : {}),
+        ...(spec.markdown ? { markdown: spec.markdown } : {}),
+        ...(spec.opensPicker ? { opensPicker: true } : {}),
         ...(state && !state.enabled && state.reason ? { disabledReason: state.reason } : {}),
         action: () => dispatcher.run(spec.commandId, spec.param),
       },
@@ -108,16 +128,16 @@ export function documentSlashItems(
  * — the verbs a caption or a card back actually needs.
  */
 export const SLASH_COMMANDS: SlashCommandItem[] = [
-  { id: "heading1", label: "Heading 1", description: "Large section heading", icon: "H1", section: "Text", aliases: ["h1", "title"], action: (editor) => editor.chain().focus().toggleHeading({ level: 1 }).run() },
-  { id: "heading2", label: "Heading 2", description: "Medium section heading", icon: "H2", section: "Text", aliases: ["h2", "subtitle"], action: (editor) => editor.chain().focus().toggleHeading({ level: 2 }).run() },
-  { id: "heading3", label: "Heading 3", description: "Small section heading", icon: "H3", section: "Text", aliases: ["h3"], action: (editor) => editor.chain().focus().toggleHeading({ level: 3 }).run() },
-  { id: "bullet", label: "Bullet list", description: "Create a bulleted list", icon: "list", section: "Lists", aliases: ["ul", "bullets"], action: (editor) => editor.chain().focus().toggleBulletList().run() },
-  { id: "numbered", label: "Numbered list", description: "Create an ordered list", icon: "list-ordered", section: "Lists", aliases: ["ol", "numbers"], action: (editor) => editor.chain().focus().toggleOrderedList().run() },
-  { id: "todo", label: "Task list", description: "Create an interactive checklist", icon: "check-square", section: "Lists", aliases: ["checkbox", "tasks"], action: (editor) => editor.chain().focus().toggleTaskList().run() },
-  { id: "quote", label: "Quote", description: "Emphasise a quoted passage", icon: "quote", section: "Blocks", aliases: ["blockquote"], action: (editor) => editor.chain().focus().toggleBlockquote().run() },
-  { id: "code", label: "Code block", description: "Insert a code block", icon: "code", section: "Blocks", aliases: ["pre"], action: (editor) => editor.chain().focus().toggleCodeBlock().run() },
+  { id: "heading1", markdown: "#", label: "Heading 1", description: "Large section heading", icon: "H1", section: "Text", aliases: ["h1", "title"], action: (editor) => editor.chain().focus().toggleHeading({ level: 1 }).run() },
+  { id: "heading2", markdown: "##", label: "Heading 2", description: "Medium section heading", icon: "H2", section: "Text", aliases: ["h2", "subtitle"], action: (editor) => editor.chain().focus().toggleHeading({ level: 2 }).run() },
+  { id: "heading3", markdown: "###", label: "Heading 3", description: "Small section heading", icon: "H3", section: "Text", aliases: ["h3"], action: (editor) => editor.chain().focus().toggleHeading({ level: 3 }).run() },
+  { id: "bullet", markdown: "-", label: "Bullet list", description: "Create a bulleted list", icon: "list", section: "Lists", aliases: ["ul", "bullets"], action: (editor) => editor.chain().focus().toggleBulletList().run() },
+  { id: "numbered", markdown: "1.", label: "Numbered list", description: "Create an ordered list", icon: "list-ordered", section: "Lists", aliases: ["ol", "numbers"], action: (editor) => editor.chain().focus().toggleOrderedList().run() },
+  { id: "todo", markdown: "[ ]", label: "Task list", description: "Create an interactive checklist", icon: "check-square", section: "Lists", aliases: ["checkbox", "tasks"], action: (editor) => editor.chain().focus().toggleTaskList().run() },
+  { id: "quote", markdown: ">", label: "Quote", description: "Emphasise a quoted passage", icon: "quote", section: "Blocks", aliases: ["blockquote"], action: (editor) => editor.chain().focus().toggleBlockquote().run() },
+  { id: "code", markdown: "```", label: "Code block", description: "Insert a code block", icon: "code", section: "Blocks", aliases: ["pre"], action: (editor) => editor.chain().focus().toggleCodeBlock().run() },
   { id: "equation", label: "Equation", description: "Insert an editable LaTeX equation", icon: "sigma", section: "Blocks", aliases: ["math", "latex", "formula"], action: (editor) => editor.chain().focus().insertContent({ type: "equation", attrs: { latex: "", display: "block", alignment: "center" } }).run() },
-  { id: "divider", label: "Divider", description: "Separate sections visually", icon: "minus", section: "Blocks", aliases: ["hr", "separator"], action: (editor) => editor.chain().focus().setHorizontalRule().run() },
+  { id: "divider", markdown: "---", label: "Divider", description: "Separate sections visually", icon: "minus", section: "Blocks", aliases: ["hr", "separator"], action: (editor) => editor.chain().focus().setHorizontalRule().run() },
   { id: "table", label: "Table", description: "Insert a 3 × 3 table", icon: "table", section: "Media", aliases: ["grid"], action: (editor) => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run() },
   { id: "image", label: "Image", description: "Insert an image from your device", icon: "image", section: "Media", aliases: ["picture", "photo"], action: (editor) => {
     const input = document.createElement("input");
@@ -134,9 +154,9 @@ export const SLASH_COMMANDS: SlashCommandItem[] = [
     };
     input.click();
   } },
-  { id: "reference", label: "Reference", description: "Insert visible work without copying it", icon: "link", section: "Media", aliases: ["embed", "work"], action: (editor) => {
+  { id: "reference", label: "Reference", description: "Show another work here, live, without copying it", icon: "link", section: "Media", aliases: ["embed", "work"], opensPicker: true, action: (editor) => {
     const hostWorkId = editor.view.dom.dataset.workId;
-    if (hostWorkId) spectraBus.command("reference.beginPicking", { hostWorkId });
+    if (hostWorkId) spectraBus.command("reference.add", { hostWorkId, at: caretPoint(editor.view) });
   } },
   { id: "callout-info", label: "Info callout", description: "Highlight useful context", icon: "info", section: "Callouts", aliases: ["note"], action: (editor) => editor.chain().focus().setCallout({ type: "info" }).run() },
   { id: "callout-warning", label: "Warning callout", description: "Highlight a caution", icon: "alert-triangle", section: "Callouts", action: (editor) => editor.chain().focus().setCallout({ type: "warning" }).run() },
@@ -152,16 +172,29 @@ function fuzzyMatch(value: string, query: string) {
   return false;
 }
 
+/**
+ * Ranks blocks by how plainly they answer what was typed. A name that starts
+ * with the query beats one that merely contains it, and a match buried in a
+ * description ("edi*tab*le" for "tab") only counts when nothing better does.
+ * Ties keep the menu's own order, which is already sensible.
+ */
 export function filterSlashCommands(items: readonly SlashCommandItem[], query: string) {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return [...items];
-  return items.flatMap((command) => {
-    const candidates = [command.id, command.label, command.description, ...(command.aliases ?? [])].map((value) => value.toLowerCase());
-    const exact = candidates.some((value) => value === normalized);
-    const contained = candidates.some((value) => value.includes(normalized));
-    const fuzzy = candidates.some((value) => fuzzyMatch(value, normalized));
-    return exact || contained || fuzzy ? [{ command, score: exact ? 3 : contained ? 2 : 1 }] : [];
-  }).sort((a, b) => b.score - a.score || a.command.label.localeCompare(b.command.label)).map(({ command }) => command);
+  const score = (command: SlashCommandItem) => {
+    const names = [command.label, command.id, ...(command.aliases ?? [])].map((value) => value.toLowerCase());
+    const words = names.flatMap((name) => name.split(/[\s-]+/));
+    if (names.includes(normalized)) return 5;
+    if (words.some((word) => word.startsWith(normalized))) return 4;
+    if (names.some((name) => name.includes(normalized))) return 3;
+    if (command.description.toLowerCase().split(/\s+/).some((word) => word.startsWith(normalized))) return 2;
+    return names.some((name) => fuzzyMatch(name, normalized)) ? 1 : 0;
+  };
+  return items
+    .map((command, order) => ({ command, order, score: score(command) }))
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score || a.order - b.order)
+    .map(({ command }) => command);
 }
 
 export function getFilteredCommands(query: string) {
@@ -179,15 +212,26 @@ export const SlashCommand = Extension.create({
           // A disabled entry explains itself and leaves the text alone; deleting
           // the "/word" a person typed and then doing nothing reads as a bug.
           if (props.disabledReason) return;
+          if (props.opensPicker) {
+            editor.chain().deleteRange(range).run();
+            void props.action(editor);
+            return;
+          }
           const query = editor.state.doc.textBetween(range.from, range.to);
           const before = editor.state.doc;
+          // The typed "/word" goes once the verb has taken: when the page
+          // changed, or when the verb accepted and opened something of its own
+          // (a picker, a dialog) that will change it next. Only a refusal that
+          // left the page as it was keeps the words. A command's own return is
+          // not enough on its own: some verbs, the style select among them,
+          // change the page and report nothing.
           void Promise.resolve(props.action(editor)).then((accepted) => {
-            if (editor.isDestroyed || accepted === false || editor.state.doc.eq(before))
-              return;
-            if (
-              editor.state.doc.textBetween(range.from, range.to) === query
-            )
-              editor.chain().focus().deleteRange(range).run();
+            if (editor.isDestroyed) return;
+            const changed = !editor.state.doc.eq(before);
+            if (!changed && accepted === false) return;
+            if (editor.state.doc.textBetween(range.from, range.to) !== query) return;
+            // No focus here: a verb that opened a dialog keeps its focus.
+            editor.chain().deleteRange(range).run();
           }).catch(() => undefined);
         },
       } as Partial<SuggestionOptions<SlashCommandItem>>,

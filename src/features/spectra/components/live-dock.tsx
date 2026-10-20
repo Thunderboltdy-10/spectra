@@ -681,7 +681,7 @@ export function LiveDock({
   return (
     <section
       className="spectra-live-dock-root pointer-events-none mb-1.5 w-full"
-      aria-label="Live Dock"
+      aria-label="Island"
       data-live-dock-version="2"
     >
       <div className="spectra-live-dock-row pointer-events-none grid w-full grid-cols-[44px_minmax(0,1fr)] items-center gap-2">

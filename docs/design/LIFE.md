@@ -2,10 +2,10 @@
 
 Spectra's life comes from one material, **the field**: a lattice of fine dots behind and above the interface.
 
-Everything that moves is made of it. The prism, a question, a card or a message is the field's dots fused into
-lines. When something changes, its lines part into dots, the dots travel through the field, and they fuse again
-into what comes next. Because everything is one matter, one state always flows into the next. Nothing pops in, and
-nothing vanishes.
+The field carries what happens between things: a press, a send, a move, news from the prism. What is
+**coming** or **being worked on** is never dots: it is the skeleton, grey bars at the content's real places with
+a band of light crossing them every 1.6 s (**ghost**, and in CSS **the band**, `spectra-field.css`). What appears
+is there at once, whole and usable, and the band crosses it once as it lands. Nothing waits on the field.
 
 The field is mostly invisible:
 
@@ -79,11 +79,11 @@ animation.
 | --- | --- | --- |
 | **pulse** | "This happened here." | Presses, drops, a thing settling into place, done |
 | **wake** | "Something is moving through the paper." | Drags, fast pointer moves over open paper |
-| **glow** | "Spectra is working on this." | Around a region while Spectra writes or edits it |
+| **glow** | "Spectra is working on this." The skeleton's band crosses the region (`data-life-working`, `useLifeGlow`, `markWorking`); a small working mark (`WorkingMark`, two banded bars) stands for it in a row or a tab. Never dots. | Around a region while Spectra writes or edits it, a sync, a pairing |
 | **send** | "Something went from here to there." Only light moves. | Adding A to B, moving a row to a list, a file to a folder |
-| **form** | "This now exists." It rises from the field at its cause. | Something the user creates by hand: a new card, block, event or row |
+| **arrive** | "This now exists." It is there at once, and the band crosses it once (`markArrival`, `useLifeEntrance`). | Anything new: a card, a row, a notice, a panel, what Spectra made |
 | **unform** | "This no longer exists." Its lines part into dots that sink. | Deleting anything |
-| **morph** | "This *is* that, in another shape." Its dots flow into the new shape, and lines it doesn't need sink. | Adjacent changes in place: the prism ↔ the composer, a tab ↔ a panel, a row ↔ its editor |
+| **morph** | "This *is* that, in another shape." A ghost's lines flow into the content's. The island changes shape as one object instead: its paper stretches from one shape into the next (`island/shape-morph.ts`). | A ghost handing over to its content; the island's dock ↔ composer, a tab ↔ its thread card |
 | **travel** | "This goes there and becomes that." It breaks, pours into the field, crosses it as light, and forms (or is taken in) at the far end. A target close by is poured into directly. | Anything that changes place: a message into the prism, Spectra's question out of it, an answer back, an artifact Spectra makes |
 | **ghost** | "This is coming." A skeleton of the real content (frame, title and text lines at their real places) with a band of light sliding along it. | Loads of more than 300 ms. One placeholder is one ghost: a list's rows are its bars, with no frame unless it shows one. When the content arrives, the ghost's lines flow into the content's frame and lines (a morph), and then the content is real. |
 | **breathe** | "The prism took something in" or "the prism changed state." It parts into dots, swells a little and reassembles. | The prism only: receiving, asking, starting work |
@@ -94,25 +94,25 @@ animation.
 
 | Moment | Choreography |
 | --- | --- |
-| Hover the island | The prism **morphs** into the composer: its outline stretches into the composer's, its edges sink, then the composer is real. |
-| Leave the island | The composer **morphs** back into the prism, and the prism turns half a turn. |
+| Hover the island | The rail's tabs rise from behind the dock one after the other; Ctrl J stretches the dock's paper into the composer with a little overshoot, the old contents fading as the new ones come in over it. |
+| Leave the island | The same stretch back to the dock. |
+| Open a thread from its tab | The thread card grows out of its tab, and folds back into it when closed. |
 | Send a message | The words become dots and **travel** (pour) into the prism as the composer folds back round them. The prism **breathes** and starts working (status dot: spectrum). |
-| Spectra asks | The prism **breathes** out, light leaves its apex and **travels** through the field, and the question **forms** where it lands. Status dot: yellow. |
+| Spectra asks | The question is there at once and **arrives**; the prism radiates yellow. Status dot: yellow. |
 | Answer | The question **travels** back into the prism, which **breathes** and turns. Status dot: working. |
-| Spectra creates an artifact | Light leaves the prism and **travels** to where the artifact will be, and the artifact **forms** there: frame, title and lines. Then the prism **radiates** green, and its status dot shows done until seen. |
+| Spectra creates an artifact | While it writes, its card carries the working mark and, while still empty, a skeleton of the lines to come; then it **arrives**. The prism **radiates** green, and its status dot shows done until seen. A live answer shows skeleton lines under the words written so far. |
 | Done or problem | The prism **radiates** in the status colour and its status dot stays until seen. |
 | A question, or work that starts on its own | When a question arrives the prism turns and **radiates** yellow; when an agent or a schedule starts work (not a message sent from here, which already travelled in), it turns and **radiates** the spectrum. `statusLight` decides. |
 | Load | A **ghost** of the real content forms from the field and shimmers until the content arrives, then hands over. |
 | Delete | The thing **unforms** from where you acted. |
-| Create by hand | The thing **forms** from where you made it. |
-| Join any list | `<LifeKey id>` inside an item (`of="tr"` in a table cell), a `Row` with a `lifeKey`, or `useLifeJoin`: an item that joins a list because of a press **forms** from it, one that joins a list already there while Spectra works **travels** from the prism, and removed it **parts**. What a list opened with, more than two at once, or anything inside something still forming is simply there; when the list itself goes (a tab, a collapsed group) nothing parts. |
-| Go to a page (the rail, a card, a creation) | The page's header **morphs out of** what was pressed: the rail item's dots cross the field into its title and the line under it (`PageHeader` lands a launch, keyed by its title or `lifeKey`; rail destinations and pinned works are launchers). The page already open stays still. |
+| Join any list | `<LifeKey id>` inside an item (`of="tr"` in a table cell), a `Row` with a `lifeKey`, or `useLifeJoin`: an item that joins a list because of a press, or while Spectra works, **arrives**, and removed it **parts**. What a list opened with, more than two at once, or anything inside something still forming is simply there; when the list itself goes (a tab, a collapsed group) nothing parts. |
+| Go to a page (the rail, a card, a creation) | The page's header **arrives** (`PageHeader` lands a launch, keyed by its title or `lifeKey`; rail destinations and pinned works are launchers). The page already open stays still. |
 | Hand over (an empty state gives way to content) | The stand-in **flows into** what takes its place: its dots morph into the new content's lines (`useLifeHandover`, `<LifeHandover />` in `EmptyState`). With nothing there it parts; content that is forming itself brings its own light. |
 | Add A to B | A **send** from A into B, which **absorbs** it and pulses. |
 | Move (another column, day or folder) | The thing **travels**: its old shape breaks into the field, crosses it and forms where it is now. A move in place, or many at once (a re-sort), simply lands. Keyed departures (`useLifeDeparture(..., key)`) and arrivals under the same key in one commit make the move. |
-| Create by hand (new work, duplicate, agent, event, comment) | While the request is on its way, dots **gather** where the user acted into the outline of a small work, breathing light (`beginCreation()`, a held ghost). When it exists, what it becomes **morphs out of them**: the surface that opens (`land()` hands the seed to `useLifeLanding`), or with `{ into: "item" }` the event or comment that arrives (its "human" arrival claims the seed); if it fails, they part (`cancel()`); if nothing opens within the launch window, they go back to the field. |
+| Create by hand (new work, duplicate, agent, event, comment) | While the request is on its way, a small **ghost** gathers where the user acted (`beginCreation()`). When it exists, what it becomes **morphs out of them**: the surface that opens (`land()` hands the seed to `useLifeLanding`), or with `{ into: "item" }` the event or comment that arrives (its "human" arrival claims the seed); if it fails, they part (`cancel()`); if nothing opens within the launch window, they go back to the field. |
 | Tick something off | The paper **pulses** green where it was done: a task's done control, a step, a checklist item in a work (`data-life-done`). Undoing it is quiet. |
-| Verdict (an answer checked, a card graded, a test run) | The paper **pulses** where the reader acted, green for right, red for wrong, blue for an open answer that is reviewed; a right answer's frame sends a few green dots off it (`useLifeVerdict`, `<LifeVerdict />`, `verdictAt`). Only a verdict that arrives on screen counts: coming back to an answered question is still. A revealed answer **forms** from the press that revealed it (`<LifeForm />`), as do the end of a study queue and a quiz's result; reopened, they are simply there. |
+| Verdict (an answer checked, a card graded, a test run) | The paper **pulses** where the reader acted, green for right, red for wrong, blue for an open answer that is reviewed; a right answer's frame sends a few green dots off it (`useLifeVerdict`, `<LifeVerdict />`, `verdictAt`). Only a verdict that arrives on screen counts: coming back to an answered question is still. A revealed answer **arrives** (`<LifeForm />`), as do the end of a study queue and a quiz's result; reopened, they are simply there. |
 
 ### In editors
 

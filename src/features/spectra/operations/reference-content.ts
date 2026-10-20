@@ -1,6 +1,7 @@
 import { documentBlocksFromJson, documentContentToProseMirrorJson, type DocumentJsonNode } from "../lenses/document-projection";
 import { createWhiteboardNode, normalizeWhiteboardContent } from "../whiteboard/model";
 import { normalizePresentationContent } from "../presentation/model";
+import { stackedEmbedIds, withoutStacked } from "../editor/reference-stack";
 
 export type OperationReference = Record<string, unknown> & {
   embedId: string;
@@ -125,8 +126,11 @@ function withoutReference(node: DocumentJsonNode, embedId: string): { node: Docu
   let removed = 0;
   const content: DocumentJsonNode[] = [];
   for (const child of node.content) {
-    if (child.type === "spectraReference" && child.attrs?.embedId === embedId) {
+    if (child.type === "spectraReference" && stackedEmbedIds(child.attrs ?? {}).includes(embedId)) {
       removed += 1;
+      // Out of a stack, the card stays with the works still on it.
+      const rest = withoutStacked(child.attrs ?? {}, embedId);
+      if (rest) content.push({ ...child, attrs: rest });
       continue;
     }
     const next = withoutReference(child, embedId);

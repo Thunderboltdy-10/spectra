@@ -250,7 +250,18 @@ export function normalizeQuizContent(value: unknown) {
       question.options = ["True", "False"];
     if (!Array.isArray(question.options) && Array.isArray(question.choices))
       question.options = question.choices;
-    const options = (
+    // Option slots an editor laid out, each with its id, are the author's
+    // draft: kept exactly as written, blanks and trailing spaces included, so
+    // a new multiple-choice question can be filled one option at a time and a
+    // space typed at the end of an option survives the round trip.
+    const authoredSlots =
+      Array.isArray(question.options) &&
+      Array.isArray(question.optionIds) &&
+      question.optionIds.length === question.options.length &&
+      question.options.every((option) => typeof option === "string");
+    const options = authoredSlots
+      ? [...(question.options as string[])]
+      : (
       Array.isArray(question.options) ? question.options : []
     ).flatMap((option) => {
       if (typeof option === "string") {
@@ -274,6 +285,7 @@ export function normalizeQuizContent(value: unknown) {
     if (question.type === "true_false" && options.length < 2)
       question.options = ["True", "False"];
     if (
+      !authoredSlots &&
       (question.type === "multiple_choice" ||
         question.type === "select_all" ||
         question.type === "ordering") &&

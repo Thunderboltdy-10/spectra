@@ -37,3 +37,22 @@ export const LAYER_CLASS: Record<SpectraLayer, string> = {
   "composer-dock": "z-composer-dock",
   toast: "z-toast",
 };
+
+const ISLAND_CLEARANCE_VAR = "--spectra-composer-safe-area";
+
+/**
+ * Collision padding for a floating surface: the screen's edges, and for
+ * anything stacked below the island, the island's band at the bottom too, so
+ * a list that opens downward flips or shortens instead of running under it.
+ * The band's height is published by `composer-safe-area.ts`.
+ */
+export function clearOfIsland(layer: SpectraLayer, padding: number) {
+  if (typeof document === "undefined") return padding;
+  if (LAYERS.indexOf(layer) >= LAYERS.indexOf("composer-dock")) return padding;
+  const island = Number.parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue(ISLAND_CLEARANCE_VAR),
+  );
+  return Number.isFinite(island) && island > padding
+    ? { top: padding, right: padding, left: padding, bottom: island }
+    : padding;
+}

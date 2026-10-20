@@ -376,7 +376,7 @@ export function CommandBar({
             const target = event.target as HTMLElement | null;
             if (!target) return;
             // Close after choosing a leaf action; keep open for the
-            // "New artifact" flyout trigger (aria-haspopup).
+            // "New work" flyout trigger (aria-haspopup).
             const button = target.closest("button");
             if (!button || button.getAttribute("aria-haspopup") === "menu")
               return;

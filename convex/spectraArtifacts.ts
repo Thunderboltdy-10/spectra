@@ -880,6 +880,23 @@ async function releaseRoutingEvaluation(
   };
 }
 
+function agentInstructionText(content: Record<string, unknown>) {
+  const instructions = content.instructions;
+  if (typeof instructions === "string") return instructions;
+  if (instructions && typeof instructions === "object" && !Array.isArray(instructions)) {
+    const text = (instructions as Record<string, unknown>).text;
+    return typeof text === "string" ? text : "";
+  }
+  return "";
+}
+
+function agentPurpose(content: Record<string, unknown>) {
+  const profile = content.profile;
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) return "";
+  const purpose = (profile as Record<string, unknown>).purpose;
+  return typeof purpose === "string" ? purpose.trim().slice(0, 600) : "";
+}
+
 function enabledReleaseToolKeys(content: Record<string, unknown>) {
   return Array.isArray(content.tools) ? content.tools.flatMap((value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return [];
@@ -1732,6 +1749,10 @@ export const listAgentRoutingDescriptors = query({
               .filter((value): value is string => typeof value === "string")
               .slice(0, 30)
           : [],
+        // What the agent is for and how much it says, so routing can leave
+        // out an agent that is still blank (HARNESS.md, Agents).
+        purpose: agentPurpose(content),
+        instructionChars: agentInstructionText(content).trim().length,
         // Compiled competence for competence-aware routing (§10.11). Carried
         // as published-release data so a draft edit cannot change routing.
         foundry: content.foundry ?? null,

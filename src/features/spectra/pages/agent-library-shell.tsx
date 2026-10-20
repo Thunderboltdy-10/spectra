@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { BookOpen, Loader2, ShieldCheck, Bot, CheckCircle2, GraduationCap, Plus, Search, Beaker, FilePenLine, FlaskConical, Grid3X3, MessageCircleQuestion, Sprout, type GlyphIcon } from "@/components/icons/glyph-icons";
+import { Loader2, ShieldCheck, Bot, CheckCircle2, Plus, Search, Grid3X3 } from "@/components/icons/glyph-icons";
 import { useSearchParams } from "next/navigation";
 import {
   useCallback,
@@ -9,7 +9,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type ReactNode,
 } from "react";
 import {
@@ -22,6 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toast";
 import { createDefaultArtifactPayload } from "../components/artifact-blueprint-sheet";
+import { authoredSummary } from "../artifacts/registry";
 import {
   StudioSplitPlaceholder,
   useArtifactStudioState,
@@ -40,12 +40,14 @@ import {
   type SpectraPublicAgent,
   type SpectraWorkspace,
 } from "../data/api";
-import { formatRelativeTime } from "../components/spectra-view-model";
 import { useProvideIslandEngine } from "../island/engine";
 import { Button } from "@/components/ui/button";
 import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { IconButton } from "@/components/ui/icon-button";
 import { PageBody, PageHeader } from "@/components/ui/page-header";
+import { AgentStarters, type AgentStarter } from "../agents/agent-starters";
+import { AgentLibraryEntry, type LibraryCard, type LibrarySection } from "../agents/agent-library-entry";
+import type { AgentContent } from "../agents/model";
 import { EmptyState, LoadingRows, ProblemState } from "@/components/ui/page-state";
 import { SelectField } from "@/components/ui/select";
 import { useAgentCatalog, useWorkspaceCatalog } from "../data/use-catalog-pages";
@@ -63,52 +65,7 @@ const ArtifactStudio = dynamic(
 );
 
 type SortMode = "relevance" | "recent" | "title";
-type LibrarySection = "discover" | "installed" | "yours" | "shared";
-
-type LibraryCard = {
-  id: string;
-  section: LibrarySection;
-  title: string;
-  summary: string;
-  subject: string;
-  capabilities: string[];
-  owner: { name: string; avatarUrl?: string };
-  updatedAt: number;
-  releaseNumber?: number;
-  rating?: number | null;
-  ratingCount?: number;
-  artifact?: SpectraArtifact;
-  publicAgent?: SpectraPublicAgent;
-  /** Installed agents reference a published release rather than copying it. */
-  installedRelease?: number;
-};
-
-const cardIcons: GlyphIcon[] = [
-  FlaskConical,
-  FilePenLine,
-  BookOpen,
-  Sprout,
-  GraduationCap,
-  Beaker,
-  MessageCircleQuestion,
-  ShieldCheck,
-];
-const cardTones = [
-  { color: "var(--accent-mint)", soft: "color-mix(in oklab, var(--accent-mint) 10%, var(--bg-primary))" },
-  { color: "var(--accent-orange)", soft: "color-mix(in oklab, var(--accent-orange) 10%, var(--bg-primary))" },
-  { color: "var(--brand-primary)", soft: "color-mix(in oklab, var(--brand-primary) 10%, var(--bg-primary))" },
-  { color: "var(--accent-cyan)", soft: "color-mix(in oklab, var(--accent-cyan) 10%, var(--bg-primary))" },
-  { color: "var(--accent-coral)", soft: "color-mix(in oklab, var(--accent-coral) 10%, var(--bg-primary))" },
-];
-
 const AGENT_BAR_PLAN: readonly CollapseStep[] = [{ hideLabel: "filter" }, { hideLabel: "new" }];
-
-function hash(value: string) {
-  let result = 0;
-  for (let index = 0; index < value.length; index += 1)
-    result = (result * 31 + value.charCodeAt(index)) >>> 0;
-  return result;
-}
 
 function subjectLabel(tags: string[], skills: string[]) {
   const candidate = [...tags, ...skills].find(
@@ -123,9 +80,7 @@ function accessibleCard(artifact: SpectraArtifact): LibraryCard {
     id: artifact._id,
     section: artifact.ownership === "shared" ? "shared" : "yours",
     title: artifact.title,
-    summary:
-      artifact.summary?.trim() ||
-      "Configure this specialist agent for a focused learning workflow.",
+    summary: authoredSummary("agent", artifact.summary) ?? "",
     subject: subjectLabel(artifact.tags, []),
     capabilities,
     owner: artifact.owner ?? {
@@ -164,161 +119,6 @@ function installedCard(agent: SpectraInstalledAgent): LibraryCard {
   };
 }
 
-function avatarFallback(name: string) {
-  return (
-    name
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase())
-      .join("") || "S"
-  );
-}
-
-function LibraryAvatar({ owner }: { owner: LibraryCard["owner"] }) {
-  return owner.avatarUrl ? (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={owner.avatarUrl}
-      alt=""
-      className="size-5 rounded-full object-cover"
-    />
-  ) : (
-    <span className="grid size-5 place-items-center rounded-full bg-[var(--bg-secondary)] text-micro font-bold text-[var(--text-secondary)]">
-      {avatarFallback(owner.name)}
-    </span>
-  );
-}
-
-function AgentCard({
-  card,
-  busy,
-  onOpen,
-  onPrimary,
-}: {
-  card: LibraryCard;
-  busy: boolean;
-  onOpen: () => void;
-  onPrimary: () => void;
-}) {
-  const signature = hash(card.id);
-  const Icon = cardIcons[signature % cardIcons.length]!;
-  const tone = cardTones[signature % cardTones.length]!;
-  const placed = Boolean(card.artifact?.placements?.length);
-  const primaryLabel =
-    card.section === "yours"
-      ? "Open agent"
-      : card.section === "discover"
-        ? "Install"
-        : card.section === "installed"
-          ? "Uninstall"
-          : card.artifact?.placementsComplete === false
-            ? "Use agent"
-            : placed
-            ? "Open agent"
-            : "Add to workspace";
-  return (
-    <article
-      className="agent-library-card group"
-      style={
-        {
-          "--agent-color": tone.color,
-          "--agent-soft": tone.soft,
-        } as CSSProperties
-      }
-    >
-      <button
-        type="button"
-        className="agent-library-card__body"
-        onClick={onOpen}
-      >
-        <span className="flex min-w-0 items-start gap-3">
-          <span className="grid size-10 shrink-0 place-items-center rounded-card bg-[var(--agent-soft)] text-[var(--agent-color)] transition-transform duration-[var(--motion-base)] ease-standard group-hover:-rotate-2 group-hover:scale-[1.04]">
-            <Icon className="size-[19px]" strokeWidth={1.8} />
-          </span>
-          <span className="min-w-0 flex-1 text-left">
-            <span className="flex items-center gap-2">
-              <span className="truncate text-ui font-semibold text-[var(--text-primary)]">
-                {card.title}
-              </span>
-              {card.section === "yours" && card.releaseNumber ? (
-                <CheckCircle2
-                  className="size-3.5 shrink-0 text-[var(--success)]"
-                  aria-label="Published"
-                />
-              ) : null}
-            </span>
-            <span className="mt-0.5 block truncate text-micro text-[var(--text-tertiary)]">
-              {card.subject}
-            </span>
-          </span>
-        </span>
-        <span className="mt-4 line-clamp-2 min-h-10 text-left text-micro leading-5 text-[var(--text-secondary)]">
-          {card.summary}
-        </span>
-        <span className="mt-4 flex items-center gap-2 text-micro text-[var(--text-tertiary)]">
-          <LibraryAvatar owner={card.owner} />
-          <span className="min-w-0 truncate font-medium text-[var(--text-secondary)]">
-            {card.owner.name}
-          </span>
-          <span aria-hidden="true">·</span>
-          <span className="shrink-0">
-            {card.section === "yours"
-              ? "Updated"
-              : card.section === "shared"
-                ? "Shared"
-                : card.section === "installed"
-                  ? "Installed"
-                  : "Published"}{" "}
-            {formatRelativeTime(card.updatedAt)}
-          </span>
-          {card.section === "discover" && typeof card.rating === "number" ? (
-            <span className="ml-auto shrink-0 font-semibold text-[var(--accent-gold)]">
-              ★ {card.rating.toFixed(1)} ({card.ratingCount})
-            </span>
-          ) : null}
-        </span>
-        <span className="mt-3 flex min-h-[22px] flex-wrap gap-1.5 overflow-hidden">
-          {(card.capabilities.length ? card.capabilities : ["Specialist"])
-            .slice(0, 3)
-            .map((capability) => (
-              <span
-                key={capability}
-                className="max-w-[42%] truncate rounded-full bg-[var(--bg-secondary)] px-2 py-1 text-micro text-[var(--text-secondary)]"
-              >
-                {capability}
-              </span>
-            ))}
-        </span>
-      </button>
-      {/* One action treatment. This used to be tinted with `--agent-color`, a
-          decorative tone picked by hashing the card id, so the same action was
-          rose on one card and cyan on the next and "Open agent" read as
-          destructive. The card's colour stays on the icon tile, where it is
-          identity rather than instruction. */}
-      <Button
-        variant="secondary"
-        size="sm"
-        disabled={busy}
-        onClick={onPrimary}
-        className="mx-2.5 mb-2.5 w-[calc(100%-20px)]"
-      >
-        {busy ? (
-          <Loader2 className="size-3.5 animate-spin" />
-        ) : card.section === "installed" ? (
-          <CheckCircle2 className="size-3.5" />
-        ) : card.section === "discover" ||
-          (card.section === "shared" && !placed) ? (
-          <Plus className="size-3.5" />
-        ) : (
-          <Bot className="size-3.5" />
-        )}
-        {primaryLabel}
-      </Button>
-    </article>
-  );
-}
-
 function LibrarySectionBlock({
   title,
   description,
@@ -334,6 +134,8 @@ function LibrarySectionBlock({
   onViewAll: () => void;
   children: (card: LibraryCard) => ReactNode;
 }) {
+  // A section with nothing in it says nothing; the page's own empty state speaks.
+  if (!cards.length) return null;
   return (
     <section
       className="mt-7"
@@ -357,13 +159,7 @@ function LibrarySectionBlock({
           </Button>
         ) : null}
       </header>
-      {cards.length ? (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {cards.slice(0, limit).map(children)}
-        </div>
-      ) : (
-        <p className="py-4 text-caption text-[var(--text-secondary)]">No agents here yet.</p>
-      )}
+      <ul className="agent-roster">{cards.slice(0, limit).map(children)}</ul>
     </section>
   );
 }
@@ -491,11 +287,15 @@ export function AgentLibraryShell({
   // Spectra is asked about; the run arrives as a tab, and the page stays.
   useProvideIslandEngine(useMemo(() => ({ engine: runEngine }), [runEngine]));
 
-  const load = useCallback(async (quiet = false) => {
+  /* A change made on this page rereads everything (`changed`). Coming back to
+     the tab rereads the published agents, which are one request, and leaves the
+     catalog to its own freshness: rescanning it is the expensive part, and it
+     was being forced every few seconds, which emptied the page each time. */
+  const load = useCallback(async (changed = false) => {
     if (!catalogKey) { setPublicLoading(false); return; }
-    const catalogRefresh = refreshCatalog(quiet);
+    const catalogRefresh = refreshCatalog(changed);
     if (publicRequest.current?.key !== catalogKey) {
-      if (!quiet) setPublicLoading(true);
+      if (publicSources.key !== catalogKey) setPublicLoading(true);
       const controller = new AbortController();
       const promise = Promise.all([getSpectraPublicAgents({ limit: 100, signal: controller.signal }), getSpectraInstalledAgents({ signal: controller.signal })])
         .then(([published, installed]) => {
@@ -511,21 +311,23 @@ export function AgentLibraryShell({
       publicRequest.current = { key: catalogKey, controller, promise };
     }
     await Promise.all([catalogRefresh, publicRequest.current.promise]);
-  }, [catalogKey, refreshCatalog]);
+  }, [catalogKey, publicSources.key, refreshCatalog]);
+  const reload = useCallback(() => load(true), [load]);
 
+  const firstLoad = useRef<string | null>(null);
   useEffect(() => {
+    if (!catalogKey || firstLoad.current === catalogKey) return;
+    firstLoad.current = catalogKey;
     void load();
-  }, [load]);
+  }, [catalogKey, load]);
 
   useEffect(() => {
     const refreshVisible = () => {
-      if (document.visibilityState === "visible") void load(true);
+      if (document.visibilityState === "visible") void load();
     };
-    const interval = window.setInterval(refreshVisible, 8_000);
     window.addEventListener("focus", refreshVisible);
     document.addEventListener("visibilitychange", refreshVisible);
     return () => {
-      window.clearInterval(interval);
       window.removeEventListener("focus", refreshVisible);
       document.removeEventListener("visibilitychange", refreshVisible);
     };
@@ -614,8 +416,20 @@ export function AgentLibraryShell({
   const yours = visibleCards.filter((card) => card.section === "yours");
   const shared = visibleCards.filter((card) => card.section === "shared");
 
-  async function createAgent() {
+  /** A blank draft, or one written from a starter (agent-starters.tsx). */
+  async function createAgent(starter?: AgentStarter) {
     const payload = createDefaultArtifactPayload("agent");
+    if (starter) {
+      const content = payload.content as AgentContent;
+      payload.title = starter.title;
+      payload.summary = starter.summary;
+      payload.content = {
+        ...content,
+        profile: { ...content.profile, purpose: starter.summary },
+        instructions: { ...content.instructions, text: starter.instructions },
+        routing: { ...content.routing, description: starter.summary },
+      };
+    }
     setBusyKey("create");
     // Dots gather where it was asked for; the agent's studio grows out of them.
     const creation = beginCreation();
@@ -628,7 +442,7 @@ export function AgentLibraryShell({
         content: payload.content,
         tags: payload.tags,
       });
-      await load();
+      await reload();
       creation.land();
       await openAgent(result.artifactId);
       toast.success("Agent draft created.");
@@ -652,7 +466,7 @@ export function AgentLibraryShell({
       await addSpectraPublicAgent(agent.agentId);
       await setSpectraAgentInstalled(agent.agentId, true);
       setPublicPreview(null);
-      await load();
+      await reload();
       toast.success(`${agent.title} is installed.`);
     } catch (error) {
       toast.error(
@@ -669,7 +483,7 @@ export function AgentLibraryShell({
     setBusyKey(`public:${card.id}`);
     try {
       await setSpectraAgentInstalled(card.id, false);
-      await load();
+      await reload();
       toast.success(`${card.title} is uninstalled.`);
     } catch (error) {
       toast.error(
@@ -694,7 +508,7 @@ export function AgentLibraryShell({
         workspaceId: workspace._id,
       });
       setPlacementTarget(null);
-      await load();
+      await reload();
       toast.success(`${artifact.title} was added to ${workspace.title}.`);
     } catch (error) {
       toast.error(
@@ -715,7 +529,7 @@ export function AgentLibraryShell({
         artifactId: artifact._id,
       });
       studio.closeStudio();
-      await load();
+      await reload();
       toast.success("Agent archived.");
     } catch (error) {
       toast.error(
@@ -755,7 +569,7 @@ export function AgentLibraryShell({
   }
 
   const renderCard = (card: LibraryCard) => (
-    <AgentCard
+    <AgentLibraryEntry
       key={card.id}
       card={card}
       busy={busyKey === `public:${card.id}` || busyKey === `place:${card.id}`}
@@ -807,7 +621,7 @@ export function AgentLibraryShell({
   return (
     <div className="spectra-wave-y relative flex h-full min-h-0 overflow-hidden">
       <div className="min-w-0 flex-1 overflow-y-auto">
-        <PageBody className="mx-auto max-w-[1460px]">
+        <PageBody className="max-w-[1460px]">
           <PageHeader
             title="Agents"
             commands={agentCommands}
@@ -816,18 +630,21 @@ export function AgentLibraryShell({
             description="Find, make and add agents for the work they are good at."
           />
 
-          <div className="mt-6 flex items-center gap-2.5">
-            <label className="agent-library-filter min-w-0 flex-1">
-              <Search className="size-4 shrink-0 text-[var(--text-tertiary)]" />
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search agents by name, subject, or capability…"
-                className="min-w-0 flex-1 bg-transparent text-micro outline-none placeholder:text-[var(--text-tertiary)]"
-              />
-              {search ? <IconButton icon="close" label="Clear search" size="compact" onClick={() => setSearch("")} /> : null}
-            </label>
-          </div>
+          {/* Nothing to search until there is an agent; the starters below lead instead. */}
+          {cards.length || search ? (
+            <div className="mt-6 flex items-center gap-2.5">
+              <label className="agent-library-filter min-w-0 flex-1">
+                <Search className="size-4 shrink-0 text-[var(--text-tertiary)]" />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search agents by name, subject, or capability…"
+                  className="min-w-0 flex-1 bg-transparent text-micro outline-none placeholder:text-[var(--text-tertiary)]"
+                />
+                {search ? <IconButton icon="close" label="Clear search" size="compact" onClick={() => setSearch("")} /> : null}
+              </label>
+            </div>
+          ) : null}
           {filtersOpen ? (
             <div className="mt-2 flex flex-wrap gap-2.5">
               <SelectField
@@ -846,7 +663,7 @@ export function AgentLibraryShell({
                 value={capability}
                 onChange={setCapability}
                 options={[
-                  { value: "all", label: "All capabilities" },
+                  { value: "all", label: "Everything Spectra can read" },
                   ...capabilities.map((value) => ({ value, label: value })),
                 ]}
                 size="lg"
@@ -884,17 +701,19 @@ export function AgentLibraryShell({
                   title="Published agents couldn't load"
                   detail="Your own and shared agents are still here."
                   action={
-                    <Button variant="secondary" size="sm" onClick={() => void load()}>
+                    <Button variant="secondary" size="sm" onClick={() => void reload()}>
                       Try again
                     </Button>
                   }
                 />
               ) : null}
-              {!publicError && !discover.length && !installed.length && !yours.length && !shared.length ? (
+              {!publicError && !discover.length && !installed.length && !yours.length && !shared.length && !search && subject === "all" && capability === "all" ? (
+                <AgentStarters busy={busyKey === "create"} onStart={(starter) => void createAgent(starter)} />
+              ) : !publicError && !discover.length && !installed.length && !yours.length && !shared.length ? (
                 <EmptyState
                   icon="agent"
-                  title={search || subject !== "all" || capability !== "all" ? "No agents match" : "No agents yet"}
-                  detail={search || subject !== "all" || capability !== "all" ? "Try other words or clear the filters." : "Make one for a subject or a kind of task, and add it where you need it."}
+                  title="No agents match"
+                  detail="Try other words or clear the filters."
                   action={
                     <Button variant="primary" size="sm" disabled={busyKey === "create"} onClick={() => void createAgent()}>
                       New agent
@@ -1075,7 +894,7 @@ export function AgentLibraryShell({
                 .map((item) => (
                   <span
                     key={item}
-                    className="rounded-full bg-[var(--bg-secondary)] px-2.5 py-1 text-micro text-[var(--text-secondary)]"
+                    className="rounded-chip bg-[var(--bg-secondary)] px-2.5 py-1 text-micro text-[var(--text-secondary)]"
                   >
                     {item}
                   </span>
@@ -1111,7 +930,7 @@ export function AgentLibraryShell({
           title={shareTarget.title}
           onClose={() => setShareTarget(null)}
           onChanged={async () => {
-            await load();
+            await reload();
           }}
         />
       ) : null}

@@ -120,6 +120,21 @@ The threads view is how the user finds any conversation.
 - The full chat page still exists. It shows the same thread component, on the stage.
 - It has no composer of its own: the island rests there as a reply bar bound to the thread.
 
+**Live everywhere.** Every page subscribes to one small Convex query, `spectraThreads.pulse`: when the account's
+threads last changed and which runs are moving. It replaces polling the lists. A change (a thread started on another
+device, a run finishing in another tab, a title arriving) becomes the `threads.changed` and `run.changed` events the
+rail, the island and the threads view already refresh on, settled to one refresh per burst.
+
+**Onboarding tour.** Once a new student's school is synced and their class shelves are chosen, Spectra gives a tour
+of the app, starting on Home (`features/spectra/onboarding`). It is written as Spectra speaking, with their first
+name and school, and arrives the way a reply does, a few words at a time. Spectra's note sits beside what it
+describes and glides from step to step and page to page: who Spectra is, the composer, the rail, threads, then the
+Library, Calendar, School, Agents and Devices, and the account menu, ending back at the composer. The step's
+target stays bright while the rest of the app dims, the only place the screen is ever dimmed, and pointing at the
+target lifts the dim. Nothing is blocked. Any step can be skipped (Next, or the arrow keys), the tour can be ended
+at any point (End tour, or Escape), and either way it is not offered again by itself
+(`integrations.tourStatus`). The account menu's "Take the tour" plays it again.
+
 ## The rail
 
 - **Top:** the Spectra prism as the brand mark, beside a compact workspace or school switcher.
@@ -146,6 +161,13 @@ The threads view is how the user finds any conversation.
 
 - The page title sits on the left, in the display serif for top-level pages.
 - The page's AdaptiveBar sits on the right.
+- **Every title stands in the same spot.** The band above it is one token, `--page-title-top`
+  (`spectra-tokens.css`): the Library's 44 px tab strip plus its header's 24 px. Pages without the tab strip take it
+  through `PageBody` or the `page-title-lane` class, so moving between pages never moves the name.
+- **Places keep their header's height.** A workspace or folder title is a size down (`level="place"`) but sits in the
+  top title's line box, and the header keeps one greeting line's height even without one, so the bar under it never
+  moves as the reader goes in and out.
+- Pages are left-aligned to the stage's 32 px gutter. Nothing centres a page's column.
 
 **The bottom centre belongs to the island.**
 
@@ -160,8 +182,8 @@ The threads view is how the user finds any conversation.
 | Page | Stage | Side by default | Notes |
 | --- | --- | --- | --- |
 | Home | Hub | Nothing | |
-| Library | Grid or list | Nothing | Folders are a breadcrumb plus a popover tree. The artifact can go fullscreen. |
-| Workspace | The artifact | The companion (collapsible) | |
+| Library | Shelf or list | Quick access (list only, collapsible) | See [LIBRARY.md](LIBRARY.md). Workspaces open inside it. The artifact can go fullscreen. |
+| Workspace | A place in the Library | As the Library | `/workspace/<id>` redirects to `/library?workspaceId=<id>` |
 | Calendar | Week or month | **Plans**, collapsible | The grid opens on working hours (about 07:00), with a now line, quiet axes and type-coloured event markers |
 | School and ManageBac | Overview, Tasks (current and past, with their files), CAS, Classes, Sync | Details, collapsible | No beige. See [../product/SCHOOL.md](../product/SCHOOL.md). |
 | Settings | Sections | Nothing | The section list folds into a popover when the Side opens |

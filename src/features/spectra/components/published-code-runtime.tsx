@@ -227,7 +227,7 @@ function PublishedCodeRuntimeInstance({
           </div>
         ) : null}
         <div className="flex items-center justify-between gap-3 px-1 text-micro text-[var(--text-tertiary)]">
-          <span className="inline-flex items-center gap-1.5 font-semibold uppercase tracking-[.1em]">
+          <span className="inline-flex items-center gap-1.5 font-semibold ">
             <ShieldCheck className="h-3 w-3 text-[var(--success)]" />
             Verified published build
           </span>
@@ -262,7 +262,7 @@ function PublishedCodeRuntimeInstance({
   return (
     <div className="overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)]">
       <div className="flex min-h-10 items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-3">
-        <span className="inline-flex items-center gap-1.5 text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+        <span className="inline-flex items-center gap-1.5 text-micro font-semibold text-[var(--text-tertiary)]">
           <ShieldCheck className="h-3 w-3 text-[var(--success)]" />
           Isolated Python build
         </span>

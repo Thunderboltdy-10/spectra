@@ -109,6 +109,13 @@ export function authoredSemanticValue(value, parentKey) {
       // Inline runs are the authored formatting source. attrs.format is a
       // resolved native convenience value and would otherwise disagree with a
       // sparse editor mark such as bold-only.
+      // A heading's level is the number of its Word style; when the two agree
+      // the level is derived, and Word reopens the heading without it.
+      if (key === "attrs" && !hasInlineContent && source.type === "heading" && child && typeof child === "object") {
+        const attrs = { ...child };
+        if (attrs.level === Number(String(attrs.styleId ?? "").match(/^Heading([1-3])$/i)?.[1])) delete attrs.level;
+        return [[key, authoredSemanticValue(attrs, key)]];
+      }
       if (
         key === "attrs" &&
         hasInlineContent &&
@@ -537,7 +544,13 @@ export function documentNodeText(node) {
     return String(node.attrs?.latex ?? "");
   if (node.type === "footnote" || node.type === "endnote") return "";
   if (node.type === "nativeDocxImage") return String(node.attrs?.alt ?? "");
-  const separator = node.type === "listItem" ? "" : "\n";
+  if (node.type === "hardBreak") return "\n";
+  // Blocks stack on lines; the runs inside one paragraph (text, an inline
+  // equation, a citation) read on as one line, as Word reads them back.
+  const separator =
+    node.type === "listItem" || node.type === "paragraph" || node.type === "heading" || node.type === "codeBlock"
+      ? ""
+      : "\n";
   return (node.content ?? []).map(documentNodeText).join(separator);
 }
 

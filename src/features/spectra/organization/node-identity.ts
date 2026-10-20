@@ -1,5 +1,6 @@
 import { Folder, FolderOpen, Link2, MessageSquare, Layers, type GlyphIcon } from "@/components/icons/glyph-icons";
 import { workTypeMeta } from "../components/artifact-card";
+import { presentWork } from "../artifacts/presentation";
 import type { ArtifactCardView } from "../components/artifact-card";
 import type { TreeNode } from "./tree-client";
 
@@ -67,7 +68,7 @@ export function nodeIdentity(node: TreeNode, open = false): NodeIdentity {
   const key = node.source?.blueprintKey as
     | ArtifactCardView["blueprintKey"]
     | undefined;
-  const meta = key ? workTypeMeta[key] : undefined;
+  const meta = key && workTypeMeta[key] ? presentWork(key, node.name) : undefined;
   return meta ?? { ...FOLDER, icon: Folder, label: "Work" };
 }
 

@@ -180,6 +180,17 @@ export function followAiActor(actorId: string | null): void {
   emit();
 }
 
+/** How long the work stays watched after the followed run ends, so its last change is seen landing. */
+const SETTLE_MS = 1600;
+
+/** A followed run that ended hands the view back; the user stays where it brought them. */
+export function endFollowedRun(runId: string): void {
+  if (!following || followedActorId !== runId) return;
+  window.setTimeout(() => {
+    if (following && followedActorId === runId) setFollowingAi(false);
+  }, SETTLE_MS);
+}
+
 export function getFollowedAiActorId(): string | null {
   return followedActorId;
 }
@@ -239,7 +250,8 @@ export function noteAiLocation(update: {
       : location?.path !== undefined
         ? { path: location.path }
         : {}),
-    ...(update.note !== undefined || !sameArtifact
+    // A bare act from the open editor ("Focused", "Done") says less than the step it is part of.
+    ...((update.note !== undefined && !(sameArtifact && location?.note && !update.note.includes(" "))) || !sameArtifact
       ? { note: update.note }
       : location?.note !== undefined
         ? { note: location.note }

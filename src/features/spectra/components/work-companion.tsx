@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "@/components/icons";
 import { Button } from "@/components/ui/button";
@@ -46,24 +46,22 @@ type CompanionProps = {
   onOpenThread: (thread: { id: string; title: string }) => void;
 };
 
-const subscribeThreadsView = (listener: () => void) => spectraBus.subscribe("threads.view", listener);
-const threadsViewOpen = () => Boolean(spectraBus.getQuery("threads.view")?.open);
-const threadsViewClosed = () => false;
-
 function CompanionTabs({ tab, onTabChange }: Pick<CompanionProps, "tab" | "onTabChange">) {
   return <PanelTabs label="About this work" tabs={TABS} value={tab} onChange={(id) => onTabChange(id as CompanionTab)} />;
 }
 
-/** Beside a fullscreen work. The threads view, while open, takes its place. */
+/**
+ * Beside a fullscreen work. Closed until asked for: the work is what was
+ * opened, and its details are a press on the panel's tab away.
+ */
 export function WorkCompanionPanel({ revealKey, ...props }: CompanionProps & { revealKey?: number | null }) {
-  const threadsOpen = useSyncExternalStore(subscribeThreadsView, threadsViewOpen, threadsViewClosed);
-  if (threadsOpen) return null;
   return (
     <SidePanel
       id="workspace.companion"
       title="About this work"
       icon="info"
       stageMin={640}
+      defaultOpen={false}
       defaultWidth={380}
       revealKey={revealKey}
       header={<CompanionTabs tab={props.tab} onTabChange={props.onTabChange} />}
@@ -179,13 +177,22 @@ export function WorkDetails({ work }: { work: SpectraArtifact }) {
       </dl>
       {source ? (
         <p className="mt-3 text-caption leading-5 text-[var(--text-tertiary)]">
-          Made from {source.replaceAll("_", " ")}
-          {files ? ` with ${files} file${files === 1 ? "" : "s"}` : ""}.
+          {MADE_FROM[source] ?? "Made in Spectra"}
+          {files ? `, from ${files} file${files === 1 ? "" : "s"}` : ""}.
         </p>
       ) : null}
     </div>
   );
 }
+
+/** Where a work came from, in words. */
+const MADE_FROM: Record<string, string> = {
+  chat: "Made by Spectra in a thread",
+  ai: "Made by Spectra",
+  workspace: "Made in a workspace",
+  artifact: "Made from another work",
+  manual: "Made by you",
+};
 
 function CompanionRow({
   glyph,

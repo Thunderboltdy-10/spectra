@@ -74,7 +74,8 @@ describe("current single-record ManageBac visibility", () => {
     const f = await fixture();
     await f.t.run(async ctx => {
       await ctx.db.delete(f.memberId);
-      await ctx.db.patch(f.recordId, { audienceScope: "mapped_user", mappedAccountId: f.accountId });
+      // A task: task resources are a kind ManageBac does not offer, so a mapped one is never shown.
+      await ctx.db.patch(f.recordId, { recordType: "assignment", audienceScope: "mapped_user", mappedAccountId: f.accountId });
     });
     expect(await f.read()).toBe(true);
   });

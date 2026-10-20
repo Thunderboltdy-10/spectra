@@ -12,7 +12,7 @@ import {
 import { documentCommandBindings, documentStubHandlers } from "../commands/office/document-commands";
 import { presentationCommandBindings, presentationStubHandlers } from "../commands/office/presentation-commands";
 import { sheetsCommandBindings, sheetsStubHandlers } from "../commands/office/sheets-commands";
-import { arrangeWorkbar, groupedItemsOf, type WorkbarAction } from "../components/workbar-arrange";
+import { arrangeWorkbar, groupedItemsOf, rareSteps, type WorkbarAction } from "../components/workbar-arrange";
 import {
   HISTORY_GROUP,
   HISTORY_IDS,
@@ -66,7 +66,18 @@ const SMALL_EDITORS: Partial<Record<WorkType, CommandBinding[]>> = {
     button("browse", "Read the deck"),
     button("progress", "Your progress"),
     button("import", "Import cards"),
-    button("add-section", "Add section", advanced),
+    ...[
+      ["add-section", "Add section"],
+      ["template-concept", "Concept card"],
+      ["template-language", "Vocabulary card"],
+      ["template-formula", "Formula card"],
+    ].map(([id, label]) => button(id!, label!, { tab: "Cards", priority: "secondary", keepLabel: true })),
+    ...[
+      ["export-csv", "CSV file"],
+      ["export-tsv", "TSV file"],
+      ["export-package", "Deck package"],
+      ["print", "Print or PDF"],
+    ].map(([id, label]) => button(id!, label!, { tab: "Export", priority: "secondary", keepLabel: true })),
   ],
   whiteboard: [
     ...history,
@@ -83,7 +94,24 @@ const SMALL_EDITORS: Partial<Record<WorkType, CommandBinding[]>> = {
     button("format", "Format"),
     button("settings", "Settings"),
     button("publish", "Publish update", { keepLabel: true }),
-    button("import-files", "Import source or ZIP", advanced),
+    ...[
+      ["file-new", "New file"],
+      ["file-rename", "Rename"],
+      ["file-duplicate", "Duplicate"],
+      ["file-entry", "Run this first"],
+      ["file-delete", "Delete file"],
+      ["import-files", "Import files"],
+      ["import-folder", "Import a folder"],
+      ["export-archive", "Download all"],
+      ["download-file", "Download file"],
+    ].map(([id, label]) => button(id!, label!, { tab: "Files", priority: "secondary" })),
+    ...[
+      ["export-html", "Web page"],
+      ["export-svg", "SVG"],
+      ["export-png", "PNG"],
+      ["export-pdf", "PDF"],
+      ["export-webm", "Video"],
+    ].map(([id, label]) => button(id!, label!, { tab: "Export", priority: "secondary" })),
   ],
   planner_task: [
     ...history,
@@ -217,9 +245,10 @@ describe("workbar plans", () => {
           const available = Math.max(FLOOR, width - FRAME - reserved);
           const layout = planGroupedLayout({
             items,
-            plan: planStepsFor(type, tab),
+            // As the bar plans it: rare commands give way before the authored steps.
+            plan: [...rareSteps(arranged), ...planStepsFor(type, tab)],
             available,
-            metrics: { ...WORKBAR_METRICS, groupMenu, moreAlways: arranged.advanced.length > 0 },
+            metrics: { ...WORKBAR_METRICS, groupMenu },
           });
           if (layout.fellBack) failures.push(`${type} ${tab} @${width} (${available}px)`);
           const worded = arranged.groups.flatMap((group) => group.actions).filter((action) => action.labelPolicy === "always");
@@ -270,10 +299,12 @@ describe("arranging a tab", () => {
     expect(insert.find((action) => action.id === "document.insert.table")?.labelPolicy).toBe("whenRoom");
   });
 
-  it("keeps rare commands apart for More, under their group", () => {
+  it("puts rare commands on the bar after the common ones, first to give way", () => {
     const insert = arrangeWorkbar({ type, tab: "Insert", actions });
-    expect(insert.advanced.map((group) => group.name)).toContain("Callouts");
-    expect(insert.groups.map((group) => group.name)).not.toContain("Callouts");
+    const names = insert.groups.map((group) => group.name);
+    expect(names).toContain("Callouts");
+    expect(names.indexOf("Callouts")).toBe(names.length - 1);
+    expect(insert.groups.find((group) => group.name === "Callouts")?.actions.every((action) => action.rare)).toBe(true);
   });
 
   it("applies a person's group and command order, and the plan follows the ids", () => {
@@ -287,13 +318,14 @@ describe("arranging a tab", () => {
       },
     });
     expect(arranged.groups.slice(0, 2).map((group) => group.name)).toEqual(["References", "Tables"]);
-    expect(arranged.groups[0]!.actions.map((action) => action.id)).toEqual([
+    // The person's order leads; the group's other commands follow in shipped order.
+    expect(arranged.groups[0]!.actions.slice(0, 2).map((action) => action.id)).toEqual([
       "document.insert.footnote",
       "document.insert.citation",
     ]);
     const layout = planGroupedLayout({
       items: groupedItemsOf(arranged),
-      plan: planStepsFor(type, "Insert"),
+      plan: [...rareSteps(arranged), ...planStepsFor(type, "Insert")],
       available: 420,
       metrics: { ...WORKBAR_METRICS, groupMenu: {} },
     });
@@ -303,6 +335,7 @@ describe("arranging a tab", () => {
 
   it("raises a contextual tab only for its own commands", () => {
     const table = arrangeWorkbar({ type, tab: "Table", actions });
-    expect(table.groups.map((group) => group.name)).toEqual(["Rows", "Columns", "Cells"]);
+    expect(table.groups.map((group) => group.name)).toEqual(["Rows", "Columns", "Cells", "Structure"]);
+    expect(table.groups.flatMap((group) => group.actions).every((action) => action.id.startsWith("document.table."))).toBe(true);
   });
 });

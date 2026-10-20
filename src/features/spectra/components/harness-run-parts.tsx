@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { Loader2, ShieldCheck, ExternalLink, FileText } from "@/components/icons/glyph-icons";
+import { useState, type CSSProperties } from "react";
+import { Icon as Glyph } from "@/components/icons";
+import { Loader2, ShieldCheck } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import { workTypeMeta } from "../artifacts/presentation";
 import type { HarnessAnswerValue } from "../ai/harness-exchange";
@@ -175,6 +176,11 @@ export function messageTouches(metadata: Record<string, unknown> | undefined): H
 
 const ACTION_COPY = { created: "Created", edited: "Edited", referenced: "Used" } as const;
 
+/*
+ * The work a response made or changed, as slips in each work's colour
+ * (LANGUAGE.md, "Cards"): what happened to it, its name, and what changed.
+ * The whole slip opens the work beside the thread.
+ */
 export function WorkTouchCards({
   touches,
   onOpen,
@@ -185,49 +191,39 @@ export function WorkTouchCards({
   const unique = dedupeTouches(touches);
   if (unique.length === 0) return null;
   return (
-    <div className="mt-4 space-y-2" aria-label="Work from this response">
+    <ul className="mt-4 grid gap-2" aria-label="Work from this response">
       {unique.map((touch) => {
-        const meta = (workTypeMeta as Record<string, (typeof workTypeMeta)[keyof typeof workTypeMeta] | undefined>)[touch.type];
-        const Icon = meta?.icon ?? FileText;
-        const line = [ACTION_COPY[touch.action], meta?.label, touch.change].filter(Boolean).join(" · ");
-        return (
-          <div key={touch.id} data-spectra-card="result" data-card-state="normal" className="px-3.5 py-2.5">
-            <div className="flex items-center gap-3">
-              <span
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)]"
-                style={{ color: meta?.color ?? "var(--accent-gold)" }}
-              >
-                <Icon className="h-4 w-4" />
+        const meta = (workTypeMeta as Record<string, (typeof workTypeMeta)[keyof typeof workTypeMeta] | undefined>)[touch.type] ?? workTypeMeta.document;
+        const action = ACTION_COPY[touch.action];
+        // A change that only repeats the action ("Edited", "Edited") says it once.
+        const change = touch.change?.trim() && touch.change.trim().toLowerCase() !== action.toLowerCase() ? touch.change : meta.label;
+        const body = (
+          <>
+            <span className="work-slip-glyph" aria-hidden>
+              <Glyph name={meta.glyph} size={18} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="work-slip-title">{touch.title}</span>
+              <span className="work-slip-line">
+                <span className="work-slip-action">{action}</span>
+                <span className="truncate">{change}</span>
               </span>
-              <div className="min-w-0 flex-1">
-                {onOpen ? (
-                  <button
-                    type="button"
-                    onClick={() => onOpen(touch.id)}
-                    className="block max-w-full truncate rounded-chip text-left text-caption font-semibold text-[var(--text-primary)] outline-none hover:text-[var(--accent-cyan)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--accent-cyan)_35%,transparent)]"
-                  >
-                    {touch.title}
-                  </button>
-                ) : (
-                  <div className="truncate text-caption font-semibold text-[var(--text-primary)]">{touch.title}</div>
-                )}
-                <div className="mt-0.5 truncate text-micro text-[var(--text-secondary)]">{line}</div>
-              </div>
-              {onOpen ? (
-                <button
-                  type="button"
-                  onClick={() => onOpen(touch.id)}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
-                  aria-label={`Open ${touch.title}`}
-                  title="Open work"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                </button>
-              ) : null}
-            </div>
-          </div>
+            </span>
+            {onOpen ? <span className="work-slip-open">Open</span> : null}
+          </>
+        );
+        return (
+          <li key={touch.id} data-work-slip style={{ "--work-hue": meta.color, "--work-tint": meta.soft } as CSSProperties}>
+            {onOpen ? (
+              <button type="button" onClick={() => onOpen(touch.id)} aria-label={`Open ${touch.title}`} className="work-slip">
+                {body}
+              </button>
+            ) : (
+              <div className="work-slip">{body}</div>
+            )}
+          </li>
         );
       })}
-    </div>
+    </ul>
   );
 }

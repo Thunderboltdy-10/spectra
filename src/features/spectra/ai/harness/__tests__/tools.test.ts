@@ -603,7 +603,7 @@ describe("harness tools", () => {
     const named = (name: string) => tools.find((entry) => entry.name === name)!;
     expect(() => named("organize_library").parse!({ action: "pin", targetIds: ["a", "b"] })).toThrow(/one id/);
     expect(() => named("managebac").parse!({ action: "set_sync_mode", kind: "grades", mode: "follow" })).toThrow(/classId/);
-    expect(() => named("manage_conversation").parse!({})).toThrow(/title, pinned or archived/);
+    expect(() => named("manage_conversation").parse!({})).toThrow(/title, pinned, archived or placeId/);
     expect(() => named("calendar").parse!({ action: "complete_block", itemId: "b1" })).toThrow(/expectedRevision/);
   });
 });

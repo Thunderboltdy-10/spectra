@@ -95,7 +95,8 @@ describe("planTextTransition", () => {
     const before = "short";
     const after = Array.from({ length: 200 }, (_, i) => `word${i}`).join(" ");
     const plan = frames(before, after);
-    expect(plan.frames.length).toBeLessThanOrEqual(12);
+    // At most 14 typed chunks, plus the select, delete and settle beats.
+    expect(plan.frames.length).toBeLessThanOrEqual(18);
   });
 
   it("keeps the total budget inside a human rhythm", () => {

@@ -113,6 +113,9 @@ const detail = (
     : { hasOlder: false },
 });
 
+// A finished reply is its own account: details are offered only while its run is the thread's active one.
+const live = (source: SpectraThreadDetail): SpectraThreadDetail => ({ ...source, activeExecution: { run } });
+
 beforeEach(() => {
   mocks.getThread.mockReset();
   mocks.workspaceCatalog.items = [];
@@ -146,7 +149,7 @@ afterEach(() => {
 describe("ConversationSurface history and saved results", () => {
   it.each([false, true])("does not present a saved-result box before any artifact result is loaded (compact=%s)", async (compact) => {
     mocks.getTrace.mockResolvedValue({ run, operations: [], events: [], cards: [], artifacts: [] });
-    render(<ConversationSurface detail={detail("thread-a", "No editable document was created.")} threadId="thread-a" compact={compact} />);
+    render(<ConversationSurface detail={live(detail("thread-a", "No editable document was created."))} threadId="thread-a" compact={compact} />);
     expect(screen.queryByText("Saved progress and results")).toBeNull();
     const disclosure = screen.getByRole("button", { name: "Show details" });
     expect(disclosure.parentElement?.className).not.toContain("bg-[var(--bg-secondary)]");
@@ -192,10 +195,7 @@ describe("ConversationSurface history and saved results", () => {
     expect(screen.getByText("Hi! What would you like help with?")).toBeTruthy();
     expect(screen.queryByText("Spectra paused this run")).toBeNull();
     expect(mocks.getTrace).toHaveBeenCalledTimes(3);
-    mocks.getTrace.mockResolvedValue({ ...failed, run: { ...run, executionId: "retry", status: "completed" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Show details" })[0]);
-    await waitFor(() => expect(mocks.getTrace).toHaveBeenCalledTimes(6));
-    expect(screen.queryByText("Spectra paused this run")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show details" })).toBeNull();
   });
 
   it("reloads a new failed attempt instead of restoring the earlier failure cache", async () => {
@@ -233,7 +233,7 @@ describe("ConversationSurface history and saved results", () => {
     await act(async () => { for (const resolve of pending) resolve({ run: { ...run, status: "failed", retryable: true }, operations: [], cards: [], events: [], artifacts: [] }); });
     expect(screen.getByText("Retry succeeded")).toBeTruthy();
     expect(screen.queryByText("Spectra paused this run")).toBeNull();
-    expect(screen.getAllByRole("button", { name: "Show details" }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Show details" })).toBeNull();
   });
 
   it("reveals recovery when the selected unanswered run settles, without loading active history", async () => {
@@ -328,7 +328,7 @@ describe("ConversationSurface history and saved results", () => {
       artifacts: [],
     });
     const first = render(
-      <ConversationSurface detail={detail("thread-a", "Thread A")} threadId="thread-a" />,
+      <ConversationSurface detail={live(detail("thread-a", "Thread A"))} threadId="thread-a" />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Show details" }));
     await waitFor(() => expect(pending).toHaveLength(3));
@@ -336,7 +336,7 @@ describe("ConversationSurface history and saved results", () => {
     first.rerender(<ConversationSurface detail={detail("thread-b", "Thread B")} threadId="thread-b" />);
     await screen.findByText("Thread B");
     first.rerender(
-      <ConversationSurface detail={detail("thread-a", "Thread A")} threadId="thread-a" />,
+      <ConversationSurface detail={live(detail("thread-a", "Thread A"))} threadId="thread-a" />,
     );
     await screen.findByText("Thread A");
     fireEvent.click(screen.getByRole("button", { name: "Show details" }));
@@ -397,7 +397,7 @@ describe("ConversationSurface history and saved results", () => {
     );
     expect(await screen.findByText("Still running")).toBeTruthy();
 
-    mocks.useQuery.mockReturnValue(null);
+    mocks.useQuery.mockReturnValue({ run });
     first.rerender(<ConversationSurface detail={detail("thread-a", "Saved answer")} threadId="thread-a" />);
     expect(screen.queryByText("Saved progress and results")).toBeNull();
     expect(await screen.findByRole("button", { name: "Show details" })).toBeTruthy();
@@ -481,7 +481,7 @@ describe("conversation answer ownership", () => {
         sequence: 1, type: "progress", payload: { title: "Checked the document" }, createdAt: 1,
       }],
     });
-    render(<ConversationSurface detail={detail("thread-a", answer)} threadId="thread-a" compact={compact} />);
+    render(<ConversationSurface detail={live(detail("thread-a", answer))} threadId="thread-a" compact={compact} />);
     expect(screen.getAllByText(answer)).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Show details" }));
     await screen.findByText("Checked the document");
@@ -513,7 +513,7 @@ describe("saved answer cards after loading details", () => {
         { ...card, _id: "other", title: "Validation", summary: "Checked editable content" },
       ],
     });
-    render(<ConversationSurface detail={detail("thread-a", answer)} threadId="thread-a" compact={compact} />);
+    render(<ConversationSurface detail={live(detail("thread-a", answer))} threadId="thread-a" compact={compact} />);
     fireEvent.click(screen.getByRole("button", { name: "Show details" }));
     await screen.findByText("Saved work");
     expect(screen.getAllByText(answer)).toHaveLength(1);

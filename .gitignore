@@ -79,3 +79,7 @@ storage-state-*.json
 /.tmp-n6-bridge
 /.tmp-n8-target
 
+
+# Local review captures and editor launch configs
+/docs/review/
+/.claude/launch.json

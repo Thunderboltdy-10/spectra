@@ -15,7 +15,7 @@ const { JSDOM } = createRequire(import.meta.url)("jsdom") as {
 };
 
 const route = vi.hoisted(() => ({ pathname: "/settings", ready: true }));
-vi.mock("next/font/google", () => ({ Manrope: () => ({ variable: "font-main" }), IBM_Plex_Mono: () => ({ variable: "font-mono" }) }));
+vi.mock("next/font/google", () => ({ Figtree: () => ({ variable: "font-main" }), Newsreader: () => ({ variable: "font-display" }), IBM_Plex_Mono: () => ({ variable: "font-mono" }) }));
 vi.mock("next/navigation", () => ({ usePathname: () => route.pathname, useRouter: () => ({ push: vi.fn() }), useSearchParams: () => new URLSearchParams("section=appearance") }));
 vi.mock("next/link", () => ({ default: ({ children, ...props }: { children: ReactNode } & { prefetch?: boolean }) => { delete props.prefetch; return <a {...props}>{children}</a>; } }));
 vi.mock("@clerk/nextjs", () => ({ ClerkProvider: ({ children }: { children: ReactNode }) => children, useClerk: () => ({ openUserProfile: vi.fn() }) }));
@@ -37,8 +37,9 @@ vi.mock("@/features/spectra/bridge/product-offline-banner", () => ({ ProductOffl
 vi.mock("@/features/spectra/collaboration/app-choreography-host", () => ({ AppChoreographyMount: () => null }));
 vi.mock("@/components/ui/dropdown-menu", () => { const Pass = ({ children }: { children?: ReactNode }) => <>{children}</>; const Nothing = () => null; return { DropdownMenu: Pass, DropdownMenuTrigger: Pass, DropdownMenuContent: Nothing, DropdownMenuItem: Nothing, DropdownMenuLabel: Nothing, DropdownMenuSeparator: Nothing, DropdownMenuRadioGroup: Nothing, DropdownMenuRadioItem: Nothing, OverflowMenu: Nothing }; });
 vi.mock("./account-menu", () => ({ AccountMenu: () => null }));
+vi.mock("@/features/spectra/onboarding/tour", () => ({ TourMount: () => null }));
+vi.mock("convex/react", () => ({ useConvexAuth: () => ({ isAuthenticated: false, isLoading: false }), useQuery: () => undefined, useMutation: () => vi.fn() }));
 vi.mock("@/features/spectra/organization/tree-client", () => ({ useTreeQuickView: () => ({ nodes: [] }) }));
-vi.mock("@/features/spectra/threads/threads-view", () => ({ ThreadsViewHost: () => null }));
 
 function shellHtml() {
   return renderToStaticMarkup(<RootLayout><AppShell><button>Page content action</button></AppShell></RootLayout>);

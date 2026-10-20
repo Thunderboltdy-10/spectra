@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveArtifactWriteInput } from "../../../../operations/artifact-write-content";
+import { DESIGNER_ACCENT, currentDesign } from "../../../../presentation/designer";
 import { presentationObjectText } from "../../../../presentation/model";
 import {
   applyPresentationEdits,
@@ -127,5 +128,18 @@ describe("presentation authoring", () => {
     expect(readback).toMatch(/Changed or new slides:\n2\. \[title-content\] Inputs/);
     expect(readback).not.toMatch(/Photosynthesis/);
     expect(presentationOutline(edited)).toMatch(/notes: Mention stomata\./);
+  });
+
+  it("finishes a new deck with Designer unless told not to, and keeps a slide's look through edits", () => {
+    const designed = presentationFromSpec({ ...sixSlides, design: "band" }, sequentialIdFactory());
+    expect(currentDesign(designed.slides[1]!)).toBe("band");
+    const plain = presentationFromSpec({ ...sixSlides, design: "none" }, sequentialIdFactory());
+    expect(plain.slides.some((slide) => slide.objects.some((object) => object.componentId === DESIGNER_ACCENT))).toBe(false);
+
+    const edited = applyPresentationEdits(designed, [{ op: "update_slide", slide: 2, body: "- Light\n- Water" }], sequentialIdFactory());
+    expect(currentDesign(edited.slides[1]!)).toBe("band");
+    const restyled = applyPresentationEdits(edited, [{ op: "design", slide: 2, look: "night" }], sequentialIdFactory());
+    expect(currentDesign(restyled.slides[1]!)).toBe("night");
+    expect(() => applyPresentationEdits(edited, [{ op: "design", look: "mosaic" }])).toThrow(AuthoringError);
   });
 });

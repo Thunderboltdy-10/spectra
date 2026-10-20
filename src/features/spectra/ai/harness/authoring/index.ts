@@ -188,7 +188,14 @@ export function authorNew(type: AuthoredType, spec: unknown, context: AuthoringC
       break;
     }
     case "presentation":
-      content = presentationFromSpec({ slides: asArray(input.slides, "slides"), theme: input.theme as PresentationSpec["theme"] }, ids);
+      content = presentationFromSpec(
+        {
+          slides: asArray(input.slides, "slides"),
+          theme: input.theme as PresentationSpec["theme"],
+          design: input.design as PresentationSpec["design"],
+        },
+        ids,
+      );
       readback = presentationReadback(content);
       break;
     case "sheets":

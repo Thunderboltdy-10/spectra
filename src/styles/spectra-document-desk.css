@@ -1,0 +1,727 @@
+/* ==========================================================================
+   A document on the desk (document-studio.tsx, EDITORS.md "Document")
+   --------------------------------------------------------------------------
+   The document is one page of card paper laid on the desk, at the measure a
+   page is read at, its corner turned down like a page in use. The outline and
+   the sources are the contents lines either side of it, not boxes. Find, a
+   finished import and a pending replace are slips laid across the top of the
+   page. In the side panel the page is the panel.
+
+   Paper size, margins, breaks and notes are spectra-document.css; the words
+   themselves are the shared prose (spectra-prose.css).
+   ========================================================================== */
+
+.spectra-document-studio > .spectra-editor-body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.spectra-document-canvas-shell {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+/* --- The desk and the page -------------------------------------------- */
+
+.document-desk {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  padding: 44px 24px calc(var(--spectra-composer-safe-area, 0px) + 40px);
+  overflow-y: auto;
+  scroll-padding-bottom: calc(var(--spectra-composer-safe-area, 0px) + 40px);
+}
+
+.document-page {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  width: min(816px, 100%);
+  flex: none;
+  flex-direction: column;
+  border: 1px solid var(--card-border-soft);
+  border-radius: 6px 0 14px 14px;
+  background: var(--card-paper);
+  box-shadow:
+    0 1px 0 var(--card-border),
+    0 3px 0 -1px color-mix(in oklab, var(--card-paper) 92%, var(--text-primary)),
+    0 4px 0 -1px var(--card-border-soft),
+    0 28px 56px -36px color-mix(in oklab, var(--text-primary) 42%, transparent);
+  transform-origin: 50% 0;
+  animation: sheet-lay var(--motion-slow) var(--ease-standard) both;
+}
+.document-page::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background-image: var(--paper-grain);
+  pointer-events: none;
+}
+
+/* The corner turned down: the desk shows through the fold, and the back of
+   the paper lies over the page in the document's blue. */
+.document-page::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  z-index: 1;
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(
+    225deg,
+    var(--bg-primary) 0 50%,
+    color-mix(in oklab, var(--type-document) 10%, var(--card-paper)) 50% 100%
+  );
+  border-bottom-left-radius: 6px;
+  box-shadow: -2px 2px 4px -2px color-mix(in oklab, var(--text-primary) 30%, transparent);
+  pointer-events: none;
+}
+
+.document-page .tiptap-root {
+  width: 100%;
+  max-width: none;
+}
+
+/* Continuous: one long page, as tall as the desk at least, so it never reads
+   as a strip of text floating in the window. */
+.spectra-document-studio[data-layout="continuous"] .document-page .ProseMirror {
+  min-height: max(520px, calc(100vh - 360px));
+  padding: 64px 88px 96px;
+}
+.spectra-document-studio .document-page .ProseMirror > :first-child {
+  margin-top: 0;
+}
+
+/* Page: the paper's own size and margins (spectra-document.css); the corners
+   square up because a printed page has square corners. */
+.spectra-document-studio[data-layout="page"] .document-page {
+  width: min(100%, var(--spectra-page-width));
+  border-radius: 2px 0 2px 2px;
+}
+
+/* Reading narrows the page to a comfortable measure. */
+.spectra-document-studio:is([data-doc-mode="read"], [data-doc-mode="review"])[data-layout="continuous"] .document-page {
+  width: min(720px, 100%);
+}
+.spectra-document-studio[data-doc-mode="read"] .ProseMirror {
+  caret-color: transparent;
+}
+
+.document-page-foot {
+  width: min(816px, 100%);
+  margin-top: 14px;
+  padding: 0 4px;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.spectra-document-studio[data-layout="page"] .document-page-foot {
+  width: min(100%, var(--spectra-page-width));
+}
+
+/* --- Pages side by side ------------------------------------------------ */
+/* The page's text block flows on as columns, one column a page, and the
+   sheets lie underneath (document-spread.tsx). Column pitch is a page plus
+   the desk between: a text column and the two margins either side of it.
+   The desk turns: the pages run sideways and the wheel follows them. */
+
+.spectra-document-studio[data-layout="spread"] .document-desk {
+  align-items: safe center;
+  justify-content: safe center;
+  padding: 28px 40px calc(var(--spectra-composer-safe-area, 0px) + 20px);
+  overflow: auto hidden;
+}
+
+/* The count stays under the window's edge while the pages pass beneath. */
+.spectra-document-studio[data-layout="spread"] .document-page-foot {
+  position: sticky;
+  left: 0;
+  width: auto;
+  align-self: stretch;
+}
+
+.spectra-document-studio[data-layout="spread"] .document-page {
+  width: calc(
+    var(--spread-pages) * var(--spectra-page-width) + (var(--spread-pages) - 1) * var(--spread-gap)
+  );
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  animation: none;
+}
+.spectra-document-studio[data-layout="spread"] .document-page::before,
+.spectra-document-studio[data-layout="spread"] .document-page::after {
+  content: none;
+}
+
+.spectra-document-studio[data-layout="spread"] .document-page .tiptap-root {
+  position: relative;
+  width: var(--spectra-page-width);
+}
+
+.spectra-document-studio[data-layout="spread"] .document-page .ProseMirror {
+  height: var(--spectra-page-height);
+  min-height: 0;
+  padding: var(--spectra-page-margin);
+  column-width: calc(var(--spectra-page-width) - 2 * var(--spectra-page-margin));
+  column-gap: calc(2 * var(--spectra-page-margin) + var(--spread-gap));
+  column-fill: auto;
+}
+.spectra-document-studio[data-layout="spread"] .ProseMirror :is(h1, h2, h3) {
+  break-after: avoid-column;
+}
+.spectra-document-studio[data-layout="spread"] .ProseMirror .spectra-page-break {
+  break-after: column;
+}
+.spectra-document-studio[data-layout="spread"] .ProseMirror :is(figure, img, table, pre) {
+  break-inside: avoid-column;
+}
+
+.document-spread-sheets {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Each sheet is the page view's paper, laid one after another with a beat
+   between them as the spread opens. */
+.document-spread-sheet {
+  position: absolute;
+  top: 0;
+  left: calc(var(--sheet) * (var(--spectra-page-width) + var(--spread-gap)));
+  width: var(--spectra-page-width);
+  height: var(--spectra-page-height);
+  border: 1px solid var(--card-border-soft);
+  border-radius: 2px;
+  background: var(--card-paper) var(--paper-grain);
+  box-shadow:
+    0 1px 0 var(--card-border),
+    0 22px 44px -30px color-mix(in oklab, var(--text-primary) 40%, transparent);
+  transform-origin: 0 50%;
+  animation: spread-sheet-lay var(--motion-slow) var(--ease-standard) both;
+  animation-delay: calc(min(var(--sheet), 6) * 45ms);
+}
+
+/* Page furniture is read at the screen's size, not the page's: it is set
+   against the spread's scale so a folio stays legible on a small page. */
+.document-spread-sheet > p {
+  position: absolute;
+  inset-inline: var(--spectra-page-margin);
+  color: var(--text-tertiary);
+  font-size: calc(var(--text-micro) / var(--spread-zoom, 1));
+  font-variant-numeric: tabular-nums;
+}
+.document-spread-sheet > p[data-slot="header"] {
+  top: 10mm;
+}
+.document-spread-sheet > p[data-slot="folio"] {
+  bottom: 10mm;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.document-spread-sheet > p[data-slot="folio"]:not(:has(span)) {
+  justify-content: center;
+}
+
+@keyframes spread-sheet-lay {
+  from {
+    opacity: 0;
+    transform: translateX(-18px) rotate(-0.6deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .document-spread-sheet {
+    animation: none;
+  }
+}
+
+/* --- The outline and the sources -------------------------------------- */
+/* The contents lines either side of the page: the outline before it, the
+   sources and the review after it. The heading the caret is in is a slip
+   pulled out, edged in the document's blue. */
+
+.spectra-document-outline,
+.spectra-document-sources,
+.spectra-document-revisions {
+  display: flex;
+  width: 256px;
+  flex: 0 0 256px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 24px 10px calc(var(--spectra-composer-safe-area, 0px) + 24px);
+  overflow-y: auto;
+  scroll-padding-bottom: calc(var(--spectra-composer-safe-area, 0px) + 24px);
+  animation: document-rail-in var(--motion-base) var(--ease-standard) both;
+}
+.spectra-document-outline {
+  border-right: 1px solid var(--card-border-soft);
+}
+.spectra-document-sources,
+.spectra-document-revisions {
+  order: 2;
+  border-left: 1px solid var(--card-border-soft);
+}
+.spectra-document-revisions {
+  width: 288px;
+  flex-basis: 288px;
+  gap: 8px;
+}
+:is(.spectra-document-outline, .spectra-document-sources, .spectra-document-revisions) > * {
+  flex-shrink: 0;
+}
+
+@keyframes document-rail-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+:is(.spectra-document-outline, .spectra-document-sources, .spectra-document-revisions) > header {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 0 4px 0 8px;
+  color: var(--text-secondary);
+}
+:is(.spectra-document-outline, .spectra-document-sources, .spectra-document-revisions) > header strong {
+  flex: 1;
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+:is(.spectra-document-outline, .spectra-document-sources, .spectra-document-revisions) > header button,
+.spectra-document-import-report > button {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+:is(.spectra-document-outline, .spectra-document-sources, .spectra-document-revisions) > header button:hover,
+.spectra-document-import-report > button:hover {
+  background: color-mix(in oklab, var(--text-primary) 6%, transparent);
+  color: var(--text-primary);
+}
+
+.spectra-document-outline > button,
+.spectra-document-sources > button:not(.spectra-document-sources-action) {
+  position: relative;
+  display: grid;
+  min-height: 40px;
+  align-items: center;
+  gap: 2px 10px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  text-align: left;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard),
+    transform var(--motion-base) var(--ease-standard);
+}
+.spectra-document-outline > button {
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+}
+.spectra-document-sources > button:not(.spectra-document-sources-action) {
+  grid-template-columns: 30px minmax(0, 1fr);
+}
+.spectra-document-outline > button:hover,
+.spectra-document-sources > button:not(.spectra-document-sources-action):hover {
+  background: color-mix(in oklab, var(--card-paper) 60%, transparent);
+  color: var(--text-primary);
+}
+.spectra-document-outline > button[data-current] {
+  background: var(--card-paper);
+  box-shadow:
+    0 0 0 1px var(--card-border-soft),
+    0 6px 16px -12px color-mix(in oklab, var(--text-primary) 45%, transparent);
+  color: var(--text-primary);
+  transform: translateX(4px);
+}
+.spectra-document-outline > button[data-current]::before {
+  content: "";
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  left: -4px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--type-document);
+}
+.spectra-document-outline > button > span,
+.spectra-document-sources > button:not(.spectra-document-sources-action) > span {
+  color: color-mix(in oklab, var(--type-document) 70%, var(--text-tertiary));
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.spectra-document-sources > button:not(.spectra-document-sources-action) > span {
+  grid-row: span 2;
+  align-self: start;
+  font-size: 14px;
+}
+.spectra-document-outline > button > strong,
+.spectra-document-sources > button:not(.spectra-document-sources-action) > strong {
+  overflow: hidden;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A section's weight, so an overlong one shows before it is read. */
+.spectra-document-outline > button > em,
+.spectra-document-sources > button:not(.spectra-document-sources-action) > em {
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+:is(.spectra-document-outline, .spectra-document-sources, .spectra-document-revisions) > p {
+  padding: 8px;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+  line-height: 1.55;
+}
+
+/* An unresolvable citation is named, not hidden: it is a problem to fix. */
+.spectra-document-sources-problem {
+  display: flex;
+  gap: 8px;
+  margin: 0 4px 6px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--warning);
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in oklab, var(--warning) 8%, var(--card-paper));
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  line-height: 1.45;
+}
+.spectra-document-sources-problem svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--warning);
+}
+
+.spectra-document-sources-action {
+  display: inline-flex;
+  height: 36px;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 0;
+  padding: 0 10px;
+  border: 1px dashed transparent;
+  border-radius: 8px;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+  font-weight: 500;
+}
+.spectra-document-sources-action:hover {
+  border-color: var(--card-border);
+  color: var(--text-primary);
+}
+
+/* The review: each change a slip in the warning ink, its two answers under it. */
+.spectra-document-revisions > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: 0 4px;
+  padding: 10px 12px;
+  border-left: 3px solid color-mix(in oklab, var(--warning) 70%, transparent);
+  border-radius: 0 8px 8px 0;
+  background: var(--card-paper);
+  box-shadow: 0 0 0 1px var(--card-border-soft);
+}
+.spectra-document-revisions > div > strong {
+  flex-basis: 100%;
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+.spectra-document-revisions > div small {
+  flex-basis: 100%;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  line-height: 1.45;
+}
+.spectra-document-revisions > div button,
+:is(.spectra-document-word-comments, .spectra-document-word-notes) button {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-chip);
+  color: var(--text-secondary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+}
+.spectra-document-revisions > div button:hover:not(:disabled),
+:is(.spectra-document-word-comments, .spectra-document-word-notes) button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+.spectra-document-revisions > div:has(> div) {
+  border-left-color: var(--card-border);
+}
+
+/* --- Slips across the top of the page --------------------------------- */
+
+.spectra-document-findbar,
+.spectra-document-import-report,
+.spectra-document-confirm {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  width: min(816px, calc(100% - 48px));
+  align-items: center;
+  gap: 8px;
+  margin: 14px auto 0;
+  padding: 8px 8px 8px 14px;
+  border: 1px solid var(--card-border-soft);
+  border-radius: 10px;
+  background: var(--card-paper);
+  box-shadow: 0 12px 28px -22px color-mix(in oklab, var(--text-primary) 50%, transparent);
+  animation: sheet-unfold var(--motion-fast) var(--ease-standard) both;
+}
+
+.spectra-document-findbar {
+  color: var(--text-tertiary);
+}
+.spectra-document-findbar label {
+  position: relative;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.spectra-document-findbar input {
+  width: 100%;
+  height: 32px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--card-paper) 70%, var(--bg-primary));
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  outline: none;
+}
+.spectra-document-findbar input:focus-visible {
+  border-color: var(--brand-primary);
+}
+.spectra-document-findbar label input {
+  padding-right: 92px;
+}
+.spectra-document-findbar > input[data-find-replace] {
+  width: 180px;
+  flex: none;
+}
+.spectra-document-findbar label small {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  font-variant-numeric: tabular-nums;
+  transform: translateY(-50%);
+}
+.spectra-document-findbar button,
+.spectra-document-find-options button {
+  display: inline-flex;
+  min-width: 30px;
+  height: 30px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.spectra-document-findbar button:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--text-primary) 6%, transparent);
+  color: var(--text-primary);
+}
+.spectra-document-findbar button:disabled {
+  opacity: 0.35;
+}
+.spectra-document-find-options {
+  display: flex;
+  gap: 2px;
+}
+.spectra-document-find-options button[data-active] {
+  background: color-mix(in oklab, var(--type-document) 14%, var(--card-paper));
+  color: color-mix(in oklab, var(--type-document) 75%, var(--text-primary));
+}
+
+.spectra-document-import-report {
+  border-left: 3px solid var(--success);
+  border-radius: 0 10px 10px 0;
+}
+.spectra-document-import-report[data-error] {
+  border-left-color: var(--danger);
+}
+:is(.spectra-document-import-report, .spectra-document-confirm) > span {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+:is(.spectra-document-import-report, .spectra-document-confirm) strong {
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+:is(.spectra-document-import-report, .spectra-document-confirm) small {
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  line-height: 1.4;
+}
+.spectra-document-confirm button {
+  height: 32px;
+  flex: none;
+  padding: 0 14px;
+  border-radius: var(--radius-chip);
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+.spectra-document-confirm button:hover {
+  background: color-mix(in oklab, var(--text-primary) 6%, transparent);
+  color: var(--text-primary);
+}
+.spectra-document-confirm button[data-confirm-replace] {
+  background: var(--text-primary);
+  color: var(--bg-primary);
+}
+
+/* The one field a command needs, laid across the page like find. */
+.spectra-document-inline-panel {
+  width: min(816px, calc(100% - 48px));
+  margin: 14px auto 0;
+  padding: 10px 10px 10px 14px;
+  border: 1px solid var(--card-border-soft);
+  border-radius: 10px;
+  background: var(--card-paper);
+  box-shadow: 0 12px 28px -22px color-mix(in oklab, var(--text-primary) 50%, transparent);
+  animation: sheet-unfold var(--motion-fast) var(--ease-standard) both;
+}
+
+/* --- Focus ------------------------------------------------------------- */
+/* Focus fills the work pane rather than the window: the studio root is a
+   query container, so a fixed surface would be clipped to the pane anyway. */
+.spectra-document-studio[data-focus="true"] {
+  position: absolute;
+  z-index: calc(var(--z-panel) + 10);
+  inset: 0;
+  min-height: 0;
+  background: var(--bg-primary) !important;
+}
+.spectra-document-studio[data-focus="true"] .document-desk {
+  padding-top: 56px;
+}
+
+/* --- In the side panel the page is the panel -------------------------- */
+
+.spectra-document-studio[data-compact] .document-desk {
+  padding: 0 0 calc(var(--spectra-composer-safe-area, 0px) + 24px);
+}
+.spectra-document-studio[data-compact] .document-page {
+  width: 100%;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  box-shadow: none;
+  animation: none;
+}
+.spectra-document-studio[data-compact] .document-page::before {
+  content: none;
+}
+.spectra-document-studio[data-compact][data-layout="continuous"] .document-page .ProseMirror {
+  --prose-size: var(--text-body);
+  --prose-leading: 1.62;
+  min-height: 320px;
+  padding: 24px 24px 48px;
+}
+.spectra-document-studio[data-compact] .document-page-foot {
+  width: 100%;
+  padding: 0 24px;
+}
+.spectra-document-studio[data-compact] :is(.spectra-document-outline, .spectra-document-sources, .spectra-document-revisions) {
+  position: absolute;
+  z-index: 25;
+  inset: 0 auto 0 0;
+  width: min(300px, 100%);
+  border: 0;
+  border-right: 1px solid var(--card-border-soft);
+  background: var(--bg-primary);
+  box-shadow: 18px 0 40px -28px color-mix(in oklab, var(--text-primary) 50%, transparent);
+}
+.spectra-document-studio[data-compact] :is(.spectra-document-findbar, .spectra-document-import-report, .spectra-document-confirm, .spectra-document-inline-panel) {
+  width: calc(100% - 24px);
+  margin-top: 10px;
+}
+.spectra-document-studio[data-compact] .spectra-document-findbar [data-find-replace] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .document-page,
+  :is(.spectra-document-outline, .spectra-document-sources, .spectra-document-revisions),
+  :is(.spectra-document-findbar, .spectra-document-import-report, .spectra-document-confirm, .spectra-document-inline-panel) {
+    animation: none;
+  }
+  .spectra-document-outline > button[data-current] {
+    transform: none;
+  }
+}
+
+/* --- Print: the page, without the desk -------------------------------- */
+
+@media print {
+  .spectra-document-studio > :not(.spectra-editor-body),
+  .document-page-foot,
+  .document-page::before {
+    display: none !important;
+  }
+  .spectra-document-canvas-shell,
+  .document-desk,
+  .document-page,
+  .spectra-document-studio .tiptap-root,
+  .spectra-document-studio .ProseMirror {
+    display: block;
+    width: auto;
+    min-height: 0;
+    margin: 0;
+    padding: 0 !important;
+    overflow: visible;
+    border: 0;
+    box-shadow: none;
+    background: #fff;
+    animation: none;
+  }
+}

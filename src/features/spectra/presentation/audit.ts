@@ -54,9 +54,10 @@ function styleString(object: PresentationObject, key: string) {
  * A frame is measured, not guessed at: characters per line come from the frame
  * width and the font size, and the line count from the text itself.
  */
-export function estimateTextOverflow(object: PresentationObject) {
+/** How tall a text object's words stand at its type size, by average glyph width. */
+export function estimateTextHeight(object: PresentationObject) {
   const text = presentationObjectText(object);
-  if (!text.trim()) return false;
+  if (!text.trim()) return 0;
   const fontSize = styleNumber(object, "fontSize", 21);
   const charsPerLine = Math.max(
     1,
@@ -66,8 +67,12 @@ export function estimateTextOverflow(object: PresentationObject) {
     const length = paragraph.trim().length;
     return total + Math.max(1, Math.ceil(length / charsPerLine));
   }, 0);
-  const lineHeight = styleNumber(object, "lineHeight", LINE_HEIGHT_RATIO);
-  return lines * fontSize * lineHeight > object.height + fontSize * 0.35;
+  return lines * fontSize * styleNumber(object, "lineHeight", LINE_HEIGHT_RATIO);
+}
+
+export function estimateTextOverflow(object: PresentationObject) {
+  const fontSize = styleNumber(object, "fontSize", 21);
+  return estimateTextHeight(object) > object.height + fontSize * 0.35;
 }
 
 function channel(component: number) {
@@ -92,7 +97,8 @@ const TOKEN_PAINT: Record<string, string> = {
   "border-strong": "#d4d0c8",
 };
 
-function resolvePaint(color: string | undefined) {
+/** A slide colour as plain hex, reading the app tokens a deck may name. */
+export function resolvePaint(color: string | undefined) {
   if (!color) return undefined;
   const trimmed = color.trim();
   const token = /^var\(--([\w-]+)\)$/.exec(trimmed);

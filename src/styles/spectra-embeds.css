@@ -1,0 +1,750 @@
+/* --- Embedded work ----------------------------------------------------------
+   An embed is the shelf's index card set into a page (artifact-embed.tsx):
+   the kind's tab, the work's name, and a face that is the work itself and can
+   be used where it sits. It reuses the card's tab and face and adds only what
+   being on a page needs: quiet controls, a resizable face, and faces that
+   step, turn and run. */
+
+.work-embed {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex-direction: column;
+  margin: 6px 0;
+  color: var(--text-primary);
+}
+
+.work-embed-tab-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.work-embed-tab-note[data-warning] {
+  color: var(--warning);
+  opacity: 1;
+}
+
+.work-embed-face {
+  background: color-mix(in oklab, var(--work-tint) 45%, var(--card-paper));
+  gap: 12px;
+  min-width: 240px;
+  max-width: 100%;
+  padding: 14px 18px 16px;
+}
+
+.work-embed[data-mode="expanded"] .work-embed-face {
+  max-height: min(720px, 80vh);
+  min-height: 160px;
+  overflow: auto;
+}
+
+.work-embed:hover .work-embed-face,
+.work-embed:focus-within .work-embed-face,
+[data-spectra-reference][data-selected] .work-embed-face {
+  box-shadow:
+    inset 0 3px 0 var(--work-hue),
+    0 0 0 1px color-mix(in oklab, var(--work-hue) 26%, var(--card-border)),
+    0 2px 4px rgb(52 40 28 / 0.05),
+    0 16px 30px -20px rgb(52 40 28 / 0.3);
+}
+
+/* The tab and the card's one menu share a row; the menu sits astride the
+   face's top edge, part of the border rather than of the work. */
+.work-embed-top {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-width: 0;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.work-embed-tab {
+  min-width: 0;
+  max-width: calc(100% - 64px);
+  height: 30px;
+  font-size: 12.5px;
+}
+
+/* A stacked card: a tab per work, spaced like the tabs above a page, and a
+   strip that scrolls sideways once there are more than fit. */
+.work-embed-stack-tabs {
+  display: flex;
+  min-width: 0;
+  height: 30px;
+  flex: 1;
+  align-items: flex-end;
+  gap: 4px;
+  padding-left: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent);
+}
+
+.work-embed-stack-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.work-embed-stack-tab {
+  flex: 0 0 auto;
+  max-width: 13rem;
+  margin: 0;
+  cursor: pointer;
+  transition: height 160ms ease, background-color 160ms ease;
+}
+
+.work-embed-stack-tab:not([aria-selected="true"]) {
+  height: 25px;
+  background: color-mix(in oklab, var(--work-tint) 58%, var(--bg-primary));
+  color: color-mix(in oklab, var(--work-hue) 55%, var(--text-secondary));
+}
+
+.work-embed-stack-tab:not([aria-selected="true"]):hover {
+  height: 28px;
+}
+
+.work-embed-stack-tab-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-embed-title {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.work-embed-title:hover {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--work-hue) 50%, transparent);
+  text-underline-offset: 3px;
+}
+
+.work-embed-more {
+  margin: 0 14px -14px 0;
+  opacity: 0.6;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+
+.work-embed:hover .work-embed-more,
+.work-embed:focus-within .work-embed-more,
+.work-embed-more:has([data-state="open"]) {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .work-embed-more {
+    opacity: 1;
+  }
+}
+
+.work-embed-more :is(.work-embed-more-trigger, .work-embed-done) {
+  border-radius: 999px;
+  background: var(--card-paper);
+  box-shadow:
+    0 0 0 1px var(--card-border),
+    0 2px 6px -3px rgb(52 40 28 / 0.25);
+  color: var(--text-secondary);
+}
+
+.work-embed-more .work-embed-more-trigger:hover,
+.work-embed-more .work-embed-more-trigger[data-state="open"] {
+  background: var(--card-paper);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--work-hue) 45%, var(--card-border)),
+    0 2px 6px -3px rgb(52 40 28 / 0.25);
+  color: var(--text-primary);
+}
+
+.work-embed-done {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.work-embed .work-embed-done {
+  background: var(--work-hue);
+  box-shadow: none;
+  color: var(--card-paper);
+}
+
+.work-embed-status-actions button {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-radius: 9px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.work-embed-status-actions button:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--text-primary) 8%, transparent);
+  color: var(--text-primary);
+}
+
+.work-embed-status-actions button[data-primary] {
+  background: var(--text-primary);
+  color: var(--card-paper);
+}
+
+.work-embed-status-actions button:disabled {
+  opacity: 0.45;
+}
+
+.work-embed-body[data-opens] {
+  cursor: pointer;
+}
+
+.work-embed-empty {
+  padding: 10px 0 4px;
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-style: italic;
+  color: var(--text-tertiary);
+}
+
+/* --- Faces --- */
+
+.work-embed-document {
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.work-embed-document > * + * {
+  margin-top: 6px;
+}
+
+.work-embed-document h4 {
+  margin-top: 10px;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.work-embed-document h4:first-child {
+  margin-top: 0;
+}
+
+.work-embed[data-mode="compact"] .work-embed-document {
+  max-height: 132px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent);
+  mask-image: linear-gradient(to bottom, #000 70%, transparent);
+}
+
+.work-embed-document img {
+  max-height: 18rem;
+  max-width: 100%;
+  border-radius: 10px;
+  object-fit: contain;
+  object-position: top;
+}
+
+/* A well in the work's tint, where a card or a slide lies to be used. */
+.work-embed-stage {
+  display: grid;
+  gap: 10px;
+}
+
+.work-embed-flashcard,
+.work-embed-slide {
+  border-radius: 12px;
+  background: var(--card-paper);
+  box-shadow:
+    0 0 0 1px var(--card-border),
+    0 8px 18px -14px rgb(52 40 28 / 0.35);
+}
+
+.work-embed-flashcard {
+  display: grid;
+  min-height: 170px;
+  place-items: center;
+  padding: 26px 30px;
+  text-align: center;
+  transition: transform var(--motion-fast) var(--ease-standard);
+}
+
+.work-embed-flashcard:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.work-embed-card-words {
+  font-family: var(--font-display);
+  font-size: 18px;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
+.work-embed-flashcard[data-side="back"] {
+  background: color-mix(in oklab, var(--work-tint) 35%, var(--card-paper));
+}
+
+.work-embed-slide {
+  overflow: hidden;
+}
+
+.work-embed-slide .presentation-canvas {
+  width: 100%;
+}
+
+/* A new card or slide arrives the way a page turns: briefly, in place. */
+.work-embed-turn {
+  display: block;
+  animation: work-embed-turn var(--motion-base) var(--ease-standard);
+}
+
+@keyframes work-embed-turn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.work-embed-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.work-embed-stepper button:not(.work-embed-quiz-check) {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.work-embed-stepper button:not(.work-embed-quiz-check):hover:not(:disabled) {
+  background: var(--card-paper);
+  color: var(--text-primary);
+}
+
+.work-embed-stepper button:not(.work-embed-quiz-check):disabled {
+  opacity: 0.3;
+}
+
+.work-embed-sheet {
+  overflow: hidden;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--card-border);
+}
+
+.work-embed-sheet-name {
+  padding: 6px 12px;
+  background: var(--work-tint);
+  font-size: 12px;
+  font-weight: 600;
+  color: color-mix(in oklab, var(--work-hue) 78%, var(--text-primary));
+}
+
+.work-embed-sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--card-border-soft);
+}
+
+.work-embed-sheet-grid > div {
+  min-width: 0;
+  padding: 6px 10px;
+  background: var(--card-paper);
+}
+
+.work-embed-sheet-grid span {
+  display: block;
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+
+.work-embed-sheet-grid strong {
+  display: block;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-embed-sheet .work-embed-empty {
+  padding: 14px 12px;
+}
+
+.work-embed-board {
+  position: relative;
+  min-height: 210px;
+  overflow: hidden;
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 1px 1px, color-mix(in oklab, var(--work-hue) 22%, transparent) 1px, transparent 0) 0 0 / 18px 18px,
+    color-mix(in oklab, var(--work-tint) 55%, var(--card-paper));
+}
+
+.work-embed-board > span {
+  position: absolute;
+  max-width: 130px;
+  padding: 6px 9px;
+  border-radius: 9px;
+  background: var(--card-paper);
+  box-shadow:
+    0 0 0 1px var(--card-border),
+    0 4px 10px -8px rgb(52 40 28 / 0.4);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.work-embed-board .work-embed-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.work-embed-events {
+  display: grid;
+}
+
+.work-embed-events li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--card-border-soft);
+  font-size: 13.5px;
+}
+
+.work-embed-events li:last-child {
+  border-bottom: 0;
+}
+
+.work-embed-events svg {
+  color: var(--work-hue);
+}
+
+.work-embed-events span {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-embed-events time {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.work-embed-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 32px;
+}
+
+.work-embed-fact span {
+  display: block;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+.work-embed-fact strong {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+/* --- When it cannot show --- */
+
+.work-embed-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 6px 0;
+  padding: 14px 16px;
+  border: 1px dashed var(--card-border);
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--card-paper) 70%, transparent);
+  color: var(--text-tertiary);
+}
+
+.work-embed-status strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.work-embed-status p {
+  margin-top: 2px;
+  max-width: 62ch;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.work-embed-status-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .work-embed-turn {
+    animation: none;
+  }
+
+  .work-embed-flashcard:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
+/* --- A quiz, one question at a time --- */
+
+.work-embed-question {
+  padding: 18px 20px;
+  border-radius: 12px;
+  background: var(--card-paper);
+  box-shadow:
+    0 0 0 1px var(--card-border),
+    0 8px 18px -14px rgb(52 40 28 / 0.35);
+}
+
+.work-embed-question-prompt {
+  font-family: var(--font-display);
+  font-size: 17px;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
+.work-embed-choices {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.work-embed-choice {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px var(--card-border-soft);
+  font-size: 14px;
+  text-align: left;
+  color: var(--text-primary);
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+
+.work-embed-choice:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--work-tint) 55%, transparent);
+}
+
+.work-embed-choice[data-active] {
+  background: var(--work-tint);
+  box-shadow: inset 0 0 0 1.5px var(--work-hue);
+}
+
+.work-embed-choice-mark {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--card-border);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.work-embed-choice[data-many] .work-embed-choice-mark {
+  border-radius: 6px;
+}
+
+.work-embed-choice[data-active] .work-embed-choice-mark {
+  background: var(--work-hue);
+  box-shadow: none;
+  color: var(--card-paper);
+}
+
+.work-embed-answer {
+  width: 100%;
+  margin-top: 14px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--card-paper);
+  box-shadow: inset 0 0 0 1px var(--card-border);
+  font-size: 14px;
+  color: var(--text-primary);
+  outline: none;
+}
+
+.work-embed-answer:focus {
+  box-shadow: inset 0 0 0 1.5px var(--work-hue);
+}
+
+.work-embed-quiz-check {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--work-hue);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--card-paper);
+}
+
+.work-embed-quiz-check:disabled {
+  opacity: 0.5;
+}
+
+.work-embed-quiz-error {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--danger);
+}
+
+.work-embed-quiz-result {
+  justify-items: center;
+  padding: 28px 18px;
+  text-align: center;
+}
+
+.work-embed-quiz-result strong {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 500;
+}
+
+.work-embed-quiz-result span {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* --- "/ Reference": the search at the caret --- */
+
+.inline-reference-picker {
+  position: fixed;
+  z-index: var(--z-dropdown);
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--card-paper);
+  box-shadow:
+    0 0 0 1px var(--card-border),
+    0 4px 10px -4px rgb(52 40 28 / 0.18),
+    0 24px 48px -24px rgb(52 40 28 / 0.4);
+  transform-origin: 24px 0;
+}
+
+.inline-reference-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--card-border-soft);
+  color: var(--text-tertiary);
+}
+
+.inline-reference-search input {
+  min-width: 0;
+  flex: 1;
+  background: transparent;
+  font-size: 14.5px;
+  color: var(--text-primary);
+  outline: none;
+}
+
+.inline-reference-results {
+  display: grid;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.inline-reference-results li[role="option"] {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.inline-reference-results li[data-active] {
+  background: var(--work-tint);
+}
+
+.inline-reference-icon {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--work-tint);
+  color: color-mix(in oklab, var(--work-hue) 80%, var(--text-primary));
+}
+
+.inline-reference-results li[data-active] .inline-reference-icon {
+  background: var(--card-paper);
+}
+
+.inline-reference-name {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inline-reference-kind {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.inline-reference-none {
+  padding: 14px 10px;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}

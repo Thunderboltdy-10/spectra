@@ -456,7 +456,7 @@ export function ShareDialog({
 
         <div className="min-h-0 overflow-y-auto px-5 py-4">
           <label
-            className="text-micro font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]"
+            className="text-micro font-semibold text-[var(--text-tertiary)]"
             htmlFor="share-member-search"
           >
             Invite someone
@@ -834,7 +834,7 @@ export function ShareDialog({
                   >
                     Public access
                   </h3>
-                  <span className="rounded-full bg-[var(--bg-secondary)] px-2 py-0.5 text-micro font-medium text-[var(--text-tertiary)]">
+                  <span className="rounded-chip bg-[var(--bg-secondary)] px-2 py-0.5 text-micro font-medium text-[var(--text-tertiary)]">
                     Explicit
                   </span>
                 </div>

@@ -10,13 +10,9 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  ChevronUp,
-  Circle,
-  Copy,
   Eye,
   EyeOff,
   History,
-  ImageIcon,
   Import,
   List,
   Loader2,
@@ -24,15 +20,12 @@ import {
   PanelLeft,
   Plus,
   Radio,
-  Shuffle,
   SlidersHorizontal,
-  Trash2,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LifeForm, LifeVerdict } from "@/components/ui/life-moments";
 import { SelectField } from "@/components/ui/select";
-import { targetAttrs } from "../collaboration/target-attributes";
 import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
@@ -65,7 +58,6 @@ import {
   type PortableQuizQuestion,
 } from "../quiz/interchange";
 
-import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { SpectraStoredText } from "./spectra-rich-content";
 import { plainTextFromStored } from "../rich-content";
 import { spectraBus } from "../events";
@@ -75,7 +67,6 @@ import { regionElement, useOpenAnchor, type AnchorLanding } from "../anchors/use
 /** The semantic layer's region for the quiz's learner instructions (shared/semantic-chunks.ts). */
 const QUIZ_INSTRUCTIONS_REGION = "quiz-setting:instructions";
 import {
-  ArtifactRichTextEditor,
   Field,
   iconButtonClass,
   inputClass,
@@ -101,26 +92,9 @@ import {
 import { projectBindingsFromIr } from "../capabilities";
 import { useStudioContract } from "./artifact-studio-shell";
 import { StudioItemRail } from "./studio-item-rail";
-
-/**
- * One name per question type, used by the type control, the question list and
- * the printed sheet, so a type is never called two things in one product.
- */
-const QUIZ_TYPE_LABELS: Record<QuizQuestion["type"], string> = {
-  multiple_choice: "Multiple choice",
-  true_false: "True or false",
-  select_all: "Select all that apply",
-  ordering: "Ordering",
-  short_answer: "Short answer",
-  numeric: "Numeric",
-  fill_blank: "Fill in the blank",
-  long_response: "Long response",
-  matching: "Matching",
-};
-
-const QUIZ_TYPE_OPTIONS = (
-  Object.keys(QUIZ_TYPE_LABELS) as Array<QuizQuestion["type"]>
-).map((type) => ({ value: type, label: QUIZ_TYPE_LABELS[type] }));
+import { QuestionSheet } from "./quiz/question-sheet";
+import { QUIZ_TYPE_LABELS, retypeQuestion } from "./quiz/question-types";
+import { QuestionThumbnail } from "./quiz/question-thumbnail";
 
 /**
  * `work/registry` mode ids to the quiz's own mode vocabulary. The registry is
@@ -534,9 +508,8 @@ export function QuizStudio({
     mode === "tab",
   );
   const [draggingQuestionId, setDraggingQuestionId] = useState<string>();
-  const [questionDetailsOpen, setQuestionDetailsOpen] = useState(
-    mode === "tab",
-  );
+  // A question's extra settings fold under its sheet; opened on request.
+  const [questionDetailsOpen, setQuestionDetailsOpen] = useState(false);
   const [responseSummary, setResponseSummary] =
     useState<SpectraQuizResponseSummary>();
   const [responseSummaryError, setResponseSummaryError] = useState<string>();
@@ -760,6 +733,25 @@ export function QuizStudio({
       published: nextPublished,
     });
   }
+
+  // A new quiz arrives as one blank short answer, the shell the server can
+  // keep schema-valid. A quiz is multiple choice unless someone says
+  // otherwise, so the untouched shell becomes one the first time it opens.
+  const commitRef = useRef(commit);
+  commitRef.current = commit;
+  const shellChecked = useRef(false);
+  useEffect(() => {
+    if (shellChecked.current || !canEditQuiz) return;
+    shellChecked.current = true;
+    const [only] = questions;
+    const untouched =
+      questions.length === 1 &&
+      only?.type === "short_answer" &&
+      !String(only.prompt ?? "").trim() &&
+      !String(only.correctAnswer ?? "").trim() &&
+      !String(only.explanation ?? "").trim();
+    if (untouched) commitRef.current([{ ...only, ...retypeQuestion(only, "multiple_choice") }]);
+  }, [canEditQuiz, questions]);
 
   function commitSettings(patch: Partial<QuizSettings>) {
     const merged = { ...quizSettings, ...patch };
@@ -1769,7 +1761,7 @@ export function QuizStudio({
                   {publishIssues.length
                     ? "Resolve these before publishing"
                     : quizImportError
-                      ? "Import quarantined"
+                      ? "Couldn't import"
                       : "Interchange complete"}
                 </strong>
                 {publishIssues.length ? (
@@ -1827,7 +1819,7 @@ export function QuizStudio({
                         : "Quiz preview"}
                     </h3>
                     {practiceAttempt?.status === "in_progress" ? (
-                      <span className="rounded-chip border border-[color-mix(in_oklab,var(--accent-cyan)_34%,var(--border-default))] px-2 py-0.5 text-micro font-semibold uppercase tracking-[0.07em] text-[var(--accent-cyan)]">
+                      <span className="rounded-chip border border-[color-mix(in_oklab,var(--accent-cyan)_34%,var(--border-default))] px-2 py-0.5 text-micro font-semibold text-[var(--accent-cyan)]">
                         In progress
                       </span>
                     ) : null}
@@ -1956,7 +1948,7 @@ export function QuizStudio({
               <>
               <div>
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                  <span className="text-micro font-semibold text-[var(--text-secondary)]">
                     {practiceAttempt ? "Answer sheet" : "Questions"}
                   </span>
                   <span className="text-micro text-[var(--text-secondary)]">
@@ -2712,7 +2704,7 @@ export function QuizStudio({
                       <strong className="block font-display text-heading tabular-nums text-[var(--text-primary)]">
                         {value}
                       </strong>
-                      <span className="text-micro uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
+                      <span className="text-micro text-[var(--text-tertiary)]">
                         {label}
                       </span>
                     </div>
@@ -2763,7 +2755,7 @@ export function QuizStudio({
                             {entry.commonResponses.map((response) => (
                               <li
                                 key={response.response}
-                                className="rounded-full border border-[var(--border-default)] px-2 py-0.5 text-micro text-[var(--text-secondary)]"
+                                className="rounded-chip border border-[var(--border-default)] px-2 py-0.5 text-micro text-[var(--text-secondary)]"
                               >
                                 {response.response}
                                 <em className="ml-1 not-italic tabular-nums text-[var(--text-tertiary)]">
@@ -2828,7 +2820,7 @@ export function QuizStudio({
                           Practice {practiceAttempts.length - index}
                         </strong>
                         <span
-                          className={`rounded-full px-2 py-0.5 text-micro font-semibold uppercase tracking-[0.06em] ${attempt.status === "submitted" ? "bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-primary))] text-[var(--success)]" : "bg-[color-mix(in_oklab,var(--warning)_10%,var(--bg-primary))] text-[var(--warning)]"}`}
+                          className={`rounded-chip px-2 py-0.5 text-micro font-semibold  ${attempt.status === "submitted" ? "bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-primary))] text-[var(--success)]" : "bg-[color-mix(in_oklab,var(--warning)_10%,var(--bg-primary))] text-[var(--warning)]"}`}
                         >
                           {attempt.status === "submitted"
                             ? "Reviewed"
@@ -2892,6 +2884,7 @@ export function QuizStudio({
                     "Untitled question",
                   subtitle: `${QUIZ_TYPE_LABELS[question.type]} · ${question.points ?? 1} point${(question.points ?? 1) === 1 ? "" : "s"}`,
                   active: activeQuestion?.id === question.id,
+                  preview: <QuestionThumbnail question={question} />,
                 }))}
                 onSelect={setActiveQuestionId}
                 onAdd={canEditQuiz ? addQuestion : undefined}
@@ -2905,10 +2898,11 @@ export function QuizStudio({
             ) : null}
             <section
               data-quiz-panel="editor"
-              className="min-w-0 flex-1 overflow-auto border-[var(--border-default)] p-4"
+              className="min-w-0 flex-1 overflow-auto pb-10"
             >
               {activeQuestion ? (
-                <QuestionEditor
+                <QuestionSheet
+                  key={activeQuestion.id}
                   question={activeQuestion}
                   questionNumber={
                     questions.findIndex(
@@ -2920,6 +2914,17 @@ export function QuizStudio({
                     (question) => question.id === activeQuestion.id,
                   )}
                   aiChangedPaths={aiChangedPaths}
+                  image={{
+                    url: activeQuestion.media
+                      ? (quizAssetMap.get(activeQuestion.media.assetId)?.downloadUrl ?? undefined)
+                      : undefined,
+                    uploading: uploadingQuizMedia,
+                    error: quizMediaError,
+                    upload: (file) => void uploadQuestionMedia(file),
+                    remove: () => removeQuestionMedia(activeQuestion.id),
+                  }}
+                  detailsOpen={questionDetailsOpen}
+                  onDetailsOpenChange={setQuestionDetailsOpen}
                   onChange={(patch) => updateQuestion(activeQuestion.id, patch)}
                   onRemove={() => removeQuestion(activeQuestion.id)}
                   onDuplicate={() => {
@@ -2945,302 +2950,6 @@ export function QuizStudio({
                 />
               ) : null}
             </section>
-            {questionDetailsOpen ? (
-            <aside
-              data-quiz-panel="settings"
-              className="spectra-studio-inspector-overlay min-w-0 p-3"
-            >
-              {
-                activeQuestion ? (
-                  <div className="grid gap-3">
-                    <Field
-                      label="Difficulty"
-                      aiActive={pathTouches(
-                        aiChangedPaths,
-                        `/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/difficulty`,
-                      )}
-                      path={`/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/difficulty`}
-                    >
-                      <SelectField
-                        ariaLabel="Difficulty"
-                        size="sm"
-                        value={activeQuestion.difficulty ?? "medium"}
-                        onChange={(value) =>
-                          updateQuestion(activeQuestion.id, {
-                            difficulty: value as QuizQuestion["difficulty"],
-                          })
-                        }
-                        options={[
-                          { value: "easy", label: "Easy" },
-                          { value: "medium", label: "Medium" },
-                          { value: "hard", label: "Hard" },
-                        ]}
-                        triggerClassName="w-full"
-                      />
-                    </Field>
-                    <Field
-                      label="Points"
-                      aiActive={pathTouches(
-                        aiChangedPaths,
-                        `/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/points`,
-                      )}
-                      path={`/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/points`}
-                    >
-                      <input
-                        type="number"
-                        value={activeQuestion.points ?? 1}
-                        min={1}
-                        onChange={(event) =>
-                          updateQuestion(activeQuestion.id, {
-                            points: Number(event.target.value),
-                          })
-                        }
-                        className={inputClass()}
-                      />
-                    </Field>
-                    <Field
-                      label="Time (seconds)"
-                      aiActive={pathTouches(
-                        aiChangedPaths,
-                        `/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/timeLimitSeconds`,
-                      )}
-                      path={`/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/timeLimitSeconds`}
-                    >
-                      <input
-                        type="number"
-                        value={activeQuestion.timeLimitSeconds ?? 90}
-                        min={0}
-                        onChange={(event) =>
-                          updateQuestion(activeQuestion.id, {
-                            timeLimitSeconds: Number(event.target.value),
-                          })
-                        }
-                        className={inputClass()}
-                      />
-                    </Field>
-                    <Field
-                      label="Bloom's taxonomy"
-                      aiActive={pathTouches(
-                        aiChangedPaths,
-                        `/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/bloomLevel`,
-                      )}
-                      path={`/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/bloomLevel`}
-                    >
-                      <SelectField
-                        ariaLabel="Bloom's taxonomy level"
-                        size="sm"
-                        value={activeQuestion.bloomLevel ?? "remember"}
-                        onChange={(value) =>
-                          updateQuestion(activeQuestion.id, {
-                            bloomLevel: value as NonNullable<
-                              QuizQuestion["bloomLevel"]
-                            >,
-                          })
-                        }
-                        options={[
-                          { value: "remember", label: "Remember" },
-                          { value: "understand", label: "Understand" },
-                          { value: "apply", label: "Apply" },
-                          { value: "analyze", label: "Analyze" },
-                          { value: "evaluate", label: "Evaluate" },
-                          { value: "create", label: "Create" },
-                        ]}
-                        triggerClassName="w-full"
-                      />
-                    </Field>
-                    <Field label="Standards (optional)">
-                      <div className="spectra-quiz-standard-editor">
-                        {(activeQuestion.standards ?? []).map((standard) => (
-                          <span key={standard}>
-                            {standard}
-                            <button
-                              type="button"
-                              aria-label={`Remove ${standard}`}
-                              onClick={() =>
-                                updateQuestion(activeQuestion.id, {
-                                  standards: (
-                                    activeQuestion.standards ?? []
-                                  ).filter((item) => item !== standard),
-                                })
-                              }
-                            >
-                              <X className="h-2.5 w-2.5" />
-                            </button>
-                          </span>
-                        ))}
-                        <input
-                          aria-label="Add standard"
-                          placeholder="+ Add standard"
-                          onKeyDown={(event) => {
-                            if (event.key !== "Enter" && event.key !== ",")
-                              return;
-                            event.preventDefault();
-                            const value = event.currentTarget.value
-                              .trim()
-                              .replace(/,$/, "");
-                            if (!value) return;
-                            updateQuestion(activeQuestion.id, {
-                              standards: Array.from(
-                                new Set([
-                                  ...(activeQuestion.standards ?? []),
-                                  value,
-                                ]),
-                              ),
-                            });
-                            event.currentTarget.value = "";
-                          }}
-                        />
-                      </div>
-                    </Field>
-                    <details className="spectra-quiz-advanced">
-                      <summary>
-                        <SlidersHorizontal className="h-3.5 w-3.5" />
-                        Advanced placement
-                        <ChevronDown className="ml-auto h-3.5 w-3.5" />
-                      </summary>
-                      <div>
-                        <Field label="Section">
-                          <input
-                            value={activeQuestion.section ?? ""}
-                            onChange={(event) =>
-                              updateQuestion(activeQuestion.id, {
-                                section: event.target.value || undefined,
-                              })
-                            }
-                            className={inputClass()}
-                            placeholder="e.g. Foundations"
-                          />
-                        </Field>
-                        <Field label="Random pool">
-                          <input
-                            value={activeQuestion.poolId ?? ""}
-                            onChange={(event) =>
-                              updateQuestion(activeQuestion.id, {
-                                poolId: event.target.value || undefined,
-                                poolDrawCount: event.target.value
-                                  ? (activeQuestion.poolDrawCount ?? 1)
-                                  : undefined,
-                              })
-                            }
-                            className={inputClass()}
-                            placeholder="e.g. glycolysis-core"
-                          />
-                        </Field>
-                        {activeQuestion.poolId ? (
-                          <Field label="Questions drawn from pool">
-                            <input
-                              type="number"
-                              min={1}
-                              max={100}
-                              value={activeQuestion.poolDrawCount ?? 1}
-                              onChange={(event) =>
-                                updateQuestion(activeQuestion.id, {
-                                  poolDrawCount: Math.max(
-                                    1,
-                                    Math.min(
-                                      100,
-                                      Number(event.target.value) || 1,
-                                    ),
-                                  ),
-                                })
-                              }
-                              className={inputClass()}
-                            />
-                          </Field>
-                        ) : null}
-                        <p>
-                          Questions with the same pool name share one draw
-                          count. Ungrouped questions always appear.
-                        </p>
-                      </div>
-                    </details>
-                    <div className="spectra-quiz-media">
-                      {activeQuestion.media ? (
-                        <>
-                          {quizAssetMap.get(activeQuestion.media.assetId)
-                            ?.downloadUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={
-                                quizAssetMap.get(activeQuestion.media.assetId)!
-                                  .downloadUrl!
-                              }
-                              alt={activeQuestion.media.altText ?? ""}
-                            />
-                          ) : (
-                            <div data-missing="true">
-                              <ImageIcon className="h-4 w-4" /> Media
-                              unavailable
-                            </div>
-                          )}
-                          <Field label="Image description">
-                            <input
-                              value={activeQuestion.media.altText ?? ""}
-                              onChange={(event) =>
-                                updateQuestion(activeQuestion.id, {
-                                  media: {
-                                    ...activeQuestion.media!,
-                                    altText: event.target.value,
-                                  },
-                                })
-                              }
-                              className={inputClass()}
-                              placeholder="Describe the image for learners who cannot see it"
-                            />
-                          </Field>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              removeQuestionMedia(activeQuestion.id)
-                            }
-                          >
-                            <Trash2 className="h-3.5 w-3.5" /> Remove image
-                          </button>
-                        </>
-                      ) : (
-                        <label
-                          onDragOver={(event) => event.preventDefault()}
-                          onDrop={(event) => {
-                            event.preventDefault();
-                            const file = event.dataTransfer.files?.[0];
-                            if (file?.type.startsWith("image/"))
-                              void uploadQuestionMedia(file);
-                          }}
-                        >
-                          {uploadingQuizMedia ? (
-                            <>
-                              <Loader2 className="mx-auto mb-2 h-4 w-4 animate-spin" />
-                              Uploading image…
-                            </>
-                          ) : (
-                            <>
-                              <span>Drag and drop image</span>
-                              <span>or</span>
-                              <strong>Browse</strong>
-                            </>
-                          )}
-                          <input
-                            type="file"
-                            accept="image/*"
-                            hidden
-                            disabled={uploadingQuizMedia}
-                            onChange={(event) => {
-                              const file = event.currentTarget.files?.[0];
-                              if (file) void uploadQuestionMedia(file);
-                              event.currentTarget.value = "";
-                            }}
-                          />
-                        </label>
-                      )}
-                      {quizMediaError ? (
-                        <p role="status">{quizMediaError}</p>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null
-              }
-            </aside>
-            ) : null}
           </div>
         )}
         <section className="spectra-quiz-print-sheet" aria-hidden="true">
@@ -3324,736 +3033,3 @@ export function QuizStudio({
   );
 }
 
-function QuestionEditor({
-  question,
-  questionNumber,
-  questionCount,
-  questionIndex,
-  aiChangedPaths = [],
-  onChange,
-  onRemove,
-  onDuplicate,
-  onMove,
-}: {
-  question: QuizQuestion;
-  questionNumber: number;
-  questionCount: number;
-  questionIndex: number;
-  aiChangedPaths?: string[];
-  onChange: (patch: Partial<QuizQuestion>) => void;
-  onRemove: () => void;
-  onDuplicate: () => void;
-  /** Moves this question to `toIndex`. Bounds are enforced by the caller. */
-  onMove: (toIndex: number) => void;
-}) {
-  const [tagDraft, setTagDraft] = useState("");
-  const qPath = `/questions/${questionIndex}`;
-  const aiField = (suffix: string) =>
-    pathTouches(aiChangedPaths, `${qPath}/${suffix}`);
-  /** Ways this question's answer key cannot be resolved as written. */
-  const answerKeyProblems = (() => {
-    if (
-      !["multiple_choice", "true_false", "select_all", "ordering"].includes(
-        question.type,
-      )
-    )
-      return [];
-    const problems: string[] = [];
-    const filled = question.options.filter((option) => option.trim());
-    const duplicate = filled.find(
-      (option, index) =>
-        filled.findIndex(
-          (candidate) => candidate.trim() === option.trim(),
-        ) !== index,
-    );
-    if (duplicate)
-      problems.push(
-        `Two options both say "${duplicate.trim()}". The answer key cannot tell them apart, so make one of them different.`,
-      );
-    if (question.options.length !== filled.length)
-      problems.push(
-        "An empty option cannot be marked correct. Write it or remove it.",
-      );
-    if (question.type === "select_all") {
-      if (!(question.correctAnswers ?? []).length)
-        problems.push("Mark at least one option correct.");
-    } else if (question.type !== "ordering" && !question.correctAnswer?.trim())
-      problems.push("Mark the correct option.");
-    return problems;
-  })();
-
-  function addTag() {
-    const tag = tagDraft.trim().replace(/^#+/, "");
-    if (!tag) return;
-    if (
-      !(question.tags ?? []).some(
-        (candidate) => candidate.toLowerCase() === tag.toLowerCase(),
-      )
-    ) {
-      onChange({ tags: [...(question.tags ?? []), tag] });
-    }
-    setTagDraft("");
-  }
-
-  function updateOption(index: number, value: string) {
-    const options = [...question.options];
-    const previous = options[index] ?? "";
-    options[index] = value;
-    onChange({
-      options,
-      correctAnswer:
-        question.correctAnswer === previous ? value : question.correctAnswer,
-      correctAnswers: (question.correctAnswers ?? []).map((answer) =>
-        answer === previous ? value : answer,
-      ),
-    });
-  }
-  return (
-    <div className="spectra-quiz-question-editor" data-anchor-region={question.id}>
-      <div className="mb-4 flex items-center justify-between">
-        {/* Which question you are editing. The workbar already states the
-            position in the set, so this does not repeat "of N". */}
-        <div className="text-ui font-semibold text-[var(--text-primary)]">
-          Question {questionNumber}
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            className={iconButtonClass()}
-            onClick={() => onMove(questionIndex - 1)}
-            disabled={questionIndex === 0}
-            aria-label="Move question earlier"
-            title="Move question earlier"
-          >
-            <ChevronUp className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            className={iconButtonClass()}
-            onClick={() => onMove(questionIndex + 1)}
-            disabled={questionIndex >= questionCount - 1}
-            aria-label="Move question later"
-            title="Move question later"
-          >
-            <ChevronDown className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            className={iconButtonClass()}
-            onClick={onDuplicate}
-            aria-label="Duplicate question"
-          >
-            <Copy className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            className={iconButtonClass()}
-            onClick={onRemove}
-            aria-label="Remove question"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-      <div className="spectra-quiz-type-row">
-        <span>Type</span>
-        <div
-          className="min-w-0"
-          data-ai-region={aiRegionAttr(aiField("type"))}
-          {...targetAttrs(`${qPath}/type`)}
-        >
-          <SelectField
-            ariaLabel="Question type"
-            size="sm"
-            value={question.type}
-            onChange={(value) => {
-              const type = value as QuizQuestion["type"];
-              onChange({
-                type,
-                options:
-                  type === "true_false"
-                    ? ["True", "False"]
-                    : ["multiple_choice", "select_all", "ordering"].includes(
-                          type,
-                        ) && question.options.length === 0
-                      ? ["", "", "", ""]
-                      : question.options,
-                optionIds:
-                  type === "true_false"
-                    ? [id("option"), id("option")]
-                    : ["multiple_choice", "select_all", "ordering"].includes(
-                          type,
-                        ) && question.options.length === 0
-                      ? [id("option"), id("option"), id("option"), id("option")]
-                      : question.optionIds,
-                correctAnswers:
-                  type === "select_all" ||
-                  type === "ordering" ||
-                  type === "fill_blank"
-                    ? (question.correctAnswers ?? [])
-                    : [],
-                matchingPairs:
-                  type === "matching" &&
-                  (question.matchingPairs ?? []).length < 2
-                    ? [
-                        { id: id("pair"), left: "", right: "" },
-                        { id: id("pair"), left: "", right: "" },
-                      ]
-                    : question.matchingPairs,
-              });
-            }}
-            options={QUIZ_TYPE_OPTIONS}
-            triggerClassName="w-full"
-          />
-        </div>
-      </div>
-      <div className="mt-2">
-        <Field
-          label="Question"
-          aiActive={aiField("prompt")}
-          path={`${qPath}/prompt`}
-        >
-          <ArtifactRichTextEditor
-            value={question.prompt}
-            onChange={(prompt) => onChange({ prompt })}
-            path={`${qPath}/prompt`}
-            placeholder="Write a clear question"
-            label="Question"
-          />
-        </Field>
-      </div>
-      {["multiple_choice", "true_false", "select_all", "ordering"].includes(
-        question.type,
-      ) ? (
-        <section className="mt-4">
-          <div className="mb-2 flex items-center justify-between">
-            <h4 className="text-caption font-semibold text-[var(--text-secondary)]">
-              Answer options
-            </h4>
-          </div>
-          <div className="grid gap-1">
-            {question.options.map((option, index) => (
-              <div
-                key={question.optionIds[index] ?? index}
-                className="grid grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2"
-              >
-                {question.type === "ordering" ? (
-                  <span className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border-default)] text-micro font-semibold text-[var(--text-secondary)]">
-                    {index + 1}
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    className={`flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
-                      question.type === "select_all"
-                        ? (question.correctAnswers ?? []).includes(option) &&
-                          option
-                          ? "border-[var(--success)] bg-[var(--success)] text-white"
-                          : "border-[var(--border-default)] text-[var(--text-tertiary)]"
-                        : question.correctAnswer === option && option
-                          ? "border-[var(--success)] text-[var(--success)]"
-                          : "border-[var(--border-default)] text-[var(--text-tertiary)]"
-                    }`}
-                    onClick={() => {
-                      if (!option) return;
-                      if (question.type === "select_all") {
-                        const current = question.correctAnswers ?? [];
-                        onChange({
-                          correctAnswers: current.includes(option)
-                            ? current.filter((answer) => answer !== option)
-                            : [...current, option],
-                        });
-                      } else onChange({ correctAnswer: option });
-                    }}
-                    {...targetAttrs(
-                      `${qPath}/${
-                        question.type === "select_all"
-                          ? "correctAnswers"
-                          : "correctAnswer"
-                      }`,
-                      `option:${index}`,
-                      "toggle",
-                    )}
-                    aria-label={`${
-                      question.type === "select_all" &&
-                      (question.correctAnswers ?? []).includes(option)
-                        ? "Unmark"
-                        : "Mark"
-                    } option ${index + 1} correct`}
-                  >
-                    {(question.type === "select_all"
-                      ? (question.correctAnswers ?? []).includes(option)
-                      : question.correctAnswer === option) && option ? (
-                      <Check className="h-3 w-3" />
-                    ) : (
-                      <Circle className="h-3 w-3" />
-                    )}
-                  </button>
-                )}
-                <input
-                  value={option}
-                  onChange={(event) => updateOption(index, event.target.value)}
-                  readOnly={question.type === "true_false"}
-                  data-ai-region={aiRegionAttr(aiField(`options/${index}`))}
-                  {...targetAttrs(`${qPath}/options/${index}`)}
-                  className={`${inputClass()} ${
-                    question.type === "true_false"
-                      ? "cursor-default bg-[var(--bg-secondary)] text-[var(--text-secondary)]"
-                      : ""
-                  }`}
-                  placeholder={`Option ${index + 1}`}
-                />
-                <div className="flex items-center gap-1">
-                  {question.type === "ordering" ? (
-                    <>
-                      <button
-                        type="button"
-                        className={iconButtonClass()}
-                        disabled={index === 0}
-                        onClick={() => {
-                          const options = [...question.options];
-                          const optionIds = [...question.optionIds];
-                          [options[index - 1], options[index]] = [
-                            options[index]!,
-                            options[index - 1]!,
-                          ];
-                          [optionIds[index - 1], optionIds[index]] = [
-                            optionIds[index]!,
-                            optionIds[index - 1]!,
-                          ];
-                          onChange({
-                            options,
-                            optionIds,
-                            correctAnswers: options,
-                          });
-                        }}
-                        aria-label={`Move option ${index + 1} earlier`}
-                      >
-                        <ChevronDown className="h-4 w-4 rotate-180" />
-                      </button>
-                      <button
-                        type="button"
-                        className={iconButtonClass()}
-                        disabled={index === question.options.length - 1}
-                        onClick={() => {
-                          const options = [...question.options];
-                          const optionIds = [...question.optionIds];
-                          [options[index], options[index + 1]] = [
-                            options[index + 1]!,
-                            options[index]!,
-                          ];
-                          [optionIds[index], optionIds[index + 1]] = [
-                            optionIds[index + 1]!,
-                            optionIds[index]!,
-                          ];
-                          onChange({
-                            options,
-                            optionIds,
-                            correctAnswers: options,
-                          });
-                        }}
-                        aria-label={`Move option ${index + 1} later`}
-                      >
-                        <ChevronDown className="h-4 w-4" />
-                      </button>
-                    </>
-                  ) : null}
-                  {question.type !== "true_false" ? (
-                    <button
-                      type="button"
-                      className={iconButtonClass()}
-                      onClick={() => {
-                        const removed = question.options[index];
-                        const options = question.options.filter(
-                          (_, candidate) => candidate !== index,
-                        );
-                        const optionIds = question.optionIds.filter(
-                          (_, candidate) => candidate !== index,
-                        );
-                        onChange({
-                          options,
-                          optionIds,
-                          correctAnswer:
-                            question.correctAnswer === removed
-                              ? ""
-                              : question.correctAnswer,
-                          correctAnswers: (
-                            question.correctAnswers ?? []
-                          ).filter((answer) => answer !== removed),
-                        });
-                      }}
-                      aria-label={`Remove option ${index + 1}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            ))}
-          </div>
-          {question.type !== "true_false" ? (
-            <div className="mt-2 flex items-center gap-2">
-              <button
-                type="button"
-                className={smallActionClass()}
-                onClick={() =>
-                  onChange({
-                    options: [...question.options, ""],
-                    optionIds: [...question.optionIds, id("option")],
-                  })
-                }
-              >
-                <Plus className="h-3.5 w-3.5" /> Add option
-              </button>
-              {question.type !== "ordering" ? (
-                <button
-                  type="button"
-                  className={smallActionClass()}
-                  onClick={() => {
-                    const paired = question.options.map((option, index) => ({
-                      option,
-                      optionId: question.optionIds[index] ?? id("option"),
-                    }));
-                    for (let index = paired.length - 1; index > 0; index -= 1) {
-                      const target = Math.floor(Math.random() * (index + 1));
-                      [paired[index], paired[target]] = [
-                        paired[target]!,
-                        paired[index]!,
-                      ];
-                    }
-                    onChange({
-                      options: paired.map(({ option }) => option),
-                      optionIds: paired.map(({ optionId }) => optionId),
-                    });
-                  }}
-                >
-                  <Shuffle className="h-3.5 w-3.5" /> Shuffle options
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-          <p className="mt-2 text-micro text-[var(--text-tertiary)]">
-            {question.type === "ordering"
-              ? "The order shown above is the canonical answer."
-              : question.type === "select_all"
-                ? "Select every correct option using the marker beside it."
-                : "Select the correct option using its marker."}
-          </p>
-          {/* The answer key is matched on the option's text, so two options that
-              read the same are genuinely undecidable and a blank one can never
-              be the answer. Both are said here, while the author can still fix
-              them, rather than only at publish. */}
-          {answerKeyProblems.length ? (
-            <ul className="mt-2 space-y-1 text-micro leading-5 text-[var(--warning)]">
-              {answerKeyProblems.map((problem) => (
-                <li key={problem} className="flex items-start gap-1.5">
-                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <span>{problem}</span>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </section>
-      ) : question.type === "matching" ? (
-        <section className="mt-4">
-          <div className="mb-2 flex items-center justify-between">
-            <h4 className="text-caption font-semibold text-[var(--text-secondary)]">
-              Matching pairs
-            </h4>
-            <button
-              type="button"
-              className={smallActionClass()}
-              onClick={() =>
-                onChange({
-                  matchingPairs: [
-                    ...(question.matchingPairs ?? []),
-                    { id: id("pair"), left: "", right: "" },
-                  ],
-                })
-              }
-            >
-              <Plus className="h-3.5 w-3.5" /> Add pair
-            </button>
-          </div>
-          <div className="space-y-2">
-            {(question.matchingPairs ?? []).map((pair, index) => (
-              <div
-                key={pair.id}
-                className="grid grid-cols-[minmax(0,1fr)_18px_minmax(0,1fr)_30px] items-center gap-2"
-              >
-                <input
-                  value={pair.left}
-                  onChange={(event) =>
-                    onChange({
-                      matchingPairs: (question.matchingPairs ?? []).map(
-                        (candidate) =>
-                          candidate.id === pair.id
-                            ? { ...candidate, left: event.target.value }
-                            : candidate,
-                      ),
-                    })
-                  }
-                  data-ai-region={aiRegionAttr(
-                    aiField(`matchingPairs/${index}/left`) ||
-                      aiField(`matchingPairs/${index}`),
-                  )}
-                  {...targetAttrs(`${qPath}/matchingPairs/${index}/left`)}
-                  className={inputClass()}
-                  placeholder={`Prompt ${index + 1}`}
-                />
-                <span className="text-center text-[var(--text-tertiary)]">
-                  →
-                </span>
-                <input
-                  value={pair.right ?? ""}
-                  onChange={(event) =>
-                    onChange({
-                      matchingPairs: (question.matchingPairs ?? []).map(
-                        (candidate) =>
-                          candidate.id === pair.id
-                            ? { ...candidate, right: event.target.value }
-                            : candidate,
-                      ),
-                    })
-                  }
-                  data-ai-region={aiRegionAttr(
-                    aiField(`matchingPairs/${index}/right`) ||
-                      aiField(`matchingPairs/${index}`),
-                  )}
-                  {...targetAttrs(`${qPath}/matchingPairs/${index}/right`)}
-                  className={inputClass()}
-                  placeholder={`Match ${index + 1}`}
-                />
-                <button
-                  type="button"
-                  className={iconButtonClass()}
-                  disabled={(question.matchingPairs ?? []).length <= 2}
-                  onClick={() =>
-                    onChange({
-                      matchingPairs: (question.matchingPairs ?? []).filter(
-                        (candidate) => candidate.id !== pair.id,
-                      ),
-                    })
-                  }
-                  aria-label={`Remove matching pair ${index + 1}`}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-          <p className="mt-2 text-micro text-[var(--text-tertiary)]">
-            Matches are shuffled in each private practice attempt. The right
-            side remains hidden from learners until feedback is released.
-          </p>
-        </section>
-      ) : question.type === "long_response" ? (
-        <div className="mt-4">
-          <Field
-            label="Formative rubric / review guidance"
-            aiActive={aiField("rubric")}
-            path={`${qPath}/rubric`}
-          >
-            <textarea
-              value={question.rubric ?? ""}
-              onChange={(event) => onChange({ rubric: event.target.value })}
-              className={textareaClass("min-h-[110px]")}
-              placeholder="What should a strong response include?"
-            />
-          </Field>
-          <p className="mt-2 text-micro leading-4 text-[var(--text-tertiary)]">
-            Long responses are not auto-scored. Learners receive this guidance
-            as advisory formative feedback.
-          </p>
-        </div>
-      ) : question.type === "numeric" ? (
-        <div
-          className="mt-4 grid gap-3"
-          style={{ gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))" }}
-        >
-          <Field
-            label="Expected number"
-            aiActive={aiField("correctAnswer")}
-            path={`${qPath}/correctAnswer`}
-          >
-            <input
-              type="number"
-              value={question.correctAnswer ?? ""}
-              onChange={(event) =>
-                onChange({ correctAnswer: event.target.value })
-              }
-              className={inputClass()}
-              placeholder="42"
-            />
-          </Field>
-          <Field
-            label="Accepted tolerance (±)"
-            aiActive={aiField("numericTolerance")}
-            path={`${qPath}/numericTolerance`}
-          >
-            <input
-              type="number"
-              min={0}
-              step="any"
-              value={question.numericTolerance ?? 0}
-              onChange={(event) =>
-                onChange({
-                  numericTolerance: Math.max(
-                    0,
-                    Number(event.target.value) || 0,
-                  ),
-                })
-              }
-              className={inputClass()}
-              placeholder="0"
-            />
-          </Field>
-        </div>
-      ) : (
-        <div className="mt-4">
-          <Field
-            label={
-              question.type === "fill_blank"
-                ? "Primary accepted answer"
-                : "Expected answer"
-            }
-            aiActive={aiField("correctAnswer")}
-            path={`${qPath}/correctAnswer`}
-          >
-            <input
-              value={question.correctAnswer ?? ""}
-              onChange={(event) =>
-                onChange({ correctAnswer: event.target.value })
-              }
-              className={inputClass()}
-              placeholder={
-                question.type === "fill_blank"
-                  ? "Text that completes the blank"
-                  : "Short answer key"
-              }
-            />
-          </Field>
-          {question.type === "fill_blank" ? (
-            <div className="mt-3">
-              <Field
-                label="Other accepted answers"
-                aiActive={aiField("correctAnswers")}
-                path={`${qPath}/correctAnswers`}
-              >
-                <input
-                  value={(question.correctAnswers ?? []).join("; ")}
-                  onChange={(event) =>
-                    onChange({
-                      correctAnswers: event.target.value
-                        .split(";")
-                        .map((answer) => answer.trim())
-                        .filter(Boolean),
-                    })
-                  }
-                  className={inputClass()}
-                  placeholder="Alternative spelling; equivalent phrase"
-                />
-              </Field>
-            </div>
-          ) : null}
-        </div>
-      )}
-      <div className="mt-4">
-        <Field
-          label="Explanation"
-          aiActive={aiField("explanation")}
-          path={`${qPath}/explanation`}
-        >
-          <ArtifactRichTextEditor
-            value={question.explanation ?? ""}
-            format="markdown"
-            onChange={(explanation) => onChange({ explanation })}
-            path={`${qPath}/explanation`}
-            placeholder="Optional answer explanation"
-            label="Explanation"
-          />
-        </Field>
-      </div>
-      <div className="mt-4">
-        <Field
-          label="Tags / topics"
-          aiActive={aiField("tags")}
-          path={`${qPath}/tags`}
-        >
-          <div className="spectra-quiz-tag-editor">
-            {(question.tags ?? []).map((tag) => (
-              <span key={tag}>
-                {tag}
-                <button
-                  type="button"
-                  aria-label={`Remove ${tag} tag`}
-                  onClick={() =>
-                    onChange({
-                      tags: (question.tags ?? []).filter(
-                        (item) => item !== tag,
-                      ),
-                    })
-                  }
-                >
-                  <X className="h-2.5 w-2.5" />
-                </button>
-              </span>
-            ))}
-            <input
-              value={tagDraft}
-              onChange={(event) => setTagDraft(event.target.value)}
-              onBlur={addTag}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === ",") {
-                  event.preventDefault();
-                  addTag();
-                }
-              }}
-              placeholder="+ Add tag"
-            />
-          </div>
-        </Field>
-      </div>
-      <details className="spectra-quiz-content-advanced mt-4">
-        <summary>
-          <SlidersHorizontal className="h-3.5 w-3.5" />
-          Feedback and source details
-          <ChevronDown className="ml-auto h-3.5 w-3.5" />
-        </summary>
-        <div className="grid gap-4 pt-3">
-          <Field
-            label="Formative feedback / next step"
-            aiActive={aiField("feedback")}
-            path={`${qPath}/feedback`}
-          >
-            <textarea
-              value={question.feedback ?? ""}
-              onChange={(event) => onChange({ feedback: event.target.value })}
-              className={textareaClass("min-h-[76px]")}
-              placeholder="Offer a useful next step without turning practice into a grade."
-            />
-          </Field>
-          <Field
-            label="Sources / provenance"
-            aiActive={aiField("sourceRefs")}
-            path={`${qPath}/sourceRefs`}
-          >
-            <input
-              value={(question.sourceRefs ?? []).join(", ")}
-              onChange={(event) =>
-                onChange({
-                  sourceRefs: event.target.value
-                    .split(",")
-                    .map((item) => item.trim())
-                    .filter(Boolean),
-                })
-              }
-              className={inputClass()}
-              placeholder="Textbook p. 42, class notes"
-            />
-          </Field>
-        </div>
-      </details>
-    </div>
-  );
-}

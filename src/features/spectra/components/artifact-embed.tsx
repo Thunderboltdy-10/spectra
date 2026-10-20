@@ -1,566 +1,28 @@
 "use client";
 
-import { ArrowUpRight, Check, ChevronLeft, RotateCw, AlertCircle, CalendarDays, ChevronRight, FileQuestion, LockKeyhole, Maximize2, Minimize2, Pencil, Pin, Radio, Send, X } from "@/components/icons/glyph-icons";
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { ArrowUpRight, Check, RotateCw, AlertCircle, FileQuestion, LockKeyhole, Maximize2, Minimize2, Pencil, Pin, Plus, Radio, Send, X } from "@/components/icons/glyph-icons";
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import type { SpectraArtifactEmbed } from "../data/api";
 import { workTypeMeta } from "./artifact-card";
-import { LiveCodeRuntime } from "./live-code-runtime";
-import { PublishedCodeRuntime } from "./published-code-runtime";
-import { isArtifactTypeKey } from "../artifacts/registry";
-import { getWorkReferenceContract, validateReferenceView } from "../references";
-import { embedCapabilityEnabled } from "../capabilities";
+import { workCardStyle } from "./work-card";
 import { useSpectraMotion } from "../motion/motion-level";
 import { transitionFor } from "../motion/grammar";
-import { ArtifactEmbedQuiz } from "./artifact-embed-quiz";
 import { RetainedPinRecovery } from "./retained-pin-recovery";
 import { shouldMountArtifactEmbedRuntime } from "./artifact-embed-runtime";
-import { sheetCellEntries } from "../../../../shared/sheet-cells";
-import { plainTextFromStored } from "../rich-content";
-import { SpectraStoredText } from "./spectra-rich-content";
+import { EmbedFace } from "./artifact-embed-faces";
+import { OverflowMenu, type OverflowItem } from "@/components/ui/dropdown-menu";
 
-/** A card face as its author wrote it: formatting, lists and math intact. */
-function EmbedCardFace({ value, className }: { value: unknown; className: string }) {
-  return (
-    <SpectraStoredText
-      value={typeof value === "string" ? value : textFrom(value)}
-      fallback="Empty card"
-      className={className}
-    />
-  );
-}
+export { whiteboardPreviewNodes, type WhiteboardPreviewNode } from "./artifact-embed-faces";
 
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function records(value: unknown) {
-  return Array.isArray(value) ? value.map(record) : [];
-}
-
-/* Rich fields (quiz prompts, option text, card faces) are stored as HTML or
-   Markdown by their studios. A summary reads them as words through the shared
-   model — never injected markup and never the raw tags. */
-function textFrom(value: unknown, limit = 360): string {
-  if (typeof value === "string")
-    return (
-      /<[a-z!/][^>]*>/i.test(value)
-        ? plainTextFromStored(value).replace(/\s+/g, " ")
-        : value
-    ).slice(0, limit);
-  if (Array.isArray(value))
-    return value
-      .map((entry) => textFrom(entry, limit))
-      .filter(Boolean)
-      .join(" · ")
-      .slice(0, limit);
-  if (value && typeof value === "object")
-    return Object.values(value as Record<string, unknown>)
-      .map((entry) => textFrom(entry, limit))
-      .filter(Boolean)
-      .join(" ")
-      .slice(0, limit);
-  return value === undefined || value === null
-    ? ""
-    : String(value).slice(0, limit);
-}
-
-function firstDocumentImage(value: unknown, depth = 0): Record<string, unknown> | undefined {
-  if (depth > 12 || value === null || value === undefined) return undefined;
-  if (Array.isArray(value)) {
-    for (const child of value) {
-      const image = firstDocumentImage(child, depth + 1);
-      if (image) return image;
-    }
-    return undefined;
-  }
-  if (typeof value !== "object") return undefined;
-  const candidate = value as Record<string, unknown>;
-  const attrs = record(candidate.attrs);
-  if (
-    candidate.kind === "image" &&
-    typeof candidate.assetId === "string"
-  )
-    return candidate;
-  if (candidate.type === "image" && typeof attrs.assetId === "string")
-    return { ...attrs, altText: attrs.alt ?? "" };
-  for (const child of Object.values(candidate)) {
-    const image = firstDocumentImage(child, depth + 1);
-    if (image) return image;
-  }
-  return undefined;
-}
-
-export type WhiteboardPreviewNode = {
-  id: string;
-  label: string;
-  /** Percent of the frame, from the node's place on the board. */
-  left: number;
-  top: number;
-};
-
-const finite = (value: unknown): value is number =>
-  typeof value === "number" && Number.isFinite(value);
-
-/**
- * A board preview keeps the board's own arrangement: each node sits where it
- * sits on the board's current page, scaled into the frame. The preview used
- * to scatter nodes by their index, so a flow chart read as confetti and two
- * nodes side by side could land on opposite corners.
+/*
+ * An embedded work is the same index card the shelf lays out (LIBRARY.md,
+ * "The shelf"), set into the page: its kind's tab, its name, and its face,
+ * which here is the work itself and works where it sits (artifact-embed-faces).
+ * A click on the face opens the work beside the page, a double-click edits it
+ * in place where the type allows (EDITORS.md, "Embeds"). The card's own
+ * controls stay quiet until the reader comes near it.
  */
-export function whiteboardPreviewNodes(
-  content: Record<string, unknown>,
-  limit: number,
-): WhiteboardPreviewNode[] {
-  const all = records(content.nodes).filter((node) => node.hidden !== true);
-  const viewportPage = record(content.viewport).pageId;
-  const page =
-    typeof viewportPage === "string"
-      ? viewportPage
-      : records(content.pages)[0]?.id;
-  const onPage =
-    typeof page === "string" && all.some((node) => node.pageId === page)
-      ? all.filter((node) => node.pageId === page)
-      : all;
-  const nodes = onPage.slice(0, limit);
-  const placed = nodes.filter((node) => finite(node.x) && finite(node.y));
-  const minX = Math.min(...placed.map((node) => node.x as number));
-  const minY = Math.min(...placed.map((node) => node.y as number));
-  const maxX = Math.max(...placed.map((node) => node.x as number));
-  const maxY = Math.max(...placed.map((node) => node.y as number));
-  const spanX = maxX - minX;
-  const spanY = maxY - minY;
-  return nodes.map((node, index) => {
-    const label =
-      textFrom(node.content, 70) || String(node.type ?? "Node");
-    const id = String(node.id ?? index);
-    if (!finite(node.x) || !finite(node.y))
-      return {
-        id,
-        label,
-        left: 8 + ((index * 23) % 70),
-        top: 10 + ((index * 31) % 68),
-      };
-    // 6–76% across and 8–72% down leaves room for the node's own box.
-    const left = spanX > 0 ? 6 + ((node.x - minX) / spanX) * 70 : 40;
-    const top = spanY > 0 ? 8 + ((node.y - minY) / spanY) * 64 : 40;
-    return {
-      id,
-      label,
-      left: Math.round(left * 10) / 10,
-      top: Math.round(top * 10) / 10,
-    };
-  });
-}
-
-function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
-  const source = embed.source;
-  const type = source?.blueprintKey;
-  const content = record(embed.source?.snapshot?.content);
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [revealed, setRevealed] = useState(false);
-  const effectiveInteraction = embed.effectiveInteraction ?? embed.interaction;
-  if (!type || !source || !isArtifactTypeKey(type)) return null;
-  const contract = getWorkReferenceContract(type);
-  const requestedView =
-    typeof embed.displayPreferences?.view === "string"
-      ? embed.displayPreferences.view
-      : undefined;
-  const targetKind =
-    contract.targets.find(
-      (target) =>
-        !requestedView ||
-        (target.views as readonly string[]).includes(requestedView),
-    )?.kind ?? contract.targets[0]!.kind;
-  const activeView = validateReferenceView(type, targetKind, requestedView)
-    ? requestedView
-    : contract.targets[0]!.views[0];
-
-  if (type === "document") {
-    const blocks = records(content.blocks).slice(
-      0,
-      embed.mode === "compact" ? 2 : 8,
-    );
-    const image = firstDocumentImage(content);
-    return (
-      <div className="space-y-2.5">
-        {blocks.map((block, index) => (
-          <p
-            key={String(block.id ?? index)}
-            className={
-              block.type === "heading"
-                ? "font-display text-editor font-semibold text-[var(--text-primary)]"
-                : "text-caption leading-5 text-[var(--text-secondary)]"
-            }
-          >
-            {textFrom(block.text ?? block.content) || "Empty block"}
-          </p>
-        ))}
-        {image ? (
-          <figure className="overflow-hidden rounded-card border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2">
-            {/* The authenticated asset endpoint has no stable intrinsic dimensions; keep the existing bounded preview. */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={`/api/spectra/assets/content?assetId=${encodeURIComponent(String(image.assetId))}`}
-              alt={textFrom(image.altText) || "Document image"}
-              loading="lazy"
-              className="max-h-72 max-w-full rounded object-contain object-top"
-            />
-            <figcaption className="sr-only">Document image preview</figcaption>
-          </figure>
-        ) : null}
-        {blocks.length === 0 ? (
-          <p className="text-micro text-[var(--text-tertiary)]">
-            Empty document
-          </p>
-        ) : null}
-      </div>
-    );
-  }
-
-  if (type === "flashcard_deck") {
-    const canReveal = embedCapabilityEnabled(
-      "flashcard_deck",
-      effectiveInteraction,
-      "study.reveal",
-    );
-    const canNavigate = embedCapabilityEnabled(
-      "flashcard_deck",
-      effectiveInteraction,
-      "study.navigate",
-    );
-    const cards = records(content.cards);
-    const card = cards[Math.min(activeIndex, Math.max(0, cards.length - 1))];
-    if (embed.mode === "expanded" && !canReveal) {
-      return (
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          {cards.slice(0, 4).map((entry, index) => (
-            <div
-              key={String(entry.id ?? index)}
-              className="min-h-[112px] rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] p-3.5"
-            >
-              <span className="text-micro font-semibold uppercase tracking-[.11em] text-[var(--text-tertiary)]">
-                {index % 2 === 0 ? "Front" : "Back"}
-              </span>
-              <EmbedCardFace
-                value={index % 2 === 0 ? entry.front : entry.back}
-                className="mt-2 font-display text-ui leading-5"
-              />
-            </div>
-          ))}
-          {cards.length === 0 ? (
-            <p className="text-micro text-[var(--text-tertiary)]">
-              Empty deck
-            </p>
-          ) : null}
-        </div>
-      );
-    }
-    return (
-      <div>
-        <button
-          type="button"
-          disabled={!canReveal}
-          onClick={() => setRevealed((value) => !value)}
-          className="flex min-h-[116px] w-full items-center justify-center rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] p-5 text-center disabled:cursor-default"
-        >
-          <span>
-            <span className="block text-micro font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
-              {revealed ? "Answer" : "Prompt"}
-            </span>
-            <EmbedCardFace
-              value={revealed ? card?.back : card?.front}
-              className="mt-2 text-subhead font-medium leading-6"
-            />
-            {!canReveal ? (
-              <span className="mt-2 block text-micro text-[var(--text-tertiary)]">
-                Read-only preview
-              </span>
-            ) : null}
-          </span>
-        </button>
-        {embed.mode === "expanded" && cards.length > 1 ? (
-          <div className="mt-2 flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => {
-                setActiveIndex((value) => Math.max(0, value - 1));
-                setRevealed(false);
-              }}
-              disabled={!canNavigate || activeIndex === 0}
-              aria-label="Previous card"
-              className="rounded-chip p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-30"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <span className="text-micro text-[var(--text-tertiary)]">
-              {activeIndex + 1} / {cards.length}
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveIndex((value) =>
-                  Math.min(cards.length - 1, value + 1),
-                );
-                setRevealed(false);
-              }}
-              disabled={!canNavigate || activeIndex >= cards.length - 1}
-              aria-label="Next card"
-              className="rounded-chip p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-30"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  if (type === "quiz") {
-    return <ArtifactEmbedQuiz embed={embed} />;
-  }
-
-  if (type === "planner_task") {
-    if (embed.mode === "compact")
-      return (
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          <span className="text-micro font-semibold capitalize text-[var(--text-primary)]">
-            {String(content.status ?? "todo").replaceAll("_", " ")}
-          </span>
-          <span className="text-micro capitalize text-[var(--text-tertiary)]">
-            {String(content.priority ?? "medium")} priority
-          </span>
-          <span className="ml-auto text-micro text-[var(--text-secondary)]">
-            {typeof content.dueAt === "number"
-              ? new Date(content.dueAt).toLocaleString()
-              : "No due date"}
-          </span>
-        </div>
-      );
-    return (
-      <div className="grid gap-2 sm:grid-cols-3">
-        <Metric
-          label="Status"
-          value={String(content.status ?? "todo").replaceAll("_", " ")}
-        />
-        <Metric label="Priority" value={String(content.priority ?? "medium")} />
-        <Metric
-          label="Due"
-          value={
-            typeof content.dueAt === "number"
-              ? new Date(content.dueAt).toLocaleString()
-              : "No date"
-          }
-        />
-      </div>
-    );
-  }
-
-  if (type === "presentation") {
-    const slides = records(content.slides);
-    const slide = slides[Math.min(activeIndex, Math.max(0, slides.length - 1))];
-    return (
-      <div>
-        <div className="aspect-video rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] p-[8%]">
-          <h4 className="font-display text-heading font-semibold text-[var(--text-primary)]">
-            {textFrom(slide?.title) || "Untitled slide"}
-          </h4>
-          <p className="mt-3 max-w-[76%] text-micro leading-4 text-[var(--text-secondary)]">
-            {textFrom(slide?.objects, 220)}
-          </p>
-        </div>
-        {embed.mode === "expanded" && slides.length > 1 ? (
-          <div className="mt-2 flex items-center justify-center gap-3">
-            <button
-              type="button"
-              onClick={() => setActiveIndex((value) => Math.max(0, value - 1))}
-              disabled={activeIndex === 0}
-              aria-label="Previous slide"
-              className="disabled:opacity-30"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <span className="text-micro text-[var(--text-tertiary)]">
-              Slide {activeIndex + 1} of {slides.length}
-            </span>
-            <button
-              type="button"
-              onClick={() =>
-                setActiveIndex((value) =>
-                  Math.min(slides.length - 1, value + 1),
-                )
-              }
-              disabled={activeIndex >= slides.length - 1}
-              aria-label="Next slide"
-              className="disabled:opacity-30"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  if (type === "sheets") {
-    const sheet = records(content.sheets)[0];
-    const entries = sheetCellEntries(
-      sheet?.cells,
-      embed.mode === "compact" ? 12 : 40,
-    );
-    return (
-      <div className="overflow-hidden rounded-control border border-[var(--border-default)]">
-        <div className="border-b border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-micro font-semibold text-[var(--text-secondary)]">
-          {String(sheet?.name ?? "Sheet 1")}
-        </div>
-        <div className="grid grid-cols-4 gap-px bg-[var(--border-subtle)]">
-          {entries.map(([address, value]) => (
-            <div
-              key={address}
-              className="min-h-9 bg-[var(--bg-primary)] px-2 py-1"
-            >
-              <span className="block text-micro text-[var(--text-tertiary)]">
-                {address}
-              </span>
-              <span className="block truncate text-micro text-[var(--text-primary)]">
-                {textFrom(record(value).value ?? value, 40)}
-              </span>
-            </div>
-          ))}
-          {entries.length === 0 ? (
-            <div className="col-span-4 p-6 text-center text-micro text-[var(--text-tertiary)]">
-              Empty range
-            </div>
-          ) : null}
-        </div>
-      </div>
-    );
-  }
-
-  if (type === "code") {
-    if (embed.runtimeBuild) {
-      return (
-        <PublishedCodeRuntime
-          title={embed.source?.title ?? "Interactive visualisation"}
-          build={embed.runtimeBuild}
-          embedId={embed.embedId}
-          compact={embed.mode === "compact"}
-          resources={embed.runtimeResources}
-          allowInteraction={embedCapabilityEnabled(
-            "code",
-            effectiveInteraction,
-            "runtime.interact",
-          )}
-        />
-      );
-    }
-    return (
-      <LiveCodeRuntime
-        artifactId={source.artifactId}
-        title={source.title ?? "Interactive visualisation"}
-        content={content}
-        compact={embed.mode === "compact"}
-        allowInteraction={embedCapabilityEnabled(
-          "code",
-          effectiveInteraction,
-          "runtime.interact",
-        )}
-        resources={embed.runtimeResources}
-      />
-    );
-  }
-
-  if (type === "whiteboard") {
-    const nodes = whiteboardPreviewNodes(
-      content,
-      embed.mode === "compact" ? 8 : 24,
-    );
-    return (
-      <div className="relative min-h-[190px] overflow-hidden rounded-card border border-[var(--border-default)] bg-[radial-gradient(circle_at_1px_1px,var(--border-subtle)_1px,transparent_0)] bg-[size:18px_18px]">
-        {nodes.map((node) => (
-          <div
-            key={node.id}
-            className="absolute max-w-[120px] rounded-chip border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1.5 text-micro text-[var(--text-primary)] shadow-sm"
-            style={{ left: `${node.left}%`, top: `${node.top}%` }}
-          >
-            {node.label}
-          </div>
-        ))}
-        {nodes.length === 0 ? (
-          <p className="absolute inset-0 flex items-center justify-center text-micro text-[var(--text-tertiary)]">
-            Empty board
-          </p>
-        ) : null}
-      </div>
-    );
-  }
-
-  if (type === "timetable") {
-    const events = records(content.events).slice(
-      0,
-      embed.mode === "compact" ? 3 : 8,
-    );
-    return (
-      <div className="space-y-1.5">
-        {events.map((event, index) => (
-          <div
-            key={String(event.id ?? index)}
-            className="flex items-center gap-3 rounded-control border border-[var(--border-subtle)] px-3 py-2"
-          >
-            <CalendarDays className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-micro font-semibold text-[var(--text-primary)]">
-                {textFrom(event.title) || "Event"}
-              </div>
-              <div className="text-micro text-[var(--text-tertiary)]">
-                {typeof event.start === "string"
-                  ? new Date(event.start).toLocaleString()
-                  : typeof event.startAt === "number"
-                    ? new Date(event.startAt).toLocaleString()
-                    : "Time not set"}
-              </div>
-            </div>
-          </div>
-        ))}
-        {events.length === 0 ? (
-          <p className="text-micro text-[var(--text-tertiary)]">
-            No events in this view.
-          </p>
-        ) : null}
-      </div>
-    );
-  }
-
-  if (type === "agent") {
-    const mission = record(content.mission);
-    const skills = records(content.skills);
-    const evidence = records(content.evidenceBindings ?? content.evidence);
-    return (
-      <div className="grid gap-2 sm:grid-cols-3">
-        <div className="sm:col-span-3 rounded-control border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
-          <div className="text-micro uppercase tracking-[.1em] text-[var(--text-tertiary)]">
-            Mission
-          </div>
-          <p className="mt-1 text-micro leading-5 text-[var(--text-primary)]">
-            {textFrom(mission.objective ?? content.objective, 420) ||
-              "Mission is still being shaped."}
-          </p>
-        </div>
-        <Metric label="Skills" value={String(skills.length)} />
-        <Metric label="Evidence" value={String(evidence.length)} />
-        <Metric
-          label="Release"
-          value={String(content.releaseStatus ?? content.status ?? "draft")}
-        />
-      </div>
-    );
-  }
-
-  void activeView;
-  return null;
-}
 
 /** The key an embed's preview and its editor share, so one grows out of the other and folds back into it. */
 export function embedLifeKey(embedId: string) {
@@ -577,19 +39,82 @@ function pressedControl(event: ReactMouseEvent) {
   return event.target instanceof Element && Boolean(event.target.closest(PREVIEW_CONTROLS));
 }
 
-const headerButton =
-  "flex h-8 items-center gap-1.5 rounded-control px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45";
+type EmbedAction = "open" | "edit" | "expand" | "compact" | "live" | "pin" | "another" | "unstack" | "remove";
 
-function Metric({ label, value }: { label: string; value: string }) {
+type Status = { icon: typeof Send; title: string; detail: string };
+
+/** Why an embed cannot show its work, in the reader's words, or nothing when it can. */
+function statusOf(embed: SpectraArtifactEmbed): Status | null {
+  switch (embed.state) {
+    case "no_access":
+      return embed.accessRequest
+        ? { icon: Send, title: "Access requested", detail: "Its owner decides. It appears here as soon as they say yes." }
+        : { icon: LockKeyhole, title: "You can't open this yet", detail: "It belongs to someone who hasn't shared it with you, so nothing of it shows here." };
+    case "deleted":
+      return { icon: AlertCircle, title: "This work was deleted", detail: "The page around it is unchanged." };
+    case "version_unavailable":
+      return embed.placementRefreshKey
+        ? { icon: AlertCircle, title: "The saved version needs checking", detail: "It shows again once it matches the page around it." }
+        : { icon: AlertCircle, title: "The saved version is missing", detail: "Follow the live work instead, or remove it." };
+    case "removed":
+      return { icon: X, title: "No longer linked", detail: "This spot is no longer connected to its work. You can delete it from the page." };
+    default:
+      return null;
+  }
+}
+
+function EmbedStatus({
+  embed,
+  status,
+  busy,
+  onRetry,
+  onRequestAccess,
+  onCancelAccessRequest,
+  onUseLiveVersion,
+}: {
+  embed: SpectraArtifactEmbed;
+  status: Status;
+  busy: boolean;
+  onRetry?: () => void;
+  onRequestAccess?: () => void;
+  onCancelAccessRequest?: (requestId: string) => void;
+  onUseLiveVersion?: () => void;
+}) {
+  const StatusIcon = status.icon;
   return (
-    <div className="rounded-control bg-[var(--bg-primary)] p-3">
-      <div className="text-micro uppercase tracking-[.1em] text-[var(--text-tertiary)]">
-        {label}
+    <section className="work-embed-status">
+      <StatusIcon className="size-4 shrink-0" aria-hidden />
+      <div className="min-w-0 flex-1">
+        <strong>{status.title}</strong>
+        <p>{status.detail}</p>
+        {embed.state === "version_unavailable" && embed.placementRefreshKey ? (
+          <RetainedPinRecovery embedId={embed.embedId} refreshKey={embed.placementRefreshKey} />
+        ) : null}
       </div>
-      <div className="mt-1 text-caption font-semibold capitalize text-[var(--text-primary)]">
-        {value}
+      <div className="work-embed-status-actions">
+        {embed.state === "no_access" && embed.canRequestAccess && onRequestAccess ? (
+          <button type="button" disabled={busy} onClick={onRequestAccess} data-primary="">
+            <Send className="size-3" />
+            Request access
+          </button>
+        ) : null}
+        {embed.state === "no_access" && embed.accessRequest && onCancelAccessRequest ? (
+          <button type="button" disabled={busy} onClick={() => onCancelAccessRequest(embed.accessRequest!.requestId)}>
+            Cancel request
+          </button>
+        ) : null}
+        {embed.state === "version_unavailable" && !embed.sourceUnavailable && embed.canConfigure && onUseLiveVersion ? (
+          <button type="button" disabled={busy} onClick={onUseLiveVersion} data-primary="">
+            Follow the live work
+          </button>
+        ) : null}
+        {onRetry && !embed.placementRefreshKey ? (
+          <button type="button" disabled={busy} onClick={onRetry} aria-label="Retry embed" title="Try again">
+            <RotateCw className="size-3.5" />
+          </button>
+        ) : null}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -608,6 +133,9 @@ export function ArtifactEmbed({
   editor,
   onDoneEditing,
   onRemove,
+  tabs,
+  onStackAnother,
+  onUnstack,
 }: {
   embed: SpectraArtifactEmbed;
   busy?: boolean;
@@ -627,16 +155,23 @@ export function ArtifactEmbed({
   editor?: ReactNode;
   onDoneEditing?: () => void;
   onRemove?: () => void;
+  /** A stacked card's tabs, one per work, in place of this work's own tab. */
+  tabs?: ReactNode;
+  /** Lay another work on this card as a tab. */
+  onStackAnother?: () => void;
+  /** Take this work off a stacked card, onto one of its own. */
+  onUnstack?: () => void;
 }) {
   const rootRef = useRef<HTMLElement | null>(null);
+  const faceRef = useRef<HTMLDivElement | null>(null);
   const openTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(openTimer.current), []);
+  const isCode = embed.source?.blueprintKey === "code";
   const [nearViewport, setNearViewport] = useState(
     () => typeof window !== "undefined" && !("IntersectionObserver" in window),
   );
   const [pageVisible, setPageVisible] = useState(
-    () =>
-      typeof document === "undefined" || document.visibilityState !== "hidden",
+    () => typeof document === "undefined" || document.visibilityState !== "hidden",
   );
   /* A drag on the native resize grip is the only thing that may persist a size.
      Reading the box on any pointer-up would save a size the reader never chose
@@ -645,67 +180,10 @@ export function ArtifactEmbed({
      that same interaction actually changed it. */
   const dragOriginRef = useRef<{ width: number; height: number } | null>(null);
   const motionLevel = useSpectraMotion();
-  const meta = embed.source ? workTypeMeta[embed.source.blueprintKey] : null;
-  const Icon = meta?.icon ?? FileQuestion;
-  const interaction = embed.effectiveInteraction ?? embed.interaction;
-  const referenceState = [
-    embed.mode === "compact" ? "Compact preview" : "Expanded preview",
-    embed.versionPolicy === "pinned" ? "Pinned version" : "Live version",
-    typeof embed.displayPreferences?.view === "string"
-      ? embed.displayPreferences.view.replaceAll("_", " ")
-      : undefined,
-    embed.state === "archived" ? "Archived" : undefined,
-    embed.sourceUnavailable ? "Source unavailable" : undefined,
-    interaction === "read"
-      ? "Read-only"
-      : interaction === "interact"
-        ? "Interactive"
-        : interaction === "edit"
-          ? "Editable"
-          : undefined,
-  ]
-    .filter(Boolean)
-    .join(", ");
-  const status =
-    embed.state === "no_access" && embed.accessRequest
-      ? {
-          icon: Send,
-          title: "Access requested",
-          detail:
-            "The source owner will decide whether to grant access. This reference unlocks automatically after approval.",
-        }
-      : embed.state === "no_access"
-        ? {
-            icon: LockKeyhole,
-            title: "Source access required",
-            detail:
-              "The container does not grant source access. No title, preview, comments, or presence has been exposed.",
-          }
-        : embed.state === "deleted"
-          ? {
-              icon: AlertCircle,
-              title: "Source was deleted",
-              detail:
-                "The surrounding work is unchanged, but this reference is no longer available.",
-            }
-          : embed.state === "version_unavailable"
-            ? {
-                icon: AlertCircle,
-                title: embed.placementRefreshKey ? "Pinned placement needs verification" : "Pinned version unavailable",
-                detail:
-                  embed.placementRefreshKey ? "The saved reference must match the current surrounding work before its retained content can be shown." : "The retained source version is missing or failed its integrity check.",
-              }
-            : embed.state === "removed"
-              ? {
-                  icon: X,
-                  title: "Reference removed",
-                  detail:
-                    "This placement is no longer connected to its source. You can delete it from the surrounding work.",
-                }
-              : null;
 
+  // A running visualisation pauses off screen and in a hidden tab.
   useEffect(() => {
-    if (embed.source?.blueprintKey !== "code") return;
+    if (!isCode) return;
     const element = rootRef.current;
     if (!element || typeof IntersectionObserver === "undefined") {
       setNearViewport(true);
@@ -717,98 +195,75 @@ export function ArtifactEmbed({
     );
     observer.observe(element);
     return () => observer.disconnect();
-  }, [embed.embedId, embed.source?.blueprintKey]);
+  }, [embed.embedId, isCode]);
 
   useEffect(() => {
-    if (embed.source?.blueprintKey !== "code") return;
+    if (!isCode) return;
     const update = () => setPageVisible(document.visibilityState !== "hidden");
     update();
     document.addEventListener("visibilitychange", update);
     return () => document.removeEventListener("visibilitychange", update);
-  }, [embed.source?.blueprintKey]);
+  }, [isCode]);
 
+  const status = statusOf(embed);
   if (status) {
-    const StatusIcon = status.icon;
+    // What can still be done to a card that cannot show its work: take it off
+    // the page, or off its stack; a stacked card keeps its tabs to turn away.
+    const statusActions: OverflowItem<"unstack" | "remove">[] = [
+      ...(onUnstack ? [{ key: "unstack" as const, label: "Give it a card of its own", icon: ArrowUpRight }] : []),
+      ...(onRemove ? [{ key: "remove" as const, label: "Remove from page", icon: X }] : []),
+    ];
+    const body = (
+      <EmbedStatus
+        embed={embed}
+        status={status}
+        busy={busy}
+        onRetry={onRetry}
+        onRequestAccess={onRequestAccess}
+        onCancelAccessRequest={onCancelAccessRequest}
+        onUseLiveVersion={onUseLiveVersion}
+      />
+    );
+    if (!tabs && !statusActions.length) return body;
     return (
-      <section className="rounded-card border border-dashed border-[var(--border-strong)] bg-[color-mix(in_oklab,var(--bg-secondary)_82%,var(--bg-elevated))] px-4 py-3.5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-tertiary)]">
-            <StatusIcon className="h-4 w-4" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="text-caption font-semibold text-[var(--text-primary)]">
-              {status.title}
+      <section data-reference-id={embed.embedId} className="work-embed" data-mode={embed.mode}>
+        <div className="work-embed-top">
+          {tabs ?? <span />}
+          {statusActions.length ? (
+            <div className="work-embed-more">
+              <OverflowMenu<"unstack" | "remove">
+                label="Options for this reference"
+                size={28}
+                items={statusActions}
+                onSelect={(action) => (action === "unstack" ? onUnstack?.() : onRemove?.())}
+                triggerClassName="work-embed-more-trigger"
+                modal={false}
+              />
             </div>
-            <p className="mt-0.5 max-w-[620px] text-micro leading-4 text-[var(--text-secondary)]">
-              {status.detail}
-            </p>
-            {embed.state === "version_unavailable" && embed.placementRefreshKey ? (
-              <RetainedPinRecovery embedId={embed.embedId} refreshKey={embed.placementRefreshKey} />
-            ) : null}
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5 self-end sm:self-auto">
-            {embed.state === "no_access" &&
-            embed.canRequestAccess &&
-            onRequestAccess ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={onRequestAccess}
-                className="inline-flex h-8 items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
-              >
-                <Send className="h-3 w-3" />
-                Request access
-              </button>
-            ) : null}
-            {embed.state === "no_access" &&
-            embed.accessRequest &&
-            onCancelAccessRequest ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() =>
-                  onCancelAccessRequest(embed.accessRequest!.requestId)
-                }
-                className="inline-flex h-8 items-center gap-1.5 rounded-control border border-[var(--border-default)] px-2.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
-              >
-                <X className="h-3 w-3" />
-                Cancel request
-              </button>
-            ) : null}
-            {embed.state === "version_unavailable" &&
-            !embed.sourceUnavailable &&
-            embed.canConfigure &&
-            onUseLiveVersion ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={onUseLiveVersion}
-                className="h-8 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
-              >
-                Use live source
-              </button>
-            ) : null}
-            {onRetry && !embed.placementRefreshKey ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={onRetry}
-                className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
-                aria-label="Retry embed"
-              >
-                <RotateCw className="h-3.5 w-3.5" />
-              </button>
-            ) : null}
-          </div>
+          ) : null}
         </div>
+        {body}
       </section>
     );
   }
-  if (!embed.source || !meta) return null;
-  const sourceId = embed.source.artifactId;
+
+  const source = embed.source;
+  const meta = source ? workTypeMeta[source.blueprintKey] : null;
+  if (!source || !meta) return null;
+  const Icon = meta.icon ?? FileQuestion;
+  const sourceId = source.artifactId;
   const pinned = embed.versionPolicy === "pinned";
-  // A click opens the work in the Side; a double-click edits it here, where
-  // the type allows (EDITORS.md, Embeds). Controls in the preview are its own.
+  const expanded = embed.mode === "expanded";
+  const interaction = embed.effectiveInteraction ?? embed.interaction;
+  const referenceState = [
+    expanded ? "Expanded" : "Compact",
+    pinned ? "a saved version" : "live",
+    embed.sourceUnavailable ? "unavailable" : undefined,
+    interaction === "read" ? "read only" : interaction === "interact" ? "usable here" : interaction === "edit" ? "editable here" : undefined,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
   const openFromPreview = (event: ReactMouseEvent) => {
     if (!onOpenSource || pressedControl(event)) return;
     window.clearTimeout(openTimer.current);
@@ -820,285 +275,164 @@ export function ArtifactEmbed({
     window.clearTimeout(openTimer.current);
     onEdit();
   };
+
+  const embedActions: OverflowItem<EmbedAction>[] = [
+    ...(onOpenSource ? [{ key: "open" as const, label: "Open", icon: ArrowUpRight }] : []),
+    ...(onEdit ? [{ key: "edit" as const, label: "Edit here", icon: Pencil, hint: "Double-click" }] : []),
+    ...(onModeChange
+      ? [expanded
+          ? { key: "compact" as const, label: "Show less", icon: Minimize2 }
+          : { key: "expand" as const, label: "Show more", icon: Maximize2 }]
+      : []),
+    ...(embed.canConfigure && pinned && onUseLiveVersion
+      ? [{ key: "live" as const, label: "Follow the live work", icon: Radio }]
+      : []),
+    ...(embed.canConfigure && !pinned && onPinVersion
+      ? [{ key: "pin" as const, label: "Keep this version", icon: Pin }]
+      : []),
+    ...(onStackAnother ? [{ key: "another" as const, label: "Add another work here", icon: Plus }] : []),
+    ...(onUnstack ? [{ key: "unstack" as const, label: "Give it a card of its own", icon: ArrowUpRight }] : []),
+    ...(onRemove ? [{ key: "remove" as const, label: "Remove from page", icon: X }] : []),
+  ].map((item) => ({ ...item, disabled: busy && item.key !== "open" }));
+  const runAction = (action: EmbedAction) => {
+    if (action === "open") onOpenSource?.(sourceId);
+    else if (action === "edit") onEdit?.();
+    else if (action === "expand") onModeChange?.("expanded");
+    else if (action === "compact") onModeChange?.("compact");
+    else if (action === "live") onUseLiveVersion?.();
+    else if (action === "pin") onPinVersion?.();
+    else if (action === "another") onStackAnother?.();
+    else if (action === "unstack") onUnstack?.();
+    else onRemove?.();
+  };
+
+  const sized = expanded
+    ? {
+        width: typeof embed.displayPreferences?.width === "number" ? embed.displayPreferences.width : undefined,
+        height: typeof embed.displayPreferences?.height === "number" ? embed.displayPreferences.height : undefined,
+        resize: onResize ? ("both" as const) : undefined,
+      }
+    : undefined;
+
   return (
     <motion.section
       layout={!motionLevel.disabled}
-      transition={
-        motionLevel.disabled
-          ? undefined
-          : transitionFor("morph", motionLevel.level)
-      }
+      transition={motionLevel.disabled ? undefined : transitionFor("morph", motionLevel.level)}
       ref={rootRef}
       data-reference-id={embed.embedId}
       data-embed-editing={editor ? "true" : undefined}
-      className="overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-sm)]"
-      style={
-        embed.mode === "expanded"
-          ? {
-              width:
-                typeof embed.displayPreferences?.width === "number"
-                  ? embed.displayPreferences.width
-                  : undefined,
-              height:
-                typeof embed.displayPreferences?.height === "number"
-                  ? embed.displayPreferences.height
-                  : undefined,
-              maxWidth: "100%",
-              maxHeight: "min(720px, 80vh)",
-              minWidth: 240,
-              minHeight: 160,
-              resize: onResize ? "both" : undefined,
-              overflow: "auto",
-            }
-          : undefined
-      }
-      onPointerDown={() => {
-        if (!onResize || embed.mode !== "expanded" || !rootRef.current) {
-          dragOriginRef.current = null;
-          return;
-        }
-        const bounds = rootRef.current.getBoundingClientRect();
-        dragOriginRef.current = {
-          width: Math.round(bounds.width),
-          height: Math.round(bounds.height),
-        };
-      }}
-      onPointerCancel={() => {
-        dragOriginRef.current = null;
-      }}
-      onPointerUp={() => {
-        const origin = dragOriginRef.current;
-        dragOriginRef.current = null;
-        if (
-          !onResize ||
-          embed.mode !== "expanded" ||
-          !rootRef.current ||
-          !origin
-        )
-          return;
-        const bounds = rootRef.current.getBoundingClientRect();
-        const width = Math.round(bounds.width);
-        const height = Math.round(bounds.height);
-        if (
-          Math.abs(width - origin.width) > 3 ||
-          Math.abs(height - origin.height) > 3
-        )
-          onResize({ width, height });
-      }}
+      data-mode={embed.mode}
+      data-work-card={source.blueprintKey}
+      className="work-embed"
+      style={workCardStyle(source.blueprintKey)}
     >
-      <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2.5 sm:px-4">
-        <span
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control bg-[color-mix(in_oklab,var(--embed-accent)_9%,var(--bg-secondary))]"
-          style={
-            { "--embed-accent": meta.color, color: meta.color } as CSSProperties
-          }
-        >
-          <Icon className="h-4 w-4" />
-        </span>
-        <div className="min-w-[140px] flex-1 basis-[min(100%,220px)]">
-          {onOpenSource ? (
-            // A click on the name opens the work in the Side (EDITORS.md,
-            // Embeds). The Open button is the keyboard path, so the name
-            // stays out of the tab order instead of repeating it.
-            <button
-              type="button"
-              tabIndex={-1}
-              onClick={() => onOpenSource(embed.source!.artifactId)}
-              className="block max-w-full truncate text-left text-caption font-semibold text-[var(--text-primary)] hover:underline hover:underline-offset-2"
-            >
-              {embed.source.title}
-            </button>
-          ) : (
-            <div className="truncate text-caption font-semibold text-[var(--text-primary)]">
-              {embed.source.title}
-            </div>
-          )}
-          <div
-            className="mt-0.5 flex items-center gap-2 text-micro uppercase tracking-[.1em] text-[var(--text-tertiary)]"
-            aria-label={`${meta?.label ?? "Reference"} reference: ${referenceState}`}
-            role="group"
-            title={referenceState}
-          >
-            {embed.sourceUnavailable ? (
-              <span
-                className="inline-flex items-center gap-1 text-[var(--warning)]"
-                aria-label="Source unavailable"
-                role="img"
-              >
-                <AlertCircle className="h-3 w-3" aria-hidden="true" />
-                Unavailable
-              </span>
-            ) : null}
-          </div>
-        </div>
+      <div className="work-embed-top">
+      {/* The tab names the work; its kind is in the icon and the card's hue.
+          A stacked card has a tab for each of its works instead. */}
+      {tabs ?? (
+      <span className="work-card-tab work-embed-tab">
+        <Icon className="size-3.5" aria-hidden />
+        <span className="sr-only">{meta.label}: </span>
+        {onOpenSource ? (
+          <button type="button" tabIndex={-1} onClick={() => onOpenSource(sourceId)} className="work-embed-title">
+            {source.title}
+          </button>
+        ) : (
+          <span className="work-embed-title">{source.title}</span>
+        )}
+        <span className="sr-only">, {referenceState}</span>
         {pinned ? (
-          // A pinned version only reads: say so, and offer the live work.
-          <span
-            className="inline-flex h-8 items-center gap-1.5 px-1 text-micro text-[var(--text-tertiary)]"
-            title="This shows a saved version. It stays as it is when the work changes."
-          >
-            <Pin className="h-3.5 w-3.5" aria-hidden="true" />
-            Pinned, read-only
+          <span className="work-embed-tab-note" title="This shows a saved version. It stays as it is when the work changes.">
+            <Pin className="size-3" aria-hidden />
+            Saved version
           </span>
         ) : null}
-        {pinned && embed.canConfigure && onUseLiveVersion ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onUseLiveVersion}
-            className={headerButton}
-            title="Show the work as it is now, and follow its changes"
-          >
-            <Radio className="h-3.5 w-3.5" />
-            Follow live
-          </button>
+        {embed.sourceUnavailable ? (
+          <span className="work-embed-tab-note" data-warning="">
+            <AlertCircle className="size-3" aria-hidden />
+            Unavailable
+          </span>
         ) : null}
-        {!pinned && embed.canConfigure && onPinVersion && !editor ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onPinVersion}
-            className={headerButton}
-            aria-label="Pin the latest saved version"
-            title="Keep showing the latest saved version, even when the work changes"
-          >
-            <Pin className="h-3.5 w-3.5" />
-            Pin
-          </button>
-        ) : null}
+      </span>
+      )}
+      {/* Everything the reader can do to the embed itself waits in one menu on
+          its border, so the face holds only the work. */}
+      <div className="work-embed-more">
         {editor && onDoneEditing ? (
-          <button
-            type="button"
-            onClick={onDoneEditing}
-            className="flex h-8 items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)]"
-            title="Stop editing here (Esc)"
-          >
-            <Check className="h-3.5 w-3.5" />
+          <button type="button" onClick={onDoneEditing} title="Stop editing here (Esc)" className="work-embed-done">
+            <Check className="size-3.5" />
             Done
           </button>
-        ) : onEdit ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onEdit}
-            className={headerButton}
-            aria-label={`Edit ${embed.source.title} here`}
-            title="Edit it here (or double-click it)"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            Edit here
-          </button>
-        ) : null}
-        {onModeChange && !editor ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() =>
-              onModeChange(embed.mode === "compact" ? "expanded" : "compact")
-            }
-            className="flex h-8 items-center gap-1.5 rounded-control px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
-            aria-label={
-              embed.mode === "compact"
-                ? "Expand reference"
-                : "Collapse reference"
-            }
-          >
-            {embed.mode === "compact" ? (
-              <>
-                <Maximize2 className="h-3.5 w-3.5" />
-                Expand
-              </>
-            ) : (
-              <>
-                <Minimize2 className="h-3.5 w-3.5" />
-                Collapse
-              </>
-            )}
-          </button>
-        ) : null}
-        {onOpenSource ? (
-          <button
-            type="button"
-            onClick={() => onOpenSource(embed.source!.artifactId)}
-            className="flex h-8 items-center gap-1.5 rounded-control px-2 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-            aria-label={`Open ${embed.source.title}`}
-          >
-            Open
-            <ArrowUpRight className="h-3 w-3" />
-          </button>
-        ) : null}
-        {onRemove ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onRemove}
-            className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45"
-            aria-label="Remove reference"
-            title="Remove"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        ) : null}
-      </header>
-      {editor ?? (
-      <motion.div
-        key={embed.mode}
-        // The editor grows out of this preview and folds back into it.
-        data-life-key={embedLifeKey(embed.embedId)}
-        data-life-launch=""
-        data-embed-preview=""
-        data-opens={onOpenSource ? "true" : undefined}
-        onClick={openFromPreview}
-        onDoubleClick={editFromPreview}
-        initial={motionLevel.disabled ? false : { opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={
-          motionLevel.disabled
-            ? undefined
-            : {
-                ...transitionFor("reveal", motionLevel.level),
-                // Let the shell start settling before the arriving content
-                // declares itself — geometry first, then content.
-                delay: motionLevel.reduced ? 0 : 0.09,
-              }
-        }
-        className={embed.mode === "compact" ? "p-3.5" : "p-4 sm:p-5"}
-      >
-        {shouldMountArtifactEmbedRuntime({
-          sourceType: embed.source.blueprintKey,
-          nearViewport,
-          pageVisible,
-        }) ? (
-          <ContentAdapter embed={embed} />
         ) : (
-          <div
-            className={`${embed.mode === "compact" ? "min-h-32" : "min-h-56"} flex items-center justify-center rounded-control border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)] px-4 text-center`}
-            aria-label="Published runtime paused"
-          >
-            <p className="max-w-sm text-micro leading-4 text-[var(--text-tertiary)]">
-              Preview paused until it is back on screen.
-            </p>
-          </div>
+          <OverflowMenu<EmbedAction>
+            label={`Options for ${source.title}`}
+            size={28}
+            items={embedActions}
+            onSelect={runAction}
+            triggerClassName="work-embed-more-trigger"
+            modal={false}
+          />
         )}
-      </motion.div>
-      )}
-      {embed.source.summary && embed.mode === "expanded" && !editor ? (
-        <motion.footer
-          initial={motionLevel.disabled ? false : { opacity: 0, y: 3 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={
-            motionLevel.disabled
-              ? undefined
-              : {
-                  ...transitionFor("reveal", motionLevel.level),
-                  delay: motionLevel.reduced ? 0 : 0.14,
-                }
+      </div>
+      </div>
+      <div
+        ref={faceRef}
+        className="work-card-face work-embed-face"
+        style={sized}
+        onPointerDown={() => {
+          if (!onResize || !expanded || !faceRef.current) {
+            dragOriginRef.current = null;
+            return;
           }
-          className="border-t border-[var(--border-subtle)] px-4 py-2 text-micro leading-4 text-[var(--text-tertiary)]"
-        >
-          {embed.source.summary}
-        </motion.footer>
-      ) : null}
+          const bounds = faceRef.current.getBoundingClientRect();
+          dragOriginRef.current = { width: Math.round(bounds.width), height: Math.round(bounds.height) };
+        }}
+        onPointerCancel={() => {
+          dragOriginRef.current = null;
+        }}
+        onPointerUp={() => {
+          const origin = dragOriginRef.current;
+          dragOriginRef.current = null;
+          if (!onResize || !expanded || !faceRef.current || !origin) return;
+          const bounds = faceRef.current.getBoundingClientRect();
+          const width = Math.round(bounds.width);
+          const height = Math.round(bounds.height);
+          if (Math.abs(width - origin.width) > 3 || Math.abs(height - origin.height) > 3) onResize({ width, height });
+        }}
+      >
+        {editor ?? (
+          <motion.div
+            key={embed.mode}
+            // The editor grows out of this preview and folds back into it.
+            data-life-key={embedLifeKey(embed.embedId)}
+            data-life-launch=""
+            data-embed-preview=""
+            data-opens={onOpenSource ? "true" : undefined}
+            onClick={openFromPreview}
+            onDoubleClick={editFromPreview}
+            initial={motionLevel.disabled ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={
+              motionLevel.disabled
+                ? undefined
+                : {
+                    ...transitionFor("reveal", motionLevel.level),
+                    // Geometry settles first, then the content declares itself.
+                    delay: motionLevel.reduced ? 0 : 0.09,
+                  }
+            }
+            className="work-embed-body"
+          >
+            {shouldMountArtifactEmbedRuntime({ sourceType: source.blueprintKey, nearViewport, pageVisible }) ? (
+              <EmbedFace embed={embed} />
+            ) : (
+              <p className="work-embed-empty" aria-label="Published runtime paused">
+                Paused until it is back on screen.
+              </p>
+            )}
+          </motion.div>
+        )}
+      </div>
     </motion.section>
   );
 }

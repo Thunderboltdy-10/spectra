@@ -35,6 +35,8 @@ beforeEach(() => {
     disconnect() {}
   } as unknown as typeof ResizeObserver;
   window.localStorage.clear();
+  // The companion starts folded away; these tests read it opened.
+  window.localStorage.setItem("spectra.panel.workspace.companion", JSON.stringify({ open: true, width: 380 }));
   mocks.related.mockReturnValue(relatedState({ status: "empty" }));
   mocks.threads.mockResolvedValue({
     threads: [

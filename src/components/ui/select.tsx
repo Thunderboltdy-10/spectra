@@ -4,7 +4,7 @@ import * as React from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
-import { LAYER_CLASS, type SpectraLayer } from "./layers";
+import { clearOfIsland, LAYER_CLASS, type SpectraLayer } from "./layers";
 import { useFloatingLayer } from "./layer-context";
 
 /**
@@ -22,7 +22,7 @@ const SelectValue = SelectPrimitive.Value;
 
 /** Trigger heights match the three real densities in the product. */
 const triggerSizes = {
-  sm: "h-8 px-2.5 text-micro",
+  sm: "h-8 px-2.5 text-caption",
   md: "h-9 px-3 text-caption",
   lg: "h-10 px-3 text-ui",
 } as const;
@@ -90,6 +90,7 @@ const SelectContent = React.forwardRef<
           ref={ref}
           position={position}
           sideOffset={4}
+          collisionPadding={clearOfIsland(layer, 8)}
           className={cn(
             "relative max-h-72 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[var(--shadow-lg)] spectra-float origin-[var(--radix-select-content-transform-origin)]",
             LAYER_CLASS[layer],
@@ -145,7 +146,7 @@ const SelectLabel = React.forwardRef<
   <SelectPrimitive.Label
     ref={ref}
     className={cn(
-      "px-2 py-1.5 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]",
+      "px-2 py-1.5 text-micro font-semibold text-[var(--text-secondary)]",
       className,
     )}
     {...props}

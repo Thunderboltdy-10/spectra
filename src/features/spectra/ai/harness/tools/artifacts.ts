@@ -53,7 +53,7 @@ function problemsNote(authored: AuthoredContent) {
     : "";
 }
 
-type CreateArgs = { type: ArtifactTypeKey; title: string; content: Record<string, unknown>; summary?: string };
+type CreateArgs = { type: ArtifactTypeKey; title: string; content: Record<string, unknown>; summary?: string; placeId?: string };
 
 export function createArtifactTool(session: HarnessSession): HarnessTool<CreateArgs> {
   return {
@@ -71,6 +71,7 @@ export function createArtifactTool(session: HarnessSession): HarnessTool<CreateA
         title: { type: "string", description: "A short, specific title." },
         content: { type: "object", description: "The content in the type's authoring format.", additionalProperties: true },
         summary: { type: "string", description: "One sentence describing the work, for the library." },
+        placeId: { type: "string", description: "A workspace placeId from the environment, to file the work with that class or project. Omit to file it with this conversation." },
       },
       required: ["type", "title", "content"],
       additionalProperties: false,
@@ -89,6 +90,7 @@ export function createArtifactTool(session: HarnessSession): HarnessTool<CreateA
         title: requireString(raw, "title", 200),
         content: content as Record<string, unknown>,
         summary: optionalString(raw, "summary", 400),
+        placeId: optionalString(raw, "placeId", 200),
       };
     },
     execute: async (args, ctx) => {
@@ -106,7 +108,7 @@ export function createArtifactTool(session: HarnessSession): HarnessTool<CreateA
           title: args.title,
           content: authored.content,
           summary: args.summary ?? `${typeName(args.type).replace(/^\w/, (letter) => letter.toUpperCase())}: ${args.title}`,
-          workspaceId: session.workspaceId,
+          workspaceId: args.placeId ?? session.workspaceId,
           toolCallId: ctx.toolCallId,
         },
         ctx.signal,
@@ -149,6 +151,7 @@ export function editArtifactTool(session: HarnessSession): HarnessTool<EditArgs>
     },
     effect: "write",
     targets: (args) => [args.id],
+    shows: (args) => args.id,
     label: (args) => `Editing ${titled(session, args.id, "your work")}`,
     parse: (raw) => {
       const operations = raw.operations;
@@ -238,6 +241,7 @@ export function readArtifactTool(session: HarnessSession): HarnessTool<ReadArgs>
       additionalProperties: false,
     },
     effect: "read",
+    shows: (args) => args.id,
     label: (args) => `Reading ${titled(session, args.id, "your work")}`,
     parse: (raw) => ({
       id: requireString(raw, "id", 200),

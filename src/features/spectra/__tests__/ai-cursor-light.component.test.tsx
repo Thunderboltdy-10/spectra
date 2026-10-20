@@ -20,7 +20,7 @@ beforeEach(() => {
   vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => frames.push(callback));
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ x: 100, y: 100, left: 100, top: 100, right: 120, bottom: 120, width: 20, height: 20, toJSON: () => ({}) } as DOMRect);
   const prism = document.createElement("div");
-  prism.setAttribute("data-island-prism", "");
+  prism.setAttribute("data-island-home", "");
   document.body.append(prism);
 });
 

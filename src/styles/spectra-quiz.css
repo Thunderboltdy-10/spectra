@@ -1,0 +1,315 @@
+/* ==========================================================================
+   A quiz question (quiz/question-sheet.tsx, EDITORS.md "Quiz")
+   --------------------------------------------------------------------------
+   The question as the learner meets it, on the shared sheet: its number
+   stamped in the margin in the quiz's orange ink, the question in the display
+   serif, then the answer in its paper shape. Options are lettered; the right
+   one is inked green. Moving to another question turns the page (the shared leaf).
+   ========================================================================== */
+
+.quiz-sheet {
+  --sheet-ink: var(--type-quiz);
+  gap: 26px;
+}
+
+.quiz-sheet-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 18px;
+}
+
+.quiz-sheet-head-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* The question: the line the whole sheet is about. */
+.quiz-prompt {
+  width: 100%;
+}
+.quiz-prompt .ProseMirror {
+  min-height: 1.3em;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: clamp(22px, 1.9vw, 28px);
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+.quiz-prompt .ProseMirror p.is-editor-empty:first-child::before {
+  color: var(--text-placeholder);
+}
+
+/* Options: lettered rows; the right one inked green. */
+.quiz-options,
+.quiz-pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.quiz-option,
+.quiz-pair {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px 0 8px;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--card-paper) 80%, var(--bg-primary));
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
+}
+.quiz-option:focus-within,
+.quiz-pair:focus-within {
+  border-color: color-mix(in oklab, var(--brand-primary) 45%, var(--card-border));
+}
+.quiz-option[data-correct] {
+  border-color: color-mix(in oklab, var(--success) 45%, var(--card-border));
+  background: color-mix(in oklab, var(--success) 7%, var(--card-paper));
+}
+.quiz-option-key {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  place-items: center;
+  border: 1.5px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+button.quiz-option-key:hover {
+  border-color: var(--success);
+  color: var(--success);
+}
+button.quiz-option-key:active {
+  transform: scale(0.9);
+}
+.quiz-option[data-correct] .quiz-option-key {
+  border-color: var(--success);
+  background: var(--success);
+  color: #fff;
+}
+.quiz-options[data-ordering] .quiz-option-key {
+  border-color: color-mix(in oklab, var(--sheet-ink) 40%, var(--card-border));
+  color: color-mix(in oklab, var(--sheet-ink) 75%, var(--text-primary));
+  font-variant-numeric: tabular-nums;
+}
+.quiz-option-text {
+  min-width: 0;
+  min-height: 40px;
+  flex: 1;
+  padding: 9px 0;
+  resize: none;
+  border: 0;
+  line-height: 22px;
+  field-sizing: content;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-body);
+  outline: none;
+}
+.quiz-option-text::placeholder {
+  color: var(--text-placeholder);
+}
+.quiz-option-text:read-only {
+  cursor: default;
+}
+.quiz-option-flag {
+  flex: none;
+  color: color-mix(in oklab, var(--success) 80%, var(--text-primary));
+  font-size: var(--text-micro);
+  font-weight: 600;
+}
+.quiz-option-tools {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+:is(.quiz-option, .quiz-pair):is(:hover, :focus-within) .quiz-option-tools {
+  opacity: 1;
+}
+.quiz-pair .quiz-option-text {
+  padding-inline: 4px;
+}
+.quiz-pair .quiz-option-text + .quiz-pair-arrow + .quiz-option-text {
+  padding-left: 12px;
+  border-left: 1px solid var(--card-border);
+}
+.quiz-pair-arrow {
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.quiz-answer-foot {
+  display: flex;
+  gap: 12px;
+  margin-top: -2px;
+}
+
+.quiz-problems {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: color-mix(in oklab, var(--warning) 85%, var(--text-primary));
+  font-size: var(--text-caption);
+}
+.quiz-problems li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.quiz-problems svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+/* A written answer: a line on the page, not a box. */
+.quiz-answer-line {
+  width: 100%;
+  height: 42px;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 1.5px solid var(--card-border);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-body);
+  outline: none;
+  transition: border-color var(--motion-fast) var(--ease-standard);
+}
+.quiz-answer-line:focus {
+  border-bottom-color: var(--brand-primary);
+}
+.quiz-answer-line::placeholder {
+  color: var(--text-placeholder);
+}
+.quiz-numeric {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+.quiz-answer-line--number {
+  width: 160px;
+  font-family: var(--font-display);
+  font-size: 22px;
+}
+.quiz-answer-line--tolerance {
+  width: 90px;
+}
+.quiz-also {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+.quiz-also .sheet-hint {
+  flex: none;
+}
+.quiz-rubric {
+  width: 100%;
+  min-height: 112px;
+  padding: 12px 14px;
+  resize: vertical;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--card-paper) 80%, var(--bg-primary));
+  color: var(--text-primary);
+  font-size: var(--text-body);
+  line-height: 1.55;
+  outline: none;
+  field-sizing: content;
+}
+.quiz-rubric:focus {
+  border-color: color-mix(in oklab, var(--brand-primary) 45%, var(--card-border));
+}
+
+.quiz-explanation {
+  min-height: 62px;
+}
+
+.quiz-sheet-adds {
+  display: flex;
+  gap: 14px;
+  margin-top: -12px;
+}
+
+/* The question's picture, with its description under it. */
+.quiz-image {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: -6px 0 0;
+}
+.quiz-image img,
+.quiz-image-missing {
+  max-width: 100%;
+  max-height: 320px;
+  align-self: flex-start;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  object-fit: contain;
+}
+.quiz-image-missing {
+  display: flex;
+  height: 120px;
+  width: 280px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+.quiz-image figcaption {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.quiz-image-alt {
+  min-width: 0;
+  flex: 1;
+  height: 30px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  outline: none;
+}
+
+.quiz-detail-pool {
+  width: 160px;
+}
+
+/* In the side panel the stamp shrinks and the image lines up with the text. */
+[data-studio-mode="split"] .quiz-sheet-head {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+}
+
+/* The question's formatting floats over the head only while it is being written. */
+.quiz-prompt .spectra-rich-text-editor:not(:focus-within) .spectra-rich-text-format-bar {
+  display: none;
+}
+.quiz-prompt .spectra-rich-text-format-bar [role="toolbar"] {
+  bottom: calc(100% + 4px);
+  left: -10px;
+  animation: sheet-unfold var(--motion-fast) var(--ease-standard) both;
+}
+
+/* The studio's generic field skin does not reach the sheet's own lines. */
+.quiz-sheet :is(.quiz-answer-line, .quiz-option-text, .quiz-image-alt, .sheet-chips input) {
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}

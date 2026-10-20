@@ -950,8 +950,8 @@ const identity = {
     "ListChecks",
   ],
   planner_task: [
-    "Planner task",
-    "Actionable work connected to time and resources.",
+    "Task",
+    "One thing to do, with a due date and a checklist when it needs one.",
     "planning",
     "ListTodo",
   ],
@@ -1362,6 +1362,17 @@ export function isArtifactTypeKey(value: string): value is ArtifactTypeKey {
 
 export function getArtifactTypeManifest(typeKey: string) {
   return isArtifactTypeKey(typeKey) ? manifestsByKey.get(typeKey) : undefined;
+}
+
+/**
+ * A work's summary when someone wrote it. Every new work starts with its
+ * type's own description, which says what the type is rather than what this
+ * work is about, so that is not shown as the work's summary.
+ */
+export function authoredSummary(typeKey: string | undefined, summary: string | undefined) {
+  const said = summary?.trim();
+  if (!said) return undefined;
+  return typeKey && getArtifactTypeManifest(typeKey)?.identity.description === said ? undefined : said;
 }
 
 export function requireArtifactTypeManifest(typeKey: string) {

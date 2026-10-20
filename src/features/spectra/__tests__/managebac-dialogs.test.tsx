@@ -107,9 +107,10 @@ describe("ManageBac connection history honesty", () => {
     expect(message).toContain("No synchronization has completed yet.");
     expect(message).not.toMatch(/completed with partial coverage|records.*available/i);
   });
-  it("shows the actual block reason and keeps historical completion separate", () => {
+  it("says why syncing is blocked and keeps historical completion separate", () => {
     const message = integrationConnectionMessage({ status: "blocked", lastSyncAt: 1234, blockedReason: "The stored read-only credential was rejected by ManageBac." });
-    expect(message).toContain("credential was rejected");
+    // Said plainly, with what to do about it, rather than the provider's own wording.
+    expect(message).toContain("ManageBac turned down the saved API key");
     expect(message).not.toMatch(/No synchronization has completed|completed with partial coverage/);
   });
   it("does not infer partial coverage from a degraded connection with earlier history", () => {

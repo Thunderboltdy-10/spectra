@@ -1,39 +1,36 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { usePathname } from "next/navigation";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { PrismLoader } from "@/components/spectra-prism-optic";
 import { IconButton } from "@/components/ui/icon-button";
 import { Tooltip } from "@/components/ui/tooltip";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { getAdministration, type AdministrationIdentity } from "@/features/spectra/administration/api";
-import { CatalogProgress } from "@/features/spectra/components/catalog-progress";
 import { formatRelativeTime } from "@/features/spectra/components/spectra-view-model";
 import { useWorkspaceCatalog } from "@/features/spectra/data/use-catalog-pages";
-import type { SpectraWorkspace } from "@/features/spectra/data/api";
+import { getSpectraThreads, type SpectraThread } from "@/features/spectra/data/api";
+import { threadClick } from "@/features/spectra/components/side-open";
 import { spectraBus } from "@/features/spectra/events";
 import { useSpectraRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { life } from "@/features/spectra/life/life";
-import { useLifeEntrance, unformElement } from "@/features/spectra/life/use-life";
+import { useLifeEntrance } from "@/features/spectra/life/use-life";
+import { isActiveRunStatus, useRunTabs } from "@/features/spectra/island/run-tabs";
 import { useTreeQuickView } from "@/features/spectra/organization/tree-client";
+import { useClassBook } from "@/features/spectra/school/use-class-book";
+import { threadName } from "@/features/spectra/threads/threads-model";
 import { cn } from "@/lib/utils";
 import { AccountMenu } from "./account-menu";
 import { reviewShareInvitations, type ShellNotification } from "./shell-notifications";
 import { useShellNotifications } from "./use-shell-notifications";
+import { WorkingMark } from "@/components/ui/skeleton";
+import { HOME_PATH, threadHref } from "@/features/spectra/chat/home-routes";
 
 /*
- * The rail (SHELL.md, "The rail"): the prism as the brand beside a compact
- * workspace switcher, the seven destinations, a few pinned works, and one
- * account row. It is 232 px wide, or 56 px of icons when collapsed — by the
+ * The rail (SHELL.md, "The rail"): the prism and the name as the way home,
+ * the six destinations, recent threads, a few pinned works, and one account
+ * row. Collapsed, the prism itself opens it again. It is 232 px wide, or 56 px of icons when collapsed — by the
  * user, by a crowded page, or below 1024 px. Its width is one CSS variable,
  * `--spectra-rail-width`, so the stage and the island follow it exactly.
  */
@@ -43,29 +40,31 @@ export const RAIL_COLLAPSED_WIDTH = 56;
 const NARROW = "(max-width: 1023px)";
 const STORAGE_KEY = "spectra:sidebar-collapsed";
 const PINNED_LIMIT = 6;
+const THREAD_LIMIT = 8;
 
 export type RailDestination = {
-  key: "home" | "library" | "calendar" | "conversations" | "school" | "agents" | "devices";
+  key: "home" | "library" | "calendar" | "school" | "agents" | "devices";
   href: string;
   label: string;
   glyph: IconName;
+  /** Paths it owns: exactly, or with anything under them unless `exact`. */
   routes: string[];
+  exact?: boolean;
 };
 
 export const RAIL_DESTINATIONS: RailDestination[] = [
-  { key: "home", href: "/workspace", label: "Home", glyph: "home", routes: ["/workspace"] },
-  { key: "library", href: "/library", label: "Library", glyph: "library", routes: ["/library"] },
+  // Home is the day, and the conversations started from it; a workspace is a place in the Library.
+  { key: "home", href: HOME_PATH, label: "Home", glyph: "home", routes: [HOME_PATH, "/chat"], exact: true },
+  { key: "library", href: "/library", label: "Library", glyph: "library", routes: ["/library", "/workspace"] },
   { key: "calendar", href: "/calendar", label: "Calendar", glyph: "calendar", routes: ["/calendar"] },
-  { key: "conversations", href: "/chat", label: "Conversations", glyph: "conversations", routes: ["/chat"] },
   { key: "school", href: "/school", label: "School", glyph: "school", routes: ["/school", "/managebac"] },
   { key: "agents", href: "/agents", label: "Agents", glyph: "agents", routes: ["/agents"] },
   { key: "devices", href: "/devices", label: "Devices", glyph: "devices", routes: ["/devices"] },
 ];
 
-/** Which destination is current: the threads view claims Conversations while it is open. */
-export function activeRailDestination(pathname: string, threadsOpen: boolean): RailDestination["key"] | null {
-  if (threadsOpen) return "conversations";
-  return RAIL_DESTINATIONS.find(({ routes }) => routes.some((route) => pathname === route || pathname.startsWith(`${route}/`)))?.key ?? null;
+/** Which destination is current. Threads have their own section below the destinations. */
+export function activeRailDestination(pathname: string): RailDestination["key"] | null {
+  return RAIL_DESTINATIONS.find(({ routes, exact }) => routes.some((route) => pathname === route || (!exact && pathname.startsWith(`${route}/`))))?.key ?? null;
 }
 
 const TYPE_GLYPH: Record<string, IconName> = {
@@ -82,14 +81,6 @@ const TYPE_GLYPH: Record<string, IconName> = {
   pdf: "pdf",
 };
 
-const WORKSPACE_HUES = ["#2397c9", "#5c7bd9", "#9a70c7", "#d17858", "#58a17a", "#c18a35"];
-function workspaceHue(workspace: SpectraWorkspace, index: number) {
-  return workspace.color?.trim() || WORKSPACE_HUES[index % WORKSPACE_HUES.length]!;
-}
-
-const subscribeThreadsView = (listener: () => void) => spectraBus.subscribe("threads.view", listener);
-const threadsViewOpen = () => Boolean(spectraBus.getQuery("threads.view")?.open);
-
 function pulseFrom(element: Element, strength = 0.7) {
   if (!life.on) return;
   const r = element.getBoundingClientRect();
@@ -98,11 +89,7 @@ function pulseFrom(element: Element, strength = 0.7) {
 
 export function Rail() {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const router = useSpectraRouter();
-  const selectedWorkspaceId = pathname.startsWith("/workspace/")
-    ? decodeURIComponent(pathname.slice("/workspace/".length).split("/", 1)[0] ?? "") || null
-    : searchParams.get("workspaceId");
 
   /* Geometry. The user's preference is stored; a crowded page
      (`shell.sidebarCrowd`) and a narrow window collapse the rail without
@@ -143,10 +130,9 @@ export function Rail() {
     spectraBus.emit("shell.sidebarLayout", { collapsed: next });
   }, [collapsed, crowded, narrow]);
 
-  // The old sidebar search lives in the threads view now.
+  // The old sidebar search finds threads now.
   useEffect(() => spectraBus.on("shell.focusSidebarSearch", () => spectraBus.emit("threads.open", {})), []);
-  const threadsOpen = useSyncExternalStore(subscribeThreadsView, threadsViewOpen, () => false);
-  const active = activeRailDestination(pathname, threadsOpen);
+  const active = activeRailDestination(pathname);
 
   const [identity, setIdentity] = useState<AdministrationIdentity | null>(null);
   useEffect(() => {
@@ -196,38 +182,49 @@ export function Rail() {
   const settleMarker = useCallback(() => placeMarker(navRef.current?.querySelector("[aria-current='page']") ?? null), [placeMarker]);
   useLayoutEffect(() => settleMarker(), [active, collapsed, settleMarker]);
 
-  const openConversations = (element: HTMLElement) => {
-    pulseFrom(element);
-    if (threadsOpen) spectraBus.emit("threads.close", {});
-    else spectraBus.emit("threads.open", {});
-  };
-
   return (
     <>
       <aside
         aria-label="Spectra navigation"
         data-collapsed={collapsed}
         className={cn(
-          "spectra-shell-sidebar fixed inset-y-0 left-0 z-chrome flex w-[var(--spectra-rail-width,232px)] flex-col overflow-hidden border-r border-[var(--border-subtle)]",
-          "bg-[color-mix(in_oklab,var(--bg-primary)_84%,transparent)] backdrop-blur-[6px] transition-[width] duration-[var(--motion-base)] ease-standard",
+          "spectra-shell-sidebar fixed inset-y-0 left-0 z-chrome flex w-[var(--spectra-rail-width,232px)] flex-col overflow-hidden",
+          "transition-[width] duration-[var(--motion-base)] ease-standard",
         )}
       >
         <div className={cn("flex h-14 shrink-0 items-center gap-1", collapsed ? "justify-center px-2" : "pl-3 pr-2")}>
-          <Tooltip label="Home" side="right" disabled={!collapsed}>
-            <Link
-              href="/workspace?home=1"
-              prefetch={false}
-              aria-label="Spectra home"
-              data-rail-brand
-              onClick={(event) => pulseFrom(event.currentTarget, 1)}
-              className="grid size-8 shrink-0 place-items-center rounded-control outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
-            >
-              <PrismLoader size={22} optics="dormant" interactive />
-            </Link>
-          </Tooltip>
-          {collapsed ? null : (
+          {collapsed ? (
+            <Tooltip label="Open the rail" side="right">
+              <button
+                type="button"
+                aria-label="Open the rail"
+                data-rail-brand
+                onClick={toggle}
+                className="spectra-rail-opener grid size-9 shrink-0 place-items-center rounded-control outline-none hover:bg-[var(--bg-desk-hover)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
+              >
+                <span className="spectra-rail-opener-brand">
+                  <PrismLoader size={22} optics="dormant" interactive />
+                </span>
+                <Icon name="sidebar" size={18} className="spectra-rail-opener-glyph" />
+              </button>
+            </Tooltip>
+          ) : (
             <>
-              <WorkspaceSwitcher selectedWorkspaceId={selectedWorkspaceId} />
+              <Link
+                href={HOME_PATH}
+                prefetch={false}
+                aria-label="Spectra home"
+                data-rail-brand
+                onClick={(event) => pulseFrom(event.currentTarget, 1)}
+                className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-control pr-1.5 outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
+              >
+                <span className="grid size-8 shrink-0 place-items-center">
+                  <PrismLoader size={22} optics="dormant" interactive />
+                </span>
+                <span data-sidebar-expanded="" className="truncate font-[family-name:var(--font-display)] text-ui font-semibold text-[var(--text-primary)]">
+                  Spectra
+                </span>
+              </Link>
               <IconButton icon="sidebar" label="Collapse the rail" size="compact" tooltipSide="bottom" onClick={toggle} />
             </>
           )}
@@ -246,7 +243,7 @@ export function Rail() {
               "relative flex h-9 w-full items-center gap-2.5 rounded-control text-ui font-medium outline-none transition-colors duration-[var(--motion-fast)]",
               "focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]",
               collapsed ? "justify-center px-0" : "px-2.5",
-              current ? "bg-[var(--bg-hover)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+              current ? "spectra-rail-current text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-desk-hover)] hover:text-[var(--text-primary)]",
             );
             const body = (
               <>
@@ -256,49 +253,34 @@ export function Rail() {
             );
             return (
               <Tooltip key={destination.key} label={destination.label} side="right" disabled={!collapsed} className="flex w-full">
-                {destination.key === "conversations" ? (
-                  <button
-                    type="button"
-                    data-rail-item="conversations"
-                    aria-current={current ? "page" : undefined}
-                    aria-expanded={threadsOpen}
-                    onMouseEnter={(event) => placeMarker(event.currentTarget)}
-                    onClick={(event) => openConversations(event.currentTarget)}
-                    className={itemClass}
-                  >
-                    {body}
-                  </button>
-                ) : (
-                  <Link
-                    href={destination.key === "home" ? "/workspace?home=1" : destination.href}
-                    prefetch={false}
-                    data-rail-item={destination.key}
-                    // The page it opens grows out of it; the page already open stays as it is.
-                    data-life-launch={current ? undefined : ""}
-                    aria-current={current ? "page" : undefined}
-                    onMouseEnter={(event) => placeMarker(event.currentTarget)}
-                    onClick={(event) => {
-                      pulseFrom(event.currentTarget);
-                      if (threadsOpen) spectraBus.emit("threads.close", {});
-                      if (destination.key === "home" && pathname.startsWith("/workspace")) {
-                        event.preventDefault();
-                        void spectraBus.command("navigation.home", {});
-                      }
-                    }}
-                    className={itemClass}
-                  >
-                    {body}
-                  </Link>
-                )}
+                <Link
+                  href={destination.href}
+                  prefetch={false}
+                  data-rail-item={destination.key}
+                  // The page it opens grows out of it; the page already open stays as it is.
+                  data-life-launch={current ? undefined : ""}
+                  aria-current={current ? "page" : undefined}
+                  onMouseEnter={(event) => placeMarker(event.currentTarget)}
+                  onClick={(event) => {
+                    pulseFrom(event.currentTarget);
+                  }}
+                  className={itemClass}
+                >
+                  {body}
+                </Link>
               </Tooltip>
             );
           })}
         </nav>
 
-        {collapsed ? <div className="flex-1" /> : <PinnedWorks />}
+        {collapsed ? <div className="flex-1" /> : (
+          <div className="spectra-thin-scrollbar mt-4 min-h-0 flex-1 overflow-y-auto px-2 pb-2" data-sidebar-recents="">
+            <RailThreads />
+            <PinnedWorks />
+          </div>
+        )}
 
         <div className={cn("shrink-0 border-t border-[var(--border-subtle)] py-2", collapsed ? "flex flex-col items-center gap-1 px-2" : "px-2")}>
-          {collapsed ? <IconButton icon="sidebar" label="Expand the rail" tooltipSide="right" onClick={toggle} /> : null}
           <AccountMenu
             identity={identity}
             collapsed={collapsed}
@@ -328,61 +310,135 @@ export function Rail() {
   );
 }
 
-function WorkspaceSwitcher({ selectedWorkspaceId }: { selectedWorkspaceId: string | null }) {
-  const catalog = useWorkspaceCatalog(selectedWorkspaceId);
-  const workspaces = catalog.items;
-  const current = workspaces.find((workspace) => workspace._id === selectedWorkspaceId) ?? null;
+/**
+ * The threads a student comes back to (SHELL.md, "Threads"): the ones Spectra
+ * is still moving come first, carrying its light, then the most recent. Each
+ * opens as its own page; the + starts a new one right where the student is.
+ */
+function RailThreads() {
+  const tabs = useRunTabs();
+  const [threads, setThreads] = useState<SpectraThread[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    const load = () =>
+      void getSpectraThreads({ limit: THREAD_LIMIT * 2 })
+        .then(({ threads: rows }) => live && setThreads(rows.filter((thread) => thread.status === "active")))
+        .catch(() => live && setThreads((current) => current ?? []));
+    load();
+    const off = spectraBus.on("threads.changed", load);
+    return () => {
+      live = false;
+      off();
+    };
+  }, []);
+  const moving = useMemo(() => new Set(tabs.filter((tab) => isActiveRunStatus(tab.run.status)).map((tab) => tab.threadId)), [tabs]);
+  const placeOf = useThreadPlaces();
+  const shown = useMemo(
+    () => [...(threads ?? [])].sort((a, b) => Number(moving.has(b._id)) - Number(moving.has(a._id))).slice(0, THREAD_LIMIT),
+    [moving, threads],
+  );
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          aria-label={`Workspace: ${current?.title ?? "All workspaces"}. Switch workspace`}
-          className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-control px-1.5 text-left outline-none transition-colors hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] data-[state=open]:bg-[var(--bg-hover)]"
+    <section aria-label="Threads">
+      <div className="flex h-7 items-center gap-1 pl-2.5 pr-1">
+        <Link
+          href={HOME_PATH}
+          prefetch={false}
+          className="min-w-0 flex-1 truncate text-micro font-medium text-[var(--text-tertiary)] outline-none transition-colors hover:text-[var(--text-primary)] focus-visible:text-[var(--text-primary)]"
         >
-          <span data-sidebar-expanded="" className="min-w-0 flex-1 truncate font-[family-name:var(--font-display)] text-ui font-semibold text-[var(--text-primary)]">
-            {current?.title ?? "Spectra"}
-          </span>
-          <Icon name="chevronDown" size={14} className="shrink-0 text-[var(--text-tertiary)]" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" sideOffset={6} className="w-64">
-        <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
-        <DropdownMenuItem asChild>
-          <Link href="/workspace?home=1" prefetch={false} aria-current={!current ? "page" : undefined}>
-            <span className="grid size-4 place-items-center text-[var(--text-secondary)]">
-              <Icon name="home" size={16} />
-            </span>
-            All workspaces
-          </Link>
-        </DropdownMenuItem>
-        {workspaces.map((workspace, index) => (
-          <DropdownMenuItem key={workspace._id} asChild>
-            <Link href={`/workspace/${encodeURIComponent(workspace._id)}`} prefetch={false} aria-current={workspace._id === current?._id ? "page" : undefined}>
+          Threads
+        </Link>
+        <Tooltip label="New thread" shortcut="Ctrl Shift N" side="right">
+          <button
+            type="button"
+            aria-label="New thread"
+            onClick={(event) => {
+              pulseFrom(event.currentTarget, 0.6);
+              spectraBus.emit("island.compose", { fresh: true });
+            }}
+            className="grid size-6 place-items-center rounded-chip text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--bg-desk-hover)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
+          >
+            <Icon name="add" size={14} />
+          </button>
+        </Tooltip>
+      </div>
+      {threads === null ? (
+        <ul aria-hidden className="space-y-px">
+          {Array.from({ length: 4 }, (_, index) => (
+            <li key={index} className="flex h-8 items-center gap-2.5 px-2.5">
               <span className="grid size-4 place-items-center">
-                <span className="size-2.5 rounded-full" style={{ background: workspaceHue(workspace, index) }} />
+                <span className="size-1.5 rounded-full bg-[var(--bg-tertiary)]" />
               </span>
-              <span className="min-w-0 flex-1 truncate">{workspace.title}</span>
-              {workspace.isShared || workspace.ownership === "shared" ? (
-                <span role="img" aria-label="Shared workspace" className="text-[var(--text-tertiary)]">
-                  <Icon name="people" size={14} aria-hidden="true" />
+              <span className="h-2.5 animate-pulse rounded-full bg-[var(--bg-tertiary)]" style={{ width: `${55 + ((index * 19) % 35)}%` }} />
+            </li>
+          ))}
+        </ul>
+      ) : shown.length ? (
+        <ul className="space-y-px">
+          {shown.map((thread) => {
+            const place = placeOf(thread);
+            const name = threadName(thread);
+            return (
+            <li key={thread._id}>
+              <Link
+                href={threadHref(thread._id)}
+                prefetch={false}
+                onClick={threadClick(thread)}
+                title={`${name}${place ? `, in ${place.title}` : ""}, ${formatRelativeTime(thread.lastMessageAt ?? thread.updatedAt)}`}
+                className="flex h-8 w-full items-center gap-2.5 rounded-control px-2.5 text-caption text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--bg-desk-hover)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
+              >
+                <span className="grid size-4 shrink-0 place-items-center">
+                  {moving.has(thread._id) ? (
+                    <WorkingMark />
+                  ) : (
+                    <span
+                      aria-hidden
+                      className="spectra-rail-thread-mark"
+                      style={place ? ({ "--thread-ink": place.ink } as CSSProperties) : undefined}
+                    />
+                  )}
                 </span>
-              ) : null}
+                <span className="min-w-0 flex-1 truncate">{name}</span>
+              </Link>
+            </li>
+            );
+          })}
+          <li>
+            <Link
+              href={HOME_PATH}
+              prefetch={false}
+              className="flex h-8 items-center gap-2.5 rounded-control px-2.5 text-caption text-[var(--text-tertiary)] outline-none transition-colors hover:bg-[var(--bg-desk-hover)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
+            >
+              <span className="grid size-4 place-items-center">
+                <Icon name="search" size={13} />
+              </span>
+              All threads
             </Link>
-          </DropdownMenuItem>
-        ))}
-        <CatalogProgress catalog={catalog} />
-        <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <Link href="/workspace?create=1" prefetch={false}>
-            <span className="grid size-4 place-items-center text-[var(--text-secondary)]">
-              <Icon name="add" size={16} />
-            </span>
-            New workspace
-          </Link>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+          </li>
+        </ul>
+      ) : (
+        <p className="px-2.5 py-1 text-caption leading-5 text-[var(--text-tertiary)]">Threads you start appear here.</p>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The workspace a thread was started in, by its title and ink: a class's in
+ * the colour School gives it, any other in its own. A thread from no
+ * workspace has none, and keeps the thread colour.
+ */
+function useThreadPlaces() {
+  const workspaces = useWorkspaceCatalog().items;
+  const book = useClassBook();
+  return useCallback(
+    (thread: SpectraThread) => {
+      const workspace = thread.workspaceId ? workspaces.find((item) => item._id === thread.workspaceId) : undefined;
+      if (!workspace) return null;
+      const ink = book.named(workspace.title)?.ink ?? workspace.color?.trim();
+      return ink ? { title: workspace.title, ink } : null;
+    },
+    [book, workspaces],
   );
 }
 
@@ -392,9 +448,9 @@ function PinnedWorks() {
   const { nodes } = useTreeQuickView("favorites", ["work"]);
   const pinned = nodes.filter((node) => node.sourceId).slice(0, PINNED_LIMIT);
   return (
-    <div className="spectra-thin-scrollbar mt-3 min-h-0 flex-1 overflow-y-auto px-2 pb-2" data-sidebar-recents="">
+    <>
       {pinned.length ? (
-        <section aria-label="Pinned">
+        <section aria-label="Pinned" className="mt-4">
           <h2 className="px-2.5 pb-1 text-micro font-semibold text-[var(--text-tertiary)]">Pinned</h2>
           <ul className="space-y-px">
             {pinned.map((node) => (
@@ -408,7 +464,7 @@ function PinnedWorks() {
                     if (!handled) router.push(`/library/${encodeURIComponent(node.sourceId!)}`);
                   }}
                   title={`${node.name} · ${formatRelativeTime(node.activityAt)}`}
-                  className="flex h-8 w-full items-center gap-2.5 rounded-control px-2.5 text-left text-caption text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
+                  className="flex h-8 w-full items-center gap-2.5 rounded-control px-2.5 text-left text-caption text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--bg-desk-hover)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
                 >
                   <Icon name={TYPE_GLYPH[node.typeKey ?? ""] ?? "document"} size={16} className="shrink-0" />
                   <span className="min-w-0 flex-1 truncate">{node.name}</span>
@@ -418,7 +474,7 @@ function PinnedWorks() {
           </ul>
         </section>
       ) : null}
-    </div>
+    </>
   );
 }
 
@@ -438,22 +494,12 @@ function NotificationsPanel({
   onClose: () => void;
 }) {
   const panelRef = useRef<HTMLElement>(null);
-  const account = typeof document !== "undefined" ? document.querySelector("[data-account-row]") : null;
-  const from = useMemo(() => {
-    if (!account) return undefined;
-    const r = account.getBoundingClientRect();
-    return [r.left + r.width / 2, r.top + r.height / 2] as [number, number];
-  }, [account]);
-  useLifeEntrance(panelRef, { from, bars: "[data-panel-title]" });
-  const close = useCallback(() => {
-    if (panelRef.current) void unformElement(panelRef.current, { bars: "[data-panel-title]", from });
-    onClose();
-  }, [from, onClose]);
+  useLifeEntrance(panelRef);
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => event.key === "Escape" && close();
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && onClose();
     const onPointer = (event: PointerEvent) => {
       const target = event.target as Element | null;
-      if (target && !panelRef.current?.contains(target) && !target.closest("[data-account-row], [role='menu']")) close();
+      if (target && !panelRef.current?.contains(target) && !target.closest("[data-account-row], [role='menu']")) onClose();
     };
     window.addEventListener("keydown", onKey);
     window.addEventListener("pointerdown", onPointer);
@@ -461,7 +507,7 @@ function NotificationsPanel({
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("pointerdown", onPointer);
     };
-  }, [close]);
+  }, [onClose]);
   return (
     <section
       ref={panelRef}
@@ -484,7 +530,7 @@ function NotificationsPanel({
           <Icon name="check" size={14} />
           Mark read
         </button>
-        <IconButton icon="close" label="Close" size="compact" shortcut="Esc" onClick={close} />
+        <IconButton icon="close" label="Close" size="compact" shortcut="Esc" onClick={onClose} />
       </header>
       <div className="spectra-thin-scrollbar max-h-[420px] overflow-y-auto p-1.5">
         {items.slice(0, 30).map((item) => (

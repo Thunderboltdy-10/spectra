@@ -205,18 +205,14 @@ describe("School isolation", () => {
     expect(detail?.grade?.score).toBe(6);
     expect(detail?.submission?.files.map((file) => file.filename)).toEqual(["macbeth.docx"]);
 
-    // Writing into another student's CAS fails, and reflections stay with their author.
+    // Writing into another student's CAS fails. ManageBac doesn't share CAS, so it is Off and even
+    // its owner can't write into a record that was kept from before.
     await expect(t.withIdentity(bob).mutation(api.school.saveCasReflection, {
       experienceRecordId: f.records.aliceCas, body: "Not mine",
     })).rejects.toThrow("SCHOOL_RECORD_NOT_FOUND");
-    const saved = await t.withIdentity(alice).mutation(api.school.saveCasReflection, {
+    await expect(t.withIdentity(alice).mutation(api.school.saveCasReflection, {
       experienceRecordId: f.records.aliceCas, body: "I learned to plan the route.",
-    });
-    await expect(t.withIdentity(bob).mutation(api.school.saveCasReflection, {
-      experienceRecordId: f.records.aliceCas, reflectionId: saved.reflectionId, body: "Edited",
     })).rejects.toThrow("SCHOOL_RECORD_NOT_FOUND");
-    const aliceCas = await t.withIdentity(alice).query(api.school.casExperience, { recordId: f.records.aliceCas });
-    expect(aliceCas?.reflections.map((row) => row.body)).toEqual(["I learned to plan the route."]);
 
     // A file fetch can only start for the student's own submission.
     await expect(t.withIdentity(bob).mutation(api.managebac.beginSchoolFileFetch, {
@@ -320,17 +316,18 @@ describe("School isolation", () => {
   it("queues only the kinds an AI refresh names, and only for that student", async () => {
     const t = setup();
     const f = await seed(t);
-    const refreshed = await t.withIdentity(alice).mutation(api.managebac.requestAiRefresh, { kinds: ["current_tasks", "cas"] });
+    const refreshed = await t.withIdentity(alice).mutation(api.managebac.requestAiRefresh, { kinds: ["current_tasks", "grades", "cas"] });
     expect(refreshed.started).toBe(true);
     const queued = async (accountId: Id<"accounts">) => (await t.run((ctx) => ctx.db.query("schoolSyncStates").collect()))
       .filter((row) => row.accountId === accountId && row.state === "queued");
     const aliceQueued = await queued(f.aliceId);
-    expect(aliceQueued.map((row) => row.kind).sort()).toEqual(["cas", "current_tasks"]);
+    // CAS is unavailable, so naming it queues nothing.
+    expect(aliceQueued.map((row) => row.kind).sort()).toEqual(["current_tasks", "grades"]);
     expect(aliceQueued.every((row) => row.dueTrigger === "ai")).toBe(true);
     expect(await queued(f.bobId)).toEqual([]);
     // A kind turned Off is never queued, even when named.
-    await t.withIdentity(bob).mutation(api.school.setMode, { kind: "cas", mode: "off" });
-    const off = await t.withIdentity(bob).mutation(api.managebac.requestAiRefresh, { kinds: ["cas"] });
+    await t.withIdentity(bob).mutation(api.school.setMode, { kind: "grades", mode: "off" });
+    const off = await t.withIdentity(bob).mutation(api.managebac.requestAiRefresh, { kinds: ["grades"] });
     expect(off.started).toBe(false);
     expect(await queued(f.bobId)).toEqual([]);
   });

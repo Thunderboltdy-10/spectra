@@ -468,6 +468,15 @@ export function createEmptyFoundryContent(base?: unknown): AgentFoundryContent {
  * routing and publish gates read. This keeps one source of truth (the Foundry)
  * while the compiled projection stays compatible.
  */
+/** A list item without the full stop it may already carry, so joining never doubles it. */
+const bare = (item: string) => item.trim().replace(/[.;\s]+$/, "");
+
+/** A heading and one line per item, or nothing for an empty list. */
+function bullets(heading: string, items: string[]) {
+  const lines = items.map(bare).filter(Boolean);
+  return lines.length ? `${heading}\n${lines.map((line) => `- ${line}`).join("\n")}` : "";
+}
+
 export function projectFoundryToLegacy(
   content: AgentFoundryContent,
 ): AgentFoundryContent {
@@ -496,18 +505,14 @@ export function projectFoundryToLegacy(
 
   const compiledInstructions = [
     mission.objective,
-    mission.domains.length ? `Work within: ${mission.domains.join(", ")}.` : "",
-    mission.expectedOutputs.length
-      ? `Produce: ${mission.expectedOutputs.map((output) => output.description).join("; ")}.`
-      : "",
+    mission.domains.length ? `Stay within ${mission.domains.map(bare).join(", ")}.` : "",
+    bullets("What you produce:", mission.expectedOutputs.map((output) => output.description)),
     legacySkills.length
       ? `Use these approved skills:\n${legacySkills
           .map((skill) => `- ${skill.name}: ${skill.instructions}`)
           .join("\n")}`
       : "",
-    mission.exclusions.length
-      ? `Do not: ${mission.exclusions.join("; ")}.`
-      : "",
+    bullets("Never:", mission.exclusions),
   ]
     .filter(Boolean)
     .join("\n\n")

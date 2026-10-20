@@ -4,9 +4,8 @@ import { type GlyphIcon } from "@/components/icons/glyph-icons";
 import * as React from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { Icon, type IconName } from "@/components/icons";
-import { mergeRefs, useLifeSurface } from "@/features/spectra/life/use-life";
 import { cn } from "@/lib/utils";
-import { LAYER_CLASS, type SpectraLayer } from "./layers";
+import { clearOfIsland, LAYER_CLASS, type SpectraLayer } from "./layers";
 import { useFloatingLayer } from "./layer-context";
 
 /**
@@ -43,14 +42,12 @@ const DropdownMenuContent = React.forwardRef<
   ) => {
     const layer = useFloatingLayer(explicitLayer);
     // Usable at once; its rows gather from what opened it.
-    const surface = useLifeSurface<HTMLDivElement>();
-    const contentRef = React.useMemo(() => mergeRefs(ref, surface), [ref, surface]);
     return (
       <DropdownMenuPrimitive.Portal>
         <DropdownMenuPrimitive.Content
-          ref={contentRef}
+          ref={ref}
           sideOffset={sideOffset}
-          collisionPadding={collisionPadding}
+          collisionPadding={typeof collisionPadding === "number" ? clearOfIsland(layer, collisionPadding) : collisionPadding}
           className={cn(
             "max-h-[min(70dvh,32rem)] min-w-[11rem] overflow-y-auto rounded-card border border-[var(--border-default)] p-1.5 text-[var(--text-primary)] shadow-[var(--shadow-lg)]",
             LAYER_CLASS[layer],
@@ -110,13 +107,108 @@ const DropdownMenuLabel = React.forwardRef<
   <DropdownMenuPrimitive.Label
     ref={ref}
     className={cn(
-      "px-2 py-1.5 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]",
+      "px-2 py-1.5 text-micro font-semibold text-[var(--text-secondary)]",
       className,
     )}
     {...props}
   />
 ));
 DropdownMenuLabel.displayName = DropdownMenuPrimitive.Label.displayName;
+
+/** A row that opens related options beside it, to the right where there is room. */
+/*
+ * A submenu is a second page of the same menu, set beside it: the same width,
+ * at least the same height, and level with its top, so the two read as one
+ * pair rather than a small list hanging off one row. The trigger measures its
+ * menu just before the submenu opens.
+ */
+type SubFrame = { width: number; height: number; alignOffset: number; sideOffset: number };
+const SubFrameContext = React.createContext<{ frame: SubFrame | null; measure: (trigger: HTMLElement) => void } | null>(null);
+
+function DropdownMenuSub(props: React.ComponentProps<typeof DropdownMenuPrimitive.Sub>) {
+  const [frame, setFrame] = React.useState<SubFrame | null>(null);
+  const value = React.useMemo(
+    () => ({
+      frame,
+      measure: (trigger: HTMLElement) => {
+        const menu = trigger.closest<HTMLElement>("[role=menu]");
+        if (!menu) return;
+        const outer = menu.getBoundingClientRect();
+        const row = trigger.getBoundingClientRect();
+        setFrame({
+          width: outer.width,
+          height: outer.height,
+          alignOffset: outer.top - row.top,
+          sideOffset: outer.right - row.right + 4,
+        });
+      },
+    }),
+    [frame],
+  );
+  return (
+    <SubFrameContext.Provider value={value}>
+      <DropdownMenuPrimitive.Sub {...props} />
+    </SubFrameContext.Provider>
+  );
+}
+
+const DropdownMenuSubTrigger = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.SubTrigger>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger>
+>(({ className, children, onPointerEnter, onFocus, ...props }, ref) => {
+  const sub = React.useContext(SubFrameContext);
+  return (
+    <DropdownMenuPrimitive.SubTrigger
+      ref={ref}
+      className={cn(itemBase, "pr-1.5 data-[state=open]:bg-[var(--bg-hover)]", className)}
+      onPointerEnter={(event) => {
+        sub?.measure(event.currentTarget);
+        onPointerEnter?.(event);
+      }}
+      onFocus={(event) => {
+        sub?.measure(event.currentTarget);
+        onFocus?.(event);
+      }}
+      {...props}
+    >
+      {children}
+      <Icon name="chevronRight" size={14} className="ml-auto shrink-0 text-[var(--text-tertiary)]" />
+    </DropdownMenuPrimitive.SubTrigger>
+  );
+});
+DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayName;
+
+const DropdownMenuSubContent = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent> & { layer?: SpectraLayer }
+>(({ className, style, sideOffset, alignOffset, collisionPadding = 12, layer: explicitLayer, ...props }, ref) => {
+  const layer = useFloatingLayer(explicitLayer);
+  const frame = React.useContext(SubFrameContext)?.frame;
+  return (
+    <DropdownMenuPrimitive.Portal>
+      <DropdownMenuPrimitive.SubContent
+        ref={ref}
+        sideOffset={sideOffset ?? frame?.sideOffset ?? 4}
+        alignOffset={alignOffset ?? frame?.alignOffset}
+        collisionPadding={typeof collisionPadding === "number" ? clearOfIsland(layer, collisionPadding) : collisionPadding}
+        className={cn(
+          "max-h-[min(70dvh,32rem)] min-w-[12rem] overflow-y-auto rounded-card border border-[var(--border-default)] p-1.5 text-[var(--text-primary)] shadow-[var(--shadow-lg)]",
+          LAYER_CLASS[layer],
+          "spectra-float origin-[var(--radix-dropdown-menu-content-transform-origin)]",
+          className,
+        )}
+        style={{
+          backgroundColor: "var(--bg-elevated)",
+          borderColor: "var(--border-default)",
+          ...(frame ? { width: frame.width, minWidth: frame.width, maxWidth: frame.width, minHeight: frame.height } : null),
+          ...style,
+        }}
+        {...props}
+      />
+    </DropdownMenuPrimitive.Portal>
+  );
+});
+DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayName;
 
 const DropdownMenuSeparator = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Separator>,
@@ -162,6 +254,7 @@ export function OverflowMenu<T extends string>({
   triggerClassName,
   contentClassName,
   followSafe = false,
+  modal = true,
 }: {
   /** Accessible name for the trigger, e.g. "More School sections". */
   label: string;
@@ -185,6 +278,9 @@ export function OverflowMenu<T extends string>({
   /** Menu items count as Follow controls so choosing Follow AI does not
       immediately cancel the mode. */
   followSafe?: boolean;
+  /** False inside an editor's own node views: a modal menu hides the page
+      around it, which the editor reads as a change to its document. */
+  modal?: boolean;
 }) {
   if (!items.length) return null;
 
@@ -225,7 +321,7 @@ export function OverflowMenu<T extends string>({
   });
 
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={modal}>
       <DropdownMenuTrigger
         aria-label={label}
         title={label}
@@ -278,4 +374,7 @@ export {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 };

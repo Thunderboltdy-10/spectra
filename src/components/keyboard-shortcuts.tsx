@@ -26,7 +26,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
     description: "Find a conversation",
     context: "global",
   },
-  { keys: ["Mod", "Shift", "N"], description: "New conversation", context: "global" },
+  { keys: ["Mod", "Shift", "N"], description: "New thread", context: "global" },
   { keys: ["Mod", "J"], description: "Write to Spectra", context: "global" },
   { keys: ["Mod", "."], description: "Hide or show the island", context: "global" },
   {
@@ -99,7 +99,7 @@ export function KeyboardShortcutsHelp() {
         <div className="max-h-[60dvh] overflow-y-auto px-5 py-4">
           {(["global", "composer"] as const).map((context) => (
             <section key={context} className="mb-5 last:mb-0">
-              <h3 className="mb-2 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+              <h3 className="mb-2 text-micro font-semibold text-[var(--text-tertiary)]">
                 {context === "global" ? "Anywhere" : "When typing"}
             </h3>
               <div className="space-y-1">

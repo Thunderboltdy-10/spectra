@@ -97,12 +97,14 @@ a paragraph in a document.
 
 ## Embeds
 
-Embedding one artifact inside another must be easy:
+Embedding one artifact inside another must be easy, and the embed must be useful where it sits:
 
-- **Inserting:** `/` → Embed → semantic search. Recent and related items come first.
-- **The frame:** a consistent frame with a live preview, resize handles and a type glyph.
-- **Opening:** a click opens the embedded artifact in the Side. A double-click edits it inline where the type allows.
-- **Tooling:** the editors lane audits today's friction in `artifact-embed*.tsx` and removes it.
+- **Inserting:** `/` → Reference opens a small search at the caret (`inline-reference-picker.tsx`). Recent and related work comes first; Enter or a click sets the work into the page right there. Nothing else on screen moves, dims or blurs.
+- **The card:** the shelf's index card set into the page. The tab names the work, its kind is in the icon and hue, and the face is the work itself.
+- **The face is the work, nothing else:** flashcards show the cards (turn and step), a quiz shows its questions to answer (a published quiz keeps answers as a private practice attempt and checks them at the end), a presentation shows its real slides, a visualisation runs. No editing tools or summaries on the face.
+- **Options:** everything about the embed itself (open, edit here, show more or less, keep this version or follow the live work, remove) sits in one three-dots menu on the card's border.
+- **Opening:** a click on the face opens the work in the Side. A double-click edits it inline where the type allows.
+- **Stacking:** several works can share one card, a tab each (no folder here; that is the shelf's). "Add another work here" in the menu opens the picker beside the card, and a reference dragged by its grip onto another joins it. "Give it a card of its own" splits one out again. The others ride in the node's `stack` attribute with their placement ids, so each is as placed, saved and seen by Spectra as any reference (`reference-stack.ts`).
 
 ## Per-artifact notes
 

@@ -67,6 +67,7 @@ import {
   type ReactNode,
 } from "react";
 import { isArtifactTypeKey } from "../artifacts/registry";
+import { summaryWorthShowing } from "./artifact-summary";
 import { ResourceSurface } from "../bridge/resource-surface";
 import { FileStorageControls } from "../bridge/file-storage-controls";
 import { useNow } from "@/hooks/use-now";
@@ -213,6 +214,7 @@ import {
   ArtifactCommentsPanel,
   type ArtifactCommentRegion,
 } from "./artifact-comments-panel";
+import { InlineReferencePicker } from "./inline-reference-picker";
 import { ArtifactEmbedsPanel } from "./artifact-embeds-panel";
 import { ArtifactDraftRecovery, describeLocalRecoveryFailure } from "./artifact-draft-recovery";
 import { ChatBrowserButton } from "./chat-browser-panel";
@@ -272,7 +274,7 @@ import {
   linkedArtifacts,
 } from "./spectra-view-model";
 import { requestSpectra } from "../data/request";
-import { isSingleTask } from "../plan/model";
+import { threadHref } from "../chat/home-routes";
 function StudioTypePlaceholder() {
   return <div className="min-h-0 min-w-0 flex-1" role="status" aria-busy="true" aria-label="Opening editor" />;
 }
@@ -287,10 +289,6 @@ const FlashcardStudio = dynamic(
 );
 const QuizStudio = dynamic(
   () => import("./quiz-studio").then((module) => withStudioViewportReady(module.QuizStudio)),
-  { loading: StudioTypePlaceholder },
-);
-const PlanStudio = dynamic(
-  () => import("./plan-studio").then((module) => withStudioViewportReady(module.PlanStudio)),
   { loading: StudioTypePlaceholder },
 );
 const TaskStudio = dynamic(
@@ -897,7 +895,7 @@ function ReadonlyArtifactSnapshot({
               key={card.id}
               className="rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4"
             >
-              <div className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--brand-primary)]">
+              <div className="text-micro font-semibold text-[var(--brand-primary)]">
                 Card {index + 1} · {card.section}
               </div>
               <SpectraStoredText
@@ -924,7 +922,7 @@ function ReadonlyArtifactSnapshot({
               key={question.id}
               className="rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4"
             >
-              <div className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--accent-mint)]">
+              <div className="text-micro font-semibold text-[var(--accent-mint)]">
                 Question {index + 1}
               </div>
               <SpectraStoredText
@@ -991,7 +989,7 @@ function ReadonlyArtifactSnapshot({
               className="overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)]"
             >
               <header className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
-                <span className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+                <span className="text-micro font-semibold text-[var(--text-tertiary)]">
                   Slide {index + 1}
                 </span>
                 <h4 className="mt-1 font-display text-subhead font-semibold leading-tight">
@@ -1012,7 +1010,7 @@ function ReadonlyArtifactSnapshot({
                       key={String(object.id ?? objectIndex)}
                       className="rounded-control border border-[var(--border-subtle)] px-2.5 py-2"
                     >
-                      <span className="block text-micro font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
+                      <span className="block text-micro font-semibold text-[var(--text-tertiary)]">
                         {humanizeKey(String(object.type ?? "object"))}
                       </span>
                       <p className="mt-1 whitespace-pre-wrap text-micro leading-4 text-[var(--text-secondary)]">
@@ -1159,7 +1157,7 @@ function ReadonlyArtifactSnapshot({
       {blueprintKey === "agent" ? (
         <div className="mt-6 grid gap-4">
           <section className="rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
-            <div className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--accent-cyan)]">
+            <div className="text-micro font-semibold text-[var(--accent-cyan)]">
               Instructions
             </div>
             <p className="mt-2 whitespace-pre-wrap text-caption leading-6 text-[var(--text-primary)]">
@@ -1222,7 +1220,7 @@ function MetricSnapshot({
 }) {
   return (
     <section className="rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-      <div className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+      <div className="text-micro font-semibold text-[var(--text-tertiary)]">
         {label}
       </div>
       <div className="mt-2 text-heading font-semibold text-[var(--text-primary)]">
@@ -1425,7 +1423,7 @@ function HistoryComparisonOverlay({
                     </header>
                     <div className="grid md:grid-cols-2">
                       <div className="border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--danger)_3%,var(--bg-primary))] p-3 md:border-b-0 md:border-r">
-                        <div className="mb-1.5 text-micro font-semibold uppercase tracking-[.1em] text-[var(--danger)]">
+                        <div className="mb-1.5 text-micro font-semibold text-[var(--danger)]">
                           Selected version
                         </div>
                         <pre className="whitespace-pre-wrap break-words font-sans text-micro leading-4 text-[var(--text-secondary)]">
@@ -1433,7 +1431,7 @@ function HistoryComparisonOverlay({
                         </pre>
                       </div>
                       <div className="bg-[color-mix(in_oklab,var(--accent-cyan)_3%,var(--bg-primary))] p-3">
-                        <div className="mb-1.5 text-micro font-semibold uppercase tracking-[.1em] text-[var(--accent-cyan)]">
+                        <div className="mb-1.5 text-micro font-semibold text-[var(--accent-cyan)]">
                           Current live
                         </div>
                         <pre className="whitespace-pre-wrap break-words font-sans text-micro leading-4 text-[var(--text-primary)]">
@@ -1607,7 +1605,7 @@ function HistoryComparisonOverlay({
           {checkpointOpen ? (
             <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
               <label
-                className="text-micro font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]"
+                className="text-micro font-semibold text-[var(--text-tertiary)]"
                 htmlFor="history-checkpoint-name"
               >
                 Checkpoint name
@@ -2713,7 +2711,7 @@ export function ArtifactStudio({
               >
                 {artifact.title}
               </div>
-              <div className="mt-0.5 text-micro uppercase tracking-[0.11em] text-[var(--text-tertiary)]">
+              <div className="mt-0.5 text-micro text-[var(--text-tertiary)]">
                 Conversation · {sourceLabel}
               </div>
             </div>
@@ -2726,13 +2724,13 @@ export function ArtifactStudio({
                 className={`spectra-icon-action ${continuedThreadId === threadId ? "is-selected" : ""}`}
                 aria-label={
                   continuedThreadId === threadId
-                    ? "Remove this thread from the Live Dock"
-                    : "Add this thread to the Live Dock"
+                    ? "Stop replying to this thread from the island"
+                    : "Reply to this thread from the island"
                 }
                 title={
                   continuedThreadId === threadId
-                    ? "Remove from Live Dock"
-                    : "Add to Live Dock"
+                    ? "Stop replying from the island"
+                    : "Reply from the island"
                 }
                 aria-pressed={continuedThreadId === threadId}
               >
@@ -2743,7 +2741,7 @@ export function ArtifactStudio({
               label="Open conversation in Chat"
               onClick={() => {
                 if (threadId)
-                  router.push(`/chat?threadId=${encodeURIComponent(threadId)}`);
+                  router.push(threadHref(threadId));
               }}
               icon={Maximize2}
             />
@@ -3033,7 +3031,7 @@ function ArtifactStudioEditor({
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [summary, summaryExpanded]);
+  }, [summary, summaryExpanded, artifact.blueprintKey]);
   const [tagDraft, setTagDraft] = useState((artifact.tags ?? []).join(", "));
   const [content, setContent] = useState<unknown>(artifact.content);
   const contentHistoryRef = useRef(createStudioHistory<unknown>());
@@ -3096,12 +3094,21 @@ function ArtifactStudioEditor({
         setCommentsOpen(true);
       });
     });
+    // "/ Reference" and Insert › Reference a work: find the work to add by name or meaning.
+    const removeReference = spectraBus.handle("reference.add", (input) => {
+      if (input.hostWorkId !== artifact._id) return;
+      setReferencePicker({ at: input.at ?? { x: window.innerWidth / 2 - 190, y: window.innerHeight / 3 }, stackOnto: input.stackOnto });
+      return { status: "completed", message: "Pick the work to show here." } satisfies SpectraCommandOutcome;
+    });
     return () => {
       removeOpen();
       removeAdd();
+      removeReference();
     };
   }, [artifact._id]);
   const [embedsOpen, setEmbedsOpen] = useState(false);
+  /** "/ Reference" asks for the work in a small search at the caret. */
+  const [referencePicker, setReferencePicker] = useState<{ at: { x: number; y: number }; stackOnto?: string } | null>(null);
   const detailsEligible =
     artifact.blueprintKey !== "planner_task" &&
     artifact.blueprintKey !== "thread_reference";
@@ -3431,7 +3438,7 @@ function ArtifactStudioEditor({
           message?: string;
         } | null;
         throw new Error(
-          result?.message ?? "The retained native copy is unavailable.",
+          result?.message ?? "The original file isn't available anymore.",
         );
       }
       const blob = await response.blob();
@@ -3441,12 +3448,12 @@ function ArtifactStudioEditor({
         ? decodeURIComponent(match[1]!)
         : `${artifact.title}.spectra-pkg`;
       downloadDocumentBlob(name, blob);
-      setNativeAttribution("Downloaded a verified native copy");
+      setNativeAttribution("Downloaded the original file");
     } catch (error) {
       setNativeRecoveryError(
         error instanceof Error
           ? error.message
-          : "The retained native copy is unavailable.",
+          : "The original file isn't available anymore.",
       );
     } finally {
       setNativeRecoveryBusy(null);
@@ -3475,7 +3482,7 @@ function ArtifactStudioEditor({
       if (!response.ok)
         throw new Error(
           result?.message ??
-            "The native copy could not be queued on this device.",
+            "The original file couldn't be saved on this device.",
         );
       setNativeAttribution(
         result?.state === "existing"
@@ -3486,7 +3493,7 @@ function ArtifactStudioEditor({
       setNativeRecoveryError(
         error instanceof Error
           ? error.message
-          : "The native copy could not be queued on this device.",
+          : "The original file couldn't be saved on this device.",
       );
     } finally {
       setNativeRecoveryBusy(null);
@@ -5060,8 +5067,10 @@ function ArtifactStudioEditor({
       // closes the menu, so Escape on More would close the whole studio.
       if (
         document.querySelector(
-          // A work edited in place inside another takes Escape for itself.
-          '[data-state="open"][aria-haspopup], [role="menu"][data-state="open"], [role="listbox"][data-state="open"], [role="dialog"][data-state="open"], details[open], [aria-expanded="true"][aria-haspopup], .slash-command-portal, .spectra-document-studio[data-focus], [data-embed-editor]',
+          // A work edited in place inside another, any modal (presenting, a
+          // rehearsal's report), or an editor holding a selection that Escape
+          // should let go of (`data-escape-claim`) takes Escape for itself.
+          '[data-escape-claim], [data-state="open"][aria-haspopup], [role="menu"][data-state="open"], [role="listbox"][data-state="open"], [role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"], details[open], [aria-expanded="true"][aria-haspopup], .slash-command-portal, .spectra-document-studio[data-focus], [data-embed-editor]',
         )
       ) {
         return;
@@ -5078,6 +5087,9 @@ function ArtifactStudioEditor({
         setEmbedsOpen(false);
         return;
       }
+      // Escape puts away a panel laid over the page; a work open as its own
+      // tab is where the person is, and stays until its tab is closed.
+      if (mode === "tab") return;
       event.preventDefault();
       requestStudioClose();
     }
@@ -5091,7 +5103,7 @@ function ArtifactStudioEditor({
     };
     // requestStudioClose reads latest dirty/panel flags via this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- close handler closes over latest studio state
-  }, [artifact._id, commentsOpen, dirty, embedsOpen, historyOpen, instanceKey, live.unsynchronizedChanges]);
+  }, [artifact._id, commentsOpen, dirty, embedsOpen, historyOpen, instanceKey, live.unsynchronizedChanges, mode]);
 
   const shellHistoryEnabled =
     !readOnly && SHELL_HISTORY_TYPES.has(artifact.blueprintKey);
@@ -5830,6 +5842,9 @@ function ArtifactStudioEditor({
     executeApplicationCommand,
     history: contentHistory,
   });
+  /* A task heads its own page with its title and what the school asked, so
+     the header does not say them twice. */
+  const headedByTask = artifact.blueprintKey === "planner_task";
   const identityBlock = (
     <div className="spectra-artifact-identity flex min-w-0 flex-1 items-start">
       <div className="min-w-0 flex-1">
@@ -5856,6 +5871,7 @@ function ArtifactStudioEditor({
             placeholder="Untitled work"
           />
         </div>
+        {summaryExpanded || summaryWorthShowing(presencePreview?.summary ?? summary, artifact.blueprintKey) ? (
         <div className="mt-0.5 rounded-control">
           <div className="relative">
             <textarea
@@ -5899,6 +5915,7 @@ function ArtifactStudioEditor({
             ) : null}
           </div>
         </div>
+        ) : null}
       </div>
     </div>
   );
@@ -5993,11 +6010,12 @@ function ArtifactStudioEditor({
             >
               <Icon className="h-4 w-4" />
             </span>
-            <div className="min-w-0 flex-1">
-              <span className="spectra-artifact-kind block truncate text-micro font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
-                {meta.label}
+            <div className={`min-w-0 flex-1${headedByTask ? " self-center" : ""}`}>
+              <span className="spectra-artifact-kind block truncate text-micro font-semibold text-[var(--text-tertiary)]">
+                {/* One planner work reads as what it is now: a task, or a plan of several. */}
+                {artifact.blueprintKey === "planner_task" ? "Task" : meta.label}
               </span>
-              {identityBlock}
+              {headedByTask ? null : identityBlock}
             </div>
           </div>
           <ArtifactHeaderActions
@@ -6085,7 +6103,7 @@ function ArtifactStudioEditor({
                       <FileDown className="h-4 w-4" />{" "}
                       {nativeRecoveryBusy === "download"
                         ? "Preparing copy…"
-                        : "Download native copy"}
+                        : "Download original file"}
                     </WorkbarMenuAction>
                     <WorkbarMenuAction
                       disabled={nativeRecoveryBusy !== null}
@@ -6460,26 +6478,16 @@ function ArtifactStudioEditor({
                   synchronizationReady={presentation.ready}
                 />
               ) : null}
-              {artifact.blueprintKey === "planner_task" && isSingleTask(editorContent) ? (
+              {artifact.blueprintKey === "planner_task" ? (
                 <TaskStudio
                   key={`${artifact._id}:task`}
                   artifactId={artifact._id}
+                  createdAt={artifact.createdAt}
                   mode={contentMode}
                   title={title}
                   content={editorContent}
                   onChange={editorChange}
                   readOnly={readOnly}
-                />
-              ) : null}
-              {artifact.blueprintKey === "planner_task" && !isSingleTask(editorContent) ? (
-                <PlanStudio
-                  key={`${artifact._id}:plan`}
-                  mode={contentMode}
-                  title={title}
-                  content={editorContent}
-                  onChange={editorChange}
-                  readOnly={readOnly}
-                  onOpenArtifact={onOpenArtifact}
                 />
               ) : null}
               {artifact.blueprintKey === "sheets" ? (
@@ -6647,6 +6655,17 @@ function ArtifactStudioEditor({
         onOpenSource={onOpenArtifact}
         onClose={() => setEmbedsOpen(false)}
       />
+      {referencePicker ? (
+        <InlineReferencePicker
+          at={referencePicker.at}
+          stackOnto={referencePicker.stackOnto}
+          containerId={artifact._id}
+          containerWorkType={isArtifactTypeKey(artifact.blueprintKey) ? artifact.blueprintKey : undefined}
+          compatibilityProfile={studioContract.compatibilityProfile}
+          artifacts={artifacts}
+          onClose={() => setReferencePicker(null)}
+        />
+      ) : null}
       <Dialog
         open={nativeFolderDialogOpen}
         onOpenChange={setNativeFolderDialogOpen}
@@ -7415,7 +7434,7 @@ function StudioDetails({
               open
               className="spectra-related-artifacts rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3"
             >
-              <summary className="text-micro font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
+              <summary className="text-micro font-semibold text-[var(--text-tertiary)]">
                 Related suggestions · {suggestions.length}
               </summary>
               <div className="space-y-1.5">
@@ -7478,7 +7497,7 @@ function StudioDetails({
               {visibleTags.map((tag) => (
                 <span
                   key={tag}
-                  className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1 text-micro font-medium text-[var(--text-secondary)]"
+                  className="inline-flex items-center gap-1 rounded-chip border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1 text-micro font-medium text-[var(--text-secondary)]"
                   data-artifact-tag={tag}
                 >
                   <span>{tag}</span>
@@ -7681,7 +7700,7 @@ function SideCard({ title, children }: { title: string; children: ReactNode }) {
       data-side-card-title={title.toLowerCase().replaceAll(" ", "-")}
       className="p-4"
     >
-      <h3 className="mb-3 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+      <h3 className="mb-3 text-micro font-semibold text-[var(--text-tertiary)]">
         {title}
       </h3>
       {children}

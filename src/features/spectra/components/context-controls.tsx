@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { BookOpen, Files, Search, X } from "@/components/icons/glyph-icons";
+import { BookOpen, Files, Search } from "@/components/icons/glyph-icons";
 import { useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { workTypeMeta } from "./artifact-card";
@@ -72,74 +72,54 @@ export function showContinuationConflict({
   );
 }
 
+/**
+ * What can be done with the work picked in Select, all of it at once: ask
+ * Spectra about it, or lay it out side by side. It rises over the island
+ * with the first pick and goes with the last; Done ends picking.
+ */
 export function SelectionActionBar({
   count,
   onClear,
   onExit,
   onTile,
-  onMove,
+  onAsk,
 }: {
   count: number;
   onClear: () => void;
   onExit: () => void;
   onTile?: () => void;
-  onMove?: () => void;
+  onAsk?: () => void;
 }) {
   return (
     <AnimatePresence>
-      {count >= 0 ? (
+      {count > 0 ? (
         <motion.div
-          initial={{ opacity: 0, y: 12, scale: 0.98 }}
+          role="toolbar"
+          aria-label="Picked work"
+          initial={{ opacity: 0, y: 14, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 8, scale: 0.98 }}
-          data-spectra-card="result"
-          data-card-state="context"
-          className="mb-2 ml-[52px] flex min-h-10 flex-wrap items-center gap-1.5 px-2.5 py-1.5"
+          exit={{ opacity: 0, y: 10, scale: 0.97 }}
+          transition={{ type: "spring", stiffness: 520, damping: 34 }}
+          className="selection-bar"
         >
-          <span className="mr-1 inline-flex items-center gap-1.5 text-caption font-semibold text-[var(--text-primary)]">
-            <Files className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
-            {count ? `${count} selected` : "Select objects"}
-          </span>
-          {count > 0 ? (
-            <>
-              {onTile ? (
-                <button
-                  type="button"
-                  onClick={onTile}
-                  className="rounded-chip px-2 py-1 text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                >
-                  Group as tiles
-                </button>
-              ) : null}
-              {onMove ? (
-                <button
-                  type="button"
-                  onClick={onMove}
-                  className="rounded-chip px-2 py-1 text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                >
-                  Move
-                </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={onClear}
-                className="ml-auto flex h-7 w-7 items-center justify-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
-                title="Clear selection"
-                aria-label="Clear selection"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </>
-          ) : (
-            <span className="text-micro text-[var(--text-tertiary)]">
-              Checkmarks appear only in this mode.
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={onExit}
-            className={`${count ? "" : "ml-auto"} rounded-chip px-2 py-1 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]`}
-          >
+          <motion.span key={count} initial={{ y: -6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="selection-bar-count">
+            {count} picked
+          </motion.span>
+          {onAsk ? (
+            <button type="button" onClick={onAsk} className="selection-bar-action selection-bar-primary">
+              Ask Spectra
+            </button>
+          ) : null}
+          {onTile ? (
+            <button type="button" onClick={onTile} className="selection-bar-action">
+              Side by side
+            </button>
+          ) : null}
+          <button type="button" onClick={onClear} className="selection-bar-action">
+            Clear
+          </button>
+          <span aria-hidden className="selection-bar-rule" />
+          <button type="button" onClick={onExit} className="selection-bar-action">
             Done
           </button>
         </motion.div>
@@ -288,7 +268,7 @@ export function GlobalSearch({
             ) : null}
             {workspaces.length ? (
               <section>
-                <div className="px-2 py-1.5 text-micro font-semibold uppercase tracking-[0.09em] text-[var(--text-tertiary)]">
+                <div className="px-2 py-1.5 text-micro font-semibold text-[var(--text-tertiary)]">
                   Workspaces
                 </div>
                 {workspaces.map((workspace) => (
@@ -316,7 +296,7 @@ export function GlobalSearch({
             ) : null}
             {artifacts.length ? (
               <section className="mt-2">
-                <div className="px-2 py-1.5 text-micro font-semibold uppercase tracking-[0.09em] text-[var(--text-tertiary)]">
+                <div className="px-2 py-1.5 text-micro font-semibold text-[var(--text-tertiary)]">
                   Work
                 </div>
                 {artifacts.map((result) => {

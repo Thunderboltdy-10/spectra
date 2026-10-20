@@ -17,12 +17,14 @@ import {
   type WidgetTheme,
 } from "../widgets/widget-document";
 import { WIDGET_STOPPED_NOTE, WIDGET_WATCHDOG } from "../widgets/widget-watchdog";
+import { widgetFontCss } from "../widgets/widget-fonts";
 
 /*
  * A show_widget visual in the thread. The frame is sandboxed with scripts only
  * (an opaque origin: no cookies, storage or app access) and its document
- * carries a no-network CSP. The app tells it the theme; it tells the app its
- * height. The user can keep it as work.
+ * carries a no-network CSP. The app tells it the theme and gives it the app's
+ * typefaces; it tells the app its height. It sits on the conversation's page
+ * like a figure in a book, captioned beneath, and the user can keep it as work.
  *
  * Its scripts run under a watchdog inside the frame, which stops a loop that
  * never yields and says so. If the frame stops answering anyway (it runs on
@@ -93,6 +95,13 @@ export function ThreadWidget({
 
   useEffect(postTheme, [postTheme]);
 
+  const onFrameLoad = () => {
+    postTheme();
+    void widgetFontCss().then((css) => {
+      if (css) frame.current?.contentWindow?.postMessage({ type: WIDGET_MESSAGE.fonts, css }, "*");
+    });
+  };
+
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (!frame.current || event.source !== frame.current.contentWindow) return;
@@ -129,9 +138,9 @@ export function ThreadWidget({
   };
 
   return (
-    <figure data-spectra-card="result" data-card-state="normal" data-spectra-widget={widget.id} className="overflow-hidden">
-      <figcaption className="flex items-center gap-2 px-3.5 pt-2.5">
-        <span className="min-w-0 flex-1 truncate text-micro font-semibold text-[var(--text-secondary)]">{widget.title}</span>
+    <figure data-spectra-widget={widget.id} className="m-0 flex flex-col">
+      <figcaption className="order-last flex items-center gap-2 border-t border-[var(--border-subtle)] pt-1.5">
+        <span className="min-w-0 flex-1 truncate font-[var(--font-serif)] text-caption italic text-[var(--text-secondary)]">{widget.title}</span>
         {save.status === "saved" ? (
           onOpenArtifact ? (
             <button
@@ -165,7 +174,7 @@ export function ThreadWidget({
         )}
       </figcaption>
       {save.status === "failed" ? (
-        <p role="alert" className="px-3.5 pt-1 text-micro text-[var(--text-secondary)]">
+        <p role="alert" className="order-last pt-1 text-micro text-[var(--text-secondary)]">
           {save.message}
         </p>
       ) : null}
@@ -175,7 +184,7 @@ export function ThreadWidget({
         </p>
       ) : null}
       {health === "silent" ? (
-        <p role="status" data-spectra-widget-stopped className="m-3.5 rounded-control bg-[var(--bg-secondary)] px-3.5 py-3 text-caption text-[var(--text-secondary)]">
+        <p role="status" data-spectra-widget-stopped className="my-2 rounded-control bg-[var(--bg-secondary)] px-3.5 py-3 text-caption text-[var(--text-secondary)]">
           {WIDGET_STOPPED_NOTE}
         </p>
       ) : (
@@ -185,9 +194,9 @@ export function ThreadWidget({
           sandbox={WIDGET_SANDBOX}
           referrerPolicy="no-referrer"
           srcDoc={srcDoc}
-          onLoad={postTheme}
-          style={{ height }}
-          className="block w-full border-0 bg-[var(--bg-primary)]"
+          onLoad={onFrameLoad}
+          style={{ height, colorScheme: theme }}
+          className="block w-full border-0 bg-transparent"
         />
       )}
     </figure>

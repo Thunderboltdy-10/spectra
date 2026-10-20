@@ -63,7 +63,7 @@ import {
   type BenchReleaseOption,
 } from "../data/agent-bench";
 import { spectraBus } from "../events";
-import { useLifeArrival, useLifeDeparture, useLifeGlow, useWritingFront } from "../life/use-life";
+import { useLifeArrival, useLifeDeparture, useLifeGlow } from "../life/use-life";
 import { SpectraRichContent } from "./spectra-rich-content";
 
 /* ------------------------------------------------------------------ */
@@ -445,7 +445,6 @@ function BenchAnswer({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useLifeGlow(ref, streaming);
-  useWritingFront(ref, streaming);
   return (
     <div
       ref={ref}

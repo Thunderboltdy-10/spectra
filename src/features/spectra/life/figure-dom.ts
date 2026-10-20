@@ -140,7 +140,8 @@ export function replacementOf(rect: DOMRect): HTMLElement | null {
     const r = node.getBoundingClientRect();
     const w = Math.min(r.right, rect.right) - Math.max(r.left, rect.left);
     const h = Math.min(r.bottom, rect.bottom) - Math.max(r.top, rect.top);
-    if (r.width * r.height > 2.5 * rect.width * rect.height) break;
+    // What took a placeholder's place is never the page around it: the page's own title stood there all along.
+    if (r.width * r.height > 2.5 * rect.width * rect.height || node.querySelector("h1")) break;
     if (w > 0 && h > 0 && w * h > 0.5 * rect.width * rect.height) best = node;
   }
   return best;

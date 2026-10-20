@@ -11,7 +11,7 @@ export default async function LibraryWorkPage({
 }) {
   const { workId } = await params;
   return (
-    <AppShell fullBleed noScroll contentClassName="!p-0">
+    <AppShell fullBleed noScroll workTabs contentClassName="!p-0">
       <Suspense
         fallback={<div className="h-full min-h-0" />}
       >

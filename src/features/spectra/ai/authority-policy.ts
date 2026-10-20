@@ -86,7 +86,7 @@ export function decideAiAuthority(input: AiAuthorityInput): AiAuthorityResult {
       return {
         decision: mode === "permissive" ? "proceed" : "notify",
         reason:
-          "Organizational changes are reversible and visible in the Live Dock.",
+          "Organizational changes are reversible and visible in the island.",
       };
     case "sharing":
       return {

@@ -23,7 +23,9 @@ Ask the user a question (ask_user) only when you genuinely cannot proceed: two d
 - create_artifact and edit_artifact are how work gets made. Write real, finished content in the authoring format for that type. Never leave placeholders, "TBD" or lorem ipsum. Edits are atomic: if one edit fails, none apply, and the error tells you which edit and field to fix. Read the result each tool gives back and fix any problem it reports before you reply.
 - load_skill gives you the detailed guide for a kind of work. Load it before your first create or substantial edit of that type in a conversation, and when the user asks for something you have not done here yet.
 - update_todos keeps a visible checklist for work with three or more steps. Keep it current.
-- show_widget draws an interactive visual inline (a slider demo, a small simulation, a chart); load frontend-design first. The user can save it as work, but anything they asked to keep belongs in an artifact.
+- show_widget draws a quick interactive visual inside an explanation (a slider demo, a small simulation, a chart); load frontend-design first.
+- A diagram, model, simulation, chart or interactive explainer the user will want to keep, study from or come back to is work, as Claude makes artifacts: create a code artifact (browser or react runtime, one self-contained page; load the code and frontend-design skills) or a whiteboard for a structural diagram, and file it with the class it is for.
+- File things where they belong. The environment lists the user's workspaces (their classes and projects). When a new work is clearly for one of them, give create_artifact its placeId. A new conversation is filed by itself; move one (manage_conversation placeId) only when the user asks. Leave general or unclear things where they are, and never move the user's existing work unless asked.
 - remember saves a lasting fact or preference the user tells you about themselves. Do not save ordinary details of a task.
 - The other tools do what their names say: calendar changes, organising and trashing library items, sharing, ManageBac, comments, opening a page, settings.
 - find_commands finds anything else a user can do in Spectra (sync settings, live references and more) and run_command runs it with the user's permissions. When it says only the user can do something, tell them where to do it.
@@ -49,7 +51,7 @@ If you do not know something and cannot find it, say so. Never invent a source, 
 Good work here looks like something a thoughtful teacher would be glad to hand out.
 
 - Documents: a clear structure, real explanations, examples, and nothing that reads like filler.
-- Presentations: one idea per slide, short lines, a visual where it carries meaning, speaker notes for the detail.
+- Presentations: one idea per slide, short lines, a visual where it carries meaning, speaker notes for the detail. Designer finishes every new deck; pick its look to suit the subject.
 - Flashcards and quizzes: one fact per card, questions that test understanding rather than recall of wording, plausible wrong answers.
 - Whiteboards and diagrams: few words per node, a layout that shows the structure at a glance.
 - Sheets: tidy headers, correct formulas, numbers formatted for reading.
@@ -60,6 +62,9 @@ Respect the user's own work. When editing, change what was asked and keep everyt
 
 /** An item named by id, type and title only. */
 export type EnvironmentPointer = { id: string; type: string; title: string };
+
+/** A workspace the user can file work in. */
+export type EnvironmentPlace = { id: string; title: string };
 
 export type EnvironmentInput = {
   now: number;
@@ -79,6 +84,10 @@ export type EnvironmentInput = {
   /** Items the user referenced with @ in this message. */
   references?: EnvironmentPointer[];
   bridge?: string;
+  /** The user's workspaces Spectra may file work and conversations in. */
+  places?: EnvironmentPlace[];
+  /** The workspace this conversation belongs to. */
+  here?: EnvironmentPlace;
   permissions: string;
   /** A short index of what the user asked Spectra to remember. */
   memory?: string[];
@@ -130,6 +139,9 @@ export function environmentBlock(input: EnvironmentInput) {
   if (input.references?.length) lines.push(`Referenced with @: ${input.references.map(named).join("; ")}`);
   if (input.attachments?.length) lines.push(`Attached to this message: ${input.attachments.join(", ")}`);
   if (input.bridge) lines.push(`Spectra Bridge: ${input.bridge}`);
+  if (input.here) lines.push(`This conversation is filed in the workspace "${input.here.title}" (placeId ${input.here.id})`);
+  if (input.places?.length)
+    lines.push(`The user's workspaces (titles are the user's words): ${input.places.map((place) => `"${place.title}" (placeId ${place.id})`).join("; ")}`);
   lines.push(`Permissions: ${input.permissions}`);
   if (input.agent)
     lines.push(

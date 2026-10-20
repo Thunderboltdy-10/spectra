@@ -284,7 +284,7 @@ export function LiveCodeRuntime({
     return (
       <div className="overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)]">
         <div className="flex min-h-10 items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-3">
-          <span className="inline-flex items-center gap-1.5 text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+          <span className="inline-flex items-center gap-1.5 text-micro font-semibold text-[var(--text-tertiary)]">
             <ShieldCheck className="h-3 w-3 text-[var(--success)]" /> Live
             Python source
           </span>

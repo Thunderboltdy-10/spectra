@@ -68,17 +68,17 @@ describe("verdicts", () => {
 });
 
 describe("what a press reveals", () => {
-  it("forms from the press that revealed it", () => {
+  it("lands what the press revealed", () => {
     recentCause();
     fireEvent.pointerDown(document.body, { clientX: 40, clientY: 60 });
-    render(<section><LifeForm />Answer</section>);
-    expect(field.form).toHaveBeenCalledTimes(1);
-    expect(field.form.mock.calls[0][1]).toEqual({ from: [40, 60] });
+    const view = render(<section><LifeForm />Answer</section>);
+    expect(field.form).not.toHaveBeenCalled();
+    expect(view.container.querySelector("section")?.getAttribute("data-life-working")).toBe("arrival");
   });
 
   it("reopened later, it is simply there", () => {
     vi.spyOn(performance, "now").mockReturnValue(10_000_000);
-    render(<section><LifeForm />Answer</section>);
-    expect(field.form).not.toHaveBeenCalled();
+    const view = render(<section><LifeForm />Answer</section>);
+    expect(view.container.querySelector("section")?.hasAttribute("data-life-working")).toBe(false);
   });
 });

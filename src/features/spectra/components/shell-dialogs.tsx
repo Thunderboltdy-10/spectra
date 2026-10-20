@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, Loader2, BarChart3, CheckCircle2, GraduationCap, Home, Trash2, Atom, Brain, Calculator, FlaskConical, NotebookOpen, Sprout } from "@/components/icons/glyph-icons";
+import { BookOpen, Loader2, BarChart3, CheckCircle2, GraduationCap, Trash2, Atom, Brain, Calculator, FlaskConical, NotebookOpen, Sprout } from "@/components/icons/glyph-icons";
 import {
   Dialog,
   DialogContent,
@@ -38,59 +38,6 @@ export const workspaceIconChoices = [
   ["Sprout", Sprout],
   ["BarChart3", BarChart3],
 ] as const;
-
-export function PendingCreateDialog({
-  open,
-  typeLabel,
-  workspaces,
-  onCancel,
-  onSelect,
-}: {
-  open: boolean;
-  /** Lower-cased work type name, e.g. "document". */
-  typeLabel: string;
-  workspaces: ReadonlyArray<{ id: string; title: string; accentColor: string }>;
-  onCancel: () => void;
-  onSelect: (workspaceId: string | undefined) => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={(next) => !next && onCancel()}>
-      <DialogContent className="max-w-[min(390px,calc(100vw-32px))] gap-0 p-4">
-        <DialogTitle>Where should this {typeLabel} live?</DialogTitle>
-        <DialogDescription className="mt-1 text-caption">
-          Choose a workspace or keep it in General.
-        </DialogDescription>
-        <div className="mt-4 max-h-[300px] space-y-1 overflow-y-auto">
-          <button
-            type="button"
-            className={menuItemClass}
-            onClick={() => onSelect(undefined)}
-          >
-            <Home className="h-4 w-4" />
-            General
-          </button>
-          {workspaces.map((target) => (
-            <button
-              key={target.id}
-              type="button"
-              className={menuItemClass}
-              onClick={() => onSelect(target.id)}
-            >
-              <span
-                className="h-2.5 w-2.5 rounded-full"
-                style={{ background: target.accentColor }}
-              />
-              {target.title}
-            </button>
-          ))}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-const menuItemClass =
-  "flex w-full items-center gap-2 rounded-control px-2.5 py-2 text-left text-ui font-medium text-[var(--text-primary)] outline-none transition-colors hover:bg-[var(--bg-hover)] focus-visible:bg-[var(--bg-hover)] disabled:opacity-45";
 
 export function WorkspaceDeleteDialog({
   open,

@@ -22,12 +22,13 @@ import {
 } from "./follow-ai";
 import { disengageFollow, isProgrammaticFollowOpen } from "./follow";
 import { spectraBus } from "../events";
+import { getSpectraMotionSnapshot } from "../motion/motion-level";
 import type { SpectraCommandOutcome } from "../events/contracts";
 import { announceManualViewportInteraction } from "../viewport-readiness";
 import type { ActorIdentity } from "./interaction-model";
 import { getRunLedger } from "./run-ledger";
-import { life, type GlowHandle } from "../life/life";
-import { markCause, prismPoint } from "../life/use-life";
+import { life } from "../life/life";
+import { markCause, markWorking, prismPoint } from "../life/use-life";
 import { startSettingsObservationClient } from "./settings-observation-client";
 import { startFollowNavigation } from "./follow-navigation";
 
@@ -60,9 +61,9 @@ function sparkGoesHome(actorId: string) {
       sparkHome.delete(actorId);
       const from = sparkAt.get(actorId);
       sparkAt.delete(actorId);
-      const prism = document.querySelector("[data-island-prism]")?.getBoundingClientRect();
-      if (!from || !life.on || !prism?.width) return;
-      void life.send(from, { x: prism.x, y: prism.y, width: prism.width, height: prism.height }, { colour: "spectrum", strength: 0.6, absorb: true });
+      const home = document.querySelector("[data-island-home]")?.getBoundingClientRect();
+      if (!from || !life.on || !home?.width) return;
+      void life.send(from, { x: home.x, y: home.y, width: home.width, height: home.height }, { colour: "spectrum", strength: 0.6, absorb: true });
     }, SPARK_HOME_MS),
   );
 }
@@ -81,23 +82,23 @@ function moveSpark(actorId: string, to: [number, number]) {
 
 /** A pointer is attached only while the registered control performs its action.
  * It cannot navigate, focus, mutate the control, or acknowledge a save.
- * In the field, Spectra's light travels to the control, holds a glow round it
- * while it works it, and ripples when it lets go. */
+ * Spectra's spark travels to the control, the band crosses it while Spectra
+ * works it (as anything Spectra works on), and the paper ripples when it lets go. */
 export function presentAppControl(actorId: string, operationId: string, element: HTMLElement): () => void {
   const presentation = { actorId, operationId, element };
   controlPresentations.set(actorId, presentation);
   for (const listener of controlPresentationListeners) listener();
-  let glow: GlowHandle | null = null;
+  let release: (() => void) | null = null;
   if (life.on && element.isConnected) {
     const r = element.getBoundingClientRect();
     if (r.width > 0 && r.height > 0) {
       moveSpark(actorId, [r.left + r.width / 2, r.top + r.height / 2]);
-      glow = life.glow({ x: r.x - 4, y: r.y - 4, width: r.width + 8, height: r.height + 8 }, "spectrum", 0.7);
+      release = markWorking(element);
     }
   }
   return () => {
-    if (glow) {
-      glow.stop();
+    if (release) {
+      release();
       if (element.isConnected) {
         const r = element.getBoundingClientRect();
         if (r.width > 0) life.pulse(r.left + r.width / 2, r.top + r.height / 2, 0.6, "spectrum");
@@ -483,9 +484,11 @@ export function AppChoreographyMount() {
       observer.disconnect();
     };
   }, []);
+  const revealedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!follow.following || typeof window === "undefined") {
       setCursor(null);
+      revealedRef.current = null;
       return;
     }
     let disposed = false;
@@ -514,7 +517,16 @@ export function AppChoreographyMount() {
             ].includes(targetKey),
           )
         : null;
-      const rect = target?.getBoundingClientRect();
+      let rect = target?.getBoundingClientRect();
+      // Following moves the page to the work, once per new target, as a person
+      // scrolls to what they are about to change; it never fights the reader after.
+      if (target && rect && targetKey && revealedRef.current !== targetKey) {
+        revealedRef.current = targetKey;
+        if (rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth) {
+          target.scrollIntoView({ block: "center", inline: "nearest", behavior: getSpectraMotionSnapshot().reduced ? "auto" : "smooth" });
+          rect = target.getBoundingClientRect();
+        }
+      }
       if (rect && rect.width > 0 && rect.height > 0) {
         setCursor({
           left: Math.max(8, Math.min(window.innerWidth - 20, rect.left + 12)),
@@ -563,12 +575,8 @@ export function AppChoreographyMount() {
     moveSpark(followedActor, [cursor.left, cursor.top]);
   }, [cursor, followedActor]);
   if (!follow.following && !controlPointers.length) return null;
-  const activity = follow.location?.note ?? follow.surfaceLocation?.note ?? "Watching the current Spectra task";
-  const surfaceName = follow.location
-    ? "Artifact"
-    : follow.surfaceLocation?.route
-      ? follow.surfaceLocation.route[0]!.toUpperCase() + follow.surfaceLocation.route.slice(1)
-      : "Spectra";
+  // What the followed run is doing, said once at the top of the screen, with the way out beside it.
+  const activity = follow.location?.note || follow.surfaceLocation?.note || "Spectra is working";
   return createElement(
     Fragment,
     null,
@@ -579,9 +587,23 @@ export function AppChoreographyMount() {
         role: "status",
         "aria-live": "polite",
         "data-spectra-follow-ai-viewport": "true",
+        "data-spectra-follow-control": "",
       },
-      createElement("span", null, `${surfaceName} · Spectra AI`),
-      createElement("strong", null, activity),
+      createElement("span", { "aria-hidden": true, className: "spectra-follow-ai-status-light" }),
+      createElement("span", { className: "spectra-follow-ai-status-label" }, "Following"),
+      createElement("strong", { key: activity }, activity),
+      createElement(
+        "button",
+        {
+          type: "button",
+          className: "spectra-follow-ai-status-stop",
+          onClick: () => {
+            disengageFollowAi();
+            disengageFollow("user_input");
+          },
+        },
+        "Stop",
+      ),
     ) : null,
     ...controlPointers.map((pointer) => createElement("span", {
       key: pointer.actorId,

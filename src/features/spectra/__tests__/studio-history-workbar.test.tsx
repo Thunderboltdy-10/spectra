@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuizStudio } from "../components/quiz-studio";
 import { FlashcardStudio } from "../components/flashcard-studio";
 import { PlanStudio } from "../components/plan-studio";
-import { TaskStudio } from "../components/task-studio";
 import { TimetableStudio } from "../components/timetable-studio";
 import {
   StudioContractProvider,
@@ -16,7 +15,8 @@ import type { WorkType } from "../work/registry";
 
 // Quiz, flashcards, plan and timetable undo through the shell's content
 // history. Like the whiteboard, their workbar leads with Undo and Redo, so the
-// history is reachable without the keyboard.
+// history is reachable without the keyboard. A lone task is a calm sheet with
+// no workbar; it undoes through the shell.
 vi.mock("convex/react", () => ({ useMutation: () => vi.fn(async () => ({})), useQuery: () => undefined }));
 vi.mock("../data/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../data/api")>()),
@@ -24,7 +24,7 @@ vi.mock("../data/api", async (importOriginal) => ({
 }));
 vi.mock("../settings/preference-store", () => ({
   useSpectraPreferences: () => ({
-    preferences: { workbar: {}, writing: { smartCompletion: false } },
+    preferences: { workbar: {}, writing: { smartCompletion: false }, notifications: { reminderTime: "09:00" } },
     hydrated: true,
     update: () => {},
     replace: () => {},
@@ -63,7 +63,6 @@ const studios: Array<[string, WorkType, () => ReactNode]> = [
   ["quiz", "quiz", () => <QuizStudio artifactId="work-1" mode="tab" content={{ questions: [] }} onChange={() => {}} />],
   ["flashcards", "flashcard_deck", () => <FlashcardStudio artifactId="work-1" mode="tab" content={{ cards: [] }} onChange={() => {}} />],
   ["plan", "planner_task", () => <PlanStudio mode="tab" title="Plan" content={{ tasks: [] }} onChange={() => {}} readOnly={false} />],
-  ["task", "planner_task", () => <TaskStudio mode="tab" title="Task" content={{}} onChange={() => {}} readOnly={false} />],
   ["timetable", "timetable", () => <TimetableStudio artifactId="work-1" artifacts={[]} content={{}} onChange={() => {}} readOnly={false} />],
 ];
 

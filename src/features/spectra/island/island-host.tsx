@@ -7,9 +7,10 @@ import { spectraBus } from "../events";
 import type { SpectraCommandOutcome } from "../events/contracts";
 import { useProvideIslandEngine } from "./engine";
 import { Island } from "./island";
+import { HOME_PATH } from "../chat/home-routes";
 
-/** Pages that lend the island their own run engine (they show the runs they start). */
-const ROUTES_WITH_OWN_ENGINE = ["/chat", "/workspace", "/library", "/agents"];
+/** Pages that lend the island their own run engine (they show the runs they start): Home's conversation among them. */
+const ROUTES_WITH_OWN_ENGINE = [HOME_PATH, "/workspace", "/library", "/agents"];
 
 function ownsEngine(pathname: string) {
   return ROUTES_WITH_OWN_ENGINE.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
@@ -18,8 +19,7 @@ function ownsEngine(pathname: string) {
 /**
  * The island on every signed-in page, with the general run engine. Pages
  * that own an engine lend theirs over it while they are mounted; everywhere
- * else this one sends, answers and stops. A run it starts arrives as a tab;
- * nothing opens on its own.
+ * else this one sends, answers and stops. A run it starts arrives as a tab.
  */
 export function IslandHost() {
   const pathname = usePathname();
@@ -57,11 +57,11 @@ export function IslandHost() {
       () => ({
         engine,
         focus,
-        restAsComposer: Boolean(focus),
         startNewThread: focus ? () => setLetGo(focus.threadId) : undefined,
       }),
       [engine, focus],
     ),
+    { fallback: true },
   );
   return <Island />;
 }

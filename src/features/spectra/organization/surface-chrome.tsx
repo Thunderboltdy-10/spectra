@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode } from "react";
-import { Loader2, FolderPlus, Plus, Search, SlidersHorizontal, X, ArrowDownUp, Columns3, Upload } from "@/components/icons/glyph-icons";
+import { Loader2, FolderPlus, Laptop, Plus, Search, SlidersHorizontal, X, ArrowDownUp, Columns3, Upload, MoreHorizontal, Files, PanelRightClose, PanelRightOpen } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -11,6 +11,9 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -24,9 +27,8 @@ import type { SortDirection, SortKey, TypeFilter } from "./tree-model";
 /**
  * The chrome every view of the tree shares (CANON D41).
  *
- * The Library's List and its Board are two views of one world, so they are one
- * toolbar: one search box, one type filter, one grouping control, one create
- * menu, one view switch, one set of names. Before this file there were two
+ * Every view of the Library is one toolbar: one search box, one type filter,
+ * one create menu, one view switch, one set of names. Before this file there were two
  * searches, two "All types" controls with two different vocabularies and two
  * different visual treatments, a grouping control that opened in a style nothing
  * else used, and a second "New" button in a row that already had one. Each of
@@ -44,30 +46,14 @@ export const controlClass =
 export const controlActiveClass =
   "border-[var(--brand-primary)] text-[var(--text-primary)]";
 
-export type SurfaceView = "list" | "board";
-
-export type BoardGroupBy = "type" | "workspace" | "updated" | "folder";
-
-export const GROUP_BY_LABELS: Record<BoardGroupBy, string> = {
-  type: "Type",
-  workspace: "Workspace",
-  folder: "Folder",
-  updated: "Last activity",
-};
-
 /**
  * One vocabulary for "what kind of thing".
  *
- * The server keys its board columns on exactly these values (`orgNodes.typeKey`),
- * so the filter, the columns and the create menu all speak the same words. The
- * List used to add "All work", "Chats" and "Folders and workspaces" — three
- * options the Board could not honour — which is how the same control came to
- * mean two different things in two places.
+ * The server keys its type index on exactly these values (`orgNodes.typeKey`),
+ * so the filter and the create menu speak the same words.
  */
-export const TYPE_FILTERS: ReadonlyArray<{ key: string; label: string }> = [
-  ...workTypeFilters.map((type) => ({ key: type.key, label: type.label })),
-  { key: "thread", label: "Chats" },
-];
+export const TYPE_FILTERS: ReadonlyArray<{ key: string; label: string }> =
+  workTypeFilters.map((type) => ({ key: type.key, label: type.label }));
 
 export function typeFilterLabel(filter: TypeFilter) {
   if (filter === "all") return "All types";
@@ -129,16 +115,17 @@ export function SurfaceSearch({
   );
 }
 
-/** List or Board. Same rows, same filters, different shape. */
-export function SurfaceViewSwitch({
+/** Shelf or List, at the top of the Library and in a class. Same things, same
+    filters, different shape. */
+export function SurfaceViewSwitch<View extends string>({
   view,
   onChange,
   views,
 }: {
-  view: SurfaceView;
-  onChange: (next: SurfaceView) => void;
+  view: View;
+  onChange: (next: View) => void;
   views: ReadonlyArray<{
-    key: SurfaceView;
+    key: View;
     label: string;
     icon: React.ComponentType<{ className?: string }>;
   }>;
@@ -165,7 +152,7 @@ export function SurfaceViewSwitch({
             )}
           >
             <Icon className="size-3.5" />
-            {option.label}
+            <span className="surface-bar-label">{option.label}</span>
           </button>
         );
       })}
@@ -186,9 +173,10 @@ export function SurfaceTypeFilter({
       <DropdownMenuTrigger
         className={cn(controlClass, filter !== "all" && controlActiveClass)}
         aria-label="Filter by type"
+        title={typeFilterLabel(filter)}
       >
         <SlidersHorizontal className="size-3.5" />
-        {typeFilterLabel(filter)}
+        <span className="surface-bar-label">{typeFilterLabel(filter)}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-[200px]">
         <DropdownMenuRadioGroup
@@ -214,36 +202,6 @@ export function SurfaceTypeFilter({
   );
 }
 
-/** How the board cuts its columns. The Board's only exclusive control. */
-export function SurfaceGroupBy({
-  value,
-  onChange,
-}: {
-  value: BoardGroupBy;
-  onChange: (next: BoardGroupBy) => void;
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger className={controlClass} aria-label="Group columns by">
-        <Columns3 className="size-3.5" />
-        Grouped by {GROUP_BY_LABELS[value].toLowerCase()}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[200px]">
-        <DropdownMenuRadioGroup
-          value={value}
-          onValueChange={(next) => onChange(next as BoardGroupBy)}
-        >
-          {(Object.keys(GROUP_BY_LABELS) as BoardGroupBy[]).map((key) => (
-            <DropdownMenuRadioItem key={key} value={key}>
-              {GROUP_BY_LABELS[key]}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 const SORT_LABELS: Record<"manual" | SortKey, string> = {
   manual: "Arrangement",
   name: "Name",
@@ -252,8 +210,7 @@ const SORT_LABELS: Record<"manual" | SortKey, string> = {
 };
 
 /**
- * Row order. The List's only exclusive control: a board's order *is* its
- * grouping, so offering both there would be two answers to one question.
+ * Row order.
  */
 export function SurfaceSortMenu({
   sortKey,
@@ -273,13 +230,14 @@ export function SurfaceSortMenu({
       <DropdownMenuTrigger
         className={cn(controlClass, sortKey !== "manual" && controlActiveClass)}
         aria-label="Sort"
+        title={`Order: ${SORT_LABELS[sortKey]}`}
       >
         {settling ? (
           <Loader2 className="size-3.5 animate-spin" />
         ) : (
           <ArrowDownUp className="size-3.5" />
         )}
-        {SORT_LABELS[sortKey]}
+        <span className="surface-bar-label">{SORT_LABELS[sortKey]}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-[220px]">
         <DropdownMenuRadioGroup
@@ -322,13 +280,8 @@ export type BlueprintChoiceKey = Parameters<
 >[0];
 
 /**
- * Make something. One menu, wherever creation happens — the toolbar, a column's
- * foot, an empty state.
- *
- * `fixedTypeKey` is CANON D43 in one prop: when the position the reader clicked
- * already decides the type, the menu does not ask for it again. The same is true
- * in reverse for the place, which the caller decides from where the button
- * lives, never from a second dialog.
+ * Make something. One menu, wherever creation happens. The place is decided by
+ * where the button lives, never by a second dialog (CANON D43).
  */
 export function SurfaceNewMenu({
   disabled,
@@ -338,12 +291,9 @@ export function SurfaceNewMenu({
   onNewWorkspace,
   onNewWork,
   onImport,
-  fixedTypeKey,
+  onSyncFolder,
   label = "New",
-  placeLabel,
   align = "end",
-  trigger,
-  placeChoices,
 }: {
   disabled?: boolean;
   /** Why the control is inactive — visible status text plus title / aria. */
@@ -353,24 +303,11 @@ export function SurfaceNewMenu({
   onNewWorkspace?: () => void;
   onNewWork: (key: BlueprintChoiceKey) => void;
   onImport?: () => void;
-  /** Set when the position already fixes the type; the menu then skips asking. */
-  fixedTypeKey?: string;
+  /** Syncing a folder from this computer through Bridge, and what the row says. */
+  onSyncFolder?: { label: string; run: () => void };
   label?: string;
-  /** Where the new thing will land, said once, at the top of the menu. */
-  placeLabel?: string;
   align?: "start" | "end";
-  /** Replaces the default filled button — used by a column's own affordance. */
-  trigger?: ReactNode;
-  /** The only unanswered choice when a board column already fixes the type. */
-  placeChoices?: ReadonlyArray<{
-    key: string;
-    label: string;
-    onSelect: () => void;
-  }>;
 }) {
-  const choices = fixedTypeKey
-    ? blueprintChoices.filter((choice) => choice.key === fixedTypeKey)
-    : blueprintChoices;
 
   /* Hover-only title failed live honesty on Recent/quick; keep title/aria and
      also show the reason as visible muted status text beside the control. */
@@ -393,34 +330,9 @@ export function SurfaceNewMenu({
       control
     );
 
-  /* The type is settled and there is exactly one thing this button can make, so
-     it makes it. A menu of one item asks a question with one answer. */
-  if (
-    fixedTypeKey &&
-    choices.length === 1 &&
-    !onNewFolder &&
-    !onNewWorkspace &&
-    !onImport &&
-    !placeChoices?.length
-  ) {
-    const only = choices[0]!;
-    return withDisabledReason(
-      <button
-        type="button"
-        disabled={disabled}
-        title={disabled ? disabledTitle : undefined}
-        onClick={() => onNewWork(only.key)}
-        className={cn(controlClass, "w-full justify-center")}
-      >
-        <Plus className="size-3.5" />
-        {label}
-      </button>,
-    );
-  }
-
   /* Disabled controls often skip native title; wrap so hover/focus still
      explain why New is inactive (e.g. quick views / Trash). */
-  const triggerNode = trigger ?? (
+  const triggerNode = (
     <span
       className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-3 text-ui font-medium text-[var(--text-inverse)] transition-opacity hover:opacity-90"
       title={disabled ? disabledTitle : undefined}
@@ -437,7 +349,7 @@ export function SurfaceNewMenu({
         className="inline-flex"
         title={disabled ? disabledTitle : undefined}
       >
-        <DropdownMenuTrigger disabled={disabled} asChild={Boolean(trigger)}>
+        <DropdownMenuTrigger disabled={disabled}>
           {triggerNode}
         </DropdownMenuTrigger>
       </span>
@@ -450,20 +362,6 @@ export function SurfaceNewMenu({
         layer="composer-dock"
         collisionPadding={{ bottom: 16 }}
       >
-        {fixedTypeKey && placeChoices?.length ? (
-          <>
-            <DropdownMenuLabel>File in</DropdownMenuLabel>
-            {placeChoices.map((place) => (
-              <DropdownMenuItem key={place.key} onSelect={place.onSelect}>
-                <Columns3 className="size-3.5 text-[var(--text-tertiary)]" />
-                {place.label}
-              </DropdownMenuItem>
-            ))}
-          </>
-        ) : null}
-        {placeLabel ? (
-          <DropdownMenuLabel>Into {placeLabel}</DropdownMenuLabel>
-        ) : null}
         {onNewFolder ? (
           <DropdownMenuItem onSelect={onNewFolder}>
             <FolderPlus className="size-3.5 text-[var(--text-tertiary)]" />
@@ -486,13 +384,19 @@ export function SurfaceNewMenu({
             Import a file
           </DropdownMenuItem>
         ) : null}
-        {onNewFolder || onNewWorkspace || onImport ? (
+        {onSyncFolder ? (
+          <DropdownMenuItem onSelect={onSyncFolder.run}>
+            <Laptop className="size-3.5 text-[var(--text-tertiary)]" />
+            {onSyncFolder.label}
+          </DropdownMenuItem>
+        ) : null}
+        {onNewFolder || onNewWorkspace || onImport || onSyncFolder ? (
           <DropdownMenuSeparator />
         ) : null}
-        {placeLabel || !(onNewFolder || onNewWorkspace || onImport) ? null : (
+        {onNewFolder || onNewWorkspace || onImport || onSyncFolder ? (
           <DropdownMenuLabel>New work here</DropdownMenuLabel>
-        )}
-        {!placeChoices?.length && choices.map((choice) => (
+        ) : null}
+        {blueprintChoices.map((choice) => (
           <DropdownMenuItem
             key={choice.key}
             onSelect={() => onNewWork(choice.key)}
@@ -506,3 +410,131 @@ export function SurfaceNewMenu({
   );
 }
 
+
+/**
+ * Everything the bar does that is not finding or making something: how the
+ * shelf is shown, what it holds, its order, picking several things. One menu,
+ * so the bar stays the place you are, a search, and New (LIBRARY.md, "Views").
+ */
+export function SurfaceMoreMenu({
+  view,
+  onViewChange,
+  filter,
+  onFilterChange,
+  sortKey,
+  direction,
+  onSortKeyChange,
+  onDirectionChange,
+  selecting,
+  onToggleSelect,
+  quickAccess,
+  onToggleQuickAccess,
+  onEmptyTrash,
+}: {
+  view?: "shelf" | "list";
+  onViewChange?: (next: "shelf" | "list") => void;
+  filter: TypeFilter;
+  onFilterChange: (next: TypeFilter) => void;
+  sortKey: "manual" | SortKey;
+  direction: SortDirection;
+  onSortKeyChange: (next: "manual" | SortKey) => void;
+  onDirectionChange: (next: SortDirection) => void;
+  selecting?: boolean;
+  onToggleSelect?: () => void;
+  quickAccess?: boolean;
+  onToggleQuickAccess?: () => void;
+  onEmptyTrash?: () => void;
+}) {
+  const narrowed = filter !== "all" || sortKey !== "manual";
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className={cn(controlClass, "w-8 justify-center px-0", narrowed && controlActiveClass)}
+        aria-label="View options"
+        title="View options"
+      >
+        <MoreHorizontal className="size-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-[230px]">
+        {view && onViewChange ? (
+          <>
+            <DropdownMenuRadioGroup value={view} onValueChange={(next) => onViewChange(next as "shelf" | "list")}>
+              <DropdownMenuRadioItem value="shelf">Shelf</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="list">List</DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <SlidersHorizontal className="size-3.5 text-[var(--text-tertiary)]" />
+            Show
+            <span className="ml-auto pr-1 text-micro text-[var(--text-tertiary)]">{typeFilterLabel(filter)}</span>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-[200px]">
+            <DropdownMenuRadioGroup value={filter} onValueChange={(next) => onFilterChange(next as TypeFilter)}>
+              <DropdownMenuRadioItem value="all">All types</DropdownMenuRadioItem>
+              <DropdownMenuSeparator />
+              {TYPE_FILTERS.map((type) => (
+                <DropdownMenuRadioItem key={type.key} value={type.key}>
+                  {type.label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <ArrowDownUp className="size-3.5 text-[var(--text-tertiary)]" />
+            Order
+            <span className="ml-auto pr-1 text-micro text-[var(--text-tertiary)]">{SORT_LABELS[sortKey]}</span>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-[210px]">
+            <DropdownMenuRadioGroup value={sortKey} onValueChange={(next) => onSortKeyChange(next as "manual" | SortKey)}>
+              <DropdownMenuRadioItem value="manual">Your arrangement</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="name">Name</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="updated">Recent activity</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="type">Type</DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+            {sortKey !== "manual" ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    onDirectionChange(direction === "asc" ? "desc" : "asc");
+                  }}
+                >
+                  {direction === "asc" ? "Ascending" : "Descending"}
+                </DropdownMenuItem>
+              </>
+            ) : null}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        {onToggleSelect || onToggleQuickAccess || onEmptyTrash ? <DropdownMenuSeparator /> : null}
+        {onToggleSelect ? (
+          <DropdownMenuItem onSelect={onToggleSelect}>
+            <Files className="size-3.5 text-[var(--text-tertiary)]" />
+            {selecting ? "Done selecting" : "Select several"}
+          </DropdownMenuItem>
+        ) : null}
+        {onToggleQuickAccess ? (
+          <DropdownMenuItem onSelect={onToggleQuickAccess}>
+            {quickAccess ? (
+              <PanelRightClose className="size-3.5 text-[var(--text-tertiary)]" />
+            ) : (
+              <PanelRightOpen className="size-3.5 text-[var(--text-tertiary)]" />
+            )}
+            {quickAccess ? "Hide quick access" : "Show quick access"}
+          </DropdownMenuItem>
+        ) : null}
+        {onEmptyTrash ? (
+          <DropdownMenuItem onSelect={onEmptyTrash} className="text-[var(--danger)]">
+            <X className="size-3.5" />
+            Empty Trash
+          </DropdownMenuItem>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}

@@ -178,7 +178,7 @@ async function seedFixture(t: ReturnType<typeof setupTest>) {
       schoolId,
       category: "assignments",
       name: "Assignments",
-      recordType: "class_resource",
+      recordType: "assignment",
       method: "GET",
       path: "/assignments",
       purpose: "Read assignments and class resources",
@@ -459,15 +459,15 @@ describe("ManageBac account isolation", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const t = setupTest();
     await seedFixture(t);
-    const killed = await t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual", syncKind: "task_resources" });
+    const killed = await t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual", syncKind: "current_tasks" });
     vi.setSystemTime(Date.now() + 60_000);
     await expect(
-      t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual", syncKind: "task_resources" }),
+      t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual", syncKind: "current_tasks" }),
     ).rejects.toThrow("INTEGRATION_SYNC_BUSY");
     vi.setSystemTime(Date.now() + 6 * 60_000);
     // The killed request's pass is not thrown away: the next request takes
     // it over under a fresh lease and continues from its last saved page.
-    const replacement = await t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual", syncKind: "task_resources" });
+    const replacement = await t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual", syncKind: "current_tasks" });
     expect(replacement.syncRunId).toBe(killed.syncRunId);
     expect(replacement.leaseToken).not.toBe(killed.leaseToken);
     expect(await t.run((ctx) => ctx.db.get(killed.syncRunId as Id<"externalSyncRuns">))).toMatchObject({
@@ -494,7 +494,7 @@ describe("ManageBac account isolation", () => {
         leaseToken: "old-lease",
         leaseExpiresAt: now - 1,
         selectionRevision: 0,
-        syncKind: "task_resources",
+        syncKind: "current_tasks",
         attemptCount: 1,
         nextAttemptAt: now,
         createdAt: now - 1_000,
@@ -515,7 +515,7 @@ describe("ManageBac account isolation", () => {
 
     const replacement = await t.withIdentity(alice).mutation(
       api.managebac.beginSync,
-      { kind: "manual", syncKind: "task_resources" },
+      { kind: "manual", syncKind: "current_tasks" },
     );
     expect(replacement.syncRunId).not.toBe(oldRun);
 
@@ -594,7 +594,7 @@ describe("ManageBac account isolation", () => {
         .withIndex("by_integration_type", (q) =>
           q
             .eq("integrationId", fixture.integrationId)
-            .eq("recordType", "class_resource"),
+            .eq("recordType", "assignment"),
         )
         .collect(),
       projections: await ctx.db
@@ -614,11 +614,12 @@ describe("ManageBac account isolation", () => {
     expect(new Set(state.records.map((item) => item.mappedAccountId))).toEqual(
       new Set([fixture.aliceId, fixture.bobId]),
     );
-    expect(state.projections).toHaveLength(1);
-    expect(state.bobProjections).toHaveLength(1);
-    expect(state.projections[0]!.recordId).not.toBe(
-      state.bobProjections[0]!.recordId,
-    );
+    // An assignment lands once in each account's planner and calendar.
+    const types = (rows: typeof state.projections) => rows.map((row) => row.projectionType).sort();
+    expect(types(state.projections)).toEqual(["planner_task", "timetable_event"]);
+    expect(types(state.bobProjections)).toEqual(["planner_task", "timetable_event"]);
+    const aliceRecords = new Set(state.projections.map((row) => row.recordId));
+    expect(state.bobProjections.some((row) => aliceRecords.has(row.recordId))).toBe(false);
 
     const aliceOverview = await t
       .withIdentity(alice)
@@ -681,7 +682,7 @@ describe("ManageBac account isolation", () => {
         .withIndex("by_integration_type", (q) =>
           q
             .eq("integrationId", fixture.integrationId)
-            .eq("recordType", "class_resource"),
+            .eq("recordType", "assignment"),
         )
         .collect(),
     );
@@ -765,7 +766,7 @@ describe("ManageBac account isolation", () => {
       });
       await insert({
         providerRecordId: "resource-current",
-        recordType: "class_resource",
+        recordType: "assignment",
         providerClassId: "class-current",
         audienceScope: "class_members",
         tombstone: false,
@@ -773,7 +774,7 @@ describe("ManageBac account isolation", () => {
       });
       await insert({
         providerRecordId: "resource-removed",
-        recordType: "class_resource",
+        recordType: "assignment",
         providerClassId: "class-removed",
         audienceScope: "class_members",
         tombstone: false,
@@ -788,7 +789,7 @@ describe("ManageBac account isolation", () => {
       expectedRevision: 0,
     });
     const resources = await asAlice.query(api.managebac.recordsForPurpose, {
-      purpose: "class_resources",
+      purpose: "upcoming_deadlines",
     });
     const candidates = await asAlice.query(
       api.managebac.listMyClassCandidates,
@@ -1569,7 +1570,7 @@ describe("ManageBac account isolation", () => {
         .withIndex("by_integration_type", (q) =>
           q
             .eq("integrationId", fixture.integrationId)
-            .eq("recordType", "class_resource"),
+            .eq("recordType", "assignment"),
         )
         .collect(),
       projections: await ctx.db
@@ -1581,7 +1582,8 @@ describe("ManageBac account isolation", () => {
       run: await ctx.db.get(aliceRun),
     }));
     expect(state.records).toHaveLength(1);
-    expect(state.projections).toHaveLength(1);
+    // One planner task and one calendar event, not one per delivery.
+    expect(state.projections.map((row) => row.projectionType).sort()).toEqual(["planner_task", "timetable_event"]);
     expect(state.run?.counts.fetched).toBe(2);
     expect(state.run?.counts.unchanged).toBe(1);
   });

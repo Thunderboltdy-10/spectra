@@ -154,7 +154,7 @@ describe("CodeStudio file operations", () => {
     render(<PanelHost onContent={(next) => (latest = next)} />);
     expect(screen.queryByRole("button", { name: /Add file/ })).toBeNull();
 
-    await chooseWorkbarAction("New file");
+    await chooseWorkbarAction("New file", "Files");
     const path = await screen.findByPlaceholderText("src/chart.tsx");
     fireEvent.change(path, { target: { value: "src/util.js" } });
     fireEvent.keyDown(path, { key: "Enter" });
@@ -169,7 +169,7 @@ describe("CodeStudio file operations", () => {
     let latest: unknown = null;
     render(<PanelHost onContent={(next) => (latest = next)} />);
 
-    await chooseWorkbarAction("Rename file");
+    await chooseWorkbarAction("Rename", "Files");
     const path = await screen.findByDisplayValue("index.js");
     fireEvent.change(path, { target: { value: "main.js" } });
     fireEvent.keyDown(path, { key: "Enter" });

@@ -4,9 +4,8 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { Icon } from "@/components/icons";
 import type { ToastAction } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
-import type { Point } from "../life/figure";
 import { STATUS_COLOURS } from "../life/prism";
-import { unformElement, useLifeEntrance } from "../life/use-life";
+import { useLifeEntrance } from "../life/use-life";
 
 /*
  * A short word from the island: a thread finished or stopped, a
@@ -52,9 +51,9 @@ export const NOTICE_COLOUR = {
   info: STATUS_COLOURS.info,
 } as const;
 
-export function IslandNotice({ notice, from, onOpen, onDismiss }: { notice: IslandNoticeData; from: Point | undefined; onOpen: () => void; onDismiss: () => void }) {
+export function IslandNotice({ notice, onOpen, onDismiss }: { notice: IslandNoticeData; onOpen: () => void; onDismiss: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  useLifeEntrance(ref, { from, bars: "[data-notice-text]", colour: NOTICE_COLOUR[notice.tone] });
+  useLifeEntrance(ref);
 
   const hovering = useRef(false);
   const latest = useRef(onDismiss);
@@ -70,8 +69,6 @@ export function IslandNotice({ notice, from, onOpen, onDismiss }: { notice: Isla
     let timer = 0;
     const expire = () => {
       if (hovering.current) return;
-      const element = ref.current;
-      if (element) void unformElement(element, { bars: "[data-notice-text]" });
       latest.current();
     };
     timer = window.setTimeout(expire, left);
@@ -95,18 +92,14 @@ export function IslandNotice({ notice, from, onOpen, onDismiss }: { notice: Isla
     };
   }, [duration]);
 
-  const leave = () => {
-    const element = ref.current;
-    if (element) void unformElement(element, { bars: "[data-notice-text]" });
-    onDismiss();
-  };
+  const leave = onDismiss;
   const action = notice.action;
 
   return (
     <div
       ref={ref}
       role="status"
-      className="pointer-events-auto inline-flex h-9 max-w-[min(460px,calc(100vw-32px))] items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-card)]"
+      className="island-content-in pointer-events-auto inline-flex h-9 max-w-[min(460px,calc(100vw-32px))] items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-card)]"
     >
       <button
         type="button"

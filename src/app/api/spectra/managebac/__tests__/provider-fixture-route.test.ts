@@ -427,8 +427,9 @@ describe("ManageBac route provider fixture", () => {
       queued: string[];
     };
     expect(syncBody.jobs.map((job) => job.kind)).toEqual([
-      "classes", "current_tasks", "task_resources", "grades", "past_tasks", "dropbox_files", "cas",
+      "classes", "current_tasks", "grades", "past_tasks", "dropbox_files",
     ]);
+    // ManageBac's API can't read a task's files and links, so that kind never runs.
     expect(syncBody.jobs.filter((job) => job.errorCode)).toEqual([]);
     const classesJob = syncBody.jobs.find((job) => job.kind === "classes")!;
     expect(classesJob.summaries?.map((item) => item.name)).toEqual(
@@ -438,11 +439,8 @@ describe("ManageBac route provider fixture", () => {
     expect(fixture.requests.some((request) => request.path === "/v2p2/students")).toBe(true);
     expect(fixture.requests.some((request) => request.path === "/v2p2/students/9001/memberships")).toBe(true);
     expect(fixture.requests.some((request) => request.path.endsWith("/tasks"))).toBe(false);
-    // CAS is read through the year group the identity lookup reported; only
-    // this student's experiences are kept.
-    expect(fixture.requests.some((request) => request.path === "/v2p2/year-groups/12/projects/cas/experiences/students")).toBe(true);
-    const cas = await t.withIdentity(identity).query(api.school.cas, {});
-    expect(cas.experiences.map((item) => item.title)).toEqual(["Beach clean-up"]);
+    // ManageBac doesn't share CAS with Spectra, so it is never asked for.
+    expect(fixture.requests.some((request) => request.path.includes("/projects/cas/"))).toBe(false);
     const catalogue = (await query("managebac:listMyClassCandidates", {})) as {
       classes: Array<{ providerClassId?: string; recordId: string }>;
       selectionRevision: number;
@@ -482,7 +480,8 @@ describe("ManageBac route provider fixture", () => {
     expect(selectedSyncResponse.status).toBe(200);
     expect(fixture.requests.some((request) => request.path === "/v2p2/classes/101/tasks")).toBe(true);
     expect(fixture.requests.some((request) => request.path === "/v2p2/classes/101/timetable")).toBe(true);
-    expect(fixture.requests.some((request) => request.path === "/v2p2/classes/101/resources")).toBe(true);
+    // A task's resources can't be read through the API, so they are never asked for.
+    expect(fixture.requests.some((request) => request.path === "/v2p2/classes/101/resources")).toBe(false);
     expect(fixture.requests.some((request) => request.path === "/v2p2/classes/202/tasks")).toBe(false);
     expect(fixture.requests.some((request) => request.path === "/v2p2/classes/202/timetable")).toBe(false);
     expect(fixture.requests.some((request) => request.path === "/v2p2/classes/202/resources")).toBe(false);

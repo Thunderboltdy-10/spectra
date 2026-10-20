@@ -162,7 +162,7 @@ export function deriveLiveDockTab(source: LiveDockTabSource) {
     source.threadTitle?.trim() || source.card?.title?.trim() || "";
   const genericTitle =
     !rawTitle ||
-    ["conversation", "new conversation", "spectra", "starting run"].includes(
+    ["conversation", "new conversation", "new thread", "spectra", "starting run"].includes(
       rawTitle.toLocaleLowerCase(),
     );
   const promptTitle = (compactText(source.run.userPrompt) ?? "")
@@ -172,7 +172,7 @@ export function deriveLiveDockTab(source: LiveDockTabSource) {
     genericTitle && ["queued", "running"].includes(source.run.status);
   const title = genericTitle
     ? titlePending
-      ? "Starting run"
+      ? promptTitle || "Starting run"
       : promptTitle || "Completed run"
     : rawTitle;
   const clarification =

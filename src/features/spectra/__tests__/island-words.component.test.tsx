@@ -51,7 +51,6 @@ describe("a word in the island", () => {
     const view = render(
       <IslandNotice
         notice={{ key: "toast:1", text: "Chat moved to Trash.", tone: "done", action: { label: "Undo", onClick: undo }, onGone: gone }}
-        from={undefined}
         onOpen={() => {}}
         onDismiss={dismiss}
       />,
@@ -68,7 +67,6 @@ describe("a word in the island", () => {
     render(
       <IslandNotice
         notice={{ key: "toast:2", text: "Could not save.", tone: "problem", duration: Infinity, action: { label: "Retry", onClick: (event) => event.preventDefault() } }}
-        from={undefined}
         onOpen={() => {}}
         onDismiss={dismiss}
       />,
@@ -80,7 +78,7 @@ describe("a word in the island", () => {
   it("keeps a word meant to stay until it is dismissed", () => {
     vi.useFakeTimers();
     const dismiss = vi.fn();
-    render(<IslandNotice notice={{ key: "toast:3", text: "Offline", tone: "needs", duration: Infinity }} from={undefined} onOpen={() => {}} onDismiss={dismiss} />);
+    render(<IslandNotice notice={{ key: "toast:3", text: "Offline", tone: "needs", duration: Infinity }} onOpen={() => {}} onDismiss={dismiss} />);
     act(() => vi.advanceTimersByTime(60_000));
     expect(dismiss).not.toHaveBeenCalled();
   });

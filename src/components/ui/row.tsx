@@ -36,9 +36,9 @@ export const Row = React.forwardRef<
 >(function Row({ glyph, accent, title, meta, actions, actionsVisible, selected, fresh, lifeKey, className, ...props }, forwarded) {
   const ref = React.useRef<HTMLDivElement>(null);
   React.useImperativeHandle(forwarded, () => ref.current!);
-  useLifeEntrance(ref, { enabled: Boolean(fresh) && !lifeKey, ...ROW_FIGURE });
+  useLifeEntrance(ref, Boolean(fresh) && !lifeKey);
   useLifeArrival(ref, lifeKey, fresh ? "human" : undefined, ROW_FIGURE);
-  useLifeJoin(ref, lifeKey ?? "", ROW_FIGURE);
+  useLifeJoin(ref, lifeKey ?? "");
   useLifeDeparture(ref, true, ROW_FIGURE, lifeKey);
   return (
     <div

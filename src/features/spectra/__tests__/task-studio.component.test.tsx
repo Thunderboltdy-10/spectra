@@ -17,7 +17,7 @@ vi.mock("../components/artifact-studio", async (importOriginal) => ({
 }));
 vi.mock("../settings/preference-store", () => ({
   useSpectraPreferences: () => ({
-    preferences: { workbar: {}, writing: { smartCompletion: false } },
+    preferences: { workbar: {}, writing: { smartCompletion: false }, notifications: { reminderTime: "09:00" } },
     hydrated: true,
     update: () => {},
     replace: () => {},
@@ -86,10 +86,9 @@ describe("a planner task", () => {
   it("is one thing: a title, notes and done, with no steps until someone adds them", () => {
     render(<Harness initial={base} />);
     expect(screen.getByLabelText("Title")).toHaveProperty("value", "Return the library book");
-    expect(screen.getByLabelText("Notes")).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "Steps" })).toBeNull();
-    expect(screen.queryByRole("region", { name: "More" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Add steps" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Notes" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Checklist" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Add a checklist" })).toBeTruthy();
   });
 
   it("is ticked off in place", () => {
@@ -102,19 +101,22 @@ describe("a planner task", () => {
 
   it("writes the same fields Spectra writes, never a plan of many tasks", () => {
     render(<Harness initial={base} />);
-    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "It is the blue one." } });
-    fireEvent.click(screen.getByRole("button", { name: "Add steps" }));
-    fireEvent.change(screen.getByLabelText("Step"), { target: { value: "Find it" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Notes" }), { target: { value: "It is the blue one." } });
+    fireEvent.click(screen.getByRole("button", { name: "Add a checklist" }));
+    const item = screen.getByLabelText("New item");
+    fireEvent.change(item, { target: { value: "Find it" } });
+    fireEvent.keyDown(item, { key: "Enter" });
     expect(latest.description).toBe("It is the blue one.");
     expect(latest.subtasks).toEqual([expect.objectContaining({ title: "Find it", done: false })]);
     expect(latest.tasks).toBeUndefined();
     expect(isSingleTask(latest)).toBe(true);
   });
 
-  it("lets an empty step go when you leave it", () => {
-    render(<Harness initial={base} />);
-    fireEvent.click(screen.getByRole("button", { name: "Add steps" }));
-    fireEvent.blur(screen.getByLabelText("Step"));
+  it("lets an empty item go when you leave it", () => {
+    render(<Harness initial={{ ...base, subtasks: [{ id: "s1", title: "Find it", done: false }] }} />);
+    const item = screen.getByLabelText("Item");
+    fireEvent.change(item, { target: { value: " " } });
+    fireEvent.blur(item);
     expect(latest.subtasks).toEqual([]);
   });
 
@@ -126,8 +128,12 @@ describe("a planner task", () => {
     };
     render(<Harness initial={fromSchool} />);
     expect(screen.getByLabelText("Title")).toHaveProperty("disabled", true);
-    expect(screen.getByLabelText("Due")).toHaveProperty("disabled", true);
-    fireEvent.change(screen.getByLabelText("Your target"), { target: { value: "2026-10-12" } });
+    // The school's day reads as a sentence, not a control the student can change.
+    expect(screen.queryByRole("button", { name: /^Due / })).toBeNull();
+    expect(screen.getByText(/^Due /)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Set your own date" }));
+    fireEvent.change(screen.getByLabelText("Day"), { target: { value: "2026-10-12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set" }));
     expect(taskInputs((latest.personalOverlay as { targetDueAt: number }).targetDueAt, ZONE).date).toBe("2026-10-12");
     expect(latest.dueAt).toBe(fromSchool.dueAt);
   });

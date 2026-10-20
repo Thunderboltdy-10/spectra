@@ -129,7 +129,9 @@ const LOOSE = 0.5;
 const WIDTH_LEVELS = 4;
 /** How much a dot in flight shows at least, however faint its line. */
 const MATTER_ALPHA = 0.42;
-const LINGER = 0.12;
+/** How long a whole figure stays once its element has taken over, and how fast it then goes: nothing lingers over content. */
+const LINGER = 0;
+const TAKEOVER_FADE = 12;
 
 const smoothstep = (a: number, b: number, v: number) => {
   const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
@@ -249,7 +251,7 @@ export class LifeEngine {
         const formation = this.sourceFormation(command.formation ?? command.figure ?? null);
         if (!formation) break;
         const [fx, fy] = command.from ?? centreOfFigure(formation.figure);
-        formation.breakUp(this.lattice, { kind: "field" }, fx, fy, 700);
+        formation.breakUp(this.lattice, { kind: "field" }, fx, fy, 2000);
         this.retag(formation, command.id);
         break;
       }
@@ -265,7 +267,7 @@ export class LifeEngine {
             source.id = this.internalId--;
             source.keepOnly(rest);
             const [cx, cy] = centreOfFigure(source.figure);
-            source.breakUp(this.lattice, { kind: "field" }, cx, cy, 900);
+            source.breakUp(this.lattice, { kind: "field" }, cx, cy, 2600);
             this.add(source, false);
           }
         } else {
@@ -302,7 +304,8 @@ export class LifeEngine {
         const entry = this.formations.get(command.id);
         if (entry) {
           entry.formation.hold = false;
-          if (entry.formation.phase === "formed") entry.formation.fade(5);
+          // Whole or still forming, it gives way: its element is real now.
+          entry.formation.fade(TAKEOVER_FADE);
         }
         break;
       }
@@ -310,7 +313,7 @@ export class LifeEngine {
         const entry = this.formations.get(command.id);
         if (entry) {
           const [cx, cy] = centreOfFigure(entry.formation.figure);
-          entry.formation.breakUp(this.lattice, { kind: "field" }, cx, cy, 700);
+          entry.formation.breakUp(this.lattice, { kind: "field" }, cx, cy, 2000);
         }
         break;
       }
@@ -379,7 +382,7 @@ export class LifeEngine {
       path: [from[0], from[1], cx, cy, to[0], to[1]],
       length,
       t: 0,
-      duration: Math.min(0.85, Math.max(0.28, length / 900)),
+      duration: Math.min(0.42, Math.max(0.18, length / 2400)),
       colour,
       strength,
       last: [from[0], from[1]],
@@ -414,7 +417,7 @@ export class LifeEngine {
       // Close by: the matter flows straight in through the field, no signal.
       const r = command.absorb;
       source.tintTo((x, y) => this.rgbAt(command.colour, x, y));
-      source.breakUp(this.lattice, { kind: "into", x: aim[0], y: aim[1], radius: Math.min(r.width, r.height) * 0.3 }, start[0], start[1], 1300);
+      source.breakUp(this.lattice, { kind: "into", x: aim[0], y: aim[1], radius: Math.min(r.width, r.height) * 0.3 }, start[0], start[1], 3200);
       this.retag(source, command.id);
       const entry = this.formations.get(command.id);
       if (entry) entry.pour = { rect: r, arrived: false };
@@ -430,7 +433,7 @@ export class LifeEngine {
     const signal = this.signal(command.id, start, end, command.colour, strength);
     if (source) {
       source.tintTo((x, y) => this.rgbAt(command.colour, x, y));
-      source.breakUp(this.lattice, { kind: "point", x: start[0], y: start[1], radius: 16 }, start[0], start[1], 1100);
+      source.breakUp(this.lattice, { kind: "point", x: start[0], y: start[1], radius: 16 }, start[0], start[1], 2800);
       signal.waitFor = { formation: source.id, share: 0.3, deadline: this.time + 0.55 };
     }
     if (target) {
@@ -666,7 +669,7 @@ export class LifeEngine {
         }
         if (!formation.hold) {
           entry.linger -= dt;
-          if (entry.linger <= 0) formation.fade(5);
+          if (entry.linger <= 0) formation.fade(TAKEOVER_FADE);
         }
       }
       if (formation.done) {

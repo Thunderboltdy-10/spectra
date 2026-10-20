@@ -589,9 +589,9 @@ export function useAiCursorLight(clientId: string, isAi: boolean, departing: boo
     if (!isAi || !departing || !aiInWork.has(clientId)) return;
     aiInWork.delete(clientId);
     const node = cursor.current;
-    const prism = document.querySelector("[data-island-prism]")?.getBoundingClientRect();
-    if (!life.on || !node?.isConnected || !prism?.width) return;
-    void life.send(centreOf(node), { x: prism.x, y: prism.y, width: prism.width, height: prism.height }, { colour: "spectrum", strength: 0.6, absorb: true });
+    const home = document.querySelector("[data-island-home]")?.getBoundingClientRect();
+    if (!life.on || !node?.isConnected || !home?.width) return;
+    void life.send(centreOf(node), { x: home.x, y: home.y, width: home.width, height: home.height }, { colour: "spectrum", strength: 0.6, absorb: true });
   }, [clientId, isAi, departing]);
   // Gone from the layer (the work closed): next time, its light comes in again.
   useEffect(() => () => void aiInWork.delete(clientId), [clientId]);

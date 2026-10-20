@@ -37,6 +37,8 @@ export type OrgNodeView = {
   /** The work type, as the board's columns key on it. */
   typeKey?: string;
   trashedAt?: number;
+  /** The shelf stack this work is gathered into, if any. */
+  stackId?: string;
   /** For links: what they point at, resolved for display. */
   target?: {
     nodeId: Id<"orgNodes">;
@@ -131,6 +133,7 @@ export function baseView(node: OrgNode): OrgNodeView {
     activityAt: node.activityAt ?? node.updatedAt,
     typeKey: node.typeKey,
     trashedAt: node.deletedAt,
+    stackId: node.stackId,
   };
 }
 

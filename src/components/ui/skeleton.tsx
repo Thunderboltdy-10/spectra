@@ -28,3 +28,26 @@ export function SkeletonList({ count = 5 }: { count?: number }) {
     </div>
   );
 }
+
+/** Ragged widths, so a few lines read as a paragraph still being written. */
+const GHOST_WIDTHS = [92, 78, 54, 86, 63];
+
+/**
+ * Lines of what is still coming (a reply being written, a step's result):
+ * the skeleton's bars with its band of light passing along them. They work
+ * with the field off too, and stay still under reduced motion.
+ */
+export function GhostLines({ count = 3, className = "" }: { count?: number; className?: string }) {
+  return (
+    <span aria-hidden className={`block space-y-2 ${className}`}>
+      {Array.from({ length: count }, (_, index) => (
+        <span key={index} className="life-ghost-line" style={{ width: `${GHOST_WIDTHS[index % GHOST_WIDTHS.length]}%` }} />
+      ))}
+    </span>
+  );
+}
+
+/** Spectra is working in this (a thread, a work): two short lines being written, crossed by the band. */
+export function WorkingMark({ className = "", label }: { className?: string; label?: string }) {
+  return <span role={label ? "img" : undefined} aria-label={label} aria-hidden={label ? undefined : true} className={`life-working-mark ${className}`} />;
+}

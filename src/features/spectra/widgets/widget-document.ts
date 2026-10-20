@@ -5,8 +5,9 @@
  * The widget runs in an iframe with sandbox="allow-scripts" only, so it has an
  * opaque origin: no access to the app, its cookies, storage or Convex. The
  * document carries a strict CSP (no network at all), and the only messages it
- * sends out are its height, a heartbeat and the watchdog's stop; the only one
- * it accepts is the theme. Its scripts run under the watchdog
+ * sends out are its height, a heartbeat and the watchdog's stop; the only ones
+ * it accepts are the theme and the app's typefaces (as data: URLs, from
+ * ./widget-fonts.ts). Its scripts run under the watchdog
  * (./widget-watchdog.ts), so a loop that never ends is stopped, not left to
  * freeze the app.
  */
@@ -46,6 +47,7 @@ export type WidgetTheme = "light" | "dark";
 export const WIDGET_MESSAGE = {
   size: "spectra-widget:size",
   theme: "spectra-widget:theme",
+  fonts: "spectra-widget:fonts",
   alive: "spectra-widget:alive",
   stopped: "spectra-widget:stopped",
 } as const;
@@ -101,6 +103,12 @@ export function widgetThemeCss() {
     "html,body{margin:0;background:var(--paper-0);color:var(--ink-1);font:14px/1.5 var(--font-ui)}",
     "body{padding:16px}",
     "button,input,select,textarea{font:inherit;color:inherit}",
+    // Plain controls look like the app's; :where() keeps them easy to restyle.
+    ":where(button){padding:6px 12px;border:1px solid var(--hairline);border-radius:8px;background:var(--paper-1);font-weight:600;cursor:pointer;transition:background-color .15s}",
+    ":where(button):hover{background:var(--paper-2)}",
+    ":where(input:not([type=range],[type=checkbox],[type=radio]),select,textarea){padding:6px 10px;border:1px solid var(--hairline);border-radius:8px;background:var(--paper-0)}",
+    ":where(input,select,textarea,button):focus-visible{outline:2px solid var(--violet);outline-offset:2px}",
+    ":where(input[type=range],input[type=checkbox],input[type=radio],progress){accent-color:var(--violet)}",
     "@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}",
   ].join("\n");
 }
@@ -153,8 +161,11 @@ export function widgetFragment(html: string) {
 const escapeAttribute = (value: string) =>
   value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-/** Reports the content height and follows the app's theme; nothing else crosses the frame. */
-const BRIDGE = `(function(){var root=document.documentElement;var last=0;function report(){var h=Math.ceil(Math.max(root.scrollHeight,document.body?document.body.scrollHeight:0));if(h!==last){last=h;parent.postMessage({type:"${WIDGET_MESSAGE.size}",height:h},"*");}}window.addEventListener("message",function(e){if(e.source!==parent)return;var d=e.data;if(d&&d.type==="${WIDGET_MESSAGE.theme}"&&(d.theme==="light"||d.theme==="dark"))root.setAttribute("data-theme",d.theme);});if(typeof ResizeObserver==="function")new ResizeObserver(report).observe(root);window.addEventListener("load",report);report();})();`;
+/** Reports the content height, follows the app's theme and takes its typefaces; nothing else crosses the frame. */
+const BRIDGE = `(function(){var root=document.documentElement;var last=0;function report(){var h=Math.ceil(Math.max(root.scrollHeight,document.body?document.body.scrollHeight:0));if(h!==last){last=h;parent.postMessage({type:"${WIDGET_MESSAGE.size}",height:h},"*");}}window.addEventListener("message",function(e){if(e.source!==parent)return;var d=e.data;if(d&&d.type==="${WIDGET_MESSAGE.theme}"&&(d.theme==="light"||d.theme==="dark"))root.setAttribute("data-theme",d.theme);if(d&&d.type==="${WIDGET_MESSAGE.fonts}"&&typeof d.css==="string"&&!document.getElementById("spectra-fonts")){var s=document.createElement("style");s.id="spectra-fonts";s.textContent=d.css;document.head.appendChild(s);}});if(typeof ResizeObserver==="function")new ResizeObserver(report).observe(root);window.addEventListener("load",report);report();})();`;
+
+/** In the thread the visual sits on the conversation's own page, not a panel of its own. */
+const INLINE_SURFACE = "html,body{background:transparent}body{padding:8px 0}";
 
 /** The sandboxed document for the thread's iframe. */
 export function buildWidgetDocument(input: { title: string; html: string; theme: WidgetTheme }) {
@@ -167,7 +178,7 @@ export function buildWidgetDocument(input: { title: string; html: string; theme:
     '<meta name="referrer" content="no-referrer">',
     '<meta name="viewport" content="width=device-width,initial-scale=1">',
     `<title>${escapeAttribute(input.title)}</title>`,
-    `<style>${widgetThemeCss()}</style>`,
+    `<style>${widgetThemeCss()}${INLINE_SURFACE}</style>`,
     `<script>${widgetWatchdogScript(WIDGET_MESSAGE)}</script>`,
     "</head>",
     "<body>",

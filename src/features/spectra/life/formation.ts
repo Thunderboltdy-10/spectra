@@ -180,7 +180,7 @@ export class Formation {
    * nodes between their place and `from`, and leave in order of distance
    * from it, so the figure draws itself outward from where its matter arrived.
    */
-  riseFrom(lattice: FieldLattice, fromX: number, fromY: number, colour: Rgb, { reach = 0.45, speed = 900, maxReach = 90 } = {}) {
+  riseFrom(lattice: FieldLattice, fromX: number, fromY: number, colour: Rgb, { reach = 0.45, speed = 2600, maxReach = 90 } = {}) {
     for (let i = 0; i < this.n; i += 1) {
       const dx = fromX - this.tx[i];
       const dy = fromY - this.ty[i];
@@ -293,7 +293,7 @@ export class Formation {
   }
 
   /** Breaks the figure into dots that leave for `exit`, starting nearest `fromX, fromY`. */
-  breakUp(lattice: FieldLattice, exit: Exit, fromX: number, fromY: number, speed = 900) {
+  breakUp(lattice: FieldLattice, exit: Exit, fromX: number, fromY: number, speed = 2600) {
     this.exit = exit;
     this.phase = "breaking";
     for (let i = 0; i < this.n; i += 1) {
@@ -449,7 +449,7 @@ export class Formation {
       const nx = Math.sin(this.y[i] * 0.02 + time * 1.3 + s) + Math.sin(this.y[i] * 0.007 - time * 0.6 + s * 0.3) * 0.6;
       const ny = Math.cos(this.x[i] * 0.018 - time * 1.1 + s) + Math.cos(this.x[i] * 0.008 + time * 0.5 + s * 0.7) * 0.6;
       const wander = Math.min(1, distance / 40) * (breaking ? 60 : 120);
-      const stiffness = breaking ? 110 : 130;
+      const stiffness = breaking ? 260 : 340;
       const damping = 2 * 0.86 * Math.sqrt(stiffness);
       this.vx[i] += (dx * stiffness - this.vx[i] * damping + nx * wander) * dt;
       this.vy[i] += (dy * stiffness - this.vy[i] * damping + ny * wander) * dt;

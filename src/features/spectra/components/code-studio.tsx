@@ -19,12 +19,10 @@ import {
   AlertTriangle,
   Box,
   Check,
-  CheckCircle2,
   CircleStop,
   CloudUpload,
   Copy,
   Download,
-  Eraser,
   Eye,
   FileArchive,
   FileImage,
@@ -36,7 +34,6 @@ import {
   Import,
   Loader2,
   Maximize2,
-  PanelBottom,
   Pencil,
   Play,
   RefreshCw,
@@ -45,7 +42,6 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
-  TerminalSquare,
   Trash2,
   Video,
   X,
@@ -59,9 +55,10 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { readSpectraSandboxTheme } from "../embed/theme-tokens";
+import { accessibilityTips } from "./code/accessibility-tips";
+import { CodeTray, type CodeProblem, type ConsoleEntry, type TrayPanel } from "./code/code-tray";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { LifeVerdict } from "@/components/ui/life-moments";
 import { SelectField } from "@/components/ui/select";
 import {
   codeRuntimeVersion,
@@ -146,22 +143,6 @@ import {
 } from "./artifact-studio-file-utils";
 import { requestSpectra } from "../data/request";
 
-type CodeProblem = {
-  id: string;
-  severity: "error" | "warning" | "info";
-  message: string;
-  file?: string;
-  line?: number;
-  column?: number;
-};
-
-type ConsoleEntry = {
-  id: string;
-  level: "log" | "info" | "warn" | "error" | "system";
-  text: string;
-  createdAt: number;
-};
-
 type RunState =
   | "idle"
   | "building"
@@ -171,13 +152,6 @@ type RunState =
   | "error"
   | "limited"
   | "cancelled";
-
-type TestResult = {
-  id: string;
-  name: string;
-  status: "running" | "passed" | "failed";
-  message?: string;
-};
 
 type CodeSurface = "preview" | "code" | "split";
 
@@ -227,6 +201,14 @@ const CURATED_CODE_DEPENDENCIES = [
 
 function uid(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
+}
+
+/** A Python check's marker line, said the way the console says a browser check. */
+function checkLine(text: string) {
+  const match = /^\[spectra-test:(pass|fail)\]\s+(\S+)(?:\s+(.*))?$/.exec(text.trim());
+  if (!match) return null;
+  const [, outcome, name, detail] = match;
+  return `${outcome === "pass" ? "Passed" : "Failed"}: ${name}${detail ? `. ${detail}` : ""}`;
 }
 
 const fileCollaboration = new WeakMap<
@@ -330,20 +312,8 @@ function parserFor(file: CodeFile) {
 function runtimeLabel(runtime: CodeRuntime) {
   if (runtime === "react") return "React + TypeScript";
   if (runtime === "browser") return "HTML / CSS / JavaScript";
-  if (runtime === "python") return "Python (isolated)";
+  if (runtime === "python") return "Python";
   return "Source only";
-}
-
-/** Internal run states are not readable words, so the readout says what happened. */
-function runStateLabel(state: RunState) {
-  if (state === "building") return "Building";
-  if (state === "loading") return "Starting";
-  if (state === "running") return "Running";
-  if (state === "ready") return "Running in a sandbox";
-  if (state === "error") return "Stopped on an error";
-  if (state === "limited") return "Stopped at a safety limit";
-  if (state === "cancelled") return "Stopped";
-  return "Not running";
 }
 
 function cellCoordinates(address: string) {
@@ -485,13 +455,18 @@ export function CodeStudio({
   }, [incoming]);
   const [workbook, setWorkbook] = useState<CodeContent>(incoming);
   const lastEmittedKeyRef = useRef<string | null>(null);
+  // The last value the parent sent. Typing into a shared file changes only the
+  // local workbook (the Y.Text carries the edit), so the parent's value stays
+  // as it was; that is not a reason to put it back.
+  const seenIncomingKeyRef = useRef(codeContentKey(incoming));
   const [activeFileId, setActiveFileId] = useState(incoming.entryFileId);
+  // Code and what it makes open side by side unless the work asked otherwise.
   const [surface, setSurface] = useState<CodeSurface>(
     incoming.visualisation.openMode === "preview"
       ? "preview"
-      : incoming.visualisation.openMode === "split"
-        ? "split"
-        : "code",
+      : incoming.visualisation.openMode === "source"
+        ? "code"
+        : "split",
   );
   const [sourceMode, setSourceMode] = useState<"code" | "parameters">("code");
   const [fileQuery, setFileQuery] = useState("");
@@ -514,9 +489,7 @@ export function CodeStudio({
   const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [deleteFileId, setDeleteFileId] = useState<string | null>(null);
-  const [panel, setPanel] = useState<"console" | "problems" | "tests" | null>(
-    null,
-  );
+  const [panel, setPanel] = useState<TrayPanel | null>(null);
   const [runState, setRunState] = useState<RunState>("idle");
   const [runMessage, setRunMessage] = useState("");
   const [previewFiles, setPreviewFiles] = useState<CodeFile[] | null>(null);
@@ -524,7 +497,6 @@ export function CodeStudio({
   const [previewNonce, setPreviewNonce] = useState(0);
   const [problems, setProblems] = useState<CodeProblem[]>([]);
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([]);
-  const [testResults, setTestResults] = useState<TestResult[]>([]);
   const [a11y, setA11y] = useState<{
     title: boolean;
     headingCount: number;
@@ -572,16 +544,6 @@ export function CodeStudio({
   const runSequenceRef = useRef(0);
   const draggingRef = useRef(false);
   const importReconciliationStartedRef = useRef(false);
-
-  const finishRunningTests = useCallback((message: string) => {
-    setTestResults((current) =>
-      current.map((result) =>
-        result.status === "running"
-          ? { ...result, status: "failed", message }
-          : result,
-      ),
-    );
-  }, []);
 
   const activeFile =
     workbook.files.find((file) => file.id === activeFileId) ??
@@ -766,6 +728,8 @@ export function CodeStudio({
 
   useEffect(() => {
     const incomingKey = codeContentKey(incoming);
+    if (incomingKey === seenIncomingKeyRef.current) return;
+    seenIncomingKeyRef.current = incomingKey;
     const currentKey = codeContentKey(workbook);
     if (incomingKey === currentKey) {
       if (incomingKey === lastEmittedKeyRef.current)
@@ -872,7 +836,7 @@ export function CodeStudio({
         setPublishError(
           error instanceof Error
             ? error.message
-            : "Published runtime state is unavailable.",
+            : "Couldn't check whether this code is published.",
         );
       })
       .finally(() => {
@@ -914,34 +878,12 @@ export function CodeStudio({
       setConsoleEntries((current) =>
         [
           ...current,
-          { id: uid("console"), level, text, createdAt: Date.now() },
+          { id: uid("console"), level, text: checkLine(text) ?? text, createdAt: Date.now() },
         ].slice(-MAX_CONSOLE_ENTRIES),
       );
     },
     [],
   );
-
-  const recordTestOutput = useCallback((text: string) => {
-    const match = /^\[spectra-test:(pass|fail)\]\s+(\S+)(?:\s+(.*))?$/.exec(
-      text.trim(),
-    );
-    if (!match) return false;
-    const [, outcome, testId, remainder = ""] = match;
-    setTestResults((current) =>
-      current.map((result) =>
-        result.id === testId
-          ? {
-              ...result,
-              status: outcome === "pass" ? "passed" : "failed",
-              ...(outcome === "fail" && remainder
-                ? { message: remainder }
-                : {}),
-            }
-          : result,
-      ),
-    );
-    return true;
-  }, []);
 
   function updateActiveSource(source: string) {
     if (activeSharedText) {
@@ -1193,11 +1135,10 @@ export function CodeStudio({
       runSequenceRef.current += 1;
       pythonRunRef.current?.cancel();
       pythonRunRef.current = null;
-      finishRunningTests(message);
       setRunState("cancelled");
       setRunMessage(message);
     },
-    [finishRunningTests],
+    [],
   );
 
   const handlePythonEvent = useCallback(
@@ -1207,11 +1148,10 @@ export function CodeStudio({
         setRunState(event.status);
         setRunMessage(
           event.status === "loading"
-            ? "Loading the local isolated Python runtime…"
+            ? "Getting Python ready…"
             : "Running Python without network access…",
         );
       } else if (event.type === "stdout" || event.type === "stderr") {
-        if (event.type === "stdout") recordTestOutput(event.text);
         appendConsole(event.type === "stderr" ? "error" : "log", event.text);
       } else if (event.type === "render") {
         setPreviewFiles([
@@ -1246,10 +1186,9 @@ export function CodeStudio({
       } else if (event.type === "complete") {
         if (event.result) appendConsole("info", event.result);
         setRunState("ready");
-        setRunMessage("Python run completed in the isolated worker.");
+        setRunMessage("Finished running.");
         pythonRunRef.current = null;
       } else if (event.type === "limit") {
-        finishRunningTests(event.message);
         setRunState("limited");
         setRunMessage(event.message);
         setProblems((current) => [
@@ -1259,7 +1198,6 @@ export function CodeStudio({
         setPanel("problems");
         pythonRunRef.current = null;
       } else if (event.type === "error") {
-        finishRunningTests(event.message);
         setRunState("error");
         setRunMessage(event.message);
         appendConsole("error", event.traceback || event.message);
@@ -1276,7 +1214,7 @@ export function CodeStudio({
         pythonRunRef.current = null;
       }
     },
-    [activeFile.path, appendConsole, finishRunningTests, recordTestOutput],
+    [activeFile.path, appendConsole],
   );
 
   const run = useCallback(
@@ -1285,14 +1223,14 @@ export function CodeStudio({
         (test) => test.enabled !== false,
       );
       if (includeTests && enabledTests.length === 0) {
-        setPanel("tests");
-        setTestResults([]);
+        appendConsole("info", "There are no checks to run yet. Add them in Settings, under Quality.");
+        setPanel("console");
         return;
       }
       if (workbook.runtime === "none") {
         setRunState("idle");
         setRunMessage(
-          "This code has no runtime yet. Choose a supported runtime to run it.",
+          "Choose what this code runs as in Settings, then run it.",
         );
         return;
       }
@@ -1308,26 +1246,17 @@ export function CodeStudio({
         })),
       );
       setConsoleEntries([]);
-      setTestResults(
-        includeTests
-          ? enabledTests.map((test) => ({
-              id: test.id,
-              name: test.name,
-              status: "running",
-            }))
-          : [],
-      );
-      if (includeTests) setPanel("tests");
+      if (includeTests) setPanel("console");
       setA11y(null);
       setPreviewFiles(null);
       setPreviewTests([]);
       setRunState("building");
       setRunMessage(
         workbook.runtime === "react"
-          ? "Bundling the React preview…"
+          ? "Building…"
           : workbook.runtime === "python"
-            ? "Preparing the isolated Python worker…"
-            : "Preparing the browser sandbox…",
+            ? "Getting Python ready…"
+            : "Getting ready to run…",
       );
       if (workbook.runtime === "browser") {
         try {
@@ -1379,7 +1308,6 @@ export function CodeStudio({
                 ...issue,
               })),
             ]);
-            finishRunningTests(issues[0]!.message);
             setRunState("error");
             setRunMessage(issues[0]!.message);
             setPanel("problems");
@@ -1387,10 +1315,6 @@ export function CodeStudio({
           }
           setPreviewTests(includeTests ? enabledTests : []);
           setPreviewFiles(payload.build.files);
-          appendConsole(
-            "system",
-            `Prepared ${formatBytes(payload.build.sourceBytes)} of browser source with synchronous-loop guards.`,
-          );
           setPreviewNonce((value) => value + 1);
           setRunState("loading");
         } catch (error) {
@@ -1407,7 +1331,6 @@ export function CodeStudio({
             })),
             { id: uid("problem"), severity: "error", message },
           ]);
-          finishRunningTests(message);
           setRunState("error");
           setRunMessage(message);
           setPanel("problems");
@@ -1498,7 +1421,6 @@ export function CodeStudio({
               ...issue,
             })),
           ]);
-          finishRunningTests(issues[0]?.message ?? "The React build failed.");
           setRunState("error");
           setRunMessage(issues[0]?.message ?? "The React build failed.");
           setPanel("problems");
@@ -1538,13 +1460,9 @@ export function CodeStudio({
             source: payload.build.js,
           },
         ]);
-        appendConsole(
-          "system",
-          `Built ${formatBytes(payload.build.sourceBytes)} of source into a ${formatBytes(payload.build.outputBytes)} isolated browser bundle.`,
-        );
         setPreviewNonce((value) => value + 1);
         setRunState("loading");
-        setRunMessage("Starting the isolated React preview…");
+        setRunMessage("Starting…");
       } catch (error) {
         if (sequence !== runSequenceRef.current) return;
         const message =
@@ -1559,7 +1477,6 @@ export function CodeStudio({
           })),
           { id: uid("problem"), severity: "error", message },
         ]);
-        finishRunningTests(message);
         setRunState("error");
         setRunMessage(message);
         setPanel("problems");
@@ -1568,7 +1485,6 @@ export function CodeStudio({
     [
       appendConsole,
       assetDiagnostics,
-      finishRunningTests,
       handlePythonEvent,
       runtimeParameters,
       runtimeResources,
@@ -1592,26 +1508,13 @@ export function CodeStudio({
   async function handleSandboxEvent(event: SpectraSandboxFrameMessage) {
     if (event.type === "spectra:console") {
       const text = event.values.join(" ");
-      recordTestOutput(text);
       appendConsole(event.level, text);
     } else if (event.type === "spectra:test") {
-      setTestResults((current) =>
-        current.map((result) =>
-          result.id === event.testId
-            ? {
-                ...result,
-                status: event.status,
-                ...(event.message ? { message: event.message } : {}),
-              }
-            : result,
-        ),
-      );
       appendConsole(
         event.status === "passed" ? "info" : "error",
-        `${event.status === "passed" ? "Passed" : "Failed"} ${event.name} · ${event.durationMs} ms${event.message ? ` · ${event.message}` : ""}`,
+        `${event.status === "passed" ? "Passed" : "Failed"}: ${event.name}${event.message ? `. ${event.message}` : ""}`,
       );
     } else if (event.type === "spectra:error") {
-      finishRunningTests(event.message);
       if (exportJob) {
         setExportError(event.message);
         setExportJob(null);
@@ -1639,7 +1542,6 @@ export function CodeStudio({
       ]);
       appendConsole("error", event.message);
     } else if (event.type === "spectra:limit") {
-      finishRunningTests(event.message);
       if (exportJob) {
         setExportError(event.message);
         setExportJob(null);
@@ -1654,81 +1556,7 @@ export function CodeStudio({
       setA11y(event);
       setProblems((current) => [
         ...current.filter((problem) => !problem.id.startsWith("a11y:")),
-        ...(!event.title
-          ? [
-              {
-                id: "a11y:title",
-                severity: "warning" as const,
-                message:
-                  "The rendered experience needs a descriptive document title.",
-              },
-            ]
-          : []),
-        ...(event.headingCount === 0
-          ? [
-              {
-                id: "a11y:heading",
-                severity: "warning" as const,
-                message:
-                  "The rendered experience needs a clear heading hierarchy.",
-              },
-            ]
-          : []),
-        ...(event.landmarkCount === 0
-          ? [
-              {
-                id: "a11y:landmark",
-                severity: "warning" as const,
-                message:
-                  "Wrap the primary experience in a semantic main landmark.",
-              },
-            ]
-          : []),
-        ...(event.imagesWithoutAlt > 0
-          ? [
-              {
-                id: "a11y:image-alt",
-                severity: "warning" as const,
-                message: `${event.imagesWithoutAlt} rendered image${event.imagesWithoutAlt === 1 ? " is" : "s are"} missing an alt attribute. Use empty alt text for decorative images.`,
-              },
-            ]
-          : []),
-        ...(event.unnamedControls > 0
-          ? [
-              {
-                id: "a11y:control-name",
-                severity: "warning" as const,
-                message: `${event.unnamedControls} interactive control${event.unnamedControls === 1 ? " has" : "s have"} no accessible name.`,
-              },
-            ]
-          : []),
-        ...(event.unlabelledGraphics > 0
-          ? [
-              {
-                id: "a11y:graphic-name",
-                severity: "warning" as const,
-                message: `${event.unlabelledGraphics} chart or canvas surface${event.unlabelledGraphics === 1 ? " needs" : "s need"} an accessible name or text alternative.`,
-              },
-            ]
-          : []),
-        ...(event.headingOrderIssues > 0
-          ? [
-              {
-                id: "a11y:heading-order",
-                severity: "warning" as const,
-                message: `${event.headingOrderIssues} heading level jump${event.headingOrderIssues === 1 ? " interrupts" : "s interrupt"} the rendered outline.`,
-              },
-            ]
-          : []),
-        ...(event.duplicateIds > 0
-          ? [
-              {
-                id: "a11y:duplicate-id",
-                severity: "warning" as const,
-                message: `${event.duplicateIds} duplicate element ID${event.duplicateIds === 1 ? " can" : "s can"} break labels and keyboard targeting.`,
-              },
-            ]
-          : []),
+        ...accessibilityTips(event),
       ]);
     } else if (
       event.type === "spectra:export" &&
@@ -1818,11 +1646,8 @@ export function CodeStudio({
       ]);
     if (status === "ready") {
       setRunState("ready");
-      setRunMessage("Preview is running in an isolated Spectra sandbox.");
+      setRunMessage("Running.");
     } else if (status === "error" || status === "limited") {
-      finishRunningTests(
-        message ?? "The preview stopped before all checks completed.",
-      );
       setRunState(status);
       setRunMessage(
         message ?? "The preview stopped safely. Source remains unchanged.",
@@ -2087,7 +1912,7 @@ export function CodeStudio({
     }
     if (workbook.runtime === "none") {
       setPublishError(
-        "Choose a runtime that can run this code before publishing it.",
+        "Choose what this code runs as in Settings before publishing it.",
       );
       return;
     }
@@ -2133,14 +1958,14 @@ export function CodeStudio({
       appendConsole(
         "system",
         result.reused
-          ? "The current reproducible runtime build is already published."
-          : "Published a build of this exact version.",
+          ? "This version is already published."
+          : "Published this version.",
       );
     } catch (error) {
       setPublishError(
         error instanceof Error
           ? error.message
-          : "The runtime build could not be published.",
+          : "Couldn't publish. Try again.",
       );
     } finally {
       setPublishState("idle");
@@ -2157,13 +1982,13 @@ export function CodeStudio({
       setPublishedContentKey(null);
       appendConsole(
         "system",
-        "Removed the live published build. Existing pinned embeds retain their checkpointed build.",
+        "Unpublished. Places that already show it keep the version they had.",
       );
     } catch (error) {
       setPublishError(
         error instanceof Error
           ? error.message
-          : "The runtime build could not be unpublished.",
+          : "Couldn't unpublish. Try again.",
       );
     } finally {
       setPublishState("idle");
@@ -2203,13 +2028,13 @@ export function CodeStudio({
         },
         ".cm-activeLine, .cm-activeLineGutter": {
           backgroundColor:
-            "color-mix(in oklab, var(--accent-cyan) 5%, transparent)",
+            "color-mix(in oklab, var(--type-code) 5%, transparent)",
         },
         ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
           backgroundColor:
-            "color-mix(in oklab, var(--accent-cyan) 18%, transparent)",
+            "color-mix(in oklab, var(--type-code) 16%, transparent)",
         },
-        ".cm-cursor": { borderLeftColor: "var(--accent-cyan)" },
+        ".cm-cursor": { borderLeftColor: "var(--type-code)" },
         ".cm-search": {
           backgroundColor: "var(--bg-elevated)",
           border: "0",
@@ -2335,80 +2160,74 @@ export function CodeStudio({
     return EditorView.decorations.of(Decoration.set(ranges));
   }, [activeAiLineIndexes, activeFile.source]);
 
+  // What the page found wrong with its own accessibility; a clean page says
+  // nothing, so the preview is only the preview.
+  const a11yIssues = a11y
+    ? a11y.imagesWithoutAlt +
+      a11y.unnamedControls +
+      a11y.unlabelledGraphics +
+      a11y.headingOrderIssues +
+      a11y.duplicateIds
+    : 0;
+  const running =
+    runState === "building" || runState === "loading" || runState === "running";
+
   const preview = (
-    <div className="code-preview-surface relative flex min-h-0 flex-1 flex-col bg-transparent">
-      <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-3">
-        {/* When the run failed, the status line is the way into the detail:
-            without it, the Visualisation view can report a failure it gives you
-            no route to read. */}
-        {runState === "error" || runState === "limited" ? (
-          <button
-            type="button"
-            onClick={() => {
-              setFullPreview(false);
-              if (surface !== "split" && surface !== "code")
-                setSurface("split");
-              setPanel("problems");
-            }}
-            className="flex min-w-0 items-center gap-2 rounded-chip px-1 text-left hover:bg-[var(--bg-hover)]"
-          >
-            <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--danger)]" />
-            <span className="truncate text-micro font-medium text-[var(--text-primary)]">
-              {runMessage}
-            </span>
-            <span className="shrink-0 text-micro text-[var(--text-secondary)] underline">
-              Show problems
-            </span>
-          </button>
-        ) : (
-          <div className="flex min-w-0 items-center gap-2">
-            <span
-              className={`h-2 w-2 shrink-0 rounded-full ${runState === "ready" ? "bg-[var(--success)]" : runState === "loading" || runState === "running" || runState === "building" ? "animate-pulse bg-[var(--accent-cyan)] motion-reduce:animate-none" : "bg-[var(--text-tertiary)]"}`}
-            />
-            <span className="truncate text-micro font-medium text-[var(--text-primary)]">
-              {runMessage}
-            </span>
-          </div>
-        )}
-        <div className="flex shrink-0 items-center gap-1">
-          {canExecute ? (
-            runState === "building" ||
-            runState === "loading" ||
-            runState === "running" ? (
-              <button
-                type="button"
-                onClick={() => stopRun()}
-                className="code-icon-action"
-                aria-label="Stop run"
-                title="Stop run"
-              >
-                <CircleStop className="h-3.5 w-3.5" />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => void run()}
-                className="code-icon-action"
-                aria-label="Run preview again"
-                title="Run preview again"
-                disabled={workbook.runtime === "none"}
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-              </button>
-            )
-          ) : null}
-          <button
-            type="button"
-            onClick={() => setFullPreview(true)}
-            className="code-icon-action"
-            aria-label="Open full preview"
-            title="Open full preview"
-          >
-            <Maximize2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
+    <div className="code-preview-surface relative flex min-h-0 flex-1 flex-col">
+      {/* A failed run is the one status worth a line: it is the way into the
+          detail, so the Visualisation view never reports a failure it gives
+          no route to read. */}
+      {runState === "error" || runState === "limited" ? (
+        <button
+          type="button"
+          onClick={() => {
+            setFullPreview(false);
+            if (surface !== "split" && surface !== "code") setSurface("split");
+            setPanel("problems");
+          }}
+          className="code-preview-alert"
+        >
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{runMessage}</span>
+          <span className="code-preview-alert-link">Show problems</span>
+        </button>
+      ) : null}
+      <div className="code-preview-controls">
+        {canExecute ? (
+          running ? (
+            <button
+              type="button"
+              onClick={() => stopRun()}
+              className="code-icon-action"
+              aria-label="Stop run"
+              title="Stop run"
+            >
+              <CircleStop className="h-3.5 w-3.5" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void run()}
+              className="code-icon-action"
+              aria-label="Run preview again"
+              title="Run preview again"
+              disabled={workbook.runtime === "none"}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </button>
+          )
+        ) : null}
+        <button
+          type="button"
+          onClick={() => setFullPreview(true)}
+          className="code-icon-action"
+          aria-label="Open full preview"
+          title="Open full preview"
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+        </button>
       </div>
-      <div className="relative min-h-[360px] flex-1 overflow-auto p-2 sm:min-h-[520px]">
+      <div className="relative min-h-[360px] flex-1 overflow-auto sm:min-h-[520px]">
         {previewFiles ? (
           <SandboxedArtifactRuntime
             key={previewNonce}
@@ -2472,56 +2291,13 @@ export function CodeStudio({
           </div>
         )}
       </div>
-      <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-[var(--border-subtle)] px-3 py-2 text-micro text-[var(--text-secondary)]">
-        <span className="inline-flex items-center gap-1">
-          <ShieldCheck className="h-3 w-3 text-[var(--success)]" />
-          {workbook.runtime === "python" ||
-          workbook.networkPolicy?.mode !== "allowlist"
-            ? "Network off"
-            : `${normalizeCodeNetworkOrigins(workbook.networkPolicy.allowlist).length} HTTPS ${normalizeCodeNetworkOrigins(workbook.networkPolicy.allowlist).length === 1 ? "origin" : "origins"}`}
-        </span>
-        {a11y ? (
-          <>
-            <span className="inline-flex items-center gap-1">
-              {a11y.imagesWithoutAlt +
-                a11y.unnamedControls +
-                a11y.unlabelledGraphics +
-                a11y.headingOrderIssues +
-                a11y.duplicateIds ===
-              0 ? (
-                <CheckCircle2 className="h-3 w-3 text-[var(--success)]" />
-              ) : (
-                <AlertTriangle className="h-3 w-3 text-[var(--warning)]" />
-              )}
-              {a11y.imagesWithoutAlt +
-                a11y.unnamedControls +
-                a11y.unlabelledGraphics +
-                a11y.headingOrderIssues +
-                a11y.duplicateIds ===
-              0
-                ? "Accessibility checks passed"
-                : `${
-                    a11y.imagesWithoutAlt +
-                    a11y.unnamedControls +
-                    a11y.unlabelledGraphics +
-                    a11y.headingOrderIssues +
-                    a11y.duplicateIds
-                  } accessibility ${
-                    a11y.imagesWithoutAlt +
-                      a11y.unnamedControls +
-                      a11y.unlabelledGraphics +
-                      a11y.headingOrderIssues +
-                      a11y.duplicateIds ===
-                    1
-                      ? "issue"
-                      : "issues"
-                  }`}
-            </span>
-            <span>{a11y.focusableCount} interactive controls</span>
-            <span>{a11y.language || "No language declared"}</span>
-          </>
-        ) : null}
-      </div>
+      {a11yIssues ? (
+        <p className="code-preview-note">
+          <AlertTriangle className="h-3 w-3" />
+          {a11yIssues} accessibility {a11yIssues === 1 ? "issue" : "issues"} in
+          the page
+        </p>
+      ) : null}
     </div>
   );
 
@@ -2598,8 +2374,6 @@ export function CodeStudio({
     },
   ];
   const editingSource = sourcePaneVisible && sourceMode === "code";
-  const running =
-    runState === "building" || runState === "loading" || runState === "running";
   const exportReady = Boolean(previewFiles) && runState === "ready";
   /**
    * Control grammar: modes lead, the active file is the context chip, tools sit
@@ -2654,16 +2428,18 @@ export function CodeStudio({
                 {
                   id: "file-new",
                   label: "New file",
+                  tab: "Files",
                   icon: FilePlus2,
-                  priority: "advanced" as const,
+                  priority: "secondary" as const,
                   requires: "edit" as const,
                   onSelect: openNewFile,
                 },
                 {
                   id: "file-rename",
-                  label: "Rename file",
+                  label: "Rename",
+                  tab: "Files",
                   icon: Pencil,
-                  priority: "advanced" as const,
+                  priority: "secondary" as const,
                   requires: "edit" as const,
                   onSelect: () => startRenameFile(activeFile),
                 },
@@ -2673,30 +2449,33 @@ export function CodeStudio({
             ? [
                 {
                   id: "file-duplicate",
-                  label: "Duplicate file",
+                  label: "Duplicate",
+                  tab: "Files",
                   icon: Copy,
-                  priority: "advanced" as const,
+                  priority: "secondary" as const,
                   requires: "edit" as const,
                   onSelect: () => duplicateFile(activeFile.id),
                 },
                 {
                   id: "file-entry",
-                  label: "Set as entry file",
+                  label: "Run this first",
+                  tab: "Files",
                   icon: Flag,
-                  priority: "advanced" as const,
+                  priority: "secondary" as const,
                   requires: "edit" as const,
                   disabled: workbook.entryFileId === activeFile.id,
                   hint:
                     workbook.entryFileId === activeFile.id
-                      ? "This file is already the entry"
-                      : "Run this file first",
+                      ? "This file already runs first"
+                      : "Run this file when the code starts",
                   onSelect: () => setEntryFile(activeFile.id),
                 },
                 {
                   id: "file-delete",
                   label: "Delete file",
+                  tab: "Files",
                   icon: Trash2,
-                  priority: "advanced" as const,
+                  priority: "secondary" as const,
                   requires: "edit" as const,
                   disabled: workbook.files.length === 1,
                   hint:
@@ -2761,81 +2540,90 @@ export function CodeStudio({
         : publishedBuild && !publishedStale
           ? "This source is the current published build"
           : publishedStale
-            ? "Publish the latest source as a new retained build"
-            : "Publish a retained runtime build",
+            ? "Publish your latest changes"
+            : "Share a version others can open and run",
       onSelect: () => void publishRuntime(),
     },
     {
       id: "import-files",
-      label: "Import source or ZIP",
+      label: "Import files",
+      tab: "Files",
       icon: Import,
-      priority: "advanced" as const,
+      priority: "secondary" as const,
       requires: "edit" as const,
       disabled: importing,
       onSelect: () => importRef.current?.click(),
     },
     {
       id: "import-folder",
-      label: "Import source folder",
+      label: "Import a folder",
+      tab: "Files",
       icon: FolderOpen,
-      priority: "advanced" as const,
+      priority: "secondary" as const,
       requires: "edit" as const,
       disabled: importing,
       onSelect: () => folderImportRef.current?.click(),
     },
     {
       id: "export-archive",
-      label: "Export source archive",
+      label: "Download all",
+      tab: "Files",
       icon: FileArchive,
-      priority: "advanced" as const,
+      priority: "secondary" as const,
       onSelect: exportSourceArchive,
     },
     {
       id: "export-html",
-      label: "Export isolated HTML",
+      label: "Web page",
+      tab: "Export",
       icon: Eye,
-      priority: "advanced" as const,
+      priority: "secondary" as const,
       disabled: !previewFiles,
       onSelect: exportStandalonePreview,
     },
     {
       id: "export-svg",
-      label: "Export rendered SVG",
+      label: "SVG",
+      tab: "Export",
       icon: FileImage,
-      priority: "advanced" as const,
+      priority: "secondary" as const,
       disabled: !exportReady || Boolean(exportJob),
       onSelect: () => requestVisualExport("svg"),
     },
     {
       id: "export-png",
-      label: "Export rendered PNG",
+      label: "PNG",
+      tab: "Export",
       icon: FileImage,
-      priority: "advanced" as const,
+      priority: "secondary" as const,
       disabled: !exportReady || Boolean(exportJob),
       onSelect: () => requestVisualExport("png"),
     },
     {
       id: "export-pdf",
-      label: "Export rendered PDF",
+      label: "PDF",
+      tab: "Export",
       icon: FileText,
-      priority: "advanced" as const,
+      priority: "secondary" as const,
       disabled: !exportReady || Boolean(exportJob),
       onSelect: () => requestVisualExport("pdf"),
     },
     {
       id: "export-webm",
-      label: "Export canvas video",
+      label: "Video",
+      tab: "Export",
       icon: Video,
-      priority: "advanced" as const,
+      priority: "secondary" as const,
       disabled: !exportReady || Boolean(exportJob),
-      hint: "Records three seconds of a canvas experience",
+      hint: "Records three seconds of the animation",
       onSelect: () => requestVisualExport("webm"),
     },
     {
       id: "download-file",
-      label: "Download current file",
+      label: "Download file",
+      tab: "Files",
       icon: Download,
-      priority: "advanced" as const,
+      priority: "secondary" as const,
       onSelect: () =>
         downloadBlob(
           new Blob([activeFile.source], {
@@ -2866,7 +2654,6 @@ export function CodeStudio({
           scroll. */}
       <ArtifactWorkbar
         label="Code actions"
-        selectionContext={surface === "preview" ? "Code output" : undefined}
         modes={
           isFullscreen
             ? {
@@ -2881,13 +2668,14 @@ export function CodeStudio({
             : panelModes
         }
         context={
-          editingSource && workbook.entryFileId === activeFile.id
-            ? "Entry file"
+          editingSource && workbook.files.length > 1 && workbook.entryFileId === activeFile.id
+            ? "Runs first"
             : undefined
         }
         actions={workbarActions}
         selector={
-          workbook.files.length ? (
+          // The picture alone has no file to pick.
+          workbook.files.length && surface !== "preview" ? (
             <WorkbarItemSelector
               ariaLabel="File"
               itemNoun="file"
@@ -3056,6 +2844,7 @@ export function CodeStudio({
                     {contract.surface === "full" ? (
                       <StudioItemRail
                         label="Files"
+                        showIndex={false}
                         count={workbook.files.length}
                         collapsed={!fileRailOpen}
                         onToggleCollapsed={() =>
@@ -3098,7 +2887,7 @@ export function CodeStudio({
                       <div className="px-2 pb-2">{filePathForm}</div>
                     ) : null}
                     <div
-                      className="relative min-h-[520px] min-w-0 overflow-hidden bg-[var(--bg-primary)]"
+                      className="code-sheet"
                       data-ai-region={aiRegionAttr(activeAiEffect)}
                       {...(activeIndex >= 0
                         ? targetAttrs(`/files/${activeIndex}/source`)
@@ -3165,204 +2954,27 @@ export function CodeStudio({
                 </>
               ) : null}
             </div>
-            <div className="border-t border-[var(--border-default)] bg-[var(--bg-secondary)]">
-              <div className="flex h-9 items-center gap-1 px-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setPanel((current) =>
-                      current === "problems" ? null : "problems",
-                    )
-                  }
-                  className={`code-panel-tab ${panel === "problems" ? "is-active" : ""}`}
-                >
-                  <AlertTriangle className="h-3 w-3" />
-                  Problems
-                  {problems.length ? <span>{problems.length}</span> : null}
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setPanel((current) =>
-                      current === "console" ? null : "console",
-                    )
-                  }
-                  className={`code-panel-tab ${panel === "console" ? "is-active" : ""}`}
-                >
-                  <TerminalSquare className="h-3 w-3" />
-                  Console
-                  {consoleEntries.length ? (
-                    <span>{consoleEntries.length}</span>
-                  ) : null}
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    panel === "tests" ? setPanel(null) : void run(true)
-                  }
-                  className={`code-panel-tab ${panel === "tests" ? "is-active" : ""}`}
-                  title={
-                    canExecute
-                      ? "Run the declared tests"
-                      : "Running tests needs the execute capability"
-                  }
-                  disabled={
-                    !canExecute ||
-                    runState === "building" ||
-                    runState === "loading" ||
-                    runState === "running"
-                  }
-                >
-                  <FlaskConical className="h-3 w-3" />
-                  Tests
-                  {workbook.tests?.length ? (
-                    <span>{workbook.tests.length}</span>
-                  ) : null}
-                </button>
-                <span className="ml-auto truncate text-micro text-[var(--text-tertiary)]">
-                  {runtimeLabel(workbook.runtime)} · {runStateLabel(runState)}
-                </span>
-                {panel === "problems" && problems.length ? (
-                  <button
-                    type="button"
-                    onClick={() => setProblems([])}
-                    className="code-small-action shrink-0"
-                  >
-                    <Eraser className="h-3 w-3" />
-                    Clear
-                  </button>
-                ) : null}
-                {panel === "console" && consoleEntries.length ? (
-                  <button
-                    type="button"
-                    onClick={() => setConsoleEntries([])}
-                    className="code-small-action shrink-0"
-                  >
-                    <Eraser className="h-3 w-3" />
-                    Clear
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => setPanel(null)}
-                  className="code-icon-action h-6 w-6 shrink-0"
-                  aria-label="Close output panel"
-                >
-                  <PanelBottom className="h-3 w-3" />
-                </button>
-              </div>
-              {panel ? (
-                <div className="max-h-44 overflow-auto border-t border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2 font-mono text-micro leading-4">
-                  {panel === "problems" ? (
-                    problems.length ? (
-                      problems.map((problem) => (
-                        <button
-                          type="button"
-                          key={problem.id}
-                          className="flex w-full items-start gap-2 rounded px-2 py-1 text-left hover:bg-[var(--bg-hover)]"
-                          onClick={() => {
-                            const file =
-                              problem.file &&
-                              workbook.files.find(
-                                (candidate) => candidate.path === problem.file,
-                              );
-                            if (!file) {
-                              editorViewRef.current?.focus();
-                              return;
-                            }
-                            // Land on the reported position, not merely in the
-                            // right file: a problem you have to hunt for is a
-                            // problem the panel only half reported.
-                            setSourceMode("code");
-                            setActiveFileId(file.id);
-                            if (problem.line)
-                              setPendingSearchTarget({
-                                fileId: file.id,
-                                line: problem.line,
-                                column: problem.column ?? 0,
-                              });
-                            else editorViewRef.current?.focus();
-                          }}
-                        >
-                          <span
-                            className={
-                              problem.severity === "error"
-                                ? "text-[var(--danger)]"
-                                : problem.severity === "warning"
-                                  ? "text-[var(--warning)]"
-                                  : "text-[var(--accent-cyan)]"
-                            }
-                          >
-                            {problem.severity === "error"
-                              ? "×"
-                              : problem.severity === "warning"
-                                ? "!"
-                                : "i"}
-                          </span>
-                          <span className="min-w-0 flex-1 break-words text-[var(--text-secondary)]">
-                            {problem.message}
-                          </span>
-                          <span className="shrink-0 text-[var(--text-tertiary)]">
-                            {problem.file}
-                            {problem.line
-                              ? `:${problem.line}${problem.column !== undefined ? `:${problem.column + 1}` : ""}`
-                              : ""}
-                          </span>
-                        </button>
-                      ))
-                    ) : (
-                      <EmptyOutput text="No current problems." />
-                    )
-                  ) : panel === "tests" ? (
-                    testResults.length ? (
-                      testResults.map((result) => (
-                        <div
-                          key={result.id}
-                          className="flex items-start gap-2 border-b border-[var(--border-subtle)] px-2 py-1.5 last:border-0"
-                        >
-                          <LifeVerdict verdict={result.status === "passed" ? "right" : result.status === "failed" ? "wrong" : null} />
-                          {result.status === "running" ? (
-                            <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-[var(--accent-cyan)] motion-reduce:animate-none" />
-                          ) : result.status === "passed" ? (
-                            <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-[var(--success)]" />
-                          ) : (
-                            <X className="mt-0.5 h-3 w-3 shrink-0 text-[var(--danger)]" />
-                          )}
-                          <span className="min-w-0 flex-1 text-[var(--text-secondary)]">
-                            <strong className="font-semibold text-[var(--text-primary)]">
-                              {result.name}
-                            </strong>
-                            {result.message ? (
-                              <span className="mt-0.5 block whitespace-pre-wrap text-[var(--danger)]">
-                                {result.message}
-                              </span>
-                            ) : null}
-                          </span>
-                        </div>
-                      ))
-                    ) : (
-                      <EmptyOutput text="Add executable tests in Settings, then run them here." />
-                    )
-                  ) : consoleEntries.length ? (
-                    consoleEntries.map((entry) => (
-                      <div
-                        key={entry.id}
-                        className={`flex gap-2 border-b border-[var(--border-subtle)] px-2 py-1 last:border-0 ${entry.level === "error" ? "text-[var(--danger)]" : entry.level === "warn" ? "text-[var(--warning)]" : "text-[var(--text-secondary)]"}`}
-                      >
-                        <span className="shrink-0 uppercase text-micro tracking-wide text-[var(--text-tertiary)]">
-                          {entry.level}
-                        </span>
-                        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
-                          {entry.text}
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <EmptyOutput text="Run the code to see console output." />
-                  )}
-                </div>
-              ) : null}
-            </div>
+            <CodeTray
+              panel={panel}
+              onPanel={setPanel}
+              problems={problems}
+              onClearProblems={() => setProblems([])}
+              onOpenProblem={(problem) => {
+                const file = problem.file && workbook.files.find((candidate) => candidate.path === problem.file);
+                if (!file) {
+                  editorViewRef.current?.focus();
+                  return;
+                }
+                // Land on the reported position, not merely in the right file.
+                setSourceMode("code");
+                setActiveFileId(file.id);
+                if (problem.line) setPendingSearchTarget({ fileId: file.id, line: problem.line, column: problem.column ?? 0 });
+                else editorViewRef.current?.focus();
+              }}
+              consoleEntries={consoleEntries}
+              onClearConsole={() => setConsoleEntries([])}
+              runtime={runtimeLabel(workbook.runtime)}
+            />
           </>
         ) : null}
       </div>
@@ -4268,7 +3880,7 @@ function CodeSettings({
               <SelectField
                 ariaLabel="Opens in"
                 size="sm"
-                value={content.visualisation.openMode ?? "source"}
+                value={content.visualisation.openMode ?? "split"}
                 disabled={readOnly}
                 options={[
                   { value: "source", label: "Code" },
@@ -4525,7 +4137,7 @@ function CodeSettings({
                   React 19 · locked by Spectra
                 </span>
               </span>
-              <span className="rounded-full bg-[color-mix(in_oklab,var(--success)_10%,transparent)] px-2 py-1 text-micro font-semibold text-[var(--success)]">
+              <span className="rounded-chip bg-[color-mix(in_oklab,var(--success)_10%,transparent)] px-2 py-1 text-micro font-semibold text-[var(--success)]">
                 Included
               </span>
             </div>
@@ -4980,7 +4592,7 @@ function CodeSettings({
                 code reads them through the Spectra SDK; secrets and details of unrelated work are never included.
               </p>
             </div>
-            <span className="rounded-full border border-[var(--border-default)] px-2 py-1 text-micro font-semibold text-[var(--text-tertiary)]">
+            <span className="rounded-chip border border-[var(--border-default)] px-2 py-1 text-micro font-semibold text-[var(--text-tertiary)]">
               {(content.resourceBindings ?? []).length} bound
             </span>
           </div>
@@ -5124,7 +4736,7 @@ function CodeSettings({
                 independently of the adapted live file tree.
               </p>
             </div>
-            <span className="rounded-full border border-[var(--border-default)] px-2 py-1 text-micro font-semibold text-[var(--text-tertiary)]">
+            <span className="rounded-chip border border-[var(--border-default)] px-2 py-1 text-micro font-semibold text-[var(--text-tertiary)]">
               {importHistory.length} retained
             </span>
           </div>
@@ -5339,14 +4951,6 @@ function SecurityRow({ label, value }: { label: string; value: string }) {
         <ShieldCheck className="h-3 w-3 text-[var(--success)]" />
         {value}
       </span>
-    </div>
-  );
-}
-
-function EmptyOutput({ text }: { text: string }) {
-  return (
-    <div className="flex h-20 items-center justify-center text-[var(--text-tertiary)]">
-      {text}
     </div>
   );
 }

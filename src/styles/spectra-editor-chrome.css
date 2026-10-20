@@ -1,0 +1,773 @@
+/* ==========================================================================
+   Editor chrome (EDITORS.md, "The header" and "The workbar")
+   --------------------------------------------------------------------------
+   Every editor wears the same two things above its work: the header, which
+   names the work in the display serif, and the workbar: its categories as
+   tabs over a shelf of the open category's tools. Loaded after the older
+   editor sheets, so it is the last word on their chrome.
+   ========================================================================== */
+
+/* --- The header -------------------------------------------------------- */
+
+.spectra-artifact-studio[data-studio-mode] .spectra-artifact-header {
+  padding-top: 14px;
+  padding-bottom: 8px;
+}
+.spectra-artifact-studio[data-studio-mode] .spectra-artifact-title {
+  font-size: 26px !important;
+  font-weight: 400;
+  line-height: 1.2 !important;
+}
+.spectra-artifact-header textarea:first-of-type {
+  letter-spacing: -0.012em;
+}
+.spectra-artifact-studio[data-studio-mode] .spectra-artifact-kind {
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+/* --- The work's ink ------------------------------------------------------
+   Every kind of work has one colour. It marks the open category, the primary
+   action, the open item in the rail and the selection: the parts that say
+   "you are here" in this editor. Nothing else is tinted. */
+
+.spectra-artifact-studio { --editor-ink: var(--brand-primary); }
+.spectra-artifact-studio[data-blueprint="document"] { --editor-ink: var(--type-document); }
+.spectra-artifact-studio[data-blueprint="presentation"] { --editor-ink: var(--type-slides); }
+.spectra-artifact-studio[data-blueprint="sheets"] { --editor-ink: var(--type-sheets); }
+.spectra-artifact-studio[data-blueprint="quiz"] { --editor-ink: var(--type-quiz); }
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] { --editor-ink: var(--type-flashcards); }
+.spectra-artifact-studio[data-blueprint="code"] { --editor-ink: var(--type-code); }
+.spectra-artifact-studio[data-blueprint="whiteboard"] { --editor-ink: var(--type-whiteboard); }
+.spectra-artifact-studio[data-blueprint="planner"] { --editor-ink: var(--type-task); }
+.spectra-artifact-studio[data-blueprint="planner_task"] { --editor-ink: var(--type-task); }
+.spectra-artifact-studio[data-blueprint="timetable"] { --editor-ink: var(--type-timetable); }
+.spectra-artifact-studio[data-blueprint="agent"] { --editor-ink: var(--type-agent); }
+.spectra-artifact-studio { --rail-ink: var(--editor-ink); }
+
+/* --- The workbar: tabs over a shelf ---------------------------------------
+   Two rows, as in every office suite: the categories, then the tools of the
+   open one. The open category is a folder tab joined to the shelf under it,
+   so which tools belong to which tab is drawn, not explained. The shelf sits
+   on the desk like everything else: a border, no fill of its own. */
+
+.spectra-artifact-studio .spectra-editor-workbar,
+.spectra-editor-workbar {
+  display: flex !important;
+  height: auto;
+  min-height: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.spectra-editor-workbar > .spectra-workbar-rail-tabs {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  height: 32px;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 0 4px 0 10px;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+}
+
+.spectra-editor-workbar .spectra-command-tabs {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+}
+.spectra-editor-workbar .spectra-command-tab {
+  position: relative;
+  height: 30px;
+  margin-bottom: -1px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
+}
+.spectra-editor-workbar .spectra-command-tab:hover {
+  color: var(--text-primary);
+  background: color-mix(in oklab, var(--editor-ink, var(--brand-primary)) 5%, transparent);
+}
+.spectra-editor-workbar .spectra-command-tab[aria-selected="true"] {
+  height: 32px;
+  border-color: color-mix(in oklab, var(--editor-ink, var(--brand-primary)) 30%, var(--card-border));
+  background: linear-gradient(
+    color-mix(in oklab, var(--editor-ink, var(--brand-primary)) 18%, var(--bg-primary)),
+    var(--bg-primary)
+  );
+  color: color-mix(in oklab, var(--editor-ink, var(--text-primary)) 88%, var(--text-primary));
+  font-weight: 600;
+}
+.spectra-editor-workbar .spectra-command-tab[aria-selected="true"]::after {
+  display: none;
+}
+/* A tab that exists only for the current selection (a table, a picture). */
+.spectra-editor-workbar .spectra-command-tab[data-contextual] {
+  color: color-mix(in oklab, var(--editor-ink, var(--brand-primary)) 80%, var(--text-secondary));
+}
+
+/* The shelf. */
+.spectra-editor-workbar > .spectra-workbar-rail-commands {
+  display: flex;
+  height: 44px;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px 0 8px;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: var(--bg-primary);
+}
+.spectra-editor-workbar .spectra-workbar-commands {
+  flex: 1 1 0;
+  min-width: 0;
+}
+/* Tools are read at the size of the interface, not of a footnote. */
+.spectra-editor-workbar .spectra-workbar-rail-commands :is(button, input, [role="combobox"]) {
+  font-size: var(--text-ui);
+  font-weight: 500;
+}
+
+/* The bar's own settings sit at the right of the tab row, quiet until the
+   pointer or focus is on the bar. */
+.spectra-editor-workbar .spectra-workbar-rail-meta {
+  display: flex;
+  align-self: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+.spectra-editor-workbar:is(:hover, :focus-within) .spectra-workbar-rail-meta,
+.spectra-editor-workbar[data-workbar-customizing] .spectra-workbar-rail-meta {
+  opacity: 1;
+}
+
+/* The primary action wears the work's ink. */
+.spectra-artifact-studio .spectra-workbar-primary-action {
+  background: var(--editor-ink, var(--text-primary)) !important;
+  color: var(--text-inverse, #fff) !important;
+}
+.spectra-artifact-studio .spectra-workbar-primary-action:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--editor-ink, var(--text-primary)) 86%, var(--text-primary)) !important;
+}
+
+/* A pressed tool (a toggle that is on) is tinted with the ink, not grey. */
+.spectra-artifact-studio .spectra-editor-workbar [aria-pressed="true"]:not(.spectra-workbar-menu-trigger) {
+  background: color-mix(in oklab, var(--editor-ink, var(--brand-primary)) 10%, transparent) !important;
+  color: var(--editor-ink, var(--text-primary)) !important;
+  box-shadow: none !important;
+}
+
+/* Groups part with space and a short tick, not a full-height rule. */
+.spectra-editor-workbar .spectra-workbar-group + .spectra-workbar-group {
+  position: relative;
+  margin-left: 6px;
+  padding-left: 7px;
+  border-left: 0;
+}
+.spectra-editor-workbar .spectra-workbar-group + .spectra-workbar-group::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 1px;
+  height: 16px;
+  background: var(--card-border);
+  transform: translateY(-50%);
+}
+
+/* --- One desk -------------------------------------------------------------
+   An editor does not lay its work on a second, lighter paper: the page, the
+   grid, the board and the code share the desk's colour, and a border is all
+   that says where the work begins. Inside the studio the paper token is the
+   desk, so every surface built on it (and every tint mixed from it) follows;
+   the stacked-page shadows go with it. Slides keep their own background,
+   which is part of the deck, not of the editor. */
+
+.spectra-artifact-studio {
+  --card-paper: var(--bg-primary);
+  --paper-grain: none;
+}
+.spectra-artifact-studio :is(
+    .editor-sheet,
+    .document-page,
+    .sheets-grid-frame,
+    .code-sheet,
+    .code-preview-surface,
+    .whiteboard-shell > main
+  ) {
+  border-color: var(--card-border) !important;
+  box-shadow: none !important;
+}
+.spectra-artifact-studio :is(.editor-sheet, .document-page, .code-sheet, .whiteboard-shell > main) {
+  border-radius: 10px;
+}
+
+/* --- The contents rail (studio-item-rail.tsx) ----------------------------
+   Questions, cards, slides, files: the contents page of what is open. Lines,
+   not boxes; the open one is a slip of paper pulled out, edged in the work's
+   ink; adding one is the next line under the last. */
+
+.spectra-artifact-studio .spectra-item-rail {
+  width: 264px;
+  padding: 18px 10px 18px 14px;
+  border-right: 1px solid var(--card-border-soft);
+  background: transparent;
+}
+.spectra-artifact-studio .spectra-item-rail-toggle {
+  height: 28px;
+  gap: 8px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+.spectra-item-rail-count {
+  color: var(--text-tertiary);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+/* Without numbers (files), the row is the title alone. */
+.spectra-artifact-studio .spectra-item-rail-row:not([data-index]):not([data-has-preview]) {
+  min-height: 36px;
+  grid-template-columns: minmax(0, 1fr) 14px;
+}
+.spectra-artifact-studio .spectra-item-rail-list {
+  flex: 0 1 auto;
+  gap: 2px;
+  margin-top: 8px;
+}
+.spectra-artifact-studio .spectra-item-rail-row {
+  position: relative;
+  min-height: 48px;
+  grid-template-columns: 24px minmax(0, 1fr) 14px;
+  gap: 10px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard),
+    transform var(--motion-base) var(--ease-standard);
+}
+.spectra-artifact-studio .spectra-item-rail-row:hover {
+  background: color-mix(in oklab, var(--card-paper) 55%, transparent);
+}
+.spectra-artifact-studio .spectra-item-rail-row[data-active="true"] {
+  background: var(--card-paper);
+  box-shadow:
+    0 0 0 1px var(--card-border-soft),
+    0 6px 16px -12px color-mix(in oklab, var(--text-primary) 45%, transparent);
+  transform: translateX(4px);
+}
+.spectra-artifact-studio .spectra-item-rail-row[data-active="true"]::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: -4px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--rail-ink, var(--brand-primary));
+}
+/* A row with a picture of its item (a slide): the number in the margin, the
+   item as a small card, its title under it. */
+.spectra-artifact-studio .spectra-item-rail-row[data-has-preview] {
+  grid-template-columns: 20px minmax(0, 1fr);
+  grid-template-areas: "number preview" "number copy";
+  align-items: start;
+  gap: 6px 8px;
+  padding: 8px 10px 8px 4px;
+}
+.spectra-artifact-studio .spectra-item-rail-row[data-has-preview]:not([data-index]) {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "preview" "copy";
+}
+.spectra-artifact-studio .spectra-item-rail-row[data-has-preview] > .spectra-item-rail-preview {
+  grid-area: preview;
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+  box-shadow:
+    0 0 0 1px var(--card-border-soft),
+    0 6px 12px -10px color-mix(in oklab, var(--text-primary) 50%, transparent);
+  contain-intrinsic-size: 200px 112px;
+}
+.spectra-artifact-studio .spectra-item-rail-row[data-has-preview] > .spectra-item-rail-number {
+  grid-area: number;
+  padding-top: 2px;
+  text-align: right;
+}
+.spectra-artifact-studio .spectra-item-rail-row[data-has-preview] > .spectra-item-rail-copy {
+  grid-area: copy;
+  min-width: 0;
+}
+.spectra-artifact-studio .spectra-item-rail-row[data-has-preview] > :last-child:not(.spectra-item-rail-copy) {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+}
+.spectra-artifact-studio .spectra-item-rail-row[data-has-preview][data-active="true"]::before {
+  content: none;
+}
+.spectra-artifact-studio .spectra-item-rail-row[data-has-preview][data-active="true"] > .spectra-item-rail-preview {
+  box-shadow:
+    0 0 0 2px var(--rail-ink, var(--brand-primary)),
+    0 6px 12px -10px color-mix(in oklab, var(--text-primary) 50%, transparent);
+}
+/* Like a slide sorter, a picture rail is pictures: the number in the margin
+   and the item itself, its name left to the picture (and to a screen reader).
+   The open one is ringed in the work's ink rather than pulled out. */
+.spectra-artifact-studio .spectra-item-rail-row[data-has-preview] {
+  grid-template-areas: "number preview";
+}
+.spectra-artifact-studio .spectra-item-rail-row[data-has-preview]:not([data-index]) {
+  grid-template-areas: "preview";
+}
+.spectra-artifact-studio .spectra-item-rail-row[data-has-preview] > .spectra-item-rail-copy {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.spectra-artifact-studio .spectra-item-rail-row[data-has-preview]:is(:hover, [data-active="true"]) {
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+.spectra-artifact-studio .spectra-item-rail-row[data-has-preview]:hover:not([data-active="true"]) > .spectra-item-rail-preview {
+  box-shadow:
+    0 0 0 1px var(--card-border),
+    0 8px 14px -10px color-mix(in oklab, var(--text-primary) 55%, transparent);
+}
+/* The drag grip sits under the number, clear of the picture. */
+.spectra-artifact-studio .spectra-item-rail-row[data-has-preview] > :last-child:not(.spectra-item-rail-copy) {
+  top: auto;
+  right: auto;
+  bottom: 12px;
+  left: 6px;
+}
+.spectra-artifact-studio .spectra-item-rail-row[data-has-preview][data-active="true"] > .spectra-item-rail-number {
+  color: var(--rail-ink, var(--text-primary));
+}
+
+/* --- Thumbnails (quiz/question-thumbnail, flashcards/card-thumbnail,
+   whiteboard/page-thumbnail) -----------------------------------------------
+   Each is its item set small on its own paper: real words where they can
+   still be read, the shape of the rest where they cannot. */
+
+.rail-thumb {
+  display: flex;
+  min-width: 0;
+  aspect-ratio: 16 / 10;
+  flex-direction: column;
+  gap: 5px;
+  overflow: hidden;
+  padding: 9px 11px;
+  background: var(--card-paper);
+  color: var(--text-primary);
+  font-size: 9.5px;
+  line-height: 1.3;
+}
+.rail-thumb-kicker {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  color: var(--text-tertiary);
+  font-size: 9px;
+  white-space: nowrap;
+}
+.rail-thumb-kicker > :first-child {
+  overflow: hidden;
+  color: color-mix(in oklab, var(--rail-ink, var(--text-secondary)) 80%, var(--text-secondary));
+  text-overflow: ellipsis;
+}
+.rail-thumb-prompt {
+  display: -webkit-box;
+  overflow: hidden;
+  font-family: var(--font-serif);
+  font-size: 12px;
+  line-height: 1.22;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+.rail-thumb :is(.rail-thumb-prompt, .rail-thumb-back)[data-empty] {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.rail-thumb-options,
+.rail-thumb-pairs {
+  display: grid;
+  gap: 3px;
+  margin-top: auto;
+}
+.rail-thumb-options > li {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 11px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  color: var(--text-secondary);
+}
+.rail-thumb-options > li > span:first-child {
+  display: grid;
+  width: 11px;
+  height: 11px;
+  place-items: center;
+  border: 1px solid var(--card-border);
+  border-radius: 50%;
+  font-size: 6.5px;
+  font-weight: 600;
+}
+.rail-thumb-options[data-many] > li > span:first-child {
+  border-radius: 2px;
+}
+.rail-thumb-options > li > span:last-child,
+.rail-thumb-pairs > li > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rail-thumb-options > li > span[data-empty]::before {
+  content: "";
+  display: block;
+  width: 58%;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--card-border);
+}
+.rail-thumb-options > li[data-right] {
+  color: var(--text-primary);
+}
+.rail-thumb-options > li[data-right] > span:first-child {
+  border-color: var(--rail-ink, var(--text-primary));
+  background: var(--rail-ink, var(--text-primary));
+  color: var(--card-paper);
+}
+.rail-thumb-options > li[data-more] {
+  display: block;
+  color: var(--text-tertiary);
+}
+.rail-thumb-pairs > li {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+.rail-thumb-pairs > li > span:last-child {
+  border-left: 1px solid var(--card-border-soft);
+  padding-left: 6px;
+}
+
+/* An answer written, not chosen: a ruled line, or ruled lines in a box for a
+   long response. */
+.rail-thumb-answer {
+  display: block;
+  width: 62%;
+  height: 12px;
+  margin-top: auto;
+  border-bottom: 1px solid var(--card-border);
+}
+.rail-thumb-answer[data-type="long_response"] {
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--card-border-soft);
+  border-radius: 3px;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0 10px,
+    var(--card-border-soft) 10px 11px
+  );
+}
+
+/* A card is an index card: the prompt centred, the answer under the rule. */
+.rail-thumb[data-thumb="card"] {
+  aspect-ratio: 2 / 1;
+  justify-content: center;
+  gap: 0;
+  text-align: center;
+}
+.rail-thumb[data-thumb="card"] .rail-thumb-prompt {
+  flex: none;
+}
+.rail-thumb-back {
+  display: -webkit-box;
+  margin-top: 6px;
+  overflow: hidden;
+  border-top: 1px dashed var(--card-border-soft);
+  padding-top: 5px;
+  color: var(--text-secondary);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+/* A board page: its objects as blocks in place. */
+svg.rail-thumb {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 0;
+}
+.rail-thumb[data-thumb="page"][data-empty] {
+  background:
+    radial-gradient(circle, var(--card-border) 1px, transparent 1.4px) 0 0 / 14px 14px,
+    var(--card-paper);
+}
+.rail-thumb-node {
+  fill: var(--card-paper);
+  stroke: color-mix(in oklab, var(--text-primary) 45%, transparent);
+  stroke-width: 1;
+}
+.rail-thumb-node[data-kind="note"] {
+  fill: color-mix(in oklab, var(--rail-ink, var(--accent-yellow, #e9c46a)) 18%, var(--card-paper));
+  stroke: none;
+}
+.rail-thumb-node[data-kind="frame"] {
+  fill: none;
+  stroke-dasharray: 3 2;
+}
+.rail-thumb-node[data-kind="picture"] {
+  fill: var(--bg-secondary);
+  stroke: none;
+}
+.rail-thumb-text > rect {
+  fill: color-mix(in oklab, var(--text-primary) 55%, transparent);
+}
+.rail-thumb-edge {
+  stroke: color-mix(in oklab, var(--text-primary) 40%, transparent);
+  stroke-width: 1;
+}
+.spectra-artifact-studio .spectra-item-rail-number {
+  color: color-mix(in oklab, var(--rail-ink, var(--text-secondary)) 70%, var(--text-tertiary));
+  font-family: var(--font-display);
+  font-size: 17px;
+}
+.spectra-artifact-studio .spectra-item-rail-title {
+  font-size: var(--text-caption);
+}
+.spectra-artifact-studio .spectra-item-rail-subtitle {
+  color: var(--text-tertiary);
+}
+.spectra-artifact-studio .spectra-item-rail-row > svg:not(.rail-thumb) {
+  opacity: 0;
+}
+.spectra-artifact-studio .spectra-item-rail-row:hover > svg:not(.rail-thumb) {
+  opacity: 1;
+}
+.spectra-artifact-studio .spectra-item-rail-add {
+  height: 40px;
+  margin: 4px 0 0;
+  padding: 0 10px;
+  justify-content: flex-start;
+  gap: 10px;
+  border: 1px dashed transparent;
+  border-radius: 8px;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+  font-weight: 500;
+}
+.spectra-artifact-studio .spectra-item-rail-add:hover {
+  border-color: var(--card-border);
+  background: transparent;
+  color: var(--text-primary);
+}
+
+/* --- The item picker (workbar-item-selector.tsx) ---------------------------
+   Previous, the open part's title, next. The title opens the whole list: a
+   numbered contents page at the interface's reading size, the open part in
+   the work's ink, the pointer's row in the hover tone. */
+
+.spectra-workbar-item-selector {
+  min-width: 18ch;
+  max-width: 36ch;
+  flex: 1 1 26ch;
+  gap: 0;
+}
+.spectra-workbar-step {
+  height: 30px;
+  width: 26px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+}
+.spectra-workbar-step:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.spectra-workbar-item-trigger {
+  display: flex;
+  height: 30px;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--card-border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  text-align: left;
+  transition: border-color var(--motion-fast) var(--ease-standard);
+}
+.spectra-workbar-item-trigger:hover,
+.spectra-workbar-item-trigger[data-open] {
+  border-color: color-mix(in oklab, var(--editor-ink, var(--brand-primary)) 45%, var(--card-border));
+}
+.spectra-workbar-item-trigger:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 1px;
+}
+.spectra-workbar-item-label {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.spectra-workbar-item-position {
+  flex: none;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+.spectra-workbar-item-trigger > svg {
+  color: var(--text-tertiary);
+  transition: transform var(--motion-fast) var(--ease-standard);
+}
+.spectra-workbar-item-trigger[data-open] > svg {
+  transform: rotate(180deg);
+}
+
+.spectra-item-picker {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  background: var(--bg-elevated, var(--bg-primary));
+  box-shadow:
+    0 1px 2px color-mix(in oklab, var(--text-primary) 8%, transparent),
+    0 18px 40px -18px color-mix(in oklab, var(--text-primary) 35%, transparent);
+  outline: none;
+  transform-origin: 50% 0;
+  animation: item-picker-open var(--motion-fast) var(--ease-standard) both;
+}
+.spectra-item-picker[data-above] {
+  transform-origin: 50% 100%;
+}
+.spectra-item-picker-filter {
+  height: 40px;
+  flex: none;
+  padding: 0 14px;
+  border: 0;
+  border-bottom: 1px solid var(--card-border);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-ui);
+  outline: none;
+}
+.spectra-item-picker-filter::placeholder {
+  color: var(--text-tertiary);
+}
+.spectra-item-picker-list {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+}
+.spectra-item-picker-option {
+  display: grid;
+  min-height: 36px;
+  grid-template-columns: 3ch minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: var(--text-ui);
+  cursor: pointer;
+}
+.spectra-item-picker-option[data-cursor] {
+  background: var(--bg-hover);
+}
+.spectra-item-picker-option[aria-selected="true"] {
+  background: color-mix(in oklab, var(--editor-ink, var(--brand-primary)) 10%, transparent);
+  color: color-mix(in oklab, var(--editor-ink, var(--brand-primary)) 80%, var(--text-primary));
+  font-weight: 600;
+}
+.spectra-item-picker-option[aria-disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+.spectra-item-picker-number {
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.spectra-item-picker-option[aria-selected="true"] .spectra-item-picker-number {
+  color: inherit;
+}
+.spectra-item-picker-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.spectra-item-picker-none {
+  padding: 14px 10px;
+  color: var(--text-tertiary);
+  font-size: var(--text-ui);
+}
+
+@keyframes item-picker-open {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+.spectra-item-picker[data-above] {
+  animation-name: item-picker-open-up;
+}
+@keyframes item-picker-open-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spectra-item-picker {
+    animation: none;
+  }
+}

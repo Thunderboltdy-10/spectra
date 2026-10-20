@@ -2,6 +2,8 @@ export type SpectraShellLocation = {
   surface: "library" | "workspace";
   workspaceId?: string;
   artifactId?: string;
+  /** The Library folder open behind the work, kept so a reload lands back in it. */
+  nodeId?: string;
 };
 
 function decodePathSegment(value: string | undefined) {
@@ -43,20 +45,29 @@ export function artifactIdFromSpectraLocation(
   );
 }
 
-/** Canonical URL for the long-lived Library/Workspace shell. */
+/**
+ * Where a workspace is: a place in the Library, like any folder, so stepping
+ * into one never leaves the Library (LIBRARY.md, "Workspaces are places").
+ * /workspace/<id> only redirects here.
+ */
+export function workspaceHref(workspaceId?: string) {
+  return workspaceId ? `/library?workspaceId=${encodeURIComponent(workspaceId)}` : "/workspace?home=1";
+}
+
+/** Canonical URL for the long-lived Library shell. */
 export function spectraShellHref({
   surface,
   workspaceId,
   artifactId,
+  nodeId,
 }: SpectraShellLocation) {
-  const base = workspaceId
-    ? `/workspace/${encodeURIComponent(workspaceId)}`
-    : surface === "library"
-      ? "/library"
-      : "/workspace";
-  if (!artifactId) return base;
-  const query = new URLSearchParams({ artifactId });
-  return `${base}?${query.toString()}`;
+  const base = workspaceId || surface === "library" ? "/library" : "/workspace";
+  const query = new URLSearchParams();
+  if (workspaceId) query.set("workspaceId", workspaceId);
+  if (nodeId && base === "/library") query.set("nodeId", nodeId);
+  if (artifactId) query.set("artifactId", artifactId);
+  const rest = query.toString();
+  return rest ? `${base}?${rest}` : base;
 }
 
 /** Retire only the unavailable work named by the current URL, keeping its scope. */

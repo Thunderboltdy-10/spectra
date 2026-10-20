@@ -368,6 +368,9 @@ const ACCOUNT_TABLES: TableStep[] = [
   drain((ctx, id, n) => ctx.db.query("memoryRetrievalEvents").withIndex("by_account_created", (q) => q.eq("accountId", id)).take(n)),
   drain((ctx, id, n) => ctx.db.query("memoryJobs").withIndex("by_account_created", (q) => q.eq("accountId", id)).take(n)),
   drain((ctx, id, n) => ctx.db.query("memoryPreferences").withIndex("by_account", (q) => q.eq("accountId", id)).take(n)),
+  // Home's daily brief (its recap is written from the account's work) and when it is written.
+  drain((ctx, id, n) => ctx.db.query("dailyBriefs").withIndex("by_account", (q) => q.eq("accountId", id)).take(n)),
+  drain((ctx, id, n) => ctx.db.query("briefSchedules").withIndex("by_account", (q) => q.eq("accountId", id)).take(n)),
   // Calendar and reminders.
   drain((ctx, id, n) => ctx.db.query("plannerReminderDeliveries").withIndex("by_recipient_created", (q) => q.eq("recipientAccountId", id)).take(n), (ctx, row) => cancelReminder(ctx, row)),
   drain((ctx, id, n) => ctx.db.query("timetableReminderDeliveries").withIndex("by_recipient_created", (q) => q.eq("recipientAccountId", id)).take(n), (ctx, row) => cancelReminder(ctx, row)),

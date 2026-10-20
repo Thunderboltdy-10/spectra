@@ -12,7 +12,7 @@ import { normalizePlanContent } from "../plan/model";
 
 vi.mock("../settings/preference-store", () => ({
   useSpectraPreferences: () => ({
-    preferences: { workbar: {}, writing: { smartCompletion: false } },
+    preferences: { workbar: {}, writing: { smartCompletion: false }, notifications: { reminderTime: "09:00" } },
     hydrated: true,
     update: () => {},
     replace: () => {},

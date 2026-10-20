@@ -1558,7 +1558,7 @@ path={eventPath(event.id)}
             )}
             <span>
               <strong>
-                {importError ? "Import quarantined" : "Import complete"}
+                {importError ? "Couldn't import" : "Import complete"}
               </strong>
               <small>
                 {importError ||

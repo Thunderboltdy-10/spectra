@@ -23,7 +23,7 @@ vi.mock("../../files/office-preview-client", async (original) => ({
   loadOfficePreview: mocks.load,
 }));
 
-import { TaskDetails } from "../school-tasks";
+import { TaskDetails } from "../school-task-details";
 
 function file(providerFileId: string, filename: string, mimeType: string) {
   return { providerFileId, filename, mimeType, bytes: 4096, tooLarge: false, state: "cached", schoolFileId: `kept-${providerFileId}` };

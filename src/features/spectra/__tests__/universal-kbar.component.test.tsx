@@ -54,10 +54,10 @@ describe("UniversalKBar", () => {
     const input = screen.getByPlaceholderText("Search commands, work, workspaces, conversations…");
     fireEvent.change(input, { target: { value: "new conversation" } });
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Start a new conversation" }));
+      fireEvent.click(screen.getByRole("button", { name: "Start a new thread" }));
       await Promise.resolve();
     });
-    expect(push).toHaveBeenCalledWith("/chat?new=1");
+    expect(push).toHaveBeenCalledWith("/home");
     expect(screen.queryByRole("dialog", { name: "Spectra command bar" })).toBeNull();
   });
 

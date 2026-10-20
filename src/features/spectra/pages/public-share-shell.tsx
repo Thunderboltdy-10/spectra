@@ -207,7 +207,7 @@ function ArtifactContent({ artifact }: { artifact: PublicArtifact }) {
                 key={String(card.id ?? index)}
                 className="rounded-surface border border-[var(--border-default)] bg-[var(--bg-primary)] p-5"
               >
-                <span className="text-micro font-semibold uppercase tracking-[.11em] text-[var(--brand-primary)]">
+                <span className="text-micro font-semibold text-[var(--brand-primary)]">
                   Card {index + 1}
                 </span>
                 <h2 className="mt-3 font-display text-heading font-semibold">
@@ -227,7 +227,7 @@ function ArtifactContent({ artifact }: { artifact: PublicArtifact }) {
                 key={String(question.id ?? index)}
                 className="rounded-surface border border-[var(--border-default)] bg-[var(--bg-primary)] p-5"
               >
-                <span className="text-micro font-semibold uppercase tracking-[.11em] text-[var(--accent-mint)]">
+                <span className="text-micro font-semibold text-[var(--accent-mint)]">
                   Question {index + 1}
                 </span>
                 <h2 className="mt-2 font-display text-heading font-semibold">
@@ -292,7 +292,7 @@ function ArtifactContent({ artifact }: { artifact: PublicArtifact }) {
                 key={String(slide.id ?? index)}
                 className="aspect-video rounded-surface border border-[var(--border-default)] bg-[var(--bg-primary)] p-5 shadow-sm"
               >
-                <span className="text-micro font-semibold uppercase tracking-[.11em] text-[var(--text-tertiary)]">
+                <span className="text-micro font-semibold text-[var(--text-tertiary)]">
                   Slide {index + 1}
                 </span>
                 <h2 className="mt-4 font-display text-heading font-semibold">
@@ -429,7 +429,7 @@ function ArtifactContent({ artifact }: { artifact: PublicArtifact }) {
         ) : null}
         {artifact.blueprintKey === "agent" ? (
           <div className="rounded-surface border border-[var(--border-default)] bg-[var(--bg-primary)] p-5">
-            <span className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--brand-primary)]">
+            <span className="text-micro font-semibold text-[var(--brand-primary)]">
               Instructions
             </span>
             <p className="mt-3 whitespace-pre-wrap text-ui leading-6">
@@ -651,7 +651,7 @@ export function PublicShareShell() {
             </span>
             Spectra
           </a>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-1.5 text-micro font-medium text-[var(--text-secondary)]">
+          <span className="inline-flex items-center gap-1.5 rounded-chip border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-1.5 text-micro font-medium text-[var(--text-secondary)]">
             <LockKeyhole className="h-3 w-3" />
             View only
           </span>

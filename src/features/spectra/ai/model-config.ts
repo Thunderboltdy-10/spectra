@@ -9,6 +9,7 @@
  *   SPECTRA_MODEL_PROVIDER        OpenRouter provider that serves the model
  *   SPECTRA_FALLBACK_MODEL_ID     optional; model used on the recovery route
  *   SPECTRA_FALLBACK_PROVIDERS    optional; comma-separated recovery providers
+ *   SPECTRA_SEARCH_MODEL_ID       optional; light model that carries web searches
  *   SPECTRA_ALLOW_PROVIDER_FALLBACKS  "false" disables the recovery route
  */
 
@@ -63,6 +64,20 @@ export function getSpectraFallbackModelId() {
   return (
     modelIdFromEnvironment("SPECTRA_FALLBACK_MODEL_ID") || getSpectraModelId()
   );
+}
+
+/** The daily brief's lighter model, when one is configured; "" uses the primary. */
+export function getSpectraDailyModelId() {
+  return modelIdFromEnvironment("SPECTRA_DAILY_MODEL_ID");
+}
+
+/**
+ * The model that carries a web search, when one is configured; "" uses the
+ * primary. It only issues the search: Spectra's own model reads the results,
+ * so a light model here costs a fraction and finds the same sources.
+ */
+export function getSpectraSearchModelId() {
+  return modelIdFromEnvironment("SPECTRA_SEARCH_MODEL_ID");
 }
 
 export function getSpectraReasoningProfile(): SpectraReasoningProfile {

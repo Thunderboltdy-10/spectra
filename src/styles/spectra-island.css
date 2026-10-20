@@ -19,20 +19,6 @@
   animation: island-content-in 200ms var(--ease-standard, ease-out) both;
 }
 
-/* The working light: the spectrum turning in a small ring. */
-@keyframes island-turn {
-  to {
-    transform: rotate(1turn);
-  }
-}
-
-.island-working-light {
-  background: conic-gradient(from 0deg, #8b6cf6, #4f9fe6, #40c48e, #f6be40, #f05468, #8b6cf6);
-  -webkit-mask: radial-gradient(circle, transparent 38%, #000 42%);
-  mask: radial-gradient(circle, transparent 38%, #000 42%);
-  animation: island-turn 1.4s linear infinite;
-}
-
 /* The needs-you glint: a warm dot that breathes. */
 @keyframes island-glint {
   0%,
@@ -49,10 +35,343 @@
   animation: island-glint 1.6s ease-in-out infinite;
 }
 
+/* The island's paper between two shapes: drawn under them, only while it moves. */
+.island-morph {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  border: 1px solid var(--card-border);
+  box-shadow:
+    0 2px 5px -2px rgb(70 45 20 / 0.14),
+    0 16px 32px -18px rgb(70 45 20 / 0.34);
+}
+
+/* The rail (ISLAND.md, "The rail"): the threads as folder tabs standing on
+   the bar's top edge. The rail's box ends a pixel inside the bar and clips
+   what is below it, so a tab at rest shows only its lip, the colour of its
+   state, and a raised tab covers the bar's edge where it stands: the tab in
+   hand is the same paper as the bar, joined to it; the others are a sheet
+   behind, with the bar's edge running under them. */
+.island-rail {
+  --rail-ease: cubic-bezier(0.22, 1.18, 0.36, 1);
+  position: absolute;
+  left: 50%;
+  z-index: 1;
+  display: flex;
+  height: 34px;
+  align-items: flex-end;
+  gap: 3px;
+  padding: 0 6px;
+  translate: -50% 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition: bottom 300ms var(--rail-ease), max-width 300ms var(--rail-ease);
+}
+
+.island-rail[data-raised] {
+  pointer-events: auto;
+}
+
+.island-rail-tab {
+  --tab-ink: transparent;
+  display: inline-flex;
+  min-width: 76px;
+  max-width: 188px;
+  height: 29px;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--card-border);
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  background: var(--card-paper-quiet);
+  padding: 0 12px;
+  box-shadow:
+    inset 0 2px 0 var(--tab-ink),
+    inset 0 -1px 0 var(--card-border);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  outline: none;
+  user-select: none;
+  translate: 0 calc(100% - 5px);
+  transition:
+    translate 340ms var(--rail-ease),
+    height 220ms var(--rail-ease),
+    background-color 150ms var(--ease-standard),
+    color 150ms var(--ease-standard);
+}
+
+/* What is put away has no lip: at rest only the threads in play show. */
+.island-rail:not([data-raised]) :is(.island-rail-tab[data-side="done"], .island-rail-threads) {
+  translate: 0 100%;
+}
+
+/* Raised one after the other, from the left, like fingers along a drawer. */
+.island-rail[data-raised] .island-rail-tab {
+  translate: 0 0;
+  transition-delay: calc(var(--order, 0) * 22ms);
+}
+
+.island-rail-tab[data-state="working"] {
+  --tab-ink: var(--brand-primary);
+}
+
+.island-rail-tab[data-state="needs"] {
+  --tab-ink: var(--warning);
+}
+
+.island-rail-tab[data-state="problem"] {
+  --tab-ink: var(--danger);
+}
+
+.island-rail-tab[data-state="fresh"] {
+  --tab-ink: var(--success);
+}
+
+/* A seen thread the user keeps in play. */
+.island-rail-tab[data-state="seen"][data-side="play"] {
+  --tab-ink: var(--text-tertiary);
+}
+
+.island-rail-tab:is(button):hover {
+  background: var(--card-paper);
+  color: var(--text-primary);
+}
+
+.island-rail-tab[data-current] {
+  height: 32px;
+  background: var(--card-paper);
+  box-shadow: inset 0 2px 0 var(--tab-ink);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.island-rail-tab:focus-visible {
+  box-shadow:
+    inset 0 2px 0 var(--tab-ink),
+    inset 0 0 0 2px var(--focus-ring-color);
+}
+
+/* The two ends, new thread and every thread: a glyph each, so the rail keeps its room for threads. */
+.island-rail-end {
+  width: 36px;
+  min-width: 36px;
+  flex: none;
+  justify-content: center;
+  padding: 0;
+}
+
+/* About four tabs across the field; the rest run on to the right, the edge fading into them. */
+.island-rail-scroller {
+  display: flex;
+  min-width: 0;
+  height: 100%;
+  flex: 1 1 auto;
+  align-items: flex-end;
+  gap: 3px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+.island-rail-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.island-rail-scroller > .island-rail-tab {
+  flex: none;
+  max-width: 152px;
+}
+
+.island-rail-scroller[data-overflow-end] {
+  mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent);
+}
+
+.island-rail-scroller[data-overflow-start] {
+  mask-image: linear-gradient(90deg, transparent, #000 36px);
+}
+
+.island-rail-scroller[data-overflow-start][data-overflow-end] {
+  mask-image: linear-gradient(90deg, transparent, #000 36px, #000 calc(100% - 36px), transparent);
+}
+
+.island-rail-threads {
+  margin-left: 3px;
+  color: var(--text-tertiary);
+}
+
+/* In play on the left, put away on the right: the rule between them is where a dragged tab changes sides. */
+.island-rail-divider {
+  width: 1px;
+  height: 14px;
+  flex: none;
+  align-self: center;
+  margin: 6px 5px 0;
+  background: var(--card-border);
+  opacity: 0;
+  transition: opacity 200ms var(--ease-standard);
+}
+
+.island-rail[data-raised] .island-rail-divider {
+  opacity: 1;
+}
+
+.island-rail-divider[data-empty] {
+  width: 0;
+  margin: 0;
+}
+
+/* A tab picked up: the whole folder tab, lifted off the bar. */
+.island-rail-ghost {
+  translate: 0 0;
+  border-bottom: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: var(--card-paper);
+  color: var(--text-primary);
+  box-shadow:
+    inset 0 2px 0 var(--tab-ink),
+    0 14px 28px -12px rgb(70 45 20 / 0.4);
+}
+
+/* The thread switcher rises out of the Threads button. */
+@keyframes island-switcher-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+}
+
+.island-switcher {
+  transform-origin: 50% 100%;
+  animation: island-switcher-in 240ms var(--ease-standard) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .island-rail,
+  .island-rail-tab,
+  .island-rail-divider {
+    transition: none;
+  }
+
+  .island-switcher,
   .island-content-in,
-  .island-working-light,
   .island-needs-glint {
+    animation: none;
+  }
+}
+
+/* The composer's own controls (ISLAND.md, "The composer"). The microphone is
+   as easy to hit as the send button. Send is a soft disc of Spectra's violet
+   rather than a black block: it fills in when there is something to send. */
+.composer-mic[data-listening] {
+  background: color-mix(in oklab, var(--danger) 14%, transparent);
+  color: color-mix(in oklab, var(--danger) 80%, var(--text-primary));
+  animation: composer-listening 1.6s ease-in-out infinite;
+}
+
+@keyframes composer-listening {
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in oklab, var(--danger) 0%, transparent), 0 0 0 2px color-mix(in oklab, var(--danger) 22%, transparent);
+  }
+}
+
+.composer-send {
+  background: color-mix(in oklab, var(--brand-primary) 10%, var(--card-paper));
+  color: color-mix(in oklab, var(--brand-primary) 55%, var(--text-tertiary));
+}
+
+.composer-send:disabled {
+  opacity: 1;
+  background: var(--bg-secondary);
+  color: var(--text-tertiary);
+}
+
+.composer-send[data-ready] {
+  background: color-mix(in oklab, var(--brand-primary) 18%, var(--card-paper));
+  color: color-mix(in oklab, var(--brand-primary) 85%, var(--text-primary));
+}
+
+.composer-send:hover {
+  background: color-mix(in oklab, var(--brand-primary) 26%, var(--card-paper));
+  color: color-mix(in oklab, var(--brand-primary) 90%, var(--text-primary));
+}
+
+.composer-heard {
+  padding: 0 16px 10px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-mic[data-listening] {
+    animation: none;
+  }
+}
+
+/* A thread's sheet beside Threads slides out from behind the list. */
+@keyframes island-preview-in {
+  from {
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+}
+
+.island-preview {
+  animation: island-preview-in 220ms var(--ease-standard) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .island-preview {
+    animation: none;
+  }
+}
+
+/* Small replies to what just happened (ISLAND.md, "Life"): the prism turns
+   once when a message is sent, and a thread's tab pulses once in its new
+   colour when it finishes or stops to ask something. */
+.composer-mark[data-sent] {
+  animation: composer-mark-turn 760ms cubic-bezier(0.2, 0.75, 0.2, 1);
+}
+
+@keyframes composer-mark-turn {
+  from {
+    transform: rotate(0turn) scale(1);
+  }
+  40% {
+    transform: rotate(0.6turn) scale(1.12);
+  }
+  to {
+    transform: rotate(1turn) scale(1);
+  }
+}
+
+.island-rail-tab[data-finished] {
+  animation: island-tab-finished 1.2s var(--ease-standard);
+}
+
+@keyframes island-tab-finished {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--tab-ink) 45%, transparent);
+  }
+  35% {
+    box-shadow: 0 0 0 6px color-mix(in oklab, var(--tab-ink) 18%, transparent);
+    background: color-mix(in oklab, var(--tab-ink) 12%, var(--card-paper));
+  }
+  100% {
+    box-shadow: 0 0 0 10px color-mix(in oklab, var(--tab-ink) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-mark[data-sent],
+  .island-rail-tab[data-finished] {
     animation: none;
   }
 }

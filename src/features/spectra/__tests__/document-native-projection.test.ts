@@ -7,7 +7,9 @@ import { withDocumentFormatting } from "../components/document-studio";
 import {
   compactDocxProjectionForStorage,
   docxProjectionFromContent,
+  documentBlocksFromJson,
 } from "../lenses/document-projection";
+import { authoredSemanticsEqual } from "../../../../shared/document-projection.mjs";
 import type { DocxProjection } from "../lenses/projection-contracts";
 import {
   documentContentToProseMirrorJson,
@@ -559,5 +561,33 @@ describe("native document projection", () => {
       latex: "x+1",
       display: "block",
     });
+  });
+
+  // Word reads a cell's runs back as one line; the editor must too, or every
+  // save of a table with an inline equation fails its readback.
+  it("reads the runs of a table cell on one line, inline equations included", () => {
+    const [table] = documentBlocksFromJson({
+      type: "doc",
+      content: [{
+        type: "table",
+        content: [{
+          type: "tableRow",
+          content: [{
+            type: "tableCell",
+            content: [
+              { type: "paragraph", content: [{ type: "text", text: "Order of " }, { type: "inlineEquation", attrs: { latex: "x^2" } }] },
+              { type: "paragraph", content: [{ type: "text", text: "Second line" }] },
+            ],
+          }],
+        }],
+      }],
+    });
+    expect(table?.rows).toEqual([["Order of x^2\nSecond line"]]);
+  });
+
+  it("treats a heading level that matches its Word style as derived, not authored", () => {
+    const reopened = { type: "heading", text: "Results", attrs: { styleId: "Heading1" } };
+    expect(authoredSemanticsEqual({ ...reopened, attrs: { styleId: "Heading1", level: 1 } }, reopened)).toBe(true);
+    expect(authoredSemanticsEqual({ ...reopened, attrs: { styleId: "Heading1", level: 2 } }, reopened)).toBe(false);
   });
 });

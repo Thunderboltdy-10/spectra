@@ -1,5 +1,13 @@
 import { estimateTextOverflow } from "../../../presentation/audit";
 import {
+  DECK_FAMILIES,
+  currentDesign,
+  designDeck,
+  designIdeas,
+  designerRefusal,
+  type DeckFamily,
+} from "../../../presentation/designer";
+import {
   PRESENTATION_LAYOUT_IDS,
   applyPresentationLayout,
   ensurePresentationReadingOrders,
@@ -28,6 +36,11 @@ import { AuthoringError, type IdFactory, defaultIdFactory, isPlaceholder, record
  * places it. Nothing here invents copy: a layout that wants a visual and has
  * none is reported in the readback instead of being filled with placeholder
  * text.
+ *
+ * Designer is the studio's own finishing pass, and the model runs it the same
+ * way: a new deck is designed at the end unless the spec says "design":
+ * "none", the design op re-designs a deck or one slide, and a slide that wears
+ * a design keeps it when an edit moves its objects.
  */
 
 export type VisualSpec =
@@ -67,9 +80,12 @@ export type PresentationEditOp =
   | { op: "delete_slide"; slide: number }
   | { op: "move_slide"; slide: number; to: number }
   | ({ op: "set_theme" } & ThemeSpec)
-  | { op: "replace"; find: string; replace: string; all?: boolean };
+  | { op: "replace"; find: string; replace: string; all?: boolean }
+  | { op: "design"; look?: string; slide?: number };
 
-export type PresentationSpec = { slides: SlideSpec[]; theme?: ThemeSpec };
+export type PresentationSpec = { slides: SlideSpec[]; theme?: ThemeSpec; design?: DeckFamily | "none" };
+
+const DECK_LOOKS = new Set<string>(DECK_FAMILIES.map((family) => family.id));
 
 const VISUAL_TYPES = new Set<PresentationObjectType>(["image", "video", "chart", "shape", "embed", "table"]);
 const CHART_TYPES = new Set(["bar", "column", "line", "pie", "area"]);
@@ -340,6 +356,34 @@ function replaceAcrossDeck(deck: PresentationContent, op: { find: string; replac
   }
 }
 
+/** Re-wears a slide's look after an edit moved its objects; a look that no longer fits is dropped. */
+function keepDesign(deck: PresentationContent, index: number, look: string | undefined) {
+  if (!look || designerRefusal(deck, index)) return;
+  const idea = designIdeas(deck, index).find((candidate) => candidate.id === look);
+  if (idea) deck.slides[index] = idea.slide;
+}
+
+/** Designer over the whole deck in one family of looks, or one look on one slide. */
+function applyDesign(deck: PresentationContent, op: Extract<PresentationEditOp, { op: "design" }>, label: string) {
+  if (op.slide === undefined) {
+    const look = op.look ?? "rule";
+    if (!DECK_LOOKS.has(look))
+      throw new AuthoringError(`${label}: look for the whole deck must be one of ${[...DECK_LOOKS].join(", ")}.`);
+    // A slide that still has a problem keeps its layout, so the readback can name what it is missing.
+    const designed = designDeck(deck, look as DeckFamily);
+    deck.slides = deck.slides.map((slide, index) => (slideProblems(slide, index).length ? slide : designed[index]!));
+    return;
+  }
+  const at = slideNumber(deck, op.slide, label);
+  const refusal = designerRefusal(deck, at);
+  if (refusal) throw new AuthoringError(`${label}: ${refusal}`);
+  const ideas = designIdeas(deck, at);
+  const idea = op.look ? ideas.find((candidate) => candidate.id === op.look) : ideas[0];
+  if (!idea)
+    throw new AuthoringError(`${label}: this slide's looks are ${ideas.map((candidate) => candidate.id).join(", ")}.`);
+  deck.slides[at] = idea.slide;
+}
+
 /** Applies slide operations to a copy of the deck. Throws naming the failing op. */
 export function applyPresentationEdits(
   content: unknown,
@@ -369,9 +413,13 @@ export function applyPresentationEdits(
         const slide = deck.slides[at]!;
         const current = isPresentationLayoutId(slide.layoutId) ? slide.layoutId : "title-content";
         const layout = layoutOf(op, current, label);
+        const look = currentDesign(slide);
         slide.layoutId = layout;
         fillSlide(slide, op, layout, ids, label);
-        if (op.layout !== undefined || op.body !== undefined || op.visual !== undefined) layoutSlide(deck, at, layout);
+        if (op.layout !== undefined || op.body !== undefined || op.visual !== undefined) {
+          layoutSlide(deck, at, layout);
+          keepDesign(deck, at, look);
+        }
         break;
       }
       case "delete_slide": {
@@ -393,9 +441,12 @@ export function applyPresentationEdits(
       case "replace":
         replaceAcrossDeck(deck, op, label);
         break;
+      case "design":
+        applyDesign(deck, op, label);
+        break;
       default:
         throw new AuthoringError(
-          `${label}: unknown operation. Use add_slide, update_slide, delete_slide, move_slide, set_theme or replace.`,
+          `${label}: unknown operation. Use add_slide, update_slide, delete_slide, move_slide, set_theme, replace or design.`,
         );
     }
   });
@@ -410,6 +461,7 @@ export function presentationFromSpec(spec: PresentationSpec, ids: IdFactory = de
   const ops: PresentationEditOp[] = [
     ...(spec.theme ? [{ op: "set_theme" as const, ...spec.theme }] : []),
     ...spec.slides.map((slide) => ({ op: "add_slide" as const, ...slide })),
+    ...(spec.design === "none" ? [] : [{ op: "design" as const, look: spec.design ?? "rule" }]),
   ];
   return applyPresentationEdits(null, ops, ids);
 }
@@ -446,30 +498,29 @@ export function presentationOutline(content: unknown, options: { max?: number; s
 }
 
 /** Slides that are empty, hold placeholder copy, overflow or miss a layout role. */
-export function presentationProblems(content: unknown) {
-  const deck = normalizePresentationContent(content);
+/** What is wrong with one slide, in the model's words. */
+function slideProblems(slide: PresentationSlide, index: number) {
+  const visible = slide.objects.filter((object) => !object.hidden);
+  const label = `Slide ${index + 1}`;
+  if (!visible.length) return [`${label} is empty`];
   const problems: string[] = [];
-  deck.slides.forEach((slide, index) => {
-    const visible = slide.objects.filter((object) => !object.hidden);
-    const label = `Slide ${index + 1}`;
-    if (!visible.length) {
-      problems.push(`${label} is empty`);
-      return;
-    }
-    for (const object of visible) {
-      const value = presentationObjectText(object).trim();
-      const placeholder =
-        object.type === "text"
-          ? isPlaceholder(value)
-          : object.type === "shape" && (value ? isPlaceholder(value) : slide.layoutId === "three-ideas");
-      if (placeholder)
-        problems.push(`${label} has an empty or placeholder ${object.type === "text" ? "text box" : "shape"}`);
-      else if (object.type === "text" && estimateTextOverflow(object))
-        problems.push(`${label}: "${truncate(presentationObjectText(object), 40)}" overflows its box; shorten it or split the slide`);
-    }
-    for (const issue of presentationLayoutRoleIssues(slide)) problems.push(`${label}: ${issue}`);
-  });
+  for (const object of visible) {
+    const value = presentationObjectText(object).trim();
+    const placeholder =
+      object.type === "text"
+        ? isPlaceholder(value)
+        : object.type === "shape" && (value ? isPlaceholder(value) : slide.layoutId === "three-ideas");
+    if (placeholder)
+      problems.push(`${label} has an empty or placeholder ${object.type === "text" ? "text box" : "shape"}`);
+    else if (object.type === "text" && estimateTextOverflow(object))
+      problems.push(`${label}: "${truncate(presentationObjectText(object), 40)}" overflows its box; shorten it or split the slide`);
+  }
+  for (const issue of presentationLayoutRoleIssues(slide)) problems.push(`${label}: ${issue}`);
   return problems;
+}
+
+export function presentationProblems(content: unknown) {
+  return normalizePresentationContent(content).slides.flatMap(slideProblems);
 }
 
 export function presentationReadback(content: unknown, previous?: unknown) {

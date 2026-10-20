@@ -8,7 +8,7 @@ import { figureOf, hasVisibleFrame, replacementOf } from "./figure-dom";
 
 export { replacementOf };
 import { life, type Formed } from "./life";
-import { isVeiled, veil } from "./veil";
+import { isVeiled, veil, VEIL_MAX_MS } from "./veil";
 import { markNavigation, sendInto } from "./use-life";
 
 /*
@@ -39,14 +39,20 @@ const CONTENT_BARS = "h1, h2, h3, h4, [data-row-title], [data-row-meta], [data-c
  * list came back empty) means the ghost simply fades.
  */
 
-/** The content is hidden while the ghost's lines flow into its frame and lines, and is real when they have. */
+/** The content is hidden for a moment while the ghost's lines flow toward its frame and lines, then it is real and they fade. */
 function handOver(formed: Formed, content: HTMLElement) {
   const r = content.getBoundingClientRect();
   // Content that is forming itself (a landing, an arrival) brings its own light.
   if (!r.width || r.bottom < 0 || r.top > window.innerHeight || isVeiled(content)) return formed.release();
-  const show = veil(content);
-  void life.morph(formed, figureOf(content, { bars: CONTENT_BARS, maxBars: 24, frame: hasVisibleFrame(content) })).formed.then(show);
-  window.setTimeout(show, 700);
+  const reveal = veil(content);
+  const morph = life.morph(formed, figureOf(content, { bars: CONTENT_BARS, maxBars: 24, frame: hasVisibleFrame(content) }));
+  // The ghost's lines set off toward the content's and give way as it shows: they never stand over real text.
+  const show = () => {
+    reveal();
+    morph.release();
+  };
+  void morph.formed.then(show);
+  window.setTimeout(show, VEIL_MAX_MS);
 }
 
 function chooseTier(): LifeTier {

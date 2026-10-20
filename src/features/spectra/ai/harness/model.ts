@@ -1,6 +1,7 @@
 import {
   allowSpectraProviderFallbacks,
   assertPrimarySpectraRouting,
+  getSpectraDailyModelId,
   getSpectraFallbackModelId,
   getSpectraModelProfile,
   getSpectraProviderRouting,
@@ -21,8 +22,10 @@ import {
 
 /*
  * The OpenRouter client for the harness. The model, provider and reasoning
- * level come only from model-config (the environment). The single approved
- * exception is the caption writer, which asks for `low` reasoning explicitly.
+ * level come only from model-config (the environment). Two approved
+ * exceptions: the caption writer asks for `low` reasoning, and the daily brief
+ * asks for `medium` on its own lighter model when SPECTRA_DAILY_MODEL_ID is set
+ * (OpenRouter then picks that model's provider).
  */
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -38,8 +41,10 @@ export type ModelRequest = {
   signal: AbortSignal;
   onText?: (delta: string) => void;
   onRetry?: () => void;
-  /** Only the caption writer passes this ("low"); everything else uses the environment. */
+  /** Only the caption writer ("low") and the daily brief ("medium") pass this. */
   reasoning?: SpectraReasoningProfile;
+  /** "daily" runs on SPECTRA_DAILY_MODEL_ID when it is configured. */
+  purpose?: "daily";
   maxTokens?: number;
   responseFormat?: Record<string, unknown>;
   title?: string;
@@ -79,17 +84,18 @@ async function attempt(
   route: "primary" | "fallback",
 ): Promise<ModelTurn> {
   const profile = getSpectraModelProfile();
-  const provider = getSpectraProviderRouting(route);
-  if (route === "primary") assertPrimarySpectraRouting(provider);
+  const daily = request.purpose === "daily" && route === "primary" ? getSpectraDailyModelId() : "";
+  const provider = daily ? undefined : getSpectraProviderRouting(route);
+  if (provider && route === "primary") assertPrimarySpectraRouting(provider);
   const body: Record<string, unknown> = {
-    model: route === "fallback" ? getSpectraFallbackModelId() : profile.route,
+    model: daily || (route === "fallback" ? getSpectraFallbackModelId() : profile.route),
     reasoning: {
       effort: request.reasoning ?? getSpectraReasoningProfile(),
       exclude: true,
     },
     stream: true,
     stream_options: { include_usage: true },
-    provider,
+    ...(provider ? { provider } : {}),
     messages: request.messages,
     ...(request.tools?.length
       ? { tools: request.tools, tool_choice: request.toolChoice ?? "auto" }

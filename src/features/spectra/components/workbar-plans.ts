@@ -82,6 +82,7 @@ const document: WorkbarPlan = {
     "review.trackChanges.propose",
     "review.comment.add",
     "layout.pageCanvas",
+    "layout.pagesSideBySide",
     "layout.focus",
     "layout.previewReader",
     "layout.header",
@@ -151,7 +152,7 @@ const document: WorkbarPlan = {
       ...more("group:Review"),
     ],
     Table: [...fold("Cells", "Columns", "Rows"), ...more("group:Cells")],
-    Image: [...fold("Accessibility"), ...more("image.replace"), ...fold("Arrange")],
+    Image: [...fold("Accessibility"), ...more("image.replace"), ...fold("Arrange"), ...more("group:Accessibility")],
     Equation: [...fold("Math")],
   },
 };
@@ -356,18 +357,53 @@ const quiz: WorkbarPlan = {
 const flashcards: WorkbarPlan = {
   symbols: [],
   worded: ["add-card"],
-  groups: { "add-card": "Cards", rail: "Cards", import: "Cards", browse: "Study", progress: "Study" },
+  groups: {
+    "add-card": "Cards",
+    rail: "Cards",
+    import: "Cards",
+    browse: "Study",
+    progress: "Study",
+    "add-section": "Sections",
+    "template-concept": "Shapes",
+    "template-language": "Shapes",
+    "template-formula": "Shapes",
+    "export-csv": "Files",
+    "export-tsv": "Files",
+    "export-package": "Files",
+    print: "Print",
+  },
   tabs: {
     General: [...hide("import", "rail", "progress", "browse"), ...fold("Study"), ...more("group:Study", "import", "rail")],
-    Cards: [],
-    Study: [],
+    Cards: [...fold("Shapes")],
+    Export: [...fold("Files")],
   },
 };
 
 const code: WorkbarPlan = {
   symbols: ["find"],
   worded: ["publish"],
-  groups: { controls: "Source", files: "Source", find: "Source", format: "Source", settings: "Settings", publish: "Publish" },
+  groups: {
+    controls: "Source",
+    files: "Source",
+    find: "Source",
+    format: "Source",
+    settings: "Settings",
+    publish: "Publish",
+    "file-new": "File",
+    "file-rename": "File",
+    "file-duplicate": "File",
+    "file-entry": "File",
+    "file-delete": "File",
+    "import-files": "Bring in",
+    "import-folder": "Bring in",
+    "download-file": "Take out",
+    "export-archive": "Take out",
+    "export-html": "Save as",
+    "export-svg": "Save as",
+    "export-png": "Save as",
+    "export-pdf": "Save as",
+    "export-webm": "Record",
+  },
   tabs: {
     General: [
       ...hide("settings", "format", "files", "controls"),
@@ -375,8 +411,12 @@ const code: WorkbarPlan = {
       ...more("group:Settings"),
       ...fold("Publish"),
     ],
-    Run: [],
-    Files: [],
+    Files: [
+      ...hide("import-folder", "export-archive", "download-file"),
+      ...fold("Take out", "Bring in"),
+      ...hide("file-entry", "file-delete", "file-duplicate", "file-rename"),
+    ],
+    Export: [...fold("Record")],
   },
 };
 
@@ -523,4 +563,5 @@ export function estimateGroupMenuWidth(group: string) {
   return Math.ceil(30 + group.length * CHARACTER);
 }
 
-export const WORKBAR_METRICS = { gap: 3, groupGap: 13, more: 32 } as const;
+// groupGap: the bar's 3px gap, then a group's 5px margin, 1px rule and 6px inset.
+export const WORKBAR_METRICS = { gap: 3, groupGap: 15, more: 32 } as const;

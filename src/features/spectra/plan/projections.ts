@@ -171,7 +171,10 @@ export function planListView(
   // rather than "Other".
   if (loose.length)
     sections.push({ id: "__unsectioned", title: "Not in a section", rows: loose });
-  return sections.filter((section) => section.rows.length > 0);
+  // An empty section is where the next task gets written, so it stays while
+  // nothing is filtered; under a filter it would only read as "no match".
+  const filtered = Boolean(filter && Object.keys(filter).length);
+  return filtered ? sections.filter((section) => section.rows.length > 0) : sections;
 }
 
 // ------------------------------------------------------------------ board

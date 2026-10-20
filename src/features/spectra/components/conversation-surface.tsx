@@ -9,9 +9,9 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { useWritingFront } from "../life/use-life";
 import { Code2, Loader2, ShieldCheck, AlertCircle, Bot, Check, ChevronDown, ExternalLink, FileText, FolderPlus, MessageSquare, ArrowDown, CircleDot, GitCompareArrows, Undo2, Wrench } from "@/components/icons/glyph-icons";
 import { toast } from "@/components/ui/toast";
+import { GhostLines } from "@/components/ui/skeleton";
 import { SpectraMark } from "@/components/spectra-mark";
 import { PrismLoader } from "@/components/spectra-prism-optic";
 import { SpectraRichContent, type CitationSource } from "./spectra-rich-content";
@@ -20,7 +20,7 @@ import { spectraBus } from "../events";
 import { cn } from "@/lib/utils";
 import { SelectField } from "@/components/ui/select";
 import { useSpectraRun, type SpectraLiveExchange } from "../ai/use-spectra-run";
-import { isSettledAiRunStatus } from "../core";
+import { isSettledAiRunStatus, isWorkingAiRunStatus } from "../core";
 import { operationCounts, useRunLedger } from "../collaboration/run-ledger";
 import { ProgressTrace } from "./progress-trace";
 import {
@@ -665,7 +665,7 @@ function CodeProposalReview({
             is applied.
           </p>
         </div>
-        <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-1 text-micro font-semibold text-[var(--text-tertiary)]">
+        <span className="rounded-chip bg-[var(--bg-elevated)] px-2 py-1 text-micro font-semibold text-[var(--text-tertiary)]">
           {changes.length || paths.length} change
           {(changes.length || paths.length) === 1 ? "" : "s"}
         </span>
@@ -678,7 +678,7 @@ function CodeProposalReview({
               className="grid grid-cols-[58px_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 text-micro"
             >
               <span
-                className={`rounded-full px-1.5 py-0.5 text-center text-micro font-bold uppercase tracking-[.08em] ${change.kind === "add" ? "bg-[color-mix(in_oklab,var(--success)_10%,transparent)] text-[var(--success)]" : change.kind === "remove" ? "bg-[color-mix(in_oklab,var(--danger)_9%,transparent)] text-[var(--danger)]" : "bg-[color-mix(in_oklab,var(--accent-cyan)_9%,transparent)] text-[var(--accent-cyan)]"}`}
+                className={`rounded-chip px-1.5 py-0.5 text-center text-micro font-bold  ${change.kind === "add" ? "bg-[color-mix(in_oklab,var(--success)_10%,transparent)] text-[var(--success)]" : change.kind === "remove" ? "bg-[color-mix(in_oklab,var(--danger)_9%,transparent)] text-[var(--danger)]" : "bg-[color-mix(in_oklab,var(--accent-cyan)_9%,transparent)] text-[var(--accent-cyan)]"}`}
               >
                 {change.kind}
               </span>
@@ -699,14 +699,14 @@ function CodeProposalReview({
       )}
       {sensitive.length ? (
         <div className="border-t border-[var(--border-subtle)] px-3 py-2.5">
-          <div className="mb-1.5 text-micro font-bold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+          <div className="mb-1.5 text-micro font-bold text-[var(--text-tertiary)]">
             Requires explicit review
           </div>
           <div className="flex flex-wrap gap-1.5">
             {sensitive.map((item) => (
               <span
                 key={item}
-                className="rounded-full border border-[color-mix(in_oklab,var(--accent-gold)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-gold)_6%,var(--bg-primary))] px-2 py-1 text-micro font-semibold text-[var(--warning)]"
+                className="rounded-chip border border-[color-mix(in_oklab,var(--accent-gold)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-gold)_6%,var(--bg-primary))] px-2 py-1 text-micro font-semibold text-[var(--warning)]"
               >
                 {item}
               </span>
@@ -1599,10 +1599,8 @@ function LiveContentReveal({
     profile: "conversation",
     enabled: streaming,
   });
-  const frontRef = useRef<HTMLDivElement>(null);
-  useWritingFront(frontRef, active);
   return (
-    <div ref={frontRef} className={active ? "spectra-stream-active" : undefined}>
+    <div className={active ? "spectra-stream-active" : undefined}>
       <SpectraRichContent
         content={visibleText}
         sources={sources}
@@ -1621,6 +1619,7 @@ export function ConversationSurface({
   loading = false,
   loadError,
   empty,
+  lead,
   activeCards,
   onCardOpen,
   onCardAction,
@@ -1640,6 +1639,8 @@ export function ConversationSurface({
   /** A retryable refresh notice that must remain visible beside old messages. */
   loadError?: ReactNode;
   empty?: ReactNode;
+  /** Shown above the conversation, full width, before one begins (Home's day). */
+  lead?: ReactNode;
   activeCards?: Parameters<typeof ResultCardStack>[0]["cards"];
   onCardOpen?: Parameters<typeof ResultCardStack>[0]["onOpen"];
   onCardAction?: Parameters<typeof ResultCardStack>[0]["onAction"];
@@ -1891,8 +1892,10 @@ export function ConversationSurface({
       ),
     [persistedAssistantRunIds, persistedUserRunIds, traceByRun],
   );
+  // A lead with nothing under it yet is a page read from the top, not a conversation to follow.
+  const resting = Boolean(lead) && !renderedDetail && !liveExchange && !loading;
   useEffect(() => {
-    if (!following) return;
+    if (!following || resting) return;
     let secondFrame = 0;
     const frame = requestAnimationFrame(() => {
       secondFrame = requestAnimationFrame(() =>
@@ -1911,10 +1914,11 @@ export function ConversationSurface({
     traceByRun.size,
     renderedDetail?.thread._id,
     following,
+    resting,
     liveExchange?.content,
   ]);
   useEffect(() => {
-    if (!following || !contentRef.current) return;
+    if (!following || resting || !contentRef.current) return;
     const observer = new ResizeObserver(() => {
       requestAnimationFrame(() => {
         if (following)
@@ -1926,7 +1930,7 @@ export function ConversationSurface({
     });
     observer.observe(contentRef.current);
     return () => observer.disconnect();
-  }, [renderedDetail?.thread._id, following]);
+  }, [renderedDetail?.thread._id, following, resting]);
   useEffect(() => setFollowing(true), [renderedDetail?.thread._id]);
   const messageMeta = useCallback(
     (message: NonNullable<SpectraThreadDetail>["messages"][number]) => {
@@ -1955,9 +1959,11 @@ export function ConversationSurface({
         }}
         className={cn(
           "min-h-0 flex-1 overflow-y-auto",
-          compact ? "px-5 pb-32 pt-5" : "px-5 pb-40 pt-10 sm:px-8",
+          // Full page, it scrolls clear of the island like any page; in the Side the island is not below it.
+          compact ? "px-5 pb-8 pt-5" : "spectra-page-scroll px-5 pt-10 sm:px-8",
         )}
       >
+        {lead}
         <div
           ref={contentRef}
           className={cn("mx-auto", compact ? "max-w-[760px]" : "max-w-[820px]")}
@@ -2072,7 +2078,8 @@ export function ConversationSurface({
                         <div className="mt-1.5 text-right text-micro text-[var(--text-tertiary)]">
                           {messageMeta(message)}
                         </div>
-                        {shouldOfferTrace && message.runId ? (
+                        {/* A question still being answered shows its answer coming; details are for one left without a reply. */}
+                        {shouldOfferTrace && message.runId && !(activeRun && isWorkingAiRunStatus(activeRun.status)) ? (
                           <RunDetailsDisclosure
                             run={activeRun}
                             state={traceState}
@@ -2099,9 +2106,9 @@ export function ConversationSurface({
                       ) : null}
                     </>
                   ) : (
-                    <div className="relative pl-8">
-                      <span className="absolute left-0 top-0.5 flex h-5 w-5 items-center justify-center rounded-chip bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))] ring-4 ring-cyan/10">
-                        <SpectraMark size={13} />
+                    <div className="relative pl-9">
+                      <span aria-hidden className="absolute left-0 top-0.5 flex size-6 items-center justify-center">
+                        <SpectraMark size={20} />
                       </span>
                       {trace && trace.run.providerUsed !== "Spectra" ? (
                         <PersistedProgressTrace trace={trace} />
@@ -2114,7 +2121,8 @@ export function ConversationSurface({
                           !compact && "sm:text-subhead",
                         )}
                       />
-                      {shouldOfferTrace && message.runId ? (
+                      {/* A finished reply is its own account; the trace is offered only while its run is still live. */}
+                      {shouldOfferTrace && activeRun && message.runId ? (
                         <RunDetailsDisclosure
                           run={activeRun}
                           state={traceState}
@@ -2299,9 +2307,9 @@ export function ConversationSurface({
               {!liveExchange.runId ||
               !persistedAssistantRunIds.has(liveExchange.runId) ? (
                 <article className={cn("relative", compact ? "mb-7" : "mb-10")}>
-                  <div className="relative pl-8">
-                    <span className="absolute left-0 top-0.5 flex h-5 w-5 items-center justify-center rounded-chip bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))] ring-4 ring-cyan/10">
-                      <SpectraMark size={13} />
+                  <div className="relative pl-9">
+                    <span aria-hidden className="absolute left-0 top-0.5 flex size-6 items-center justify-center">
+                      <SpectraMark size={20} />
                     </span>
                     <ProgressTrace
                       steps={liveExchange.steps}
@@ -2321,6 +2329,10 @@ export function ConversationSurface({
                         compact={compact}
                         sources={liveExchange.sources}
                       />
+                    ) : null}
+                    {/* The reply still being written: the lines it will take, as a skeleton, until it is all there. */}
+                    {liveExchange.status === "starting" || liveExchange.status === "streaming" ? (
+                      <GhostLines count={liveExchange.content ? 1 : 3} className={cn("max-w-[34rem]", liveExchange.content ? "mt-3 w-2/3" : "mt-1")} />
                     ) : null}
                     <HarnessWidgets widgets={liveExchange.widgets} threadId={observedThreadId} onOpenArtifact={onOpenArtifact} />
                     <WorkTouchCards touches={liveExchange.artifacts ?? []} onOpen={onOpenArtifact} />
@@ -2428,7 +2440,7 @@ export function ConversationSurface({
               behavior: "smooth",
             });
           }}
-          className="absolute bottom-28 left-1/2 z-chrome flex h-9 -translate-x-1/2 items-center gap-1.5 rounded-full bg-[var(--bg-elevated)] px-3 text-micro font-medium text-[var(--text-secondary)] shadow-card hover:text-[var(--text-primary)]"
+          className="absolute bottom-28 left-1/2 z-chrome flex h-9 -translate-x-1/2 items-center gap-1.5 rounded-chip bg-[var(--bg-elevated)] px-3 text-micro font-medium text-[var(--text-secondary)] shadow-card hover:text-[var(--text-primary)]"
         >
           <ArrowDown className="h-3.5 w-3.5" />
           Latest

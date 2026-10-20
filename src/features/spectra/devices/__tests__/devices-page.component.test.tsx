@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BridgeStatus } from "../../bridge/client";
 import type { CloudOverview } from "../devices-model";
@@ -133,13 +133,13 @@ afterEach(() => {
 });
 
 describe("Devices page", () => {
-  it("shows this computer and the other devices, with folder controls in Details", async () => {
+  it("shows one list of computers, this one marked, with its folder controls", async () => {
     render(<DevicesPage />);
+    expect(screen.getByRole("heading", { name: "Your computers" })).toBeTruthy();
     expect(screen.getByText("This computer")).toBeTruthy();
-    expect(screen.getByText("Other devices")).toBeTruthy();
     expect(screen.getAllByText("Pablo's laptop").length).toBeGreaterThan(0);
     expect(screen.getByText("Desk PC")).toBeTruthy();
-    expect(screen.getByText("Documents › Biology")).toBeTruthy();
+    expect(screen.getByText("in Documents")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Pause Biology" }));
     await waitFor(() => expect(h.runLocalDeviceAction).toHaveBeenCalledWith({ action: "pause_folder", grantId: "grant_a" }));
@@ -156,9 +156,10 @@ describe("Devices page", () => {
 
   it("says another computer's folders change on that computer", () => {
     render(<DevicesPage />);
-    fireEvent.click(screen.getByRole("button", { name: "Details for Desk PC" }));
+    expect(screen.getByRole("region", { name: "Folders on Desk PC" })).toBeTruthy();
     expect(screen.getByText("Change these folders in Spectra on that computer.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Show logs" })).toBeNull();
+    const card = screen.getByRole("heading", { name: "Desk PC" }).closest("[data-device-row]") as HTMLElement;
+    expect(within(card).queryByRole("button", { name: "Show logs" })).toBeNull();
   });
 
   it("connects this computer: the code shows on the page, then the row forms", async () => {

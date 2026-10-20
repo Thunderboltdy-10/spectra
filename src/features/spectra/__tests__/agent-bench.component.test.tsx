@@ -35,7 +35,6 @@ vi.mock("../life/use-life", async (original) => ({
   useLifeArrival: mocks.arrival,
   useLifeDeparture: vi.fn(),
   useLifeGlow: mocks.glow,
-  useWritingFront: vi.fn(),
 }));
 vi.mock("@/components/ui/toast", () => ({
   toast: Object.assign(vi.fn(), { success: mocks.toastSuccess, error: mocks.toastError }),

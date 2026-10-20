@@ -238,6 +238,10 @@ export function readCommentsTool(session: HarnessSession): HarnessTool<CommentsA
 
 type WebArgs = { query: string; deep?: boolean };
 
+/** Searches one message may make. Each is a paid call, and past a handful more
+ * searching rarely changes the answer; the model is told to work from what it found. */
+export const WEB_SEARCHES_PER_MESSAGE = 6;
+
 export function webSearchTool(session: HarnessSession): HarnessTool<WebArgs> {
   return {
     name: "web_search",
@@ -253,6 +257,12 @@ export function webSearchTool(session: HarnessSession): HarnessTool<WebArgs> {
     label: (args) => `Searching the web for "${args.query}"`,
     parse: (raw) => ({ query: requireString(raw, "query", 400), deep: raw.deep === true }),
     execute: async (args, ctx) => {
+      if (session.webSearches >= WEB_SEARCHES_PER_MESSAGE)
+        return {
+          ok: false,
+          content: `This message has used its ${WEB_SEARCHES_PER_MESSAGE} web searches. Answer from the sources already found, and say plainly what they leave uncertain.`,
+        };
+      session.webSearches += 1;
       const results = await session.backend.webSearch(args, ctx.signal);
       if (!results.length) return { ok: true, content: `The web search for "${args.query}" found nothing useful.` };
       const shown = results.slice(0, 10).map((result) => ({ ...result, id: webSourceId(result.url) }));

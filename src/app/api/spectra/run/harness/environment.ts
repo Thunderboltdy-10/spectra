@@ -1,5 +1,5 @@
 import { DEFAULT_PERMISSION_PREFS, readPermissionPrefs, type PermissionPrefs } from "@/features/spectra/ai/harness/permissions";
-import type { EnvironmentInput, EnvironmentPointer } from "@/features/spectra/ai/harness/prompt";
+import type { EnvironmentInput, EnvironmentPlace, EnvironmentPointer } from "@/features/spectra/ai/harness/prompt";
 import type { HarnessContentPart, HarnessMessage } from "@/features/spectra/ai/harness/types";
 import type { PreparedAttachment, RunPointers } from "./contract";
 import { rows } from "./effects";
@@ -23,6 +23,8 @@ const POINTERS = 12;
 const SELECTION_CHARS = 1_000;
 /** A Bridge seen this recently is treated as online. */
 const BRIDGE_ONLINE_MS = 5 * 60_000;
+/** The most recently active workspaces named to the model as places to file work. */
+const PLACES = 24;
 
 const text = (value: unknown) => (typeof value === "string" ? value : "");
 
@@ -165,21 +167,38 @@ export async function readBridgeStatus(actorClerkId: string, now: number) {
   return `${online.length ? "online" : "offline"} (${names.join(", ")})`;
 }
 
+/**
+ * The user's workspaces (their classes and projects), most active first, so
+ * Spectra can file a work or a conversation where it belongs without a search.
+ */
+export async function readPlaces(actorClerkId: string, hereId?: string) {
+  const workspaces = await query<unknown & object, unknown>("spectraWorkspaces:list", { actorClerkId, limit: PLACES }).catch(() => null);
+  if (!Array.isArray(workspaces)) return { places: [] as EnvironmentPlace[] };
+  const places = rows(workspaces)
+    .filter((workspace) => workspace.accessLevel === "modify")
+    .map((workspace) => ({ id: String(workspace._id), title: text(workspace.title).trim().slice(0, 120) || "Untitled" }));
+  const here = hereId ? places.find((place) => place.id === hereId) : undefined;
+  return { places, ...(here ? { here } : {}) };
+}
+
 export type EnvironmentRequest = RunPointers & {
   actorClerkId: string;
   surface?: string;
+  /** The workspace this conversation belongs to, when it has one. */
+  workspaceId?: string;
   attachments?: PreparedAttachment[];
   now?: number;
 };
 
 export async function buildEnvironment(request: EnvironmentRequest): Promise<Omit<EnvironmentInput, "permissions" | "timeZone">> {
   const now = request.now ?? Date.now();
-  const [me, memory, bridge] = await Promise.all([
+  const [me, memory, bridge, places] = await Promise.all([
     query<unknown & object, { name?: string; schoolRole?: string } | null>("identity:me", {
       actorClerkId: request.actorClerkId,
     }).catch(() => null),
     readMemoryIndex(request.actorClerkId),
     readBridgeStatus(request.actorClerkId, now),
+    readPlaces(request.actorClerkId, request.workspaceId),
   ]);
   const first = request.open?.[0];
   const page =
@@ -193,6 +212,8 @@ export async function buildEnvironment(request: EnvironmentRequest): Promise<Omi
     ...(request.selection ? { selection: request.selection } : {}),
     ...(request.references?.length ? { references: request.references } : {}),
     ...(bridge ? { bridge } : {}),
+    ...(places.places.length ? { places: places.places } : {}),
+    ...(places.here ? { here: places.here } : {}),
     ...(memory.length ? { memory } : {}),
     ...(request.attachments?.length ? { attachments: request.attachments.map((attachment) => attachment.name) } : {}),
   };

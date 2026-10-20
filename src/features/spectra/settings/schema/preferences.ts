@@ -105,6 +105,12 @@ const notificationsSchema = z.object({
   requiredInput: z.boolean().default(true),
   schoolSourceChanges: z.boolean().default(true),
   deadlines: z.boolean().default(true),
+  /** When a task with a date but no time reminds you, as "HH:MM" on the reminder's day. */
+  reminderTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default("08:00"),
+  /** Home's morning brief: yesterday in a few lines and what to do today. */
+  dailyBrief: z.boolean().default(true),
+  /** When the student wakes, as "HH:MM": the brief is ready by then. */
+  dailyBriefTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).default("07:00"),
   browserPermission: z.enum(["not_requested", "granted", "denied"]).default("not_requested"),
 });
 
@@ -121,6 +127,8 @@ const integrationsSchema = z.object({
   connectionNotifications: z.boolean().default(true),
   classShelvesStatus: z.enum(["pending", "chosen", "skipped"]).default("pending"),
   classShelfRecordIds: z.array(z.string().min(1).max(128)).max(100).default([]),
+  /** Spectra's tour of the app: offered once after the school's first sync. */
+  tourStatus: z.enum(["pending", "done"]).default("pending"),
 });
 
 const accessibilitySchema = z.object({
@@ -474,6 +482,7 @@ export function restoreDefaultPreferences(
       ...DEFAULT_SPECTRA_PREFERENCES.integrations,
       classShelvesStatus: current.integrations.classShelvesStatus,
       classShelfRecordIds: [...current.integrations.classShelfRecordIds],
+      tourStatus: current.integrations.tourStatus,
     },
   };
 }

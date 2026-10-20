@@ -85,14 +85,12 @@ function ControlOptionRow({
       title={option.hint ?? option.label}
       style={option.previewFontFamily ? { fontFamily: option.previewFontFamily } : undefined}
     >
-      <span className="spectra-workbar-control-check" aria-hidden="true">
-        {selected ? <Check className="size-3" /> : null}
+      {/* The same icon column as every menu row; the choice in use is ticked at the end. */}
+      <span className="grid size-4 shrink-0 place-items-center text-[var(--text-secondary)]" aria-hidden="true">
+        {Icon ? <Icon className="size-3.5" /> : null}
       </span>
-      {Icon ? <Icon className="size-3.5 shrink-0" /> : null}
       <span className="min-w-0 flex-1 truncate text-left">{option.label}</span>
-      {option.hint ? (
-        <span className="spectra-workbar-control-option-hint">{option.hint}</span>
-      ) : null}
+      {selected ? <Check className="spectra-workbar-control-check size-3.5" aria-hidden="true" /> : null}
     </button>
   );
 }

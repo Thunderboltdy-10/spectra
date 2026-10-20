@@ -31,7 +31,10 @@ describe("P6.I1 UX debt closure", () => {
         workspaceId: "course work",
         artifactId: "draft/one",
       }),
-    ).toBe("/workspace/course%20work?artifactId=draft%2Fone");
+    ).toBe("/library?workspaceId=course+work&artifactId=draft%2Fone");
+    expect(spectraShellHref({ surface: "workspace", artifactId: "draft/one" })).toBe(
+      "/workspace?artifactId=draft%2Fone",
+    );
     expect(spectraShellHref({ surface: "library", artifactId: "work-1" })).toBe(
       "/library?artifactId=work-1",
     );
@@ -58,21 +61,18 @@ describe("P6.I1 UX debt closure", () => {
     expect(shell).toContain('requestArtifactOpen(routeArtifactId, "replace")');
   });
 
-  it("keeps narrow chrome, retries, board movement, and first-run exits reachable", () => {
+  it("keeps narrow chrome, retries, and first-run exits reachable", () => {
     const library = read(
       "src/features/spectra/organization/library-organizer.tsx",
     );
-    const board = read("src/features/spectra/organization/work-board.tsx");
     const dock = read("src/features/spectra/components/live-dock.tsx");
     const shell = read("src/features/spectra/pages/spectra-shell.tsx");
-    expect(library).toContain("flex-wrap items-center");
+    expect(library).toContain("flex-wrap gap-x-3");
     expect(library).toContain("showRetryToast(");
     expect(read("src/components/ui/retry-toast.ts")).toContain('label = "Retry"');
     expect(library).toContain("Delete forever");
-    expect(library).toContain("Empty Trash");
+    expect(read("src/features/spectra/organization/surface-chrome.tsx")).toContain("Empty Trash");
     expect(library).toContain("TrashPurgeDialog");
-    expect(board).toContain("aria-label={`Move ${node.name}`}");
-    expect(board).toContain("data-drop-node");
     expect(dock).toContain("outsideCurrentWorkspace");
     expect(dock).toContain("Running in ${workspaceLabel}");
     expect(shell).toContain("<SheetContent");
@@ -119,7 +119,7 @@ describe("P6.I1 UX debt closure", () => {
     expect(school).not.toContain("Unexpected server error");
     expect(calendar).toContain("<ProductErrorState");
     expect(calendar).toContain("describeFailure");
-    expect(calendar).toContain("Plans could not be read just now.");
+    expect(calendar).toContain("Calendar could not be loaded");
     expect(calendar).not.toContain("Unexpected server error");
     expect(routes).toContain("PUBLIC_SERVER_FAILURE");
     expect(routes).toContain(
@@ -141,10 +141,10 @@ describe("P6.I1 UX debt closure", () => {
     expect(rail).not.toContain("window.location");
     expect(rail).toContain('data-sidebar-recents=""');
     expect(rail).toContain("prefetch={false}");
-    // Workspace discovery moved to the shared paged catalog: focus reuses a
-    // warm page while a workspace change forces a fresh traversal.
+    // Workspace discovery reads the shared paged catalog: focus reuses a warm
+    // page while an explicit refresh forces a fresh traversal.
     const catalog = read("src/features/spectra/data/use-catalog-pages.ts");
-    expect(rail).toContain("useWorkspaceCatalog(selectedWorkspaceId)");
+    expect(rail).toContain("useWorkspaceCatalog()");
     expect(catalog).toContain("window.addEventListener(\"focus\", onFocus)");
     expect(catalog).toContain("const onFocus = () => { void refresh(); };");
     expect(catalog).toContain("void refresh(true)");

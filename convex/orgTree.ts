@@ -3,7 +3,7 @@ import { internalMutation, mutation } from "./orgNodeMutation";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import {
   normalizeArtifactId,
   requireArtifactCapability,
@@ -95,6 +95,52 @@ async function resolveParentId(
 
 /* -------------------------------------------------------------------- reads */
 
+type ChildOrder = "order" | "name" | "activity";
+
+/**
+ * The live children of a parent through the index for their order. Grouped by
+ * type when asked, narrowed to one type when a filter names it.
+ */
+function liveChildren(
+  ctx: QueryCtx,
+  { accountId, parentId, order, byType, typeFilter }: {
+    accountId: Doc<"orgNodes">["accountId"];
+    parentId: Doc<"orgNodes">["parentId"];
+    order: ChildOrder;
+    byType: boolean;
+    typeFilter: string | null;
+  },
+) {
+  const nodes = ctx.db.query("orgNodes");
+  if (byType) {
+    if (order === "name")
+      return nodes.withIndex("by_account_parent_live_type_name", (q) => {
+        const parent = q.eq("accountId", accountId).eq("parentId", parentId).eq("deletedAt", undefined);
+        return typeFilter === null ? parent : parent.eq("typeKey", typeFilter);
+      });
+    if (order === "activity")
+      return nodes.withIndex("by_account_parent_live_type_activity", (q) => {
+        const parent = q.eq("accountId", accountId).eq("parentId", parentId).eq("deletedAt", undefined);
+        return typeFilter === null ? parent : parent.eq("typeKey", typeFilter);
+      });
+    return nodes.withIndex("by_account_parent_live_type_order", (q) => {
+      const parent = q.eq("accountId", accountId).eq("parentId", parentId).eq("deletedAt", undefined);
+      return typeFilter === null ? parent : parent.eq("typeKey", typeFilter);
+    });
+  }
+  if (order === "name")
+    return nodes.withIndex("by_account_parent_live_name", (q) =>
+      q.eq("accountId", accountId).eq("parentId", parentId).eq("deletedAt", undefined),
+    );
+  if (order === "activity")
+    return nodes.withIndex("by_account_parent_live_activity", (q) =>
+      q.eq("accountId", accountId).eq("parentId", parentId).eq("deletedAt", undefined),
+    );
+  return nodes.withIndex("by_account_parent_live_order", (q) =>
+    q.eq("accountId", accountId).eq("parentId", parentId).eq("deletedAt", undefined),
+  );
+}
+
 /** One level of the tree, ordered, paginated. */
 export const listChildren = query({
   args: {
@@ -106,6 +152,7 @@ export const listChildren = query({
     ),
     direction: v.optional(v.union(v.literal("asc"), v.literal("desc"))),
     typeFilter: v.optional(v.string()),
+    withoutThreads: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
@@ -125,66 +172,24 @@ export const listChildren = query({
       ...args.paginationOpts,
       numItems: Math.min(args.paginationOpts.numItems, MAX_ORG_TREE_PAGE_SIZE),
     };
-    const result = args.includeTrashed
-      ? await ctx.db
+    const live = (order: ChildOrder, byType = typeFilter !== null) =>
+      liveChildren(ctx, { accountId: actor.accountId, parentId, order, byType, typeFilter });
+    const ordered = args.includeTrashed
+      ? ctx.db
           .query("orgNodes")
           .withIndex("by_account_parent_order", (q) =>
             q.eq("accountId", actor.accountId).eq("parentId", parentId),
           )
-          .paginate(paginationOpts)
       : sortKey === "updated"
-        ? typeFilter
-          ? await ctx.db
-              .query("orgNodes")
-              .withIndex("by_account_parent_live_type_activity", (q) =>
-                q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined).eq("typeKey", typeFilter),
-              )
-              .order(direction)
-              .paginate(paginationOpts)
-          : await ctx.db
-              .query("orgNodes")
-              .withIndex("by_account_parent_live_activity", (q) =>
-                q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined),
-              )
-              .order(direction)
-              .paginate(paginationOpts)
+        ? live("activity").order(direction)
         : sortKey === "name" || sortKey === "type"
-          ? typeFilter
-            ? await ctx.db
-                .query("orgNodes")
-                .withIndex("by_account_parent_live_type_name", (q) =>
-                  q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined).eq("typeKey", typeFilter),
-                )
-                .order(direction)
-                .paginate(paginationOpts)
-            : sortKey === "type"
-              ? await ctx.db
-                  .query("orgNodes")
-                  .withIndex("by_account_parent_live_type_name", (q) =>
-                    q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined),
-                  )
-                  .order(direction)
-                  .paginate(paginationOpts)
-              : await ctx.db
-                  .query("orgNodes")
-                  .withIndex("by_account_parent_live_name", (q) =>
-                    q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined),
-                  )
-                  .order(direction)
-              .paginate(paginationOpts)
-          : typeFilter
-            ? await ctx.db
-                .query("orgNodes")
-                .withIndex("by_account_parent_live_type_order", (q) =>
-                  q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined).eq("typeKey", typeFilter),
-                )
-              .paginate(paginationOpts)
-            : await ctx.db
-                .query("orgNodes")
-                .withIndex("by_account_parent_live_order", (q) =>
-                  q.eq("accountId", actor.accountId).eq("parentId", parentId).eq("deletedAt", undefined),
-                )
-                .paginate(paginationOpts);
+          ? live("name", typeFilter !== null || sortKey === "type").order(direction)
+          : live("order");
+    // Threads live behind the Threads button, not among the work (LIBRARY.md).
+    const result = await (args.withoutThreads
+      ? ordered.filter((q) => q.neq(q.field("kind"), "thread"))
+      : ordered
+    ).paginate(paginationOpts);
     return {
       ...result,
       page: await hydrateNodes(ctx, result.page, {

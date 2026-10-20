@@ -22,7 +22,7 @@ so every change of state is the same matter rearranging itself.
   - It floats over content and never pushes anything.
   - Scrolling pages add bottom padding, so their last line can scroll clear of it.
 - **Opening upward.** Everything it opens grows upward from it:
-  - the tabs pill;
+  - the rail of thread tabs;
   - the composer as it gains lines;
   - questions;
   - the thread view.
@@ -33,13 +33,13 @@ so every change of state is the same matter rearranging itself.
 
 ### The wake setting
 
-Settings → Spectra → Island offers:
+Settings → Spectra → "The dock at rest" offers:
 
-- **Show the prism** (default): the prism rests at the bottom centre.
-- **Wake from the edge:**
+- **Always show the dock** (default): the dock rests at the bottom centre (see "The dock").
+- **Show it from the edge:**
   - Nothing is shown at rest.
-  - Moving the pointer into a 28 px band along the bottom centre (about 360 px wide) wakes the island. The prism
-    forms out of the field and morphs straight into the hover structure.
+  - Moving the pointer into a 28 px band along the bottom centre (about 360 px wide) wakes the island, which forms
+    straight into the dock.
   - Ctrl/Cmd + J also wakes it.
   - A "needs you" event still wakes it on its own.
 
@@ -50,69 +50,69 @@ Settings → Spectra → Island offers:
 | **Rest** | The prism alone, about 30 px. It is still until the pointer comes near; then it leans toward it, and on hover it spins round once. |
 | **Working** | The prism turns in 3D, and the spectrum flows round its edges. Faint spectral particles shed from it and drift into the field. When more than one thread is working, a small count sits beside it. |
 | **Finished** | The prism spins once with momentum and settles. A short ripple runs through the field. A one-line notice unfolds from it ("*Photosynthesis deck* is ready"), and hovering holds the notice. After it folds away, the prism keeps the full spectrum on its edges until the thread has been seen. |
-| **Needs you** | The prism dissolves into particles that re-form as the question card (below). A warm orange light leans out of it. |
-| **Hover** | The structure: tabs on both sides of the + (below) |
-| **Composing** | The + opens into the composer |
+| **Needs you** | The question card (below) comes up over the island at once. A warm orange light leans out of the prism. |
+| **Hover** | The rail stands up on the bar's top edge (below) |
+| **Composing** | The dock opens into the composer, with the rail standing on it |
 | **Thread in focus** | On the chat page, or while a thread is open in the Side, the island rests as a slim reply bar bound to that thread ("Reply to *Photosynthesis deck*"), because writing is the main action there. The prism sits at its left end. |
 | **Faded** | The user is typing in an editor or dragging nearby: a faint prism that lets pointer events through |
 | **Hidden** | Ctrl/Cmd + . or focus mode. Only a "needs you" event breaks through: particles rise from the bottom edge into a small pulse that opens the question when clicked. |
 
-## The hover structure
+## The rail
+
+The threads stand on the island's top edge as folder tabs, in the bar's own paper:
 
 ```text
-      in play (working, needs you, just finished)               done                history
-   [ ◐ Chemistry quiz ][ ● Essay plan ][ ✓ Deck ]   ( + )   [ ✓ Notes ][ ✓ Timetable ] ┆ › ……
+              in play                ┆           put away
+   ╭ ◐ Chemistry quiz ╮╭ ● Essay plan ╮ ┆ ╭ ✓ Notes ╮╭ ✓ Timetable ╮╭ 6 more ╮
+ ( ◉ Ask Spectra anything                    Ctrl J │ New thread  Threads )
 ```
 
-- **The + button.** It always stays at the exact centre of the pill, and the pill grows outward from it.
+- **At rest** the tabs are tucked behind the bar. Only the threads in play show, as a lip a few pixels high in the
+  colour of their state: violet while working, amber when they need the user, red when stopped, green when finished
+  and not yet seen. Nothing else marks them, so a glance at the bar says what is going on.
+- **Reaching for the island** (the pointer on it, or the keyboard in it) raises the tabs one after the other from the
+  left. They go back down a moment after the hand leaves, unless a card is pinned, a menu is open or a tab is being
+  dragged.
+- **The tab in hand** is the same paper as the bar and joined to it, like the front sheet of a folder; the others are
+  a sheet behind, with the bar's edge running under them. From the dock, the tab in hand is the one whose card is
+  open; in the composer, the thread the composer writes into.
+- **Width.** The rail stands on the straight part of the bar's top edge and never overhangs it. It shows the threads
+  in play and as many put-away threads as keep their titles readable; the rest are behind "N more", which opens
+  Threads.
 
-### Left of the +: in play
+### In play and put away
 
-Threads that need attention or are still moving:
+Threads in play, left of the divider, need attention or are still moving:
 
 - working;
 - waiting for the user;
 - finished but not yet seen.
 
-The newest sits nearest the +.
+The newest sits nearest the divider. When a finished thread has been seen (its card or the thread was opened), it
+is put away the next time the rail goes down. It never moves while the user is looking at it.
 
-When a finished thread has been seen (its card or the thread was opened), it moves to the done side the next time
-the pill closes. It never moves while the user is looking at it.
-
-### Right of the +: done
-
-Seen, finished threads stay here until the user dismisses them.
-
-### Beyond them: history
-
-- Dismissed and older threads continue to the right, out of view, behind a soft fade and a "›" hint.
-- The user reaches history by scrolling or dragging deliberately.
-- History loads lazily and is virtualised.
+Put-away threads stay right of the divider until the user dismisses them. Older ones are in Threads.
 
 ### Arranging tabs
 
 The user arranges tabs:
 
 - **Order.** Dragging a tab reorders it within its side. The order is kept.
-- **Between sides.** Dragging a tab across the + moves it to the other side, and it stays there:
-  - a done thread dragged left stays in play, pinned, until it is moved or dismissed;
+- **Between sides.** Dragging a tab across the divider moves it to the other side, and it stays there:
+  - a put-away thread dragged left stays in play, pinned, until it is moved or dismissed;
   - a thread in play dragged right is put away.
-- **Dismissing.** Flicking a done tab to the right sends it into history with inertia. The keyboard equivalent is
+- **Dismissing.** Flicking a put-away tab to the right sends it to history with inertia. The keyboard equivalent is
   Delete, and the tab's context menu has it too.
 - **During a drag:**
+  - the tab lifts off the rail as a whole folder tab;
   - the other tabs part to make room;
-  - the dragged tab trails a faint wake of particles;
-  - crossing the + makes the + ripple.
+  - crossing the divider makes it ripple.
 
 ### Tabs
 
 - A tab shows the title and one status cue: the working light, the needs-you glint or the done mark.
 - It has no buttons. Actions live in the thread view.
-- The maximum width is about 180 px, and the title truncates at a word boundary.
-
-### With no threads
-
-The pill is just the +.
+- The maximum width is about 190 px, and the title truncates.
 
 ## The thread view (hovering a tab)
 
@@ -146,9 +146,10 @@ The island's composer is Spectra's only composer.
 
 ### Opening
 
-- Clicking + (or Ctrl/Cmd + J) opens it.
-- The + turns into the agent switch at the field's left end, and the field widens from the centre to about 560–640
-  px.
+- Clicking the dock's field (or Ctrl/Cmd + J) opens it, and the bar widens from the centre to about 600 px.
+- The rail stands on it. Its tabs say where the words go: the tab in hand is the thread being replied to. Clicking
+  another tab turns the composer to that thread (on the chat page, the page changes to it); the first tab, "New
+  thread", starts a new one. A thread in focus that has no tab stands in hand on its own.
 
 ### Writing
 
@@ -187,9 +188,9 @@ The agent switch is at the left end of the field.
 
 ### Sending
 
-- The words part into dots that travel into a new tab sliding out to the left of the +.
-- The pill then folds back into the prism, unless the pointer is on it. The prism breathes as it takes the run in,
-  and its status dot shows working.
+- The words travel into the dock, which takes the run in; its light shows working.
+- A new thread's card opens over its new tab, so what was sent is seen working. A reply to a thread still working
+  joins its run instead of starting another.
 
 ### Cancelling
 
@@ -197,8 +198,8 @@ Esc, or moving away with an empty field, cancels. Unsent text is kept as a draft
 
 ## Questions and approvals
 
-When a run calls `ask_user` or needs permission (see [HARNESS.md](../ai/HARNESS.md#permissions)), the prism breathes
-out, light leaves its apex and travels up through the field, and the question card forms where it lands. The prism's
+When a run calls `ask_user` or needs permission (see [HARNESS.md](../ai/HARNESS.md#permissions)), the question card
+is there at once and the skeleton's band crosses it once as it lands. The prism radiates yellow and its
 status dot turns yellow. Neither the composer nor the tabs open.
 
 **The card.**
@@ -213,7 +214,6 @@ status dot turns yellow. Neither the composer nor the tabs open.
   - The split button is one rounded shape: the menu segment has its own rounded end and is never clipped.
 - **"Open thread"** is a quiet text link.
 - **Several pending questions** stack, showing "1 of 3", and the card steps through them.
-- **When the pill is already open,** the question grows from its tab instead.
 - **Typing in the reply field** answers a question or declines an approval, with the text as what to do instead. The
   run resumes where it stopped.
 - **Answering** sends the card back: it parts into dots that pour into the prism, which breathes, turns, and shows
@@ -223,9 +223,8 @@ status dot turns yellow. Neither the composer nor the tabs open.
 
 When a thread is opened from the threads view or started elsewhere (for example "Ask about this" on an artifact):
 
-1. Its row or button travels to the island: its lines part, and light crosses the field.
-2. The pill opens, and the tab forms where the light lands.
-3. It settles after about 1.2 s.
+1. The rail stands up.
+2. The thread's tab is there, and the band crosses it once (with no tab yet, the dock).
 
 ## Keyboard and access
 
@@ -234,7 +233,7 @@ When a thread is opened from the threads view or started elsewhere (for example 
 | Ctrl/Cmd + J | Open the composer (bound to the thread in focus, if any) |
 | Ctrl/Cmd + . | Hide or show the island |
 | ← / → | Move between tabs when the island has focus |
-| Alt + ← / → | Move the focused tab, across the + as well |
+| Alt + ← / → | Move the focused tab, across the divider as well |
 | Enter | Open the focused tab's thread view |
 | Delete | Dismiss the focused done tab |
 
@@ -246,13 +245,16 @@ When a thread is opened from the threads view or started elsewhere (for example 
 
 ## Motion
 
-Every transition is a morph of one continuous container, carried by the field:
+Every transition is a morph of one continuous container (`shape-morph.ts`):
 
-- **The container** is measured and animated with springs.
-- **The content** cross-fades with a slight blur.
-- **The prism never vanishes.** It is made of the field's dots like everything else. Its lines part into dots,
-  which flow into the next thing (the composer's outline, the question card, the agent glyph) and fuse into its
-  lines. Lines the next thing doesn't need sink into the field. Reversing a transition forms the prism again.
+- **The container.** The island's paper is measured in the shape that was there and the one that comes, and a
+  frame stretches from one to the other in about 300 ms, overshooting a little and settling. The dock and the
+  composer share it, and a thread card grows out of its tab and folds back into it. The rail rides the shape's
+  top edge as it changes.
+- **The content** of the old shape fades at once; the new shape's fades in over the frame once it is nearly
+  there (110 ms in), so the island reads as one thing that extends rather than one thing redrawn.
+- **No dots.** The island's waiting and working are the skeleton's (LIFE.md): the working mark in the dock and
+  on tabs, skeleton lines in a thread card while the answer is still coming.
 - **The status dot** by the prism's top right corner keeps the state visible after each short moment (see
   [LIFE.md](LIFE.md#status-dot)).
 - **Interruption.** Every transition can be interrupted from its current state, and nothing snaps.
@@ -277,16 +279,16 @@ The island lives in `src/features/spectra/island/`.
   Which threads the user has seen is kept per browser (`seen.ts`).
 - **Questions** (`questions.ts`) merge the live harness question with saved runs waiting on the user, and each
   answers through the right path (harness answer, card action, choice continuation or a new turn).
-- **Arranging.** `arrange.ts` keeps the user's order per side and the threads moved across the + (a choice
+- **The rail** (`island-rail.tsx`) draws the tabs and measures the shape it stands on (`useRailSeat`).
+- **Arranging.** `arrange.ts` keeps the user's order per side and the threads moved across the divider (a choice
   belongs to the run it was made on; a put-away thread still comes forward when it needs the user).
   `use-tab-drag.ts` lifts a dragged tab into a ghost, moves its empty slot through the row (FLIP, so the others
-  part), ripples the + on crossing and throws a flicked done tab into history. Alt + ←/→ and the tab's context
+  part), ripples the divider on crossing and throws a flicked put-away tab into history. Alt + ←/→ and the tab's context
   menu do the same from the keyboard and the pointer's other button.
-- **History** (`history.tsx`) follows the done tabs behind the "›": it loads a page of threads at a time as its
-  end scrolls into view, and keeps at most 64 drawn.
-- **Arriving.** `island.arrive` (emitted by the threads view) opens the pill and forms the thread's tab from the
-  light of the row it left; with no tab yet, the + takes the light in.
-- **Notices** (`notice.tsx`) form out of the prism's light: finished or stopped threads, and every new
+- **Arriving.** `island.arrive` (emitted by the threads view) raises the rail and marks the thread's tab as
+  arriving; with no tab yet, the dock.
+- **Notices** (`notice.tsx`) rise above the dock: finished or stopped threads (named by the work the run made, when
+  it made one), and every new
   notification (`island.notify`, from the account's notifications; opening one emits `notifications.choose`).
 - **The app's words** ("Saved", "Could not move it") are notices too: `toast` from `@/components/ui/toast` hands them to the
   island, in the colour of what happened, with one action (Undo, Retry) and a duration (`Infinity` stays until dismissed). Pages

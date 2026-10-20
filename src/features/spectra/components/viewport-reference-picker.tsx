@@ -110,7 +110,7 @@ export function ViewportReferencePicker() {
       <DialogContent
         layer="composer-dock"
         hideCloseButton
-        overlayClassName="bg-[color-mix(in_oklab,var(--text-primary)_10%,transparent)] backdrop-blur-none"
+        overlayClassName="backdrop-blur-none"
         aria-label="Pick referenced work from page"
         className="bottom-5 top-auto max-w-[min(520px,calc(100vw-24px))] -translate-y-0 gap-0 rounded-card p-3"
       >

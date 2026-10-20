@@ -71,7 +71,8 @@ export const SCHOOL_SYNC_KIND_INFO: Record<SchoolSyncKind, SchoolSyncKindInfo> =
   task_resources: {
     label: "Task resources",
     description: "Files and links your teachers attach to your classes.",
-    defaultMode: "auto", autoEveryMinutes: 6 * 60, classScoped: true, availability: "available",
+    defaultMode: "auto", autoEveryMinutes: 6 * 60, classScoped: true, availability: "unavailable",
+    unavailableReason: "ManageBac's API has no way to read the files and links on a task, so Spectra can't sync them.",
   },
   grades: {
     label: "Grades and feedback",
@@ -90,8 +91,9 @@ export const SCHOOL_SYNC_KIND_INFO: Record<SchoolSyncKind, SchoolSyncKindInfo> =
   },
   cas: {
     label: "CAS",
-    description: "Your CAS experiences. Reflections, outcomes and evidence are kept in Spectra.",
-    defaultMode: "manual", autoEveryMinutes: 24 * 60, classScoped: false, availability: "available",
+    description: "Your CAS experiences.",
+    defaultMode: "manual", autoEveryMinutes: 24 * 60, classScoped: false, availability: "unavailable",
+    unavailableReason: "ManageBac doesn't share CAS with apps a student connects, so Spectra can't sync it.",
   },
   calendar_events: {
     label: "Calendar events",

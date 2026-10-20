@@ -139,6 +139,8 @@ export type HarnessTool<A = Record<string, unknown>> = {
    * every other call runs in parallel.
    */
   targets?: (args: A) => string[];
+  /** The artifact the step works in, which a view following the run opens while it does. */
+  shows?: (args: A) => string | undefined;
   /** Validate and normalise raw JSON arguments. Throw ToolInputError. */
   parse?: (raw: Record<string, unknown>) => A;
   execute: (args: A, ctx: ToolContext) => Promise<ToolOutcome>;

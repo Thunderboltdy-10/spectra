@@ -256,7 +256,7 @@ export function SandboxedArtifactRuntime({
       ) : null}
       {toolbar ? (
         <div className="flex h-8 items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3">
-          <span className="inline-flex items-center gap-1.5 text-micro font-semibold uppercase tracking-[.09em] text-[var(--text-tertiary)]">
+          <span className="inline-flex items-center gap-1.5 text-micro font-semibold text-[var(--text-tertiary)]">
             <ShieldCheck className="h-3 w-3 text-[var(--success)]" />
             Isolated Spectra preview
           </span>

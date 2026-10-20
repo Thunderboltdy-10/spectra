@@ -19,6 +19,9 @@ const isPublicRoute = createRouteMatcher([
   // internal_work action is HMAC-authenticated before the route asks for a
   // user session; every interactive action still requires requireActor().
   "/api/spectra/run",
+  // The morning brief's scheduled call is HMAC-signed and acts as its owner;
+  // Home's own call still needs the student's session in the route.
+  "/api/spectra/brief",
   "/api/contact(.*)",
   "/api/health(.*)",
   "/api/webhooks(.*)",

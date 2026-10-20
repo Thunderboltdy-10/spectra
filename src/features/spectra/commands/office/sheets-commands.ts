@@ -3,33 +3,50 @@ import {
   AlignVerticalJustifyEnd,
   AlignVerticalJustifyStart,
   ArrowDown,
-  ArrowLeft,
   ArrowDownAZ,
+  ArrowLeft,
   ArrowRight,
+  ArrowRightLeft,
   ArrowUpAZ,
   ArrowUpDown,
   Ban,
+  Binary,
   Braces,
-  ChevronsLeftRight,
   Brush,
   Calculator,
+  Calendar,
+  CalendarDays,
+  CalendarRange,
+  ChartArea,
+  ChartBar,
   ChartColumn,
+  ChartColumnStacked,
+  ChartLine,
+  ChartNoAxesCombined,
   ChartPie,
+  ChartScatter,
+  ChartSpline,
+  ChevronsLeftRight,
   Clipboard,
   ClipboardPaste,
+  Clock,
+  Code,
   Columns3,
   Copy,
+  Divide,
   DollarSign,
   Eraser,
   Eye,
   EyeOff,
   Grid2x2,
   Grid3x3,
+  Hand,
   Hash,
   Highlighter,
   History,
   Indent,
   Info,
+  Landmark,
   Layers,
   Library,
   Link2,
@@ -38,11 +55,15 @@ import {
   Merge,
   Minus,
   Outdent,
-  PaintBucket,
   Paintbrush,
+  PaintBucket,
   Palette,
-  Percent,
+  PanelBottom,
+  PanelLeft,
+  PanelRight,
+  PanelTop,
   PencilLine,
+  Percent,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -55,11 +76,22 @@ import {
   Snowflake,
   Sparkles,
   Split,
+  Square,
+  SquareDashed,
+  SquareFunction,
+  SquareX,
   StickyNote,
+  Superscript,
+  Table,
   Table2,
+  TableProperties,
   Tags,
   Text,
   Trash2,
+  TrendingUp,
+  Type,
+  Underline,
+  Wand2,
 } from "lucide-react";
 import type { CommandBinding, CommandControlOption, CommandParam } from "../types";
 import {
@@ -114,17 +146,17 @@ import { SHEETS_EXPORT_COPIES, projectBindingsFromIr } from "../../capabilities"
 
 /** Number formats Spectra can render *and* write to `numFmt` truthfully. */
 export const SHEETS_NUMBER_FORMATS: readonly CommandControlOption[] = [
-  { value: "general", label: "Automatic", hint: "Numbers as typed, text left aligned" },
-  { value: "number", label: "Number", hint: "1,234.57" },
-  { value: "currency", label: "Currency", hint: "$1,234.57" },
-  { value: "accounting", label: "Accounting", hint: "Aligned symbols, (1,234.57) for negatives" },
-  { value: "percent", label: "Percent", hint: "12.35%" },
-  { value: "fraction", label: "Fraction", hint: "1 1/4" },
-  { value: "scientific", label: "Scientific", hint: "1.23E+03" },
-  { value: "date", label: "Date", hint: "2026-08-23" },
-  { value: "time", label: "Time", hint: "14:05" },
-  { value: "text", label: "Text", hint: "Keeps leading zeros; never calculated" },
-  { value: "custom", label: "Custom…", hint: "Enter an Excel format code" },
+  { value: "general", label: "Automatic", hint: "Numbers as typed, text left aligned", icon: Wand2 },
+  { value: "number", label: "Number", hint: "1,234.57", icon: Hash },
+  { value: "currency", label: "Currency", hint: "$1,234.57", icon: DollarSign },
+  { value: "accounting", label: "Accounting", hint: "Aligned symbols, (1,234.57) for negatives", icon: Landmark },
+  { value: "percent", label: "Percent", hint: "12.35%", icon: Percent },
+  { value: "fraction", label: "Fraction", hint: "1 1/4", icon: Divide },
+  { value: "scientific", label: "Scientific", hint: "1.23E+03", icon: Superscript },
+  { value: "date", label: "Date", hint: "2026-08-23", icon: Calendar },
+  { value: "time", label: "Time", hint: "14:05", icon: Clock },
+  { value: "text", label: "Text", hint: "Keeps leading zeros; never calculated", icon: Type },
+  { value: "custom", label: "Custom…", hint: "Enter an Excel format code", icon: Code },
 ];
 
 /** Currencies a school actually invoices in, not a full ISO dump. */
@@ -143,16 +175,16 @@ export const SHEETS_CURRENCIES: readonly CommandControlOption[] = [
  * way OOXML stores it: an outline, an inside grid, one edge at a time.
  */
 export const SHEETS_BORDER_PRESETS: readonly CommandControlOption[] = [
-  { value: "all", label: "All borders" },
-  { value: "outline", label: "Outline" },
-  { value: "inside", label: "Inside" },
-  { value: "top", label: "Top edge" },
-  { value: "bottom", label: "Bottom edge" },
-  { value: "left", label: "Left edge" },
-  { value: "right", label: "Right edge" },
-  { value: "thick-outline", label: "Thick outline" },
-  { value: "double-bottom", label: "Double underline" },
-  { value: "none", label: "No borders" },
+  { value: "all", label: "All borders", icon: Grid3x3 },
+  { value: "outline", label: "Outline", icon: Square },
+  { value: "inside", label: "Inside", icon: SquareDashed },
+  { value: "top", label: "Top edge", icon: PanelTop },
+  { value: "bottom", label: "Bottom edge", icon: PanelBottom },
+  { value: "left", label: "Left edge", icon: PanelLeft },
+  { value: "right", label: "Right edge", icon: PanelRight },
+  { value: "thick-outline", label: "Thick outline", icon: Square },
+  { value: "double-bottom", label: "Double underline", icon: Underline },
+  { value: "none", label: "No borders", icon: SquareX },
 ];
 
 export const SHEETS_BORDER_STYLES: readonly CommandControlOption[] = [
@@ -166,9 +198,9 @@ export const SHEETS_BORDER_STYLES: readonly CommandControlOption[] = [
 ];
 
 export const SHEETS_VERTICAL_ALIGN: readonly CommandControlOption[] = [
-  { value: "top", label: "Top" },
-  { value: "middle", label: "Middle" },
-  { value: "bottom", label: "Bottom" },
+  { value: "top", label: "Top", icon: AlignVerticalJustifyStart },
+  { value: "middle", label: "Middle", icon: AlignVerticalJustifyCenter },
+  { value: "bottom", label: "Bottom", icon: AlignVerticalJustifyEnd },
 ];
 
 export const SHEETS_TEXT_ROTATIONS: readonly number[] = [-90, -45, 0, 45, 90];
@@ -180,41 +212,41 @@ export const SHEETS_FILL_COLORS: readonly string[] = [
 ];
 
 export const SHEETS_CHART_TYPES: readonly CommandControlOption[] = [
-  { value: "column", label: "Column" },
-  { value: "bar", label: "Bar" },
-  { value: "line", label: "Line" },
-  { value: "area", label: "Area" },
-  { value: "pie", label: "Pie" },
-  { value: "scatter", label: "Scatter" },
-  { value: "combo", label: "Combo" },
-  { value: "histogram", label: "Histogram" },
+  { value: "column", label: "Column", icon: ChartColumn },
+  { value: "bar", label: "Bar", icon: ChartBar },
+  { value: "line", label: "Line", icon: ChartLine },
+  { value: "area", label: "Area", icon: ChartArea },
+  { value: "pie", label: "Pie", icon: ChartPie },
+  { value: "scatter", label: "Scatter", icon: ChartScatter },
+  { value: "combo", label: "Combo", icon: ChartNoAxesCombined },
+  { value: "histogram", label: "Histogram", icon: ChartColumnStacked },
 ];
 
 export const SHEETS_PASTE_MODES: readonly CommandControlOption[] = [
-  { value: "all", label: "Everything" },
-  { value: "values", label: "Values only", hint: "Formulas land as their current result" },
-  { value: "formulas", label: "Formulas only", hint: "References shift to the new position" },
-  { value: "formats", label: "Formatting only" },
-  { value: "transpose", label: "Transposed" },
+  { value: "all", label: "Everything", icon: ClipboardPaste },
+  { value: "values", label: "Values only", hint: "Formulas land as their current result", icon: Binary },
+  { value: "formulas", label: "Formulas only", hint: "References shift to the new position", icon: SquareFunction },
+  { value: "formats", label: "Formatting only", icon: Paintbrush },
+  { value: "transpose", label: "Transposed", icon: ArrowRightLeft },
 ];
 
 export const SHEETS_FILL_SERIES: readonly CommandControlOption[] = [
-  { value: "copy", label: "Copy cells" },
-  { value: "linear", label: "Linear series", hint: "Continues the step between the first two cells" },
-  { value: "growth", label: "Growth series", hint: "Continues the ratio between the first two cells" },
-  { value: "weekday", label: "Weekdays" },
-  { value: "month", label: "Months" },
+  { value: "copy", label: "Copy cells", icon: Copy },
+  { value: "linear", label: "Linear series", hint: "Continues the step between the first two cells", icon: TrendingUp },
+  { value: "growth", label: "Growth series", hint: "Continues the ratio between the first two cells", icon: ChartSpline },
+  { value: "weekday", label: "Weekdays", icon: CalendarDays },
+  { value: "month", label: "Months", icon: CalendarRange },
 ];
 
 export const SHEETS_TABLE_STYLES: readonly CommandControlOption[] = [
-  { value: "plain", label: "Plain" },
-  { value: "striped", label: "Banded rows" },
-  { value: "accent", label: "Accent header" },
+  { value: "plain", label: "Plain", icon: Table },
+  { value: "striped", label: "Banded rows", icon: Rows3 },
+  { value: "accent", label: "Accent header", icon: TableProperties },
 ];
 
 export const SHEETS_CALC_MODES: readonly CommandControlOption[] = [
-  { value: "automatic", label: "Automatic" },
-  { value: "manual", label: "Manual", hint: "Recalculate with F9" },
+  { value: "automatic", label: "Automatic", icon: Calculator },
+  { value: "manual", label: "Manual", hint: "Recalculate with F9", icon: Hand },
 ];
 
 /**

@@ -8,6 +8,7 @@ import { devicePairing } from "../devices/pairing";
 import type { CommandEffectKind, CommandExecutionResult } from "./types";
 import { aiSyncPurpose } from "../../../../shared/school-sync";
 import { expectLanding } from "../anchors/open-anchor";
+import { HOME_PATH, threadHref } from "../chat/home-routes";
 
 export type ApplicationCommandDispatcher = (
   commandId: string,
@@ -116,7 +117,7 @@ function readinessFrom(value: CommandExecutionResult["readiness"] | void) {
 }
 
 const routeForMap = {
-  "app.page.chat": "/chat?new=1",
+  "app.page.chat": HOME_PATH,
   "app.page.workspace": "/workspace?home=1",
   "app.page.library": "/library",
   "app.page.calendar": "/calendar",
@@ -124,7 +125,7 @@ const routeForMap = {
   "app.page.agents": "/agents",
   "app.page.school": "/school",
   "app.page.analytics": "/analytics",
-  "app.chat.new": "/chat?new=1",
+  "app.chat.new": HOME_PATH,
   "app.devices.open": DEVICES_HREF,
 } as const;
 
@@ -238,7 +239,7 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
       case "app.chat.continue": {
         const threadId = typeof params.threadId === "string" ? params.threadId.trim() : "";
         if (threadId && host.openRoute) {
-          const readiness = readinessFrom(await host.openRoute(`/chat?threadId=${encodeURIComponent(threadId)}`));
+          const readiness = readinessFrom(await host.openRoute(threadHref(threadId)));
           return completed(commandId, "navigate", "Continuing the current conversation.", readiness, { threadId });
         }
         return completed(commandId, "toggle", "The current conversation remains the continuation target.");

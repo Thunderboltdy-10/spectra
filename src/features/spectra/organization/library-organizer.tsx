@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { Pencil, RotateCcw, ChevronRight, FolderPlus, Home, Link2, Share2, Star, Trash2, LayoutGrid, Rows3, ArrowRight } from "@/components/icons/glyph-icons";
+import { Pencil, RotateCcw, ChevronRight, FolderPlus, Link2, Share2, Star, Trash2, ArrowRight } from "@/components/icons/glyph-icons";
 import { toast } from "@/components/ui/toast";
 import { showRetryToast } from "@/components/ui/retry-toast";
 import { useConvexAuth, useQuery } from "convex/react";
@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { useNow } from "@/hooks/use-now";
 import { presentSync, replicaHasNativeLock } from "../bridge/status";
 import { useProductOnline } from "../bridge/use-product-online";
+import { useFolderSync } from "../bridge/use-folder-sync";
 import type { StatusTone } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -66,26 +67,26 @@ import {
 import { useOrganizerDrag } from "./organizer-drag";
 import { OrganizerRail, type OrganizerLocation } from "./organizer-rail";
 import { OrganizerRow, ROW_HEIGHT, type RowCallbacks } from "./organizer-row";
-import { WorkBoard } from "./work-board";
+import { useRowPeek } from "./row-peek";
 import { spectraBus } from "../events";
 import type { SpectraCommandOutcome } from "../events/contracts";
 import { subscribeIdleSurfaceRefresh } from "../data/idle-surface";
 import { LIBRARY_IMPORT_ACCEPT } from "./library-import";
 import {
-  SurfaceGroupBy,
+  SurfaceMoreMenu,
   SurfaceNewMenu,
   SurfaceSearch,
-  SurfaceSortMenu,
-  SurfaceTypeFilter,
-  SurfaceViewSwitch,
   type BlueprintChoiceKey,
-  type BoardGroupBy,
-  type SurfaceView,
 } from "./surface-chrome";
 import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
-import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { beginCreation, sendInto } from "../life/use-life";
+import { ClassShelf, classWorkspaceIdentity, isClassWorkspace } from "./class-shelf";
+import { LibraryShelf, LibraryShelfSkeleton } from "./library-shelf";
+import { FolderShelf } from "./folder-shelf";
+import { LibraryCrumbs, crumbSteps } from "./library-crumbs";
+import { useLibraryView, useQuickPane } from "./library-view";
+import type { WorkPicking } from "./library-note";
+import { useClassBook } from "../school/use-class-book";
 
 /**
  * The Library, as a filesystem.
@@ -110,7 +111,8 @@ export type LibraryOrganizerProps = {
   onOpenWork: (artifactId: string) => void;
   onOpenThread: (threadId: string, title: string) => void;
   onShareWork?: (artifactId: string) => void;
-  onToggleContext?: (artifactId: string) => void;
+  /** Picks or unpicks a work; its name and type say what it is where the loaded work does not have it. */
+  onToggleContext?: (artifactId: string, work: { title: string; type?: string }) => void;
   /** Replaces the composer's selected work with this set (list range-select). */
   onSelectWork?: (artifactIds: string[]) => void;
   contextIds?: ReadonlySet<string>;
@@ -131,8 +133,20 @@ export type LibraryOrganizerProps = {
   showBreadcrumbs?: boolean;
   /** Hidden when the host owns the rail (a workspace hub has its own). */
   showRail?: boolean;
-  /** Called when the reader navigates, so a host route can follow along. */
-  onLocationChange?: (nodeId: string | null) => void;
+  /**
+   * Called when the reader navigates, so a host route can follow along, with
+   * the folder they left when they were in one.
+   */
+  onLocationChange?: (nodeId: string | null, from?: string | null) => void;
+  /**
+   * The folder the host asks for, as its own Back and Forward walk the
+   * reader's steps. Only a change moves the surface; null is the top.
+   */
+  folderId?: string | null;
+  /** Steps into a workspace, at a folder inside it when one is named. */
+  onOpenWorkspace?: (workspaceId: string, nodeId?: string) => void;
+  /** Steps out of the scope to the top of the Library, or to a folder outside every workspace. */
+  onLeaveScope?: (nodeId?: string) => void;
   /**
    * The host surface's own controls, rendered inside this one toolbar row.
    *
@@ -142,18 +156,9 @@ export type LibraryOrganizerProps = {
    * they act on — lead before the breadcrumb, trail after New.
    */
   toolbarLead?: ReactNode;
-  toolbarTrail?: ReactNode;
-  /**
-   * List or Board. Both are this component: one location, one search, one
-   * filter, one create menu, one rail (CANON D41). The Board is a different
-   * arrangement of the same scope, not a different program with its own chrome —
-   * which is what it was, down to a second search box and a second "New".
-   */
-  view?: SurfaceView;
-  onViewChange?: (next: SurfaceView) => void;
-  /** How the board cuts its columns. Ignored by the List. */
-  boardGroupBy?: BoardGroupBy;
-  onBoardGroupByChange?: (next: BoardGroupBy) => void;
+  /** Rows and cards become a selection the composer answers from. */
+  selecting?: boolean;
+  onToggleSelect?: () => void;
   /** Turns rows and cards into a picker for the composer's context. */
   selectionMode?: boolean;
   selectedObjectKeys?: Set<string>;
@@ -161,8 +166,6 @@ export type LibraryOrganizerProps = {
   activeWorkId?: string;
   /** A create is in flight somewhere on the surface. */
   busy?: boolean;
-  /** Open a container the reader clicked on the board. */
-  onOpenContainer?: (target: { nodeId: string; workspaceId?: string }) => void;
   /** A fresh account gets teaching copy instead of a generic empty folder. */
   firstRun?: boolean;
 };
@@ -234,11 +237,10 @@ export function ReplicaPresentationLoader({
   return null;
 }
 
-/** The two shapes one scope can take. */
-const VIEW_OPTIONS = [
-  { key: "list" as const, label: "List", icon: Rows3 },
-  { key: "board" as const, label: "Board", icon: LayoutGrid },
-];
+const QUICK_LABELS = { recent: "Recent", favorites: "Favorites", shared: "Shared" } as const;
+
+/** What a quick view of the Library lists: never threads. */
+const PLACES_AND_WORK: TreeNode["kind"][] = ["folder", "workspace", "work"];
 
 export function LibraryOrganizer(props: LibraryOrganizerProps) {
   const [attempt, setAttempt] = useState(0);
@@ -280,21 +282,21 @@ function LibraryOrganizerContent({
   showBreadcrumbs = true,
   showRail = true,
   onLocationChange,
+  folderId,
+  onOpenWorkspace,
+  onLeaveScope,
   toolbarLead,
-  toolbarTrail,
-  view = "list",
-  onViewChange,
-  boardGroupBy = "workspace",
-  onBoardGroupByChange,
+  selecting,
+  onToggleSelect,
   selectionMode = false,
-  selectedObjectKeys,
   activeWorkId,
   busy: hostBusy = false,
-  onOpenContainer,
   firstRun = false,
 }: LibraryOrganizerProps) {
   const now = useNow(60_000);
+  const book = useClassBook();
   const productOnline = useProductOnline();
+  const folderSync = useFolderSync();
   const [replicaRows, setReplicaRows] = useState<
     | ReadonlyArray<{
         workId: string;
@@ -358,13 +360,10 @@ function LibraryOrganizerContent({
     names: string[];
     emptying: boolean;
   } | null>(null);
-  /* The rail is the tree; hiding it gives the rows or the columns the whole
-     window. Reachable from both views, because a reader who wants more room for
-     a board wants it for a list too. */
-  /* Folders are a breadcrumb plus a popover tree (SHELL.md): the tree is
-     never a column of its own, so the Library keeps its three. */
-  const [foldersOpen, setFoldersOpen] = useState(false);
-  const board = view === "board";
+  /* Shelf or list, kept on this device for every place (LIBRARY.md, "Views");
+     the list keeps a quick access pane at its side, as File Explorer does. */
+  const [view, setView] = useLibraryView();
+  const [paneOpen, togglePane] = useQuickPane();
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const importRef = useRef<HTMLInputElement | null>(null);
@@ -381,15 +380,18 @@ function LibraryOrganizerContent({
   currentParentRef.current = currentParentId;
 
   const children = useTreeChildren(currentParentId, {
-    enabled: inFolder && !searching && !board,
+    enabled: inFolder && !searching,
     sortKey,
     direction: sortDirection,
     typeFilter: filter,
+    withoutThreads: true,
   });
+  /* Threads are kept behind the Threads button, not among the work; only
+     search reaches them here. */
   const search = useTreeSearch(term, undefined, floorId, filter);
   const quick = useTreeQuickView(
     !searching && location.kind === "quick" ? location.view : null,
-    undefined,
+    PLACES_AND_WORK,
     floorId,
     filter,
   );
@@ -419,6 +421,31 @@ function LibraryOrganizerContent({
     return sortRows(base, sortKey, sortDirection);
   }, [source, filter, sortKey, sortDirection, flat]);
 
+  // Picking keeps the shelf: its cards are picked where they stand.
+  const atShelfRoot = inFolder && currentParentId === null && !scope;
+  const folderShelf = inFolder && currentParentId !== null && path?.node.nodeId === currentParentId ? path.node : null;
+  /* A class's workspace opens as the class (LIBRARY.md, "A class"), with the
+     same switch to its plain rows. */
+  const classFolder =
+    inFolder && currentParentId !== null && isClassWorkspace(path?.node)
+      ? path!.node
+      : null;
+  const shelfable = inFolder && !searching;
+  const shelf = shelfable && filter === "all" && view === "shelf";
+
+  const picking = useMemo<WorkPicking | undefined>(
+    () =>
+      selectionMode && onToggleContext
+        ? {
+            has: (node) => Boolean(node.sourceId && contextIds?.has(node.sourceId)),
+            toggle: (node) => {
+              if (node.sourceId) onToggleContext(node.sourceId, { title: node.name, type: node.typeKey });
+            },
+          }
+        : undefined,
+    [contextIds, onToggleContext, selectionMode],
+  );
+
   const firstResult = !loading ? rows[0] : undefined;
   const selectedSearchResult = rows.find((row) => row.nodeId === selection.cursorId);
   const hasExactTitleMatch = rows.some((row) => titleSearchMatch(row.name, term) === "Exact title match");
@@ -439,7 +466,7 @@ function LibraryOrganizerContent({
   /* Ordinary scrolling loads the next page as the reader approaches the end. */
   const { status: pageStatus, loadMore: loadMorePage } = page;
   useEffect(() => {
-    if ((board && inFolder && !searching) || !paginated || rows.length === 0) return;
+    if (!paginated || rows.length === 0) return;
     if (pageStatus !== "CanLoadMore") return;
     const remaining = rows.length * ROW_HEIGHT - scrollTop - viewportHeight;
     if (remaining >= ROW_HEIGHT * 12) return;
@@ -447,9 +474,6 @@ function LibraryOrganizerContent({
     // filtered pages can legitimately return zero additional visible rows.
     loadMorePage(50);
   }, [
-    board,
-    inFolder,
-    searching,
     paginated,
     pageStatus,
     loadMorePage,
@@ -468,12 +492,12 @@ function LibraryOrganizerContent({
   useEffect(() => {
     if (rootsEnsured.current || scope) return;
     if (!inFolder || currentParentId !== null || searching) return;
-    if (!board && children.status === "LoadingFirstPage") return;
+    if (children.status === "LoadingFirstPage") return;
     rootsEnsured.current = true;
     void actionsRef.current.ensureRoots().catch(() => {
       rootsEnsured.current = false;
     });
-  }, [board, inFolder, currentParentId, searching, children.status, scope]);
+  }, [inFolder, currentParentId, searching, children.status, scope]);
 
   /* Keep the path to the current folder visible, but do not force the current
      folder's own children open. A selected tree item and an expanded tree item
@@ -505,17 +529,28 @@ function LibraryOrganizerContent({
     return () => observer.disconnect();
   }, [measure]);
 
+  const moveTo = useCallback((next: OrganizerLocation) => {
+    setLocation(next);
+    setSelection(EMPTY_SELECTION);
+    setRenamingId(null);
+    setScrollTop(0);
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, []);
   const navigate = useCallback(
     (next: OrganizerLocation) => {
-      setLocation(next);
-      setSelection(EMPTY_SELECTION);
-      setRenamingId(null);
-      setScrollTop(0);
-      if (scrollRef.current) scrollRef.current.scrollTop = 0;
-      if (next.kind === "folder") onLocationChange?.(next.nodeId);
+      moveTo(next);
+      if (next.kind === "folder")
+        onLocationChange?.(next.nodeId, location.kind === "folder" ? location.nodeId : undefined);
     },
-    [onLocationChange],
+    [location, moveTo, onLocationChange],
   );
+  const askedFolderRef = useRef(folderId);
+  useEffect(() => {
+    if (folderId === undefined || folderId === askedFolderRef.current) return;
+    askedFolderRef.current = folderId;
+    const target = folderId ?? floorId;
+    if (location.kind !== "folder" || location.nodeId !== target) moveTo({ kind: "folder", nodeId: target });
+  }, [floorId, folderId, location, moveTo]);
 
   const run = useCallback(async function execute(
     label: string,
@@ -606,6 +641,12 @@ function LibraryOrganizerContent({
 
   const openNode = useCallback(
     (node: TreeNode) => {
+      // A workspace is a place: it opens on its own, unless it is where this surface already stands.
+      const place = node.kind === "workspace" ? node.workspace?.workspaceId : undefined;
+      if (place && onOpenWorkspace && node.nodeId !== floorId) {
+        onOpenWorkspace(place);
+        return;
+      }
       if (node.kind === "folder" || node.kind === "workspace") {
         navigate({ kind: "folder", nodeId: node.nodeId });
         return;
@@ -630,7 +671,7 @@ function LibraryOrganizerContent({
       if (kind === "work") onOpenWork(sourceId);
       else if (kind === "thread") onOpenThread(sourceId, name);
     },
-    [navigate, onOpenThread, onOpenWork],
+    [floorId, navigate, onOpenThread, onOpenWork, onOpenWorkspace],
   );
 
   const moveNodes = useCallback(
@@ -752,10 +793,8 @@ function LibraryOrganizerContent({
   /**
    * Make one piece of work, in one named place.
    *
-   * Both callers reach this: the toolbar's New menu, where the place is where the
-   * reader is standing, and a board column's own affordance, where the place is
-   * whatever that column represents (CANON D43). Neither asks the reader for
-   * something their click already answered.
+   * The toolbar's New menu reaches this with the place the reader is standing
+   * (CANON D43), so it never asks for something their click already answered.
    */
   const createWorkAt = useCallback(
     (blueprintKey: BlueprintChoiceKey, parentId: string | null) =>
@@ -783,9 +822,9 @@ function LibraryOrganizerContent({
 
   const createWorkHere = useCallback(
     (blueprintKey: BlueprintChoiceKey) => {
-      void createWorkAt(blueprintKey, currentParentId);
+      void createWorkAt(blueprintKey, inFolder ? currentParentId : floorId);
     },
-    [createWorkAt, currentParentId],
+    [createWorkAt, currentParentId, floorId, inFolder],
   );
 
   /* A new folder is appended, which in a long folder means off-screen. */
@@ -989,6 +1028,8 @@ function LibraryOrganizerContent({
 
   const range = windowRange(scrollTop, viewportHeight, ROW_HEIGHT, rows.length);
   const visible = rows.slice(range.start, range.end);
+  const nodeById = useCallback((nodeId: string) => rows.find((node) => node.nodeId === nodeId), [rows]);
+  const peek = useRowPeek(nodeById, Boolean(drag) || selectionMode || renamingId !== null);
   const dropRingId =
     drag?.target?.type === "into" ? drag.target.highlightNodeId : undefined;
   const railDropId =
@@ -1004,29 +1045,43 @@ function LibraryOrganizerContent({
     [menu, nodesById],
   );
 
-  /* Breadcrumbs start at the floor, never above it: a workspace's List view
-     must not offer a path out of the workspace. */
-  const crumbs = useMemo(() => {
-    if (!path) return [];
-    const chain = [...path.ancestors, path.node];
-    if (!floorId) return chain;
-    const index = chain.findIndex((node) => node.nodeId === floorId);
-    return index === -1 ? chain : chain.slice(index + 1);
-  }, [path, floorId]);
+  /* The path runs from the top of the Library, through the workspace the
+     surface is in, to the open folder (LIBRARY.md, "The path"). */
+  const crumbs = useMemo(
+    () =>
+      crumbSteps({
+        path: path && inFolder && path.node.nodeId === currentParentId ? [...path.ancestors, path.node] : [],
+        floor: scope ? { nodeId: scope.nodeId, label: scope.label } : null,
+        onLeaveFloor: onLeaveScope ? () => onLeaveScope() : undefined,
+      }),
+    [path, inFolder, currentParentId, scope, onLeaveScope],
+  );
+
+  /* Somewhere picked in the quick access pane, with the way down to it. A
+     place in another workspace is that workspace's; one outside every
+     workspace is the top's. */
+  const goTo = useCallback(
+    (next: OrganizerLocation, trail?: readonly TreeNode[]) => {
+      if (next.kind !== "folder") return navigate(next);
+      if (next.nodeId === null) return scope && onLeaveScope ? onLeaveScope() : navigate(next);
+      const place = trail?.find((node) => node.kind === "workspace");
+      if (!trail || place?.nodeId === floorId || (!scope && !(place?.workspace && onOpenWorkspace))) return navigate(next);
+      const inside = next.nodeId === place?.nodeId ? undefined : next.nodeId;
+      if (place?.workspace && onOpenWorkspace) onOpenWorkspace(place.workspace.workspaceId, inside);
+      else onLeaveScope?.(next.nodeId);
+    },
+    [floorId, navigate, onLeaveScope, onOpenWorkspace, scope],
+  );
 
   const rail = (
     <OrganizerRail
       location={location}
       expanded={expanded}
       dropNodeId={railDropId}
-      floorId={floorId}
-      floorLabel={floorLabel}
-      className="max-h-[min(70vh,520px)] w-full border-0 bg-transparent px-1.5 py-1.5"
+      floorId={null}
+      className="w-full border-0 bg-transparent"
       handlers={{
-        onNavigate: (next) => {
-          setFoldersOpen(false);
-          navigate(next);
-        },
+        onNavigate: goTo,
         onToggle: (nodeId) =>
           setExpanded((current) => {
             const next = new Set(current);
@@ -1069,36 +1124,12 @@ function LibraryOrganizerContent({
         }}
       />
 
-      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--border-subtle)] px-4 py-2.5">
-        {/* The toolbar has two semantic groups. They share one row at full
-            width and wrap as groups beside a split artifact, so controls never
-            compete in one clipped, horizontally scrolling strip. */}
-        <div className="flex min-w-0 flex-1 basis-[300px] items-center gap-2">
-          {showRail ? (
-            <Popover open={foldersOpen} onOpenChange={setFoldersOpen}>
-              <PopoverAnchor asChild>
-                <span className="inline-flex">
-                  <IconButton
-                    icon="folderTree"
-                    label="Folders"
-                    className={foldersOpen ? "bg-[var(--bg-hover)] text-[var(--text-primary)]" : undefined}
-                    aria-expanded={foldersOpen}
-                    onClick={() => setFoldersOpen((open) => !open)}
-                  />
-                </span>
-              </PopoverAnchor>
-              <PopoverContent align="start" sideOffset={6} className="w-[280px] overflow-hidden p-0">
-                {rail}
-              </PopoverContent>
-            </Popover>
-          ) : null}
-          {onViewChange ? (
-            <SurfaceViewSwitch
-              view={view}
-              onChange={onViewChange}
-              views={VIEW_OPTIONS}
-            />
-          ) : null}
+      <header className="surface-bar shrink-0 border-b border-[var(--border-subtle)] px-4 py-2.5">
+        {/* Two groups on one row, always: where the reader is, and what they
+            can do there. As the row narrows (a work open beside it) the
+            controls fold to their icons and search gives up width; nothing
+            wraps to a second row (spectra-library.css, "The bar"). */}
+        <div className="surface-bar-where">
           {toolbarLead}
           <nav
             aria-label="Location"
@@ -1111,60 +1142,25 @@ function LibraryOrganizerContent({
                   {term.trim()}
                 </span>
               </span>
-            ) : location.kind === "quick" ? (
-              <span className="font-medium capitalize text-[var(--text-primary)]">
-                {location.view}
-              </span>
-            ) : location.kind === "trash" ? (
-              <span className="font-medium text-[var(--text-primary)]">
-                Trash
-              </span>
             ) : showBreadcrumbs ? (
-              <>
-                {/* The tree lives in the Folders popover, so the breadcrumb is
-                    the one place that always names where the reader stands. */}
-                <Crumb
-                  label={floorLabel}
-                  nodeId={floorId}
-                  icon
-                  active={crumbs.length === 0}
-                  dropping={
-                    drag?.target?.type === "into" &&
-                    drag.target.parentId === floorId
-                  }
-                  onNavigate={navigate}
-                />
-                {crumbs.map((node, index) => (
-                  <div key={node.nodeId} className="flex items-center">
-                    <ChevronRight
-                      aria-hidden
-                      className="size-3.5 shrink-0 text-[var(--text-tertiary)]"
-                    />
-                    <Crumb
-                      label={node.name}
-                      nodeId={node.nodeId}
-                      active={index === crumbs.length - 1}
-                      dropping={
-                        drag?.target?.type === "into" &&
-                        drag.target.parentId === node.nodeId
-                      }
-                      onNavigate={navigate}
-                    />
-                  </div>
-                ))}
-              </>
+              <LibraryCrumbs
+                steps={location.kind === "folder" ? crumbs : crumbs.slice(0, 1)}
+                tail={location.kind === "quick" ? QUICK_LABELS[location.view] : location.kind === "trash" ? "Trash" : undefined}
+                dropNodeId={drag?.target?.type === "into" ? drag.target.parentId : undefined}
+                onNavigate={goTo}
+              />
             ) : null}
           </nav>
         </div>
 
-        <div className="flex min-w-0 flex-1 basis-[430px] flex-wrap items-center justify-end gap-2">
+        <div className="surface-bar-tools">
           {/* One search, one filter, one create menu, for both views. */}
           <SurfaceSearch
             value={term}
             descriptionId={searching ? searchHelpId : undefined}
             onChange={setTerm}
             scopeLabel={floorLabel}
-            className="min-w-[140px] flex-1 basis-[180px]"
+            className="surface-bar-search"
             onMoveToResults={() => {
               const first = rows[0];
               if (first) {
@@ -1179,48 +1175,44 @@ function LibraryOrganizerContent({
             }}
           />
 
-          <SurfaceTypeFilter filter={filter} onChange={setFilter} />
-          {/* A board's order *is* its grouping, so the two controls swap rather
-              than stacking: offering both would be two answers to one question. */}
-          {board && !searching ? (
-            <SurfaceGroupBy
-              value={boardGroupBy}
-              onChange={(next) => onBoardGroupByChange?.(next)}
-            />
-          ) : (
-            <SurfaceSortMenu
-              sortKey={sortKey}
-              direction={sortDirection}
-              onKeyChange={setSortKey}
-              onDirectionChange={setSortDirection}
-              settling={false}
-            />
-          )}
+          {location.kind === "trash" ? null : (
           <SurfaceNewMenu
-            disabled={!inFolder || busy}
-            disabledTitle={
-              !inFolder ? "Open a folder to create here" : undefined
-            }
+            disabled={busy || hostBusy}
             importing={importing}
-            onNewFolder={createFolderHere}
+            /* Recent, Favorites and Shared are ways of looking, not places:
+               new work there starts at the top, and folders are made where they will stand. */
+            onNewFolder={inFolder ? createFolderHere : undefined}
             onNewWorkspace={
-              onNewWorkspace ? () => onNewWorkspace(currentParentId) : undefined
+              onNewWorkspace && inFolder ? () => onNewWorkspace(currentParentId) : undefined
             }
             onNewWork={createWorkHere}
             onImport={
-              onImportFile ? () => importRef.current?.click() : undefined
+              onImportFile && inFolder ? () => importRef.current?.click() : undefined
             }
+            onSyncFolder={{
+              // Not connected yet, the same row connects this computer first.
+              label: "Sync a computer folder",
+              run: () => void folderSync.sync(),
+            }}
           />
-          {toolbarTrail}
-          {location.kind === "trash" && rows.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => requestPurge(rows, true)}
-              className="flex h-8 items-center rounded-control px-2.5 text-ui text-[var(--danger)] hover:bg-[var(--bg-hover)]"
-            >
-              Empty Trash
-            </button>
-          ) : null}
+          )}
+          {/* How the place is shown, narrowed and ordered, and picking several
+              at once: one menu, so the bar is where you are, search and New. */}
+          <SurfaceMoreMenu
+            view={shelfable ? (shelf ? "shelf" : "list") : undefined}
+            onViewChange={shelfable ? setView : undefined}
+            filter={filter}
+            onFilterChange={setFilter}
+            sortKey={sortKey}
+            direction={sortDirection}
+            onSortKeyChange={setSortKey}
+            onDirectionChange={setSortDirection}
+            selecting={selecting}
+            onToggleSelect={onToggleSelect}
+            quickAccess={paneOpen}
+            onToggleQuickAccess={showRail && !shelf ? togglePane : undefined}
+            onEmptyTrash={location.kind === "trash" && rows.length > 0 ? () => requestPurge(rows, true) : undefined}
+          />
         </div>
       </header>
 
@@ -1250,68 +1242,67 @@ function LibraryOrganizerContent({
         </div>
       ) : null}
 
-      <div className="relative flex min-h-0 flex-1">
+      <div className="library-body relative flex min-h-0 flex-1">
 
-        {board && !searching && inFolder ? (
-          /* Same scope, same filter, different shape. The board mounts beside
-             the rail rather than replacing the surface, so the breadcrumb, the
-             search and the rail keep meaning what they meant a moment ago. */
-          <section className="spectra-composer-clearance flex min-w-0 flex-1 flex-col overflow-hidden px-3 pt-3">
-            <WorkBoard
-              scopeNodeId={currentParentId ?? floorId}
-              groupBy={boardGroupBy}
-              typeFilter={filter}
-              selectionMode={selectionMode}
-              selectedObjectKeys={selectedObjectKeys}
-              activeWorkId={activeWorkId}
-              busy={busy || hostBusy}
+        {shelf && classFolder ? (
+          <section className="spectra-composer-clearance min-w-0 flex-1 overflow-y-auto px-8 pt-6">
+            <ClassShelf
+              key={classFolder.nodeId}
+              folderId={classFolder.nodeId}
+              name={classFolder.name}
+              identity={classWorkspaceIdentity(classFolder, book)}
+              providerClassId={book.idNamed(classFolder.name)}
+              now={now}
               onOpen={openNode}
-              onOpenContainer={(target) => {
-                if (target.workspaceId && onOpenContainer)
-                  onOpenContainer(target);
-                else navigate({ kind: "folder", nodeId: target.nodeId });
-              }}
-              onToggleContext={
-                onToggleContext
-                  ? (node) => {
-                      if (node.sourceId) onToggleContext(node.sourceId);
-                    }
-                  : undefined
-              }
-              onContextMenu={(event, node) => {
+              onMenu={(event, node) => {
                 event.preventDefault();
-                setSelection((current) =>
-                  current.ids.has(node.nodeId)
-                    ? current
-                    : selectRow(current, rows, node.nodeId, "replace"),
-                );
-                setMenu({
-                  x: event.clientX,
-                  y: event.clientY,
-                  nodeIds: selection.ids.has(node.nodeId)
-                    ? [...selection.ids]
-                    : [node.nodeId],
-                });
+                setSelection((current) => selectRow(current, rows, node.nodeId, "replace"));
+                setMenu({ x: event.clientX, y: event.clientY, nodeIds: [node.nodeId] });
               }}
-              onBeginDrag={(event, node) => {
-                const ids = selection.ids.has(node.nodeId)
-                  ? [...selection.ids]
-                  : [node.nodeId];
-                const label =
-                  ids.length === 1 ? node.name : `${ids.length} items`;
-                beginDrag(event, ids, label);
-              }}
-              onMove={(nodeId, parentNodeId) =>
-                moveNodes([nodeId], parentNodeId)
-              }
-              onCreate={({ blueprintKey, parentNodeId }) =>
-                void createWorkAt(blueprintKey, parentNodeId)
-              }
+              onCreate={() => void createWorkAt("document", classFolder.nodeId)}
+              picking={picking}
             />
           </section>
+        ) : shelf && atShelfRoot ? (
+          <section className="spectra-composer-clearance min-w-0 flex-1 overflow-y-auto px-8 pt-6">
+            <LibraryShelf
+              nodes={children.nodes}
+              loading={loading}
+              now={now}
+              onOpen={openNode}
+              onMenu={(event, node) => {
+                event.preventDefault();
+                setSelection((current) => selectRow(current, rows, node.nodeId, "replace"));
+                setMenu({ x: event.clientX, y: event.clientY, nodeIds: [node.nodeId] });
+              }}
+              onNewWorkspace={onNewWorkspace ? () => onNewWorkspace(null) : undefined}
+              picking={picking}
+            />
+          </section>
+        ) : shelf && folderShelf ? (
+          <section className="spectra-composer-clearance min-w-0 flex-1 overflow-y-auto px-8 pt-6">
+            <FolderShelf
+              key={folderShelf.nodeId}
+              folderId={folderShelf.nodeId}
+              name={folderShelf.name}
+              now={now}
+              onOpen={openNode}
+              onMenu={(event, node) => {
+                event.preventDefault();
+                setMenu({ x: event.clientX, y: event.clientY, nodeIds: [node.nodeId] });
+              }}
+              onCreate={() => void createWorkAt("document", folderShelf.nodeId)}
+              picking={picking}
+            />
+          </section>
+        ) : shelf ? (
+          <section className="min-w-0 flex-1 px-8 pt-6">
+            <LibraryShelfSkeleton />
+          </section>
         ) : (
+          <>
           <section className="@container/rows flex min-w-0 flex-1 flex-col">
-            <div className="flex h-7 shrink-0 items-center gap-2 border-b border-[var(--border-subtle)] px-4 pr-3.5 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+            <div className="flex h-7 shrink-0 items-center gap-2 border-b border-[var(--border-subtle)] px-4 pr-3.5 text-micro font-semibold text-[var(--text-tertiary)]">
               <span className="w-[22px] shrink-0" />
               <ColumnLabel
                 label="Name"
@@ -1419,7 +1410,9 @@ function LibraryOrganizerContent({
                 <div
                   className="relative"
                   style={{ height: rows.length * ROW_HEIGHT }}
+                  {...peek.handlers}
                 >
+                  {peek.card}
                   {visible.map((node, index) => (
                     <OrganizerRow
                       key={node.nodeId}
@@ -1446,6 +1439,11 @@ function LibraryOrganizerContent({
                       picking={selectionMode}
                       now={now}
                       callbacks={rowCallbacks}
+                      ink={
+                        node.workspace?.starterKey === "managebac-class"
+                          ? book.named(node.name)?.ink
+                          : undefined
+                      }
                       syncLabel={
                         node.sourceId
                           ? syncByWorkId.get(node.sourceId)?.label
@@ -1484,10 +1482,14 @@ function LibraryOrganizerContent({
                 </span>
               ) : null}
               <span className="ml-auto hidden @3xl/rows:block">
-                Drag to move · hold Alt to leave a reference · F2 renames
+                Drag to move, hold Alt to leave a reference, F2 to rename
               </span>
             </footer>
           </section>
+          {showRail && paneOpen ? (
+            <aside className="library-quick-pane spectra-composer-clearance">{rail}</aside>
+          ) : null}
+          </>
         )}
       </div>
 
@@ -1556,7 +1558,7 @@ function LibraryOrganizerContent({
         />
       ) : null}
       {selectedNodes.length > 1 ? (
-        <div className="spectra-composer-above pointer-events-none fixed left-1/2 z-toast -translate-x-1/2 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3.5 py-1.5 text-caption text-[var(--text-secondary)] shadow-[var(--shadow-lg)]">
+        <div className="spectra-composer-above pointer-events-none fixed left-1/2 z-toast -translate-x-1/2 rounded-chip border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3.5 py-1.5 text-caption text-[var(--text-secondary)] shadow-[var(--shadow-lg)]">
           {selectedNodes.length} selected · drag them anywhere
         </div>
       ) : null}
@@ -1599,7 +1601,7 @@ function ColumnLabel({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex items-center gap-1 text-micro font-semibold uppercase tracking-[0.08em] transition-colors hover:text-[var(--text-secondary)]",
+        "flex items-center gap-1 text-micro font-semibold transition-colors hover:text-[var(--text-secondary)]",
         sorted ? "text-[var(--text-secondary)]" : "text-[var(--text-tertiary)]",
         className,
       )}
@@ -1618,42 +1620,6 @@ function ColumnLabel({
 function dropTarget(parentId: string | null) {
   if (typeof document === "undefined") return null;
   return document.querySelector(`[data-drop-node="${CSS.escape(parentId ?? "root")}"]`);
-}
-
-function Crumb({
-  label,
-  nodeId,
-  active,
-  dropping,
-  icon = false,
-  onNavigate,
-}: {
-  label: string;
-  nodeId: string | null;
-  active: boolean;
-  dropping: boolean;
-  icon?: boolean;
-  onNavigate: (location: OrganizerLocation) => void;
-}) {
-  return (
-    <button
-      type="button"
-      data-drop-node={nodeId ?? "root"}
-      data-drop-kind="container"
-      data-life-receive
-      onClick={() => onNavigate({ kind: "folder", nodeId })}
-      className={cn(
-        "flex min-w-0 items-center gap-1.5 rounded-chip px-1.5 py-1 transition-colors",
-        active
-          ? "font-medium text-[var(--text-primary)]"
-          : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
-        dropping && "ring-2 ring-brand",
-      )}
-    >
-      {icon ? <Home className="size-3.5 shrink-0" strokeWidth={1.9} /> : null}
-      <span className="whitespace-nowrap">{label}</span>
-    </button>
-  );
 }
 
 function NodeMenu({

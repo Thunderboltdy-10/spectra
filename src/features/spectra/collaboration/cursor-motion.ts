@@ -36,15 +36,16 @@ export type TravelSample = {
   speed: number;
 };
 
-const MIN_JOURNEY_MS = 120;
-const MAX_JOURNEY_MS = 460;
+const MIN_JOURNEY_MS = 140;
+const MAX_JOURNEY_MS = 560;
 const HOP_DISTANCE_PX = 96;
 
-/** Distance-scaled travel time. Short hops stay under 180ms; even a full-pane
- * sweep completes in under half a second so the AI never feels slow. */
+/** Travel time by Fitts's law, as a hand moves a mouse: quick for a short hop,
+ * growing ever more slowly with distance, so a full-pane sweep still lands in
+ * about half a second and nothing jumps. */
 export function travelDuration(distancePx: number): number {
   if (!Number.isFinite(distancePx) || distancePx <= 0) return MIN_JOURNEY_MS;
-  const scaled = 70 + distancePx * 0.42;
+  const scaled = 110 + 72 * Math.log2(1 + distancePx / 24);
   return Math.round(Math.max(MIN_JOURNEY_MS, Math.min(MAX_JOURNEY_MS, scaled)));
 }
 

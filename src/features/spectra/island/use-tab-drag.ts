@@ -9,7 +9,7 @@ import { previewTabs, type IslandSide, type IslandTab } from "./island-model";
  * Arranging the island's tabs by hand (ISLAND.md, "Arranging tabs"). The tab
  * lifts into a ghost that follows the pointer; its slot stays behind, empty,
  * and moves through the row as the pointer crosses neighbours, so the others
- * part to make room (FLIP). Crossing the + ripples it and changes the side.
+ * part to make room (FLIP). Crossing the divider ripples it and changes the side.
  * Flicking a done tab to the right throws it into history.
  */
 
@@ -38,7 +38,7 @@ export function useTabDrag({
   play,
   done,
   tabRefs,
-  plusRef,
+  dividerRef,
   onStart,
   onPlace,
   onDismiss,
@@ -46,7 +46,7 @@ export function useTabDrag({
   play: readonly IslandTab[];
   done: readonly IslandTab[];
   tabRefs: RefObject<Map<string, HTMLButtonElement>>;
-  plusRef: RefObject<HTMLElement | null>;
+  dividerRef: RefObject<HTMLElement | null>;
   onStart: () => void;
   onPlace: (tab: IslandTab, side: IslandSide, index: number) => void;
   onDismiss: (tab: IslandTab) => void;
@@ -99,8 +99,8 @@ export function useTabDrag({
       if (life.on && Math.abs(speed) > 40) life.wake(event.clientX, current.rect.top + current.rect.height / 2, speed, 0);
 
       // Which side, and where in it.
-      const plus = plusRef.current?.getBoundingClientRect();
-      const side: IslandSide = plus && event.clientX > plus.left + plus.width / 2 ? "done" : "play";
+      const divider = dividerRef.current?.getBoundingClientRect();
+      const side: IslandSide = divider && event.clientX > divider.left + divider.width / 2 ? "done" : "play";
       const others = previewRef.current[side].filter((tab) => tab.runId !== current.tab.runId);
       let index = 0;
       for (const tab of others) {
@@ -109,7 +109,7 @@ export function useTabDrag({
         const r = element.getBoundingClientRect();
         if (event.clientX > r.left + r.width / 2) index += 1;
       }
-      if (side !== current.side && plus && life.on) life.pulse(plus.left + plus.width / 2, plus.top + plus.height / 2, 0.8, "spectrum");
+      if (side !== current.side && divider && life.on) life.pulse(divider.left + divider.width / 2, divider.top + divider.height / 2, 0.8, "spectrum");
       if (side !== current.side || index !== current.index) {
         current.side = side;
         current.index = index;
@@ -175,7 +175,7 @@ export function useTabDrag({
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, [finish, moveGhost, plusRef, tabRefs]);
+  }, [finish, moveGhost, dividerRef, tabRefs]);
 
   const onPointerDown = useCallback((tab: IslandTab, event: ReactPointerEvent<HTMLElement>) => {
     if (event.button !== 0 || drag.current) return;

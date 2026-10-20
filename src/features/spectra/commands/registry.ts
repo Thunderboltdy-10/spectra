@@ -15,9 +15,9 @@ export const COMMAND_TABS: Record<WorkType, readonly string[]> = {
   sheets: ["Insert", "Format", "Data", "Formula", "Review"],
   presentation: ["Insert", "Design", "Arrange", "Animate", "Present"],
   quiz: ["General", "Questions", "Review"],
-  flashcard_deck: ["General", "Cards", "Study"],
+  flashcard_deck: ["General", "Cards", "Export"],
   planner_task: ["General", "Plan"],
-  code: ["General", "Run", "Files"],
+  code: ["General", "Files", "Export"],
   whiteboard: ["General", "Insert", "Arrange"],
   agent: ["General", "Configure", "Evaluate", "Release"],
   timetable: ["General", "Schedule"],
@@ -28,7 +28,6 @@ const contextualByType: Partial<Record<WorkType, readonly string[]>> = {
   sheets: ["Chart", "Formula"],
   presentation: ["Shape", "Transition"],
   whiteboard: ["Shape"],
-  code: ["Code output"],
 };
 
 /** The contextual tabs a type may raise. A studio may only emit these. */
@@ -80,7 +79,7 @@ function inferNamedTab(type: WorkType, binding: CommandBinding) {
     if (COMMAND_TABS[type].includes("Layout")) return "Layout";
     return type === "planner_task" ? "Plan" : "General";
   }
-  if (/\b(?:un|re)?(?:run|preview|build|test)/.test(value)) return type === "code" ? "Run" : "Evaluate";
+  if (/\b(?:un|re)?(?:run|preview|build|test)/.test(value)) return type === "code" ? "General" : "Evaluate";
   if (/\b(?:present|play|slideshow)/.test(value)) return "Present";
   if (/\b(?:reference|citation|source)/.test(value)) return COMMAND_TABS[type].includes("References") ? "References" : "General";
   return "General";
@@ -109,7 +108,6 @@ function inferContextualTab(type: WorkType, binding: CommandBinding) {
     if (/shape|align|arrange|group/.test(value) && !/\b(?:insert|add(?!ress)|new|create)/.test(value)) return "Shape";
   }
   if (type === "whiteboard" && /shape|align|arrange|group|lock/.test(value)) return "Shape";
-  if (type === "code" && /preview|output|console|run/.test(value)) return "Code output";
   return undefined;
 }
 

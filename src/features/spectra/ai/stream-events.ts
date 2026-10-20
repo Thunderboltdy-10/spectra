@@ -258,6 +258,8 @@ export const spectraStreamEventSchema = z.discriminatedUnion("type", [
       label: z.string(),
       status: z.enum(["running", "done", "error"]),
       durationMs: z.number().optional(),
+      /** The artifact a running step works in. */
+      work: z.string().optional(),
     })
     .strict(),
   z

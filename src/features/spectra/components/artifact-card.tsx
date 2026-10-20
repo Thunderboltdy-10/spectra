@@ -7,11 +7,12 @@ import {
   type PointerEvent,
   type ReactNode,
 } from "react";
-import { Check, MoreHorizontal, Share2, Building2, Loader2 } from "@/components/icons/glyph-icons";
+import { Check, MoreHorizontal, Share2, Building2 } from "@/components/icons/glyph-icons";
+import { WorkingMark } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { useArtifactAiActivity } from "../collaboration/artifact-ai-activity";
-import { workTypeMeta } from "../artifacts/presentation";
+import { presentWork } from "../artifacts/presentation";
 export { workTypeMeta } from "../artifacts/presentation";
 import {
   CardTypeIcon,
@@ -20,31 +21,7 @@ import {
 } from "./card-system";
 import { previewText } from "./preview-text";
 import { formatByteCount } from "../../../../shared/human-format";
-
-const AI_EDITED_FLASH_FALLBACK_MS = 90_000;
-
-function resolveCardAiState(
-  aiState: ArtifactCardView["aiState"] | undefined,
-  updatedAt: number | undefined,
-  now: number,
-  expiresAt?: number,
-): ArtifactCardView["aiState"] | undefined {
-  if (aiState === "failed") return aiState;
-  if (aiState === "creating" || aiState === "updating") {
-    // Convex can leave working states after a failed/settled run. Without a
-    // fresh update window the card must stop the infinite working sweep.
-    const fresh = typeof updatedAt === "number" && now - updatedAt < 45_000;
-    return fresh ? aiState : undefined;
-  }
-  if (aiState === "edited" || aiState === "generated") {
-    const expiry =
-      expiresAt ??
-      (updatedAt ? updatedAt + AI_EDITED_FLASH_FALLBACK_MS : undefined);
-    if (expiry && expiry > now) return "edited";
-    return undefined;
-  }
-  return aiState;
-}
+import { useCardAiState, type CardAiState } from "./use-card-ai-state";
 
 /** How long after it was made a card still arrives, rather than simply being there. */
 const ARRIVAL_WINDOW_MS = 30_000;
@@ -87,7 +64,7 @@ export type ArtifactCardView = {
   pinned?: boolean;
   variant?: string;
   metrics?: Record<string, string | number>;
-  aiState?: "generated" | "edited" | "creating" | "updating" | "failed";
+  aiState?: CardAiState;
   aiProgress?: number;
 };
 
@@ -121,14 +98,13 @@ export function ArtifactCard({
   onContextMenu?: (event: MouseEvent) => void;
   onBeginDrag?: (event: PointerEvent) => void;
 }) {
-  const meta = workTypeMeta[artifact.blueprintKey];
+  const meta = presentWork(artifact.blueprintKey, artifact.title);
   const Icon = meta.icon;
   const interactive = Boolean(onSelect);
   const metrics = Object.entries(artifact.metrics ?? {}).slice(
     0,
     size === "compact" ? 0 : 4,
   );
-  const [aiClock, setAiClock] = useState(0);
   const [actionsOpen, setActionsOpen] = useState(false);
   const actionsRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -140,47 +116,9 @@ export function ArtifactCard({
     document.addEventListener("pointerdown", close);
     return () => document.removeEventListener("pointerdown", close);
   }, [actionsOpen]);
-  useEffect(() => {
-    setAiClock(Date.now());
-  }, []);
-  useEffect(() => {
-    if (!aiClock) return;
-    const resolved = resolveCardAiState(
-      artifact.aiState,
-      artifact.updatedAt,
-      aiClock,
-      artifact.aiStateExpiresAt,
-    );
-    if (
-      resolved !== "edited" &&
-      resolved !== "generated" &&
-      resolved !== "creating" &&
-      resolved !== "updating"
-    )
-      return;
-    const expiry =
-      resolved === "creating" || resolved === "updating"
-        ? (artifact.updatedAt ?? aiClock) + 45_000
-        : (artifact.aiStateExpiresAt ??
-          (artifact.updatedAt
-            ? artifact.updatedAt + AI_EDITED_FLASH_FALLBACK_MS
-            : undefined));
-    if (!expiry || expiry <= aiClock) return;
-    const timer = window.setTimeout(
-      () => setAiClock(Date.now()),
-      Math.max(16, expiry - Date.now() + 24),
-    );
-    return () => window.clearTimeout(timer);
-  }, [
-    aiClock,
-    artifact.aiState,
-    artifact.aiStateExpiresAt,
-    artifact.updatedAt,
-  ]);
-  const liveAiState = resolveCardAiState(
+  const { state: liveAiState, clock: aiClock } = useCardAiState(
     artifact.aiState,
     artifact.updatedAt,
-    aiClock,
     artifact.aiStateExpiresAt,
   );
   const liveAiActivity = useArtifactAiActivity(artifact.id);
@@ -275,7 +213,7 @@ export function ArtifactCard({
         <CardTypeIcon icon={Icon} color={meta.color} />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-1.5 overflow-hidden pr-4">
-            <span className="shrink-0 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+            <span className="shrink-0 text-micro font-semibold text-[var(--text-tertiary)]">
               {meta.label}
             </span>
             {/* The generic chip is only for work we cannot yet describe. Once a
@@ -285,9 +223,9 @@ export function ArtifactCard({
             (liveAiActivity ||
               liveAiState === "creating" ||
               liveAiState === "updating") ? (
-              <span className="spectra-card-ai-activity inline-flex shrink-0 items-center gap-1 rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))] px-1.5 py-0.5 text-micro font-semibold text-[var(--accent-cyan)]">
-                <Loader2 className="h-2.5 w-2.5" aria-hidden="true" />
-                AI {liveAiState === "creating" ? "building" : "editing"}
+              <span className="inline-flex shrink-0 items-center gap-1.5 text-micro font-medium text-[var(--text-secondary)]">
+                <WorkingMark />
+                {liveAiState === "creating" ? "Spectra is making this" : "Spectra is editing"}
               </span>
             ) : null}
             {artifact.shared ? (
@@ -379,7 +317,7 @@ export function ArtifactCard({
               role="status"
               aria-live="polite"
             >
-              <Loader2 className="spectra-card-activity-spark" />
+              <WorkingMark className="spectra-card-activity-mark" />
               <span className="spectra-card-activity-text">
                 {liveAiActivity.label ? (
                   <strong>{liveAiActivity.label}</strong>

@@ -25,44 +25,6 @@
     color-mix(in oklab, var(--brand-primary) 8%, transparent);
 }
 
-.agent-library-card {
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--border-default);
-  border-radius: var(--card-radius);
-  background: var(--bg-elevated);
-  box-shadow: 0 1px 2px rgba(27, 20, 12, 0.025);
-  transition:
-    transform var(--motion-base) var(--ease-standard),
-    border-color var(--motion-base) var(--ease-standard),
-    box-shadow var(--motion-base) var(--ease-standard);
-}
-
-.agent-library-card:hover {
-  transform: translateY(-2px);
-  border-color: color-mix(
-    in oklab,
-    var(--agent-color) 24%,
-    var(--border-default)
-  );
-  box-shadow: 0 12px 30px rgba(27, 20, 12, 0.075);
-}
-
-.agent-library-card__body {
-  display: block;
-  width: 100%;
-  min-height: 183px;
-  padding: 13px 13px 10px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .agent-library-card,
-  .agent-library-card__body > span:first-child > span:first-child {
-    transition: none !important;
-    transform: none !important;
-  }
-}
-
 /* Spectra reference system -------------------------------------------------
    Shared visual contract. Canonical tokens live in the later :root block;
    these utilities only apply chrome grammar and readable density. */
@@ -94,6 +56,84 @@ body {
 
 .spectra-shell-rail-marker[data-visible] {
   opacity: 1;
+}
+
+/* The desk and the sheet (SHELL.md, "The stage"): the rail sits on the desk,
+   and the page is one sheet lifted off it, inset by a hair on three sides so
+   its edge reads as paper, not as a pane. */
+.spectra-app-shell {
+  background: var(--bg-desk);
+}
+
+.spectra-sheet {
+  height: calc(100dvh - 16px);
+  margin: 8px 8px 8px 0;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--bg-primary);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 1px 2px rgb(52 40 28 / 0.05),
+    0 12px 32px -18px rgb(52 40 28 / 0.18);
+}
+
+.dark .spectra-sheet {
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 12px 32px -18px rgb(0 0 0 / 0.6);
+}
+
+/* The destination open in the rail is a scrap of the page's own paper. */
+.spectra-rail-current {
+  background: var(--bg-primary);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 1px 2px rgb(52 40 28 / 0.06);
+}
+
+/* Collapsed, the prism is what opens the rail: pointed at, it turns into the
+   rail glyph, so the brand and the control are one thing in one place. */
+.spectra-rail-opener {
+  position: relative;
+}
+
+.spectra-rail-opener > * {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    transform var(--motion-base) var(--ease-standard);
+}
+
+.spectra-rail-opener-glyph {
+  opacity: 0;
+  transform: scale(0.8);
+  color: var(--text-secondary);
+}
+
+.spectra-rail-opener:is(:hover, :focus-visible) .spectra-rail-opener-brand {
+  opacity: 0;
+  transform: scale(0.8) rotate(-12deg);
+}
+
+.spectra-rail-opener:is(:hover, :focus-visible) .spectra-rail-opener-glyph {
+  opacity: 1;
+  transform: none;
+}
+
+/* A thread in the rail is marked in the ink of the workspace it was started
+   in, the stroke the Library gives loose things; one from nowhere keeps the
+   thread colour. */
+.spectra-rail-thread-mark {
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--thread-ink, color-mix(in oklab, var(--type-chat) 60%, transparent));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spectra-rail-opener > * {
+    transition: none;
+  }
 }
 
 .spectra-global-stage {
@@ -138,34 +178,6 @@ body {
   border-radius: var(--control-radius) !important;
 }
 
-.spectra-document-studio,
-.spectra-document-studio[data-layout="continuous"]
-  .spectra-document-canvas-shell {
-  background:
-    radial-gradient(
-      circle at 16% 2%,
-      rgba(21, 155, 118, 0.02),
-      transparent 24%
-    ),
-    #faf9f8 !important;
-}
-
-.spectra-document-studio[data-layout="continuous"] .tiptap-root {
-  width: min(920px, calc(100% - 168px));
-  max-width: 920px !important;
-  margin-left: auto !important;
-  margin-right: auto !important;
-}
-
-.spectra-document-studio[data-layout="continuous"] .ProseMirror {
-  /* Side inset is owned by the later continuous rule; keep only bottom air here. */
-  padding-bottom: 90px !important;
-}
-
-.spectra-document-studio[data-layout="continuous"] .ProseMirror > :first-child {
-  margin-top: 0 !important;
-}
-
 .spectra-artifact-studio[data-blueprint="planner_task"]
   .spectra-planner-description
   > div[role="toolbar"] {
@@ -173,11 +185,6 @@ body {
   height: 38px;
 }
 
-.spectra-artifact-studio[data-blueprint="planner_task"]
-  .spectra-planner-description
-  .ProseMirror {
-  min-height: 82px !important;
-}
 .spectra-artifact-studio[data-blueprint="planner_task"]
   [data-side-card-title="schedule"] {
   order: 2;
@@ -191,168 +198,8 @@ body {
   order: 6;
 }
 
-/* Quiz authoring follows the reference's fast primary path: question, options,
-   explanation and tags stay visible; review metadata remains one disclosure away. */
-.spectra-quiz-question-editor textarea[class*="min-h-[110px]"] {
-  min-height: 78px !important;
-}
+/* A quiz question: spectra-quiz.css. */
 
-.spectra-quiz-tag-editor,
-.spectra-quiz-standard-editor {
-  display: flex;
-  min-height: 32px;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 5px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--control-radius);
-  background: var(--bg-primary);
-  padding: 4px 6px;
-}
-
-.spectra-quiz-tag-editor > span,
-.spectra-quiz-standard-editor > span {
-  display: inline-flex;
-  height: 22px;
-  align-items: center;
-  gap: 4px;
-  border-radius: var(--chip-radius);
-  background: color-mix(in oklab, var(--brand-primary) 8%, var(--bg-primary));
-  padding: 0 7px;
-  color: #6753cf;
-  font-size: var(--text-micro);
-  white-space: nowrap;
-}
-
-.spectra-quiz-tag-editor > span button,
-.spectra-quiz-standard-editor > span button {
-  display: grid;
-  place-items: center;
-  color: currentColor;
-  opacity: 0.65;
-}
-
-.spectra-quiz-tag-editor > input,
-.spectra-quiz-standard-editor > input {
-  min-width: 86px;
-  flex: 1 1 86px;
-  min-height: 22px !important;
-  height: 22px !important;
-  border: 0 !important;
-  background: transparent !important;
-  padding: 0 3px !important;
-  font-size: var(--text-micro);
-  outline: none;
-}
-
-.spectra-quiz-content-advanced {
-  border-top: 1px solid var(--border-subtle);
-  padding-top: 10px;
-}
-
-.spectra-quiz-content-advanced > summary {
-  display: flex;
-  height: 28px;
-  cursor: pointer;
-  list-style: none;
-  align-items: center;
-  gap: 7px;
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 600;
-}
-
-.spectra-quiz-content-advanced > summary::-webkit-details-marker {
-  display: none;
-}
-
-.spectra-quiz-content-advanced[open] > summary svg:last-child {
-  transform: rotate(180deg);
-}
-
-.spectra-artifact-studio[data-blueprint="quiz"] [data-quiz-panel="editor"] {
-  padding-left: 20px !important;
-  padding-right: 20px !important;
-}
-
-.spectra-quiz-question-editor
-  section.mt-4
-  .space-y-2
-  > :not([hidden])
-  ~ :not([hidden]) {
-  margin-top: 5px !important;
-}
-
-.spectra-quiz-question-editor section.mt-4 .space-y-2 > :not(:last-child) {
-  margin-block-end: 5px !important;
-}
-
-.spectra-quiz-question-editor section.mt-4 .space-y-2 {
-  display: grid;
-  gap: 4px !important;
-}
-
-.spectra-quiz-question-editor section.mt-4 .space-y-2 > * {
-  margin: 0 !important;
-}
-
-.spectra-quiz-question-editor section.mt-4 > p.mt-2 {
-  margin-top: 4px !important;
-}
-
-.spectra-quiz-question-editor > .mt-4 {
-  margin-top: 11px !important;
-}
-
-.spectra-artifact-studio[data-blueprint="quiz"] [data-quiz-panel="settings"] {
-  padding-top: 32px !important;
-}
-
-.spectra-artifact-studio[data-blueprint="quiz"]
-  [data-quiz-panel="settings"]
-  :is(input, select) {
-  min-height: 32px !important;
-  height: 32px !important;
-}
-
-.spectra-artifact-studio[data-blueprint="quiz"]
-  [data-quiz-panel="settings"]
-  .spectra-quiz-media {
-  order: 6;
-  position: relative;
-  margin-top: 40px;
-}
-
-.spectra-artifact-studio[data-blueprint="quiz"]
-  [data-quiz-panel="settings"]
-  .spectra-quiz-media::before {
-  content: "Media (optional)";
-  position: absolute;
-  top: -25px;
-  left: 0;
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 500;
-}
-
-.spectra-quiz-media > label:only-child > span {
-  display: block;
-  line-height: 16px;
-}
-
-.spectra-quiz-media > label:only-child > strong {
-  margin-top: 2px;
-  color: var(--success);
-  font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.spectra-artifact-studio[data-blueprint="quiz"]
-  [data-quiz-panel="settings"]
-  .spectra-quiz-advanced {
-  order: 7;
-}
 .spectra-artifact-studio[data-blueprint="planner_task"]
   [data-side-card-title="schedule"] {
   order: 2;
@@ -425,7 +272,7 @@ body {
 }
 
 .spectra-deck-progress h3 {
-  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-display);
   font-size: 17px;
   font-weight: 570;
   color: var(--text-primary);
@@ -473,7 +320,7 @@ body {
 
 .spectra-deck-progress-bands strong {
   display: block;
-  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-display);
   font-size: 20px;
   font-weight: 560;
   line-height: 1.1;
@@ -566,7 +413,7 @@ body {
 .spectra-deck-progress-empty strong {
   display: block;
   margin-bottom: 5px;
-  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-display);
   font-size: 14px;
   color: var(--text-primary);
 }
@@ -663,8 +510,6 @@ body {
   color: #6b57d5;
   font-size: var(--text-micro);
   font-weight: 760;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
 }
 
 /* A card face is the shared prose at study size, in the display face. */
@@ -705,76 +550,10 @@ body {
 .spectra-deck-card-editor {
   border: 0 !important;
   background: transparent !important;
-  padding: 5px 18px 24px !important;
-}
-
-.spectra-deck-card-heading {
-  display: none !important;
-}
-
-.spectra-deck-card-editor .spectra-deck-swap {
-  box-shadow: 0 3px 10px rgba(30, 26, 23, 0.08);
-}
-
-.spectra-deck-card-editor .my-3:has(> .spectra-deck-swap) {
-  margin-top: 0 !important;
-  margin-bottom: -13px !important;
-  transform: translateY(-5px);
-}
-
-.spectra-deck-card-editor [data-card-face="front"] textarea {
-  min-height: 168px !important;
-  height: 168px;
-  padding: 26px 28px !important;
-  font-size: 20px !important;
-  line-height: 1.35 !important;
-}
-
-.spectra-card-face-shell {
-  overflow: hidden;
-  border: 1px solid var(--border-default);
-  border-radius: var(--card-radius);
-  background: var(--bg-primary);
-  box-shadow: 0 18px 42px -34px rgba(57, 38, 97, 0.38);
-}
-
-.spectra-deck-card-editor [data-card-face="back"] textarea {
-  display: block;
-  min-height: 120px !important;
-  height: 120px;
-  border: 0 !important;
-  border-radius: 0 !important;
-  padding: 22px 28px !important;
-  font-size: 20px !important;
-  line-height: 1.35 !important;
-  box-shadow: none !important;
-}
-
-.spectra-card-face-note {
-  display: block;
-  width: 100%;
-  height: 56px;
-  border: 0;
-  border-top: 1px solid var(--border-default);
-  background: color-mix(
-    in oklab,
-    var(--bg-elevated) 84%,
-    transparent
-  ) !important;
-  padding: 0 16px;
-  font-size: 11px;
-  color: var(--text-secondary);
-  outline: none;
-}
-
-.spectra-card-face-note::placeholder {
-  color: var(--text-tertiary);
+  padding: 0 0 40px !important;
 }
 
 /* Final inspector and deck metadata overrides. */
-.spectra-deck-tag-field {
-  margin-top: 32px !important;
-}
 
 .spectra-studio-details {
   height: calc(100dvh - 148px) !important;
@@ -820,10 +599,6 @@ body {
 
 .spectra-inspector-action:disabled {
   opacity: 0.48;
-}
-
-.spectra-deck-tag-field {
-  margin-top: 32px !important;
 }
 
 .spectra-studio-details {
@@ -882,6 +657,13 @@ body {
 
 .spectra-studio-split-placeholder {
   animation: none;
+}
+
+/* Beside an open panel, the page keeps its own layers to itself: a cursor,
+   peek, workbar or entrance animation in the page can rise over the page's
+   own content but never over the panel next to it. */
+:has(> [data-studio-panel]) > :not([data-studio-panel]) {
+  isolation: isolate;
 }
 
 .spectra-workbench-frame {
@@ -948,10 +730,6 @@ body {
   padding-inline: var(--spectra-studio-inline-inset) !important;
 }
 
-.spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-main,
-.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-main {
-  padding-inline: var(--spectra-studio-inline-inset) !important;
-}
 
 .spectra-artifact-studio[data-studio-mode="split"] .spectra-editor-workbar,
 .spectra-artifact-studio[data-studio-mode="tab"] .spectra-editor-workbar {
@@ -1031,9 +809,7 @@ body {
 }
 
 @container spectra-studio-split (max-width: 460px) {
-  .spectra-artifact-studio[data-studio-mode="split"] [data-quiz-panel="editor"],
-  .spectra-artifact-studio[data-studio-mode="split"]
-    [data-quiz-panel="settings"] {
+  .spectra-artifact-studio[data-studio-mode="split"] [data-quiz-panel="editor"] {
     min-width: 0 !important;
     width: 100% !important;
   }
@@ -1089,56 +865,6 @@ body {
   background: transparent;
 }
 
-.spectra-quiz-studio [data-quiz-panel="settings"] {
-  background: transparent;
-}
-
-.spectra-quiz-question-editor > .mb-4 {
-  margin-bottom: 10px;
-}
-
-.spectra-quiz-type-row {
-  display: grid;
-  grid-template-columns: 34px 190px;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-secondary);
-  font-size: 11px;
-}
-
-.spectra-quiz-question-editor > label:first-of-type,
-.spectra-quiz-question-editor > div:first-of-type + label {
-  max-width: 190px;
-}
-
-.spectra-quiz-question-editor input,
-.spectra-quiz-question-editor select,
-.spectra-quiz-studio [data-quiz-panel="settings"] input,
-.spectra-quiz-studio [data-quiz-panel="settings"] select {
-  min-height: 32px;
-}
-
-.spectra-quiz-question-editor section.mt-4 {
-  margin-top: 12px;
-}
-
-.spectra-quiz-question-editor section.mt-4 .space-y-2 {
-  gap: 5px;
-}
-
-.spectra-quiz-question-editor section.mt-4 input {
-  height: 30px;
-  min-height: 30px;
-}
-
-.spectra-quiz-studio [data-quiz-panel="settings"] > div {
-  gap: 12px;
-}
-
-.spectra-quiz-studio [data-quiz-panel="settings"] .spectra-quiz-media {
-  min-height: 104px;
-}
-
 .spectra-studio-details [data-spectra-card="side"] {
   padding: 12px;
 }
@@ -1176,8 +902,8 @@ body {
   display: none;
 }
 
-.spectra-flashcard-studio textarea {
-  font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+.spectra-flashcard-studio textarea:not(.editor-sheet *, .spectra-deck-study *) {
+  font-family: var(--font-sans);
 }
 
 .spectra-studio-details {
@@ -1190,8 +916,8 @@ body {
   box-shadow: none;
 }
 
-.spectra-flashcard-studio textarea {
-  font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+.spectra-flashcard-studio textarea:not(.editor-sheet *, .spectra-deck-study *) {
+  font-family: var(--font-sans);
 }
 
 .spectra-studio-details {
@@ -1362,10 +1088,8 @@ body {
   color: #fff;
   font-size: var(--text-micro);
   font-weight: 700;
-  letter-spacing: 0.03em;
   opacity: 0;
   pointer-events: none;
-  text-transform: uppercase;
   transition: opacity var(--motion-fast) var(--ease-standard);
 }
 
@@ -1467,6 +1191,23 @@ body {
 .whiteboard-node-text[data-editing="true"] {
   overflow: visible;
   cursor: text;
+}
+
+/* An empty field says what goes in it, at a whisper, in its own size. */
+.whiteboard-node-placeholder {
+  margin: 0;
+  font-size: var(--prose-size, 14px);
+  line-height: var(--prose-leading);
+  opacity: 0.38;
+  pointer-events: none;
+}
+
+/* Text has no frame of its own; the board draws one where it would be lost:
+   always while it is empty, on hover once it has words. */
+.whiteboard-canvas:not([data-compact]) .whiteboard-node[data-type="text"]:not([data-selected]):hover,
+.whiteboard-node[data-type="text"]:not([data-selected]):has(.whiteboard-node-placeholder) {
+  outline: 1px dashed color-mix(in oklab, var(--text-primary) 28%, transparent);
+  outline-offset: 2px;
 }
 
 .whiteboard-node[data-type="card"] {
@@ -1986,8 +1727,6 @@ body {
   color: var(--text-tertiary);
   font-size: var(--text-micro);
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .whiteboard-inspector > div:not(:first-child) {
@@ -2006,19 +1745,13 @@ body {
   background: var(--bg-elevated);
   color: var(--text-primary);
   font-size: 11px;
-  letter-spacing: normal;
-  text-transform: none;
 }
 
 /* The inspector's icon buttons are 28px squares, and Spectra's Select renders a
-   button too, so the trigger needs its own size or it collapses into one. The
-   two resets stop the panel's uppercase label styling from inheriting into the
-   chosen value. */
+   button too, so the trigger needs its own size or it collapses into one. */
 .whiteboard-inspector [role="combobox"] {
   width: 100%;
   height: 32px;
-  letter-spacing: normal;
-  text-transform: none;
 }
 
 .whiteboard-color-fields input[type="color"] {
@@ -2081,7 +1814,7 @@ body {
 }
 
 .whiteboard-presenter-bar strong {
-  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-display);
   font-size: 17px;
 }
 
@@ -2187,7 +1920,7 @@ body {
   gap: 7px;
   padding: 6px 10px;
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-chip);
   background: rgba(255, 255, 255, 0.94);
   box-shadow: 0 8px 22px rgba(37, 50, 42, 0.09);
   color: var(--text-secondary);
@@ -2242,8 +1975,6 @@ body {
   color: var(--text-primary);
   font-size: var(--text-micro);
   font-weight: 760;
-  letter-spacing: 0.055em;
-  text-transform: uppercase;
 }
 
 .timetable-overview > section > button {
@@ -2340,7 +2071,6 @@ body {
 .timetable-week-header > button span {
   font-size: var(--text-micro);
   font-weight: 650;
-  text-transform: uppercase;
 }
 
 .timetable-week-header > button strong {
@@ -2566,8 +2296,6 @@ body {
   background: var(--bg-elevated);
   color: var(--text-tertiary);
   font-size: var(--text-micro);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
 }
 
 .timetable-month > section {
@@ -2634,7 +2362,7 @@ body {
 }
 
 .timetable-agenda > section > header strong {
-  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-display);
   font-size: 15px;
 }
 
@@ -2995,8 +2723,6 @@ body {
   color: var(--text-secondary);
   font-size: var(--text-micro);
   font-weight: 720;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .timetable-event-editor > label:has(svg) {
@@ -3045,8 +2771,6 @@ body {
   color: var(--text-secondary);
   font-size: var(--text-micro);
   font-weight: 720;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .timetable-color-field > span {
@@ -3287,16 +3011,23 @@ body {
     var(--bg-elevated)
   );
 
-  /* Surfaces — near-white warm paper, calm layered elevation */
-  --bg-primary: #fbfaf8;
-  --bg-secondary: #f6f4f0;
-  --bg-tertiary: #efede8;
-  --bg-sidebar: var(--bg-primary);
-  --bg-user-bubble: #f3efff;
-  --bg-elevated: #fffefd;
-  --bg-elevated-rgb: 255, 254, 253;
-  --bg-hover: #f1efeb;
-  --bg-overlay: rgba(12, 18, 28, 0.22);
+  /* Surfaces — a toned paper with lighter sheets on it: work lifts off the
+     page by tone, so the page itself never has to be white. The sidebar sits
+     one step deeper, so the shell reads as a frame around the work. */
+  --bg-primary: #f3f1ec;
+  --bg-secondary: #eae8e2;
+  --bg-tertiary: #e1ded7;
+  --bg-sidebar: #ebe9e3;
+  /* The desk the rail sits on; every page is a sheet lifted off it. */
+  --bg-desk: #e4e0d8;
+  --bg-desk-hover: #d9d5cc;
+  --bg-user-bubble: #ebe6fb;
+  --bg-elevated: #fbfaf7;
+  --bg-elevated-rgb: 251, 250, 247;
+  --bg-hover: #e7e4de;
+  /* Nothing behind a dialog is dimmed or blurred: the page stays as it was
+     and the dialog stands on its own shadow. Only onboarding spotlights. */
+  --bg-overlay: transparent;
   --bg-code: #f2f0ec;
   --bg-code-editor: #2a2a3c;
   --text-code-editor: #cdd6f4;
@@ -3304,17 +3035,18 @@ body {
   /* Text — the quiet end of the scale is shifted one step darker so every
      tier clears WCAG AA on every paper surface (DS-4): secondary 5.6:1,
      tertiary 4.7:1, placeholder equals tertiary. The hierarchy ratio is
-     preserved; only the absolute lightness moved. */
-  --text-primary: #211f1c;
-  --text-secondary: #65615b;
-  --text-tertiary: #716d67;
-  --text-placeholder: #716d67;
+     preserved; only the absolute lightness moved. The greys lean warm,
+     toward the paper they sit on, not cool toward the screen. */
+  --text-primary: #1d1b21;
+  --text-secondary: #58524b;
+  --text-tertiary: #6b655d;
+  --text-placeholder: #6b655d;
   --text-inverse: #f8fafc;
 
   /* Borders */
-  --border-default: #e5e2dc;
-  --border-subtle: #efede8;
-  --border-strong: #d4d0c8;
+  --border-default: #dcd8d0;
+  --border-subtle: #e6e3dd;
+  --border-strong: #cbc6bc;
 
   /* Accents */
   --accent: var(--brand-primary);
@@ -3324,6 +3056,38 @@ body {
   --accent-orange: #e8703c;
   --accent-coral: #ef684f;
   --accent-mint: #159b76;
+
+  /* The spectrum (LANGUAGE.md): six hues, each with a text-safe ink and a
+     soft tint. Colour reaches the interface through these and nowhere else. */
+  --hue-red: #ff647f;
+  --hue-orange: #ffab4a;
+  --hue-yellow: #f6d75d;
+  --hue-green: #48c997;
+  --hue-blue: #4f9fe6;
+  --hue-violet: #9176e8;
+  --ink-red: #c42a4a;
+  --ink-orange: #b0560a;
+  --ink-yellow: #8a6a00;
+  --ink-green: #12825a;
+  --ink-blue: #236eb4;
+  --ink-violet: #6a4de8;
+
+  /* One hue per kind of work, so a list of mixed work is told apart at a
+     glance: the glyph is drawn in the ink, on a tile of the tint. */
+  --type-document: var(--ink-blue);
+  --type-flashcards: var(--ink-violet);
+  --type-quiz: var(--ink-red);
+  --type-task: var(--ink-yellow);
+  --type-slides: color-mix(in oklab, var(--ink-orange) 78%, var(--ink-red));
+  --type-sheets: var(--ink-green);
+  --type-code: color-mix(in oklab, var(--ink-blue) 55%, var(--ink-violet));
+  --type-whiteboard: color-mix(in oklab, var(--ink-green) 50%, var(--ink-blue));
+  --type-agent: var(--ink-violet);
+  --type-timetable: color-mix(in oklab, var(--ink-yellow) 60%, var(--ink-green));
+  --type-chat: var(--brand-primary);
+  --type-file: var(--text-secondary);
+  --type-workspace: color-mix(in oklab, var(--ink-green) 50%, var(--text-secondary));
+  --type-tint-strength: 13%;
 
   /* Status */
   --danger: #d33a4a;
@@ -3358,10 +3122,10 @@ body {
   --selection-bg: color-mix(in oklab, var(--brand-primary) 14%, transparent);
 
   /* Cards */
-  --card-paper: #fffefd;
-  --card-paper-quiet: #faf9f6;
-  --card-border: #e7e4de;
-  --card-border-soft: #efede8;
+  --card-paper: #fcfbf8;
+  --card-paper-quiet: #f7f5f1;
+  --card-border: #dfdbd3;
+  --card-border-soft: #e8e5df;
   --card-sheen-start: rgba(255, 255, 255, 0.56);
   --card-sheen-end: rgba(255, 255, 255, 0.08);
   --card-shadow:
@@ -3371,6 +3135,8 @@ body {
   --card-focus: #16856f;
   --card-pinned: #c78320;
   --card-radius: 10px;
+  /* A fine grain laid over every card, so paper reads as paper (spectra-desk.css, "Paper"). */
+  --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .36 0 0 0 0 .27 0 0 0 0 .17 0 0 0 .1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
 
   /* Radii */
   --radius-sm: 6px;
@@ -3387,9 +3153,9 @@ body {
   --composer-max-width: 880px;
 
   /* Typography */
-  --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
-  --font-serif: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
-  --font-display: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-figtree), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-newsreader), ui-serif, Georgia, serif;
+  --font-display: var(--font-newsreader), ui-serif, Georgia, serif;
   --font-mono: var(--font-plex-mono), ui-monospace, monospace;
 
   /* Approved type scale — prefer the `text-micro` … `text-display` utilities
@@ -3671,13 +3437,15 @@ html[data-spectra-motion="none"] *::after {
   --bg-primary: #121211;
   --bg-secondary: #1a1a19;
   --bg-tertiary: #222221;
-  --bg-sidebar: var(--bg-primary);
+  --bg-sidebar: #161615;
+  --bg-desk: #0c0c0b;
+  --bg-desk-hover: #1b1b1a;
   --bg-user-bubble: #1e2530;
 
   --bg-elevated: #1e1e24;
   --bg-elevated-rgb: 30, 30, 36;
   --bg-hover: #1c1d25;
-  --bg-overlay: rgba(0, 0, 0, 0.72);
+  --bg-overlay: transparent;
   --bg-code: #0a0a0c;
   --bg-code-editor: #1e1e2e;
   --text-code-editor: #cdd6f4;
@@ -3712,6 +3480,13 @@ html[data-spectra-motion="none"] *::after {
   --accent-orange: color-mix(in oklab, var(--brand-accent) 66%, #ffb36f);
   --accent-coral: color-mix(in oklab, var(--brand-accent) 76%, #ff9473);
   --accent-mint: color-mix(in oklab, var(--brand-accent) 86%, #25bc89);
+  --ink-red: #ff8197;
+  --ink-orange: #ffb766;
+  --ink-yellow: #f2d66e;
+  --ink-green: #5fd3a5;
+  --ink-blue: #74b4ef;
+  --ink-violet: #a993f2;
+  --type-tint-strength: 18%;
   --danger: #ff7f8a;
   --success: #43d097;
   --warning: #f4ba54;
@@ -3728,6 +3503,7 @@ html[data-spectra-motion="none"] *::after {
   --card-shadow-hover: 0 18px 40px -20px rgba(0, 0, 0, 0.88);
   --card-focus: #4bc8a4;
   --card-pinned: #e2a84d;
+  --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .92 0 0 0 0 .88 0 0 0 0 .8 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
   --sheet-column-header: #252522;
   --sheet-row-header: #21211f;
 
@@ -3766,7 +3542,7 @@ body {
   margin: 0;
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-family: var(--font-manrope), sans-serif;
+  font-family: var(--font-sans);
   font-size: 15px;
   line-height: 1.6;
   letter-spacing: 0.01em;
@@ -3776,6 +3552,15 @@ body {
 :focus-visible {
   outline: var(--focus-ring);
   outline-offset: 2px;
+}
+
+/* A caret already says where typing goes: text entry never wears a ring. */
+:is(
+    input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], [type="button"], [type="submit"], [type="reset"]),
+    textarea,
+    [contenteditable]:not([contenteditable="false"])
+  ):focus-visible {
+  outline: none;
 }
 
 ::selection {
@@ -3859,7 +3644,7 @@ button:disabled {
 }
 
 .font-display {
-  font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-display);
   font-variant-numeric: lining-nums tabular-nums;
 }
 
@@ -4201,51 +3986,241 @@ button:disabled {
   }
 }
 
-/* ── Slash Command Dropdown ─────────────────────────────────────────── */
+/* ── Slash menu: a type case ───────────────────────────────────────
+ * One line per block. The mark on the left is a specimen of what the row
+ * makes; the markdown on the right is what to type instead next time. The
+ * selected row takes the document's blue as a tint and a hairline of ink,
+ * and the one sentence about it sits under the list instead of under every
+ * row. */
 
 .slash-command-dropdown {
-  min-width: 240px;
-  max-width: 320px;
-  max-height: 360px;
+  --slash-ink: var(--type-document);
+  display: flex;
+  flex-direction: column;
+  width: 284px;
+  max-height: min(392px, calc(100vh - 32px));
+  overflow: hidden;
+  background: var(--card-paper);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm), 0 18px 40px -24px rgba(41, 34, 27, 0.32);
+  transform-origin: top left;
+  animation: slash-open 150ms var(--ease-standard) both;
+}
+
+.slash-command-portal[data-above] .slash-command-dropdown {
+  transform-origin: bottom left;
+}
+
+.slash-command-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-default);
-  border-radius: var(--surface-radius);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
-  padding: 4px;
-  backdrop-filter: blur(16px);
+  overscroll-behavior: contain;
+  padding: 4px 0;
+  scrollbar-width: thin;
+}
+
+.slash-command-section + .slash-command-section {
+  margin-top: 4px;
+  border-top: 1px solid var(--card-border-soft);
+  padding-top: 4px;
+}
+
+.slash-command-section > p {
+  margin: 0;
+  padding: 6px 14px 3px;
+  font-size: var(--text-micro);
+  color: var(--text-tertiary);
 }
 
 .slash-command-item {
-  display: flex;
+  position: relative;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  padding: 8px 12px;
-  border-radius: var(--control-radius);
+  min-height: 32px;
+  padding: 0 12px 0 10px;
   border: none;
   background: transparent;
-  cursor: pointer;
+  color: var(--text-primary);
+  font-size: var(--text-ui);
   text-align: left;
-  transition: background var(--motion-fast) var(--ease-standard);
 }
 
-.slash-command-item:hover,
+.slash-command-item::before {
+  content: "";
+  position: absolute;
+  inset: 5px auto 5px 0;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--slash-ink);
+  transform: scaleY(0);
+  transition: transform var(--motion-fast) var(--ease-standard);
+}
+
 .slash-command-item.is-selected {
-  background: var(--bg-hover);
+  background: color-mix(in srgb, var(--slash-ink) 8%, transparent);
 }
 
-.slash-command-icon {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  display: flex;
+.slash-command-item.is-selected::before {
+  transform: scaleY(1);
+}
+
+.slash-command-item[data-disabled] {
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+.slash-command-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Headings are listed at their own weight, so the three read as a ramp. */
+.slash-command-item[data-command="heading1"] .slash-command-label {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.slash-command-item[data-command="heading2"] .slash-command-label {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.slash-command-item[data-command="heading3"] .slash-command-label {
+  font-weight: 600;
+}
+
+.slash-command-item[data-command="quote"] .slash-command-label {
+  font-family: var(--font-serif);
+  font-style: italic;
+}
+
+.slash-command-item[data-command="code"] .slash-command-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+}
+
+.slash-command-mark {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--control-radius);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-default);
+  height: 20px;
+  color: var(--text-tertiary);
+}
+
+.slash-command-item.is-selected .slash-command-mark,
+.slash-command-item.is-selected .slash-command-markdown {
+  color: var(--slash-ink);
+}
+
+.slash-command-glyph {
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.slash-command-glyph[data-kind="heading"] {
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+
+.slash-command-glyph[data-kind="bullet"] {
+  font-size: 18px;
+}
+
+.slash-command-glyph[data-kind="code"] {
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+}
+
+.slash-command-glyph[data-kind="math"] {
+  font-family: var(--font-serif);
+  font-size: 15px;
+}
+
+.slash-command-rule {
+  display: block;
+  box-sizing: border-box;
+}
+
+.slash-command-rule[data-kind="quote"] {
+  width: 12px;
+  height: 14px;
+  border-left: 2px solid currentColor;
+}
+
+.slash-command-rule[data-kind="task"] {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+}
+
+.slash-command-rule[data-kind="divider"] {
+  width: 14px;
+  border-top: 1.5px solid currentColor;
+}
+
+.slash-command-rule[data-kind="section"] {
+  width: 14px;
+  height: 5px;
+  border-top: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+}
+
+.slash-command-markdown {
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  line-height: 16px;
+}
+
+.slash-command-gist {
+  flex: none;
+  margin: 0;
+  padding: 8px 14px 9px;
+  border-top: 1px solid var(--card-border-soft);
   color: var(--text-secondary);
+  font-size: var(--text-caption);
+  line-height: 1.35;
+}
+
+.slash-command-gist[data-disabled] {
+  color: var(--ink-orange);
+}
+
+.slash-command-empty {
+  margin: 0;
+  padding: 12px 14px;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+
+@keyframes slash-open {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slash-command-dropdown,
+  .slash-command-item::before {
+    animation: none;
+    transition: none;
+  }
 }
 
 /* ── Spectra card language ─────────────────────────────────────────── */
@@ -4684,53 +4659,87 @@ button:not(:disabled),
   }
 }
 
-@container spectra-studio-split (max-width: 460px) {
-  .spectra-deck-card-editor textarea[data-ai-region="true"] {
-    min-height: 120px;
-    padding-inline: 14px;
-    font-size: 18px;
-  }
-}
-
-.spectra-card-ai-activity {
-  animation: spectra-ai-activity-pulse 1.5s ease-in-out infinite alternate;
-}
-
+/* Following Spectra: one slim sheet at the top centre of the screen, over the
+   empty middle of the tab bar, saying what the run is doing, with Stop. */
 .spectra-follow-ai-status {
   position: fixed;
   z-index: calc(var(--z-panel) + 10);
-  inset-block-start: 56px;
-  inset-inline-end: 20px;
+  inset-block-start: 10px;
+  left: 50%;
   display: flex;
-  max-width: min(300px, calc(100vw - 32px));
-  flex-direction: column;
-  gap: 2px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--surface-radius);
-  padding: 8px 11px;
-  background: color-mix(in oklab, var(--bg-elevated) 94%, transparent);
+  max-width: min(460px, calc(100vw - 32px));
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  padding: 3px 3px 3px 12px;
+  background: var(--card-paper);
   color: var(--text-primary);
-  box-shadow: 0 8px 28px
-    color-mix(in oklab, var(--text-primary) 12%, transparent);
-  pointer-events: none;
-  backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-md);
+  translate: -50% 0;
+  animation: spectra-follow-status-in 320ms var(--ease-standard) both;
 }
 
-.spectra-follow-ai-status > span {
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 650;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+.spectra-follow-ai-status-light {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 999px;
+  background: conic-gradient(from 200deg, var(--brand-primary), var(--accent-coral), var(--warning), var(--success), var(--brand-primary));
+  animation: spectra-follow-light 2.4s linear infinite;
+}
+
+.spectra-follow-ai-status-label {
+  flex: none;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
 }
 
 .spectra-follow-ai-status > strong {
+  min-width: 0;
   overflow: hidden;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.4;
+  font-size: var(--text-caption);
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
+  animation: island-content-in 260ms var(--ease-standard) both;
+}
+
+.spectra-follow-ai-status-stop {
+  flex: none;
+  border-radius: 999px;
+  padding: 3px 10px;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  transition: background-color 150ms, color 150ms;
+}
+
+.spectra-follow-ai-status-stop:hover,
+.spectra-follow-ai-status-stop:focus-visible {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+@keyframes spectra-follow-status-in {
+  from {
+    opacity: 0;
+    translate: -50% -8px;
+  }
+}
+
+@keyframes spectra-follow-light {
+  to {
+    rotate: 1turn;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spectra-follow-ai-status,
+  .spectra-follow-ai-status-light,
+  .spectra-follow-ai-status > strong {
+    animation: none;
+  }
 }
 
 /* Spectra's body when it acts in the interface: a spark of the prism's light.
@@ -4771,17 +4780,6 @@ button:not(:disabled),
   }
 }
 
-@keyframes spectra-ai-activity-pulse {
-  from {
-    opacity: 0.68;
-  }
-  to {
-    opacity: 1;
-    box-shadow: 0 0 10px
-      color-mix(in oklab, var(--accent-cyan) 20%, transparent);
-  }
-}
-
 /* Contextual AI activity on an artifact card.
    One quiet line that names the actor and the operation. It reads as part of
    the card's own metadata column rather than as a badge stuck on top of it. */
@@ -4800,14 +4798,8 @@ button:not(:disabled),
     both;
 }
 
-.spectra-card-activity-spark {
-  width: 10px;
-  height: 10px;
-  flex-shrink: 0;
-  translate: 0 1.5px;
-  color: var(--accent-cyan);
-  /* Breathes rather than flashes: presence, not an alarm. */
-  animation: spectra-card-activity-spark 2.4s var(--ease-standard) infinite;
+.spectra-card-activity-mark {
+  translate: 0 1px;
 }
 
 .spectra-card-activity-text {
@@ -4824,12 +4816,6 @@ button:not(:disabled),
 }
 
 /* Structural work reads as a step forward; text work reads as a steady hand. */
-.spectra-card-activity[data-act="create"] .spectra-card-activity-spark,
-.spectra-card-activity[data-act="remove"] .spectra-card-activity-spark,
-.spectra-card-activity[data-act="reorder"] .spectra-card-activity-spark {
-  animation-duration: 1.6s;
-}
-
 @keyframes spectra-card-activity-in {
   from {
     opacity: 0;
@@ -4841,23 +4827,6 @@ button:not(:disabled),
   }
 }
 
-@keyframes spectra-card-activity-spark {
-  0%,
-  100% {
-    opacity: 0.55;
-    transform: scale(0.94);
-  }
-  45% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .spectra-card-activity-spark {
-    opacity: 0.9;
-  }
-}
 @keyframes spectra-texture-drift {
   from {
     transform: translate3d(0, 0, 0);
@@ -5010,19 +4979,6 @@ button[data-spectra-context-trigger="true"][aria-expanded="true"] {
   box-shadow: none;
 }
 
-[data-board-column] {
-  border-color: color-mix(
-    in oklab,
-    var(--card-accent, var(--text-tertiary)) 16%,
-    var(--card-border-soft)
-  );
-  background: color-mix(
-    in oklab,
-    var(--card-accent, var(--text-tertiary)) 3%,
-    var(--bg-primary)
-  );
-}
-
 /* Context picker is a utility control — never inherit card working/continued
    accents from nearby live AI chrome. */
 button[data-spectra-context-trigger="true"],
@@ -5059,7 +5015,7 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .spectra-artifact-studio[data-blueprint="sheets"] .spectra-artifact-main {
-  background: color-mix(in oklab, #169b69 1.4%, var(--bg-primary));
+  background: color-mix(in oklab, var(--type-sheets) 1.4%, var(--bg-primary));
 }
 
 .spectra-artifact-studio[data-blueprint="code"] .spectra-artifact-main {
@@ -5200,6 +5156,11 @@ button[data-spectra-context-trigger="true"]::after {
   background: var(--bg-secondary);
 }
 
+/* The stage only holds focus between keystrokes; it is not a control. */
+.presentation-stage:focus {
+  outline: none;
+}
+
 .presentation-workspace[data-rail-collapsed="true"] {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -5304,7 +5265,8 @@ button[data-spectra-context-trigger="true"]::after {
   width: 100%;
   height: 100%;
   cursor: grab;
-  border: 1px solid transparent;
+  /* The selection frame is drawn outside the object, never taking from its size. */
+  outline: 1px solid transparent;
   border-radius: 3px;
 }
 
@@ -5312,9 +5274,20 @@ button[data-spectra-context-trigger="true"]::after {
   cursor: grabbing;
 }
 
+/* Where a text box is, before it says anything. */
+.presentation-object[data-text-frame="empty"]:not([data-selected]),
+.presentation-object[data-text-frame]:not([data-selected]):hover {
+  outline-style: dashed;
+  outline-color: color-mix(in oklab, var(--text-frame-ink, var(--text-primary)) 34%, transparent);
+}
+
+.presentation-object[data-text-frame="hover"]:not([data-selected]):hover {
+  outline-color: color-mix(in oklab, var(--text-frame-ink, var(--text-primary)) 48%, transparent);
+}
+
 .presentation-object[data-selected="true"] {
   cursor: grab;
-  border-color: color-mix(in oklab, var(--text-primary) 42%, transparent);
+  outline-color: color-mix(in oklab, var(--text-primary) 42%, transparent);
   box-shadow: 0 0 0 8px color-mix(in oklab, var(--text-primary) 7%, transparent);
 }
 
@@ -5323,7 +5296,7 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .presentation-object[data-overflow="true"] {
-  border-color: color-mix(in oklab, #d57c2a 72%, transparent);
+  outline-color: color-mix(in oklab, #d57c2a 72%, transparent);
 }
 
 .presentation-overflow-indicator {
@@ -5480,6 +5453,15 @@ button[data-spectra-context-trigger="true"]::after {
   overflow-wrap: break-word;
 }
 
+/* An empty box says where to write, faintly, in its own ink and size. */
+.presentation-text-field .ProseMirror > p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  opacity: 0.38;
+  pointer-events: none;
+}
+
 /* Its commands float beside the box, over the canvas, never in it. */
 .presentation-text-bar {
   position: fixed;
@@ -5609,7 +5591,7 @@ button[data-spectra-context-trigger="true"]::after {
 
 .presentation-linked-artifact strong {
   margin-block: 3%;
-  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-display);
   font-size: 1.15cqw;
 }
 
@@ -5733,27 +5715,6 @@ button[data-spectra-context-trigger="true"]::after {
   min-height: 72px;
 }
 
-.presentation-notes > div {
-  display: flex;
-  height: 38px;
-  align-items: center;
-  gap: 14px;
-  border-bottom: 1px solid var(--border-default);
-  padding: 0 14px;
-  font-size: var(--text-micro);
-}
-
-.presentation-notes > div strong {
-  height: 38px;
-  border-bottom: 2px solid var(--text-primary);
-  padding-top: 13px;
-}
-
-.presentation-notes > div span,
-.presentation-notes > span {
-  color: var(--text-tertiary);
-}
-
 .presentation-notes textarea {
   min-height: 72px;
   width: 100%;
@@ -5765,13 +5726,6 @@ button[data-spectra-context-trigger="true"]::after {
   font-size: 11px;
   line-height: 1.7;
   outline: none;
-}
-
-.presentation-notes > span {
-  position: absolute;
-  right: 12px;
-  bottom: 8px;
-  font-size: var(--text-micro);
 }
 
 .presentation-settings-grid,
@@ -5834,7 +5788,7 @@ button[data-spectra-context-trigger="true"]::after {
 
 .presentation-settings-grid h4 {
   color: var(--text-primary);
-  font-size: var(--text-micro);
+  font-size: var(--text-caption);
   font-weight: 650;
 }
 
@@ -5916,8 +5870,8 @@ button[data-spectra-context-trigger="true"]::after {
 
 .presentation-theme-grid > button strong {
   color: var(--text-primary);
-  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
-  font-size: 14px;
+  font-size: var(--text-ui);
+  font-weight: 500;
 }
 
 .presentation-component-library {
@@ -5975,7 +5929,6 @@ button[data-spectra-context-trigger="true"]::after {
   color: var(--brand-primary);
   font-size: var(--text-micro);
   font-weight: 800;
-  text-transform: uppercase;
 }
 
 .presentation-component-library button strong {
@@ -6374,144 +6327,6 @@ button[data-spectra-context-trigger="true"]::after {
   color: var(--danger);
 }
 
-.presentation-rehearsal-report {
-  position: fixed;
-  z-index: calc(var(--z-composer-dock) + 5);
-  inset: 50% auto auto 50%;
-  width: min(680px, calc(100vw - 32px));
-  max-height: min(760px, calc(100vh - 32px));
-  overflow: auto;
-  border: 1px solid var(--border-default);
-  border-radius: var(--surface-radius);
-  background: var(--bg-elevated);
-  box-shadow: 0 34px 100px rgba(29, 31, 26, 0.28);
-  transform: translate(-50%, -50%);
-}
-
-.presentation-rehearsal-report::before {
-  position: fixed;
-  z-index: -1;
-  inset: -100vh -100vw;
-  background: rgba(22, 24, 20, 0.28);
-  content: "";
-  backdrop-filter: blur(5px);
-}
-
-.presentation-rehearsal-report > header,
-.presentation-rehearsal-report > footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.presentation-rehearsal-report > header span {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 720;
-}
-
-.presentation-rehearsal-report > header button {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  border-radius: var(--control-radius);
-  color: var(--text-secondary);
-}
-
-.presentation-rehearsal-report > main {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 9px;
-  padding: 14px 16px;
-}
-
-.presentation-rehearsal-report > main > div {
-  padding: 13px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--card-radius);
-  background: var(--bg-primary);
-}
-
-.presentation-rehearsal-report > main strong,
-.presentation-rehearsal-report > main span {
-  display: block;
-}
-
-.presentation-rehearsal-report > main strong {
-  font-family: var(--font-display);
-  font-size: 20px;
-  color: var(--text-primary);
-}
-
-.presentation-rehearsal-report > main span {
-  margin-top: 3px;
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-
-.presentation-rehearsal-report > ol {
-  margin: 0;
-  padding: 0 16px 14px;
-  list-style: none;
-}
-
-.presentation-rehearsal-report > ol li {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 9px;
-  min-height: 38px;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.presentation-rehearsal-report > ol li > span,
-.presentation-rehearsal-report > ol li > small {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-
-.presentation-rehearsal-report > ol li > strong {
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: var(--text-micro);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.presentation-rehearsal-report > ol li > small[data-over="true"] {
-  color: #c47a1c;
-  font-weight: 700;
-}
-
-.presentation-rehearsal-report > footer {
-  border-top: 1px solid var(--border-subtle);
-  border-bottom: 0;
-}
-
-.presentation-rehearsal-report > footer p {
-  max-width: 460px;
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  line-height: 1.5;
-}
-
-.presentation-rehearsal-report > footer button {
-  height: 34px;
-  padding: 0 11px;
-  border-radius: var(--control-radius);
-  background: var(--brand-primary);
-  color: white;
-  font-size: var(--text-micro);
-  font-weight: 700;
-}
-
 .presentation-presenter {
   position: fixed;
   inset: 0;
@@ -6659,8 +6474,6 @@ button[data-spectra-context-trigger="true"]::after {
   color: #a7a9a1;
   font-size: var(--text-micro);
   font-weight: 650;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .presentation-presenter-next .presentation-canvas {
@@ -6786,7 +6599,7 @@ button[data-spectra-context-trigger="true"]::after {
 }
 .sheets-toolbar-button.is-active {
   box-shadow: inset 0 0 0 1px
-    color-mix(in oklab, #169b69 30%, var(--border-default));
+    color-mix(in oklab, var(--sheet-ink) 30%, var(--border-default));
 }
 .sheets-toolbar-button:disabled {
   opacity: 0.28;
@@ -6841,7 +6654,7 @@ button[data-spectra-context-trigger="true"]::after {
   outline: none;
 }
 .sheets-formula-input:focus {
-  box-shadow: inset 0 -2px color-mix(in oklab, #169b69 65%, transparent);
+  box-shadow: inset 0 -2px color-mix(in oklab, var(--sheet-ink) 65%, transparent);
 }
 
 .sheets-grid-frame {
@@ -6921,7 +6734,7 @@ button[data-spectra-context-trigger="true"]::after {
   font-weight: 600;
 }
 .sheets-column-header:hover {
-  background: color-mix(in oklab, #169b69 7%, var(--sheet-header));
+  background: color-mix(in oklab, var(--sheet-ink) 7%, var(--sheet-header));
   color: var(--text-primary);
 }
 .sheets-column-header[data-frozen="true"],
@@ -6955,7 +6768,7 @@ button[data-spectra-context-trigger="true"]::after {
   font-size: var(--text-micro);
 }
 .sheets-row-header:hover {
-  background: color-mix(in oklab, #169b69 7%, var(--sheet-header));
+  background: color-mix(in oklab, var(--sheet-ink) 7%, var(--sheet-header));
   color: var(--text-primary);
 }
 .sheets-row-header[data-freeze-edge="true"] {
@@ -6998,7 +6811,7 @@ button[data-spectra-context-trigger="true"]::after {
   contain: strict;
 }
 .sheets-grid-viewport:focus-visible {
-  box-shadow: inset 0 0 0 2px color-mix(in oklab, #169b69 32%, transparent);
+  box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--sheet-ink) 32%, transparent);
 }
 
 .sheets-cell {
@@ -7019,21 +6832,21 @@ button[data-spectra-context-trigger="true"]::after {
 .sheets-cell[data-selected="true"] {
   background-color: color-mix(
     in oklab,
-    var(--brand-primary) 6%,
+    var(--sheet-ink) 6%,
     var(--bg-primary)
   );
 }
 .sheets-cell[data-selection-top="true"] {
-  border-top: 2px solid var(--brand-primary);
+  border-top: 2px solid var(--sheet-ink);
 }
 .sheets-cell[data-selection-right="true"] {
-  border-right: 2px solid var(--brand-primary);
+  border-right: 2px solid var(--sheet-ink);
 }
 .sheets-cell[data-selection-bottom="true"] {
-  border-bottom: 2px solid var(--brand-primary);
+  border-bottom: 2px solid var(--sheet-ink);
 }
 .sheets-cell[data-selection-left="true"] {
-  border-left: 2px solid var(--brand-primary);
+  border-left: 2px solid var(--sheet-ink);
 }
 .sheets-cell[data-frozen-row="true"],
 .sheets-cell[data-frozen-column="true"] {
@@ -7061,7 +6874,7 @@ button[data-spectra-context-trigger="true"]::after {
 .sheets-cell[data-active="true"] {
   z-index: 3;
   overflow: visible;
-  box-shadow: inset 0 0 0 2px var(--brand-primary);
+  box-shadow: inset 0 0 0 2px var(--sheet-ink);
 }
 .sheets-cell[data-active="true"]::before {
   content: none;
@@ -7075,7 +6888,7 @@ button[data-spectra-context-trigger="true"]::after {
   height: 8px;
   border: 1px solid white;
   border-radius: 1px;
-  background: var(--brand-primary);
+  background: var(--sheet-ink);
   cursor: crosshair;
   touch-action: none;
 }
@@ -7085,22 +6898,22 @@ button[data-spectra-context-trigger="true"]::after {
   height: 10px;
   right: -5px;
   bottom: -5px;
-  outline: 2px solid color-mix(in oklab, var(--brand-primary) 28%, transparent);
+  outline: 2px solid color-mix(in oklab, var(--sheet-ink) 28%, transparent);
 }
 .sheets-cell[data-search-match="true"] {
   background-color: color-mix(in oklab, #e6b72d 17%, var(--bg-primary));
 }
 .sheets-cell[data-table="true"] {
-  background-color: color-mix(in oklab, #169b69 2.8%, var(--bg-primary));
+  background-color: color-mix(in oklab, var(--sheet-ink) 2.8%, var(--bg-primary));
 }
 .sheets-cell[data-table-header="true"] {
-  background-color: color-mix(in oklab, #169b69 11%, var(--bg-primary));
+  background-color: color-mix(in oklab, var(--sheet-ink) 11%, var(--bg-primary));
   padding-right: 27px;
-  color: color-mix(in oklab, #116b4d 78%, var(--text-primary));
+  color: color-mix(in oklab, color-mix(in oklab, var(--sheet-ink) 75%, var(--text-primary)) 78%, var(--text-primary));
   font-weight: 700;
 }
 .sheets-cell[data-filter-active="true"] {
-  background-color: color-mix(in oklab, #169b69 17%, var(--bg-primary));
+  background-color: color-mix(in oklab, var(--sheet-ink) 17%, var(--bg-primary));
 }
 .sheets-table-filter {
   position: absolute;
@@ -7113,12 +6926,12 @@ button[data-spectra-context-trigger="true"]::after {
   align-items: center;
   justify-content: center;
   border-radius: 4px;
-  color: #116b4d;
+  color: color-mix(in oklab, var(--sheet-ink) 75%, var(--text-primary));
   transform: translateY(-50%);
 }
 .sheets-table-filter:hover,
 .sheets-table-filter[aria-pressed="true"] {
-  background: color-mix(in oklab, #169b69 18%, var(--bg-elevated));
+  background: color-mix(in oklab, var(--sheet-ink) 18%, var(--bg-elevated));
 }
 .sheets-table-filter:disabled {
   cursor: default;
@@ -7159,7 +6972,7 @@ button[data-spectra-context-trigger="true"]::after {
   padding: 0 7px;
   color: var(--text-primary);
   font-size: 11px;
-  outline: 2px solid var(--brand-primary);
+  outline: 2px solid var(--sheet-ink);
 }
 .sheets-note-corner {
   position: absolute;
@@ -7187,7 +7000,7 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .sheets-chart-object[data-selected] {
-  border-color: color-mix(in oklab, #169b69 62%, var(--border-default));
+  border-color: color-mix(in oklab, var(--sheet-ink) 62%, var(--border-default));
   box-shadow: 0 8px 24px rgba(38, 49, 43, 0.16);
 }
 
@@ -7278,7 +7091,7 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .sheets-chart-object > footer button:hover {
-  color: #169b69;
+  color: var(--sheet-ink);
 }
 
 .sheets-chart-object > footer span {
@@ -7354,8 +7167,6 @@ button[data-spectra-context-trigger="true"]::after {
   color: var(--foundry-mark);
   font-size: var(--text-micro);
   font-weight: 650;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
 }
 
 .foundry-lede {
@@ -7504,20 +7315,16 @@ button[data-spectra-context-trigger="true"]::after {
   );
 }
 
+/* What the agent is for, set quietly above the interview: context, not a headline. */
 .foundry-mission {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  border-left: 2px solid var(--foundry-mark);
-  padding: 2px 0 2px 15px;
+  max-width: 640px;
 }
 
 .foundry-mission-objective {
   margin: 0;
-  font-size: 17px;
-  font-weight: 500;
-  letter-spacing: -0.014em;
-  line-height: 1.48;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.55;
 }
 
 .foundry-mission-objective.is-ai-changed {
@@ -7525,30 +7332,6 @@ button[data-spectra-context-trigger="true"]::after {
   border-radius: 4px;
   box-shadow: 0 0 0 4px
     color-mix(in oklab, var(--foundry-mark) 12%, transparent);
-}
-
-.foundry-mission-facts {
-  display: flex;
-  margin: 0;
-  flex-wrap: wrap;
-  gap: 6px 14px;
-  padding: 0;
-  list-style: none;
-}
-
-.foundry-mission-facts > li {
-  color: var(--text-secondary);
-  font-size: 11.5px;
-  font-weight: 540;
-}
-
-.foundry-mission-facts > li:not(:last-child)::after {
-  content: "";
-}
-
-.foundry-mission-facts > li.is-muted {
-  color: var(--text-tertiary);
-  font-weight: 440;
 }
 
 /* ---------------- notices ---------------- */
@@ -7622,8 +7405,6 @@ button[data-spectra-context-trigger="true"]::after {
   color: var(--foundry-mark);
   font-size: var(--text-micro);
   font-weight: 650;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
 }
 
 .foundry-section-actions {
@@ -7734,14 +7515,15 @@ button[data-spectra-context-trigger="true"]::after {
   color: var(--foundry-mark);
 }
 
+/* A choice said as a word: quiet until chosen, then underlined in the agent's ink. */
 .foundry-chip {
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-pill);
-  background: var(--card-paper);
-  padding: 5px 11px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  padding: 2px 0;
   color: var(--text-secondary);
   font-family: var(--font-sans);
-  font-size: 11.5px;
+  font-size: var(--text-caption);
   font-weight: 520;
   cursor: pointer;
   transition:
@@ -7749,10 +7531,13 @@ button[data-spectra-context-trigger="true"]::after {
     color var(--motion-fast) var(--ease-standard);
 }
 
+.foundry-chip:hover,
 .foundry-chip.is-active {
-  border-color: var(--foundry-mark);
-  background: color-mix(in oklab, var(--foundry-mark) 8%, var(--card-paper));
   color: var(--foundry-mark);
+}
+
+.foundry-chip.is-active {
+  border-bottom-color: var(--foundry-mark);
 }
 
 .foundry-confirm {
@@ -7788,8 +7573,6 @@ button[data-spectra-context-trigger="true"]::after {
   color: var(--text-tertiary);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
 }
 
 .foundry-dismissed {
@@ -7842,8 +7625,7 @@ button[data-spectra-context-trigger="true"]::after {
 
 .foundry-block-count {
   color: var(--text-tertiary);
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-variant-numeric: tabular-nums;
 }
 
@@ -8195,9 +7977,7 @@ button[data-spectra-context-trigger="true"]::after {
 .agent-bench-label {
   margin: 0;
   color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-size: var(--text-caption);
 }
 
 .agent-bench-ask {
@@ -8215,7 +7995,7 @@ button[data-spectra-context-trigger="true"]::after {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px 16px;
 }
 
 .agent-bench-samples .foundry-chip {
@@ -8230,13 +8010,13 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .agent-bench-choice {
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-pill);
-  background: var(--card-paper);
-  padding: 4px 11px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  padding: 2px 0;
   color: var(--text-secondary);
   font-family: var(--font-sans);
-  font-size: 11.5px;
+  font-size: var(--text-caption);
   font-weight: 520;
   cursor: pointer;
   transition:
@@ -8244,10 +8024,13 @@ button[data-spectra-context-trigger="true"]::after {
     color var(--motion-fast) var(--ease-standard);
 }
 
+.agent-bench-choice:hover:not(:disabled),
 .agent-bench-choice[aria-checked="true"] {
-  border-color: var(--foundry-mark);
-  background: color-mix(in oklab, var(--foundry-mark) 8%, var(--card-paper));
   color: var(--foundry-mark);
+}
+
+.agent-bench-choice[aria-checked="true"] {
+  border-bottom-color: var(--foundry-mark);
 }
 
 .agent-bench-choice:disabled {
@@ -8303,7 +8086,7 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .agent-bench-tag {
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-chip);
   background: color-mix(in oklab, var(--foundry-hold) 12%, transparent);
   padding: 2px 9px;
   color: var(--foundry-hold);
@@ -8373,7 +8156,7 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .agent-bench-chips > li {
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-chip);
   background: var(--card-paper-quiet);
   padding: 3px 10px;
   color: var(--text-secondary);
@@ -8610,8 +8393,6 @@ button[data-spectra-context-trigger="true"]::after {
   color: var(--text-tertiary);
   font-size: var(--text-micro);
   font-weight: 650;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
 }
 
 .foundry-ledger-figure {
@@ -8691,8 +8472,6 @@ button[data-spectra-context-trigger="true"]::after {
   color: var(--text-tertiary);
   font-size: var(--text-micro);
   font-weight: 650;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
 }
 
 .foundry-ledger-stats {
@@ -9007,8 +8786,7 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 @container (max-width: 250px) {
-  .spectra-artifact-card .spectra-artifact-card-meta,
-  .spectra-artifact-card .spectra-card-ai-activity {
+  .spectra-artifact-card .spectra-artifact-card-meta {
     display: none;
   }
 
@@ -9148,8 +8926,6 @@ button[data-spectra-context-trigger="true"]::after {
   text-align: left;
   font-size: var(--text-micro);
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--text-secondary);
 }
 
@@ -9486,6 +9262,9 @@ button[data-spectra-context-trigger="true"]::after {
   z-index: 3;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--bg-primary);
+  /* It sticks inside the scroller's padding; the strip left of it is covered
+     too, so the days scrolled past do not show at the edge. */
+  box-shadow: -12px 0 0 var(--bg-primary);
 }
 
 .spectra-calendar-week-caption,
@@ -9495,8 +9274,6 @@ button[data-spectra-context-trigger="true"]::after {
   padding: 0 6px;
   font-size: var(--text-micro);
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--text-tertiary);
 }
 
@@ -9527,8 +9304,6 @@ button[data-spectra-context-trigger="true"]::after {
 .spectra-calendar-day-head span {
   font-size: var(--text-micro);
   font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
   color: var(--text-tertiary);
 }
 
@@ -9547,8 +9322,8 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .spectra-calendar-day-head.is-today strong {
-  background: var(--text-primary);
-  color: var(--bg-primary);
+  background: var(--brand-primary);
+  color: var(--card-paper);
   border-radius: var(--radius-pill);
 }
 
@@ -9596,6 +9371,85 @@ button[data-spectra-context-trigger="true"]::after {
   color: var(--text-primary);
 }
 
+/* A block on the week: paper tinted with its ink, the ink along its edge.
+   Short ones, and deadlines, keep time and title on one line. */
+.spectra-calendar-block {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 8px 4px 10px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--block-ink) 11%, var(--card-paper));
+  box-shadow:
+    inset 3px 0 0 var(--block-ink),
+    0 0 0 1px color-mix(in oklab, var(--block-ink) 18%, transparent);
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.spectra-calendar-block:hover {
+  background: color-mix(in oklab, var(--block-ink) 18%, var(--card-paper));
+}
+
+.spectra-calendar-block:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 1px;
+}
+
+.spectra-calendar-block--short {
+  container-type: inline-size;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding-block: 0;
+}
+
+/* Too narrow for both, a one-line block keeps its title: where it sits on the
+   day already says when. Its time stays in the tooltip and the details. */
+@container (max-width: 190px) {
+  .spectra-calendar-block--short .spectra-calendar-block-time {
+    display: none;
+  }
+}
+
+.spectra-calendar-block[data-due] {
+  border-radius: 999px;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--block-ink) 30%, transparent);
+  padding-left: 8px;
+}
+
+.spectra-calendar-block[data-due]::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--block-ink);
+}
+
+.spectra-calendar-block-time {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in oklab, var(--block-ink) 65%, var(--text-secondary));
+}
+
+.spectra-calendar-block-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.spectra-calendar-block:not(.spectra-calendar-block--short) .spectra-calendar-block-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+}
+
 @media (max-width: 900px) {
   .spectra-calendar-week-label {
     max-width: 11rem;
@@ -9610,7 +9464,6 @@ button[data-spectra-context-trigger="true"]::after {
   height: 32px;
 }
 
-.spectra-document-studio,
 .spectra-flashcard-studio > aside,
 .spectra-flashcard-studio > section,
 .spectra-quiz-studio {
@@ -9619,621 +9472,7 @@ button[data-spectra-context-trigger="true"]::after {
   box-shadow: none !important;
 }
 
-.spectra-document-studio {
-  overflow: hidden;
-  border: 0 !important;
-  border-radius: 0;
-  background: transparent !important;
-  box-shadow: none !important;
-  min-height: calc(100vh - 210px);
-}
-
-.spectra-document-studio {
-  position: relative;
-  display: flex;
-  min-height: 0;
-  flex-direction: column;
-}
-
-.spectra-document-studio > .spectra-artifact-header {
-  padding-bottom: 12px;
-}
-
-/* Stacking order comes from the DOM: work bar, format bar, then the body. It
-   used to be forced with `order: 2/3/6`, which broke the moment the content was
-   wrapped in the shared `.spectra-editor-body` — that wrapper has no order, so
-   it sorted to 0 and both bars fell to the bottom of the panel, leaving the
-   document with its chrome underneath the text and a 24px-wide work bar. */
-.spectra-document-canvas-shell {
-  display: flex;
-  min-height: 0;
-  flex: 1 1 auto;
-  margin-top: 0;
-  padding: 15px 18px 38px;
-  background:
-    radial-gradient(
-      circle at 18% 8%,
-      rgba(49, 154, 124, 0.025),
-      transparent 28%
-    ),
-    #f6f6f2;
-}
-
-.spectra-document-canvas-shell > main {
-  position: relative;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.spectra-document-studio[data-layout="page"] .tiptap-root {
-  overflow: hidden;
-  border: 1px solid #e6e8e3;
-  border-radius: 4px;
-  background: #fff;
-  box-shadow: 0 13px 38px rgba(39, 49, 43, 0.075);
-}
-
-.spectra-document-studio[data-layout="page"] .ProseMirror {
-  min-height: 1080px;
-  padding: 55px clamp(48px, 9vw, 104px) 110px !important;
-}
-
-.spectra-document-studio[data-layout="continuous"]
-  .spectra-document-canvas-shell {
-  background: #fff;
-}
-
-.spectra-document-studio[data-layout="continuous"] .ProseMirror {
-  box-sizing: border-box;
-  min-height: 100%;
-  height: 100%;
-  padding: 28px clamp(40px, 9vw, 104px) 48px !important;
-}
-
-.spectra-document-outline {
-  width: 218px;
-  flex: 0 0 218px;
-  margin-right: 14px;
-  overflow-y: auto;
-  border: 1px solid #e3e6e0;
-  border-radius: var(--card-radius);
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 9px 28px rgba(40, 50, 44, 0.045);
-}
-
-.spectra-document-outline > header {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px;
-  border-bottom: 1px solid #eceeea;
-  background: rgba(255, 255, 255, 0.96);
-}
-
-.spectra-document-outline > header strong {
-  font-size: var(--text-micro);
-  font-weight: 760;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.spectra-document-outline > header button,
-.spectra-document-import-report button {
-  display: inline-flex;
-  width: 28px;
-  height: 28px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--control-radius);
-  color: #6f7973;
-}
-
-.spectra-document-outline > button {
-  display: grid;
-  width: calc(100% - 12px);
-  grid-template-columns: 18px minmax(0, 1fr) auto;
-  gap: 5px;
-  align-items: center;
-  margin: 3px 6px;
-  padding-top: 7px;
-  padding-right: 8px;
-  padding-bottom: 7px;
-  border-radius: var(--control-radius);
-  color: #69736d;
-  text-align: left;
-}
-
-/* Where the caret is, so a long document says which section you are in. */
-.spectra-document-outline > button[data-current] {
-  background: var(--brand-wash);
-  color: var(--brand-ink);
-}
-
-/* Section weight, so an overlong section is visible before it is read. */
-.spectra-document-outline > button em {
-  font-size: var(--text-micro);
-  font-style: normal;
-  font-variant-numeric: tabular-nums;
-  opacity: 0.55;
-}
-
-.spectra-document-sources {
-  display: flex;
-  width: 246px;
-  flex: 0 0 246px;
-  flex-direction: column;
-  margin-right: 14px;
-  overflow-y: auto;
-  border: 1px solid #e3e6e0;
-  border-radius: var(--card-radius);
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 9px 28px rgba(40, 50, 44, 0.045);
-}
-
-.spectra-document-sources > header {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px;
-  border-bottom: 1px solid #eceeea;
-  background: rgba(255, 255, 255, 0.96);
-}
-
-.spectra-document-sources > header strong {
-  font-size: var(--text-micro);
-  font-weight: 760;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.spectra-document-sources > header button {
-  display: inline-flex;
-  width: 28px;
-  height: 28px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--control-radius);
-  color: #6f7973;
-}
-
-/* An unresolvable citation is named, not hidden: it is a problem to fix. */
-.spectra-document-sources-problem {
-  display: flex;
-  gap: 7px;
-  margin: 8px 8px 2px;
-  padding: 8px 9px;
-  border: 1px solid color-mix(in oklab, #d88922 30%, #e3e6e0);
-  border-radius: var(--control-radius);
-  background: color-mix(in oklab, #d88922 7%, #fff);
-  color: #7a5312;
-  font-size: var(--text-micro);
-  line-height: 1.45;
-}
-
-.spectra-document-sources-problem svg {
-  flex: none;
-  margin-top: 1px;
-}
-
-.spectra-document-sources > button {
-  display: grid;
-  width: calc(100% - 12px);
-  grid-template-columns: 30px minmax(0, 1fr);
-  gap: 2px 7px;
-  margin: 3px 6px;
-  padding: 7px 8px;
-  border-radius: var(--control-radius);
-  text-align: left;
-}
-
-.spectra-document-sources > button:hover {
-  background: var(--brand-wash);
-}
-
-.spectra-document-sources > button span {
-  grid-row: span 2;
-  color: var(--brand-ink);
-  font-size: var(--text-micro);
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-}
-
-.spectra-document-sources > button strong {
-  overflow: hidden;
-  color: #3a423d;
-  font-size: var(--text-micro);
-  font-weight: 620;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.spectra-document-sources > button em {
-  color: #7d867f;
-  font-size: var(--text-micro);
-  font-style: normal;
-}
-
-.spectra-document-sources > p {
-  padding: 12px;
-  color: #7d867f;
-  font-size: var(--text-micro);
-  line-height: 1.55;
-}
-
-.spectra-document-sources-action {
-  display: inline-flex !important;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  margin: 8px 8px 12px !important;
-  padding: 7px !important;
-  border: 1px solid #e3e6e0;
-  border-radius: var(--control-radius);
-  background: #fff;
-  color: #3a423d;
-  font-size: var(--text-micro);
-  font-weight: 620;
-  grid-template-columns: none !important;
-  width: calc(100% - 16px) !important;
-}
-
-.spectra-document-find-options {
-  display: flex;
-  gap: 3px;
-}
-
-.spectra-document-find-options button {
-  display: inline-flex;
-  width: 26px;
-  height: 26px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--chip-radius);
-  color: #6f7973;
-  font-size: var(--text-micro);
-  font-weight: 700;
-}
-
-.spectra-document-find-options button[data-active] {
-  background: #efecfb;
-  color: var(--brand-ink);
-}
-
-.spectra-document-outline > button:hover {
-  background: var(--brand-wash);
-  color: var(--brand-ink);
-}
-
-.spectra-document-outline > button span {
-  font-size: var(--text-micro);
-  opacity: 0.65;
-}
-
-.spectra-document-outline > button strong {
-  overflow: hidden;
-  font-size: var(--text-micro);
-  font-weight: 620;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.spectra-document-outline > p {
-  padding: 20px 14px;
-  color: #8a938e;
-  font-size: var(--text-micro);
-  line-height: 1.5;
-  text-align: center;
-}
-
-.spectra-document-findbar {
-  position: relative;
-  z-index: 31;
-  display: grid;
-  min-height: 45px;
-  grid-template-columns:
-    auto minmax(150px, 1fr) auto 30px 30px minmax(110px, 0.7fr)
-    auto 30px;
-  gap: 5px;
-  align-items: center;
-  margin: 7px 20px 0;
-  padding: 6px 8px;
-  border: 1px solid #e0e3dd;
-  border-radius: var(--card-radius);
-  background: #fff;
-  box-shadow: 0 8px 25px rgba(39, 50, 44, 0.07);
-  color: #707a74;
-}
-
-.spectra-document-findbar label {
-  position: relative;
-  min-width: 0;
-}
-
-.spectra-document-findbar input {
-  width: 100%;
-  height: 31px;
-  min-width: 0;
-  padding: 0 8px;
-  border: 1px solid #dfe3dd;
-  border-radius: var(--control-radius);
-  outline: 0;
-  color: #34413a;
-  font-size: var(--text-micro);
-}
-
-.spectra-document-findbar label input {
-  padding-right: 60px;
-}
-
-.spectra-document-findbar label small {
-  position: absolute;
-  top: 50%;
-  right: 7px;
-  color: #8a938e;
-  font-size: var(--text-micro);
-  transform: translateY(-50%);
-}
-
-.spectra-document-findbar button {
-  display: inline-flex;
-  min-width: 30px;
-  height: 30px;
-  align-items: center;
-  justify-content: center;
-  padding: 0 8px;
-  border-radius: var(--control-radius);
-  color: #626d67;
-  font-size: var(--text-micro);
-  font-weight: 650;
-  white-space: nowrap;
-}
-
-.spectra-document-findbar button:hover:not(:disabled) {
-  background: var(--brand-wash);
-  color: var(--brand-ink);
-}
-
-.spectra-document-findbar button:disabled {
-  opacity: 0.35;
-}
-
-.spectra-document-import-report {
-  position: relative;
-  z-index: 29;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 7px 20px 0;
-  padding: 8px 9px 8px 11px;
-  border: 1px solid #b8dfd0;
-  border-radius: var(--control-radius);
-  background: #f2fbf7;
-  color: #28775e;
-}
-
-.spectra-document-import-report[data-error="true"] {
-  border-color: #efc5bd;
-  background: #fff5f3;
-  color: #9b493e;
-}
-
-.spectra-document-import-report span {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.spectra-document-import-report strong {
-  font-size: var(--text-micro);
-  font-weight: 740;
-}
-
-.spectra-document-import-report small {
-  color: #6c7872;
-  font-size: var(--text-micro);
-  line-height: 1.4;
-}
-
-.spectra-document-confirm {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 7px 20px 0;
-  padding: 8px 10px 8px 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--control-radius);
-  background: var(--bg-elevated);
-}
-
-.spectra-document-confirm span {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.spectra-document-confirm strong {
-  color: var(--text-primary);
-  font-size: var(--text-micro);
-  font-weight: 740;
-}
-
-.spectra-document-confirm small {
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  line-height: 1.4;
-}
-
-.spectra-document-confirm button {
-  height: 28px;
-  flex-shrink: 0;
-  padding: 0 10px;
-  border-radius: var(--control-radius);
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 620;
-}
-
-.spectra-document-confirm button:hover {
-  background: color-mix(in oklab, var(--bg-primary) 80%, transparent);
-  color: var(--text-primary);
-}
-
-.spectra-document-confirm button[data-confirm-replace] {
-  background: var(--text-primary);
-  color: var(--bg-primary);
-}
-
-.spectra-document-confirm button[data-confirm-replace]:hover {
-  background: var(--text-primary);
-  color: var(--bg-primary);
-  opacity: 0.92;
-}
-
-/* Focus fills the work pane rather than the window. It has to: the studio root
-   is a query container, so layout containment makes it the containing block for
-   fixed descendants, and a `position: fixed` Focus surface would have been
-   clipped to the pane anyway while claiming to cover the app. Absolute states
-   the real behaviour, and it is already what Focus did in a side panel. */
-.spectra-document-studio[data-focus="true"] {
-  position: absolute;
-  z-index: calc(var(--z-panel) + 10);
-  inset: 0;
-  min-height: 0;
-  background: #f5f5f1 !important;
-}
-
-.spectra-document-studio[data-focus="true"] .spectra-document-canvas-shell {
-  overflow-y: auto;
-}
-
-/* Read puts the document down rather than taking it away: the measure narrows
-   to a comfortable one and the writing affordances stop advertising
-   themselves. */
-.spectra-document-studio[data-doc-mode="read"] .ProseMirror {
-  caret-color: transparent;
-}
-
-.spectra-document-studio[data-doc-mode="read"][data-layout="continuous"]
-  .tiptap-root,
-.spectra-document-studio[data-doc-mode="review"][data-layout="continuous"]
-  .tiptap-root {
-  width: min(720px, calc(100% - 48px));
-}
-
-/* A side panel is a reading surface. It gets the document at a readable size
-   in the width it actually has, not a desktop editor scaled down (§11A). */
-.spectra-document-studio[data-compact] {
-  min-height: 0;
-}
-
-.spectra-document-studio[data-compact] .spectra-document-canvas-shell {
-  min-height: 0;
-  padding: 10px 8px 24px;
-}
-
-.spectra-document-studio[data-compact][data-layout="continuous"] .ProseMirror {
-  --prose-size: var(--text-body);
-  --prose-leading: 1.62;
-  min-height: 320px;
-  padding: 16px 18px 48px !important;
-}
-
-.spectra-document-studio[data-compact][data-layout="continuous"] .tiptap-root {
-  width: calc(100% - 16px);
-}
-
-.spectra-document-studio[data-compact] .spectra-document-outline,
-.spectra-document-studio[data-compact] .spectra-document-sources {
-  position: absolute;
-  z-index: 25;
-  top: 8px;
-  bottom: 8px;
-  left: 8px;
-  width: calc(100% - 16px);
-  flex: none;
-  margin: 0;
-  box-shadow: 0 14px 40px rgba(39, 50, 44, 0.18);
-}
-
-.spectra-document-studio[data-compact] .spectra-document-findbar {
-  grid-template-columns: auto minmax(0, 1fr) auto 30px 30px 30px;
-}
-
-.spectra-document-studio[data-compact]
-  .spectra-document-findbar
-  [data-find-replace] {
-  display: none;
-}
-
-@media (max-width: 820px) {
-  .spectra-document-findbar {
-    grid-template-columns: auto minmax(0, 1fr) auto 30px 30px 30px;
-  }
-
-  .spectra-document-findbar [data-find-replace] {
-    display: none;
-  }
-
-  .spectra-document-outline {
-    position: absolute;
-    z-index: 25;
-    top: 64px;
-    bottom: 10px;
-    left: 8px;
-    width: min(250px, calc(100% - 34px));
-    box-shadow: 12px 0 34px rgba(39, 50, 44, 0.14);
-  }
-
-  .spectra-document-studio[data-layout="page"] .ProseMirror {
-    min-height: 820px;
-    padding: 35px 24px 80px !important;
-  }
-}
-
-@media print {
-  .spectra-document-studio > :not(.spectra-document-canvas-shell),
-  .spectra-document-outline {
-    display: none !important;
-  }
-
-  .spectra-document-canvas-shell,
-  .spectra-document-canvas-shell > main,
-  .spectra-document-studio .tiptap-root,
-  .spectra-document-studio .ProseMirror {
-    display: block;
-    min-height: 0;
-    margin: 0;
-    padding: 0 !important;
-    border: 0;
-    box-shadow: none;
-    background: #fff;
-  }
-}
-
-.spectra-document-studio .tiptap-root {
-  max-width: 920px;
-}
-
-/* The document's text is the shared prose at the editor size the reader
-   chose (spectra-prose.css). */
-.spectra-document-studio .ProseMirror {
-  --prose-size: var(--text-editor);
-  --prose-leading: 1.7;
-  caret-color: var(--accent-cyan);
-}
-
-.spectra-flashcard-studio textarea {
+.spectra-flashcard-studio textarea:not(.editor-sheet *, .spectra-deck-study *) {
   background:
     radial-gradient(
       circle at 88% 12%,
@@ -10318,102 +9557,6 @@ button[data-spectra-context-trigger="true"]::after {
   background: transparent;
 }
 
-.spectra-quiz-media {
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-  border: 1px dashed var(--border-default);
-  border-radius: var(--card-radius);
-  background: color-mix(in oklab, var(--bg-primary) 96%, white);
-}
-
-.spectra-quiz-media > label:only-child,
-.spectra-quiz-media > div[data-missing="true"] {
-  display: flex;
-  min-height: 92px;
-  cursor: pointer;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  text-align: center;
-}
-
-.spectra-quiz-media > img {
-  width: 100%;
-  max-height: 180px;
-  border-radius: var(--control-radius);
-  object-fit: contain;
-  background: #fff;
-}
-
-.spectra-quiz-media > button {
-  display: flex;
-  min-height: 30px;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border-radius: var(--control-radius);
-  color: var(--danger);
-  font-size: var(--text-micro);
-  font-weight: 650;
-}
-
-.spectra-quiz-media > button:hover {
-  background: color-mix(in oklab, var(--danger) 6%, var(--bg-elevated));
-}
-
-.spectra-quiz-media > p {
-  color: var(--danger);
-  font-size: var(--text-micro);
-  line-height: 1.4;
-}
-
-.spectra-quiz-advanced {
-  overflow: hidden;
-  border: 1px solid var(--border-default);
-  border-radius: var(--card-radius);
-  background: color-mix(in oklab, var(--bg-primary) 96%, white);
-}
-
-.spectra-quiz-advanced > summary {
-  display: flex;
-  min-height: 36px;
-  cursor: pointer;
-  list-style: none;
-  align-items: center;
-  gap: 7px;
-  padding: 0 10px;
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 680;
-}
-
-.spectra-quiz-advanced > summary::-webkit-details-marker {
-  display: none;
-}
-
-.spectra-quiz-advanced[open] > summary {
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.spectra-quiz-advanced[open] > summary svg:last-child {
-  transform: rotate(180deg);
-}
-
-.spectra-quiz-advanced > div {
-  display: grid;
-  gap: 10px;
-  padding: 10px;
-}
-
-.spectra-quiz-advanced > div > p {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  line-height: 1.55;
-}
-
 .spectra-quiz-print-sheet {
   display: none;
 }
@@ -10459,7 +9602,7 @@ button[data-spectra-context-trigger="true"]::after {
 
 .spectra-artifact-studio[data-blueprint="flashcard_deck"]
   .spectra-flashcard-studio
-  textarea {
+  textarea:not(.editor-sheet *, .spectra-deck-study *) {
   min-height: 190px;
   border-color: color-mix(in oklab, var(--border-default) 84%, transparent);
   border-radius: var(--surface-radius);
@@ -10560,466 +9703,12 @@ button[data-spectra-context-trigger="true"]::after {
   display: none;
 }
 
-.spectra-deck-sync-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 7px;
-  margin-top: 18px;
-  padding-top: 13px;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.spectra-deck-sync-actions span {
-  margin-right: auto;
-  color: var(--success);
-  font-size: var(--text-micro);
-}
-
-.spectra-deck-sync-actions span[data-invalid="true"] {
-  color: var(--warning);
-}
-
-.spectra-deck-sync-actions button {
-  display: inline-flex;
-  height: 32px;
-  align-items: center;
-  gap: 5px;
-  padding: 0 10px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--control-radius);
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 650;
-}
-
-.spectra-deck-sync-actions button:last-child:not(:only-child) {
-  border-color: color-mix(in oklab, var(--warning) 28%, var(--border-default));
-  background: color-mix(in oklab, var(--warning) 5%, var(--bg-primary));
-  color: var(--text-secondary);
-}
-
 .spectra-artifact-studio[data-studio-mode="split"] .spectra-studio-details {
   height: auto !important;
   max-height: none;
   margin-top: 0 !important;
   transform: none;
   border-radius: var(--control-radius);
-}
-
-.spectra-deck-sync-actions button:disabled {
-  opacity: 0.58;
-}
-
-.spectra-deck-swap {
-  display: inline-flex;
-  width: 37px;
-  height: 37px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-pill);
-  background: color-mix(in oklab, var(--bg-primary) 82%, white);
-  color: var(--text-secondary);
-  box-shadow: 0 4px 12px rgba(43, 35, 73, 0.07);
-  transition:
-    color var(--motion-fast) var(--ease-standard),
-    transform var(--motion-base) var(--ease-standard);
-}
-
-.spectra-deck-swap:hover {
-  color: #6753d1;
-  transform: rotate(-180deg);
-}
-
-.spectra-deck-advanced-trigger {
-  display: flex;
-  width: 100%;
-  min-height: 36px;
-  align-items: center;
-  gap: 7px;
-  margin-top: 12px;
-  padding: 0 10px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--control-radius);
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 650;
-}
-
-.spectra-deck-advanced-trigger:hover {
-  background: color-mix(in oklab, var(--brand-primary) 5%, var(--bg-primary));
-  color: #6250c8;
-}
-
-.spectra-deck-advanced {
-  display: grid;
-  gap: 10px;
-  margin-top: 8px;
-  padding: 11px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--control-radius);
-  background: color-mix(in oklab, var(--brand-primary) 2.2%, var(--bg-primary));
-}
-
-.spectra-deck-advanced > div:first-child {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.spectra-deck-check-field {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-}
-
-.spectra-deck-study {
-  position: fixed;
-  z-index: calc(var(--z-toast) - 1);
-  inset: 0;
-  display: grid;
-  grid-template-rows: 58px minmax(0, 1fr) auto;
-  background:
-    radial-gradient(
-      circle at 50% 18%,
-      rgba(117, 96, 232, 0.08),
-      transparent 35%
-    ),
-    #f5f4f0;
-}
-
-.spectra-deck-study > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 18px;
-  border-bottom: 1px solid var(--border-default);
-  background: rgba(255, 255, 255, 0.94);
-}
-
-.spectra-deck-study > header span {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #6652ce;
-}
-
-.spectra-deck-study > header strong {
-  color: var(--text-primary);
-  font-size: 11px;
-}
-
-.spectra-deck-study > header small {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-
-.spectra-deck-study > header button {
-  display: inline-flex;
-  width: 32px;
-  height: 32px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--control-radius);
-}
-
-/* The keyboard contract, stated in the session rather than in a help page. */
-.spectra-deck-study-shortcuts {
-  display: grid;
-  width: min(760px, calc(100% - 32px));
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 6px 18px;
-  margin: 0 auto;
-  padding: 12px 16px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--surface-radius);
-  background: var(--bg-elevated);
-}
-
-.spectra-deck-study-shortcuts > div {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-
-.spectra-deck-study-shortcuts dd {
-  color: var(--text-secondary);
-  font-size: 11.5px;
-}
-
-/* The learner's own note. It sits with the answer because that is when a
-   correction is worth writing down. */
-.spectra-deck-study-note {
-  width: 100%;
-  max-width: 560px;
-  margin-top: 4px;
-  text-align: left;
-}
-
-.spectra-deck-study-note label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 5px;
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  font-weight: 750;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.spectra-deck-study-note textarea {
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--card-radius);
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: 12.5px;
-  line-height: 1.5;
-  outline: none;
-  resize: vertical;
-}
-
-.spectra-deck-study-note textarea:focus-visible {
-  border-color: color-mix(
-    in oklab,
-    var(--brand-primary) 55%,
-    var(--border-default)
-  );
-}
-
-.spectra-deck-study > main {
-  display: flex;
-  width: min(760px, calc(100% - 32px));
-  align-items: stretch;
-  justify-content: center;
-  flex-direction: column;
-  gap: 14px;
-  margin: auto;
-  padding: 28px 0;
-}
-
-.spectra-deck-study > main > section {
-  display: flex;
-  min-height: 230px;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 13px;
-  padding: 30px clamp(25px, 8vw, 75px);
-  border: 1px solid var(--border-default);
-  border-radius: var(--surface-radius);
-  background: #fff;
-  box-shadow: 0 20px 50px rgba(49, 39, 91, 0.09);
-  text-align: center;
-}
-
-.spectra-deck-study > main > section[data-answer="true"] {
-  border-color: color-mix(in oklab, var(--success) 28%, var(--border-default));
-}
-
-.spectra-deck-study > main > section > span {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  font-weight: 750;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-/* A face in study is the shared prose at study size, in the display face. */
-.spectra-deck-study-face {
-  --prose-size: clamp(20px, 3vw, 34px);
-  --prose-leading: 1.35;
-  --prose-font: var(--font-display);
-  max-width: 590px;
-}
-
-.spectra-deck-study > main > section > small {
-  max-width: 560px;
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  line-height: 1.5;
-}
-
-.spectra-deck-reveal {
-  min-height: 42px;
-  margin: 0 auto;
-  padding: 0 22px;
-  border-radius: var(--card-radius);
-  background: #7160df;
-  color: #fff;
-  font-size: var(--text-micro);
-  font-weight: 700;
-  box-shadow: 0 9px 24px rgba(78, 61, 176, 0.2);
-}
-
-.spectra-deck-reveal kbd {
-  margin-left: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 4px;
-  padding: 1px 5px;
-  font-size: var(--text-micro);
-  font-weight: 750;
-}
-
-.spectra-deck-study-error {
-  position: absolute;
-  z-index: 3;
-  top: 70px;
-  left: 50%;
-  display: flex;
-  width: min(620px, calc(100% - 32px));
-  align-items: center;
-  gap: 9px;
-  border: 1px solid
-    color-mix(in oklab, var(--danger) 24%, var(--border-default));
-  border-radius: var(--card-radius);
-  background: color-mix(in oklab, var(--danger) 6%, white);
-  padding: 9px 11px;
-  color: var(--danger);
-  font-size: var(--text-micro);
-  transform: translateX(-50%);
-}
-
-.spectra-deck-study-error span {
-  flex: 1;
-}
-.spectra-deck-study-error button {
-  font-weight: 700;
-}
-
-.spectra-deck-study > main.spectra-deck-study-complete {
-  max-width: 620px;
-  align-items: center;
-  border: 1px solid var(--border-default);
-  border-radius: var(--surface-radius);
-  background: white;
-  padding: 38px;
-  box-shadow: 0 20px 50px rgba(49, 39, 91, 0.09);
-  text-align: center;
-}
-
-.spectra-deck-study-complete h3 {
-  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
-  font-size: 25px;
-  font-weight: 600;
-}
-
-.spectra-deck-study-complete > p {
-  max-width: 470px;
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  line-height: 1.65;
-}
-
-.spectra-deck-study-complete > div {
-  display: grid;
-  width: 100%;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 7px;
-}
-
-.spectra-deck-study-complete > div > span {
-  display: flex;
-  min-height: 58px;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  border-radius: var(--control-radius);
-  background: var(--bg-secondary);
-}
-
-.spectra-deck-study-complete > div strong {
-  font-size: 17px;
-}
-.spectra-deck-study-complete > div small {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  text-transform: capitalize;
-}
-
-.spectra-deck-study-complete > button {
-  min-height: 38px;
-  border-radius: var(--control-radius);
-  background: var(--text-primary);
-  padding-inline: 16px;
-  color: var(--bg-primary);
-  font-size: var(--text-micro);
-  font-weight: 700;
-}
-
-.spectra-deck-study > footer {
-  display: grid;
-  width: min(620px, calc(100% - 32px));
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  margin: 0 auto 24px;
-}
-
-.spectra-deck-study > footer button {
-  position: relative;
-  display: flex;
-  min-height: 48px;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 2px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--card-radius);
-  background: #fff;
-}
-
-.spectra-deck-study > footer button:disabled {
-  opacity: 0.55;
-}
-
-.spectra-deck-study > footer kbd {
-  position: absolute;
-  left: 7px;
-  top: 7px;
-  border-radius: 4px;
-  background: var(--bg-secondary);
-  padding: 1px 4px;
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-
-.spectra-deck-study > footer button:hover {
-  border-color: #9a8dea;
-  transform: translateY(-1px);
-}
-
-.spectra-deck-study > footer strong {
-  font-size: var(--text-micro);
-}
-
-.spectra-deck-study > footer small {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-
-.spectra-deck-study > footer button[data-rating="again"] {
-  color: var(--danger);
-}
-
-.spectra-deck-study > footer button[data-rating="good"],
-.spectra-deck-study > footer button[data-rating="easy"] {
-  color: var(--success);
-}
-
-@media (max-width: 760px) {
-  .spectra-deck-advanced > div:first-child {
-    grid-template-columns: 1fr;
-  }
-
-  .spectra-deck-study > footer {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media print {
@@ -11059,8 +9748,6 @@ button[data-spectra-context-trigger="true"]::after {
     color: #666;
     font-family: Arial, sans-serif;
     font-size: 8pt;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
   }
 
   .spectra-deck-print-section h2 {
@@ -11130,8 +9817,6 @@ button[data-spectra-context-trigger="true"]::after {
   .spectra-quiz-print-sheet > header > span {
     font-family: Arial, sans-serif;
     font-size: 8pt;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
   }
 
   .spectra-quiz-print-sheet > header h1 {
@@ -11219,12 +9904,6 @@ button[data-spectra-context-trigger="true"]::after {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .spectra-deck-swap:hover,
-  .spectra-deck-study > footer button:hover {
-    transform: none;
-  }
-}
 
 .spectra-planner-description {
   overflow: hidden;
@@ -11574,13 +10253,11 @@ button[data-spectra-context-trigger="true"]::after {
   color: var(--text-tertiary);
   font-size: var(--text-micro);
   font-weight: 800;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
 }
 
 .code-settings-nav-heading > strong {
   color: var(--text-primary);
-  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-display);
   font-size: 15px;
   font-weight: 650;
 }
@@ -11641,7 +10318,7 @@ button[data-spectra-context-trigger="true"]::after {
   padding: 16px;
 }
 .code-settings-card > h3 {
-  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-display);
   color: var(--text-primary);
   font-size: 16px;
   font-weight: 650;
@@ -11820,9 +10497,6 @@ button[data-spectra-context-trigger="true"]::after {
   .spectra-artifact-header input:first-of-type {
     font-size: 22px !important;
   }
-  .spectra-document-studio .ProseMirror {
-    padding-inline: 8px !important;
-  }
   .spectra-command-bar {
     gap: 8px;
   }
@@ -11908,50 +10582,6 @@ button[data-spectra-context-trigger="true"]::after {
   background: transparent;
 }
 
-.spectra-quiz-studio [data-quiz-panel="settings"] {
-  padding: 24px 12px 12px;
-  background: transparent;
-}
-
-.spectra-quiz-question-editor > .mb-4 {
-  margin-bottom: 10px;
-}
-
-.spectra-quiz-type-row {
-  display: grid;
-  grid-template-columns: 34px 190px;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-secondary);
-  font-size: 11px;
-}
-
-.spectra-quiz-type-row select {
-  min-height: 32px !important;
-  height: 32px !important;
-}
-
-.spectra-quiz-question-editor section.mt-4 {
-  margin-top: 12px;
-}
-
-.spectra-quiz-question-editor section.mt-4 .space-y-2 {
-  gap: 5px;
-}
-
-.spectra-quiz-question-editor section.mt-4 input {
-  min-height: 30px;
-  height: 30px;
-}
-
-.spectra-quiz-studio [data-quiz-panel="settings"] > div {
-  gap: 12px;
-}
-
-.spectra-quiz-studio [data-quiz-panel="settings"] .spectra-quiz-media {
-  min-height: 104px;
-}
-
 .spectra-studio-details [data-spectra-card="side"] {
   padding: 12px;
 }
@@ -11966,8 +10596,8 @@ button[data-spectra-context-trigger="true"]::after {
   gap: 10px;
 }
 
-.spectra-flashcard-studio textarea {
-  font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+.spectra-flashcard-studio textarea:not(.editor-sheet *, .spectra-deck-study *) {
+  font-family: var(--font-sans);
 }
 
 .spectra-studio-details {
@@ -12012,44 +10642,6 @@ body {
 
 .spectra-artifact-header {
   border-color: var(--border-subtle) !important;
-}
-
-.spectra-document-studio,
-.spectra-document-studio[data-layout="continuous"]
-  .spectra-document-canvas-shell {
-  background:
-    radial-gradient(
-      circle at 16% 2%,
-      rgba(21, 155, 118, 0.02),
-      transparent 24%
-    ),
-    #faf9f8 !important;
-}
-
-.spectra-document-studio[data-layout="continuous"] .tiptap-root {
-  width: min(920px, calc(100% - 80px));
-  max-width: 920px !important;
-  margin-left: auto !important;
-  margin-right: auto !important;
-}
-
-.spectra-document-studio[data-layout="continuous"] .ProseMirror {
-  padding: 28px 0 90px !important;
-}
-
-.spectra-document-studio[data-layout="continuous"] .tiptap-root {
-  margin-left: auto !important;
-  margin-right: auto !important;
-}
-
-.spectra-document-canvas-shell {
-  padding-top: 20px !important;
-}
-
-.spectra-artifact-studio[data-canvas-extent="infinite"]
-  .spectra-document-studio[data-layout="continuous"]
-  .spectra-document-canvas-shell {
-  padding: 0 !important;
 }
 
 .spectra-artifact-studio[data-blueprint="flashcard_deck"]
@@ -12111,10 +10703,6 @@ body {
   display: none !important;
 }
 
-.spectra-deck-tag-field {
-  margin-top: 32px !important;
-}
-
 .spectra-inspector-action {
   display: flex;
   width: 100%;
@@ -12152,14 +10740,6 @@ body {
   height: 36px !important;
   margin-top: 2px !important;
   border-radius: var(--control-radius) !important;
-}
-
-.spectra-document-studio[data-layout="continuous"] .ProseMirror {
-  padding: 0 0 90px !important;
-}
-
-.spectra-document-studio[data-layout="continuous"] .ProseMirror > :first-child {
-  margin-top: 0 !important;
 }
 
 .spectra-workspace-header nav[aria-label="Workspace sections"] {
@@ -12308,7 +10888,7 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
 
 .spectra-artifact-studio[data-blueprint="presentation"]
   .presentation-object-text[data-text-preset="title"] {
-  font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-sans);
   letter-spacing: -0.025em;
 }
 
@@ -12359,15 +10939,6 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
 }
 
 .spectra-artifact-studio[data-blueprint="presentation"]
-  .presentation-notes
-  > div {
-  height: 30px;
-  gap: 11px;
-  padding-inline: 11px;
-  font-size: var(--text-micro);
-}
-
-.spectra-artifact-studio[data-blueprint="presentation"]
   .presentation-notes-toggle {
   display: grid;
   width: 100%;
@@ -12392,14 +10963,6 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
   .presentation-notes-toggle
   span {
   text-align: right;
-}
-
-.spectra-artifact-studio[data-blueprint="presentation"]
-  .presentation-notes
-  > div
-  strong {
-  height: 30px;
-  padding-top: 9px;
 }
 
 .spectra-artifact-studio[data-blueprint="presentation"]
@@ -12482,10 +11045,12 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
 
 .spectra-artifact-main {
   /* The workbar lives above the scrollport. Overflow starts in
-     `.spectra-editor-body`, so the 42px bar never covers the canvas. */
+     `.spectra-editor-body`, so the 42px bar never covers the canvas. No side
+     inset here: each editor's scrollport runs to the panel's edges, so its
+     scrollbar sits at the very right, and the editor insets its own content. */
   overflow: hidden !important;
   overscroll-behavior: contain;
-  padding: 0 var(--spectra-studio-inline-inset) 20px !important;
+  padding: 0 0 20px !important;
 }
 
 .spectra-artifact-studio[data-canvas-extent="infinite"] .spectra-artifact-main {
@@ -12498,34 +11063,6 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
 .spectra-artifact-studio[data-canvas-extent="infinite"]
   .spectra-editor-workbar {
   margin: 8px var(--spectra-studio-inline-inset) 0 !important;
-}
-
-.spectra-artifact-studio[data-canvas-extent="infinite"]
-  .spectra-document-studio[data-layout="continuous"]
-  .spectra-document-canvas-shell {
-  height: 100%;
-  min-height: 0;
-  flex: 1 1 auto;
-  /* Beat the later `padding-top: 20px !important` paper-tray gutter. */
-  padding: 0 !important;
-}
-
-.spectra-artifact-studio[data-canvas-extent="infinite"]
-  .spectra-document-studio[data-layout="continuous"]
-  .tiptap-root {
-  width: 100% !important;
-  max-width: none !important;
-  height: 100%;
-  min-height: 0;
-  margin: 0 !important;
-}
-
-.spectra-artifact-studio[data-canvas-extent="infinite"]
-  .spectra-document-studio[data-layout="continuous"]
-  .ProseMirror {
-  min-height: 100%;
-  height: 100%;
-  padding: 16px 20px 32px !important;
 }
 
 .spectra-artifact-studio[data-canvas-extent="infinite"] .sheets-grid-frame {
@@ -12715,7 +11252,7 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
 .tabular-nums,
 .timetable-studio time {
   font-family:
-    var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
+    var(--font-sans) !important;
   font-weight: 500 !important;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em !important;
@@ -12726,21 +11263,21 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
 .timetable-event-editor input:not([type="checkbox"]):not([type="color"]),
 .timetable-event-editor select,
 .timetable-event-editor textarea,
-.spectra-quiz-studio input:not([type="checkbox"]):not([type="radio"]),
-.spectra-quiz-studio select,
-.spectra-quiz-studio textarea {
+.spectra-quiz-studio input:not([type="checkbox"]):not([type="radio"]):not(.editor-sheet *),
+.spectra-quiz-studio select:not(.editor-sheet *),
+.spectra-quiz-studio textarea:not(.editor-sheet *) {
   border-radius: var(--chip-radius) !important;
   border-color: var(--border-default) !important;
   background: var(--bg-elevated) !important;
   box-shadow: none !important;
   font-family:
-    var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
+    var(--font-sans) !important;
   font-weight: 400 !important;
 }
 
 .timetable-event-editor label,
 .spectra-quiz-studio label {
-  font-family: var(--font-manrope), var(--font-sans), Arial, sans-serif;
+  font-family: var(--font-sans);
   font-weight: 500;
 }
 
@@ -12754,7 +11291,7 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
 
 .timetable-week-header strong {
   font-family:
-    var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
+    var(--font-sans) !important;
   font-weight: 500 !important;
   font-variant-numeric: tabular-nums;
 }
@@ -12776,25 +11313,17 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
   > div:not(:last-child)
   strong {
   font-family:
-    var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
+    var(--font-sans) !important;
   font-weight: 500 !important;
   font-variant-numeric: tabular-nums;
 }
 
 .spectra-artifact-studio[data-blueprint="flashcard_deck"]
   .spectra-flashcard-studio
-  textarea {
+  textarea:not(.editor-sheet *, .spectra-deck-study *) {
   font-size: 18px !important;
   font-weight: 400 !important;
   line-height: 1.35 !important;
-}
-
-.spectra-deck-sync-actions > span:not([data-invalid]) {
-  display: none;
-}
-
-.spectra-deck-sync-actions:not(:has(button)):has(> span:not([data-invalid])) {
-  display: none;
 }
 
 /* Planner two-rail layout must not apply inside the workspace side panel.
@@ -13009,8 +11538,6 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
   padding: 4px 7px 5px;
   font-size: var(--text-micro);
   font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
   color: var(--presence-color);
 }
 
@@ -13195,7 +11722,7 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
   max-width: 180px;
   height: 18px;
   padding: 0 7px;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-chip);
   background: var(--presence-color);
   color: #fff;
   font-size: var(--text-micro);
@@ -13435,7 +11962,7 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
   gap: 5px;
   height: 26px;
   padding: 0 9px 0 8px;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-chip);
   border: 1px solid var(--border-default);
   background: transparent;
   font-size: 11px;
@@ -13463,65 +11990,6 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
 @container (max-width: 420px) {
   .spectra-follow-toggle span {
     display: none;
-  }
-}
-
-.spectra-follow-strip {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 12px 7px 14px;
-  border-bottom: 1px solid var(--border-subtle);
-  background: color-mix(in oklab, var(--brand-primary) 6%, transparent);
-  font-size: 11.5px;
-  color: var(--text-secondary);
-}
-
-.spectra-follow-strip-pip {
-  flex: none;
-  width: 5px;
-  height: 5px;
-  border-radius: var(--radius-pill);
-  background: var(--brand-primary);
-  /* Resolves rather than loops: three beats, then it simply sits there. */
-  animation: spectra-follow-pip 1.6s var(--ease-standard) 3 both;
-}
-
-.spectra-follow-strip-text {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--text-primary);
-}
-
-.spectra-follow-strip-stop {
-  flex: none;
-  padding: 2px 7px;
-  border-radius: var(--chip-radius);
-  border: 1px solid transparent;
-  background: transparent;
-  font-size: var(--text-micro);
-  font-weight: 600;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  transition: color var(--motion-fast) var(--ease-standard);
-}
-
-.spectra-follow-strip-stop:hover {
-  color: var(--text-primary);
-  border-color: var(--border-default);
-}
-
-@keyframes spectra-follow-pip {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
   }
 }
 
@@ -13785,1126 +12253,6 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
   min-height: 0;
 }
 
-/* ---------------------------------------------------------------------------
-   Plan (§11H)
-
-   List, Board and Timeline are three readings of the same tasks, so they share
-   one chrome: the same filter bar, the same row rhythm, the same task panel.
-   Only the middle changes. The timeline lane is the one place the surface
-   raises its voice — everywhere else stays quiet enough to read a hundred rows.
-   --------------------------------------------------------------------------- */
-.spectra-plan-studio {
-  position: relative;
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-  background: var(--bg-primary);
-}
-
-/* Find and Filters are disclosures under the workbar, not permanent chrome: a
-   plan is read far more often than it is filtered, so the row only exists while
-   it is being used. Both sit inside the studio, below the 42px bar, and never
-   change its height. */
-.spectra-plan-find,
-.spectra-plan-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 12px;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-secondary);
-}
-
-.spectra-plan-find {
-  gap: 6px;
-}
-
-/* The filter fields carry their own labels, so the row aligns on the controls
-   rather than centring the labels against them. */
-.spectra-plan-filters {
-  align-items: flex-end;
-}
-
-.spectra-plan-find > input {
-  height: 28px;
-  min-width: 140px;
-  flex: 1 1 200px;
-  max-width: 320px;
-  padding: 0 9px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--control-radius);
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  font-size: 12px;
-}
-
-.spectra-plan-find > input:focus {
-  border-color: var(--border-strong);
-  outline: none;
-}
-
-.spectra-plan-find > button,
-.spectra-plan-filters > button {
-  height: 28px;
-  padding: 0 9px;
-  border-radius: var(--control-radius);
-  color: var(--text-secondary);
-  font-size: 11.5px;
-  font-weight: 550;
-}
-
-.spectra-plan-find > button:hover,
-.spectra-plan-filters > button:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-/* A problem says what happened; a notice says what changed. Neither apologises
-   and neither stays longer than the person needs it. */
-.spectra-plan-problem,
-.spectra-plan-notice {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-subtle);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.spectra-plan-problem {
-  background: color-mix(in oklab, var(--danger) 9%, var(--bg-primary));
-  color: var(--danger);
-}
-
-.spectra-plan-notice {
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-}
-
-.spectra-plan-problem > p,
-.spectra-plan-notice > p {
-  flex: 1;
-}
-
-.spectra-plan-problem > button,
-.spectra-plan-notice > button {
-  flex: none;
-  padding: 2px;
-  border-radius: var(--chip-radius);
-  opacity: 0.55;
-}
-
-.spectra-plan-problem > button:hover,
-.spectra-plan-notice > button:hover {
-  opacity: 1;
-}
-
-.spectra-plan-bulk {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 12px;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-secondary);
-}
-
-.spectra-plan-bulk > strong {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.spectra-plan-bulk > button {
-  height: 26px;
-  padding: 0 9px;
-  border-radius: var(--chip-radius);
-  color: var(--text-secondary);
-  font-size: 11.5px;
-  font-weight: 550;
-}
-
-.spectra-plan-bulk > button:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.spectra-plan-danger {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--danger) !important;
-}
-
-.spectra-plan-danger:hover {
-  background: color-mix(in oklab, var(--danger) 12%, transparent) !important;
-}
-
-/* An empty plan is an invitation: one field, one verb, no explanation of what
-   a plan is. */
-.spectra-plan-empty {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 48px 24px;
-  color: var(--text-tertiary);
-  text-align: center;
-}
-
-.spectra-plan-empty > h3 {
-  color: var(--text-primary);
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.spectra-plan-empty > p {
-  max-width: 340px;
-  font-size: 12.5px;
-  line-height: 1.6;
-}
-
-.spectra-plan-empty > form {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.spectra-plan-empty input {
-  height: 30px;
-  width: 210px;
-  padding: 0 10px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--control-radius);
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  font-size: 12.5px;
-  outline: none;
-}
-
-.spectra-plan-empty button {
-  height: 30px;
-  padding: 0 12px;
-  border-radius: var(--control-radius);
-  background: var(--text-primary);
-  color: var(--bg-elevated);
-  font-size: 12px;
-  font-weight: 560;
-}
-
-/* List --------------------------------------------------------------------- */
-.spectra-plan-list {
-  /* A task row is a line of text, not a table: at 1900px the title sat a metre
-     from its own date. The list keeps a comfortable measure and centres, the way
-     the document surface does, so the eye travels from title to date in one
-     movement at any window size. */
-  max-width: 1120px;
-  margin-inline: auto;
-  width: 100%;
-  min-height: 0;
-  flex: 1;
-  overflow-y: auto;
-  padding-bottom: 28px;
-}
-
-.spectra-plan-listhead {
-  position: sticky;
-  z-index: 5;
-  top: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 12px;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-primary);
-  color: var(--text-tertiary);
-  font-size: 11px;
-}
-
-.spectra-plan-listhead > span {
-  flex: 1;
-}
-
-.spectra-plan-listhead > button:not(:first-child) {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 7px;
-  border-radius: var(--chip-radius);
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 550;
-}
-
-.spectra-plan-listhead > button:not(:first-child):hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.spectra-plan-listhead > button[data-active] {
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  box-shadow: inset 0 0 0 1px var(--border-default);
-}
-
-/* The completion box and the selection box look alike because they behave
-   alike; they differ in what they mean, which is why only one of them is ever
-   present in a row. Completion is round — the shape every task list uses for
-   "finish this" — and selection stays square. */
-.spectra-plan-check,
-.spectra-plan-select,
-.spectra-plan-listhead > button:first-child {
-  display: inline-flex;
-  width: 15px;
-  height: 15px;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  color: var(--bg-elevated);
-  transition:
-    background var(--motion-fast) var(--ease-standard),
-    border-color var(--motion-fast) var(--ease-standard);
-}
-
-.spectra-plan-check {
-  border-radius: 50%;
-}
-
-.spectra-plan-check:hover:not(:disabled) {
-  border-color: var(--text-secondary);
-  background: var(--bg-hover);
-}
-
-.spectra-plan-check:disabled {
-  border-color: var(--border-subtle);
-}
-
-.spectra-plan-list article[data-status="done"] .spectra-plan-check,
-.spectra-plan-select[data-checked],
-.spectra-plan-listhead > button:first-child[data-checked] {
-  border-color: var(--text-primary);
-  background: var(--text-primary);
-  color: var(--bg-elevated);
-}
-
-/* The status is a chip, not an OS dropdown: no bevel, no arrow until it is
-   wanted, and the tone comes from the status itself. */
-.spectra-plan-status {
-  flex: none;
-  /* A fixed column, not a shrink-to-fit chip: "Backlog" and "In progress" are
-     very different widths, and letting each row size its own status starts
-     every title at a different place. */
-  width: 82px;
-  padding: 2px 4px;
-  border: 0;
-  border-radius: var(--chip-radius);
-  background: transparent;
-  font-size: 11px;
-  font-weight: 560;
-  appearance: none;
-  text-align: left;
-  text-overflow: ellipsis;
-}
-
-.spectra-plan-status:not(:disabled) {
-  cursor: pointer;
-}
-
-.spectra-plan-status:hover:not(:disabled),
-.spectra-plan-status:focus-visible {
-  background: var(--bg-hover);
-}
-
-.spectra-plan-list > section > header {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-  padding: 14px 12px 5px;
-  color: var(--text-secondary);
-}
-
-.spectra-plan-list > section > header > strong {
-  font-size: 11px;
-  font-weight: 640;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.spectra-plan-list > section > header > em {
-  color: var(--text-tertiary);
-  font-size: 11px;
-  font-style: normal;
-}
-
-.spectra-plan-list article {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding-top: 5px;
-  padding-right: 12px;
-  padding-bottom: 5px;
-  border-bottom: 1px solid var(--border-subtle);
-  transition: background var(--motion-fast) var(--ease-standard);
-}
-
-.spectra-plan-list article:hover {
-  background: var(--bg-secondary);
-}
-
-.spectra-plan-list article[data-selected] {
-  background: var(--bg-hover);
-}
-
-.spectra-plan-list article[data-status="done"] .spectra-plan-title > span {
-  color: var(--text-tertiary);
-  text-decoration: line-through;
-}
-
-.spectra-plan-title {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  align-items: center;
-  gap: 7px;
-  text-align: left;
-}
-
-.spectra-plan-title > span {
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: 14px;
-  font-weight: 560;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.spectra-plan-title > em {
-  flex: none;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--bg-secondary);
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  font-style: normal;
-}
-
-.spectra-plan-title > em[data-tone="blocked"] {
-  background: color-mix(in oklab, #d88922 16%, transparent);
-  color: #a4671a;
-}
-
-/* Deadlines the school owns are marked, never editable here. */
-.spectra-plan-official {
-  flex: none;
-  padding: 1px 6px;
-  border: 1px solid color-mix(in oklab, var(--accent-cyan) 40%, transparent);
-  border-radius: 4px;
-  color: var(--accent-cyan);
-  font-size: var(--text-micro);
-  font-style: normal;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.spectra-plan-blocks {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 3px;
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-
-/* The date slot: one fixed column holding the relative reading, with the picker
-   stacked invisibly on top of it. Nothing changes width when the two swap, so a
-   row never twitches as the pointer crosses it. */
-.spectra-plan-date {
-  position: relative;
-  display: flex;
-  width: 104px;
-  height: 24px;
-  flex: none;
-  align-items: center;
-  justify-content: flex-end;
-}
-
-.spectra-plan-date > input[type="date"] {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  padding: 0 6px;
-  border: 1px solid transparent;
-  border-radius: var(--chip-radius);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 11px;
-  opacity: 0;
-  transition: opacity var(--motion-fast) var(--ease-standard);
-}
-
-.spectra-plan-date > input[type="date"]:disabled {
-  /* A school deadline is not moved here, so the picker is not merely dimmed —
-     it is out of the way, and the label alone carries the date. */
-  pointer-events: none;
-}
-
-.spectra-plan-list article:hover .spectra-plan-date > input:not(:disabled),
-.spectra-plan-date > input[type="date"]:focus {
-  border-color: var(--border-subtle);
-  background: var(--bg-elevated);
-  opacity: 1;
-}
-
-.spectra-plan-list
-  article:hover
-  .spectra-plan-date
-  > input:not(:disabled)
-  ~ .spectra-plan-due,
-.spectra-plan-date:focus-within > .spectra-plan-due {
-  opacity: 0;
-}
-.spectra-plan-due {
-  width: 100%;
-  flex: none;
-  color: var(--text-tertiary);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  transition: opacity var(--motion-fast) var(--ease-standard);
-}
-
-.spectra-plan-due[data-overdue],
-.spectra-plan-board em[data-overdue] {
-  color: var(--danger);
-  font-weight: 560;
-}
-
-.spectra-plan-none {
-  padding: 28px 16px;
-  color: var(--text-tertiary);
-  font-size: 12.5px;
-  line-height: 1.6;
-  text-align: center;
-}
-
-.spectra-plan-add {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 12px;
-  color: var(--text-tertiary);
-}
-
-.spectra-plan-add > input {
-  width: 100%;
-  border: 0;
-  background: transparent;
-  color: var(--text-primary);
-  font-size: 13px;
-  outline: none;
-}
-
-/* Board -------------------------------------------------------------------- */
-.spectra-plan-board {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  gap: 10px;
-  overflow-x: auto;
-  /* The columns scroll horizontally; each one scrolls its own cards. Letting
-     the whole board scroll vertically instead put the column heads off screen
-     as soon as one status filled up. */
-  align-items: start;
-  padding: 12px;
-}
-
-.spectra-plan-board > section {
-  display: flex;
-  /* 244px fitted two and a half columns into a side panel and cut the third in
-     half. The column now shrinks to 196px before the board scrolls, which fits
-     four across a 900px pane and all five at 1180. */
-  width: 244px;
-  min-width: 196px;
-  max-height: 100%;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px;
-  border-radius: var(--card-radius);
-  /* No border and no fill: the gap between columns is what separates them, and
-     an empty column should read as space rather than as a grey slab. The tint
-     appears only while a card is being dragged over it, where it means
-     something. */
-  background: transparent;
-  overflow-y: auto;
-}
-
-.spectra-plan-board > section[data-dropping] {
-  background: color-mix(in oklab, var(--accent-cyan) 8%, transparent);
-  box-shadow: inset 0 0 0 1px
-    color-mix(in oklab, var(--accent-cyan) 34%, transparent);
-}
-
-.spectra-plan-board > section > header {
-  position: sticky;
-  z-index: 1;
-  top: 0;
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  padding: 1px 3px 5px;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-primary);
-}
-
-.spectra-plan-board > section > header > strong {
-  font-size: 11px;
-  font-weight: 640;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-
-.spectra-plan-board > section > header > em {
-  color: var(--text-tertiary);
-  font-size: 11px;
-  font-style: normal;
-}
-
-.spectra-plan-board > section > button {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 9px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--control-radius);
-  background: var(--bg-elevated);
-  text-align: left;
-  transition:
-    border-color var(--motion-fast) var(--ease-standard),
-    box-shadow var(--motion-fast) var(--ease-standard);
-}
-
-.spectra-plan-board > section > button:hover {
-  border-color: var(--border-strong);
-  box-shadow: 0 4px 12px rgba(39, 50, 44, 0.07);
-}
-
-.spectra-plan-board > section > button > strong {
-  color: var(--text-primary);
-  font-size: 12.5px;
-  font-weight: 550;
-  line-height: 1.4;
-}
-
-.spectra-plan-board > section > button > span {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 5px;
-}
-
-.spectra-plan-board > section > button em {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  font-style: normal;
-}
-
-.spectra-plan-board > section > p {
-  padding: 10px 8px;
-  color: var(--text-placeholder);
-  font-size: 11.5px;
-}
-
-/* Typing here files the task under this column's status. The field is quiet
-   until it is used, so five of them across a board read as one row of prompts
-   rather than five outlined inputs. */
-.spectra-plan-column-add {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 7px;
-  border-radius: var(--control-radius);
-  color: var(--text-tertiary);
-}
-
-.spectra-plan-column-add:focus-within {
-  background: var(--bg-elevated);
-  box-shadow: inset 0 0 0 1px var(--border-default);
-}
-
-.spectra-plan-column-add > input {
-  width: 100%;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text-primary);
-  font-size: 12px;
-  outline: none;
-}
-
-/* Timeline ----------------------------------------------------------------- */
-.spectra-plan-timeline {
-  min-height: 0;
-  flex: 1;
-  overflow-y: auto;
-  padding: 14px 16px 28px;
-}
-
-/* Name column, then one shared axis. Every lane uses the same two-column grid,
-   so a bar's position means the same thing in every row and the names stay
-   readable however short the bar is. */
-.spectra-plan-lanes {
-  max-width: 1200px;
-  margin-inline: auto;
-}
-
-.spectra-plan-axis {
-  display: grid;
-  grid-template-columns: minmax(120px, 210px) minmax(0, 1fr) 54px;
-  gap: 12px;
-  padding-bottom: 5px;
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-tertiary);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
-.spectra-plan-axis > div {
-  position: relative;
-  height: 14px;
-}
-
-.spectra-plan-axis > div > span {
-  position: absolute;
-  top: 0;
-  white-space: nowrap;
-}
-
-/* The first tick starts at the left edge and the last ends at the right, so
-   neither label hangs off the axis it describes. */
-.spectra-plan-axis > div > span:first-child {
-  transform: none;
-}
-
-.spectra-plan-axis > div > span:not(:first-child):not(:last-child) {
-  transform: translateX(-50%);
-}
-
-.spectra-plan-axis > div > span:last-child {
-  transform: translateX(-100%);
-}
-
-.spectra-plan-lane {
-  display: grid;
-  align-items: center;
-  grid-template-columns: minmax(120px, 210px) minmax(0, 1fr) 54px;
-  gap: 12px;
-  padding: 3px 0;
-}
-
-.spectra-plan-lane-name,
-.spectra-plan-lane-label {
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: 12.5px;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.spectra-plan-lane-name:hover {
-  color: var(--accent-violet);
-}
-
-.spectra-plan-lane-label {
-  color: var(--text-tertiary);
-  font-size: 11px;
-  font-weight: 640;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-/* The lane carries a hairline, not a filled slab. A tinted block behind every
-   row read as an empty progress bar — five bars at 0% — when all it has to do
-   is let the eye travel from the name to the mark. */
-.spectra-plan-lane-track {
-  position: relative;
-  height: 22px;
-}
-
-.spectra-plan-lane-track::before {
-  position: absolute;
-  top: 50%;
-  right: 0;
-  left: 0;
-  height: 1px;
-  background: color-mix(in oklab, var(--border-subtle) 70%, transparent);
-  content: "";
-}
-
-/* Today, so a deadline is read against the present rather than against the
-   window's arbitrary ends. */
-.spectra-plan-today {
-  position: absolute;
-  top: -3px;
-  bottom: -3px;
-  width: 0;
-  border-left: 1px solid
-    color-mix(in oklab, var(--accent-violet) 60%, transparent);
-}
-
-.spectra-plan-lane-date {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-/* The signature of this surface: every mark is measured against one window, so
-   the eye compares deadlines rather than reading dates. */
-.spectra-plan-bar {
-  position: absolute;
-  top: 5px;
-  bottom: 5px;
-  min-width: 8px;
-  border-radius: 4px;
-  background: color-mix(
-    in oklab,
-    var(--accent-violet) 42%,
-    var(--bg-secondary)
-  );
-  transition: filter var(--motion-fast) var(--ease-standard);
-}
-
-.spectra-plan-bar:hover {
-  filter: brightness(0.92);
-}
-
-.spectra-plan-bar[data-status="done"] {
-  background: color-mix(in oklab, var(--success) 45%, var(--bg-secondary));
-}
-
-.spectra-plan-bar[data-status="blocked"] {
-  background: color-mix(in oklab, #d88922 55%, var(--bg-secondary));
-}
-
-/* A deadline with no known start is a point, not a span. Drawing it as a bar
-   invented a duration the plan does not have, so it is a marker on its date —
-   and a marker has to be as tall as it is wide, or it is just a short bar. */
-.spectra-plan-bar[data-inferred] {
-  top: 50%;
-  bottom: auto;
-  width: 9px;
-  min-width: 9px;
-  height: 9px;
-  margin-top: -4.5px;
-  margin-left: -4.5px;
-  border-radius: 50%;
-  background: var(--accent-violet);
-}
-
-.spectra-plan-bar[data-inferred][data-status="done"] {
-  background: var(--success);
-}
-
-.spectra-plan-bar[data-inferred][data-status="blocked"] {
-  background: #d88922;
-}
-
-.spectra-plan-milestone {
-  position: absolute;
-  top: 50%;
-  padding: 1px 6px 1px 8px;
-  border-left: 2px solid var(--accent-gold);
-  color: var(--accent-gold);
-  font-size: var(--text-micro);
-  font-weight: 600;
-  white-space: nowrap;
-  transform: translateY(-50%);
-}
-
-.spectra-plan-milestone[data-status="reached"] {
-  opacity: 0.55;
-}
-
-.spectra-plan-milestone[data-status="missed"] {
-  border-left-color: var(--danger);
-  color: var(--danger);
-}
-
-.spectra-plan-axis-note {
-  padding-top: 12px;
-  color: var(--text-tertiary);
-  font-size: 11.5px;
-  line-height: 1.6;
-}
-
-.spectra-plan-unscheduled {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.spectra-plan-unscheduled > strong {
-  width: 100%;
-  color: var(--text-tertiary);
-  font-size: 11px;
-  font-weight: 640;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.spectra-plan-unscheduled > button {
-  padding: 4px 9px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--chip-radius);
-  color: var(--text-secondary);
-  font-size: 11.5px;
-}
-
-.spectra-plan-unscheduled > button:hover {
-  border-style: solid;
-  color: var(--text-primary);
-}
-
-/* Task panel --------------------------------------------------------------- */
-.spectra-plan-detail {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  width: 100%;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px 12px 24px;
-  border-top: 1px solid var(--border-default);
-  background: var(--bg-primary);
-}
-
-.spectra-plan-detail > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: var(--text-tertiary);
-}
-
-.spectra-plan-detail > header > strong {
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 650;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.spectra-plan-detail > header > button {
-  padding: 3px;
-  border-radius: var(--chip-radius);
-  opacity: 0.6;
-}
-
-.spectra-plan-detail > header > button:hover {
-  background: var(--bg-hover);
-  opacity: 1;
-}
-
-.spectra-plan-detail-title {
-  color: var(--text-primary);
-  font-size: 14px;
-  font-weight: 560;
-  line-height: 1.35;
-}
-
-.spectra-plan-detail > textarea {
-  min-height: 90px;
-  margin-top: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--control-radius);
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.6;
-  outline: none;
-  resize: vertical;
-}
-
-.spectra-plan-detail > textarea:focus {
-  border-color: var(--border-strong);
-}
-
-.spectra-plan-detail-grid {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.spectra-plan-detail-grid > label {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.spectra-plan-detail-grid > label:last-child {
-  grid-column: 1 / -1;
-}
-
-.spectra-plan-detail-grid > label > span {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  font-weight: 560;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-
-.spectra-plan-detail-grid :is(select, input) {
-  height: 28px;
-  width: 100%;
-  padding: 0 7px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--control-radius);
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: 12px;
-  outline: none;
-}
-
-.spectra-plan-detail-grid :is(select, input):disabled {
-  color: var(--text-tertiary);
-}
-
-.spectra-plan-detail-note {
-  padding: 8px 10px;
-  border-radius: var(--control-radius);
-  background: color-mix(in oklab, var(--accent-cyan) 10%, transparent);
-  color: var(--text-secondary);
-  font-size: 11.5px;
-  line-height: 1.55;
-}
-
-.spectra-plan-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.spectra-plan-chips > li {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 5px 3px 8px;
-  border-radius: var(--chip-radius);
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-  font-size: 11.5px;
-}
-
-.spectra-plan-chips > li > button {
-  opacity: 0.5;
-}
-
-.spectra-plan-chips > li > button:hover {
-  opacity: 1;
-}
-
-.spectra-plan-checklist,
-.spectra-plan-references {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.spectra-plan-checklist > strong,
-.spectra-plan-references > strong {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  font-weight: 640;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.spectra-plan-checklist > label {
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  font-size: 12.5px;
-  line-height: 1.5;
-}
-
-.spectra-plan-checklist span[data-done] {
-  color: var(--text-tertiary);
-  text-decoration: line-through;
-}
-
-.spectra-plan-checklist > button {
-  display: inline-flex;
-  align-self: flex-start;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 6px;
-  border-radius: var(--chip-radius);
-  color: var(--text-secondary);
-  font-size: 11.5px;
-}
-
-.spectra-plan-checklist > button:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.spectra-plan-references :is(button, span) {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  overflow: hidden;
-  color: var(--text-secondary);
-  font-size: 11.5px;
-  text-align: left;
-  text-overflow: ellipsis;
-}
-
-.spectra-plan-references > button:hover {
-  color: var(--accent-cyan);
-}
-
-/* A side panel keeps every view, but the task panel covers the width it has
-   instead of leaving a two-column layout nothing can read. */
-.spectra-plan-studio[data-mode="split"] .spectra-plan-detail {
-  width: 100%;
-  border-left: 0;
-}
-
-.spectra-plan-studio[data-mode="split"] .spectra-plan-list article {
-  padding-right: 9px;
-}
-
-/* The date slot no longer costs width — the picker sits on top of the label
-   rather than beside it — so a side panel keeps date editing instead of
-   dropping it, and only the narrowest widths give it up. */
-@media (max-width: 820px) {
-  .spectra-plan-detail {
-    width: 100%;
-    border-left: 0;
-  }
-
-  .spectra-plan-date > input[type="date"] {
-    display: none;
-  }
-}
-
 .spectra-sheets-studio[data-compact] .sheets-grid-frame {
   height: auto;
   min-height: 0;
@@ -14923,8 +12271,8 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
 
 /* The writing front (MOTION.md, "Streaming text"): Spectra's caret is a small
    prism of the spectrum at the end of the unresolved tail. It breathes while
-   words arrive; completed paragraphs never carry it. The field's light follows
-   it from useWritingFront. */
+   words arrive; completed paragraphs never carry it. Below it, the skeleton
+   lines of what is still coming (GhostLines). */
 @keyframes spectra-tail-shimmer {
   0%,
   100% {
@@ -15227,19 +12575,6 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
   margin-top: 8px !important;
   margin-inline: var(--spectra-studio-inline-inset) !important;
   border-radius: var(--card-radius) !important;
-}
-
-.spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-main,
-.spectra-artifact-studio[data-studio-mode="tab"] .spectra-artifact-main,
-.spectra-artifact-studio[data-studio-mode="split"][data-canvas-extent="infinite"]
-  .spectra-artifact-main,
-.spectra-artifact-studio[data-studio-mode="tab"][data-canvas-extent="infinite"]
-  .spectra-artifact-main,
-.spectra-artifact-studio[data-studio-mode="split"][data-blueprint="document"]
-  .spectra-artifact-main,
-.spectra-artifact-studio[data-studio-mode="tab"][data-blueprint="document"]
-  .spectra-artifact-main {
-  padding-inline: var(--spectra-studio-inline-inset) !important;
 }
 
 .spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-header,
@@ -16034,13 +13369,13 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
 
 .spectra-workbar-control-option {
   display: flex;
-  min-height: 28px;
+  min-height: 32px;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   border-radius: var(--chip-radius);
-  padding: 0 6px;
+  padding: 0 8px;
   color: var(--text-primary);
-  font-size: var(--text-micro);
+  font-size: var(--text-ui);
   font-weight: 550;
   text-align: left;
 }
@@ -16058,19 +13393,8 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
 }
 
 .spectra-workbar-control-check {
-  display: grid;
-  width: 12px;
   flex: 0 0 auto;
-  place-items: center;
-  color: var(--text-secondary);
-}
-
-.spectra-workbar-control-option-hint {
-  flex: 0 0 auto;
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
+  color: var(--accent);
 }
 
 .spectra-workbar-color-grid {
@@ -16125,13 +13449,11 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
 .spectra-workbar-control-row-label {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 4px;
+  gap: 8px;
+  padding: 2px 6px;
   color: var(--text-tertiary);
-  font-size: var(--text-micro);
+  font-size: var(--text-caption);
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .spectra-workbar-control-row-options {
@@ -16189,57 +13511,16 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
 .spectra-workbar-menu {
   min-width: 13rem;
 }
+/* A submenu that holds one control already names it on the row that opened it. */
+.spectra-workbar-menu[data-single-control] .spectra-workbar-control-row-label {
+  display: none;
+}
 
 @container artifact-workbar (max-width: 780px) {
   .spectra-editor-workbar [role="status"],
   .spectra-workbar-count,
   .spectra-workbar-context {
     display: none !important;
-  }
-}
-
-/* Captions (MOTION.md): light runs slowly along the current caption's left
-   edge while Spectra works; when the run is done the headline is still. */
-.spectra-caption-live {
-  position: relative;
-  padding-left: 10px;
-}
-.spectra-caption-live::before,
-.spectra-caption-live::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  width: 2px;
-  border-radius: 2px;
-}
-.spectra-caption-live::before {
-  top: 2px;
-  bottom: 2px;
-  background: color-mix(in oklab, var(--text-tertiary) 22%, transparent);
-}
-.spectra-caption-live::after {
-  top: 0;
-  height: 60%;
-  background: linear-gradient(180deg, transparent, #8b6cf6, #4f9fe6, #40c48e, transparent);
-  animation: spectra-caption-light 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-}
-@keyframes spectra-caption-light {
-  from {
-    transform: translateY(-100%);
-  }
-  to {
-    transform: translateY(170%);
-  }
-}
-html[data-spectra-motion="reduced"] .spectra-caption-live::after,
-html[data-spectra-motion="none"] .spectra-caption-live::after {
-  animation: none;
-  transform: translateY(35%);
-}
-@media (prefers-reduced-motion: reduce) {
-  .spectra-caption-live::after {
-    animation: none;
-    transform: translateY(35%);
   }
 }
 
@@ -16381,230 +13662,7 @@ html[data-spectra-motion="none"] .spectra-caption-live::after {
   box-shadow: 0 0 6px color-mix(in oklab, #8b6cf6 40%, transparent);
 }
 
-/* A planner task (task-studio.tsx): one quiet card. A title, when it is due,
-   notes and done; steps and More only once they are wanted. */
-.spectra-task-studio {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-}
-.spectra-task-card {
-  display: flex;
-  width: min(640px, 100%);
-  flex-direction: column;
-  gap: 14px;
-  margin: 28px auto 0;
-  padding: 22px 24px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-xl);
-  background: var(--bg-elevated);
-}
-.spectra-task-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-.spectra-task-done {
-  display: grid;
-  flex: none;
-  width: 22px;
-  height: 22px;
-  margin-top: 4px;
-  place-items: center;
-  border: 1.5px solid var(--border-strong);
-  border-radius: var(--radius-pill);
-  color: var(--bg-elevated);
-  transition:
-    background-color var(--motion-fast) var(--ease-standard),
-    border-color var(--motion-fast) var(--ease-standard),
-    transform var(--motion-fast) var(--ease-standard);
-}
-.spectra-task-done:hover:not(:disabled) {
-  border-color: var(--success);
-}
-.spectra-task-done:active:not(:disabled) {
-  transform: scale(0.9);
-}
-.spectra-task-card[data-done] .spectra-task-done {
-  border-color: var(--success);
-  background: var(--success);
-}
-.spectra-task-title {
-  flex: 1;
-  min-width: 0;
-  resize: none;
-  border: 0;
-  background: transparent;
-  color: var(--text-primary);
-  font-family: var(--font-display);
-  font-size: var(--text-title);
-  font-weight: 600;
-  line-height: 1.4;
-  field-sizing: content;
-  outline: none;
-}
-.spectra-task-card[data-done] .spectra-task-title {
-  color: var(--text-tertiary);
-  text-decoration: line-through;
-  text-decoration-color: color-mix(in oklab, var(--text-tertiary) 60%, transparent);
-}
-.spectra-task-when,
-.spectra-task-extras,
-.spectra-task-more,
-.spectra-task-reminders {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-}
-.spectra-task-when {
-  padding-left: 34px;
-}
-.spectra-task-field {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-secondary);
-  font-size: var(--text-caption);
-}
-.spectra-task-field > span {
-  color: var(--text-tertiary);
-}
-.spectra-task-field input {
-  height: 30px;
-  padding: 0 8px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: var(--text-caption);
-}
-.spectra-task-field input[type="number"] {
-  width: 96px;
-}
-.spectra-task-distance {
-  color: var(--text-tertiary);
-  font-size: var(--text-caption);
-}
-.spectra-task-distance.is-late {
-  color: var(--danger);
-}
-.spectra-task-icon-button {
-  display: inline-grid;
-  width: 26px;
-  height: 26px;
-  place-items: center;
-  border-radius: var(--radius-sm);
-  color: var(--text-tertiary);
-}
-.spectra-task-icon-button:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-.spectra-task-notes {
-  margin-left: 34px;
-}
-.spectra-task-school,
-.spectra-task-school-notes {
-  margin-left: 34px;
-}
-.spectra-task-school {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 10px;
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-  font-size: var(--text-caption);
-}
-.spectra-task-school > p {
-  flex: 1 1 260px;
-}
-.spectra-task-school-notes {
-  --prose-leading: 1.6;
-  color: var(--text-secondary);
-}
-.spectra-task-steps {
-  margin-left: 34px;
-}
-.spectra-task-steps ul {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.spectra-task-step {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 32px;
-}
-.spectra-task-step input[type="checkbox"] {
-  width: 15px;
-  height: 15px;
-  accent-color: var(--success);
-}
-.spectra-task-step input[type="text"] {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text-primary);
-  font-size: var(--text-body);
-  outline: none;
-}
-.spectra-task-step[data-done] input[type="text"] {
-  color: var(--text-tertiary);
-  text-decoration: line-through;
-}
-.spectra-task-step .spectra-task-icon-button {
-  opacity: 0;
-}
-.spectra-task-step:hover .spectra-task-icon-button,
-.spectra-task-step:focus-within .spectra-task-icon-button {
-  opacity: 1;
-}
-.spectra-task-extras {
-  margin-left: 30px;
-}
-.spectra-task-quiet {
-  display: inline-flex;
-  height: 28px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 8px;
-  border-radius: var(--radius-sm);
-  color: var(--text-tertiary);
-  font-size: var(--text-caption);
-}
-.spectra-task-quiet:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-.spectra-task-more {
-  align-items: flex-start;
-  margin-left: 34px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-subtle);
-}
-.spectra-task-hint {
-  color: var(--text-tertiary);
-  font-size: var(--text-caption);
-}
-.spectra-task-chip {
-  display: inline-flex;
-  height: 28px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-pill);
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-}
+/* A planner task: spectra-task.css. */
 
 /* ── File viewer: Office files read in place (EDITORS.md, R-D4d) ───────────
    A document reads as a page, a deck as thumbnails beside the current slide,
@@ -17022,4 +14080,288 @@ html[data-spectra-motion="none"] .spectra-caption-live::after {
 .file-viewer-sheet-tab:focus-visible {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: -2px;
+}
+
+/* The late tasks, folded to one line in the warning ink above what is ahead. */
+/* An event or block of time, opened beside itself on the week: what it belongs to and its actions
+   along the top, then the title (checked off like a task when it is time for one) and when it is. */
+.calendar-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.calendar-card-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: -4px -4px 2px 0;
+}
+
+.calendar-card-kind {
+  display: inline-flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.calendar-card-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.calendar-card-title h2 {
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.calendar-card-check {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  place-items: center;
+  margin-top: 2px;
+  border: 1.5px solid color-mix(in oklab, var(--type-task) 70%, var(--border-default));
+  border-radius: 999px;
+  color: var(--text-inverse);
+  transition: background var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
+}
+
+.calendar-card-check:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--type-task) 18%, transparent);
+}
+
+.calendar-card-check:active:not(:disabled) {
+  transform: scale(0.9);
+}
+
+.calendar-card-check[aria-checked="true"] {
+  border-color: var(--type-task);
+  background: var(--type-task);
+}
+
+.calendar-card-time {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.calendar-card-length {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+}
+
+.calendar-card-length button {
+  padding: 1px 9px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  transition: background var(--motion-fast) var(--ease-standard);
+}
+
+.calendar-card-length button + button {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.calendar-card-length button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.calendar-card-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.calendar-card-notes {
+  max-height: 160px;
+  overflow-y: auto;
+  padding-top: 2px;
+  color: var(--text-secondary);
+}
+
+.calendar-card-source {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+}
+
+/* While the week loads: its days as ghosts, side by side like the week itself. */
+.spectra-calendar-ghost {
+  display: grid;
+  grid-template-columns: repeat(var(--ghost-days, 7), minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px 0 0 54px;
+}
+.spectra-calendar-ghost-day {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+
+/* One band pass over something on screen that Spectra changed outside an
+   editor (collaboration/ai-touch.ts): a Library row, an event, a setting.
+   It is laid over the element's box, so its layout never moves. */
+.spectra-ai-touch {
+  position: fixed;
+  z-index: var(--z-chrome);
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: 6px;
+  animation: spectra-ai-touch-out 1.5s var(--ease-standard) both;
+}
+.spectra-ai-touch > i {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 28%,
+    color-mix(in oklab, #8b6cf6 10%, transparent) 40%,
+    color-mix(in oklab, #4f9fe6 13%, transparent) 50%,
+    color-mix(in oklab, #40c48e 10%, transparent) 60%,
+    transparent 72%
+  );
+  transform: translateX(-100%);
+  animation: spectra-ai-band 1.3s cubic-bezier(0.4, 0, 0.2, 1) 1 forwards;
+}
+@keyframes spectra-ai-touch-out {
+  0%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+html[data-spectra-motion="reduced"] .spectra-ai-touch > i {
+  animation: none;
+  transform: none;
+  background: color-mix(in oklab, #4f9fe6 8%, transparent);
+}
+
+/* §Tour — Spectra's tour of the app (onboarding/tour-layer.tsx). The only
+   place the screen is ever dimmed: the spotlight's shadow covers everything
+   but the step's target, and pointing at the target lifts it. The spotlight
+   and the note glide between steps; neither catches the pointer except the
+   note's own buttons. */
+.spectra-tour {
+  --tour-dim: rgb(29 27 33 / 0.36);
+  --tour-ring: color-mix(in oklab, var(--hue-violet) 55%, transparent);
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-toast);
+  pointer-events: none;
+}
+.dark .spectra-tour {
+  --tour-dim: rgb(0 0 0 / 0.56);
+}
+.spectra-tour-spot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 1.5px var(--tour-ring),
+    0 0 32px 6px color-mix(in oklab, var(--hue-violet) 18%, transparent),
+    0 0 0 200vmax var(--tour-dim);
+  transition:
+    transform 620ms var(--ease-out-expo),
+    width 620ms var(--ease-out-expo),
+    height 620ms var(--ease-out-expo),
+    border-radius 620ms var(--ease-out-expo),
+    box-shadow 320ms var(--ease-standard);
+  animation: spectra-tour-dim-in 480ms var(--ease-standard) both;
+}
+.spectra-tour-spot[data-empty] {
+  border-radius: 50%;
+  box-shadow: 0 0 0 200vmax var(--tour-dim);
+}
+.spectra-tour-spot[data-lifted] {
+  box-shadow:
+    0 0 0 1.5px var(--tour-ring),
+    0 0 32px 6px transparent,
+    0 0 0 200vmax transparent;
+}
+.spectra-tour-note {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: min(380px, calc(100vw - 32px));
+  padding: 18px 18px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+  pointer-events: auto;
+  transition: transform 680ms var(--ease-out-expo);
+  animation: spectra-tour-note-in 420ms var(--ease-out-expo) both;
+}
+.spectra-tour-text {
+  display: grid;
+  margin: 0;
+  font: 400 15px/1.6 var(--font-sans);
+  color: var(--text-primary);
+  text-wrap: pretty;
+}
+.spectra-tour-text > span:not(.sr-only) {
+  grid-area: 1 / 1;
+}
+.spectra-tour-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  border-radius: 1px;
+  background: var(--hue-violet);
+  animation: spectra-tour-caret 900ms steps(2, jump-none) infinite;
+}
+@keyframes spectra-tour-dim-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes spectra-tour-note-in {
+  from {
+    opacity: 0;
+    scale: 0.97;
+  }
+}
+@keyframes spectra-tour-caret {
+  50% {
+    opacity: 0;
+  }
+}
+/* A layer that arrives with the next page carries on: no second entrance. */
+.spectra-tour[data-resumed] .spectra-tour-spot,
+.spectra-tour[data-resumed] .spectra-tour-note {
+  animation: none;
+}
+html[data-spectra-motion="reduced"] .spectra-tour-spot,
+html[data-spectra-motion="reduced"] .spectra-tour-note {
+  transition: none;
+  animation: none;
 }

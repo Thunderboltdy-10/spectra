@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
-import { isVeiled, veil } from "./veil";
+import { describe, expect, it, vi } from "vitest";
+import { isVeiled, veil, VEIL_MAX_MS } from "./veil";
 
 describe("veil", () => {
   it("hides, and shows again as it was", () => {
@@ -24,5 +24,16 @@ describe("veil", () => {
     expect(element.style.opacity).toBe("0");
     second();
     expect(element.style.opacity).toBe("");
+  });
+
+  it("never holds content back longer than a split second", () => {
+    vi.useFakeTimers();
+    const element = document.createElement("div");
+    veil(element);
+    veil(element);
+    vi.advanceTimersByTime(VEIL_MAX_MS);
+    expect(element.style.opacity).toBe("");
+    expect(isVeiled(element)).toBe(false);
+    vi.useRealTimers();
   });
 });

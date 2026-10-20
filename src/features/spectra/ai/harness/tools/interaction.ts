@@ -131,7 +131,7 @@ type WidgetArgs = { title: string; html: string };
 export function showWidgetTool(): HarnessTool<WidgetArgs> {
   return {
     name: "show_widget",
-    description: `Show an interactive HTML or SVG visual inline in the conversation: a slider demo, a small simulation, a calculator, a chart, a labelled diagram. Write a fragment (no <html> or <head>) with inline <style> and <script>. It runs sandboxed with no network: no external scripts, styles, fonts, images or fetch. Colour it with the theme variables (var(--paper-0), var(--ink-1), var(--blue), var(--blue-tint), var(--font-ui) and the rest in the frontend-design skill); they follow light and dark mode. Limits: ${WIDGET_LIMITS.maxHtmlChars.toLocaleString("en")} characters, ${WIDGET_LIMITS.maxScripts} script blocks, height up to ${WIDGET_LIMITS.maxHeight}px. The user can save it as work; for something they asked to keep, create a code artifact instead.`,
+    description: `Show an interactive HTML or SVG visual inline in the conversation: a slider demo, a small simulation, a calculator, a chart, a labelled diagram. Write a fragment (no <html> or <head>) with inline <style> and <script>. It runs sandboxed with no network: no external scripts, styles, fonts, images or fetch. Colour it with the theme variables (var(--paper-0), var(--ink-1), var(--blue), var(--blue-tint), var(--font-ui) and the rest in the frontend-design skill); they follow light and dark mode. It sits directly on the conversation's page with the app's typefaces, so don't paint a page background or wrap it in a card: draw on the page, with var(--paper-1) only for a panel that needs one. Limits: ${WIDGET_LIMITS.maxHtmlChars.toLocaleString("en")} characters, ${WIDGET_LIMITS.maxScripts} script blocks, height up to ${WIDGET_LIMITS.maxHeight}px. The user can save it as work; for something they asked to keep, create a code artifact instead.`,
     parameters: {
       type: "object",
       properties: {
@@ -170,7 +170,7 @@ export function agentHandoffTool(session: HarnessSession): HarnessTool<AgentArgs
   return {
     name: "use_agent",
     description:
-      "Hand this request to one of the user's own agents (listed in the environment) when it clearly matches what the agent is for. You receive the agent's instructions and follow them for the rest of the conversation. Do not use it for requests no agent is meant for.",
+      "Hand this request to one of the user's own agents (listed in the environment) when it clearly matches what the agent is for. You receive the agent's instructions and follow them for the rest of the conversation. Most requests need no agent: use one only when the request is squarely what it is for, never just because it is related.",
     parameters: {
       type: "object",
       properties: { agentId: { type: "string", description: "The agent's id from the environment." } },

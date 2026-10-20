@@ -39,7 +39,7 @@ describe("follow navigation", () => {
     expect(followRouteHref("analytics")).toBe("/analytics");
     expect(followRouteHref("settings", "ai")).toBe("/settings?section=ai");
     expect(followRouteHref("devices", "connect")).toBe("/devices?connect=1");
-    expect(followRouteHref("workspace", "ws1")).toBe("/workspace/ws1");
+    expect(followRouteHref("workspace", "ws1")).toBe("/library?workspaceId=ws1");
     expect(followRouteHref("artifact", "wx1")).toBe("/library/wx1");
   });
 

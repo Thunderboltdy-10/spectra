@@ -438,7 +438,7 @@ export async function projectOfficeImportWithLens(file: File, artifactId: string
   ) {
     const err = new Error(
       payload?.message ||
-        "Could not parse this Office file with the Spectra lens.",
+        "Spectra couldn't read this Office file.",
     );
     (err as Error & { code?: string; durableFailed?: boolean }).code =
       payload?.error || `HTTP_${response.status}`;

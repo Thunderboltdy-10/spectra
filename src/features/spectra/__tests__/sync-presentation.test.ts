@@ -143,8 +143,8 @@ describe("sync presentation (P1.I3)", () => {
       online: true,
     });
     expect(presentation.label).toBe("Queued");
-    expect(presentation.detail).toContain("lives on your PC");
-    expect(presentation.detail).toContain("queued safely");
+    expect(presentation.detail).toContain("on your computer");
+    expect(presentation.detail).toContain("will sync when it is");
     expect(presentation.ready).toBe(false);
   });
 

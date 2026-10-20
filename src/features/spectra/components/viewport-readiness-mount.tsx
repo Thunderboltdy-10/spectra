@@ -3,9 +3,10 @@
 import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 import { acknowledgeViewportReady, type ViewportView } from "../viewport-readiness";
+import { isHomePath } from "../chat/home-routes";
 
 function mountedSurface(pathname: string, searchParams: URLSearchParams): { view: ViewportView; targetId: string } | null {
-  if (pathname.startsWith("/chat")) {
+  if (isHomePath(pathname)) {
     // A thread route can be present before its detail has loaded. ChatShell
     // acknowledges a specific thread only after that conversation mounts;
     // the generic chat target is reserved for opening the blank surface.
@@ -23,7 +24,8 @@ function mountedSurface(pathname: string, searchParams: URLSearchParams): { view
     // The detail is ready only after the actual ArtifactStudio mounts.
     return null;
   }
-  if (pathname.startsWith("/library")) return { view: "library", targetId: "library" };
+  // A workspace is a place in the Library; the shell says when it is ready.
+  if (pathname.startsWith("/library")) return searchParams.get("workspaceId") ? null : { view: "library", targetId: "library" };
   return { view: "workspace", targetId: pathname || "workspace" };
 }
 

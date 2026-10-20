@@ -2,7 +2,7 @@
 
 import { describeFailure } from "@/components/ui/truthful-state";
 import { useMutation, useQuery } from "convex/react";
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { toast } from "@/components/ui/toast";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { api } from "../../../../convex/_generated/api";
@@ -45,6 +45,9 @@ export function ArtifactEmbedById({
   onOpenSource = openSource,
   onRemove,
   editInPlace = false,
+  tabs,
+  onStackAnother,
+  onUnstack,
 }: {
   embedId: string;
   className?: string;
@@ -52,6 +55,12 @@ export function ArtifactEmbedById({
   onRemove?: () => void;
   /** The host is an editor: the embedded work can be edited here too. */
   editInPlace?: boolean;
+  /** A stacked card's tabs, in place of the one work's own. */
+  tabs?: ReactNode;
+  /** Lay another work on this card, from a picker beside it. */
+  onStackAnother?: (anchor: Element | null) => void;
+  /** Take the work shown out of its stack, onto a card of its own. */
+  onUnstack?: () => void;
 }) {
   const embed = useQuery(api.artifactEmbeds.getProjection, {
     embedId: embedId as Id<"artifactEmbeds">,
@@ -73,12 +82,21 @@ export function ArtifactEmbedById({
 
   if (embed === null)
     return (
-      <div
-        className={`rounded-card border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)] px-4 py-3 text-micro text-[var(--text-secondary)] ${className ?? ""}`}
-        role="status"
-        aria-label="Reference unavailable"
-      >
-        This pinned reference is no longer available.
+      <div className={className}>
+        {/* A stacked card keeps its tabs, so the reader can turn to a work that is still there. */}
+        {tabs ? <div className="work-embed-top">{tabs}</div> : null}
+        <div
+          className="flex items-center gap-3 rounded-card border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)] px-4 py-3 text-micro text-[var(--text-secondary)]"
+          role="status"
+          aria-label="Reference unavailable"
+        >
+          <span className="flex-1">This reference is no longer available.</span>
+          {onRemove ? (
+            <button type="button" onClick={onRemove} className="today-link shrink-0">
+              Remove from page
+            </button>
+          ) : null}
+        </div>
       </div>
     );
 
@@ -115,6 +133,9 @@ export function ArtifactEmbedById({
       <ArtifactEmbed
         embed={embed}
         busy={busy}
+        tabs={tabs}
+        onStackAnother={onStackAnother ? () => onStackAnother(hostRef.current) : undefined}
+        onUnstack={onUnstack}
         onOpenSource={onOpenSource}
         onEdit={
           editable

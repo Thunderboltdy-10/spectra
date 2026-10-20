@@ -254,8 +254,8 @@ describe("ordinary-student invite → accept → class selection", () => {
           integrationId: seeded.integrationId,
           schoolId: seeded.schoolId,
           providerRecordId: `resource-${providerClassId}`,
-          providerRecordKey: `class_resource:resource-${providerClassId}`,
-          recordType: "class_resource",
+          providerRecordKey: `assignment:resource-${providerClassId}`,
+          recordType: "assignment",
           classification: "class",
           audienceScope: "class_members",
           providerClassId,
@@ -284,7 +284,7 @@ describe("ordinary-student invite → accept → class selection", () => {
     expect(selected.selectedRecordIds).toEqual([classIds.selectedClassId]);
 
     const resources = await asStudent.query(api.managebac.recordsForPurpose, {
-      purpose: "class_resources",
+      purpose: "upcoming_deadlines",
     });
     expect(resources.records.map((item) => item.providerClassId)).toEqual([
       "class-follow",

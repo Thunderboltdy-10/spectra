@@ -64,7 +64,7 @@ describe("model artifact content normalization", () => {
     });
   });
 
-  it("makes the classic blank-option pending quiz shell schema-valid after normalize", () => {
+  it("keeps an editor's blank option slots as a multiple-choice draft", () => {
     const shell = normalizeArtifactContent("quiz", {
       questions: [
         {
@@ -86,7 +86,8 @@ describe("model artifact content normalization", () => {
     });
     expect(validateBlueprintContent("quiz", shell).success).toBe(true);
     expect((shell.questions as Array<Record<string, unknown>>)?.[0]).toMatchObject({
-      type: "short_answer",
+      type: "multiple_choice",
+      options: ["", "", "", ""],
     });
   });
 

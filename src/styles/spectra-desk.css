@@ -1,0 +1,950 @@
+/*
+ * The desk (docs/design/LANGUAGE.md, "Desk and paper"): the pieces Spectra's
+ * pages are built from. Work is paper on a desk: index cards with a tab in
+ * their type's colour, pages lifted off the desk, and Spectra's violet kept
+ * for Spectra itself. Every colour here comes from the tokens in
+ * spectra-app.css; nothing on this sheet introduces a new one.
+ */
+
+/* --- A page's greeting ------------------------------------------------- */
+
+/* Every top-level page opens the way Home does: its name set large in the
+   display serif, and one sentence under it saying what is there now. */
+.page-greeting {
+  font-family: var(--font-display);
+  font-size: clamp(40px, 3.4vw, 54px);
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: -0.018em;
+  color: var(--text-primary);
+  font-variation-settings: "opsz" 72;
+}
+
+/* A place inside a top-level page (a workspace, a folder, a class): the same
+   hand, a size down, so the Library stays the larger name above it. */
+.page-greeting--place {
+  font-size: clamp(30px, 2.3vw, 38px);
+  letter-spacing: -0.012em;
+  font-variation-settings: "opsz" 48;
+  /* The top title's line box, so a place's name stands where the page's
+     does and the toolbar under it never moves as the reader goes in. */
+  line-height: calc(clamp(40px, 3.4vw, 54px) * 1.1);
+}
+
+/* A place's header holds its height whether or not it has a line under its
+   name, so the bar beneath stands still as the reader moves between places:
+   the padding, the title's line box, and one greeting line. */
+.spectra-workspace-header {
+  min-height: calc(24px + clamp(40px, 3.4vw, 54px) * 1.1 + 8px + 17px * 1.6 + 16px + 1px);
+}
+
+/* The band above a page's title, the same on every page (spectra-tokens.css, "Page title"). */
+@media (min-width: 1024px) {
+  /* Doubled to outrank the small-screen padding utility it replaces. */
+  .page-title-lane.page-title-lane {
+    padding-top: var(--page-title-top);
+  }
+}
+
+.page-greeting-line {
+  max-width: 760px;
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+/* --- Paper -------------------------------------------------------------- */
+
+/* Every card is a piece of paper, not a flat fill: a fine grain sits over its
+   colour and under its words. The grain is one token, warm specks on light
+   paper and pale ones on dark, so every card shares one stock. */
+:is(
+    .work-card-face,
+    .school-tile,
+    .chat-starter,
+    .class-due-task,
+    .class-shelf-head,
+    .today-thread,
+    .today-week,
+    .school-slip,
+    .device-card,
+    .device-folder,
+    .device-slip
+  ) {
+  position: relative;
+  isolation: isolate;
+}
+
+:is(
+    .work-card-face,
+    .school-tile,
+    .chat-starter,
+    .class-due-task,
+    .class-shelf-head,
+    .today-thread,
+    .today-week,
+    .school-slip,
+    .device-card,
+    .device-folder,
+    .device-slip
+  )::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background-image: var(--paper-grain);
+  background-size: 180px 180px;
+  pointer-events: none;
+}
+
+/* --- Index cards -------------------------------------------------------- */
+
+/* Cards laid on a desk sit by hand, not on a grid line: each a little off its
+   neighbour, as sheets put down one by one are. */
+:is(.library-notes, .work-desk) > :nth-child(4n + 2) {
+  translate: 2px 3px;
+}
+:is(.library-notes, .work-desk) > :nth-child(4n + 3) {
+  translate: -1px -2px;
+}
+:is(.library-notes, .work-desk) > :nth-child(4n) {
+  translate: 1px 2px;
+}
+
+.work-card {
+  --work-radius: 14px;
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  outline: none;
+  color: var(--text-primary);
+}
+
+/* The tab: the type's name in its own ink, on its own tint, joined to the face. */
+.work-card-tab {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  margin-left: 12px;
+  padding: 0 10px 0 8px;
+  border-radius: 9px 9px 0 0;
+  background: var(--work-tint);
+  color: color-mix(in oklab, var(--work-hue) 78%, var(--text-primary));
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: transform var(--motion-base) var(--ease-standard);
+  transform-origin: 50% 100%;
+}
+
+.work-card-face {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px 14px;
+  border-radius: var(--work-radius);
+  background: var(--card-paper);
+  box-shadow:
+    inset 0 3px 0 var(--work-tint),
+    0 0 0 1px var(--card-border),
+    0 1px 2px rgb(52 40 28 / 0.05),
+    0 10px 24px -18px rgb(52 40 28 / 0.22);
+  transition:
+    transform var(--motion-base) var(--ease-standard),
+    box-shadow var(--motion-base) var(--ease-standard);
+}
+
+.work-card:hover .work-card-face,
+.work-card:focus-visible .work-card-face {
+  transform: translateY(-2px);
+  box-shadow:
+    inset 0 3px 0 var(--work-hue),
+    0 0 0 1px color-mix(in oklab, var(--work-hue) 30%, var(--card-border)),
+    0 2px 4px rgb(52 40 28 / 0.06),
+    0 18px 32px -20px rgb(52 40 28 / 0.32);
+}
+
+.work-card:hover .work-card-tab,
+.work-card:focus-visible .work-card-tab {
+  transform: translateY(-2px);
+}
+
+.work-card:focus-visible .work-card-face {
+  box-shadow:
+    inset 0 3px 0 var(--work-hue),
+    0 0 0 2px var(--focus-ring-color);
+}
+
+.work-card-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: -0.005em;
+  overflow-wrap: anywhere;
+}
+
+/* The face shows what is in the work, fading out where the card ends. */
+.work-card-preview {
+  position: relative;
+  display: block;
+  min-height: 96px;
+  max-height: 120px;
+  flex: 1;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent);
+  mask-image: linear-gradient(to bottom, #000 72%, transparent);
+}
+
+.work-card-foot {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--card-border-soft);
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+.work-preview-text {
+  display: block;
+  font-family: var(--font-serif);
+  font-size: 13px;
+}
+
+.work-preview-heading {
+  display: block;
+  margin-bottom: 3px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.work-preview-empty {
+  font-style: italic;
+  font-family: var(--font-serif);
+  color: var(--text-tertiary);
+}
+
+/* A file without a face of its own: its kind, set large in its colour. */
+.work-preview-file {
+  display: block;
+  padding-top: 8px;
+  font-family: var(--font-display);
+  font-size: 44px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: color-mix(in oklab, var(--work-hue) 55%, var(--bg-elevated));
+}
+
+/* A deck, fanned: three cards, the top one showing its front. */
+.work-preview-deck {
+  position: relative;
+  display: block;
+  height: 112px;
+}
+
+.work-preview-deck-card {
+  position: absolute;
+  top: 6px;
+  left: 4px;
+  display: grid;
+  width: min(78%, 220px);
+  height: 72px;
+  place-items: center;
+  padding: 8px 12px;
+  border-radius: 9px;
+  background: var(--bg-elevated);
+  box-shadow:
+    0 0 0 1px var(--card-border),
+    0 4px 10px -6px rgb(52 40 28 / 0.25);
+  font-family: var(--font-serif);
+  font-size: 13px;
+  text-align: center;
+  color: var(--text-primary);
+  transition: transform var(--motion-base) var(--ease-standard);
+}
+
+.work-preview-deck-card[data-depth="2"] {
+  transform: translate(14px, 10px) rotate(4deg);
+  background: color-mix(in oklab, var(--work-tint) 60%, var(--bg-elevated));
+}
+
+.work-preview-deck-card[data-depth="1"] {
+  transform: translate(7px, 5px) rotate(2deg);
+}
+
+.work-card:hover .work-preview-deck-card[data-depth="2"] {
+  transform: translate(22px, 8px) rotate(7deg);
+}
+
+.work-card:hover .work-preview-deck-card[data-depth="1"] {
+  transform: translate(11px, 4px) rotate(3.5deg);
+}
+
+.work-preview-quiz {
+  position: relative;
+  display: flex;
+  height: 112px;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.work-preview-option {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.work-preview-option::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--work-hue) 60%, var(--border-strong));
+}
+
+.work-preview-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.work-preview-task {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.work-preview-task::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--work-hue) 70%, var(--border-strong));
+}
+
+.work-preview-task[data-done]::before {
+  background: var(--work-hue);
+  box-shadow: none;
+}
+
+.work-preview-task[data-done] {
+  text-decoration: line-through;
+  color: var(--text-tertiary);
+}
+
+.work-preview-code {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--work-tint) 45%, var(--bg-secondary));
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.work-preview-slides {
+  position: relative;
+  display: block;
+  height: 112px;
+}
+
+.work-preview-slide {
+  display: grid;
+  width: min(82%, 200px);
+  aspect-ratio: 16 / 9;
+  place-items: center;
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  box-shadow:
+    0 0 0 1px var(--card-border),
+    6px 6px 0 -1px color-mix(in oklab, var(--work-tint) 80%, var(--bg-elevated));
+  font-family: var(--font-display);
+  font-size: 13px;
+  line-height: 1.25;
+  text-align: center;
+  color: var(--text-primary);
+}
+
+/* A sheet's corner: the first rows as a small table, the top row read as its
+   head, figures set to the right as they are on the sheet. */
+.work-preview-grid {
+  display: grid;
+  overflow: hidden;
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px var(--card-border-soft);
+  font-size: 11.5px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.work-preview-grid-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.work-preview-grid-row + .work-preview-grid-row {
+  border-top: 1px solid var(--card-border-soft);
+}
+
+.work-preview-grid-row > span {
+  overflow: hidden;
+  padding: 4px 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.work-preview-grid-row > span + span {
+  border-left: 1px solid var(--card-border-soft);
+}
+
+.work-preview-grid-row > span[data-number] {
+  text-align: right;
+}
+
+.work-preview-grid-row[data-head] {
+  background: color-mix(in oklab, var(--work-tint) 55%, transparent);
+}
+
+.work-preview-grid-row[data-head] > span {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* A board: its first page drawn as the page rail draws it. */
+.work-preview-board {
+  display: block;
+  width: 100%;
+  max-height: 112px;
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px var(--card-border-soft);
+  --rail-ink: var(--work-hue);
+}
+
+/* A task: its due day as a calendar leaf, where it stands, and its steps. */
+.work-preview-task-face {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.work-preview-leaf {
+  display: flex;
+  width: 46px;
+  flex-shrink: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: 0 0 0 1px var(--card-border);
+  text-align: center;
+}
+
+.work-preview-leaf-month {
+  padding: 2px 0 1px;
+  background: var(--work-hue);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--bg-elevated);
+}
+
+.work-preview-leaf-day {
+  padding: 2px 0 4px;
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 500;
+  line-height: 1.1;
+  color: var(--text-primary);
+}
+
+.work-preview-task-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.work-preview-task-status::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1.5px var(--text-tertiary);
+}
+
+[data-status="doing"] .work-preview-task-status::before {
+  background: linear-gradient(90deg, var(--work-hue) 50%, transparent 50%);
+  box-shadow: inset 0 0 0 1.5px var(--work-hue);
+}
+
+[data-status="done"] .work-preview-task-status::before {
+  background: var(--success);
+  box-shadow: none;
+}
+
+.work-preview-task-priority {
+  padding: 0 6px;
+  border-radius: var(--radius-chip);
+  background: color-mix(in oklab, var(--accent-coral) 14%, var(--bg-elevated));
+  font-size: 10.5px;
+  font-weight: 600;
+  color: color-mix(in oklab, var(--accent-coral) 75%, var(--text-primary));
+}
+
+.work-preview-steps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+
+.work-preview-steps-track {
+  position: relative;
+  height: 4px;
+  flex: 1;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--work-hue) 14%, var(--bg-secondary));
+}
+
+.work-preview-steps-track > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--work-hue);
+}
+
+/* A thread: what was last asked, and how the answer began. */
+.work-preview-exchange {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.work-preview-ask {
+  align-self: flex-end;
+  max-width: 88%;
+  padding: 5px 10px;
+  border-radius: 10px 10px 3px 10px;
+  background: color-mix(in oklab, var(--work-hue) 12%, var(--bg-elevated));
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
+.work-preview-answer {
+  font-family: var(--font-serif);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* On the board: the same card, a little shorter, with the board's states. */
+.work-card--board {
+  cursor: pointer;
+}
+
+.work-card--board .work-card-face {
+  gap: 8px;
+  padding: 14px 16px 12px;
+}
+
+.work-card--board .work-card-title {
+  font-size: 17px;
+}
+
+.work-card--board .work-card-preview {
+  min-height: 72px;
+  max-height: 96px;
+}
+
+/* Open beside the board: the face takes the type's ink as its edge. */
+.work-card[data-open] .work-card-face {
+  box-shadow:
+    inset 0 3px 0 var(--work-hue),
+    0 0 0 1.5px color-mix(in oklab, var(--work-hue) 70%, transparent),
+    0 14px 28px -20px color-mix(in oklab, var(--work-hue) 60%, transparent);
+}
+
+/* Picked for the selection: tinted, with the mark filled. */
+.work-card[data-picked] .work-card-face {
+  background: color-mix(in oklab, var(--work-hue) 7%, var(--card-paper));
+  box-shadow:
+    inset 0 3px 0 var(--work-hue),
+    0 0 0 2px var(--text-primary);
+}
+
+/* Spectra is working on it: the field glows around it (LIFE.md); the face stays still. */
+.work-card[data-working] .work-card-tab {
+  background: color-mix(in oklab, var(--accent-violet) 16%, var(--work-tint));
+}
+
+.work-card-activity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--accent-violet) 8%, var(--card-paper));
+  font-size: 11.5px;
+  color: color-mix(in oklab, var(--accent-violet) 70%, var(--text-primary));
+}
+
+.work-card-activity strong {
+  font-weight: 600;
+}
+
+/* The foot's controls stay out of the way until the card is in hand. */
+.work-card-actions {
+  display: inline-flex;
+  margin: -6px -6px -6px 0;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+
+.work-card:hover .work-card-actions,
+.work-card:focus-within .work-card-actions,
+.work-card-actions:has([data-state="open"]) {
+  opacity: 1;
+}
+
+.work-card-action {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--text-tertiary);
+  outline: none;
+}
+
+.work-card-action:hover,
+.work-card-action[data-state="open"] {
+  background: color-mix(in oklab, var(--work-hue) 12%, var(--card-paper));
+  color: var(--text-primary);
+}
+
+.work-card-action:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus-ring-color);
+}
+
+/* The selection mark, in the face's top corner. */
+.work-card-pick {
+  position: absolute;
+  top: 38px;
+  right: 12px;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--card-paper);
+  box-shadow: 0 0 0 1.5px var(--border-strong);
+  color: transparent;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.work-card-pick.is-picked {
+  background: var(--text-primary);
+  box-shadow: none;
+  color: var(--bg-primary);
+  transform: scale(1.08);
+}
+
+.dark .work-card-face {
+  box-shadow:
+    inset 0 3px 0 var(--work-tint),
+    0 0 0 1px var(--card-border),
+    0 10px 24px -18px rgb(0 0 0 / 0.7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .work-card-face,
+  .work-card-tab,
+  .work-preview-deck-card {
+    transition: none;
+  }
+}
+
+/* --- Work slips --------------------------------------------------------- */
+
+/* A work a response made or changed: its glyph on its tint, its name, what happened. */
+.work-slip {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px 10px 10px;
+  border-radius: 12px;
+  background: var(--card-paper);
+  box-shadow:
+    inset 3px 0 0 var(--work-tint),
+    0 0 0 1px var(--card-border);
+  text-align: left;
+  outline: none;
+  transition:
+    box-shadow var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+button.work-slip:hover,
+button.work-slip:focus-visible {
+  box-shadow:
+    inset 3px 0 0 var(--work-hue),
+    0 0 0 1px color-mix(in oklab, var(--work-hue) 30%, var(--card-border)),
+    0 10px 22px -16px rgb(52 40 28 / 0.35);
+}
+
+button.work-slip:focus-visible {
+  box-shadow:
+    inset 3px 0 0 var(--work-hue),
+    0 0 0 2px var(--focus-ring-color);
+}
+
+button.work-slip:active {
+  transform: scale(0.995);
+}
+
+.work-slip-glyph {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--work-tint);
+  color: color-mix(in oklab, var(--work-hue) 82%, var(--text-primary));
+}
+
+.work-slip-title {
+  display: block;
+  overflow: hidden;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+}
+
+.work-slip-line {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.work-slip-action {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: color-mix(in oklab, var(--work-hue) 75%, var(--text-primary));
+}
+
+.work-slip-open {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+
+button.work-slip:hover .work-slip-open,
+button.work-slip:focus-visible .work-slip-open {
+  opacity: 1;
+  background: var(--work-tint);
+  color: color-mix(in oklab, var(--work-hue) 80%, var(--text-primary));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .work-slip,
+  .work-slip-open {
+    transition: none;
+  }
+}
+
+/* Picking work (Select): every pickable card shows an empty ring in its
+   corner; a picked card is held up in the brand's ink, its ring filled with
+   the check. The ring pops as it fills, so the press is answered. */
+.work-pick {
+  position: absolute;
+  inset-block-start: 10px;
+  inset-inline-end: 10px;
+  z-index: 1;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--card-paper);
+  box-shadow: inset 0 0 0 1.5px var(--border-strong, var(--text-tertiary));
+  color: transparent;
+  animation: work-pick-in 220ms var(--ease-standard) both;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.work-card .work-pick {
+  inset-block-start: 36px;
+}
+
+.library-loose-item .work-pick {
+  position: static;
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+[data-picked] > .work-pick {
+  background: var(--brand-primary);
+  box-shadow: none;
+  color: var(--text-inverse, #fff);
+  animation: work-pick-pop 260ms cubic-bezier(0.3, 1.6, 0.5, 1) both;
+}
+
+.work-card[data-picking] .work-card-face {
+  transition:
+    transform var(--motion-base) var(--ease-standard),
+    box-shadow var(--motion-base) var(--ease-standard);
+}
+
+.work-card[data-picked] .work-card-face {
+  transform: translateY(-3px);
+  box-shadow:
+    inset 0 3px 0 var(--work-tint),
+    0 0 0 2px var(--brand-primary),
+    0 14px 28px -18px color-mix(in oklab, var(--brand-primary) 60%, transparent);
+}
+
+.library-loose-item[data-picked] {
+  background: color-mix(in oklab, var(--brand-primary) 9%, transparent);
+}
+
+@keyframes work-pick-in {
+  from {
+    opacity: 0;
+    scale: 0.6;
+  }
+}
+
+@keyframes work-pick-pop {
+  0% {
+    scale: 0.7;
+  }
+  60% {
+    scale: 1.15;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .work-pick,
+  [data-picked] > .work-pick {
+    animation: none;
+  }
+
+  .work-card[data-picked] .work-card-face {
+    transform: none;
+  }
+}
+
+/* What can be done with the picked work: a paper strip over the island, one primary action. */
+.selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  padding: 4px 4px 4px 14px;
+  background: var(--card-paper);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-md);
+}
+
+.selection-bar-count {
+  margin-inline-end: 8px;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.selection-bar-action {
+  border-radius: 999px;
+  padding: 5px 12px;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 150ms, color 150ms;
+}
+
+.selection-bar-action:hover,
+.selection-bar-action:focus-visible {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.selection-bar-primary {
+  background: var(--brand-primary);
+  color: var(--text-inverse);
+}
+
+.selection-bar-primary:hover,
+.selection-bar-primary:focus-visible {
+  background: color-mix(in oklab, var(--brand-primary) 88%, black);
+  color: var(--text-inverse);
+}
+
+.selection-bar-rule {
+  width: 1px;
+  height: 16px;
+  margin-inline: 4px;
+  background: var(--card-border);
+}

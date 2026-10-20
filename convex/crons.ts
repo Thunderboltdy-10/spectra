@@ -87,4 +87,10 @@ crons.interval(
   internal.semanticIndex.maintain,
   {},
 );
+crons.interval(
+  "dispatch-morning-briefs",
+  { minutes: 10 },
+  internal.dailyBriefs.dispatchDue,
+  {},
+);
 export default crons;

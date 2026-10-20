@@ -88,6 +88,10 @@ export type SlideTextFieldProps = Omit<HTMLAttributes<HTMLDivElement>, "onChange
   editable: boolean;
   /** The deck is linked to a PowerPoint file: only what DrawingML holds is written. */
   native: boolean;
+  /** Take the caret once the field is ready. */
+  autoFocus?: boolean;
+  /** Shown faintly while the field is empty. */
+  placeholder?: string;
   style?: CSSProperties;
   hostRef?: Ref<HTMLDivElement>;
   onChange: (paragraphs: PresentationParagraph[]) => void;
@@ -99,6 +103,8 @@ export function SlideTextField({
   paragraphs,
   editable,
   native,
+  autoFocus = false,
+  placeholder = "",
   style,
   hostRef,
   onChange,
@@ -136,7 +142,7 @@ export function SlideTextField({
 
   const editor = useEditor({
     extensions: [
-      ...fieldExtensions({ placeholder: "", host: () => ownRef.current, box: true }),
+      ...fieldExtensions({ placeholder, host: () => ownRef.current, box: true }),
       SpectraTiptapAutocomplete.configure({
         enabled: preferences.writing.smartCompletion && editable,
         delayMs: preferences.writing.delayMs,
@@ -164,6 +170,10 @@ export function SlideTextField({
   useEffect(() => {
     editor?.setEditable(editable);
   }, [editable, editor]);
+
+  useEffect(() => {
+    if (autoFocus && editable) editor?.commands.focus("end");
+  }, [autoFocus, editable, editor]);
 
   // Someone else's text (a peer, Spectra, find and replace, undo in the
   // studio): apply only what differs, so a focused caret follows it.

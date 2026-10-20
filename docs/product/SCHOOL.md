@@ -1,6 +1,6 @@
 # School: ManageBac in Spectra
 
-The School page brings the student's ManageBac into Spectra: tasks, past work and its files, CAS, classes and
+The School page brings the student's ManageBac into Spectra: tasks, past work and its files, classes and
 timetable. Each student controls what syncs, and when.
 
 ## Principles
@@ -31,7 +31,7 @@ Settings sit on the School page's **Sync** tab, not buried in Settings.
 | Dropbox files (the student's own submissions) | Manual | Downloaded on demand, cached once fetched |
 | Task resources from teachers | Auto | Attachments and links on tasks |
 | Grades and feedback | Auto | Only the student's own |
-| CAS | Manual | See below |
+| CAS | Off | Unavailable, see below |
 | Classes and timetable | Auto | Classes become workspaces, as today |
 | Calendar events | Auto | School events |
 
@@ -65,22 +65,10 @@ Settings sit on the School page's **Sync** tab, not buried in Settings.
 
 ## CAS
 
-Creativity, Activity and Service. It is the IB Diploma requirement that students track across two years.
-
-- **Experiences.**
-  - Each shows its type (C, A, S), its dates, its supervisor and its status.
-  - Each opens to its reflections and evidence.
-- **Reflections.**
-  - Students read them in Spectra and write new ones there.
-  - Writing back to ManageBac asks first.
-- **Learning outcomes.** The seven outcomes, with which experiences cover each and what's still missing, at a glance.
-- **Evidence.** Photos and files, viewable, and copied into the Library on request.
-- **Spectra AI.** It can:
-  - draft a reflection from the student's notes;
-  - suggest which outcomes an experience meets;
-  - find gaps before deadlines.
-
-Writing always asks first.
+ManageBac doesn't share CAS with the connection a school makes for Spectra, so CAS is unavailable: it never syncs,
+and the School page doesn't mention it. The records, queries and AI read stay in place behind that one switch
+(`SCHOOL_SYNC_KIND_INFO.cas` in `shared/school-sync.ts`), so a school whose ManageBac does share it can be turned
+on without new code.
 
 ## What the API allows
 
@@ -107,9 +95,9 @@ confirming against a real school before launch.
 | Grades and feedback | `/classes/{id}/tasks/{task}/students?student_ids={id}` | Synced for tasks already due, the student's own row only |
 | Dropbox files | `/classes/{id}/tasks/{task}/submissions/{id}` | The file list syncs; each file downloads when the student opens it (a redirect to short-lived storage) |
 | Task resources | `/classes/{id}/resources` | Synced. **Live check:** not in the public guide |
-| CAS experiences | `/year-groups/{id}/projects/cas/experiences/students?student_ids={id}` | Synced, read through the student's year group |
+| CAS experiences | `/year-groups/{id}/projects/cas/experiences/students?student_ids={id}` | Unavailable: ManageBac doesn't share it with Spectra's connection |
 | CAS reflections, learning outcomes, evidence | None | Kept in Spectra only. The School page says ManageBac can't receive them |
-| Calendar events | None | Unavailable: the mode is Off and the page says why |
+| Calendar events | None | Unavailable: the mode is Off and the School page leaves it out |
 
 - **Writes.** The public API has no endpoints to write CAS reflections or evidence, so nothing is written back to
   ManageBac. If a live check finds one, `CAS_WRITE_BACK` in `shared/school-sync.ts` flips and the write asks first.
@@ -135,7 +123,8 @@ confirming against a real school before launch.
 - A `403` means the school's key wasn't granted that endpoint. The job stops and the School page shows, in plain words,
   what can't be read and that a ManageBac administrator at the school can fix it. A job set to Auto tries again a day later.
 - A `401` means ManageBac refused the key itself. The connection is marked as needing the school administrator.
-- An endpoint ManageBac doesn't have shows as unavailable, which nobody can fix from Spectra.
+- An endpoint ManageBac doesn't serve is unavailable: its mode is Off and the School page leaves it out, since
+  nobody can fix it from Spectra.
 - The wording and who can fix each problem live in `describeSchoolSyncProblem` (`shared/school-sync.ts`).
 
 ## Engineering notes

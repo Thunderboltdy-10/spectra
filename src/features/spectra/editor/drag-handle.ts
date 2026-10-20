@@ -78,15 +78,21 @@ export const DragHandle = Extension.create({
           };
           const drag = (event: DragEvent) => {
             if (!active) return;
-            view.dispatch(
-              view.state.tr.setSelection(
-                NodeSelection.create(view.state.doc, active.pos),
-              ),
-            );
+            const selection = NodeSelection.create(view.state.doc, active.pos);
+            view.dispatch(view.state.tr.setSelection(selection));
+            // The grip sits outside the editor, so ProseMirror never saw this
+            // drag start: tell it what is moving, as its own dragstart would,
+            // so the drop moves the block (or lays a reference on another).
+            view.dragging = { slice: selection.content(), move: true, node: selection } as typeof view.dragging;
             event.dataTransfer?.setData("text/plain", "spectra-block");
+            event.dataTransfer?.setDragImage(active.element, 12, 12);
+          };
+          const dragEnd = () => {
+            view.dragging = null;
           };
           ui.add.addEventListener("click", add);
           ui.grip.addEventListener("dragstart", drag);
+          ui.grip.addEventListener("dragend", dragEnd);
           const positionForBlock = (block: Block) => {
             const wrapper =
               (view.dom.closest(".tiptap-root") as HTMLElement | null) ??
@@ -116,6 +122,7 @@ export const DragHandle = Extension.create({
             destroy: () => {
               ui.add.removeEventListener("click", add);
               ui.grip.removeEventListener("dragstart", drag);
+              ui.grip.removeEventListener("dragend", dragEnd);
               view.dom.removeEventListener("scroll", onScroll);
               scrollParent?.removeEventListener("scroll", onScroll);
               ui.root.remove();

@@ -20,6 +20,10 @@ vi.mock("../../hooks/use-spectra-router", () => ({ useSpectraRouter: () => ({ pu
 vi.mock("../../island/run-tabs", () => ({ useRunTabs: () => [], isActiveRunStatus: () => false }));
 vi.mock("../../semantic/use-semantic", () => ({ useThreadSearch: () => h.search }));
 vi.mock("../../life/life", () => ({ life: { on: false } }));
+vi.mock("../../school/use-class-book", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../school/use-class-book")>()),
+  useClassBook: () => ({ loading: false, classes: [], named: () => null, idNamed: () => null, of: () => null }),
+}));
 vi.mock("../../life/use-life", () => ({
   unformElement: vi.fn(),
   useLifeArrival: (_ref: unknown, key: string) => {
@@ -30,7 +34,7 @@ vi.mock("../../life/use-life", () => ({
   },
 }));
 
-import { ThreadsView } from "../threads-view";
+import { ThreadsBrowser } from "../threads-view";
 
 afterEach(() => {
   cleanup();
@@ -39,28 +43,28 @@ afterEach(() => {
   h.search = { results: [], status: "idle", degraded: false };
 });
 
-describe("threads view life", () => {
+describe("threads browser life", () => {
   it("keys each conversation, so one that moves to another group travels there", async () => {
-    render(<ThreadsView onClose={() => {}} />);
+    render(<ThreadsBrowser onChoose={() => {}} />);
     await screen.findByText("Essay plan");
     expect([...h.arrivals]).toEqual(expect.arrayContaining(["thread:t1", "thread:t2"]));
     expect(h.departures.get("thread:t1")).toBe(true);
   });
 
   it("narrowing a search is a filter: nothing parts", async () => {
-    render(<ThreadsView onClose={() => {}} />);
+    render(<ThreadsBrowser onChoose={() => {}} />);
     await act(async () => {});
-    fireEvent.change(screen.getByRole("textbox", { name: "Find a conversation" }), { target: { value: "essay" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Search threads" }), { target: { value: "essay" } });
     expect(screen.getByText("Essay plan")).toBeTruthy();
     expect(h.departures.get("thread:t1")).toBe(false);
   });
 
   it("while a search is still looking, a ghost stands in, not \"nothing matches\"", async () => {
     h.search = { results: [], status: "loading", degraded: false };
-    render(<ThreadsView onClose={() => {}} />);
+    render(<ThreadsBrowser onChoose={() => {}} />);
     await act(async () => {});
-    fireEvent.change(screen.getByRole("textbox", { name: "Find a conversation" }), { target: { value: "photosynthesis" } });
-    expect(screen.getByRole("status", { name: "Searching conversations" })).toBeTruthy();
-    expect(screen.queryByText(/Nothing matches/)).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: "Search threads" }), { target: { value: "photosynthesis" } });
+    expect(screen.getByRole("status", { name: "Searching threads" })).toBeTruthy();
+    expect(screen.queryByText(/No thread matches/)).toBeNull();
   });
 });

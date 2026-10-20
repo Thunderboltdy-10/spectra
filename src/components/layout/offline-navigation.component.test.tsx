@@ -6,7 +6,7 @@ import { AppShell } from "./app-shell";
 import { SPECTRA_REQUEST_UNREACHABLE } from "@/features/spectra/data/request";
 
 const route = vi.hoisted(() => ({ pathname: "/calendar", ready: true, router: { push: vi.fn(), replace: vi.fn() }, error: vi.fn() }));
-vi.mock("next/font/google", () => ({ Manrope: () => ({ variable: "font-main" }), IBM_Plex_Mono: () => ({ variable: "font-mono" }) }));
+vi.mock("next/font/google", () => ({ Figtree: () => ({ variable: "font-main" }), Newsreader: () => ({ variable: "font-display" }), IBM_Plex_Mono: () => ({ variable: "font-mono" }) }));
 vi.mock("next/navigation", () => ({ usePathname: () => route.pathname, useRouter: () => route.router, useSearchParams: () => new URLSearchParams("section=appearance") }));
 vi.mock("sonner", () => ({ toast: { error: route.error } }));
 vi.mock("next/link", () => ({ default: ({ children, ...props }: { children: ReactNode } & { prefetch?: boolean }) => { delete props.prefetch; return <a {...props} onClick={event => { event.preventDefault(); route.router.push(String((props as { href?: string }).href)); }}>{children}</a>; } }));
@@ -28,10 +28,12 @@ vi.mock("@/features/spectra/island/island-host", () => ({ IslandHost: () => null
 vi.mock("@/features/spectra/collaboration/app-choreography-host", () => ({ AppChoreographyMount: () => null }));
 vi.mock("@/components/ui/dropdown-menu", () => { const Pass = ({ children }: { children?: ReactNode }) => <>{children}</>; const Nothing = () => null; return { DropdownMenu: Pass, DropdownMenuTrigger: Pass, DropdownMenuContent: Nothing, DropdownMenuItem: Nothing, DropdownMenuLabel: Nothing, DropdownMenuSeparator: Nothing, DropdownMenuRadioGroup: Nothing, DropdownMenuRadioItem: Nothing, OverflowMenu: Nothing }; });
 vi.mock("./account-menu", () => ({ AccountMenu: () => null }));
+vi.mock("convex/react", () => ({ useConvexAuth: () => ({ isAuthenticated: false, isLoading: false }), useQuery: () => undefined, useMutation: () => vi.fn() }));
+vi.mock("@/features/spectra/onboarding/tour", () => ({ TourMount: () => null }));
 vi.mock("@/features/spectra/organization/tree-client", () => ({ useTreeQuickView: () => ({ nodes: [] }) }));
-vi.mock("@/features/spectra/threads/threads-view", () => ({ ThreadsViewHost: () => null }));
 
 vi.mock("@/features/spectra/administration/api", () => ({ getAdministration: async () => null }));
+vi.mock("@/features/spectra/island/run-tabs", () => ({ useRunTabs: () => [], isActiveRunStatus: () => false }));
 vi.mock("@/features/spectra/data/api", () => ({
   getSpectraThreads: async () => ({ threads: [] }),
   getSpectraNotificationCenter: async () => ({ comments: [], planner: [], timetable: [], invitations: [] }),

@@ -65,7 +65,7 @@ function shareQuestion(work: string, args: ShareArgs) {
     case "revoke": return `Remove someone's access to ${work}?`;
     case "withdraw_invitation": return `Withdraw the pending invitation to ${work}?`;
     case "set_exception": return args.effect === "deny" ? `Stop one member of a shared workspace from opening ${work}?` : `Let one member of a shared workspace only view ${work}?`;
-    case "clear_exception": return `Give one workspace member their usual access to ${work} again?`;
+    case "clear_exception": return `Give this person their usual access to ${work} again?`;
     case "create_public_link": return `Make a public link so anyone with it can view ${work}${args.expiresInDays ? ` for ${args.expiresInDays} days` : ""}?`;
     case "revoke_public_link": return `Turn off a public link to ${work}?`;
   }
@@ -426,7 +426,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "manage_conversation",
       description:
-        "Rename, pin, unpin, archive or restore a conversation in the user's chat list. Omit threadId for this conversation.",
+        "Rename, pin, unpin, archive or restore a conversation in the user's chat list, or file it in one of the user's workspaces. Omit threadId for this conversation.",
       parameters: {
         type: "object",
         properties: {
@@ -434,24 +434,29 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
           title: { type: "string" },
           pinned: { type: "boolean" },
           archived: { type: "boolean" },
+          placeId: { type: "string", description: 'A workspace placeId from the environment to file the conversation in, or "none" to unfile it.' },
         },
         additionalProperties: false,
       },
       effect: "write",
-      label: (args: { title?: string }) => (args.title ? `Renaming the conversation *${args.title}*` : "Tidying your conversations"),
-      doneLabel: (args: { title?: string }) => (args.title ? `Renamed the conversation *${args.title}*` : "Tidied your conversations"),
+      label: (args: { title?: string; placeId?: string }) =>
+        args.title ? `Renaming the conversation *${args.title}*` : args.placeId ? "Filing this conversation" : "Tidying your conversations",
+      doneLabel: (args: { title?: string; placeId?: string }) =>
+        args.title ? `Renamed the conversation *${args.title}*` : args.placeId ? "Filed this conversation" : "Tidied your conversations",
       parse: (raw) => {
         const threadId = optionalString(raw, "threadId", 200);
         const title = optionalString(raw, "title", 200);
         const pinned = typeof raw.pinned === "boolean" ? raw.pinned : undefined;
         const archived = typeof raw.archived === "boolean" ? raw.archived : undefined;
-        if (title === undefined && pinned === undefined && archived === undefined)
-          throw new ToolInputError("Say what changes: title, pinned or archived.");
+        const placeId = optionalString(raw, "placeId", 200);
+        if (title === undefined && pinned === undefined && archived === undefined && placeId === undefined)
+          throw new ToolInputError("Say what changes: title, pinned, archived or placeId.");
         return {
           ...(threadId ? { threadId } : {}),
           ...(title ? { title } : {}),
           ...(pinned !== undefined ? { pinned } : {}),
           ...(archived !== undefined ? { archived } : {}),
+          ...(placeId ? { placeId } : {}),
         };
       },
       command: (args) => ({ command: "manage_conversation", args }),

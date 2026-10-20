@@ -170,14 +170,16 @@ export function createWhiteboardNode(
   if (type === "note")
     return {
       ...base,
-      content: { text: "Add a thought" },
-      style: { fill: "color-mix(in oklab, var(--accent-gold) 28%, var(--bg-elevated))", stroke: "var(--accent-gold)", color: "var(--text-primary)" },
+      // Starts empty: the board shows a quiet placeholder and opens the note
+      // ready to write, so nobody has to delete stock words first.
+      content: { text: "" },
+      style: { fill: "color-mix(in oklab, var(--accent-gold) 28%, var(--card-paper))", stroke: "transparent", color: "var(--text-primary)" },
       semanticLabel: "Sticky note",
     };
   if (type === "text")
     return {
       ...base,
-      content: { text: "Add text" },
+      content: { text: "" },
       style: { color: "var(--text-primary)", fontSize: 30, fontWeight: 650 },
       semanticLabel: "Text",
     };
@@ -186,9 +188,9 @@ export function createWhiteboardNode(
       ...base,
       content: { text: "Concept", shape: "rounded-rectangle" },
       style: {
-        fill: "var(--bg-user-bubble)",
-        stroke: "var(--brand-primary)",
-        color: "var(--brand-primary)",
+        fill: "color-mix(in oklab, var(--type-whiteboard) 8%, var(--card-paper))",
+        stroke: "color-mix(in oklab, var(--type-whiteboard) 55%, var(--card-border))",
+        color: "var(--text-primary)",
         radius: 14,
       },
       semanticLabel: "Concept",
@@ -197,14 +199,14 @@ export function createWhiteboardNode(
     return {
       ...base,
       content: { title: "New frame" },
-      style: { fill: "var(--bg-elevated)", stroke: "var(--border-strong)" },
+      style: { fill: "transparent", stroke: "var(--border-strong)" },
       semanticLabel: "Frame",
     };
   if (type === "card")
     return {
       ...base,
       content: { title: "Card", text: "Add supporting detail" },
-      style: { fill: "var(--bg-elevated)", stroke: "var(--border-default)" },
+      style: { fill: "var(--card-paper)", stroke: "var(--card-border)" },
       semanticLabel: "Card",
     };
   if (type === "table")
@@ -216,7 +218,7 @@ export function createWhiteboardNode(
           ["Example", "Value"],
         ],
       },
-      style: { fill: "var(--bg-elevated)", stroke: "var(--border-default)" },
+      style: { fill: "var(--card-paper)", stroke: "var(--card-border)" },
       semanticLabel: "Table",
     };
   return { ...base, content: {}, semanticLabel: type };
@@ -439,7 +441,7 @@ export function normalizeWhiteboardContent(value: unknown): WhiteboardContent {
     settings: {
       gridSize: bounded(settings.gridSize, 24, 4, 200),
       snapToGrid: settings.snapToGrid !== false,
-      showGrid: settings.showGrid !== false,
+      showGrid: settings.showGrid === true,
       canvasColor: text(settings.canvasColor, "#fbfbf8").slice(0, 100),
     },
   };

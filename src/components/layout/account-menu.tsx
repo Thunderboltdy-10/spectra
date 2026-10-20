@@ -77,7 +77,7 @@ export function AccountMenu({
             aria-label={`Account menu${unreadCount ? `, ${unreadCount} unread notifications` : ""}`}
             className={cn(
               "flex h-10 w-full items-center gap-2.5 rounded-control px-1.5 text-left outline-none transition-colors",
-              "hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] data-[state=open]:bg-[var(--bg-hover)]",
+              "hover:bg-[var(--bg-desk-hover)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] data-[state=open]:bg-[var(--bg-desk-hover)]",
               collapsed && "justify-center px-0",
             )}
           >
@@ -111,7 +111,7 @@ export function AccountMenu({
         <DropdownMenuItem onSelect={onOpenNotifications}>
           <MenuGlyph name="bell" />
           <span className="flex-1">Notifications</span>
-          {unreadCount ? <span className="rounded-full bg-[var(--brand-primary)] px-1.5 text-micro font-semibold leading-4 text-[var(--text-inverse)]">{unreadCount}</span> : null}
+          {unreadCount ? <span className="rounded-chip bg-[var(--brand-primary)] px-1.5 text-micro font-semibold leading-4 text-[var(--text-inverse)]">{unreadCount}</span> : null}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => router.push("/settings")}>
           <MenuGlyph name="settings" />
@@ -138,6 +138,10 @@ export function AccountMenu({
         <DropdownMenuItem onSelect={() => window.dispatchEvent(new Event(OPEN_SHORTCUTS_EVENT))}>
           <MenuGlyph name="keyboard" />
           Keyboard shortcuts
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => spectraBus.emit("tour.start", {})}>
+          <MenuGlyph name="help" />
+          Take the tour
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => router.push("/analytics")}>
           <MenuGlyph name="analytics" />

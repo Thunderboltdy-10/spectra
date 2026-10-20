@@ -16,7 +16,9 @@ export type StudioItemRailEntry = {
  * slides, files, pages. Expanded is the quiz list (number, title, caption).
  * Collapsed removes the column entirely so the host can keep a compact
  * show-control inside its own chrome. Types add extras in `tools` and
- * `footer`; they do not grow a second column.
+ * `footer`; they do not grow a second column. It reads as the contents page
+ * of what is open (EDITORS.md, "The contents rail"): the open item is the
+ * slip pulled out, and adding one is the next line under the last.
  */
 export function StudioItemRail({
   label,
@@ -70,20 +72,9 @@ export function StudioItemRail({
           aria-label={`Hide ${label.toLowerCase()}`}
         >
           <PanelLeft className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate">
-            {label} · {count}
-          </span>
+          <span className="truncate">{label}</span>
+          <span className="spectra-item-rail-count">{count}</span>
         </button>
-        {canEdit && onAdd ? (
-          <button
-            type="button"
-            className="spectra-item-rail-add"
-            onClick={onAdd}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            {addLabel ?? "Add"}
-          </button>
-        ) : null}
       </div>
       {tools}
       <ul className="spectra-item-rail-list">
@@ -170,7 +161,7 @@ export function StudioItemRail({
       {canEdit && onAdd ? (
         <button
           type="button"
-          className="spectra-item-rail-add is-block"
+          className="spectra-item-rail-add"
           onClick={onAdd}
         >
           <Plus className="h-3.5 w-3.5" />

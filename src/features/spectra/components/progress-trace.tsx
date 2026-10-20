@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Loader2, AlertCircle, Check, ChevronDown } from "@/components/icons/glyph-icons";
+import { AlertCircle, Check, ChevronDown } from "@/components/icons/glyph-icons";
+import { WorkingMark } from "@/components/ui/skeleton";
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import { transitionFor, useSpectraMotion } from "../motion";
@@ -46,12 +47,10 @@ export function ProgressTrace({
   const revealTransition = transitionFor("reveal", motionLevel.level);
   const morphTransition = transitionFor("morph", motionLevel.level);
   const thinking = active && !hasOutput;
-  const [groupOpen, setGroupOpen] = useState(() => {
-    if (persistKey && groupOpenByKey.has(persistKey)) {
-      return groupOpenByKey.get(persistKey)!;
-    }
-    return false;
-  });
+  // The steps show while Spectra works, so its thinking is what it is doing, not a light; once the answer
+  // comes they fold under their caption. A choice the user made holds.
+  const [chosenOpen, setChosenOpen] = useState(() => (persistKey ? groupOpenByKey.get(persistKey) : undefined));
+  const groupOpen = chosenOpen ?? thinking;
   const [openIds, setOpenIds] = useState<Set<string>>(() => new Set());
   const [userTouched, setUserTouched] = useState<Set<string>>(() => new Set());
   // Steps seen working here: when one finishes, its light settles into a tick that draws itself.
@@ -176,22 +175,19 @@ export function ProgressTrace({
         <button
           type="button"
           disabled={!expandable}
-          onClick={() =>
-            setGroupOpen((open) => {
-              const next = !open;
-              if (persistKey) groupOpenByKey.set(persistKey, next);
-              return next;
-            })
-          }
+          onClick={() => {
+            const next = !groupOpen;
+            if (persistKey) groupOpenByKey.set(persistKey, next);
+            setChosenOpen(next);
+          }}
           className="mb-1.5 flex w-full min-w-0 items-center gap-1.5 py-0.5 text-left"
           aria-expanded={expandable ? groupOpen : undefined}
         >
           <span
             className={cn(
               "min-w-0 truncate text-caption font-medium tracking-[-0.01em] text-[var(--text-secondary)] opacity-70",
-              thinking && "thinking-wave",
-              // The current caption has light running slowly along its left edge (MOTION.md, "Captions").
-              !finished && "spectra-caption-live",
+              // While Spectra works, the skeleton's band of light passes along the caption.
+              !finished && "thinking-wave",
             )}
           >
             {/* Present tense becomes past tense with a quick cross-fade. */}
@@ -247,7 +243,7 @@ export function ProgressTrace({
                     >
                       <div className="flex w-full items-center gap-2 text-left">
                         {step.status === "running" ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
+                          <WorkingMark />
                         ) : step.status === "error" ? (
                           <AlertCircle className="h-3.5 w-3.5 text-[var(--danger)]" />
                         ) : (

@@ -51,7 +51,7 @@ export function CapabilityTruthBadge({
   return (
     <span
       className={cn(
-        "inline-flex min-h-6 items-center gap-1.5 rounded-full border px-2.5 text-micro font-semibold",
+        "inline-flex min-h-6 items-center gap-1.5 rounded-chip border px-2.5 text-micro font-semibold",
         good && "border-emerald-600/20 bg-emerald-500/8 text-emerald-800",
         pending && "border-sky-600/20 bg-sky-500/8 text-sky-800",
         warning && "border-amber-600/20 bg-amber-500/9 text-amber-800",
@@ -86,9 +86,9 @@ export function CapabilityTruthState({
         : state.kind === "not_connected"
           ? "Connect a supported provider before expecting school records here."
           : state.kind === "permission_denied"
-            ? "Your current school role cannot read this capability."
+            ? "Your role at school can't see this."
             : state.kind === "unsupported"
-              ? "The connected provider does not expose this capability."
+              ? "ManageBac doesn't share this."
               : state.kind === "schema_incompatible"
                 ? "Provider schema drift was quarantined instead of being shown as empty data."
                 : state.kind === "refreshing"

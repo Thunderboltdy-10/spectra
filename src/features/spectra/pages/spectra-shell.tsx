@@ -1,10 +1,10 @@
 "use client";
 
-import { hubTabsWithoutWorkspace, type WorkspaceHubTab } from "./hub-tabs";
+import { distinctHubTabs, hubTabsWithoutWorkspace, workSetLabel, type WorkspaceHubTab } from "./hub-tabs";
 import { subscribeShellWorkAvailability } from "../components/use-work-availability";
 import { retireShellArtifactLocation } from "./shell-location";
 
-import { BookOpen, CalendarCheck2, Download, Files, HelpCircle, Loader2, Table2, Code2, CheckCircle2, ExternalLink, FileText, Plus, School, Trash2, X, Presentation, Bot, PencilLine, Workflow, type GlyphIcon } from "@/components/icons/glyph-icons";
+import { Loader2, CheckCircle2, ExternalLink, Plus, School, Trash2, X, type GlyphIcon } from "@/components/icons/glyph-icons";
 import {
   useCallback,
   useEffect,
@@ -17,7 +17,6 @@ import {
 import { usePathname, useSearchParams } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import dynamic from "next/dynamic";
-import type { Id } from "../../../../convex/_generated/dataModel";
 import { useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { toast } from "@/components/ui/toast";
@@ -28,19 +27,11 @@ import {
 } from "@/features/spectra/components/product-state";
 import { ClassShelfOnboarding } from "../components/class-shelf-onboarding";
 import Link from "next/link";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  OverflowMenu,
-} from "@/components/ui/dropdown-menu";
-import { useSpectraContextStore } from "@/stores/spectra-context-store";
+import { useSpectraContextStore, type SpectraOpenObject } from "@/stores/spectra-context-store";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import { useSpectraContext } from "../hooks/use-spectra-context";
 import {
   createDefaultArtifactPayload,
-  type ArtifactPayload,
 } from "../components/artifact-blueprint-sheet";
 import { workTypeMeta } from "../components/artifact-card";
 import {
@@ -60,9 +51,7 @@ import { CompanionSheet, WorkCompanionPanel, type CompanionTab } from "../compon
 import { RunDetailPanel } from "../components/run-detail-panel";
 import { LiveThreadPanel } from "../components/live-thread-panel";
 import { ChatBrowserPanel } from "../components/chat-browser-panel";
-import { Icon } from "@/components/icons";
-import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
-import { PageHeader } from "@/components/ui/page-header";
+import { LibraryHeader, WorkspaceHeader } from "./library-header";
 import { useProvideIslandEngine } from "../island/engine";
 import { createApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import { applyPreferencePatch } from "../settings/schema";
@@ -86,17 +75,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import {
   ArtifactDeleteDialog,
-  PendingCreateDialog,
   WorkspaceDeleteDialog,
   WorkspaceEditDialog,
   workspaceIconChoices,
 } from "../components/shell-dialogs";
 import { LibraryOrganizer } from "../organization/library-organizer";
-import type { ContainerTarget } from "../organization/work-board";
+import { LibraryShelfSkeleton } from "../organization/library-shelf";
+import { LoadingRows } from "@/components/ui/page-state";
 import {
   useLiveOrgIdentities,
   useTreePlacement,
-  type BoardGroupBy,
 } from "../organization/tree-client";
 import { spectraBus } from "../events";
 import type { SpectraCommandOutcome } from "../events/contracts";
@@ -111,7 +99,7 @@ import {
   rememberSpectraMemory,
   correctSpectraMemory,
 } from "../data/api";
-import { parseWorkspaceHubTabs } from "../components/workspace-tab-state";
+import { LIBRARY_TAB_LABEL, parseWorkspaceHubTabs } from "../components/workspace-tab-state";
 import { previewText } from "../components/preview-text";
 import {
   formatRelativeTime,
@@ -119,8 +107,6 @@ import {
   artifactPlacements,
   linkedArtifacts,
   sortSpectraWorkspaces,
-  workspaceAccent,
-  workspaceThreadCount,
   workspaceItemToCard,
 } from "../components/spectra-view-model";
 import {
@@ -181,7 +167,6 @@ import { expectLanding, type WorkRegion } from "../anchors/open-anchor";
 import { useShareInvitations } from "./use-share-invitations";
 import { downloadDocumentBlob } from "../components/artifact-studio-file-utils";
 
-type ViewMode = "list" | "board";
 type OverviewLoadState =
   | { status: "loading" }
   | { status: "ready" }
@@ -191,6 +176,18 @@ type Selection =
   | { type: "thread"; itemId: string; threadId: string }
   | { type: "run"; runId: string }
   | null;
+/**
+ * One step of the shell's own Back and Forward. A hub step that names a
+ * `nodeId` is a folder within it (null is the top), so walking into folders
+ * can be walked back out of; one without leaves the folder where it is.
+ */
+type ShellNavEntry = {
+  kind: "hub" | "artifact-split" | "artifact-tab";
+  hubTabId: string | null;
+  workspaceId?: string;
+  artifactId?: string;
+  nodeId?: string | null;
+};
 type WorkspaceEntry = {
   item: SpectraWorkspaceItem;
   artifact?: SpectraArtifact;
@@ -420,7 +417,7 @@ function mergeLiveAiOverview(
 }
 
 function workspaceHubTab(
-  label = "Home",
+  label = LIBRARY_TAB_LABEL,
   workspaceId?: string,
 ): WorkspaceHubTab {
   return {
@@ -429,30 +426,6 @@ function workspaceHubTab(
     workspaceId,
   };
 }
-
-// Icons here, names from `work/registry` — the same rule the cards follow, so
-// "New work" can never offer a type by a name the studio does not use.
-const createTypes: Array<{
-  key: ArtifactTypeKey;
-  label: string;
-  icon: GlyphIcon;
-}> = (
-  [
-    ["document", FileText],
-    ["flashcard_deck", BookOpen],
-    ["quiz", HelpCircle],
-    ["planner_task", CalendarCheck2],
-    ["agent", Bot],
-    ["presentation", Presentation],
-    ["sheets", Table2],
-    ["code", Code2],
-    ["whiteboard", Workflow],
-  ] satisfies Array<[ArtifactTypeKey, GlyphIcon]>
-).map(([key, icon]) => ({
-  key,
-  icon,
-  label: getWorkDefinition(key).userFacingName,
-}));
 
 function useOutsideClick<T extends HTMLElement>(
   open: boolean,
@@ -470,233 +443,25 @@ function useOutsideClick<T extends HTMLElement>(
   return ref;
 }
 
-const WORKSPACE_BAR_PLAN: readonly CollapseStep[] = [{ hideLabel: "chats" }, { hideLabel: "people" }, { toMenu: "chats" }];
-
-function WorkspaceHeader({
-  workspace,
-  items,
-  runs,
-  optimisticActive,
-  optimisticRunId,
-  onEditWorkspace,
-  onShareWorkspace,
-  onExportWorkspace,
-  onDeleteWorkspace,
-  onOpenChats,
-}: {
-  workspace: SpectraWorkspace | null;
-  items: SpectraWorkspaceItem[];
-  runs: SpectraRun[];
-  optimisticActive?: boolean;
-  optimisticRunId?: string;
-  onEditWorkspace: () => void;
-  onShareWorkspace: () => void;
-  onExportWorkspace: () => void;
-  onDeleteWorkspace: () => void;
-  onOpenChats?: () => void;
-}) {
-  const artifactCount = items.filter((item) => item.artifact).length;
-  const threadCount = workspaceThreadCount(items);
-  const cardCount = items.filter((item) => item.pinned).length;
-  const persistedActiveRuns = runs.filter(
-    (run) =>
-      run.status === "running" ||
-      run.status === "queued" ||
-      run.status === "awaiting_confirmation" ||
-      run.status === "awaiting_resolution",
-  ).length;
-  const activeRuns =
-    persistedActiveRuns +
-    (optimisticActive &&
-    (!optimisticRunId || !runs.some((run) => run._id === optimisticRunId))
-      ? 1
-      : 0);
-
-  const commands: BarCommand[] = [
-    ...(onOpenChats
-      ? [{ id: "chats", icon: "conversations", label: "Chats", onSelect: onOpenChats } satisfies BarCommand]
-      : []),
-    {
-      id: "people",
-      icon: "people",
-      label: workspace?.sharedWithCount ? `People · ${workspace.sharedWithCount}` : "People",
-      onSelect: onShareWorkspace,
-    },
-    {
-      id: "more",
-      icon: "more",
-      label: "More workspace actions",
-      pinned: true,
-      render: () => (
-        <OverflowMenu
-          label="More workspace actions"
-          items={[
-            { key: "settings", label: "Workspace settings", icon: PencilLine },
-            { key: "export", label: "Export workspace", icon: Download },
-            { key: "delete", label: "Delete workspace", icon: Trash2 },
-          ]}
-          onSelect={(key) => {
-            if (key === "settings") onEditWorkspace();
-            else if (key === "export") onExportWorkspace();
-            else if (key === "delete") onDeleteWorkspace();
-          }}
-          size={32}
-        />
-      ),
-    },
-  ];
-
-  return (
-    <div
-      role="group"
-      className="spectra-workspace-header border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 pb-3 pt-3"
-      aria-label={`${artifactCount} work items, ${threadCount} threads, ${cardCount} pinned, ${activeRuns} active runs`}
-    >
-      <PageHeader
-        title={
-          <span className="inline-flex min-w-0 max-w-full items-center gap-2">
-            <span className="truncate">{workspace?.title ?? "Workspace"}</span>
-            {workspace?.isShared ? (
-              <span role="img" aria-label="Shared workspace" className="inline-flex shrink-0 text-[var(--text-tertiary)]">
-                <Icon name="share" size={16} />
-              </span>
-            ) : null}
-          </span>
-        }
-        commands={commands}
-        plan={WORKSPACE_BAR_PLAN}
-        barLabel="Workspace commands"
-        description={workspace?.description || undefined}
-        lifeKey={workspace?._id}
-      />
-    </div>
-  );
-}
-
 /**
- * The header at the top of the account, where no workspace is open yet.
- *
- * It is deliberately the same shell as a workspace's header — same lane, same
- * type, same actions in the same corner — because the surface underneath is the
- * same surface. Only the scope changed, and a header that re-arranged itself
- * would make the reader re-learn the page every time they stepped out of a
- * workspace.
- *
- * The two doors into that scope name themselves differently, and honestly: the
- * Library is everything the reader has made, and the Workspace root is the same
- * material seen through the workspaces that hold it.
+ * The Library on its way, laid out as it will stand: its command bar, then the
+ * shelf at its top or rows inside a folder, so the ghosts hand over in place.
  */
-function RootHeader({
-  surface,
-  workspaceCount,
-  onOpenChats,
-}: {
-  surface: "library" | "workspace";
-  workspaceCount: number;
-  onOpenChats?: () => void;
-}) {
-  const commands: BarCommand[] = onOpenChats
-    ? [{ id: "chats", icon: "conversations", label: "Chats", onSelect: onOpenChats }]
-    : [];
+function WorkspaceContentSkeleton({ shelf }: { shelf: boolean }) {
   return (
-    <div className="spectra-workspace-header border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 pb-3 pt-3">
-      <PageHeader
-        title={surface === "library" ? "Library" : "Workspace"}
-        commands={commands}
-        plan={WORKSPACE_BAR_PLAN}
-        barLabel={surface === "library" ? "Library commands" : "Workspace commands"}
-        description={
-          surface === "library"
-            ? "Everything you have made, filed where you put it."
-            : workspaceCount === 0
-              ? "Your work lives here."
-              : workspaceCount === 1
-                ? "One workspace, and everything filed across it."
-                : `${workspaceCount} workspaces, and everything filed across them.`
-        }
-      />
-    </div>
-  );
-}
-
-/**
- * Turn the surface into a picker: every row and card becomes selectable, and
- * what the reader picks becomes the context the composer answers from.
- */
-function SelectObjectsButton({
-  selectionMode,
-  onToggle,
-}: {
-  selectionMode: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <Button
-      variant={selectionMode ? "primary" : "secondary"}
-      size="sm"
-      aria-pressed={selectionMode}
-      onClick={onToggle}
-    >
-      <Files className="size-3.5" />
-      {selectionMode ? "Done selecting" : "Select objects"}
-    </Button>
-  );
-}
-
-/** New work of any type, opened in the studio here. */
-function NewWorkButton({
-  busyKey,
-  onCreate,
-}: {
-  busyKey: string | null;
-  onCreate: (type: ArtifactTypeKey) => void;
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="secondary" size="sm">
-          <Plus className="size-3.5" />
-          New
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-[13rem]">
-        {createTypes.map((type) => {
-          const TypeIcon = type.icon;
-          const busy = busyKey === `artifact:${type.key}`;
-          return (
-            <DropdownMenuItem
-              key={type.key}
-              disabled={busy}
-              onSelect={() => onCreate(type.key)}
-            >
-              {busy ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <TypeIcon className="size-4" />
-              )}
-              {type.label}
-            </DropdownMenuItem>
-          );
-        })}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-function WorkspaceContentSkeleton() {
-  return (
-    <div className="px-1 pt-2" aria-label="Loading workspace">
-      <div data-life-ghost className="ml-auto h-9 w-[520px] max-w-full animate-pulse rounded-card bg-[var(--bg-secondary)]" />
-      <div className="mt-7 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {Array.from({ length: 6 }, (_, index) => (
-          <div data-life-ghost
-            key={index}
-            className="h-[116px] animate-pulse rounded-card bg-[linear-gradient(110deg,var(--bg-secondary),color-mix(in_oklab,var(--bg-elevated)_70%,var(--bg-secondary)),var(--bg-secondary))] [background-size:220%_100%]"
-            style={{ animationDelay: `${index * 55}ms` }}
-          />
-        ))}
+    <>
+      <div aria-hidden className="flex h-[52px] shrink-0 items-center gap-3 border-b border-[var(--border-default)] px-5">
+        <div data-life-ghost className="h-8 w-[240px] animate-pulse rounded-control bg-[var(--bg-secondary)]" />
+        <div data-life-ghost className="ml-auto h-8 w-[min(560px,50%)] animate-pulse rounded-control bg-[var(--bg-secondary)]" />
       </div>
-    </div>
+      {shelf ? (
+        <section className="min-w-0 flex-1 overflow-hidden px-8 pt-6">
+          <LibraryShelfSkeleton />
+        </section>
+      ) : (
+        <LoadingRows count={8} label="Opening the Library" className="px-3 pt-2" />
+      )}
+    </>
   );
 }
 
@@ -809,7 +574,7 @@ function Inspector({
                   className="h-8 w-8 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5"
                   style={{ color: meta.color }}
                 />
-                <div className="mt-3 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+                <div className="mt-3 text-micro font-semibold text-[var(--text-tertiary)]">
                   {meta.label} · {selectedArtifact.status}
                 </div>
                 <h2 className="mt-2 font-display text-metric font-semibold leading-tight text-[var(--text-primary)]">
@@ -876,11 +641,11 @@ function Inspector({
                   ) : null}
                 </div>
               </InspectorSection>
-              <InspectorSection title="Sources and provenance">
+              <InspectorSection title="Where this came from">
                 <p className="text-micro leading-5 text-[var(--text-secondary)]">
                   {selectedArtifact.createdFrom?.source
                     ? `Created from ${selectedArtifact.createdFrom.source.replaceAll("_", " ")}${selectedArtifact.createdFrom.sourceAttachmentNames?.length ? ` with ${selectedArtifact.createdFrom.sourceAttachmentNames.length} source file${selectedArtifact.createdFrom.sourceAttachmentNames.length === 1 ? "" : "s"}` : ""}.`
-                    : "No external source provenance is recorded."}
+                    : "This wasn't brought in from anywhere else."}
                 </p>
               </InspectorSection>
               <InspectorSection title="Actions">
@@ -1159,20 +924,9 @@ export function SpectraShell({
   >();
   const [selection, setSelection] = useState<Selection>(null);
   const [multiSelectMode, setMultiSelectMode] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("list");
-  /* Two boards, two memories. The root board answers "which workspace holds
-     what" and the hub board answers "what kind of work is in here" — so a
-     grouping chosen in one is the wrong answer in the other. */
-  const [rootGroupBy, setRootGroupBy] = useState<BoardGroupBy>("workspace");
-  const [hubGroupBy, setHubGroupBy] = useState<BoardGroupBy>("type");
-  /* Set when the reader jumps from a board column to the folder it names, so the
-     List view opens there instead of at the top of the workspace. */
-  const [boardFolderNodeId, setBoardFolderNodeId] = useState<string | null>(
-    null,
-  );
   /* The AI needs the Library location the reader is actually viewing, not only
-     the route's entry node. Keep it separate from the one-shot board jump so
-     ordinary breadcrumb/folder navigation does not remount the organizer. */
+     the route's entry node. It is kept out of the organizer's key so ordinary
+     breadcrumb/folder navigation does not remount the organizer. */
   const [currentLibraryNodeId, setCurrentLibraryNodeId] = useState<
     string | null
   >(requestedNodeId);
@@ -1189,24 +943,25 @@ export function SpectraShell({
   const [workspaceEditDescription, setWorkspaceEditDescription] = useState("");
   const [workspaceEditIcon, setWorkspaceEditIcon] = useState("Sparkles");
   const [hubTabs, setHubTabs] = useState<WorkspaceHubTab[]>(() => [
-    { id: "workspace-home-default", label: "Home" },
+    { id: "workspace-home-default", label: LIBRARY_TAB_LABEL },
   ]);
   const [activeHubTabId, setActiveHubTabId] = useState<string | null>(
     "workspace-home-default",
   );
   const [hubTabsRestored, setHubTabsRestored] = useState(false);
+  const activeWorkSetTab = hubTabs.find((tab) => tab.id === activeHubTabId && tab.workSet);
+  // However a place came to be opened twice (a restored session, a tab
+  // retargeted onto a place another tab shows), the rail shows it once.
+  useEffect(() => {
+    const next = distinctHubTabs(hubTabs, activeHubTabId);
+    if (next.tabs.length === hubTabs.length) return;
+    setHubTabs(next.tabs);
+    setActiveHubTabId(next.activeId);
+  }, [activeHubTabId, hubTabs]);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [navCursor, setNavCursor] = useState(-1);
-  const navStackRef = useRef<
-    Array<{
-      kind: "hub" | "artifact-split" | "artifact-tab";
-      hubTabId: string | null;
-      workspaceId?: string;
-      artifactId?: string;
-    }>
-  >([]);
+  const navStackRef = useRef<ShellNavEntry[]>([]);
   const restoringNavRef = useRef(false);
-  const skipAutoContinueThreadIdRef = useRef<string | null>(null);
   /** The deep-linked work this shell has already acted on, opened or reported. */
   const openedDeepLinkRef = useRef<string | null>(null);
   const previousRequestedArtifactIdRef = useRef<string | undefined>(
@@ -1243,8 +998,6 @@ export function SpectraShell({
     },
     [],
   );
-  const [pendingCreateType, setPendingCreateType] =
-    useState<ArtifactTypeKey | null>(null);
   const [workspaceDeleteOpen, setWorkspaceDeleteOpen] = useState(false);
   const [workspaceShareOpen, setWorkspaceShareOpen] = useState(false);
   const [artifactDeletePending, setArtifactDeletePending] =
@@ -1318,7 +1071,6 @@ export function SpectraShell({
   );
   const workspaceRequestSequence = useRef(0);
   const overviewRequestSequence = useRef(0);
-  const restoredViewScope = useRef<string | null>(null);
   const workspaceImportInputRef = useRef<HTMLInputElement | null>(null);
   const setObjectAvailability = useSpectraContextStore(
     (state) => state.setObjectAvailability,
@@ -1545,11 +1297,10 @@ export function SpectraShell({
 
   useEffect(() => {
     void loadOverview(requestedWorkspaceId).then((next) => {
-      if (!requestedWorkspaceId || next?.workspace) return;
-      router.replace("/workspace");
-      toast.message(
-        "That workspace is no longer available. Opened workspace home instead.",
-      );
+      // Null is a load another one overtook, not a missing workspace.
+      if (!requestedWorkspaceId || !next || next.workspace) return;
+      router.replace("/library");
+      toast.message("That workspace is gone. Here is your Library.");
     });
   }, [loadOverview, requestedWorkspaceId, router]);
 
@@ -1582,23 +1333,27 @@ export function SpectraShell({
   }, []);
   useEffect(() => {
     if (!hubTabsRestored || navStackRef.current.length > 0) return;
-    const seed = {
-      kind: "hub" as const,
+    const seed: ShellNavEntry = {
+      kind: "hub",
       hubTabId: activeHubTabId,
       workspaceId: selectedWorkspaceId,
+      nodeId: requestedNodeId,
     };
     navStackRef.current = [seed];
     setNavCursor(0);
-  }, [activeHubTabId, hubTabsRestored, selectedWorkspaceId]);
+  }, [activeHubTabId, hubTabsRestored, requestedNodeId, selectedWorkspaceId]);
   useEffect(() => {
     if (!hubTabsRestored || restoringNavRef.current) return;
-    let matchingIndex = -1;
-    for (let index = 0; index < navStackRef.current.length; index += 1) {
-      const entry = navStackRef.current[index];
-      const matches = requestedArtifactId
+    const matches = (entry: ShellNavEntry | undefined) =>
+      requestedArtifactId
         ? entry?.artifactId === requestedArtifactId
         : entry?.kind === "hub" && entry.workspaceId === requestedWorkspaceId;
-      if (matches) matchingIndex = index;
+    /* The step Back or Forward landed on already matches the address; only a
+       move the stack did not make (the browser's own Back) re-seats it. */
+    if (matches(navStackRef.current[navCursor])) return;
+    let matchingIndex = -1;
+    for (let index = 0; index < navStackRef.current.length; index += 1) {
+      if (matches(navStackRef.current[index])) matchingIndex = index;
     }
     if (matchingIndex >= 0 && matchingIndex !== navCursor)
       setNavCursor(matchingIndex);
@@ -1641,7 +1396,7 @@ export function SpectraShell({
     ) {
       const fallback = sanitized.tabs.length
         ? sanitized.tabs
-        : [{ id: "workspace-home-recovered", label: "Home" }];
+        : [{ id: "workspace-home-recovered", label: LIBRARY_TAB_LABEL }];
       setHubTabs(fallback);
       setActiveHubTabId(sanitized.activeId ?? fallback[0]!.id);
       return;
@@ -1684,45 +1439,11 @@ export function SpectraShell({
   useEffect(() => {
     setCurrentLibraryNodeId(requestedNodeId ?? scopeNodeId);
   }, [requestedNodeId, scopeNodeId]);
-  const boardGroupBy = atRoot ? rootGroupBy : hubGroupBy;
-  const setBoardGroupBy = atRoot ? setRootGroupBy : setHubGroupBy;
-  const viewScopeKey = selectedWorkspaceId || "root";
-
-  useEffect(() => {
-    if (restoredViewScope.current === viewScopeKey) return;
-    restoredViewScope.current = viewScopeKey;
-    const saved = window.localStorage.getItem(
-      `spectra.workspace.view.${viewScopeKey}`,
-    );
-    if (saved === "list" || saved === "board") {
-      setViewMode(saved);
-      return;
-    }
-    /* Canvas and Timeline are gone, and a reader who left one open comes back to
-       a real view of their work. So does a reader with no preference at all: the
-       root's question is which workspace holds what, which the board grouped by
-       workspace answers; a hub's is what is filed in here, which the list
-       answers. The next save overwrites the retired preference either way. */
-    setViewMode(viewScopeKey === "root" ? "board" : "list");
-  }, [viewScopeKey]);
-  useEffect(() => {
-    if (restoredViewScope.current !== viewScopeKey) return;
-    window.localStorage.setItem(
-      `spectra.workspace.view.${viewScopeKey}`,
-      viewMode,
-    );
-  }, [viewScopeKey, viewMode]);
   const snapshotArtifacts = overview?.artifacts ?? EMPTY_ARTIFACTS;
-  const firstRunGuidanceApplied = useRef(false);
   const firstRun =
     overviewLoadState.status === "ready" &&
     atRoot &&
     snapshotArtifacts.length === 0;
-  useEffect(() => {
-    if (!firstRun || firstRunGuidanceApplied.current) return;
-    firstRunGuidanceApplied.current = true;
-    setViewMode("list");
-  }, [firstRun]);
   const allArtifacts = useMemo(
     () => {
       const listedIds = new Set(snapshotArtifacts.map((artifact) => artifact._id));
@@ -2144,11 +1865,13 @@ export function SpectraShell({
       ? overview?.workspaces.find((item) => item._id === requestedWorkspaceId)
       : undefined;
     if (requestedWorkspaceId && !target) return;
-    const label = target?.title ?? "Home";
+    const label = target?.title ?? LIBRARY_TAB_LABEL;
     setHubTabs((current) => {
       const active = current.find((tab) => tab.id === activeHubTabId);
+      // A work set's tab is named by its work, not by the page under it.
       if (
         !active ||
+        active.workSet ||
         (active.label === label && active.workspaceId === requestedWorkspaceId)
       )
         return current;
@@ -2186,8 +1909,6 @@ export function SpectraShell({
         // The Side holds one pane: a conversation takes the chat browser's place.
         setChatBrowserOpen(false);
         setCompanionSheetFor(null);
-        if (skipAutoContinueThreadIdRef.current !== thread.id)
-          skipAutoContinueThreadIdRef.current = null;
         openObject({
           type: "thread",
           id: thread.id,
@@ -2753,14 +2474,12 @@ export function SpectraShell({
     workspaceId: selectedWorkspaceId,
     scopeNodeId:
       currentLibraryNodeId ??
-      boardFolderNodeId ??
       requestedNodeId ??
       scopeNodeId ??
       undefined,
     artifactId: commandFocusArtifact?._id,
     threadId: composerThread?.id,
     open: openPointers,
-    currentView: viewMode,
     initialCards: initialResultCards,
     onThreadReady: (threadId) => {
       setComposerThread((current) =>
@@ -2790,13 +2509,13 @@ export function SpectraShell({
   });
 
   useEffect(() => {
-    if (surface !== "workspace" || !requestedWorkspaceId || !overview || selectedWorkspaceId !== requestedWorkspaceId) return;
+    if (!requestedWorkspaceId || !overview || selectedWorkspaceId !== requestedWorkspaceId) return;
     const frame = requestAnimationFrame(() => acknowledgeViewportReady({
       targetId: requestedWorkspaceId,
       view: "workspace",
     }));
     return () => cancelAnimationFrame(frame);
-  }, [overview, requestedWorkspaceId, selectedWorkspaceId, surface]);
+  }, [overview, requestedWorkspaceId, selectedWorkspaceId]);
 
   useEffect(() => spectraBus.handle("run.stopRequested", async ({ runId }) => {
     if (runId && runEngine.activeRunId && runEngine.activeRunId !== runId) return;
@@ -2991,20 +2710,23 @@ export function SpectraShell({
     }
   }
 
-  function toggleContextArtifact(artifact: SpectraArtifact) {
+  // What each picked work is, for work the loaded overview does not hold (picked from the shelf's full tree).
+  const pickedWorkRef = useRef(new Map<string, { title: string; type?: string }>());
+  function toggleContextArtifact(artifactId: string, work: { title: string; type?: string }) {
+    pickedWorkRef.current.set(artifactId, work);
     setMultiSelectMode(true);
     setSelectedContextIds((current) => {
       const next = new Set(current);
-      if (next.has(artifact._id)) next.delete(artifact._id);
-      else if (next.size < 24) next.add(artifact._id);
+      if (next.has(artifactId)) next.delete(artifactId);
+      else if (next.size < 24) next.add(artifactId);
       else
         toast.message("You can select up to 24 work items at once.");
       return next;
-    });
+    }, new Map([[artifactId, work.title]]));
   }
 
   /**
-   * The organizer and the board name a work by its id, because that is what the
+   * The organizer names a work by its id, because that is what the
    * tree stores. A work made a moment ago is not in the loaded overview yet, so a
    * miss refreshes once instead of failing silently.
    */
@@ -3079,80 +2801,103 @@ export function SpectraShell({
     studio.isOpen,
   ]);
 
-  /**
-   * A place the reader clicked on the board. A workspace becomes their context
-   * (D32) — that is what opening a workspace means. A folder is a location inside
-   * the current context, so the List view goes there.
-   *
-   * The board says which of the two it handed over, because it already knows —
-   * the shell must not hold a copy of the tree to find out (D42).
-   */
-  const openBoardContainerById = (target: ContainerTarget) => {
-    cancelArtifactOpen();
-    if (target.workspaceId) {
-      goToWorkspaceHub(target.workspaceId as Id<"spectraWorkspaces">);
-      return;
-    }
-    setBoardFolderNodeId(target.nodeId);
-    setCurrentLibraryNodeId(target.nodeId);
-    setViewMode("list");
-  };
-
   function clearSelection() {
     clearDraftSelection();
+  }
+
+  // The picked work goes into the island's message as references, and picking ends: the question is the next step.
+  function askAboutSelection() {
+    const references = [...selectedContextIds].flatMap((id) => {
+      const loaded = allArtifacts.find((artifact) => artifact._id === id);
+      const work = loaded ? { title: loaded.title, type: loaded.blueprintKey } : pickedWorkRef.current.get(id);
+      return work ? [{ id, type: work.type ?? "document", title: work.title }] : [];
+    });
+    if (!references.length) return;
+    spectraBus.emit("island.compose", { fresh: true, references });
+    clearSelection();
+    setMultiSelectMode(false);
   }
 
   function openSelectedArtifactsInTiles() {
     cancelArtifactOpen();
     const selectedIds = [...selectedContextIds]
-      .filter((id) => allArtifacts.some((artifact) => artifact._id === id))
+      .filter((id) => pickedWorkRef.current.has(id) || allArtifacts.some((artifact) => artifact._id === id))
       .slice(0, 24);
     if (selectedIds.length === 0) {
       toast.message("Select one or more items first.");
       return;
     }
-    setTileObjects(
-      selectedIds.flatMap((id) => {
+    const objects = selectedIds.flatMap((id) => {
         const artifact = allArtifacts.find((item) => item._id === id);
-        return artifact
+        const label = artifact?.title ?? pickedWorkRef.current.get(id)?.title;
+        return label
           ? [
               {
                 type: "artifact" as const,
                 id,
-                label: artifact.title,
-                workspaceId: artifact.placements?.[0]?.workspaceId,
+                label,
+                workspaceId: artifact?.placements?.[0]?.workspaceId,
                 presentation: "tile" as const,
               },
             ]
           : [];
-      }),
-    );
+      });
+    setTileObjects(objects);
     openedDeepLinkRef.current = null;
     studio.closeStudio();
     replaceWorkspaceLocation(selectedWorkspaceId);
     setWorkSetIsolated(true);
+    // The picked work gets its own tab in the top rail, so the page it was picked on stays where it was.
+    const tab: WorkspaceHubTab = { ...workspaceHubTab(workSetLabel(objects.map((object) => object.label))), workSet: objects };
+    setHubTabs((current) => [...current, tab]);
+    setActiveHubTabId(tab.id);
+    pushShellNav({ kind: "hub", hubTabId: tab.id });
+    clearSelection();
     setMultiSelectMode(false);
+  }
+
+  /** Leaving a work set's tab for another page takes its tiles down with it; the tab keeps them. */
+  function leaveWorkSet() {
+    if (activeWorkSetTab) clearTiles();
+  }
+
+  /** A work set's tab follows the tiles added to it or closed in it, and goes with the last one. */
+  function updateWorkSet(objects: SpectraOpenObject[]) {
+    if (!activeWorkSetTab) return;
+    if (!objects.length) {
+      closeHubTab(activeWorkSetTab.id);
+      return;
+    }
+    setHubTabs((current) =>
+      current.map((tab) =>
+        tab.id === activeWorkSetTab.id ? { ...tab, label: workSetLabel(objects.map((object) => object.label)), workSet: objects } : tab,
+      ),
+    );
   }
 
   function closeTileArtifact(artifactId: string) {
     removeTileObject(artifactId);
+    if (activeWorkSetTab?.workSet) updateWorkSet(activeWorkSetTab.workSet.filter((object) => object.id !== artifactId));
   }
 
   function addArtifactTile(artifactId: string) {
     const artifact = allArtifacts.find((item) => item._id === artifactId);
-    if (artifact)
-      addTileObject({
-        type: "artifact",
-        id: artifact._id,
-        label: artifact.title,
-        workspaceId: artifact.placements?.[0]?.workspaceId,
-        presentation: "tile",
-      });
+    if (!artifact) return;
+    const tile = {
+      type: "artifact" as const,
+      id: artifact._id,
+      label: artifact.title,
+      workspaceId: artifact.placements?.[0]?.workspaceId,
+      presentation: "tile" as const,
+    };
+    addTileObject(tile);
+    if (activeWorkSetTab?.workSet && !activeWorkSetTab.workSet.some((object) => object.id === tile.id)) updateWorkSet([...activeWorkSetTab.workSet, tile]);
   }
 
   function closeTileSet() {
     cancelArtifactOpen();
-    clearTiles();
+    if (activeWorkSetTab) closeHubTab(activeWorkSetTab.id);
+    else clearTiles();
   }
 
   function openArtifactPanel(
@@ -3289,15 +3034,21 @@ export function SpectraShell({
   }
 
   function startFreshComposerThread() {
-    if (liveThread) skipAutoContinueThreadIdRef.current = liveThread.id;
     setComposerThread(null);
   }
 
   function writeShellLocation(
-    location: { workspaceId?: string; artifactId?: string },
+    { nodeId: folder, ...location }: { workspaceId?: string; artifactId?: string; nodeId?: string | null },
     mode: "push" | "replace",
   ) {
-    const href = spectraShellHref({ surface, ...location });
+    // A folder belongs to the place it is in; moving to another drops it.
+    const nodeId =
+      folder !== undefined
+        ? (folder ?? undefined)
+        : location.workspaceId === requestedWorkspaceId
+          ? (new URLSearchParams(window.location.search).get("nodeId") ?? undefined)
+          : undefined;
+    const href = spectraShellHref({ surface, nodeId, ...location });
     const current = `${window.location.pathname}${window.location.search}`;
     if (href === current) return;
     // Next integrates native History API writes with usePathname/useSearchParams,
@@ -3310,12 +3061,7 @@ export function SpectraShell({
   }
 
   function pushShellNav(
-    entry: {
-      kind: "hub" | "artifact-split" | "artifact-tab";
-      hubTabId: string | null;
-      workspaceId?: string;
-      artifactId?: string;
-    },
+    entry: ShellNavEntry,
     historyMode: "push" | "replace" | "none" = "push",
   ) {
     if (restoringNavRef.current) return;
@@ -3326,11 +3072,12 @@ export function SpectraShell({
       last.kind === entry.kind &&
       last.hubTabId === entry.hubTabId &&
       last.workspaceId === entry.workspaceId &&
-      last.artifactId === entry.artifactId
+      last.artifactId === entry.artifactId &&
+      (entry.nodeId === undefined || (last.nodeId ?? null) === entry.nodeId)
     ) {
       if (historyMode !== "none")
         writeShellLocation(
-          { workspaceId: entry.workspaceId, artifactId: entry.artifactId },
+          { workspaceId: entry.workspaceId, artifactId: entry.artifactId, nodeId: entry.nodeId },
           historyMode,
         );
       return;
@@ -3340,17 +3087,29 @@ export function SpectraShell({
     setNavCursor(navStackRef.current.length - 1);
     if (historyMode !== "none")
       writeShellLocation(
-        { workspaceId: entry.workspaceId, artifactId: entry.artifactId },
+        { workspaceId: entry.workspaceId, artifactId: entry.artifactId, nodeId: entry.nodeId },
         historyMode,
       );
   }
 
-  function applyShellNav(entry: {
-    kind: "hub" | "artifact-split" | "artifact-tab";
-    hubTabId: string | null;
-    workspaceId?: string;
-    artifactId?: string;
-  }) {
+  /**
+   * A folder move inside the open hub is a step of its own. The step it
+   * leaves learns which folder it was showing, so Back returns there.
+   */
+  function pushFolderNav(nodeId: string | null, from: string | null | undefined) {
+    if (restoringNavRef.current) return;
+    const current = navStackRef.current[navCursor];
+    if (current?.kind === "hub" && current.nodeId === undefined && from !== undefined)
+      navStackRef.current[navCursor] = { ...current, nodeId: from };
+    pushShellNav(
+      { kind: "hub", hubTabId: activeHubTabId, workspaceId: selectedWorkspaceId, nodeId },
+      "none",
+    );
+  }
+
+  function applyShellNav(entry: ShellNavEntry) {
+    const folder = entry.kind === "hub" ? entry.nodeId : undefined;
+    if (folder !== undefined) setCurrentLibraryNodeId(folder);
     cancelArtifactOpen();
     restoringNavRef.current = true;
     try {
@@ -3374,11 +3133,14 @@ export function SpectraShell({
       if (entry.hubTabId && hubTabs.some((tab) => tab.id === entry.hubTabId)) {
         const tab = hubTabs.find((item) => item.id === entry.hubTabId);
         if (!tab) return;
+        // A place tab may have walked on since (into a workspace, or back out); the step names where it stood.
+        const workspaceId = tab.workSet ? tab.workspaceId : entry.workspaceId;
+        if (workspaceId !== tab.workspaceId) retargetHubTab(tab.id, workspaceId);
         setActiveHubTabId(tab.id);
-        replaceWorkspaceLocation(tab.workspaceId);
-        if (tab.workspaceId) {
-          setSelectedWorkspaceId(tab.workspaceId);
-          void loadWorkspace(tab.workspaceId);
+        writeShellLocation({ workspaceId, nodeId: folder }, "replace");
+        if (workspaceId) {
+          setSelectedWorkspaceId(workspaceId);
+          void loadWorkspace(workspaceId);
         } else {
           setSelectedWorkspaceId(undefined);
         }
@@ -3394,7 +3156,7 @@ export function SpectraShell({
         void loadWorkspace(entry.workspaceId);
         return;
       }
-      setActiveHubDestination("Home");
+      setActiveHubDestination(LIBRARY_TAB_LABEL);
       setSelectedWorkspaceId(undefined);
     } finally {
       requestAnimationFrame(() => {
@@ -3424,7 +3186,9 @@ export function SpectraShell({
   function setActiveHubDestination(label: string, workspaceId?: string) {
     cancelArtifactOpen();
     studio.closeStudio();
-    if (activeHubTabId && hubTabs.some((tab) => tab.id === activeHubTabId)) {
+    leaveWorkSet();
+    // A work set's tab stays the work set; going somewhere from it opens that place in a tab of its own.
+    if (activeHubTabId && !activeWorkSetTab && hubTabs.some((tab) => tab.id === activeHubTabId)) {
       setHubTabs((current) =>
         current.map((tab) =>
           tab.id === activeHubTabId ? { ...tab, label, workspaceId } : tab,
@@ -3447,32 +3211,58 @@ export function SpectraShell({
     });
   }
 
-  function goToWorkspaceHub(workspaceId: string) {
+  /** Point a place tab at a workspace, or at the Library's top with none. */
+  function retargetHubTab(tabId: string, workspaceId: string | undefined) {
+    const label = workspaceId ? (workspaces.find((item) => item._id === workspaceId)?.title ?? "Workspace") : LIBRARY_TAB_LABEL;
+    setHubTabs((tabs) => tabs.map((tab) => (tab.id === tabId ? { ...tab, label, workspaceId } : tab)));
+  }
+
+  /**
+   * Step into a workspace, optionally at a folder inside it. A workspace is a
+   * place in the Library: one already open in a tab is switched to, otherwise
+   * it opens in the place tab being looked at, the way a folder does.
+   */
+  function goToWorkspaceHub(workspaceId: string, nodeId?: string) {
     cancelArtifactOpen();
-    const target = workspaces.find((item) => item._id === workspaceId);
-    const next =
-      hubTabs.find((tab) => tab.workspaceId === workspaceId) ??
-      workspaceHubTab(target?.title ?? "Workspace", workspaceId);
-    if (!hubTabs.some((tab) => tab.id === next.id))
-      setHubTabs((current) => [...current, next]);
-    setActiveHubTabId(next.id);
+    const current = hubTabs.find((tab) => tab.id === activeHubTabId && !tab.workSet);
+    const open = hubTabs.find((tab) => tab.workspaceId === workspaceId);
+    const tabId = open?.id ?? current?.id;
+    if (!tabId) {
+      const created = workspaceHubTab(workspaces.find((item) => item._id === workspaceId)?.title ?? "Workspace", workspaceId);
+      setHubTabs((tabs) => [...tabs, created]);
+      return enterPlace(created.id, workspaceId, nodeId);
+    }
+    if (!open) retargetHubTab(tabId, workspaceId);
+    enterPlace(tabId, workspaceId, nodeId);
+  }
+
+  /** Step out of any workspace to the top of the Library, or to a folder outside every workspace. */
+  function goToLibraryTop(nodeId?: string) {
+    cancelArtifactOpen();
+    const current = hubTabs.find((tab) => tab.id === activeHubTabId && !tab.workSet);
+    const tabId = current?.id ?? hubTabs.find((tab) => !tab.workspaceId && !tab.workSet)?.id;
+    if (!tabId) return goToHomeHub();
+    retargetHubTab(tabId, undefined);
+    enterPlace(tabId, undefined, nodeId);
+  }
+
+  function enterPlace(tabId: string, workspaceId: string | undefined, nodeId?: string) {
+    leaveWorkSet();
+    setActiveHubTabId(tabId);
     studio.closeStudio();
     setSelection(null);
-    setViewMode("list");
     setSelectedWorkspaceId(workspaceId);
-    void loadWorkspace(workspaceId);
-    pushShellNav({
-      kind: "hub",
-      hubTabId: next.id,
-      workspaceId,
-    });
+    if (workspaceId) void loadWorkspace(workspaceId);
+    if (nodeId !== undefined) setCurrentLibraryNodeId(nodeId);
+    pushShellNav({ kind: "hub", hubTabId: tabId, workspaceId, nodeId: nodeId ?? null });
   }
 
   function goToHomeHub() {
     cancelArtifactOpen();
-    const home = hubTabs.find((tab) => !tab.workspaceId) ?? workspaceHubTab();
+    const home = hubTabs.find((tab) => !tab.workspaceId && !tab.workSet) ?? workspaceHubTab();
     if (!hubTabs.some((tab) => tab.id === home.id))
       setHubTabs((current) => [...current, home]);
+    leaveWorkSet();
     setActiveHubTabId(home.id);
     studio.closeStudio();
     setSelection(null);
@@ -3484,6 +3274,10 @@ export function SpectraShell({
     cancelArtifactOpen();
     const tab = hubTabs.find((item) => item.id === tabId);
     if (!tab) return;
+    if (tab.workSet) {
+      if (tab.id !== activeHubTabId) setTileObjects(tab.workSet);
+      setWorkSetIsolated(true);
+    } else leaveWorkSet();
     setActiveHubTabId(tabId);
     studio.closeStudio();
     setSelection(null);
@@ -3500,8 +3294,11 @@ export function SpectraShell({
 
   function addHomeHubTab() {
     cancelArtifactOpen();
-    const next = workspaceHubTab();
-    setHubTabs((current) => [...current, next]);
+    leaveWorkSet();
+    // The Library is one tab: asking for a new one opens the one there is.
+    const home = hubTabs.find((tab) => !tab.workspaceId && !tab.workSet);
+    const next = home ?? workspaceHubTab();
+    if (!home) setHubTabs((current) => [...current, next]);
     setActiveHubTabId(next.id);
     studio.closeStudio();
     setSelection(null);
@@ -3565,65 +3362,6 @@ export function SpectraShell({
       hubTabs[hubTabs.length - 1];
     if (target) activateHubTab(target.id);
     else addHomeHubTab();
-  }
-
-  function openCreateArtifact(blueprintKey: ArtifactTypeKey) {
-    if (!selectedWorkspaceId) {
-      setPendingCreateType(blueprintKey);
-      return;
-    }
-    void createArtifact(
-      createDefaultArtifactPayload(blueprintKey),
-      selectedWorkspaceId,
-    );
-  }
-
-  async function createArtifact(
-    payload: ArtifactPayload,
-    targetWorkspaceId = selectedWorkspaceId,
-  ) {
-    const label = workTypeMeta[payload.blueprintKey].label;
-    setBusyKey(`artifact:${payload.blueprintKey}`);
-    // Dots gather where it was asked for; the studio grows out of them.
-    const creation = beginCreation();
-    try {
-      const result = await postSpectra<{ artifactId: string }>({
-        action: "createArtifact",
-        blueprintKey: payload.blueprintKey,
-        title: payload.title,
-        summary: payload.summary,
-        content: payload.content,
-        tags: payload.tags,
-        workspaceId: targetWorkspaceId,
-      });
-      const refreshed = await loadOverview(selectedWorkspaceId);
-      const created = refreshed?.artifacts.find(
-        (artifact) => artifact._id === result.artifactId,
-      );
-      if (created) {
-        creation.land();
-        openArtifactPanel(created);
-        toast.success(
-          targetWorkspaceId
-            ? `${label} created in workspace.`
-            : `${label} created in General.`,
-        );
-      } else {
-        creation.cancel();
-        toast.message(
-          `${label} created. It will appear as soon as the workspace finishes syncing.`,
-        );
-      }
-    } catch (error) {
-      creation.cancel();
-      toast.error(
-        describeFailure(error, {
-          fallback: `Could not create ${label.toLowerCase()}.`,
-        }).message,
-      );
-    } finally {
-      setBusyKey(null);
-    }
   }
 
   async function respondToShareInvitation(
@@ -3961,8 +3699,7 @@ export function SpectraShell({
       setNewWorkspaceDescription("");
       setNewWorkspaceIcon("Sparkles");
       setSelection(null);
-      setViewMode("list");
-      creation.land();
+        creation.land();
       setActiveHubDestination(title, result.workspaceId);
       await loadOverview(result.workspaceId);
     } catch (error) {
@@ -4016,8 +3753,7 @@ export function SpectraShell({
         : `${result.report.placed} work reference${result.report.placed === 1 ? "" : "s"} placed.`;
       toast.success(`Workspace imported. ${detail}`);
       setSelection(null);
-      setViewMode("list");
-      const refreshed = await loadOverview(result.workspaceId, true);
+        const refreshed = await loadOverview(result.workspaceId, true);
       const imported = refreshed?.workspaces.find(
         (item) => item._id === result.workspaceId,
       );
@@ -4062,7 +3798,7 @@ export function SpectraShell({
       toast.success(
         warningCount
           ? `Workspace exported with ${warningCount} fidelity note${warningCount === 1 ? "" : "s"}.`
-          : "Portable workspace manifest exported.",
+          : "Workspace exported.",
       );
     } catch (error) {
       toast.error(
@@ -4123,8 +3859,7 @@ export function SpectraShell({
       setWorkspaceDeleteOpen(false);
       setWorkspaceDeleteConfirmation("");
       setSelection(null);
-      setViewMode("list");
-      setActiveHubDestination("Home");
+        setActiveHubDestination(LIBRARY_TAB_LABEL);
       // Its tabs close and the address leaves it, so a reload never lands on a workspace that is gone.
       const next = hubTabsWithoutWorkspace(hubTabs, activeHubTabId, deletedWorkspaceId, () => workspaceHubTab());
       setHubTabs(next.tabs);
@@ -4142,22 +3877,6 @@ export function SpectraShell({
     }
   }
 
-  /*
-   * The action that belongs to the surface rather than either view: the switch
-   * that turns rows and cards into a selection the composer answers from.
-   * Search belongs to SurfaceSearch alone. A second global-search icon in this
-   * row was still a second search control, whatever scope its tooltip claimed
-   * (CANON D41).
-   */
-  const surfaceActions = (
-    <>
-      <NewWorkButton busyKey={busyKey} onCreate={openCreateArtifact} />
-      <SelectObjectsButton
-        selectionMode={multiSelectMode}
-        onToggle={() => setMultiSelectMode((value) => !value)}
-      />
-    </>
-  );
   const surfaceLoading =
     (overviewLoadState.status === "loading" &&
       (!overview || requestedWorkspaceId !== selectedWorkspaceId)) ||
@@ -4188,9 +3907,10 @@ export function SpectraShell({
       setLiveThread({ id: threadId, title });
     },
   };
-  const islandFocusId = composerThread?.id ?? null;
-  const islandFocusTitle = composerThread?.title ?? "";
-  const islandReplying = Boolean(liveThread && islandFocusId === liveThread.id);
+  // It writes into the thread the panel shows, so what it replies to is always in sight; elsewhere it starts one
+  // (its rail picks any other).
+  const islandFocusId = liveThread?.id ?? null;
+  const islandFocusTitle = liveThread?.title ?? "";
   useProvideIslandEngine(
     useMemo(
       () => ({
@@ -4198,12 +3918,11 @@ export function SpectraShell({
         focus: islandFocusId
           ? { threadId: islandFocusId, title: islandFocusTitle }
           : null,
-        restAsComposer: islandReplying,
         startNewThread: () => islandHandlers.current.startNew(),
         openThread: (_runId: string, threadId: string, title: string) =>
           islandHandlers.current.open(threadId, title),
       }),
-      [islandFocusId, islandFocusTitle, islandReplying, runEngine],
+      [islandFocusId, islandFocusTitle, runEngine],
     ),
   );
 
@@ -4218,7 +3937,7 @@ export function SpectraShell({
         type="file"
         accept=".spectra-workspace.json,.json,application/json"
         className="sr-only"
-        aria-label="Import a Spectra workspace manifest"
+        aria-label="Import a Spectra workspace file"
         onChange={(event) => {
           const file = event.target.files?.[0];
           if (file) void importWorkspaceManifest(file);
@@ -4227,13 +3946,10 @@ export function SpectraShell({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <StudioTabRail
           hubTabs={
-            workSetIsolated && activeHubTabId
+            workSetIsolated && activeHubTabId && !activeWorkSetTab
               ? hubTabs.map((tab) =>
                   tab.id === activeHubTabId
-                    ? {
-                        ...tab,
-                        label: `Work set · ${tiledArtifacts.length} objects`,
-                      }
+                    ? { ...tab, label: workSetLabel(tiledArtifacts.map((artifact) => artifact.title)) }
                     : tab,
                 )
               : hubTabs
@@ -4259,29 +3975,6 @@ export function SpectraShell({
           persistent
         />
         <div className="spectra-workbench-frame relative flex min-h-0 min-w-0 flex-1 flex-col">
-          <PendingCreateDialog
-            open={pendingCreateType !== null}
-            typeLabel={
-              pendingCreateType
-                ? workTypeMeta[pendingCreateType].label.toLowerCase()
-                : ""
-            }
-            workspaces={workspaces.map((target) => ({
-              id: target._id,
-              title: target.title,
-              accentColor: workspaceAccent(target, 0).color,
-            }))}
-            onCancel={() => setPendingCreateType(null)}
-            onSelect={(workspaceId) => {
-              const type = pendingCreateType;
-              setPendingCreateType(null);
-              if (!type) return;
-              void createArtifact(
-                createDefaultArtifactPayload(type),
-                workspaceId,
-              );
-            }}
-          />
           <WorkspaceDeleteDialog
             open={workspaceDeleteOpen && !!workspace}
             workspaceTitle={workspace?.title ?? ""}
@@ -4370,7 +4063,7 @@ export function SpectraShell({
                 className="mt-2 min-h-[70px] resize-none placeholder:text-[var(--text-tertiary)]"
               />
               <div className="mt-3">
-                <div className="mb-2 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+                <div className="mb-2 text-micro font-semibold text-[var(--text-tertiary)]">
                   Icon
                 </div>
                 <div
@@ -4445,7 +4138,8 @@ export function SpectraShell({
                   onCloseAll={closeTileSet}
                   onAddArtifact={addArtifactTile}
                   onFocusSet={() => setWorkSetIsolated(true)}
-                  onExitFocusSet={() => setWorkSetIsolated(false)}
+                  // Returning from a work set's own tab is closing it, back to the page before.
+                  onExitFocusSet={() => (activeWorkSetTab ? closeHubTab(activeWorkSetTab.id) : setWorkSetIsolated(false))}
                   onArchive={archiveArtifact}
                   onDirtyChange={studio.setDirty}
                   onContinueThread={(threadId, title) =>
@@ -4516,7 +4210,8 @@ export function SpectraShell({
                           }
                         />
                       ) : null}
-                      {surfaceLoading ? (
+                      {/* The Library's own header needs nothing loaded, so only a workspace's waits. */}
+                      {surfaceLoading && (requestedWorkspaceId || surface !== "library") ? (
                         <WorkspaceHeaderSkeleton />
                       ) : needsSchool || surfaceFailure ? null : workspace ? (
                         <WorkspaceHeader
@@ -4540,8 +4235,9 @@ export function SpectraShell({
                           onOpenChats={openChatBrowser}
                         />
                       ) : (
-                        <RootHeader
+                        <LibraryHeader
                           surface={surface}
+                          folderId={currentLibraryNodeId}
                           workspaceCount={workspaces.length}
                           onOpenChats={openChatBrowser}
                         />
@@ -4556,19 +4252,16 @@ export function SpectraShell({
                           }
                         />
                       ) : surfaceLoading || !scopeReady ? (
-                        <main className="spectra-workspace-content spectra-composer-clearance relative z-chrome min-h-0 flex-1 overflow-y-auto px-3 pt-2 sm:px-5 lg:px-8">
-                          <WorkspaceContentSkeleton />
+                        <main className="spectra-workspace-content relative isolate z-chrome flex min-h-0 flex-1 flex-col overflow-hidden">
+                          <WorkspaceContentSkeleton shelf={surface === "library" && !requestedWorkspaceId && !currentLibraryNodeId} />
                         </main>
                       ) : (
-                        /* One surface, two shapes. The Library scoped to whatever is
-                       open owns the location, the search, the filter, the create
-                       menu, the rail and the view switch — for the List and the
-                       Board alike (CANON D41). This route used to render a second
-                       toolbar with a second search and a second type filter above
-                       the board; that row is gone. */
+                        /* One surface. The Library scoped to whatever is open owns
+                       the location, the search, the filter, the create menu and
+                       the rail (CANON D41). */
                         <main className="spectra-workspace-content relative isolate z-chrome flex min-h-0 flex-1 flex-col overflow-hidden">
                           <LibraryOrganizer
-                            key={`${scopeNodeId ?? "root"}:${boardFolderNodeId ?? ""}`}
+                            key={scopeNodeId ?? "root"}
                             scope={
                               scopeNodeId && workspace
                                 ? {
@@ -4578,15 +4271,7 @@ export function SpectraShell({
                                 : null
                             }
                             firstRun={firstRun}
-                            initialNodeId={
-                              boardFolderNodeId ??
-                              requestedNodeId ??
-                              scopeNodeId
-                            }
-                            view={viewMode}
-                            onViewChange={setViewMode}
-                            boardGroupBy={boardGroupBy}
-                            onBoardGroupByChange={setBoardGroupBy}
+                            initialNodeId={requestedNodeId ?? scopeNodeId}
                             selectionMode={multiSelectMode}
                             selectedObjectKeys={selectedObjectKeys}
                             activeWorkId={studio.activeArtifact?._id}
@@ -4599,14 +4284,18 @@ export function SpectraShell({
                               setWorkspaceCreateParentNodeId(parentNodeId);
                               setWorkspaceCreateOpen(true);
                             }}
-                            toolbarTrail={surfaceActions}
+                            selecting={multiSelectMode}
+                            onToggleSelect={() => setMultiSelectMode((value) => !value)}
                             contextIds={selectedContextIds}
                             onOpenWork={openArtifactById}
-                            onOpenContainer={openBoardContainerById}
-                            onLocationChange={(nodeId) => {
+                            folderId={currentLibraryNodeId}
+                            onLocationChange={(nodeId, from) => {
+                              pushFolderNav(nodeId, from);
                               setCurrentLibraryNodeId(nodeId);
-                              setBoardFolderNodeId(null);
+                              rememberLibraryFolder(nodeId);
                             }}
+                            onOpenWorkspace={goToWorkspaceHub}
+                            onLeaveScope={goToLibraryTop}
                             onOpenThread={(threadId, title) =>
                               setLiveThread({ id: threadId, title })
                             }
@@ -4616,12 +4305,7 @@ export function SpectraShell({
                               );
                               if (found) setArtifactShareTarget(found);
                             }}
-                            onToggleContext={(artifactId) => {
-                              const found = allArtifacts.find(
-                                (item) => item._id === artifactId,
-                              );
-                              if (found) toggleContextArtifact(found);
-                            }}
+                            onToggleContext={toggleContextArtifact}
                             onSelectWork={(ids) => {
                               setMultiSelectMode(true);
                               setSelectedContextIds(new Set(ids));
@@ -4728,7 +4412,7 @@ export function SpectraShell({
             </div>
             {multiSelectMode ? (
               <div className="pointer-events-none absolute inset-x-0 bottom-[var(--spectra-composer-safe-area,84px)] z-composer-dock flex justify-center px-4">
-                <div className="pointer-events-auto spectra-float">
+                <div className="pointer-events-auto">
                   <SelectionActionBar
                     count={selectionCount}
                     onClear={clearSelection}
@@ -4741,6 +4425,7 @@ export function SpectraShell({
                         ? openSelectedArtifactsInTiles
                         : undefined
                     }
+                    onAsk={selectedContextIds.size ? askAboutSelection : undefined}
                   />
                 </div>
               </div>
@@ -4758,49 +4443,7 @@ export function SpectraShell({
                 }
                 width={paneWidths.thread ?? liveThreadPanelWidth}
                 onWidthChange={(next) => notePaneIntent("thread", next)}
-                continuing={composerThread?.id === liveThread.id}
-                onContinue={() => {
-                  void (async () => {
-                    if (composerThread?.id === liveThread.id) {
-                      skipAutoContinueThreadIdRef.current = liveThread.id;
-                      setComposerThread(null);
-                      return;
-                    }
-                    skipAutoContinueThreadIdRef.current = null;
-                    try {
-                      const result = await postSpectra<{
-                        runId?: string;
-                        selected?: boolean;
-                      }>({
-                        action: "selectRunTab",
-                        threadId: liveThread.id,
-                      });
-                      if (!result.selected || !result.runId) {
-                        setComposerThread(null);
-                        return;
-                      }
-                      setComposerThread({
-                        id: liveThread.id,
-                        title: liveThread.title,
-                        runId: result.runId,
-                        workspaceId: selectedWorkspaceId,
-                      });
-                      spectraBus.emit("threads.changed", {});
-                    } catch (error) {
-                      toast.message(
-                        describeFailure(error, {
-                          fallback:
-                            "Could not select this thread for continuation.",
-                        }).message,
-                      );
-                    }
-                  })();
-                }}
-                onClose={() => {
-                  setLiveThread(null);
-                  // Closing the side panel does not force-deselect continuation;
-                  // the run-tab icon remains the source of truth for QC.
-                }}
+                onClose={() => setLiveThread(null)}
                 onOpenArtifact={(artifactId) => {
                   const artifact = allArtifacts.find(
                     (item) => item._id === artifactId,
@@ -4818,7 +4461,7 @@ export function SpectraShell({
                 width={paneWidths["chat-browser"] ?? chatBrowserWidth}
                 onWidthChange={(next) => notePaneIntent("chat-browser", next)}
                 overlay={paneOverlay["chat-browser"] ?? false}
-                title={chatBrowserScope === "artifact" ? "Chats about this work" : chatBrowserScope === "workspace" ? "Workspace chats" : "Library chats"}
+                title={chatBrowserScope === "artifact" ? "Threads about this work" : chatBrowserScope === "workspace" ? "Workspace threads" : "All threads"}
                 onClose={() => setChatBrowserOpen(false)}
                 onOpenChat={(thread) => {
                   setChatBrowserOpen(false);
@@ -4850,4 +4493,16 @@ export function SpectraShell({
       </div>
     </div>
   );
+}
+
+/**
+ * The folder open in the Library goes in the address, so a reload, Back or a
+ * copied link comes back to it rather than to the top (LIBRARY.md).
+ */
+function rememberLibraryFolder(nodeId: string | null) {
+  const params = new URLSearchParams(window.location.search);
+  if (nodeId) params.set("nodeId", nodeId);
+  else params.delete("nodeId");
+  const query = params.toString();
+  window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
 }

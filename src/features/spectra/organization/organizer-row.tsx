@@ -10,7 +10,7 @@ import { useLifeArrival } from "../life/use-life";
 import type { TreeNode } from "./tree-client";
 import { nodeIdentity, relativeTime } from "./node-identity";
 
-export const ROW_HEIGHT = 36;
+export const ROW_HEIGHT = 42;
 
 export type RowCallbacks = {
   onPointerDown: (event: React.PointerEvent, node: TreeNode) => void;
@@ -46,6 +46,7 @@ export const OrganizerRow = memo(function OrganizerRow({
   syncLabel,
   searchMatch,
   syncTone = "attention",
+  ink,
 }: {
   node: TreeNode;
   top: number;
@@ -63,8 +64,13 @@ export const OrganizerRow = memo(function OrganizerRow({
   syncLabel?: string;
   searchMatch?: "Exact title match" | "Partial match";
   syncTone?: StatusTone;
+  /** A class's ink (School), which a class workspace wears instead of its own colour. */
+  ink?: string;
 }) {
-  const identity = nodeIdentity(node);
+  const type = nodeIdentity(node);
+  const identity = ink
+    ? { ...type, color: ink, soft: `color-mix(in oklab, ${ink} 14%, var(--bg-elevated))` }
+    : type;
   const Icon = identity.icon;
   const working =
     node.source?.aiState === "creating" || node.source?.aiState === "updating";
@@ -122,7 +128,7 @@ export const OrganizerRow = memo(function OrganizerRow({
       data-node-row={node.nodeId}
       style={{ top, height: ROW_HEIGHT }}
       className={cn(
-        "spectra-organizer-row group absolute inset-x-0 flex cursor-default items-center gap-2 rounded-chip pl-2 pr-1.5 text-ui transition-colors",
+        "spectra-organizer-row group absolute inset-x-0 flex cursor-default items-center gap-2.5 rounded-chip pl-2 pr-1.5 text-body transition-colors",
         active
           ? "bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-elevated))] text-[var(--text-primary)]"
           : selected
@@ -174,11 +180,11 @@ export const OrganizerRow = memo(function OrganizerRow({
 
       <span
         aria-hidden
-        className="flex size-[22px] shrink-0 items-center justify-center rounded-chip"
+        className="flex size-7 shrink-0 items-center justify-center rounded-chip"
         style={{ backgroundColor: identity.soft }}
       >
         <Icon
-          className="size-[13px]"
+          className="size-4"
           style={{ color: identity.color }}
           strokeWidth={1.9}
         />
@@ -203,6 +209,11 @@ export const OrganizerRow = memo(function OrganizerRow({
           {node.kind === "link" ? (
             <span className="ml-1.5 text-micro text-[var(--text-tertiary)]">
               reference
+            </span>
+          ) : null}
+          {node.isContainer && node.kind !== "workspace" ? (
+            <span className="ml-2 text-caption text-[var(--text-tertiary)] tabular-nums">
+              {node.childCount ?? 0} {node.childCount === 1 ? "item" : "items"}
             </span>
           ) : null}
           {node.source?.shared ? (
@@ -237,7 +248,7 @@ export const OrganizerRow = memo(function OrganizerRow({
       ) : null}
 
       {inContext ? (
-        <span className="shrink-0 rounded-chip bg-[color-mix(in_oklab,var(--accent-mint)_14%,var(--bg-elevated))] px-1.5 py-px text-micro font-medium uppercase tracking-[0.06em] text-[var(--accent-mint)]">
+        <span className="shrink-0 rounded-chip bg-[color-mix(in_oklab,var(--accent-mint)_14%,var(--bg-elevated))] px-1.5 py-px text-micro font-medium text-[var(--accent-mint)]">
           Context
         </span>
       ) : null}
@@ -253,9 +264,7 @@ export const OrganizerRow = memo(function OrganizerRow({
       </span>
 
       <span className="hidden w-[76px] shrink-0 text-right text-caption text-[var(--text-tertiary)] tabular-nums @lg/rows:block">
-        {node.isContainer && node.kind !== "workspace"
-          ? `${node.childCount ?? 0}`
-          : relativeTime(node.source?.updatedAt ?? node.updatedAt, now)}
+        {relativeTime(node.source?.updatedAt ?? node.updatedAt, now)}
       </span>
 
       <span className="flex w-[52px] shrink-0 items-center justify-end gap-0.5">

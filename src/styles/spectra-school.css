@@ -1,0 +1,620 @@
+/*
+ * School (docs/product/SCHOOL.md). Every class has an ink of its own
+ * (class-identity.ts) and School draws with it: a task is a ticket with its
+ * day on a leaf in that ink, a class is an exercise book in its ink,
+ * and the week across the top is a dot for every task due, in the same inks.
+ */
+
+.school-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 40px;
+  align-items: start;
+}
+
+@media (min-width: 1280px) {
+  .school-columns {
+    grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
+  }
+}
+
+.school-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 32px 0 12px;
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+
+section:first-child > .school-heading:first-child {
+  margin-top: 0;
+}
+
+.school-week + section > .school-heading:first-child {
+  margin-top: 24px;
+}
+
+.school-heading-count {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+
+.school-heading[data-late] {
+  color: var(--danger);
+}
+
+.school-class-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--class-ink);
+}
+
+/* The week: seven days on one strip, today lifted out of it. */
+.school-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 8px;
+  padding: 6px;
+  border-radius: 16px;
+  background: color-mix(in oklab, var(--card-paper) 55%, transparent);
+  box-shadow: 0 0 0 1px var(--card-border-soft);
+}
+
+.school-week-day {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 10px 4px 12px;
+  border-radius: 11px;
+}
+
+.school-week-day[data-past] {
+  opacity: 0.55;
+}
+
+.school-week-day[data-today] {
+  background: var(--card-paper);
+  box-shadow:
+    0 0 0 1px var(--card-border),
+    0 6px 16px -12px rgb(52 40 28 / 0.35);
+}
+
+.school-week-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.school-week-day[data-today] .school-week-name {
+  color: var(--ink-violet);
+}
+
+.school-week-date {
+  font-family: var(--font-display);
+  font-size: 26px;
+  line-height: 1.1;
+  font-variant-numeric: lining-nums;
+  color: var(--text-primary);
+}
+
+.school-week-dots {
+  display: flex;
+  min-height: 10px;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.school-week-more {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* A task: a ticket on the desk, its day on a leaf in its class's ink. */
+.school-tickets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 10px;
+}
+
+.school-ticket {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 12px 14px 12px 12px;
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--card-paper) 78%, transparent);
+  box-shadow: 0 0 0 1px var(--card-border-soft);
+  text-align: left;
+  outline: none;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.school-ticket:hover {
+  background: var(--card-paper);
+  box-shadow:
+    0 0 0 1px var(--card-border),
+    0 10px 22px -18px rgb(52 40 28 / 0.4);
+  transform: translateY(-1px);
+}
+
+.school-ticket:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus-ring-color);
+}
+
+.school-ticket[aria-pressed="true"] {
+  background: var(--card-paper);
+  box-shadow:
+    0 0 0 1.5px var(--class-ink),
+    0 10px 22px -18px rgb(52 40 28 / 0.4);
+}
+
+.school-ticket[data-late] {
+  background: color-mix(in oklab, var(--danger) 5%, var(--card-paper));
+}
+
+.school-ticket[data-past] {
+  opacity: 0.8;
+}
+
+.school-ticket-leaf {
+  display: flex;
+  width: 44px;
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: center;
+  padding: 5px 0 6px;
+  border-radius: 9px;
+  background: color-mix(in oklab, var(--class-ink) 13%, var(--card-paper));
+  box-shadow: inset 0 3px 0 var(--class-ink);
+  color: color-mix(in oklab, var(--class-ink) 75%, var(--text-primary));
+}
+
+.school-ticket-month {
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.school-ticket-day {
+  font-family: var(--font-display);
+  font-size: 21px;
+  line-height: 1.05;
+  font-variant-numeric: lining-nums;
+  color: var(--text-primary);
+}
+
+.school-ticket-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--text-primary);
+}
+
+.school-ticket-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-top: 5px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.school-ticket-class {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  color: color-mix(in oklab, var(--class-ink) 70%, var(--text-primary));
+}
+
+.school-ticket--compact {
+  padding: 10px 12px 10px 10px;
+}
+
+/* A class: an exercise book in its own ink. The spine is the class's colour;
+   the plain cover warms toward the top corner in the same ink, and the name
+   is written on it in the reading face. */
+.school-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
+  gap: 12px;
+}
+
+.school-tiles--groups {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 8px;
+}
+
+.school-tiles--narrow {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.school-tile {
+  --spine: 11px;
+  display: flex;
+  min-width: 0;
+  min-height: 132px;
+  flex-direction: column;
+  gap: 14px;
+  overflow: hidden;
+  padding: 16px 16px 14px calc(var(--spine) + 16px);
+  border-radius: 6px 14px 14px 6px;
+  background:
+    /* the spine, and the shadow where the cover folds round it */
+    linear-gradient(90deg, var(--class-ink) 0 var(--spine), color-mix(in oklab, var(--class-ink) 30%, transparent) var(--spine), transparent calc(var(--spine) + 6px)),
+    radial-gradient(120% 90% at 100% 0%, color-mix(in oklab, var(--class-ink) 18%, transparent), transparent 62%),
+    color-mix(in oklab, var(--class-ink) 3%, var(--card-paper));
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--class-ink) 18%, var(--card-border-soft)),
+    0 1px 2px rgb(52 40 28 / 0.05),
+    3px 3px 0 -1px color-mix(in oklab, var(--class-ink) 8%, var(--card-paper-quiet)),
+    3px 3px 0 0 color-mix(in oklab, var(--class-ink) 14%, var(--card-border-soft));
+  text-align: left;
+  outline: none;
+  transition:
+    box-shadow var(--motion-fast) var(--ease-standard),
+    transform var(--motion-base) var(--ease-standard);
+}
+
+.school-tile:hover {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--class-ink) 40%, var(--card-border)),
+    0 14px 28px -20px rgb(52 40 28 / 0.45),
+    3px 3px 0 -1px color-mix(in oklab, var(--class-ink) 8%, var(--card-paper-quiet)),
+    3px 3px 0 0 color-mix(in oklab, var(--class-ink) 20%, var(--card-border-soft));
+  transform: translateY(-2px) rotate(-0.4deg);
+}
+
+.school-tile:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus-ring-color);
+}
+
+.school-tile[aria-pressed="true"] {
+  box-shadow:
+    0 0 0 2px var(--class-ink),
+    0 12px 26px -20px rgb(52 40 28 / 0.45);
+}
+
+/* A class that is not syncing: the book left on the shelf, its ink faded. */
+.school-tile[data-paused] {
+  --class-ink: color-mix(in oklab, var(--text-tertiary) 70%, var(--card-border));
+}
+
+.school-tile-name {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.006em;
+  color: var(--text-primary);
+}
+
+.school-tile-code {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.school-tile-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.school-tile-due {
+  border-radius: var(--radius-chip);
+  padding: 2px 8px;
+  background: color-mix(in oklab, var(--class-ink) 14%, var(--card-paper));
+  font-weight: 500;
+  color: color-mix(in oklab, var(--class-ink) 75%, var(--text-primary));
+}
+
+/* The short tile, for the Overview's side and for groups that are not
+   subjects: a slim notebook, its spine narrower and its cover unruled. */
+.school-tile--small {
+  --spine: 6px;
+  min-height: 0;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px 11px calc(var(--spine) + 12px);
+  border-radius: 4px 11px 11px 4px;
+  background:
+    linear-gradient(90deg, var(--class-ink) 0 var(--spine), color-mix(in oklab, var(--class-ink) 26%, transparent) var(--spine), transparent calc(var(--spine) + 4px)),
+    radial-gradient(90% 120% at 100% 50%, color-mix(in oklab, var(--class-ink) 9%, transparent), transparent 70%),
+    var(--card-paper);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--class-ink) 16%, var(--card-border-soft)),
+    0 1px 2px rgb(52 40 28 / 0.04);
+}
+
+.school-tile--small:hover {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--class-ink) 36%, var(--card-border)),
+    0 10px 22px -18px rgb(52 40 28 / 0.4);
+  transform: translateY(-1px);
+}
+
+.school-tile--small .school-tile-name {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  line-height: 1.25;
+}
+
+/* The side of the Overview: a slip of paper like Home's day. */
+.school-slip {
+  padding: 18px 18px 20px;
+  border-radius: 16px;
+  background: var(--card-paper);
+  box-shadow:
+    0 0 0 1px var(--card-border),
+    0 1px 2px rgb(52 40 28 / 0.05),
+    0 14px 30px -22px rgb(52 40 28 / 0.3);
+}
+
+.school-slip + .school-slip {
+  margin-top: 16px;
+}
+
+.school-slip-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+/* Sync: one card for each kind of data, its state as a light in its corner. */
+.school-kinds {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+  gap: 12px;
+}
+
+.school-kind {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 16px 14px;
+  border-radius: 14px;
+  background: var(--card-paper);
+  box-shadow: 0 0 0 1px var(--card-border-soft);
+}
+
+.school-kind[data-mode="off"] {
+  background: color-mix(in oklab, var(--card-paper) 60%, transparent);
+}
+
+.school-kind[data-problem] {
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--danger) 40%, var(--card-border));
+}
+
+.school-kind-light {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--success) 18%, transparent);
+}
+
+.school-kind[data-mode="manual"] .school-kind-light {
+  background: var(--ink-blue);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ink-blue) 18%, transparent);
+}
+
+.school-kind[data-mode="off"] .school-kind-light {
+  background: var(--border-strong);
+  box-shadow: none;
+}
+
+.school-kind[data-running] .school-kind-light {
+  background: var(--accent-cyan);
+  animation: school-pulse 1.4s ease-in-out infinite;
+}
+
+.school-kind[data-problem] .school-kind-light {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--danger) 18%, transparent);
+}
+
+.school-kind-name {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.school-kind-about {
+  margin-top: 3px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.school-kind-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+}
+
+.school-kind-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--card-border-soft);
+}
+
+@keyframes school-pulse {
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in oklab, var(--accent-cyan) 14%, transparent);
+  }
+}
+
+/* The chosen task or class, at the head of the Details panel. */
+.school-detail-head {
+  margin: -12px -12px 0;
+  padding: 18px 16px 16px;
+  background: linear-gradient(color-mix(in oklab, var(--class-ink) 10%, var(--bg-primary)), var(--bg-primary));
+  box-shadow: inset 0 3px 0 var(--class-ink);
+}
+
+.school-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: var(--radius-chip);
+  padding: 3px 9px;
+  background: color-mix(in oklab, var(--card-paper) 80%, transparent);
+  box-shadow: 0 0 0 1px var(--card-border-soft);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .school-ticket,
+  .school-tile {
+    transition: none;
+  }
+
+  .school-ticket:hover,
+  .school-tile:hover {
+    transform: none;
+  }
+
+  .school-kind[data-running] .school-kind-light {
+    animation: none;
+  }
+}
+
+/* Which classes sync: each class pressed in (its ink fills the box) or left out. */
+.school-choice {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
+  gap: 8px;
+}
+
+.school-choice-item {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--card-paper) 50%, transparent);
+  box-shadow: 0 0 0 1px var(--card-border-soft);
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  text-align: left;
+  outline: none;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.school-choice-item:hover {
+  background: var(--card-paper);
+  color: var(--text-primary);
+}
+
+.school-choice-item:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus-ring-color);
+}
+
+.school-choice-item[aria-pressed="true"] {
+  background: var(--card-paper);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--class-ink) 30%, var(--card-border));
+  color: var(--text-primary);
+}
+
+.school-choice-box {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1.5px var(--border-strong);
+  color: var(--card-paper);
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.school-choice-item[aria-pressed="true"] .school-choice-box {
+  background: var(--class-ink);
+  box-shadow: none;
+}
+
+/* Agent starters (AGENTS.md) borrow the class tile: a book in an ink, the
+   name in the reading face, one line of what the agent does. */
+.agent-starters {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
+  gap: 12px;
+}
+
+.agent-starters-heading {
+  margin: 28px 0 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* An agent is a book with its own cover, not a class's. */
+.agent-starter {
+  height: 100%;
+  width: 100%;
+}
+
+.agent-starter:disabled {
+  opacity: 0.6;
+}

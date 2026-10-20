@@ -19,8 +19,14 @@ vi.mock("convex/react", () => ({
   useConvexAuth: () => ({ isAuthenticated: true, isLoading: false }),
   useQuery: () => undefined,
   useMutation: () => tree.mutation,
+  useConvex: () => ({ query: vi.fn(async () => null), mutation: tree.mutation }),
 }));
 vi.mock("../bridge/use-product-online", () => ({ useProductOnline: () => true }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+  usePathname: () => "/library",
+  useSearchParams: () => new URLSearchParams(),
+}));
 vi.mock("@/hooks/use-now", () => ({ useNow: () => Date.now() }));
 vi.mock("../data/idle-surface", () => ({ subscribeIdleSurfaceRefresh: () => () => {} }));
 
@@ -119,6 +125,8 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  // The Library opens on the shelf; these cover the list, which the reader can choose instead.
+  window.localStorage.setItem("spectra.library.view", "list");
   toast.error.mockReset();
   toast.success.mockReset();
   toast.dismiss.mockReset();
@@ -137,17 +145,14 @@ afterEach(() => {
 });
 
 describe("LibraryOrganizer", () => {
-  it("keeps folders in a popover tree beside the breadcrumb, not a column", () => {
+  it("keeps every place in the list's quick access pane", async () => {
     renderOrganizer();
-    expect(screen.queryByRole("navigation", { name: "Library folders" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Folders" }));
-    const tree = screen.getByRole("navigation", { name: "Library folders" });
+    const places = screen.getByRole("navigation", { name: "Quick access" });
     for (const name of ["Recent", "Favorites", "Shared", "Trash"]) {
-      expect(within(tree).getByRole("button", { name })).toBeTruthy();
+      expect(within(places).getByRole("button", { name })).toBeTruthy();
     }
-    // Choosing a place closes the tree.
-    fireEvent.click(within(tree).getByRole("button", { name: "Trash" }));
-    expect(screen.queryByRole("navigation", { name: "Library folders" })).toBeNull();
+    fireEvent.click(within(places).getByRole("button", { name: "Trash" }));
+    expect(await screen.findByText("Old notes")).toBeTruthy();
   });
 
   it("labels broad search results and names the work Enter will open", async () => {
@@ -228,8 +233,7 @@ describe("LibraryOrganizer", () => {
 
   it("asks before deleting forever when Delete is pressed in the Trash", async () => {
     renderOrganizer();
-    fireEvent.click(screen.getByRole("button", { name: "Folders" }));
-    fireEvent.click(screen.getByRole("button", { name: /Trash/ }));
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Quick access" })).getByRole("button", { name: "Trash" }));
     await screen.findByText("Old notes");
     selectFirstRowAndPress("Delete");
     expect(tree.actions.trash).not.toHaveBeenCalled();

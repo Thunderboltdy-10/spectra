@@ -19,6 +19,7 @@ import {
 import type { ResultCardStreamView } from "../ai/stream-events";
 import { deriveLiveDockTab, liveDockStateCopy } from "../runs/live-dock";
 import { IconAction } from "./card-system";
+import { threadHref } from "../chat/home-routes";
 
 function legacyRunDetail(detail: SpectraRunDetail): SpectraThreadDetail {
   const run = detail.run;
@@ -169,7 +170,7 @@ export function RunDetailPanel({
       });
       spectraBus.emit("threads.changed", {});
       if (navigate)
-        router.push(`/chat?threadId=${encodeURIComponent(result.threadId)}`);
+        router.push(threadHref(result.threadId));
       else
         toast.success(
           placeInWorkspace
@@ -216,7 +217,7 @@ export function RunDetailPanel({
               <div className="truncate font-display text-title font-semibold">
                 {conversation?.thread.title ?? "Conversation"}
               </div>
-              <div className="text-micro uppercase tracking-[0.11em] text-[var(--text-tertiary)]">
+              <div className="text-micro text-[var(--text-tertiary)]">
                 Chat · {runTruth ? liveDockStateCopy[runTruth.state] : "Loading"}
               </div>
             </div>
@@ -230,7 +231,7 @@ export function RunDetailPanel({
               onClick={() => {
                 if (detail?.run.threadId)
                   router.push(
-                    `/chat?threadId=${encodeURIComponent(detail.run.threadId)}`,
+                    threadHref(detail.run.threadId),
                   );
                 else void keep(false, true, false);
               }}

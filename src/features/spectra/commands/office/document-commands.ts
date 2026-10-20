@@ -8,13 +8,18 @@ import {
   ChevronDown,
   ChevronUp,
   Code2,
+  Columns2,
   Columns3,
   Copy,
   Eye,
+  File,
   FileText,
   Focus,
   Frame,
   Heading,
+  Heading1,
+  Heading2,
+  Heading3,
   History,
   Image as ImageIcon,
   Indent,
@@ -26,27 +31,37 @@ import {
   ListChecks,
   ListOrdered,
   ListTree,
+  Maximize2,
   Merge,
   MessageSquare,
+  Minimize2,
   Minus,
   Outdent,
   PaintBucket,
   PanelBottom,
+  PanelLeft,
   PanelTop,
   Pencil,
+  Pilcrow,
   Plus,
   Quote,
   RefreshCw,
   Rows3,
+  SeparatorHorizontal,
   Sigma,
   SpellCheck,
   Split,
+  Square,
+  SquareCode,
   SquareSplitVertical,
+  SquareX,
   Superscript,
   Table as TableIcon,
   Text,
+  TextCursorInput,
   TextQuote,
   Trash2,
+  WrapText,
   X,
 } from "lucide-react";
 import {
@@ -98,37 +113,37 @@ import type { CommandBinding, CommandControlOption } from "../types";
 
 /** Paragraph styles offered when the artifact carries no named-style set. */
 export const DOCUMENT_STYLE_OPTIONS: readonly CommandControlOption[] = [
-  { value: "paragraph", label: "Body text" },
-  { value: "h1", label: "Heading 1" },
-  { value: "h2", label: "Heading 2" },
-  { value: "h3", label: "Heading 3" },
-  { value: "quote", label: "Quotation" },
-  { value: "code", label: "Code block" },
+  { value: "paragraph", label: "Body text", icon: Pilcrow },
+  { value: "h1", label: "Heading 1", icon: Heading1 },
+  { value: "h2", label: "Heading 2", icon: Heading2 },
+  { value: "h3", label: "Heading 3", icon: Heading3 },
+  { value: "quote", label: "Quotation", icon: Quote },
+  { value: "code", label: "Code block", icon: SquareCode },
 ];
 
 /** Paper sizes Spectra can lay out and print truthfully. */
 export const DOCUMENT_PAGE_SIZES: readonly CommandControlOption[] = [
-  { value: "a4", label: "A4" },
-  { value: "letter", label: "Letter" },
-  { value: "legal", label: "Legal" },
-  { value: "a5", label: "A5" },
+  { value: "a4", label: "A4", icon: FileText },
+  { value: "letter", label: "Letter", icon: FileText },
+  { value: "legal", label: "Legal", icon: FileText },
+  { value: "a5", label: "A5", icon: File },
 ];
 
 export const DOCUMENT_MARGIN_PRESETS: readonly CommandControlOption[] = [
-  { value: "narrow", label: "Narrow · 12 mm" },
-  { value: "normal", label: "Normal · 25 mm" },
-  { value: "wide", label: "Wide · 40 mm" },
+  { value: "narrow", label: "Narrow · 12 mm", icon: Minimize2 },
+  { value: "normal", label: "Normal · 25 mm", icon: Square },
+  { value: "wide", label: "Wide · 40 mm", icon: Maximize2 },
 ];
 
 /** Space after a paragraph, in points — Word's own ladder. */
 export const DOCUMENT_PARAGRAPH_SPACING: readonly number[] = [0, 4, 6, 8, 12, 18, 24];
 
 export const DOCUMENT_BORDER_OPTIONS: readonly CommandControlOption[] = [
-  { value: "none", label: "No border" },
-  { value: "all", label: "Box" },
-  { value: "top", label: "Line above" },
-  { value: "bottom", label: "Line below" },
-  { value: "left", label: "Line at left" },
+  { value: "none", label: "No border", icon: SquareX },
+  { value: "all", label: "Box", icon: Square },
+  { value: "top", label: "Line above", icon: PanelTop },
+  { value: "bottom", label: "Line below", icon: PanelBottom },
+  { value: "left", label: "Line at left", icon: PanelLeft },
 ];
 
 export const DOCUMENT_SHADING_COLORS: readonly string[] = [
@@ -136,10 +151,10 @@ export const DOCUMENT_SHADING_COLORS: readonly string[] = [
 ];
 
 export const DOCUMENT_IMAGE_WRAP: readonly CommandControlOption[] = [
-  { value: "inline", label: "In line with text" },
-  { value: "left", label: "Wrap left" },
-  { value: "right", label: "Wrap right" },
-  { value: "break", label: "Break text" },
+  { value: "inline", label: "In line with text", icon: TextCursorInput },
+  { value: "left", label: "Wrap left", icon: WrapText },
+  { value: "right", label: "Wrap right", icon: WrapText },
+  { value: "break", label: "Break text", icon: SeparatorHorizontal },
 ];
 
 /**
@@ -276,10 +291,17 @@ function foundationBindings(handlers: DocumentCommandHandlers): CommandBinding[]
     // linked file carries Word comments the adapter says so in the hint, which
     // is the honest statement — not a disabled button.
     { ...commentsBinding(handlers.comments), touches: undefined },
-    ...textFormatBindings("document", handlers.format),
+    // General is the document's Home: the formatting used every few seconds is
+    // on it as well as on Format.
+    ...textFormatBindings("document", {
+      ...handlers.format,
+      generalPins: ["fontFamily", "fontSize", "bold", "italic", "underline", "strike", "color", "highlight", "alignment"],
+    }),
   ];
   return placed(bindings, {
+    "format.underline": { priority: "secondary" },
     "format.strike": { priority: "secondary" },
+    "format.align": { priority: "secondary" },
     "format.fontFamily": {
       priority: "secondary",
       keepLabel: true,
@@ -1137,9 +1159,14 @@ export type DocumentPageHandlers = {
   headerText?: string;
   editFooter: () => void;
   footerText?: string;
-  /** Page canvas versus a continuous scroll. A view state, not page setup. */
-  canvas: "page" | "continuous";
-  setCanvas: (canvas: "page" | "continuous") => void;
+  /**
+   * Page canvas, pages laid side by side like an open book, or one continuous
+   * scroll. A view state, not page setup.
+   */
+  canvas: "page" | "spread" | "continuous";
+  setCanvas: (canvas: "page" | "spread" | "continuous") => void;
+  /** Why pages cannot lie side by side here, e.g. in the narrow side panel. */
+  spreadReason?: string;
   focus: boolean;
   toggleFocus: () => void;
   previewAsReader?: () => void;
@@ -1280,18 +1307,35 @@ function layoutBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
     },
     {
       id: "layout.pageCanvas",
-      label: page.canvas === "page" ? "Continuous canvas" : "Page canvas",
+      label: page.canvas === "continuous" ? "Page canvas" : "Continuous canvas",
       icon: FileText,
       tab: "Layout",
       group: "View",
       priority: "essential",
-      active: page.canvas === "page",
+      active: page.canvas !== "continuous",
       hint:
-        page.canvas === "page"
+        page.canvas !== "continuous"
           ? "Back to one continuous surface"
           : "Show the page edges as they will print",
       undo: "none(explain)",
-      onSelect: () => page.setCanvas(page.canvas === "page" ? "continuous" : "page"),
+      onSelect: () => page.setCanvas(page.canvas === "continuous" ? "page" : "continuous"),
+    },
+    {
+      id: "layout.pagesSideBySide",
+      label: "Pages side by side",
+      icon: Columns2,
+      tab: "Layout",
+      group: "View",
+      priority: "secondary",
+      active: page.canvas === "spread",
+      disabled: Boolean(page.spreadReason) || undefined,
+      hint:
+        page.spreadReason ??
+        (page.canvas === "spread"
+          ? "Back to one page at a time"
+          : "Lay the pages out across the screen, as many as fit"),
+      undo: "none(explain)",
+      onSelect: () => page.setCanvas(page.canvas === "spread" ? "page" : "spread"),
     },
     {
       id: "layout.focus",

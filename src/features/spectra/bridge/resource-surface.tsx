@@ -184,7 +184,7 @@ export function ResourceSurface({
           message?: string;
         } | null;
         throw new Error(
-          result?.message ?? "The retained native copy is unavailable.",
+          result?.message ?? "The original file isn't available anymore.",
         );
       }
       const blob = await response.blob();
@@ -195,7 +195,7 @@ export function ResourceSurface({
       setOpenError(
         error instanceof Error
           ? error.message
-          : "The retained native copy is unavailable.",
+          : "The original file isn't available anymore.",
       );
     } finally {
       setFileAction(null);
@@ -405,7 +405,7 @@ export function ResourceSurface({
                 <Download className="size-3.5" />
                 {fileAction === "download"
                   ? "Preparing copy…"
-                  : "Download native copy"}
+                  : "Download original file"}
               </Button>
             </div>
           </aside>

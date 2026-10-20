@@ -136,7 +136,7 @@ describe("quiz media survives an in-editor delete", () => {
     await undoTo(harness, initialQuiz);
     const rail = screen.getByRole("complementary", { name: "Questions" });
     await act(async () => {
-      fireEvent.click(within(rail).getByText("One"));
+      fireEvent.click(within(rail).getAllByText("One")[0]!);
     });
     expect(revokeArtifactAsset).not.toHaveBeenCalled();
     await waitFor(() => expect(imageShown("https://files.test/asset-1.png")).toBe(true));
@@ -186,10 +186,7 @@ describe("flashcard media survives an in-editor delete", () => {
     const harness = renderStudio("deck");
     await waitFor(() => expect(imageShown("https://files.test/asset-1.png")).toBe(true));
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /Advanced card settings/ }));
-    });
-    await act(async () => {
-      fireEvent.click(screen.getAllByRole("button", { name: /^Remove (card )?image$/ })[0]!);
+      fireEvent.click(screen.getByRole("button", { name: "Remove card image" }));
     });
     await undoTo(harness, initialDeck);
     expect(revokeArtifactAsset).not.toHaveBeenCalled();

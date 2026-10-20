@@ -581,6 +581,21 @@ export function parseSpectraRichContent(source: string): SpectraRichContentAst {
 }
 
 /**
+ * A stream cut inside `**bold` would show its asterisks until the closer
+ * comes; the opener is held back instead, so the words appear plain and turn
+ * bold when it does. Only the last line, and never inside code.
+ */
+function holdOpenEmphasis(source: string) {
+  const line = source.slice(source.lastIndexOf("\n") + 1);
+  const fences = source.match(/^\s*```/gm)?.length ?? 0;
+  if (fences % 2 || line.includes("`")) return source;
+  const openers = line.match(/(?<![\\*])\*\*(?!\*)/g)?.length ?? 0;
+  if (openers % 2 === 0) return source;
+  const at = source.lastIndexOf("**");
+  return source.slice(0, at) + source.slice(at + 2);
+}
+
+/**
  * Parses a stream as it grows. A block that is the same as before keeps its
  * object identity, so the renderer leaves it alone while the next one forms.
  */
@@ -591,7 +606,8 @@ export class IncrementalRichContentParser {
   append(delta: string) { return this.replace(this.source + delta); }
 
   replace(source: string) {
-    const next = parseSpectraRichContent(source);
+    const next = parseSpectraRichContent(holdOpenEmphasis(source));
+    next.source = source;
     const prior = this.ast.blocks;
     next.blocks = next.blocks.map((block, index) => {
       const previous = prior[index];

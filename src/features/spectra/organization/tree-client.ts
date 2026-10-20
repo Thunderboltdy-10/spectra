@@ -33,9 +33,11 @@ export type TreeNode = {
   updatedAt: number;
   /** When the thing itself last changed — what every recency view orders by. */
   activityAt: number;
-  /** The work type, as the board's columns key on it. */
+  /** The work type, as the type filter keys on it. */
   typeKey?: string;
   trashedAt?: number;
+  /** The shelf stack this work is gathered into, if any. */
+  stackId?: string;
   target?: {
     nodeId: string;
     kind: TreeNode["kind"];
@@ -82,37 +84,6 @@ export type LiveIdentity = {
 
 const EMPTY_LIVE_IDENTITIES: LiveIdentity[] = [];
 
-/** How the board cuts its columns. Mirrors `convex/orgTreeBoard.ts`. */
-export type BoardGroupBy = "type" | "workspace" | "updated" | "folder";
-
-/**
- * One column, named but not filled. `identity` is what the column *is*, which is
- * where its colour comes from; `fixes` is what creating into it already decides,
- * so the create affordance asks only for what is still open (CANON D43).
- */
-export type BoardColumn = {
-  key: string;
-  label: string;
-  sublabel?: string;
-  identity:
-    | { kind: "type"; typeKey: string }
-    | {
-        kind: "workspace";
-        workspaceId: string;
-        color?: string;
-        icon?: string;
-      }
-    | { kind: "band" }
-    | { kind: "folder" }
-    | { kind: "loose" };
-  openNodeId?: string;
-  fixes: { typeKey?: string; parentNodeId?: string | null };
-  count?: number;
-};
-
-/** A card on the board: a tree row plus the folder it sits in. */
-export type BoardCard = TreeNode & { parentName?: string };
-
 const ROOT = "root";
 const nodeArg = (parentId: string | null) => (parentId ?? ROOT) as string;
 
@@ -125,6 +96,8 @@ export function useTreeChildren(
     sortKey?: "manual" | "name" | "updated" | "type";
     direction?: "asc" | "desc";
     typeFilter?: string;
+    /** Leave threads out: they live behind the Threads button. */
+    withoutThreads?: boolean;
   },
 ) {
   const enabled = options?.enabled ?? true;
@@ -137,6 +110,7 @@ export function useTreeChildren(
             sortKey: options?.sortKey,
             direction: options?.direction,
             typeFilter: options?.typeFilter,
+            withoutThreads: options?.withoutThreads,
           }
         : "skip",
     ),
@@ -272,71 +246,6 @@ export function useLiveOrgIdentities(
     ),
   );
   return result ? (result.identities as LiveIdentity[]) : EMPTY_LIVE_IDENTITIES;
-}
-
-/**
- * The columns of a board: what they are called, what colour they carry, what
- * creating into one already decides. Contents are not here — a column's cards
- * are its own paginated query, so naming ten columns costs ten column-shaped
- * reads and not the account (CANON D42).
- */
-export function useBoardColumns(
-  scopeNodeId: string | null,
-  groupBy: BoardGroupBy,
-  typeFilter: string,
-  enabled = true,
-) {
-  const result = useQuery(
-    api.orgTreeBoard.columns,
-    useAuthedArgs(
-      enabled
-        ? { scopeNodeId: scopeNodeId ?? ROOT, groupBy, typeFilter }
-        : "skip",
-    ),
-  );
-  return {
-    loading: enabled && result === undefined,
-    /** Null when the scope has gone — a deleted workspace, a stale link. */
-    missing: result === null,
-    scope: (result?.scope ?? null) as TreeNode | null,
-    columns: (result?.columns ?? []) as BoardColumn[],
-  };
-}
-
-/**
- * One column's cards, newest activity first, a page at a time.
- *
- * `now` is passed in frozen by the caller so a recency band's boundary does not
- * slide between pages of the same scroll — a card must not appear twice, or
- * vanish, because the clock moved while the reader was reading.
- */
-export function useBoardColumnCards(
-  scopeNodeId: string | null,
-  groupBy: BoardGroupBy,
-  columnKey: string,
-  typeFilter: string,
-  now: number,
-  pageSize = 20,
-) {
-  const result = usePaginatedQuery(
-    api.orgTreeBoard.column,
-    useAuthedArgs({
-      scopeNodeId: scopeNodeId ?? ROOT,
-      groupBy,
-      columnKey,
-      typeFilter,
-      now,
-    }),
-    { initialNumItems: pageSize },
-  );
-  return {
-    cards: result.results as unknown as BoardCard[],
-    status: result.status,
-    loadMore: result.loadMore,
-    loading: result.status === "LoadingFirstPage",
-    /** True while more pages exist, which is what makes a count an `n+`. */
-    hasMore: result.status === "CanLoadMore" || result.status === "LoadingMore",
-  };
 }
 
 /** Library transactions have no durable offline queue. Reject before enqueueing. */

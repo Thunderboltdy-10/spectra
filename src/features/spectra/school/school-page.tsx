@@ -1,50 +1,45 @@
 "use client";
 
-import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import Link from "next/link";
+import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "convex/react";
-import { Icon } from "@/components/icons";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { Button } from "@/components/ui/button";
 import { PageBody, PageHeader } from "@/components/ui/page-header";
-import { EmptyState, LoadingRows, ProblemState } from "@/components/ui/page-state";
+import { ProblemState } from "@/components/ui/page-state";
 import { PanelTabs, SidePanel } from "@/components/ui/side-panel";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { api } from "../../../../convex/_generated/api";
 import type { SchoolSyncKind } from "../../../../shared/school-sync";
 import { getAdministration, type AdministrationIdentity } from "../administration/api";
 import { ArtifactStatusControl } from "../components/artifact-status-control";
-import { resolveSpectraManageBacIdentity, syncSpectraManageBac } from "../data/api";
+import { syncSpectraManageBac } from "../data/api";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { useLifeLanding } from "../life/use-life";
-import { CasSection, ExperienceDetails } from "./school-cas";
-import { ClassDetails, ClassesSection, KindDetails, SyncSection } from "./school-classes-sync";
-import { ago, schoolStatus, sentenceOf, type SchoolSyncStatus } from "./school-model";
-import { SectionHeading, TaskDetails, TaskRow, TasksSection, type TaskView } from "./school-tasks";
+import { ClassDetails, ClassesSection } from "./school-classes";
+import { ago, groupCurrentTasks, schoolStatus, sentenceOf, type SchoolSyncStatus } from "./school-model";
+import { Overview } from "./school-overview";
+import { SyncSection } from "./school-sync";
+import { TaskDetails } from "./school-task-details";
+import { TasksSection, type TaskView } from "./school-tasks";
 
 /*
  * School (docs/product/SCHOOL.md): the student's ManageBac in Spectra, on
  * the per-student API (convex/school.README.md). The stage holds Overview,
- * Tasks, CAS, Classes and Sync; the Details panel beside it shows whatever
- * is chosen, and tucks away while work or a conversation holds the Side.
+ * Tasks, Classes and Sync. A task or class chosen opens beside the stage,
+ * and the panel goes when it is let go: nothing waits there empty.
  */
 
-type Section = "overview" | "tasks" | "cas" | "classes" | "sync";
-const SECTIONS: { id: Section; label: string; icon: "home" | "task" | "cas" | "school" | "syncing" }[] = [
+type Section = "overview" | "tasks" | "classes" | "sync";
+const SECTIONS: { id: Section; label: string; icon: "home" | "task" | "school" | "syncing" }[] = [
   { id: "overview", label: "Overview", icon: "home" },
   { id: "tasks", label: "Tasks", icon: "task" },
-  { id: "cas", label: "CAS", icon: "cas" },
   { id: "classes", label: "Classes", icon: "school" },
   { id: "sync", label: "Sync", icon: "syncing" },
 ];
 const isSection = (value: string | null): value is Section => SECTIONS.some((section) => section.id === value);
 
-type Selection =
-  | { kind: "task"; id: string }
-  | { kind: "experience"; id: string }
-  | { kind: "class"; id: string }
-  | { kind: "sync"; id: SchoolSyncKind };
+type Selection = { kind: "task" | "class"; id: string };
 
 const BAR_PLAN: readonly CollapseStep[] = [{ hideLabel: "connection" }, { toMenu: "connection" }, { hideLabel: "sync" }];
 
@@ -79,10 +74,17 @@ export function SchoolPage() {
   const router = useRouter();
   const preferences = useQuery(api.school.preferences, useAuthedArgs({}));
   const status = useQuery(api.school.syncStatus, useAuthedArgs({}));
+  const current = useQuery(api.school.tasks, useAuthedArgs({ view: "current" as const }));
 
   useEffect(() => {
-    const query = new URLSearchParams(window.location.search).get("section");
-    if (isSection(query)) setSection(query);
+    const query = new URLSearchParams(window.location.search);
+    const section = query.get("section");
+    if (isSection(section)) setSection(section);
+    // Home and the Calendar open a task straight into its panel; a class's page in the Library opens the class.
+    const task = query.get("task");
+    const cls = query.get("class");
+    if (task) setSelection({ kind: "task", id: task });
+    else if (cls) setSelection({ kind: "class", id: cls });
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
     let live = true;
     void getAdministration<AdministrationIdentity>("identity")
@@ -145,19 +147,25 @@ export function SchoolPage() {
     <main className="spectra-wave-y relative isolate flex h-full min-h-0 flex-1" data-spectra-app-surface="true" data-school-page>
       <div className="min-w-0 flex-1 overflow-y-auto">
         <PageBody>
-          <PageHeader title="School" commands={commands} plan={BAR_PLAN} barLabel="School commands" />
-          <PanelTabs
-            label="School sections"
-            tabs={SECTIONS}
-            value={section}
-            onChange={(id) => go(id as Section)}
-          />
+          <PageHeader title="School" description={summary(current?.tasks, status, now)} commands={commands} plan={BAR_PLAN} barLabel="School commands" />
+          <PanelTabs label="School sections" tabs={SECTIONS} value={section} onChange={(id) => go(id as Section)} />
           <p role="status" aria-live="polite" className="min-h-6 py-1 text-caption text-[var(--text-secondary)]">
             {notice}
           </p>
           <SectionBoundary key={section} label={SECTIONS.find((entry) => entry.id === section)!.label}>
             {section === "overview" ? (
-              <Overview now={now} status={status} onGo={go} onSelectTask={(id) => select({ kind: "task", id })} selectedId={selectedId} onSync={sync} syncing={syncing !== null} onNotice={setNotice} />
+              <Overview
+                now={now}
+                status={status}
+                chosen={selection}
+                onChoose={select}
+                onOpenTasks={() => go("tasks")}
+                onOpenClasses={() => go("classes")}
+                onOpenSync={() => go("sync")}
+                onSync={sync}
+                syncing={syncing !== null}
+                onNotice={setNotice}
+              />
             ) : section === "tasks" ? (
               <TasksSection
                 now={now}
@@ -170,237 +178,59 @@ export function SchoolPage() {
                 syncing={syncing !== null}
                 onOpenSync={() => go("sync")}
               />
-            ) : section === "cas" ? (
-              <CasSection
-                now={now}
-                selectedId={selection?.kind === "experience" ? selectedId : null}
-                onSelect={(id) => select({ kind: "experience", id })}
-                preferences={preferences}
-                onSync={() => void sync("cas")}
-                syncing={syncing !== null}
-                onOpenSync={() => go("sync")}
-              />
             ) : section === "classes" ? (
               <ClassesSection selectedId={selection?.kind === "class" ? selectedId : null} onSelect={(id) => select({ kind: "class", id })} onOpenSync={() => go("sync")} />
             ) : (
-              <SyncSection
-                now={now}
-                preferences={preferences}
-                status={status}
-                syncingKind={syncing}
-                onSync={(kind) => void sync(kind)}
-                onSelect={(kind) => select({ kind: "sync", id: kind })}
-                selectedKind={selection?.kind === "sync" ? selectedId : null}
-                onNotice={setNotice}
-              />
+              <SyncSection now={now} preferences={preferences} status={status} syncingKind={syncing} onSync={(kind) => void sync(kind)} onNotice={setNotice} />
             )}
           </SectionBoundary>
         </PageBody>
       </div>
-      <SidePanel id="school.details" title="Details" icon="info" stageMin={600}>
-        <Details selection={selection} section={section} now={now} onNotice={setNotice} onSync={(kind) => void sync(kind)} syncing={syncing !== null} />
-      </SidePanel>
+      {selection ? (
+        <SidePanel id="school.chosen" title={selection.kind === "task" ? "Task" : "Class"} icon={selection.kind === "task" ? "task" : "school"} stageMin={600} onClose={() => setSelection(null)}>
+          <Chosen selection={selection} now={now} onSelect={select} onNotice={setNotice} />
+        </SidePanel>
+      ) : null}
     </main>
   );
 }
 
-function Details({
-  selection,
-  section,
-  now,
-  onNotice,
-  onSync,
-  syncing,
-}: {
-  selection: Selection | null;
-  section: Section;
-  now: number;
-  onNotice: (message: string) => void;
-  onSync: (kind: SchoolSyncKind) => void;
-  syncing: boolean;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  // What was chosen grows out of the row it was chosen from.
-  useLifeLanding(ref, selection ? `${selection.kind}:${selection.id}` : null);
-  if (!selection)
-    return (
-      <EmptyState
-        compact
-        icon="info"
-        title="Nothing chosen"
-        detail={
-          section === "cas"
-            ? "Choose an experience to see its reflections, outcomes and evidence."
-            : section === "classes"
-              ? "Choose a class to choose what syncs for it."
-              : section === "sync"
-                ? "Choose a kind of data to see when it last synced and what runs next."
-                : "Choose a task to see its brief, grade and the files you handed in."
-        }
-      />
-    );
-  return (
-    <div ref={ref} key={`${selection.kind}:${selection.id}`}>
-      <SectionBoundary label="Details">
-        {selection.kind === "task" ? (
-          <TaskDetails recordId={selection.id} now={now} onNotice={onNotice} />
-        ) : selection.kind === "experience" ? (
-          <ExperienceDetails recordId={selection.id} now={now} onNotice={onNotice} />
-        ) : selection.kind === "class" ? (
-          <ClassDetails providerClassId={selection.id} onNotice={onNotice} />
-        ) : (
-          <KindDetails kind={selection.id} now={now} onSync={onSync} syncing={syncing} />
-        )}
-      </SectionBoundary>
-    </div>
-  );
+/** The header's line: what needs doing, and how fresh it is. */
+function summary(tasks: Parameters<typeof groupCurrentTasks>[0] | undefined, status: SchoolSyncStatus | undefined, now: number) {
+  if (!tasks || status?.connection.state === "not_connected") return undefined;
+  const groups = groupCurrentTasks(tasks, now);
+  const count = (key: string) => groups.find((group) => group.key === key)?.tasks.length ?? 0;
+  const late = count("late");
+  const soon = count("week");
+  const parts = [late ? `${late} late` : null, soon ? `${soon} due this week` : null].filter(Boolean);
+  const work = parts.length ? `${parts.join(" and ")}.` : "Nothing due this week.";
+  const synced = status?.connection.lastSyncAt ? ` Synced from ManageBac ${ago(status.connection.lastSyncAt, now)}.` : "";
+  return work + synced;
 }
 
-function Overview({
+function Chosen({
+  selection,
   now,
-  status,
-  onGo,
-  onSelectTask,
-  selectedId,
-  onSync,
-  syncing,
+  onSelect,
   onNotice,
 }: {
+  selection: Selection;
   now: number;
-  status: SchoolSyncStatus | undefined;
-  onGo: (section: Section) => void;
-  onSelectTask: (id: string) => void;
-  selectedId: string | null;
-  onSync: (kind?: SchoolSyncKind) => Promise<void>;
-  syncing: boolean;
+  onSelect: (next: Selection) => void;
   onNotice: (message: string) => void;
 }) {
-  const tasks = useQuery(api.school.tasks, useAuthedArgs({ view: "current" as const }));
-  const cas = useQuery(api.school.cas, useAuthedArgs({}));
-  const [matching, setMatching] = useState(false);
-  const upcoming = useMemo(() => (tasks?.tasks ?? []).filter((task) => !task.past).slice(0, 6), [tasks]);
-  const problems = (status?.kinds ?? []).filter((kind) => kind.problem && kind.available && (kind.state === "failed" || kind.state === "blocked"));
-
-  if (status === undefined) return <LoadingRows label="Loading School" count={6} />;
-  const connection = status.connection;
-
-  if (connection.state === "not_connected")
-    return (
-      <EmptyState
-        icon="school"
-        title="ManageBac isn't connected"
-        detail={connection.problem ? `${connection.problem.message} ${connection.problem.fixHint}` : "Your school connects ManageBac once; then your tasks, classes and CAS come in here."}
-      />
-    );
-
-  async function matchAccount() {
-    setMatching(true);
-    try {
-      await resolveSpectraManageBacIdentity();
-      onNotice("Matched. Your classes and tasks come in with the next sync.");
-    } catch (error) {
-      onNotice(sentenceOf(error, "Spectra couldn't match you yet. Try again later, or ask your school."));
-    } finally {
-      setMatching(false);
-    }
-  }
-
+  const ref = useRef<HTMLDivElement>(null);
+  // What was chosen grows out of the ticket or tile it was chosen from.
+  useLifeLanding(ref, `${selection.kind}:${selection.id}`);
   return (
-    <div className="space-y-2">
-      {connection.problem ? (
-        <ProblemState
-          compact
-          className="items-start text-left"
-          title={connection.problem.message}
-          detail={connection.problem.fixHint}
-          action={
-            connection.problem.fixBy === "student" ? (
-              <Button size="sm" variant="primary" disabled={matching} onClick={() => void matchAccount()}>
-                {matching ? "Matching" : "Match my account"}
-              </Button>
-            ) : undefined
-          }
-        />
-      ) : null}
-
-      <div className="-mx-2.5">
-        <SectionHeading count={tasks?.tasks.length}>Coming up</SectionHeading>
-        {tasks === undefined ? (
-          <LoadingRows label="Loading tasks" count={3} />
-        ) : upcoming.length ? (
-          <>
-            {upcoming.map((task) => (
-              <TaskRow key={task.recordId} task={task} now={now} selected={selectedId === task.recordId} onSelect={() => onSelectTask(task.recordId)} />
-            ))}
-            <Button variant="ghost" size="sm" className="ml-1 mt-1" onClick={() => onGo("tasks")}>
-              All tasks
-            </Button>
-          </>
+    <div ref={ref} key={`${selection.kind}:${selection.id}`}>
+      <SectionBoundary label="This">
+        {selection.kind === "task" ? (
+          <TaskDetails recordId={selection.id} now={now} onNotice={onNotice} />
         ) : (
-          <p className="px-2.5 text-caption text-[var(--text-secondary)]">Nothing due. Past work is in Tasks.</p>
+          <ClassDetails providerClassId={selection.id} now={now} onSelectTask={(id) => onSelect({ kind: "task", id })} onNotice={onNotice} />
         )}
-      </div>
-
-      <div className="-mx-2.5">
-        <SectionHeading>CAS</SectionHeading>
-        {cas === undefined ? (
-          <LoadingRows label="Loading CAS" count={1} />
-        ) : (
-          <button
-            type="button"
-            data-life-launch
-            onClick={() => onGo("cas")}
-            className="flex w-full min-w-0 items-center gap-2.5 rounded-control px-2.5 py-2 text-left outline-none hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
-          >
-            <Icon name="cas" size={16} accent="var(--accent-mint)" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-ui font-medium text-[var(--text-primary)]">
-                {cas.outcomeCoverage.filter((outcome) => !outcome.missing).length} of {cas.outcomeCoverage.length} learning outcomes met
-              </span>
-              <span className="block truncate text-caption text-[var(--text-tertiary)]">
-                {cas.experiences.length
-                  ? `${cas.experiences.length} experience${cas.experiences.length === 1 ? "" : "s"}`
-                  : "No experiences yet"}
-                {cas.outcomeCoverage.some((outcome) => outcome.missing)
-                  ? ` · still to meet: ${cas.outcomeCoverage.filter((outcome) => outcome.missing).map((outcome) => outcome.label.toLowerCase()).join(", ")}`
-                  : ""}
-              </span>
-            </span>
-            <Icon name="chevronRight" size={16} />
-          </button>
-        )}
-      </div>
-
-      <div className="-mx-2.5">
-        <SectionHeading>Sync</SectionHeading>
-        {problems.length ? (
-          problems.map((kind) => (
-            <div key={kind.kind} className="flex min-w-0 items-start gap-2.5 px-2.5 py-2">
-              <Icon name="problem" size={16} accent="var(--danger)" className="mt-0.5" />
-              <span className="min-w-0 flex-1">
-                <span className="block text-ui font-medium text-[var(--text-primary)]">{kind.problem!.message}</span>
-                <span className="block text-caption text-[var(--text-secondary)]">{kind.problem!.fixHint}</span>
-              </span>
-              {kind.problem!.fixBy === "student" || kind.problem!.fixBy === "spectra" ? (
-                <Button size="sm" variant="ghost" disabled={syncing} onClick={() => void onSync(kind.kind)}>
-                  Try again
-                </Button>
-              ) : null}
-            </div>
-          ))
-        ) : (
-          <p className="flex items-center gap-2.5 px-2.5 py-2 text-caption text-[var(--text-secondary)]">
-            <Icon name="saved" size={16} accent="var(--success)" />
-            {connection.lastSyncAt ? `Everything is up to date. Last synced ${ago(connection.lastSyncAt, now)}.` : "Connected. Nothing synced yet."}
-          </p>
-        )}
-        <Button variant="ghost" size="sm" className="ml-1" onClick={() => onGo("sync")}>
-          Choose what syncs
-        </Button>
-      </div>
-      <p className="pt-4 text-micro text-[var(--text-tertiary)]">
-        Spectra reads only your own ManageBac data. <Link className="underline underline-offset-2" href="/settings?section=privacy">Privacy</Link>
-      </p>
+      </SectionBoundary>
     </div>
   );
 }

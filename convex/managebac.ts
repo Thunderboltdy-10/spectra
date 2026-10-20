@@ -10,6 +10,7 @@ import {
   ensureWorkspaceNode,
   findPrimaryNode,
   placeSourceNode,
+  trashNode,
   DISSOLVE_CHILD_BATCH,
 } from "./orgTreeShared";
 import {
@@ -24,6 +25,7 @@ import {
 } from "./spectraShared";
 import { upsertSourceCalendarItem } from "./calendarShared";
 import { managebacPlainText as plainText, managebacText as text } from "../shared/planner-provider-refresh";
+import { classIdentity } from "../shared/class-identity";
 import {
   addProviderWork, applyPlannerProviderUpdate, inlinePlannerProjections, recordProviderConflict, scheduleProviderFanout,
   settleProviderWork, syncRunOutcome, PROVIDER_INLINE_PLANNERS,
@@ -1373,6 +1375,35 @@ export const replaceCapabilityManifest = mutation({
   },
 });
 
+/**
+ * Opens a blocked connection again once the saved key has been seen to work
+ * (the route's "recheck"). Its routes keep their verification, so it is
+ * connected at once when any of them is verified, and syncs straight away.
+ */
+export const reopenBlocked = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const actor = await requireSchoolAdmin(ctx);
+    const integration = await integrationForSchool(ctx, actor.schoolId);
+    if (!integration || integration.status !== "blocked") return { reopened: false };
+    const capabilities = await ctx.db
+      .query("integrationCapabilities")
+      .withIndex("by_integration", (q) => q.eq("integrationId", integration._id))
+      .collect();
+    const verified = capabilities.some((item) => item.permissionState === "read_only" && item.verificationStatus === "verified");
+    const now = Date.now();
+    await ctx.db.patch(integration._id, {
+      status: verified ? "connected" : "validating",
+      blockedReason: undefined,
+      nextSyncAt: now,
+      updatedByAccountId: actor.accountId,
+      updatedAt: now,
+    });
+    if (verified) await scheduleSync(ctx, integration._id, now);
+    return { reopened: true };
+  },
+});
+
 export const adminOverview = query({
   args: {},
   handler: async (ctx) => {
@@ -2526,6 +2557,31 @@ export const commitIdentityResolution = mutation({
   },
 });
 
+/**
+ * A class's own name, or "" when ManageBac only told us the student belongs to
+ * it. Membership rows carry a class id and a role and nothing else; a class
+ * Spectra cannot name is not a place anyone can find, so it is never offered,
+ * never projected, and an old projection of one is retired.
+ */
+function classTitle(source: Pick<Doc<"externalRecords">, "normalized">) {
+  const normalized = record(source.normalized);
+  return text(normalized.name ?? normalized.title, 180);
+}
+
+/**
+ * Take a class workspace out of the Library: it goes to Trash with everything
+ * filed in it, restorable as one, and stops being a projection of the class.
+ */
+async function retireClassWorkspace(
+  ctx: MutationCtx,
+  workspace: Doc<"spectraWorkspaces">,
+  now: number,
+) {
+  const node = await findPrimaryNode(ctx, workspace.ownerAccountId, "workspace", workspace._id);
+  if (node) await trashNode(ctx, node);
+  await ctx.db.patch(workspace._id, { status: "archived", updatedAt: now });
+}
+
 async function ensureClassWorkspace(
   ctx: MutationCtx,
   integration: Doc<"schoolIntegrations">,
@@ -2550,11 +2606,11 @@ async function ensureClassWorkspace(
     );
   const normalized = record(source.normalized);
   const now = Date.now();
-  const projectedTitle = text(
-    normalized.name ?? normalized.title,
-    180,
-    "ManageBac class",
-  );
+  // The class in words ("Physics HL"), not ManageBac's code for it; the code stays in the description.
+  const projectedTitle = classIdentity({
+    providerClassId: source.providerClassId ?? String(source._id),
+    title: text(normalized.name ?? normalized.title, 180, "ManageBac class"),
+  }).name;
   const capabilities = await ctx.db
     .query("integrationCapabilities")
     .withIndex("by_integration", (q) => q.eq("integrationId", integration._id))
@@ -2609,13 +2665,14 @@ async function ensureClassWorkspace(
         existingWorkspace.title === previouslyProjectedTitle
           ? { title: projectedTitle }
           : {}),
-        description:
-          text(normalized.description, 600) ||
-          `${text(normalized.course ?? normalized.programme, 120)} - Source-linked from ManageBac`,
+        description: classDescription(normalized),
         sourceContext,
         status: "active",
         updatedAt: now,
       });
+      /* The tree names the workspace too; a class renamed in ManageBac is
+         renamed in the Library, not only on its own page. */
+      await ensureWorkspaceNode(ctx, (await ctx.db.get(existingWorkspace._id))!);
       await ctx.db.patch(existing._id, {
         recordId: source._id,
         sourceHash: source.sourceHash,
@@ -2633,11 +2690,7 @@ async function ensureClassWorkspace(
     ownerAccountId: accountId,
     schoolId: integration.schoolId,
     title: projectedTitle,
-    description: text(
-      normalized.description ??
-        `${text(normalized.course ?? normalized.programme, 120)} · Source-linked from ManageBac`,
-      600,
-    ),
+    description: classDescription(normalized),
     icon: "BookOpen",
     color: text(normalized.color, 32, "#429379"),
     starterKey: "managebac-class",
@@ -2686,6 +2739,13 @@ async function ensureClassWorkspace(
   return { projection: (await ctx.db.get(projectionId))!, created: true };
 }
 
+/** The class's own description, else its course, else where it came from. */
+/** The class's own description, or where it came from: its course and ManageBac's code for it. */
+function classDescription(normalized: Record<string, unknown>) {
+  const from = [text(normalized.course ?? normalized.programme, 120), text(normalized.name ?? normalized.title, 180)].filter(Boolean).join(", ");
+  return text(normalized.description, 600) || (from ? `${from}, from ManageBac` : "From ManageBac");
+}
+
 async function classWorkspaceId(
   ctx: MutationCtx,
   integrationId: Id<"schoolIntegrations">,
@@ -2713,7 +2773,8 @@ async function classWorkspaceId(
     : null;
 }
 
-async function ensurePlannerProjection(
+/** The task work Spectra keeps for a school task: made the first time it is needed, by sync or by opening it. */
+export async function ensurePlannerProjection(
   ctx: MutationCtx,
   integration: Doc<"schoolIntegrations">,
   accountId: Id<"accounts">,
@@ -2796,11 +2857,7 @@ async function ensurePlannerProjection(
     blueprintKey: "planner_task",
     schemaVersion: defaultArtifactSchemaVersion("planner_task"),
     title,
-    summary: plainText(
-      normalized.description,
-      600,
-      "Source-linked ManageBac task",
-    ),
+    summary: plainText(normalized.description, 600),
     content,
     textIndex: buildArtifactTextIndex({
       title,
@@ -4038,6 +4095,7 @@ export const failSync = mutation({
     errorSummary: v.string(),
     retryAfterAt: v.optional(v.number()),
     leaseToken: v.optional(v.string()),
+    selectionRevision: v.optional(v.number()),
     payloadDigest: v.string(),
     timestamp: v.number(),
     nonce: v.string(),
@@ -4070,6 +4128,9 @@ export const failSync = mutation({
         ? { retryAfterAt: args.retryAfterAt }
         : {}),
       ...(args.leaseToken ? { leaseToken: args.leaseToken } : {}),
+      ...(args.selectionRevision !== undefined
+        ? { selectionRevision: args.selectionRevision }
+        : {}),
     });
     if (expectedDigest !== args.payloadDigest)
       throw new Error("INTEGRATION_PAYLOAD_INVALID: Failure payload changed.");
@@ -6202,11 +6263,9 @@ export const listMyClassCandidates = query({
       (typeof eligibleClasses)[number]
     >();
     const candidateScore = (item: (typeof eligibleClasses)[number]) => {
-      const normalized = record(item.normalized);
-      const title = text(normalized.name ?? normalized.title, 180);
       return (
         (item.mappedAccountId === actor.accountId ? 10_000 : 0) +
-        (title && title !== "ManageBac class" ? 1_000 : 0) +
+        (classTitle(item) ? 1_000 : 0) +
         item.fetchedAt / 1_000_000_000_000
       );
     };
@@ -6227,7 +6286,7 @@ export const listMyClassCandidates = query({
           recordId: item._id,
           providerRecordId: item.providerRecordId,
           providerClassId: item.providerClassId,
-          title: text(normalized.name ?? normalized.title, 180, "ManageBac class"),
+          title: classTitle(item),
           program: text(normalized.program ?? normalized.programme, 120),
           grade: text(normalized.grade, 80),
           description: plainText(normalized.description, 400),
@@ -6243,7 +6302,7 @@ export const listMyClassCandidates = query({
           fetchedAt: item.fetchedAt,
         };
       })
-      .filter((item) => !item.archived)
+      .filter((item) => !item.archived && item.title)
       .sort((a, b) => a.title.localeCompare(b.title));
     return {
       integration: safeIntegration(integration),
@@ -6342,6 +6401,17 @@ export const materializeClassWorkspaces = mutation({
         item.providerClassId ? [item.providerClassId] : [],
       ),
     );
+    /* Classes ManageBac never named were once projected as workspaces called
+       "ManageBac class". Saving a selection retires the ones nothing was filed in. */
+    for (const source of membershipRows) {
+      if (source.recordType !== "class" || classTitle(source)) continue;
+      const workspaceId = await classWorkspaceId(ctx, integration._id, actor.accountId, source.providerClassId, source.academicPeriodKey);
+      const workspace = workspaceId ? await ctx.db.get(workspaceId) : null;
+      if (!workspace || workspace.status !== "active" || workspace.ownerAccountId !== actor.accountId) continue;
+      const node = await findPrimaryNode(ctx, actor.accountId, "workspace", workspace._id);
+      if (node?.childCount) continue;
+      await retireClassWorkspace(ctx, workspace, Date.now());
+    }
     const selected = args.recordIds.slice(0, 100);
     let created = 0;
     let refreshed = 0;
@@ -6359,6 +6429,10 @@ export const materializeClassWorkspaces = mutation({
           (!source.providerClassId ||
             !accessibleClassIds.has(source.providerClassId)))
       ) {
+        skipped += 1;
+        continue;
+      }
+      if (!classTitle(source)) {
         skipped += 1;
         continue;
       }
@@ -6660,10 +6734,7 @@ export const releaseClassWorkspaces = mutation({
             state: "tombstoned",
             updatedAt: now,
           });
-        await ctx.db.patch(workspace._id, {
-          status: "archived",
-          updatedAt: now,
-        });
+        await retireClassWorkspace(ctx, workspace, now);
         removed += 1;
         continue;
       }

@@ -4,6 +4,9 @@ export type PersistedWorkspaceHubTab = {
   workspaceId?: string;
 };
 
+/** The tab that shows the Library itself rather than one workspace in it. */
+export const LIBRARY_TAB_LABEL = "Library";
+
 export function parseWorkspaceHubTabs(
   value: unknown,
   validWorkspaceIds?: ReadonlySet<string>,
@@ -36,7 +39,8 @@ export function parseWorkspaceHubTabs(
       return [
         {
           id: row.id.slice(0, 160),
-          label: row.label.slice(0, 88) || "Home",
+          // The Library tab is named by the place, whatever an older session stored for it.
+          label: workspaceId ? row.label.slice(0, 88) || LIBRARY_TAB_LABEL : LIBRARY_TAB_LABEL,
           workspaceId,
         },
       ];
@@ -44,9 +48,12 @@ export function parseWorkspaceHubTabs(
   const tabs: PersistedWorkspaceHubTab[] = [];
   const destinationIndexes = new Map<string, number>();
   for (const tab of parsedTabs) {
-    const destination = tab.workspaceId
-      ? `workspace:${tab.workspaceId}`
-      : "home";
+    // A workspace has one tab; the Library may have several, each its own view of it.
+    if (!tab.workspaceId) {
+      tabs.push(tab);
+      continue;
+    }
+    const destination = `workspace:${tab.workspaceId}`;
     const existingIndex = destinationIndexes.get(destination);
     if (existingIndex === undefined) {
       destinationIndexes.set(destination, tabs.length);

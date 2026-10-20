@@ -10,7 +10,7 @@ export type ThreadStatus = (typeof THREAD_STATUSES)[number];
 export const AI_RUN_STATUSES = ["queued", "running", "awaiting_confirmation", "awaiting_resolution", "completed", "failed", "cancelled"] as const;
 export type AIRunStatus = (typeof AI_RUN_STATUSES)[number];
 
-/** Run is still actively working — Live Dock should stay non-idle. */
+/** Run is still actively working — the island should stay non-idle. */
 export function isWorkingAiRunStatus(status: AIRunStatus | string): boolean {
   return status === "queued" || status === "running";
 }

@@ -1,0 +1,423 @@
+/* ==========================================================================
+   The sheet: what every editor's work is written on (EDITORS.md, "The sheet")
+   --------------------------------------------------------------------------
+   A work opens as a page laid on the desk: card paper with the shared grain,
+   a soft stack of pages under it, and one measure, so a task, a deck of cards
+   and a quiz all start their title at the same height and run to the same
+   width. Inside, a sheet is sections: a quiet heading in the UI face, then
+   the thing. What most people never need folds into "More options" at the
+   foot, with one line saying what is set.
+   ========================================================================== */
+
+.editor-sheet {
+  --sheet-pad-x: 48px;
+  --sheet-pad-y: 40px;
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  width: min(760px, calc(100% - 48px));
+  flex-direction: column;
+  gap: 28px;
+  margin: 32px auto 0;
+  padding: var(--sheet-pad-y) var(--sheet-pad-x) 28px;
+  border: 1px solid var(--card-border-soft);
+  border-radius: 6px 6px 14px 14px;
+  background: var(--card-paper);
+  box-shadow:
+    0 1px 0 var(--card-border),
+    0 3px 0 -1px color-mix(in oklab, var(--card-paper) 92%, var(--text-primary)),
+    0 4px 0 -1px var(--card-border-soft),
+    0 24px 48px -32px color-mix(in oklab, var(--text-primary) 40%, transparent);
+  transform-origin: 50% 0;
+  animation: sheet-lay var(--motion-slow) var(--ease-standard) both;
+}
+.editor-sheet::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background-image: var(--paper-grain);
+  pointer-events: none;
+}
+
+/* Beside a page in the side panel the sheet is the panel: no desk around it. */
+[data-studio-mode="split"] .editor-sheet {
+  --sheet-pad-x: 24px;
+  --sheet-pad-y: 24px;
+  width: 100%;
+  margin: 0;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  box-shadow: none;
+  animation: none;
+}
+
+/* Words on a sheet are written on its paper. The app's field fill is for
+   framed fields, which here are the ones that say so (.sheet-input). */
+.spectra-wave-y :is(.editor-sheet, .plan-board) :is(textarea, input):not(.sheet-input) {
+  background-color: transparent;
+}
+
+/* A page laid down: it settles from a slight lift, short enough to never wait on. */
+@keyframes sheet-lay {
+  from {
+    opacity: 0;
+    transform: perspective(1400px) translateY(10px) rotateX(4deg);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.sheet-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sheet-section-head {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  gap: 12px;
+}
+.sheet-section-head h3 {
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+
+.sheet-input {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--card-paper) 70%, var(--bg-primary));
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  transition: border-color var(--motion-fast) var(--ease-standard);
+}
+.sheet-input:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+.sheet-input:focus-visible {
+  border-color: var(--brand-primary);
+  outline: none;
+}
+
+.sheet-chip {
+  position: relative;
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  background: var(--card-paper);
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+.sheet-chip:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+.sheet-chip:active:not(:disabled) {
+  transform: scale(0.96);
+}
+/* A chip that opens the browser's own date picker under it. */
+.sheet-chip--date input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.sheet-quiet {
+  display: inline-flex;
+  height: 30px;
+  align-self: flex-start;
+  align-items: center;
+  gap: 6px;
+  margin-left: -8px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+.sheet-quiet:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sheet-icon-button {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+}
+.sheet-icon-button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sheet-hint {
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+
+/* More options: folded at the foot, its line saying what is set. */
+.sheet-more {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--card-border);
+}
+.sheet-more-toggle {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  text-align: left;
+}
+.sheet-more-toggle:hover {
+  color: var(--text-primary);
+}
+.sheet-more-chevron {
+  flex: none;
+  transform: rotate(-90deg);
+  transition: transform var(--motion-fast) var(--ease-standard);
+}
+.sheet-more-toggle[aria-expanded="true"] .sheet-more-chevron {
+  transform: none;
+}
+.sheet-more-summary {
+  min-width: 0;
+  margin-left: 6px;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sheet-options {
+  display: grid;
+  grid-template-columns: minmax(110px, max-content) 1fr;
+  align-items: center;
+  gap: 12px 20px;
+  animation: sheet-unfold var(--motion-base) var(--ease-standard) both;
+}
+.sheet-option {
+  display: contents;
+}
+.sheet-option > span:first-child {
+  align-self: start;
+  padding-top: 8px;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+.sheet-option > :not(:first-child) {
+  justify-self: start;
+}
+.sheet-option--wide > :not(:first-child) {
+  justify-self: stretch;
+}
+.sheet-option-minutes {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+.sheet-option-minutes .sheet-input {
+  width: 88px;
+}
+/* Words filed one at a time: tags, standards. */
+.sheet-chips {
+  display: flex;
+  min-height: 32px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.sheet-chip-word {
+  display: inline-flex;
+  height: 26px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px 0 10px;
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  background: var(--card-paper);
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+}
+.sheet-chip-word button {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  color: var(--text-tertiary);
+}
+.sheet-chip-word button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.sheet-chips input {
+  min-width: 90px;
+  height: 28px;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  outline: none;
+}
+@keyframes sheet-unfold {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-sheet,
+  .sheet-options {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   A leaf: one of many items written on the same sheet (a question, a card)
+   --------------------------------------------------------------------------
+   Its kind is named at the top in the type's ink (the contents rail already
+   numbers it), and its own tools wait at the right. Moving to another item
+   slides the next one in.
+   ========================================================================== */
+
+.sheet-leaf {
+  --sheet-ink: var(--brand-primary);
+  animation-name: sheet-turn;
+  transform-origin: 0 50%;
+}
+[data-studio-mode="split"] .sheet-leaf {
+  animation: sheet-turn var(--motion-slow) var(--ease-standard) both;
+}
+
+/* The next item slides in: short, and never in the way. */
+@keyframes sheet-turn {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The number, stamped like the task's day. */
+.sheet-stamp {
+  display: grid;
+  width: 56px;
+  height: 62px;
+  place-content: center;
+  justify-items: center;
+  gap: 2px;
+  border: 1px solid color-mix(in oklab, var(--sheet-ink) 38%, var(--card-border));
+  border-top-width: 6px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--sheet-ink) 8%, var(--card-paper));
+  color: color-mix(in oklab, var(--sheet-ink) 78%, var(--text-primary));
+}
+.sheet-stamp-label {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+.sheet-stamp-number {
+  font-family: var(--font-display);
+  font-size: 26px;
+  line-height: 1.05;
+  font-variant-numeric: lining-nums;
+}
+[data-studio-mode="split"] .sheet-stamp {
+  width: 48px;
+  height: 54px;
+}
+
+/* The kind: its name in the type's ink, opening the list of kinds. Words,
+   not a capsule. */
+.sheet-type-chip [role="combobox"],
+.sheet-type-chip button {
+  height: 28px !important;
+  min-height: 28px !important;
+  gap: 4px;
+  margin-left: -8px;
+  padding: 0 6px 0 8px !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  color: color-mix(in oklab, var(--sheet-ink) 78%, var(--text-primary)) !important;
+  font-size: var(--text-ui) !important;
+  font-weight: 600;
+  box-shadow: none !important;
+}
+.sheet-type-chip :is([role="combobox"], button):hover {
+  background: color-mix(in oklab, var(--sheet-ink) 8%, transparent) !important;
+}
+
+.sheet-tools {
+  display: flex;
+  gap: 2px;
+  opacity: 0.35;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+header:is(:hover, :focus-within) > .sheet-tools {
+  opacity: 1;
+}
+.sheet-tools .sheet-icon-button:disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* A few lines of text in More options. */
+.sheet-input--text {
+  width: 100%;
+  height: auto;
+  min-height: 64px;
+  padding: 8px 10px;
+  line-height: 1.5;
+  field-sizing: content;
+}
+
+.sheet-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+}
+.sheet-check input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--sheet-ink, var(--brand-primary));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-leaf {
+    animation: none;
+  }
+}

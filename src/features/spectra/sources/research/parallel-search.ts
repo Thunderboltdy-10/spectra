@@ -1,11 +1,24 @@
-import { getSpectraModelProfile, getSpectraProviderRouting } from "../../ai/model-config";
+import { getSpectraModelProfile, getSpectraProviderRouting, getSpectraSearchModelId } from "../../ai/model-config";
 import { canonicalizeSourceUrl } from "../records";
 import { recordProviderUsage } from "../../ai/run-usage";
 
 export type ResearchMode = "quick" | "verified" | "deep";
 export type ParallelSearchResult = { title: string; url: string; content: string; publishedAt?: string; authority: "primary" | "secondary" | "unknown" };
 export type PurposefulSearch = { purpose: string; query: string };
-export type ParallelSearchCall = (search: PurposefulSearch, options: { maxResults: number; signal?: AbortSignal }) => Promise<ParallelSearchResult[]>;
+export type SearchOptions = { maxResults: number; mode?: ResearchMode; signal?: AbortSignal };
+export type ParallelSearchCall = (search: PurposefulSearch, options: SearchOptions) => Promise<ParallelSearchResult[]>;
+
+/*
+ * What a search costs. Parallel charges per request with ten results included
+ * and $0.001 for each one past that, and every character it returns is read by
+ * the carrying model as input. So a search asks for the ten included results,
+ * each cut near what Spectra shows its model. A quick search uses the engine's
+ * fast depth ($0.001), which found sources as strong as its basic depth in
+ * testing; deep searches pay for advanced.
+ */
+export const INCLUDED_RESULTS = 10;
+const RESULT_CHARACTERS = 2_000;
+const ENGINE_DEPTH: Record<ResearchMode, string> = { quick: "fast", verified: "basic", deep: "advanced" };
 
 /** One search call's own limit. The run's signal only fires on Stop or a lost
  * lease, so a provider that accepts the request and never answers would
@@ -22,7 +35,7 @@ function rows(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && !Array.isArray(entry))) : [];
 }
 
-export async function openRouterParallelSearch(search: PurposefulSearch, options: { maxResults: number; signal?: AbortSignal }): Promise<ParallelSearchResult[]> {
+export async function openRouterParallelSearch(search: PurposefulSearch, options: SearchOptions): Promise<ParallelSearchResult[]> {
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
   if (!apiKey) throw new Error("PROVIDER_UNAVAILABLE: OpenRouter is not configured.");
   const profile = getSpectraModelProfile();
@@ -42,27 +55,32 @@ async function parallelSearchRequest(
   apiKey: string,
   profile: ReturnType<typeof getSpectraModelProfile>,
   search: PurposefulSearch,
-  options: { maxResults: number; signal: AbortSignal },
+  options: SearchOptions & { signal: AbortSignal },
 ): Promise<ParallelSearchResult[]> {
+  // A configured search model carries the call on its own routing; otherwise the
+  // primary model does, pinned to its provider as every primary request is.
+  const searchModel = getSpectraSearchModelId();
+  const results = Math.max(1, Math.min(INCLUDED_RESULTS, options.maxResults));
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000", "X-OpenRouter-Title": "Spectra Parallel Research" },
     body: JSON.stringify({
-      model: profile.route,
-      provider: getSpectraProviderRouting("primary"),
+      model: searchModel || profile.route,
+      ...(searchModel ? {} : { provider: getSpectraProviderRouting("primary") }),
       messages: [{ role: "user", content: `Search purpose: ${search.purpose}\nQuery: ${search.query}\nReturn the strongest directly relevant sources. Do not answer beyond the evidence.` }],
       tools: [{
         type: "openrouter:web_search",
         parameters: {
           engine: "parallel",
-          max_results: Math.max(1, Math.min(20, options.maxResults)),
-          max_total_results: Math.max(1, Math.min(20, options.maxResults)),
+          mode: ENGINE_DEPTH[options.mode ?? "quick"],
+          max_results: results,
+          max_total_results: results,
           max_uses: 1,
-          search_context_size: "high",
+          max_characters: RESULT_CHARACTERS,
         },
       }],
       max_tool_calls: 1,
-      reasoning: { effort: profile.reasoningProfile, exclude: true },
+      ...(searchModel ? {} : { reasoning: { effort: profile.reasoningProfile, exclude: true } }),
     }),
     signal: options.signal,
   });
@@ -103,7 +121,7 @@ export async function conductParallelResearch(input: { mode: ResearchMode; searc
   let calls = 0;
   for (const search of purposeful) {
     if (input.signal?.aborted) throw input.signal.reason;
-    const results = await execute(search, { maxResults: 20, signal: input.signal });
+    const results = await execute(search, { maxResults: INCLUDED_RESULTS, mode: input.mode, signal: input.signal });
     calls += 1;
     for (const result of results) byUrl.set(canonicalizeSourceUrl(result.url), result);
     const values = [...byUrl.values()];

@@ -7,6 +7,7 @@ import { documentCommandBindings, documentCommandStubHandlers } from "./office/d
 import type { Command, CommandContext, CommandExecutionResult, CommandParam } from "./types";
 import type { WorkType } from "../work/registry";
 import { regionOfResult } from "../anchors/locate";
+import { isHomePath } from "../chat/home-routes";
 
 export type KBarContext = {
   pathname: string;
@@ -156,7 +157,7 @@ const DOCUMENT_KBAR_COMMANDS: readonly Command<unknown>[] = documentCommandBindi
 
 function surfaceFor(pathname: string): keyof (typeof CONTEXT_BOOSTS)[string] | undefined {
   if (pathname.startsWith("/settings")) return "settings";
-  if (pathname.startsWith("/chat")) return "chat";
+  if (isHomePath(pathname)) return "chat";
   if (pathname.startsWith("/library")) return "library";
   if (pathname.startsWith("/workspace")) return "workspace";
   if (/\/artifact(?:\/|$)/.test(pathname)) return "artifact";

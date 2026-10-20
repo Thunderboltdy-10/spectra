@@ -27,6 +27,7 @@ import {
   writeSharedWorkbenchSession,
 } from "../workbench";
 import { launchFrom, useLifeLanding } from "../life/use-life";
+import { threadName } from "../threads/threads-model";
 import { LiveThreadPanel } from "./live-thread-panel";
 import { CompanionSheet, type CompanionTab } from "./work-companion";
 import { createLatestStudioLoad } from "./latest-studio-load";
@@ -35,11 +36,12 @@ import {
   StudioSplitPlaceholder,
   useArtifactStudioState,
 } from "./artifact-studio-shell";
+import { workspaceHref } from "../pages/shell-location";
 
 /**
- * Routes that already own `useArtifactStudioState` + `ArtifactStudio` must not
- * mount a second studio here. Two studios on one page load two Yjs copies and
- * stall the first paint.
+ * Routes that already own `useArtifactStudioState` + `ArtifactStudio` (Home,
+ * the Library shell, Agents) must not mount a second studio here. Two studios
+ * on one page load two Yjs copies and stall the first paint.
  */
 const ROUTE_SIDE_PANEL_PREFIXES = [
   "/school",
@@ -63,9 +65,7 @@ export function RouteSidePanelHost() {
   const pathname = usePathname();
   const router = useRouter();
   const { preferences, replace: replacePreferences } = useSpectraPreferences();
-  const eligible = ROUTE_SIDE_PANEL_PREFIXES.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-  );
+  const eligible = ROUTE_SIDE_PANEL_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
   const [work, setWork] = useState<SpectraArtifact | null>(null);
   const [thread, setThread] = useState<SpectraThread | null>(null);
   /* The Side holds one panel (SHELL.md): what opened last is in front, and
@@ -228,11 +228,7 @@ export function RouteSidePanelHost() {
                 : "/settings",
             );
           } else {
-            router.push(
-              targetId
-                ? `/workspace/${encodeURIComponent(targetId)}`
-                : "/workspace?home=1",
-            );
+            router.push(workspaceHref(targetId));
           }
         },
         openThread: (threadId) =>
@@ -281,7 +277,7 @@ export function RouteSidePanelHost() {
   const showsWork = Boolean(work) && (front === "work" || !thread);
   const showsThread = Boolean(thread) && (front === "thread" || !work);
   const sideThreadId = eligible && showsThread ? thread?._id ?? null : null;
-  const sideThreadTitle = thread?.title ?? "";
+  const sideThreadTitle = thread ? threadName(thread) : "";
   useEffect(() => {
     spectraBus.setQuery("side.thread", sideThreadId ? { threadId: sideThreadId, title: sideThreadTitle } : null);
     return () => spectraBus.setQuery("side.thread", null);
@@ -382,13 +378,13 @@ export function RouteSidePanelHost() {
         <div ref={threadSlot} data-side-slot="thread" hidden={!showsThread} className="flex h-full shrink-0 [&[hidden]]:hidden">
         <LiveThreadPanel
           threadId={thread._id}
-          title={thread.title}
+          title={sideThreadTitle}
           width={threadWidth}
           onWidthChange={setThreadWidth}
           onClose={closeThread}
           onOpenArtifact={(workId) => void loadWork(workId)}
           onOpenWorkspace={(workspaceId) =>
-            router.push(`/workspace/${encodeURIComponent(workspaceId)}`)
+            router.push(workspaceHref(workspaceId))
           }
         />
         </div>

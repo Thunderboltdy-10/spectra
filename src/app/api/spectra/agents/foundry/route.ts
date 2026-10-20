@@ -29,10 +29,12 @@ import {
   type EvidenceExtraction,
 } from "@/features/spectra/agents/foundry";
 import { compileAgentDraft } from "./compile";
+import { prepareAttachments, type AttachmentInput } from "@/features/spectra/compute/files/attachment-preprocessor";
 import {
   answeredDigest,
   EXTRACT_SYSTEM,
   facetGuidance,
+  facetQuestion,
   FOUNDATION_SYSTEM,
   foundryCompletion,
   foundrySpend,
@@ -176,7 +178,7 @@ export async function POST(request: Request) {
         prompt:
           typeof parsed.prompt === "string"
             ? parsed.prompt.slice(0, 2_000)
-            : facetGuidance(plan.facet),
+            : facetQuestion(plan.facet),
         ...(typeof parsed.detail === "string"
           ? { detail: parsed.detail.slice(0, 2_000) }
           : {}),
@@ -224,13 +226,19 @@ export async function POST(request: Request) {
     if (body.operation === "extract") {
       const sourceId =
         typeof body.sourceId === "string" ? body.sourceId : undefined;
-      const text = typeof body.text === "string" ? body.text : "";
+      // A file the creator attached is read here, the same way a message's attachment is.
+      const text =
+        typeof body.text === "string"
+          ? body.text
+          : body.attachment && typeof body.attachment === "object"
+            ? ((await prepareAttachments([body.attachment as AttachmentInput]))[0]?.extractedText ?? "")
+            : "";
       const kind =
         typeof body.kind === "string"
           ? (body.kind as EvidenceExtraction["kind"])
           : "source_document";
       if (!sourceId || !text.trim()) {
-        throw new Error("Evidence text and a source are required.");
+        throw new Error("Nothing could be read from this source. Attach a text, PDF or Word file, or paste its text.");
       }
 
       const raw = await foundryCompletion({

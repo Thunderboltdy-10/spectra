@@ -370,3 +370,471 @@
       top 40ms linear;
   }
 }
+
+/* ==========================================================================
+   Slides on the desk (EDITORS.md, "Presentation")
+   --------------------------------------------------------------------------
+   The open slide is a card laid on the desk, fitted to the stage by height
+   as well as width so the whole slide is always in view, with the stack of
+   the deck's other slides under it. Speaker notes are the slip tucked
+   beneath it, the same width. The rail is the contents rail with each slide
+   as a small card.
+   ========================================================================== */
+
+.spectra-artifact-studio[data-blueprint="presentation"] .presentation-stage {
+  /* The height the notes slip takes under the slide: the toggle alone, or
+     the toggle and the open field. The slide is fitted to what is left. */
+  --notes-room: 56px;
+  container: presentation-stage / size;
+  align-items: center;
+  padding: 28px 36px calc(var(--spectra-composer-safe-area, 72px) + 4px);
+  background: transparent;
+}
+.spectra-artifact-studio[data-blueprint="presentation"] .presentation-stage:has(> .presentation-notes[data-open]) {
+  --notes-room: 168px;
+}
+.spectra-artifact-studio[data-blueprint="presentation"] .presentation-stage:not([data-zoomed]) > .presentation-canvas {
+  width: min(100%, calc((100cqh - var(--notes-room)) * var(--presentation-ratio, 1.7778)));
+  flex: none;
+}
+.spectra-artifact-studio[data-blueprint="presentation"] .presentation-canvas[data-authoring] {
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"] .presentation-stage > .presentation-notes {
+  width: min(100%, calc((100cqh - var(--notes-room)) * var(--presentation-ratio, 1.7778)));
+  margin-top: 18px;
+  overflow: visible;
+}
+.spectra-artifact-studio[data-blueprint="presentation"] .presentation-stage[data-zoomed] > .presentation-notes {
+  width: 100%;
+}
+.spectra-artifact-studio[data-blueprint="presentation"] .presentation-notes-toggle {
+  height: 32px;
+  grid-template-columns: auto auto 1fr;
+  padding-inline: 2px;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+.spectra-artifact-studio[data-blueprint="presentation"] .presentation-notes-toggle strong {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.spectra-artifact-studio[data-blueprint="presentation"] .presentation-notes-toggle span {
+  order: 2;
+  text-align: left;
+}
+.spectra-artifact-studio[data-blueprint="presentation"] .presentation-notes-toggle svg {
+  order: 3;
+}
+.spectra-artifact-studio[data-blueprint="presentation"] .presentation-notes-toggle:hover :is(strong, span) {
+  color: var(--text-primary);
+}
+.spectra-artifact-studio[data-blueprint="presentation"] .presentation-notes[data-open] .presentation-notes-field {
+  margin-top: 4px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: transparent;
+  animation: sheet-unfold var(--motion-fast) var(--ease-standard) both;
+}
+.spectra-artifact-studio[data-blueprint="presentation"] .presentation-notes textarea {
+  min-height: 92px;
+  padding: 10px 14px 12px;
+  font-size: var(--text-caption);
+  line-height: 1.6;
+}
+
+/* In the side panel the slide is the panel's width; no stack under it. */
+.spectra-artifact-studio[data-studio-mode="split"][data-blueprint="presentation"] .presentation-stage {
+  padding: 12px 14px 8px;
+}
+
+/* ------------------------------------------------------------------ Designer
+   (components/presentation-designer.tsx). The open slide in each of its
+   looks, one under another and large enough to judge, then the same looks for
+   the whole deck as plain words. Its sections join the inspector's own. */
+
+.presentation-designer {
+  display: contents;
+}
+
+/* Its sections are spaced and ruled like the inspector's own around them. */
+.presentation-designer > section {
+  padding-bottom: 18px;
+}
+.presentation-designer > section + section,
+.presentation-settings-grid > .presentation-designer + section {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 14px;
+}
+
+.presentation-inspector:has(.presentation-designer) {
+  width: min(320px, 88%);
+}
+
+/* The open inspector lies over the stage's right edge; at full size the slide
+   steps aside for it so nothing under it is hidden while it is being changed. */
+.spectra-artifact-studio:not([data-studio-mode="split"])[data-blueprint="presentation"]
+  .presentation-workspace:has(> .presentation-inspector[data-overlay="true"])
+  > .presentation-stage {
+  padding-right: calc(272px + 36px);
+  transition: padding-right var(--motion-fast) var(--ease-standard);
+}
+.spectra-artifact-studio:not([data-studio-mode="split"])[data-blueprint="presentation"]
+  .presentation-workspace:has(> .presentation-inspector[data-overlay="true"] .presentation-designer)
+  > .presentation-stage {
+  padding-right: calc(320px + 36px);
+}
+
+.presentation-designer-note {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  line-height: 1.5;
+}
+
+.presentation-designer-ideas {
+  display: grid;
+  gap: 16px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.presentation-designer-idea {
+  display: grid;
+  width: 100%;
+  gap: 7px;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  text-align: left;
+  cursor: pointer;
+}
+
+.presentation-designer-still {
+  overflow: hidden;
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px var(--card-border-soft);
+  transition:
+    box-shadow var(--motion-fast) var(--ease-standard),
+    transform var(--motion-base) var(--ease-standard);
+}
+
+.presentation-designer-still .presentation-canvas {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.presentation-designer-still .presentation-object {
+  cursor: inherit;
+}
+
+.presentation-designer-idea:hover:not(:disabled) .presentation-designer-still {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--editor-ink, var(--type-slides)) 45%, transparent),
+    0 14px 24px -18px color-mix(in oklab, var(--text-primary) 60%, transparent);
+  transform: translateY(-1px);
+}
+
+.presentation-designer-idea[aria-pressed="true"] {
+  color: var(--text-primary);
+  font-weight: 560;
+}
+
+.presentation-designer-idea[aria-pressed="true"] .presentation-designer-still {
+  box-shadow: 0 0 0 2px var(--editor-ink, var(--type-slides));
+}
+
+.presentation-designer-idea:focus-visible {
+  outline: none;
+}
+
+.presentation-designer-idea:focus-visible .presentation-designer-still {
+  box-shadow: 0 0 0 2px var(--focus-ring-color);
+}
+
+.presentation-designer-idea:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.presentation-designer-families {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 10px;
+}
+
+.presentation-designer-families button {
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  padding: 2px 0;
+  color: var(--text-secondary);
+  font-size: var(--text-ui);
+  font-weight: 520;
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard);
+}
+
+.presentation-designer-families button:hover:not(:disabled) {
+  border-bottom-color: currentColor;
+  color: var(--editor-ink, var(--type-slides));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .presentation-designer-still {
+    transition: none;
+  }
+}
+
+/* ------------------------------------------------------------- Rehearsal
+   (components/presentation-rehearsal-report.tsx). A run sheet laid over the
+   editor after a private rehearsal: the total as a sentence, a strip where
+   each slide is as wide as the time spent on it, then each slide's time. The
+   strip filling in, slide by slide, is the one moment of motion. */
+
+.presentation-rehearsal {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-composer-dock) + 5);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: color-mix(in oklab, var(--text-primary) 24%, transparent);
+  animation: rehearsal-dim var(--motion-base) var(--ease-standard) both;
+}
+
+.presentation-rehearsal-sheet {
+  display: flex;
+  width: min(620px, 100%);
+  max-height: min(780px, 100%);
+  flex-direction: column;
+  overflow: auto;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  background: var(--card-paper);
+  padding: 22px 28px 20px;
+  box-shadow: 0 40px 120px -48px rgba(40, 30, 16, 0.5);
+  outline: none;
+  animation: rehearsal-rise var(--motion-base) var(--ease-standard) both;
+}
+
+.presentation-rehearsal-sheet > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.presentation-rehearsal-sheet > header p {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+
+.presentation-rehearsal-sheet > header button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  margin-right: -8px;
+  place-items: center;
+  border-radius: var(--control-radius);
+  color: var(--text-secondary);
+}
+
+.presentation-rehearsal-sheet > header button:hover {
+  color: var(--text-primary);
+}
+
+.presentation-rehearsal-sheet h2 {
+  margin: 14px 0 0;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.presentation-rehearsal-gist {
+  max-width: 52ch;
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-body);
+  line-height: 1.55;
+}
+
+.presentation-rehearsal-strip {
+  display: flex;
+  height: 14px;
+  gap: 2px;
+  margin: 22px 0 14px;
+}
+
+.presentation-rehearsal-strip > span {
+  min-width: 3px;
+  flex: var(--share) 1 0;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--type-slides) 52%, var(--card-paper));
+  transition: background-color var(--motion-fast) var(--ease-standard);
+  animation: rehearsal-fill 760ms var(--ease-standard) both;
+  animation-delay: calc(var(--motion-base) + var(--order, 0) * 70ms);
+}
+
+.presentation-rehearsal-strip > span[data-longest="true"] {
+  background: var(--type-slides);
+}
+
+.presentation-rehearsal-strip > span[data-pointed="true"] {
+  background: color-mix(in oklab, var(--type-slides) 78%, var(--text-primary));
+}
+
+.presentation-rehearsal-slides {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.presentation-rehearsal-slides > li {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.presentation-rehearsal-still {
+  overflow: hidden;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--card-border-soft);
+}
+
+.presentation-rehearsal-still .presentation-canvas {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.presentation-rehearsal-title {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--text-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.presentation-rehearsal-slides > li[data-pointed="true"] .presentation-rehearsal-title {
+  text-decoration: underline;
+  text-decoration-color: var(--type-slides);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+
+.presentation-rehearsal-time {
+  display: grid;
+  justify-items: end;
+  color: var(--text-secondary);
+  font-size: var(--text-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+.presentation-rehearsal-time small {
+  color: var(--ink-orange);
+  font-size: var(--text-micro);
+}
+
+.presentation-rehearsal-sheet > footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.presentation-rehearsal-sheet > footer p {
+  flex: 1;
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+
+.presentation-rehearsal-sheet > footer button {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--control-radius);
+  font-size: var(--text-ui);
+  font-weight: 550;
+}
+
+.presentation-rehearsal-quiet {
+  color: var(--text-secondary);
+}
+
+.presentation-rehearsal-quiet:hover {
+  color: var(--text-primary);
+}
+
+.presentation-rehearsal-again {
+  background: var(--text-primary);
+  color: var(--bg-primary);
+}
+
+.presentation-rehearsal-again:hover {
+  background: color-mix(in oklab, var(--text-primary) 86%, var(--type-slides));
+}
+
+@keyframes rehearsal-dim {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes rehearsal-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+
+@keyframes rehearsal-fill {
+  from {
+    flex-grow: 0;
+    opacity: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .presentation-rehearsal-sheet {
+    padding: 18px 16px 16px;
+  }
+  .presentation-rehearsal-sheet h2 {
+    font-size: 24px;
+  }
+  .presentation-rehearsal-slides > li {
+    grid-template-columns: 56px minmax(0, 1fr) auto;
+  }
+  .presentation-rehearsal-sheet > footer {
+    flex-wrap: wrap;
+  }
+  .presentation-rehearsal-sheet > footer p {
+    flex-basis: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .presentation-rehearsal,
+  .presentation-rehearsal-sheet,
+  .presentation-rehearsal-strip > span {
+    animation: none;
+  }
+}

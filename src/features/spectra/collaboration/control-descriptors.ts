@@ -81,32 +81,32 @@ const DESCRIPTORS: Record<ArtifactTypeKey, readonly ControlRule[]> = {
     {
       pattern: "/blocks/*",
       primitive: "richtext",
-      label: (c) => `Block ${c[0]}`,
+      label: "Text",
       identified: true,
       parts: ["grip"],
     },
     {
       pattern: "/blocks/*/text",
       primitive: "richtext",
-      label: (c) => `Block ${c[0]}`,
+      label: "Text",
       identified: true,
     },
     {
       pattern: "/blocks/*/lines/*",
       primitive: "richtext",
-      label: (c) => `Block ${c[0]} line ${c[1]}`,
+      label: (c) => `Line ${c[1]}`,
       identified: true,
     },
     {
       pattern: "/blocks/*/type",
       primitive: "dropdown",
-      label: (c) => `Block ${c[0]} style`,
+      label: "Text style",
       identified: true,
     },
     {
       pattern: "/blocks/*/cells/**",
       primitive: "gridCell",
-      label: (c) => `Table cell in block ${c[0]}`,
+      label: "Table cell",
       identified: true,
     },
     { pattern: "/outline", primitive: "listItem", label: "Outline" },
@@ -627,7 +627,7 @@ export function matchControl(
     if (!captures) continue;
     const label =
       typeof rule.label === "function"
-        ? rule.label(captures.map((capture) => humanizeCapture(capture)))
+        ? rule.label(captures.map((capture) => humanizeCapture(capture))).replace(/\s+/g, " ").trim()
         : rule.label;
     const scopeCapture =
       rule.scope && captures[rule.scope.capture] !== undefined
@@ -649,12 +649,13 @@ export function matchControl(
 }
 
 /**
- * Array indices read as 1-based in labels ("Card 3", not "Card 2"), while
- * id-shaped and A1-shaped captures pass through untouched.
+ * Array indices read as 1-based in labels ("Card 3", not "Card 2"); A1 cells
+ * and names pass through; ids say nothing to a person and are left out
+ * ("Card front", not "Card c-9f2e front"). The path keeps them.
  */
 function humanizeCapture(capture: string): string {
   if (/^\d+$/.test(capture)) return String(Number(capture) + 1);
-  if (capture.startsWith("id:")) return capture.slice(3);
+  if (capture.startsWith("id:") || /^[a-z]+[-_][0-9a-z-]{4,}$/i.test(capture) || /^[a-z0-9]{16,}$/i.test(capture)) return "";
   return capture;
 }
 

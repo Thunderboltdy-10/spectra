@@ -6,4 +6,5 @@ These documents describe what a feature does for the user and the engineering sh
 | Document | Covers |
 | --- | --- |
 | [DEVICES.md](DEVICES.md) | Spectra Bridge as a tray-only helper, controlled from the Devices page |
+| [HOME.md](HOME.md) | Home: the greeting, the daily brief, the week, and work and threads to pick up |
 | [SCHOOL.md](SCHOOL.md) | ManageBac in Spectra: per-student sync preferences, past tasks and files, and CAS |

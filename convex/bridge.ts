@@ -188,6 +188,14 @@ export const devices = query({ args: {}, handler: async (ctx) => {
   return devices.map(({ credentialHash: _credentialHash, ...device }) => device);
 } });
 
+/** Whether the account has connected Bridge on any computer, so its browsers may look for it. */
+export const hasDevice = query({ args: {}, handler: async (ctx) => {
+  const actor = await getOptionalAuthenticatedActor(ctx);
+  if (!actor) return false;
+  const device = await ctx.db.query("bridgeDevices").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "active")).first();
+  return device !== null;
+} });
+
 export const overview = query({ args: {}, handler: async (ctx) => {
   const actor = await getOptionalAuthenticatedActor(ctx);
   if (!actor) return null;

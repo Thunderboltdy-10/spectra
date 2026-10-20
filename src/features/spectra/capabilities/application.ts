@@ -115,7 +115,7 @@ const APP_SPECS: readonly AppSpec[] = [
   },
   {
     id: "app.chat.new",
-    description: "Start a new conversation without changing existing work.",
+    description: "Start a new thread without changing existing work.",
     risk: "safe",
     availability: "readable",
     choreography: { target: "conversation-route" },
@@ -164,7 +164,7 @@ const APP_SPECS: readonly AppSpec[] = [
   },
   {
     id: "app.workspace.import",
-    description: "Open the existing workspace manifest import flow.",
+    description: "Import a workspace from a Spectra export file.",
     risk: "safe",
     availability: "readable",
     choreography: { target: "workspace-import" },

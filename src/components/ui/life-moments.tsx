@@ -15,14 +15,14 @@ function useParent() {
 
 /**
  * Put inside something that appears because of what the reader just did (an
- * answer revealed, a result shown): it forms out of the field from that press
- * (LIFE.md, Arrive). Without a recent press (reopening what was already
+ * answer revealed, a result shown): the skeleton's band crosses it once as it
+ * lands (LIFE.md, Arrive). Without a recent press (reopening what was already
  * shown) it is simply there. It renders nothing visible.
  */
-export function LifeForm({ bars }: { bars?: string }) {
+export function LifeForm() {
   const { anchor, host } = useParent();
   const [from] = useState(recentCause);
-  useLifeEntrance(host, { bars, from, enabled: from !== undefined });
+  useLifeEntrance(host, from !== undefined);
   return <span ref={anchor} hidden />;
 }
 
@@ -38,10 +38,9 @@ export function LifeVerdict({ verdict, immediate }: { verdict: Verdict | null | 
 
 /**
  * Put inside an item of a list, with what it shows as `id` (or inside a
- * table cell, with `of="tr"`): made just now by the reader, it forms from
- * their press; made by Spectra while it works, it arrives as light from the
- * prism; removed, it parts where it was (LIFE.md, Create by hand, Delete).
- * What the list opened with, or many at once, is simply there.
+ * table cell, with `of="tr"`): made just now, by the reader or by Spectra, it
+ * lands crossed once by the skeleton's band; removed, it parts where it was
+ * (LIFE.md, Create by hand, Delete). What the list opened with is simply there.
  */
 export function LifeKey({ id, of, bars }: { id: string; of?: string; bars?: string }) {
   const anchor = useRef<HTMLSpanElement>(null);
@@ -51,7 +50,7 @@ export function LifeKey({ id, of, bars }: { id: string; of?: string; bars?: stri
     host.current = of ? (parent?.closest<HTMLElement>(of) ?? parent) : parent;
   }, [of]);
   const figure = bars ? { bars } : {};
-  useLifeJoin(host, id, figure);
+  useLifeJoin(host, id);
   useLifeDeparture(host, true, figure);
   return <span ref={anchor} hidden />;
 }

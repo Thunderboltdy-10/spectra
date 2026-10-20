@@ -39,14 +39,15 @@ import { registerSettingsToggleControl } from "../../collaboration/settings-togg
 const SECTIONS = [
   { id: "ai", label: "Spectra AI", icon: "agent" },
   { id: "writing", label: "Writing", icon: "edit" },
+  { id: "day", label: "Your day", icon: "clock" },
   { id: "appearance", label: "Appearance", icon: "theme" },
   { id: "workbar", label: "Workbars", icon: "tool" },
   { id: "privacy", label: "Privacy and data", icon: "locked" },
 ] as const satisfies ReadonlyArray<{ id: string; label: string; icon: IconName }>;
 
 const ISLAND_WAKE_OPTIONS = [
-  { value: "prism", label: "Show the prism" },
-  { value: "edge", label: "Wake from the edge" },
+  { value: "prism", label: "Always show the dock" },
+  { value: "edge", label: "Show it from the edge" },
 ];
 
 const RETENTION_OPTIONS = [
@@ -105,7 +106,7 @@ function ConversationSettings({ p, update }: SectionProps<"ai">) {
   return (
     <SettingGroup title="Conversations and the island" description="How new messages continue, and how the island at the bottom of every page waits for you.">
       <ToggleRow label="Continue the current conversation" description="When off, an unassigned send begins a new conversation. Explicitly selected conversations still continue." checked={p.continueCurrentConversation} onCheckedChange={(continueCurrentConversation) => update({ continueCurrentConversation })} />
-      <SettingRow label="The island at rest" description="Wake from the edge hides the prism until the pointer reaches the bottom of the screen, or you press Ctrl+J. Questions still wake it." control={<SelectField ariaLabel="The island at rest" value={p.islandWake} onChange={(islandWake) => update({ islandWake: islandWake as "prism" | "edge" })} options={ISLAND_WAKE_OPTIONS} triggerClassName="min-w-[168px]" />} />
+      <SettingRow label="The dock at rest" description="Show it from the edge keeps the dock hidden until the pointer reaches the bottom of the screen, or you press Ctrl+J. Spectra still shows it when it has a question for you." control={<SelectField ariaLabel="The dock at rest" value={p.islandWake} onChange={(islandWake) => update({ islandWake: islandWake as "prism" | "edge" })} options={ISLAND_WAKE_OPTIONS} triggerClassName="min-w-[168px]" />} />
       <ToggleRow label="Open requests for input" description="Required questions expand automatically while the run waits for you." checked={p.expandRequiredInput} onCheckedChange={(expandRequiredInput) => update({ expandRequiredInput })} />
       <ToggleRow label="Keep completed runs nearby" checked={p.retainCompletedRunTabs} onCheckedChange={(retainCompletedRunTabs) => update({ retainCompletedRunTabs })} />
       {p.retainCompletedRunTabs ? <SettingRow label="Keep completed runs for" control={<SelectField ariaLabel="Keep completed runs for" value={String(p.completedRunRetentionMinutes)} onChange={(next) => update({ completedRunRetentionMinutes: Number(next) })} options={RETENTION_OPTIONS} triggerClassName="min-w-[144px]" />} /> : null}
@@ -163,6 +164,47 @@ function WritingSettings({ p, update, refreshConfirmedPreferences }: SectionProp
       <ToggleRow label="Quick Chat suggestions" checked={p.quickChatSuggestions} onCheckedChange={(quickChatSuggestions) => update({ quickChatSuggestions })} />
       <ToggleRow label="Document suggestions" checked={p.longFormSuggestions} onCheckedChange={(longFormSuggestions) => update({ longFormSuggestions })} />
       <SettingRow label="Suggestion delay" description={`${p.delayMs} ms after you pause`} control={<input aria-label="Suggestion delay" type="range" min={120} max={1200} step={20} value={p.delayMs} onChange={(event) => update({ delayMs: Number(event.target.value) })} />} />
+    </SettingGroup>
+  );
+}
+
+function DaySettings({ p, update }: SectionProps<"notifications">) {
+  return (
+    <SettingGroup title="Reminders and brief" description="When Spectra nudges you about the work you have dated, and the brief it writes each morning.">
+      <SettingRow
+        label="Reminder time"
+        description="A task with a day but no time reminds you at this time, on the day or the days before, as you choose on the task."
+        control={
+          <Input
+            type="time"
+            aria-label="Reminder time"
+            className="h-9 w-[124px]"
+            value={p.reminderTime}
+            onChange={(event) => event.target.value && update({ reminderTime: event.target.value })}
+          />
+        }
+      />
+      <ToggleRow
+        label="Morning brief"
+        description="When you wake, Home has yesterday in a few lines and what to do today, each one press away: work to make or pick up, tasks to open or add."
+        checked={p.dailyBrief}
+        onCheckedChange={(dailyBrief) => update({ dailyBrief })}
+      />
+      {p.dailyBrief ? (
+        <SettingRow
+          label="Wake-up time"
+          description="Your brief is ready by this time each morning."
+          control={
+            <Input
+              type="time"
+              aria-label="Wake-up time"
+              className="h-9 w-[124px]"
+              value={p.dailyBriefTime}
+              onChange={(event) => event.target.value && update({ dailyBriefTime: event.target.value })}
+            />
+          }
+        />
+      ) : null}
     </SettingGroup>
   );
 }
@@ -341,6 +383,7 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
       </div>
     ),
     writing: <WritingSettings p={preferences.writing} update={updateSection("writing")} refreshConfirmedPreferences={refreshConfirmedPreferences} />,
+    day: <DaySettings p={preferences.notifications} update={updateSection("notifications")} />,
     appearance: <AppearanceSettings p={preferences.appearance} update={updateSection("appearance")} />,
     workbar: <WorkbarSettings p={preferences.workbar} update={updateSection("workbar")} />,
     privacy: <div className="space-y-10"><AccountSettings /><PrivacySettings /></div>,

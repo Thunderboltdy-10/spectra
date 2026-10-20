@@ -13,7 +13,6 @@ import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   ArtifactDeleteDialog,
-  PendingCreateDialog,
   TrashPurgeDialog,
   WorkspaceDeleteDialog,
 } from "../components/shell-dialogs";
@@ -139,12 +138,12 @@ describe("Field", () => {
 });
 
 describe("Input", () => {
-  it("carries the restored focus ring itself (DS-4)", () => {
+  it("shows focus with an ink edge, never a stacked ring", () => {
     render(<Input aria-label=" bare" />);
     const className = screen.getByRole("textbox").className;
-    expect(className).toContain("focus-visible:ring-2");
-    expect(className).toContain("focus-visible:ring-[var(--focus-ring-color)]");
-    expect(className).not.toContain("focus-visible:ring-0");
+    expect(className).toContain("border-transparent");
+    expect(className).toContain("focus-visible:border-[color-mix(in_oklab,var(--text-primary)_55%,transparent)]");
+    expect(className).not.toContain("focus-visible:ring-2");
   });
 });
 
@@ -230,24 +229,4 @@ describe("shell dialogs", () => {
     ).toBeTruthy();
   });
 
-  it("PendingCreateDialog offers General plus every workspace", () => {
-    const onSelect = vi.fn();
-    render(
-      <PendingCreateDialog
-        open
-        typeLabel="document"
-        workspaces={[
-          { id: "ws1", title: "Biology", accentColor: "var(--accent-cyan)" },
-          { id: "ws2", title: "History", accentColor: "var(--accent-gold)" },
-        ]}
-        onCancel={() => {}}
-        onSelect={onSelect}
-      />,
-    );
-    expect(screen.getByText(/Where should this document live\?/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /general/i }));
-    expect(onSelect).toHaveBeenCalledWith(undefined);
-    fireEvent.click(screen.getByRole("button", { name: /history/i }));
-    expect(onSelect).toHaveBeenCalledWith("ws2");
-  });
 });

@@ -2,6 +2,7 @@
 
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { BookOpen, ChevronLeft, ChevronRight, Plus, X } from "@/components/icons/glyph-icons";
+import { Icon } from "@/components/icons";
 import {
   createContext,
   useCallback,
@@ -810,7 +811,7 @@ export function StudioTabRail({
   onGoForward,
   persistent = false,
 }: {
-  hubTabs: Array<{ id: string; label: string }>;
+  hubTabs: Array<{ id: string; label: string; workSet?: unknown }>;
   activeHubTabId: string | null;
   artifacts: SpectraArtifact[];
   tabs: StudioTab[];
@@ -904,7 +905,11 @@ export function StudioTabRail({
                 aria-current={active ? "page" : undefined}
                 onClick={() => onActivateHub(hubTab.id)}
               >
-                <BookOpen className="h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]" />
+                {hubTab.workSet ? (
+                  <Icon name="compare" size={14} className="shrink-0 text-[var(--text-secondary)]" />
+                ) : (
+                  <BookOpen className="h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]" />
+                )}
                 <span className="min-w-0 flex-1 truncate text-left">
                   {hubTab.label}
                 </span>

@@ -50,292 +50,142 @@ function answerText(value: string | string[] | undefined) {
   return typeof value === "string" ? value : "";
 }
 
+/** A stored question as the learner may see it, before a practice attempt exists. */
+function practiceQuestion(question: Record<string, unknown>, index: number): SpectraQuizPracticeQuestion {
+  const strings = (value: unknown) => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : []);
+  return {
+    id: typeof question.id === "string" ? question.id : `q${index}`,
+    prompt: typeof question.prompt === "string" ? question.prompt : "",
+    type: (typeof question.type === "string" ? question.type : "short_answer") as SpectraQuizPracticeQuestion["type"],
+    options: strings(question.options),
+    matchingPairs: Array.isArray(question.matchingPairs)
+      ? question.matchingPairs.map(record).map((pair, at) => ({ id: String(pair.id ?? at), left: String(pair.left ?? "") }))
+      : undefined,
+    matchingChoices: strings(question.matchingChoices),
+    points: typeof question.points === "number" ? question.points : 1,
+  };
+}
+
+/*
+ * An embedded quiz is its questions, one at a time, answered where they sit.
+ * A published quiz keeps the answers as a private practice attempt (never in
+ * the quiz itself) and checks them at the end; a draft can be read and tried
+ * but has nothing to check against yet.
+ */
 export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
   const interaction = embed.effectiveInteraction ?? embed.interaction;
-  const canAnswer = embedCapabilityEnabled(
-    "quiz",
-    interaction,
-    "attempt.answer",
-  );
-  const canNavigate = embedCapabilityEnabled(
-    "quiz",
-    interaction,
-    "attempt.navigate",
-  );
-  const canSubmit = embedCapabilityEnabled(
-    "quiz",
-    interaction,
-    "attempt.submit",
-  );
-  const published = embeddedQuizIsPublished(embed);
-  const previews = useMemo(() => previewQuestions(embed), [embed]);
-  const [attempt, setAttempt] = useState<SpectraQuizPracticeAttempt | null>(
-    null,
-  );
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [busy, setBusy] = useState<"start" | "save" | "submit" | null>(null);
+  const canPractice = embeddedQuizIsPublished(embed) && embedCapabilityEnabled("quiz", interaction, "attempt.answer");
+  const previews = useMemo(() => previewQuestions(embed).map(practiceQuestion), [embed]);
+  const [attempt, setAttempt] = useState<SpectraQuizPracticeAttempt | null>(null);
+  const [responses, setResponses] = useState<Record<string, string | string[]>>({});
+  const [index, setIndex] = useState(0);
+  const [busy, setBusy] = useState<"save" | "submit" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const questions = attempt?.questions ?? previews;
 
-  async function start() {
-    if (!embed.source || !canAnswer || !published || busy) return;
-    setBusy("start");
-    setError(null);
-    try {
-      const next = await startSpectraQuizPractice({
-        artifactId: embed.source.artifactId,
-        clientAttemptId: crypto.randomUUID(),
-      });
-      setAttempt(next);
-      setActiveIndex(0);
-    } catch (reason) {
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "Practice could not be started.",
-      );
-    } finally {
-      setBusy(null);
-    }
+  if (!questions.length) return <p className="work-embed-empty">No questions yet</p>;
+
+  if (attempt?.status === "submitted")
+    return (
+      <div className="work-embed-stage work-embed-quiz-result">
+        <strong>
+          {attempt.score ?? 0} of {attempt.maxScore ?? 0}
+        </strong>
+        <span>{typeof attempt.percentage === "number" ? `${Math.round(attempt.percentage)}% right` : "Checked"}</span>
+        <button
+          type="button"
+          className="work-embed-quiz-check"
+          onClick={() => {
+            setAttempt(null);
+            setResponses({});
+            setIndex(0);
+          }}
+        >
+          Try again
+        </button>
+      </div>
+    );
+
+  async function practiceAttempt() {
+    if (attempt) return attempt;
+    const started = await startSpectraQuizPractice({
+      artifactId: embed.source!.artifactId,
+      clientAttemptId: crypto.randomUUID(),
+    });
+    setAttempt(started);
+    return started;
   }
 
-  async function saveResponse(questionId: string, response: string | string[]) {
-    if (!attempt || attempt.status !== "in_progress" || !canAnswer || busy)
-      return;
-    const previous = attempt.responses[questionId];
-    setAttempt((current) =>
-      current
-        ? {
-            ...current,
-            responses: { ...current.responses, [questionId]: response },
-          }
-        : current,
-    );
+  async function answer(questionId: string, response: string | string[]) {
+    setResponses((current) => ({ ...current, [questionId]: response }));
+    if (!canPractice || !embed.source) return;
     setBusy("save");
     setError(null);
     try {
+      const current = await practiceAttempt();
       await saveSpectraQuizPracticeResponse({
-        attemptId: attempt.attemptId,
+        attemptId: current.attemptId,
         questionId,
         response,
         clientMutationId: crypto.randomUUID(),
       });
     } catch (reason) {
-      setAttempt((current) => {
-        if (!current) return current;
-        const responses = { ...current.responses };
-        if (previous === undefined) delete responses[questionId];
-        else responses[questionId] = previous;
-        return { ...current, responses };
-      });
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "That answer could not be saved.",
-      );
+      setError(reason instanceof Error ? reason.message : "That answer could not be saved.");
     } finally {
       setBusy(null);
     }
   }
 
-  function updateLocalResponse(
-    questionId: string,
-    response: string | string[],
-  ) {
-    setAttempt((current) =>
-      current
-        ? {
-            ...current,
-            responses: { ...current.responses, [questionId]: response },
-          }
-        : current,
-    );
-  }
-
-  async function submit() {
-    if (!attempt || attempt.status !== "in_progress" || !canSubmit || busy)
-      return;
+  async function check() {
+    if (!canPractice || busy) return;
     setBusy("submit");
     setError(null);
     try {
-      for (const [questionId, response] of Object.entries(attempt.responses)) {
-        await saveSpectraQuizPracticeResponse({
-          attemptId: attempt.attemptId,
-          questionId,
-          response,
-          clientMutationId: crypto.randomUUID(),
-        });
-      }
-      const submitted = await submitSpectraQuizPractice({
-        attemptId: attempt.attemptId,
-        clientSubmissionId: crypto.randomUUID(),
-      });
-      setAttempt(submitted);
-    } catch (reason) {
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "Practice could not be submitted.",
+      const current = await practiceAttempt();
+      setAttempt(
+        await submitSpectraQuizPractice({ attemptId: current.attemptId, clientSubmissionId: crypto.randomUUID() }),
       );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The answers could not be checked.");
     } finally {
       setBusy(null);
     }
   }
 
-  if (!canAnswer || !published) {
-    if (embed.mode === "compact") {
-      return (
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-caption font-semibold text-[var(--text-primary)]">
-              {previews.length}{" "}
-              {previews.length === 1 ? "question" : "questions"}
-            </div>
-            <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
-              {canAnswer ? "Publish to practice" : "Read-only preview"}
-            </p>
-          </div>
-          <span className="rounded-chip border border-[var(--border-default)] px-2 py-1 text-micro font-medium text-[var(--text-secondary)]">
-            {canAnswer ? "Draft" : "Preview"}
-          </span>
-        </div>
-      );
-    }
-    return (
-      <div className="space-y-3">
-        {previews.slice(0, 6).map((question, index) => (
-          <div
-            key={String(question.id ?? index)}
-            className="rounded-control border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3"
-          >
-            <Stored value={question.prompt} fallback="Empty question" className="text-caption font-semibold leading-5" />
-          </div>
-        ))}
-        {previews.length === 0 ? (
-          <p className="text-micro text-[var(--text-tertiary)]">
-            This quiz has no visible questions yet.
-          </p>
-        ) : null}
-        {canAnswer && !published ? (
-          <p className="text-micro text-[var(--text-secondary)]">
-            Publish the source quiz to start private practice.
-          </p>
-        ) : null}
-      </div>
-    );
-  }
-
-  if (!attempt) {
-    return (
-      <div className="flex min-h-24 items-center justify-between gap-4 rounded-control border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3.5">
-        <div>
-          <p className="text-caption font-semibold text-[var(--text-primary)]">
-            Private practice
-          </p>
-          <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">
-            Answers are saved to your attempt, not to the source quiz.
-          </p>
-          {error ? (
-            <p className="mt-1 text-micro text-[var(--danger)]">{error}</p>
-          ) : null}
-        </div>
-        <button
-          type="button"
-          onClick={() => void start()}
-          disabled={busy === "start"}
-          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
-        >
-          {busy === "start" ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
-          ) : null}
-          Start practice
-        </button>
-      </div>
-    );
-  }
-
-  if (attempt.status === "submitted") {
-    return (
-      <div className="rounded-control border border-[color-mix(in_oklab,var(--success)_32%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_5%,var(--bg-primary))] p-4">
-        <p className="text-caption font-semibold text-[var(--text-primary)]">
-          Practice submitted
-        </p>
-        <p className="mt-1 text-body font-semibold text-[var(--success)]">
-          {attempt.score ?? 0} / {attempt.maxScore ?? 0}
-          {typeof attempt.percentage === "number"
-            ? ` (${Math.round(attempt.percentage)}%)`
-            : ""}
-        </p>
-      </div>
-    );
-  }
-
-  const question =
-    attempt.questions[Math.min(activeIndex, attempt.questions.length - 1)];
-  if (!question)
-    return (
-      <p className="text-micro text-[var(--text-tertiary)]">
-        This practice attempt has no questions.
-      </p>
-    );
-  const response = attempt.responses[question.id];
+  const at = Math.min(index, questions.length - 1);
+  const question = questions[at]!;
+  const last = at === questions.length - 1;
   return (
-    <div>
-      <div className="flex items-start justify-between gap-3">
-        <Stored value={question.prompt} fallback="Empty question" className="min-w-0 text-ui font-semibold leading-5" />
-        <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
-          {activeIndex + 1} / {attempt.questions.length}
+    <div className="work-embed-stage">
+      <div className="work-embed-question">
+        <span key={question.id} className="work-embed-turn">
+          <Stored value={question.prompt} fallback="Empty question" className="work-embed-question-prompt" />
+          <QuestionResponse
+            question={question}
+            response={responses[question.id]}
+            disabled={busy === "submit"}
+            onChange={(value) => setResponses((current) => ({ ...current, [question.id]: value }))}
+            onCommit={(value) => void answer(question.id, value)}
+          />
         </span>
+        {error ? <p className="work-embed-quiz-error">{error}</p> : null}
       </div>
-      <QuestionResponse
-        question={question}
-        response={response}
-        disabled={busy !== null}
-        onChange={(value) => updateLocalResponse(question.id, value)}
-        onCommit={(value) => void saveResponse(question.id, value)}
-      />
-      {error ? (
-        <p className="mt-2 text-micro text-[var(--danger)]">{error}</p>
-      ) : null}
-      <div className="mt-3 flex items-center justify-between gap-2 border-t border-[var(--border-subtle)] pt-3">
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            aria-label="Previous question"
-            disabled={!canNavigate || activeIndex === 0 || busy !== null}
-            onClick={() => setActiveIndex((value) => Math.max(0, value - 1))}
-            className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-30"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            aria-label="Next question"
-            disabled={
-              !canNavigate ||
-              activeIndex >= attempt.questions.length - 1 ||
-              busy !== null
-            }
-            onClick={() =>
-              setActiveIndex((value) =>
-                Math.min(attempt.questions.length - 1, value + 1),
-              )
-            }
-            className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-30"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
-        <button
-          type="button"
-          onClick={() => void submit()}
-          disabled={!canSubmit || busy !== null}
-          className="inline-flex h-8 items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
-        >
-          {busy === "submit" ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
-          ) : null}
-          Submit
+      <div className="work-embed-stepper">
+        <button type="button" onClick={() => setIndex(Math.max(0, at - 1))} disabled={at === 0} aria-label="Previous question">
+          <ChevronLeft className="size-4" />
         </button>
+        <span aria-live="polite">
+          Question {at + 1} of {questions.length}
+        </span>
+        <button type="button" onClick={() => setIndex(Math.min(questions.length - 1, at + 1))} disabled={last} aria-label="Next question">
+          <ChevronRight className="size-4" />
+        </button>
+        {canPractice && last ? (
+          <button type="button" className="work-embed-quiz-check" onClick={() => void check()} disabled={busy !== null}>
+            {busy === "submit" ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : null}
+            Check answers
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -361,7 +211,7 @@ function QuestionResponse({
   if (question.type === "select_all") {
     const selected = answerArray(response);
     return (
-      <div className="mt-3 space-y-1.5">
+      <div className="work-embed-choices">
         {options.map((option) => {
           const active = selected.includes(option);
           return (
@@ -376,11 +226,11 @@ function QuestionResponse({
                     : [...selected, option],
                 )
               }
-              className={`flex w-full items-center gap-2 rounded-control border px-3 py-2 text-left text-micro disabled:opacity-55 ${active ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))]" : "border-[var(--border-subtle)]"}`}
+              className="work-embed-choice"
+              data-active={active || undefined}
+              data-many=""
             >
-              <span
-                className={`flex h-4 w-4 items-center justify-center rounded-chip border ${active ? "border-[var(--accent-cyan)] bg-[var(--accent-cyan)] text-white" : "border-[var(--border-default)]"}`}
-              >
+              <span className="work-embed-choice-mark">
                 {active ? <Check className="h-3 w-3" /> : null}
               </span>
               <Stored inline value={option} fallback="Empty option" />
@@ -395,7 +245,7 @@ function QuestionResponse({
       ? answerArray(response)
       : options;
     return (
-      <div className="mt-3 space-y-1.5">
+      <div className="work-embed-choices">
         {order.map((option, index) => (
           <div
             key={`${option}:${index}`}
@@ -447,7 +297,7 @@ function QuestionResponse({
   if (question.type === "matching") {
     const selected = answerArray(response);
     return (
-      <div className="mt-3 space-y-1.5">
+      <div className="work-embed-choices">
         {(question.matchingPairs ?? []).map((pair) => {
           const current = selected
             .find((value) => value.startsWith(`${pair.id}:`))
@@ -486,7 +336,7 @@ function QuestionResponse({
   }
   if (options.length > 0) {
     return (
-      <div className="mt-3 space-y-1.5">
+      <div className="work-embed-choices">
         {options.map((option, index) => {
           const active = response === option;
           return (
@@ -495,9 +345,10 @@ function QuestionResponse({
               type="button"
               disabled={disabled}
               onClick={() => onCommit(option)}
-              className={`flex w-full items-center gap-2 rounded-control border px-3 py-2 text-left text-micro disabled:opacity-55 ${active ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))]" : "border-[var(--border-subtle)]"}`}
+              className="work-embed-choice"
+              data-active={active || undefined}
             >
-              <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current text-micro">
+              <span className="work-embed-choice-mark">
                 {String.fromCharCode(65 + index)}
               </span>
               <Stored inline value={option} fallback="Empty option" />
@@ -508,8 +359,7 @@ function QuestionResponse({
     );
   }
   const long = question.type === "long_response";
-  const className =
-    "mt-3 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-caption text-[var(--text-primary)] outline-none focus:border-[var(--accent-cyan)] disabled:opacity-55";
+  const className = "work-embed-answer";
   return long ? (
     <textarea
       rows={4}

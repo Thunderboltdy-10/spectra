@@ -82,6 +82,18 @@ beforeEach(() => {
   harness.getArtifact.mockResolvedValue({ artifact: { _id: "deck-1", title: "Cell biology", blueprintKey: "presentation" } });
   harness.getVersions.mockResolvedValue({ versions: [{ _id: "version-9", artifactId: "deck-1" }], continueCursor: null, isDone: true });
 });
+/** What can be done to the embed itself waits in its one options menu. */
+async function openOptions() {
+  await act(async () => {
+    fireEvent.keyDown(screen.getByRole("button", { name: "Options for Cell biology" }), { key: "Enter" });
+  });
+}
+
+async function chooseOption(item: string) {
+  await openOptions();
+  fireEvent.click(await screen.findByRole("menuitem", { name: new RegExp(item) }));
+}
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -117,10 +129,10 @@ describe("editing an embedded work where it is embedded", () => {
 
   it("enters from Edit here and leaves from Done or the studio's own close", async () => {
     render(<ArtifactEmbedById embedId="embed-1" editInPlace onOpenSource={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Edit Cell biology here" }));
+    await chooseOption("Edit here");
     fireEvent.click(await screen.findByRole("button", { name: "Close studio" }));
     expect(screen.queryByLabelText("Embedded studio")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Edit Cell biology here" }));
+    await chooseOption("Edit here");
     await screen.findByLabelText("Embedded studio");
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(screen.queryByLabelText("Embedded studio")).toBeNull();
@@ -133,7 +145,7 @@ describe("editing an embedded work where it is embedded", () => {
     });
     try {
       render(<ArtifactEmbedById embedId="embed-1" editInPlace onOpenSource={vi.fn()} />);
-      fireEvent.click(screen.getByRole("button", { name: "Edit Cell biology here" }));
+      await chooseOption("Edit here");
       const studio = await screen.findByLabelText("Embedded studio");
       expect(studio.getAttribute("data-instance")).toBe("embed-1");
       fireEvent.click(screen.getByRole("button", { name: "Make a change" }));
@@ -161,11 +173,12 @@ describe("editing an embedded work where it is embedded", () => {
   it("keeps a pinned version read-only, with a clear way to follow the live work", async () => {
     harness.embed = embed({ versionPolicy: "pinned", pinnedVersionId: "version-1" });
     render(<ArtifactEmbedById embedId="embed-1" editInPlace />);
-    expect(screen.getByText("Pinned, read-only")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /here$/ })).toBeNull();
+    expect(screen.getByText("Saved version")).toBeTruthy();
     fireEvent.doubleClick(preview());
     expect(document.querySelector("[data-embed-editor]")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Follow live" }));
+    await openOptions();
+    expect(screen.queryByRole("menuitem", { name: /Edit here/ })).toBeNull();
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Follow the live work/ }));
     await waitFor(() =>
       expect(harness.update).toHaveBeenCalledWith({ embedId: "embed-1", versionPolicy: "live" }),
     );
@@ -173,7 +186,7 @@ describe("editing an embedded work where it is embedded", () => {
 
   it("pins the latest saved version", async () => {
     render(<ArtifactEmbedById embedId="embed-1" editInPlace />);
-    fireEvent.click(screen.getByRole("button", { name: "Pin the latest saved version" }));
+    await chooseOption("Keep this version");
     await waitFor(() =>
       expect(harness.update).toHaveBeenCalledWith({
         embedId: "embed-1",
@@ -184,7 +197,7 @@ describe("editing an embedded work where it is embedded", () => {
     expect(harness.getVersions).toHaveBeenCalledWith("deck-1", 1);
   });
 
-  it("is edited here only in an editor, by someone who may change the work, for a type that fits", () => {
+  it("is edited here only in an editor, by someone who may change the work, for a type that fits", async () => {
     expect(editableInPlace(embed())).toBe(true);
     expect(editableInPlace(embed({ canEditSource: false }))).toBe(false);
     expect(editableInPlace(embed({ versionPolicy: "pinned" }))).toBe(false);
@@ -195,6 +208,7 @@ describe("editing an embedded work where it is embedded", () => {
       ),
     ).toBe(false);
     render(<ArtifactEmbedById embedId="embed-1" />);
-    expect(screen.queryByRole("button", { name: "Edit Cell biology here" })).toBeNull();
+    await openOptions();
+    expect(screen.queryByRole("menuitem", { name: /Edit here/ })).toBeNull();
   });
 });

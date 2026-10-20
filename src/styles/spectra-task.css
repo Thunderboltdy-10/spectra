@@ -1,0 +1,676 @@
+/* ==========================================================================
+   A planner task (task-studio.tsx, EDITORS.md "Planner task")
+   --------------------------------------------------------------------------
+   A sheet headed like a diary entry: the due day stamped in the margin in the
+   task's yellow ink (red once it is late), the title in the display serif,
+   when it is due said as a sentence, and done as one press at the right.
+   ========================================================================== */
+
+.spectra-task-studio {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.task-sheet {
+  --task-ink: var(--type-task);
+}
+.task-sheet[data-late] {
+  --task-ink: var(--danger);
+}
+
+.task-head {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 18px;
+}
+
+/* The day, stamped: month over day, in the task's ink. */
+.task-stamp {
+  display: grid;
+  width: 56px;
+  height: 62px;
+  place-content: center;
+  justify-items: center;
+  border: 1px solid color-mix(in oklab, var(--task-ink) 38%, var(--card-border));
+  border-top-width: 6px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--task-ink) 9%, var(--card-paper));
+  color: color-mix(in oklab, var(--task-ink) 75%, var(--text-primary));
+}
+.task-stamp[data-empty] {
+  border-style: dashed;
+  border-top-width: 1px;
+  background: transparent;
+  color: var(--text-tertiary);
+}
+.task-stamp-month {
+  font-size: var(--text-micro);
+  font-weight: 600;
+  line-height: 1;
+}
+.task-stamp-day {
+  font-family: var(--font-display);
+  font-size: 26px;
+  line-height: 1.1;
+}
+
+.task-head-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+.task-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+.task-title {
+  width: 100%;
+  resize: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: clamp(26px, 2.2vw, 32px);
+  line-height: 1.2;
+  field-sizing: content;
+  outline: none;
+}
+.task-title::placeholder {
+  color: var(--text-placeholder);
+}
+.task-title:disabled {
+  opacity: 1;
+}
+.task-sheet[data-done] .task-title {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklab, var(--text-tertiary) 60%, transparent);
+  text-decoration-thickness: 1.5px;
+}
+
+/* When: a sentence that is also the control that changes it. */
+.task-when {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+.task-when-sentence {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  color: var(--text-secondary);
+  font-size: var(--text-body);
+}
+.task-when-pick {
+  margin-left: -8px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  text-align: left;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+.task-when-pick:hover,
+.task-when-pick[data-state="open"] {
+  background: color-mix(in oklab, var(--task-ink) 9%, transparent);
+}
+.task-when-pick[data-empty] {
+  align-items: center;
+  gap: 8px;
+  color: color-mix(in oklab, var(--task-ink) 80%, var(--text-secondary));
+  font-weight: 500;
+}
+.task-when-distance {
+  color: color-mix(in oklab, var(--task-ink) 70%, var(--text-secondary));
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+.task-when-distance.is-late {
+  color: var(--danger);
+}
+.task-when-target {
+  margin-left: -8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+  transition: background-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+}
+.task-when-target:hover:not(:disabled),
+.task-when-target[data-state="open"] {
+  background: color-mix(in oklab, var(--task-ink) 9%, transparent);
+  color: var(--text-secondary);
+}
+
+/* Done: a press that fills with green and strikes the title. */
+.task-done {
+  display: inline-flex;
+  height: 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 0 10px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: var(--card-paper);
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+.task-done:hover:not(:disabled) {
+  border-color: var(--success);
+  color: var(--text-primary);
+}
+.task-done:active:not(:disabled) {
+  transform: scale(0.95);
+}
+.task-done-mark {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  color: #fff;
+}
+.task-sheet[data-done] .task-done {
+  border-color: color-mix(in oklab, var(--success) 40%, transparent);
+  background: color-mix(in oklab, var(--success) 12%, var(--card-paper));
+  color: color-mix(in oklab, var(--success) 70%, var(--text-primary));
+}
+.task-sheet[data-done] .task-done-mark {
+  border-color: var(--success);
+  background: var(--success);
+}
+
+/* What the school asked: a slip pinned into the sheet, read only. */
+.task-brief {
+  padding: 14px 18px 16px;
+  border-left: 3px solid color-mix(in oklab, var(--task-ink) 60%, transparent);
+  border-radius: 0 10px 10px 0;
+  background: color-mix(in oklab, var(--task-ink) 6%, var(--card-paper));
+}
+.task-brief-text {
+  --prose-leading: 1.6;
+  max-height: 14em;
+  overflow: auto;
+  color: var(--text-primary);
+}
+
+.task-notes {
+  min-height: 72px;
+  padding: 2px 0;
+}
+/* Notes are written straight on the sheet; the formatting floats above them
+   only while they are being written. */
+.task-notes .ProseMirror {
+  min-height: 72px;
+  color: var(--text-primary);
+  font-size: var(--text-body);
+  line-height: 1.65;
+}
+.task-notes .ProseMirror p.is-editor-empty:first-child::before {
+  color: var(--text-placeholder);
+}
+.task-notes .spectra-rich-text-editor:not(:focus-within) .spectra-rich-text-format-bar {
+  display: none;
+}
+.task-notes .spectra-rich-text-format-bar [role="toolbar"] {
+  bottom: calc(100% + 6px);
+  left: -12px;
+  animation: sheet-unfold var(--motion-fast) var(--ease-standard) both;
+}
+
+/* Steps, and the rule that fills as they are ticked. */
+.task-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+.task-progress-rule {
+  position: relative;
+  width: 96px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--bg-secondary);
+}
+.task-progress-rule::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--done);
+  border-radius: inherit;
+  background: var(--success);
+  transition: width var(--motion-base) var(--ease-standard);
+}
+.task-steps {
+  display: flex;
+  flex-direction: column;
+}
+.task-step {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid color-mix(in oklab, var(--card-border) 60%, transparent);
+}
+.task-step input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  accent-color: var(--success);
+}
+.task-step input[type="text"] {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-body);
+  outline: none;
+}
+.task-step[data-done] input[type="text"] {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+}
+.task-step .sheet-icon-button {
+  opacity: 0;
+}
+.task-step:is(:hover, :focus-within) .sheet-icon-button {
+  opacity: 1;
+}
+.task-step--new {
+  border-bottom: 0;
+  color: var(--text-tertiary);
+}
+.task-step--new svg {
+  width: 16px;
+  flex: none;
+}
+.task-step--new input[type="text"]::placeholder {
+  color: var(--text-placeholder);
+}
+
+/* Linked work: slips in each work's own ink that open it. */
+.task-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+.task-link {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 2px;
+  padding-right: 2px;
+  border: 1px solid var(--card-border);
+  border-left: 3px solid var(--type-ink);
+  border-radius: 6px 10px 10px 6px;
+  background: color-mix(in oklab, var(--type-ink) 5%, var(--card-paper));
+}
+.task-link-open {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 320px;
+  height: 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px 0 10px;
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+}
+.task-link-open svg {
+  flex: none;
+  color: var(--type-ink);
+}
+.task-link-where {
+  flex: none;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+}
+.task-picker {
+  display: flex;
+  width: min(380px, 100%);
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+  animation: sheet-unfold 180ms var(--ease-standard) both;
+}
+.task-picker-note {
+  padding: 2px 4px 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+}
+.task-picker-row {
+  display: flex;
+  width: 100%;
+  height: 34px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  text-align: left;
+}
+.task-picker-row svg {
+  flex: none;
+  color: var(--type-ink);
+}
+.task-picker-row:hover,
+.task-picker-row:focus-visible {
+  background: var(--bg-hover);
+}
+
+/* Reminders: one line each, taken away from its end; the select adds the next. */
+.task-reminders {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+.task-reminder-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.task-reminder {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: var(--text-ui);
+}
+.task-reminder > svg {
+  color: var(--task-ink);
+}
+.task-reminder .sheet-icon-button {
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+.task-reminder:is(:hover, :focus-within) .sheet-icon-button {
+  opacity: 1;
+}
+
+/* The due picker: the usual days with their dates, then a day and time of one's own. */
+.due-picker {
+  width: 300px;
+  padding: 6px;
+}
+.due-picker-days {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.due-picker-days button {
+  display: flex;
+  width: 100%;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: var(--text-ui);
+  font-weight: 500;
+}
+.due-picker-days button:hover,
+.due-picker-days button:focus-visible {
+  background: var(--bg-hover);
+  outline: none;
+}
+.due-picker-days button[aria-current] {
+  color: var(--type-task);
+}
+.due-picker-date {
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.due-picker-own {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px auto;
+  align-items: end;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 10px 6px 4px;
+  border-top: 1px solid var(--card-border);
+}
+.due-picker-own label {
+  display: grid;
+  gap: 4px;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  font-weight: 500;
+}
+.due-picker-own .sheet-input {
+  width: 100%;
+  height: 32px;
+}
+.due-picker-set {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--type-task);
+  color: var(--bg-primary);
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+.due-picker-set:disabled {
+  opacity: 0.45;
+}
+.due-picker-hint {
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+.due-picker-clear {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 0 10px;
+  border-top: 1px solid var(--card-border);
+  color: var(--text-secondary);
+  font-size: var(--text-ui);
+}
+.due-picker-clear:hover {
+  color: var(--danger);
+}
+.due-picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* In the side panel the stamp and done stay; the head wraps done under. */
+[data-mode="split"] .task-head {
+  grid-template-columns: 48px minmax(0, 1fr);
+}
+[data-mode="split"] .task-stamp {
+  width: 48px;
+  height: 54px;
+}
+[data-mode="split"] .task-done {
+  grid-column: 2;
+  justify-self: start;
+}
+[data-mode="split"] .task-when-target {
+  margin-left: 0;
+}
+
+/* How much of its time is gone: a hairline from the day it was added to the
+   day it is due, filled to today, in the task's ink. */
+.task-elapsed {
+  display: flex;
+  max-width: 420px;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 2px;
+}
+.task-elapsed-rule {
+  position: relative;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--task-ink) 14%, var(--bg-tertiary));
+}
+.task-elapsed-rule > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: color-mix(in oklab, var(--task-ink) 78%, var(--text-secondary));
+  transition: width var(--motion-slow) var(--ease-standard);
+}
+.task-elapsed-words {
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+
+/* --------------------------------------------------------------------------
+   A task opened beside its calendar block (task-peek.tsx): the same sheet,
+   pared to what a glance needs. No studio chrome; a smaller stamp and title;
+   it scrolls inside itself and never reaches down behind the island.
+   -------------------------------------------------------------------------- */
+
+.task-peek {
+  position: fixed;
+  z-index: calc(var(--z-dropdown) - 1);
+  display: flex;
+  max-height: var(--peek-max, 560px);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  background: var(--card-paper);
+  box-shadow: var(--shadow-lg);
+  transform-origin: var(--peek-origin, left top);
+  animation: task-peek-in 200ms var(--ease-standard) both;
+}
+@keyframes task-peek-in {
+  from {
+    opacity: 0;
+    scale: 0.97;
+  }
+}
+.task-peek-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.task-peek-body > section {
+  border-left-width: 0;
+}
+.task-peek .spectra-artifact-header {
+  display: none;
+}
+.task-peek .spectra-artifact-studio .spectra-artifact-main {
+  overflow: visible;
+  padding: 0 !important;
+}
+.task-peek .task-notes .ProseMirror {
+  min-height: 44px;
+}
+.task-peek .spectra-composer-clearance {
+  padding-bottom: 0;
+}
+.task-peek .editor-sheet {
+  --sheet-pad-x: 20px;
+  --sheet-pad-y: 18px;
+  width: 100%;
+  gap: 18px;
+  margin: 0;
+  padding-bottom: 18px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  animation: none;
+}
+.task-peek .task-head {
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 12px;
+}
+.task-peek .task-stamp {
+  width: 44px;
+  height: 50px;
+  border-top-width: 5px;
+}
+.task-peek .task-stamp-day {
+  font-size: 20px;
+}
+.task-peek .task-title {
+  font-size: 21px;
+}
+.task-peek-foot {
+  display: flex;
+  flex-shrink: 0;
+  justify-content: flex-end;
+  padding: 6px 8px;
+  border-top: 1px solid var(--card-border-soft);
+}
+.task-peek-full {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: var(--radius-control);
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+}
+.task-peek-full:hover,
+.task-peek-full:focus-visible {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.task-peek-ghost {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px;
+}
+.task-peek-failure {
+  margin: 0;
+  padding: 18px 20px;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-peek {
+    animation: none;
+  }
+}

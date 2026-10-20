@@ -174,6 +174,15 @@ vi.mock("../components/conversation-surface", () => ({
   ),
 }));
 
+// The thread column's browser reads live threads; one row stands in for it.
+vi.mock("../threads/threads-view", () => ({
+  ThreadsBrowser: ({ onChoose }: { onChoose: (thread: { _id: string; title: string }) => void }) => (
+    <button type="button" onClick={() => onChoose({ _id: "saved-thread", title: "Saved conversation" })}>
+      Saved conversation
+    </button>
+  ),
+}));
+
 vi.mock("../components/command-bar", () => ({
   CommandBar: () => <div data-testid="command-bar" />,
 }));
@@ -246,10 +255,10 @@ afterEach(() => {
 
 describe("ChatShell load states", () => {
   it("does not turn an initial chat read failure into a welcome state", async () => {
-    mocks.getThreads.mockRejectedValueOnce(new Error("gateway unavailable"));
+    mocks.getOverview.mockRejectedValueOnce(new Error("gateway unavailable"));
     render(<ChatShell />);
 
-    expect(await screen.findByText("Chat could not load")).toBeTruthy();
+    expect(await screen.findByText("Threads could not load")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
     expect(screen.queryByText(/Bring a half-formed question/)).toBeNull();
   });
@@ -260,9 +269,9 @@ describe("ChatShell load states", () => {
     render(<ChatShell />);
 
     expect(
-      await screen.findByText("This conversation could not load"),
+      await screen.findByText("This thread could not load"),
     ).toBeTruthy();
-    expect(mocks.router.replace).not.toHaveBeenCalledWith("/chat?new=1");
+    expect(mocks.router.replace).not.toHaveBeenCalledWith("/home");
   });
 
   it("answers a clarification in its existing conversation", async () => {
@@ -288,7 +297,7 @@ describe("ChatShell load states", () => {
         }),
       ),
     );
-    expect(mocks.router.replace).not.toHaveBeenCalledWith("/chat?new=1");
+    expect(mocks.router.replace).not.toHaveBeenCalledWith("/home");
   });
 
   it("does not start a new chat when a clarification has lost its thread", async () => {
@@ -302,15 +311,15 @@ describe("ChatShell load states", () => {
     );
   });
 
-  it("redirects a confirmed missing thread through the normal new-chat route", async () => {
+  it("sends a confirmed missing thread back to Home", async () => {
     mocks.searchParams = new URLSearchParams("threadId=deleted-thread");
     mocks.getThread.mockResolvedValueOnce(null);
     render(<ChatShell />);
 
     await waitFor(() =>
-      expect(mocks.router.replace).toHaveBeenCalledWith("/chat?new=1"),
+      expect(mocks.router.replace).toHaveBeenCalledWith("/home"),
     );
-    expect(screen.queryByText("Chat could not load")).toBeNull();
+    expect(screen.queryByText("Threads could not load")).toBeNull();
   });
 
   it.each(["context", "conversation"] as const)("keeps the last loaded messages visible when a background %s refresh fails", async (scope) => {
@@ -323,7 +332,7 @@ describe("ChatShell load states", () => {
     render(<ChatShell />);
 
     expect(await screen.findByText("Keep this message visible.")).toBeTruthy();
-    if (scope === "context") mocks.getThreads.mockRejectedValueOnce(new Error("gateway unavailable"));
+    if (scope === "context") mocks.getOverview.mockRejectedValueOnce(new Error("gateway unavailable"));
     else mocks.getThread.mockRejectedValueOnce(new Error("gateway unavailable"));
 
     await act(async () => {
@@ -331,7 +340,7 @@ describe("ChatShell load states", () => {
     });
 
     expect(
-      await screen.findByText(scope === "context" ? "Chat context could not load" : "This conversation could not refresh"),
+      await screen.findByText(scope === "context" ? "Your work could not load" : "This thread could not refresh"),
     ).toBeTruthy();
     expect(screen.getByText("Keep this message visible.")).toBeTruthy();
     expect(screen.queryByText(/New conversation/)).toBeNull();
@@ -342,7 +351,7 @@ describe("ChatShell load states", () => {
     const trigger = screen.getByRole("button", { name: "Runs" });
     trigger.focus();
     fireEvent.click(trigger);
-    expect(await screen.findByRole("heading", { name: "Runs and chats" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Runs" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Close runs" }));
 
@@ -401,7 +410,7 @@ describe("ChatShell load states", () => {
   });
 });
 
-describe("ChatShell chat actions", () => {
+describe("ChatShell thread actions", () => {
   function openSavedChat() {
     mocks.searchParams = new URLSearchParams("threadId=saved-thread");
     mocks.getThread.mockResolvedValue({
@@ -414,8 +423,8 @@ describe("ChatShell chat actions", () => {
 
   it("keeps the rename open and says so when saving the name fails", async () => {
     openSavedChat();
-    fireEvent.click(await screen.findByRole("button", { name: "Rename chat" }));
-    const field = screen.getByRole("textbox", { name: "Chat name" });
+    fireEvent.click(await screen.findByRole("button", { name: "Rename thread" }));
+    const field = screen.getByRole("textbox", { name: "Thread name" });
     fireEvent.change(field, { target: { value: "Exam prep" } });
     mocks.postSpectra.mockRejectedValueOnce(new Error("network down"));
     await act(async () => {
@@ -425,16 +434,16 @@ describe("ChatShell chat actions", () => {
 
     await waitFor(() =>
       expect(mocks.toastError).toHaveBeenCalledWith(
-        "Could not rename this chat. Try again.",
+        "Could not rename this thread. Try again.",
       ),
     );
-    expect(screen.getByRole("textbox", { name: "Chat name" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Thread name" })).toBeTruthy();
   });
 
-  it("does not save an empty chat name", async () => {
+  it("does not save an empty thread name", async () => {
     openSavedChat();
-    fireEvent.click(await screen.findByRole("button", { name: "Rename chat" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Chat name" }), {
+    fireEvent.click(await screen.findByRole("button", { name: "Rename thread" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Thread name" }), {
       target: { value: "   " },
     });
     const save = screen.getByRole("button", { name: "Save name" });
@@ -447,32 +456,32 @@ describe("ChatShell chat actions", () => {
     openSavedChat();
     mocks.postSpectra.mockRejectedValueOnce(new Error("network down"));
     await act(async () => {
-      fireEvent.click(await screen.findByRole("button", { name: "Pin chat" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Pin thread" }));
       await Promise.resolve();
     });
     await waitFor(() =>
       expect(mocks.toastError).toHaveBeenCalledWith(
-        "Could not pin this chat. Try again.",
+        "Could not pin this thread. Try again.",
       ),
     );
   });
 
-  it("moves the open chat to the Trash, starts a new chat, and can undo", async () => {
+  it("moves the open thread to the Trash, returns Home, and can undo", async () => {
     mocks.placement.current = { node: { nodeId: "node-1" } };
     mocks.trash.mockResolvedValue({ trashed: [] });
     mocks.restore.mockResolvedValue({ restored: [] });
     openSavedChat();
     await act(async () => {
-      fireEvent.click(await screen.findByRole("button", { name: "Delete chat" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Delete thread" }));
       await Promise.resolve();
     });
 
     expect(mocks.trash).toHaveBeenCalledWith(["node-1"]);
     await waitFor(() =>
-      expect(mocks.router.replace).toHaveBeenCalledWith("/chat?new=1"),
+      expect(mocks.router.replace).toHaveBeenCalledWith("/home"),
     );
     const [message, options] = mocks.toastSuccess.mock.calls.at(-1)!;
-    expect(message).toBe("Chat moved to Trash.");
+    expect(message).toBe("Thread moved to Trash.");
     await act(async () => {
       options.action.onClick();
       await Promise.resolve();
@@ -480,7 +489,7 @@ describe("ChatShell chat actions", () => {
     expect(mocks.restore).toHaveBeenCalledWith(["node-1"]);
     await waitFor(() =>
       expect(mocks.router.replace).toHaveBeenCalledWith(
-        "/chat?threadId=saved-thread",
+        "/home?threadId=saved-thread",
       ),
     );
   });
@@ -503,7 +512,7 @@ describe("ChatShell primary conversation hydration", () => {
     traces: [],
   });
 
-  it.each([false, true])("keeps the current conversation when its history entry is selected (refresh failure=%s)", async (refreshFailure) => {
+  it.each([false, true])("keeps the current conversation when its row is chosen in the thread column (refresh failure=%s)", async (refreshFailure) => {
     mocks.searchParams = new URLSearchParams("threadId=saved-thread");
     mocks.getThreads.mockResolvedValue({ threads: [{ _id: "saved-thread", title: "Saved conversation", messageCount: 2 }] });
     mocks.getThread.mockResolvedValue(saved());
@@ -512,13 +521,12 @@ describe("ChatShell primary conversation hydration", () => {
     if (refreshFailure) {
       mocks.getThread.mockRejectedValueOnce(new Error("temporary read failure"));
       await act(async () => { await mocks.runOptions.current?.onDataChanged?.(); });
-      expect(await screen.findByText("This conversation could not refresh")).toBeTruthy();
+      expect(await screen.findByText("This thread could not refresh")).toBeTruthy();
     }
     const reads = mocks.getThread.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Show threads" }));
     for (let attempt = 0; attempt < 2; attempt++) {
-      fireEvent.click(screen.getByRole("button", { name: "Runs" }));
       fireEvent.click(await screen.findByRole("button", { name: /Saved conversation/ }));
-      expect(screen.queryByRole("heading", { name: "Runs and chats" })).toBeNull();
       expect(screen.getByText("Saved answer is available.")).toBeTruthy();
       expect(mocks.getThread).toHaveBeenCalledTimes(reads);
       expect(mocks.router.replace).not.toHaveBeenCalled();
@@ -533,7 +541,7 @@ describe("ChatShell primary conversation hydration", () => {
     mocks.getThreads.mockReturnValueOnce(threads.promise);
     mocks.getThread.mockResolvedValue(saved());
     render(<ChatShell />);
-    expect(screen.getByText("Loading conversation…")).toBeTruthy();
+    expect(screen.getByText("Opening thread…")).toBeTruthy();
     try {
       expect(await screen.findByText("Saved answer is available.")).toBeTruthy();
       expect(screen.getByText("Saved conversation")).toBeTruthy();
@@ -550,11 +558,11 @@ describe("ChatShell primary conversation hydration", () => {
     mocks.getThread.mockResolvedValue(saved());
     render(<ChatShell />);
     expect(await screen.findByText("Saved answer is available.")).toBeTruthy();
-    expect(await screen.findByText("Chat context could not load")).toBeTruthy();
+    expect(await screen.findByText("Your work could not load")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(screen.queryByText("Chat context could not load")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Your work could not load")).toBeNull());
     expect(screen.getByText("Saved answer is available.")).toBeTruthy();
-    expect(mocks.router.replace).not.toHaveBeenCalledWith("/chat?new=1");
+    expect(mocks.router.replace).not.toHaveBeenCalledWith("/home");
   });
 
   it("shows a primary read failure without waiting for supplementary context", async () => {
@@ -564,7 +572,7 @@ describe("ChatShell primary conversation hydration", () => {
     mocks.getThread.mockRejectedValueOnce(new Error("conversation unavailable"));
     render(<ChatShell />);
     try {
-      expect(await screen.findByText("This conversation could not load")).toBeTruthy();
+      expect(await screen.findByText("This thread could not load")).toBeTruthy();
       expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
     } finally { await act(async () => { overview.resolve({ workspaces: [], artifacts: [] }); }); }
   });
@@ -582,8 +590,8 @@ describe("ChatShell primary conversation hydration", () => {
       await waitFor(() => expect(mocks.getThread).toHaveBeenCalledWith("new-thread"));
       await act(async () => { overview.reject(new Error("old context unavailable")); });
       expect(screen.getByText("Saved answer is available.")).toBeTruthy();
-      expect(screen.queryByText("Chat context could not load")).toBeNull();
-      expect(screen.queryByText("This conversation could not load")).toBeNull();
+      expect(screen.queryByText("Your work could not load")).toBeNull();
+      expect(screen.queryByText("This thread could not load")).toBeNull();
     } finally { overview.resolve({ workspaces: [], artifacts: [] }); }
   });
 });

@@ -116,10 +116,10 @@ export function selectSyncTruth(input: SyncTruthInput): SyncTruth {
   if (error) {
     return {
       key: "error",
-      label: "Could not synchronize",
+      label: "Couldn't sync",
       detail: error.errorCode
         ? humanizePublicFailure(error.errorCode)
-        : "Synchronization stopped. Try again, or keep working here.",
+        : "Syncing stopped. Try again, or keep working here.",
       tone: "danger",
     };
   }
@@ -162,8 +162,8 @@ export function selectSyncTruth(input: SyncTruthInput): SyncTruth {
         : retryingReplica
         ? `${humanizePublicFailure(retryingReplica.errorCode!)}. Spectra will retry automatically.`
         : queuedChangeCount > 0 && pendingCount === 0
-          ? `${queuedChangeCount} change${queuedChangeCount === 1 ? " is" : "s are"} still queued for synchronization.`
-          : "A verified operation is still in progress.",
+          ? `${queuedChangeCount} change${queuedChangeCount === 1 ? " is" : "s are"} waiting to sync.`
+          : "Saving your latest changes.",
       tone: "neutral",
     };
   }
@@ -184,7 +184,7 @@ export function selectSyncTruth(input: SyncTruthInput): SyncTruth {
     return {
       key: "synced",
       label: "Synced",
-      detail: "Every copy agrees at a verified revision.",
+      detail: "Up to date everywhere.",
       tone: "positive",
     };
   }
@@ -192,7 +192,7 @@ export function selectSyncTruth(input: SyncTruthInput): SyncTruth {
     return {
       key: "saved-locally",
       label: "Saved locally",
-      detail: "The bytes were read back and verified on this device.",
+      detail: "Saved on this device.",
       tone: "positive",
     };
   }
@@ -200,8 +200,8 @@ export function selectSyncTruth(input: SyncTruthInput): SyncTruth {
     key: "saved",
     label: "Saved",
     detail: current.length
-      ? "The cloud revision is verified."
-      : "No copy has reported a verified revision yet.",
+      ? "Saved to Spectra."
+      : "Not saved anywhere yet.",
     tone: current.length ? "positive" : "neutral",
   };
 }
@@ -303,7 +303,7 @@ export function presentSync(input: PresentSyncInput): SyncPresentation {
       label: "Read-only",
       detail: input.protectedOriginal
         ? PROTECTED_ORIGINAL_TOGGLE.consequence
-        : "You can inspect this work, but only someone with edit access can change it.",
+        : "You can look, but only people with edit access can change it.",
       tone: "neutral",
       ready: false,
     };
@@ -314,7 +314,7 @@ export function presentSync(input: PresentSyncInput): SyncPresentation {
       state: "pending",
       label: "Refreshing access",
       detail:
-        "Spectra is refreshing this work's access. You can keep editing your local draft.",
+        "Checking your access. Keep editing; your changes are kept.",
       tone: "warning",
       ready: false,
     };
@@ -387,7 +387,7 @@ export function presentSync(input: PresentSyncInput): SyncPresentation {
         state: "saving",
         label: "Waiting for Office",
         detail:
-          "Office still has this file open. Spectra will verify it after Office finishes saving.",
+          "Office still has this file open. It saves here once Office is done.",
         tone: "warning",
         ready: false,
       };
@@ -400,8 +400,8 @@ export function presentSync(input: PresentSyncInput): SyncPresentation {
         label: queued > 0 ? "Queued" : "Not running",
         detail:
           queued > 0
-            ? "This file lives on your PC. Its background connection is unavailable. Changes remain queued safely."
-            : "This file lives on your PC. Connect this device from Files and devices in Spectra.",
+            ? "This file is on your computer, which isn't connected right now. Your changes will sync when it is."
+            : "This file is on your computer. Connect it from Devices to open it here.",
         tone: "warning",
         ready: false,
       };

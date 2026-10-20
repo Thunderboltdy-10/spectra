@@ -198,6 +198,9 @@ function officialPersonalCapabilities() {
         syncKind: "classes",
         fanOutParameter: "class_id",
         classIdFromRouteParameter: "class_id",
+        // A membership can outlive its class: ManageBac answers 404 for a
+        // class that was removed or that a student can no longer open.
+        notFoundIsEmpty: true,
         recordsPath: ["class", "$"],
         idPath: "id",
         requiredPaths: ["id"],
@@ -249,6 +252,8 @@ function officialPersonalCapabilities() {
       normalization: {
         fanOutParameter: "class_id",
         classIdFromRouteParameter: "class_id",
+        // The same for its tasks: one closed class is not a broken route.
+        notFoundIsEmpty: true,
         recordsPath: ["tasks", "coursework", "items"],
         idPath: "id",
         modifiedAtPath: "updated_at",
@@ -510,7 +515,9 @@ async function ensureOfficialPersonalCapabilityManifest(
       ...item,
       freshnessSlaMinutes: 120,
       permissionState: "read_only" as const,
-      verificationStatus: "verified" as const,
+      // Only a route with a response contract can be kept as verified; one
+      // without stays listed but unverified, so it never blocks the refresh.
+      verificationStatus: item.responseSchemaHash ? ("verified" as const) : ("unverified" as const),
       routeSource: "tenant_reference" as const,
     }));
   const capabilities = [...existing, ...official];
@@ -1252,6 +1259,7 @@ async function runSync(
   // reveals during the job are not read until the student selects them.
   const targetClassIds = new Set(accessibleClassIds);
   const targetYearGroupIds = new Set(accessibleYearGroupIds);
+  let keyAccepted = false;
   const pacedFetch = async (
     capability: ConnectorContext["capabilities"][number],
     input: Parameters<typeof providerFetch>[3],
@@ -1266,7 +1274,37 @@ async function runSync(
       );
     if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
     lastProviderRequestAt = Date.now();
-    return providerFetch(context, capability, token, input);
+    try {
+      const payload = await providerFetch(context, capability, token, input);
+      keyAccepted = true;
+      return payload;
+    } catch (error) {
+      // ManageBac answers 401 for a route the key was never granted, too. When
+      // the key stands (it was accepted in this sync, or the identity lookup
+      // every key is granted still answers), the refusal is this route's, so
+      // it must not block the school's whole connection.
+      if (
+        error instanceof Error &&
+        error.message.startsWith("INTEGRATION_CREDENTIAL_REJECTED") &&
+        (keyAccepted || (await keyStillAccepted(capability)))
+      )
+        throw new Error(`INTEGRATION_PERMISSION_DENIED: The school's ManageBac API key doesn't allow ${capability.name}.`);
+      throw error;
+    }
+  };
+  /** One look at the identity lookup, the route a working key always reaches. */
+  const keyStillAccepted = async (refused: ConnectorContext["capabilities"][number]) => {
+    const identity = context.capabilities.find(
+      (item) => item._id !== refused._id && object(item.normalization).identityOnly === true,
+    );
+    if (!identity || !actor.email) return false;
+    try {
+      await providerFetch(context, identity, token, { verifiedEmail: actor.email });
+      keyAccepted = true;
+      return true;
+    } catch {
+      return false;
+    }
   };
   try {
     for (const capability of ordered) {
@@ -1512,12 +1550,15 @@ async function runSync(
             ? error.message
             : "INTEGRATION_CAPABILITY_FAILED";
         // These end the whole sync. Quarantining one route for them would
-        // hide a school-wide cause behind a single route.
+        // hide a school-wide cause behind a single route, and a fault of
+        // Spectra's own (a timed-out commit, a dropped connection) says
+        // nothing about the route: the next sync simply tries again.
         if (
           message.startsWith("INTEGRATION_CREDENTIAL_REJECTED") ||
           message.startsWith("INTEGRATION_PERMISSION_DENIED") ||
           message.startsWith("INTEGRATION_RATE_LIMITED") ||
-          message.startsWith("INTEGRATION_SYNC_TIME_BUDGET")
+          message.startsWith("INTEGRATION_SYNC_TIME_BUDGET") ||
+          transientFailure(error, message)
         )
           throw error;
         const reasonCode =
@@ -1638,12 +1679,55 @@ type StudentSyncJob = {
   errorSummary?: string;
 };
 
+/**
+ * A failure that is not the provider's answer: Convex refusing or timing out
+ * a commit, or the request never completing. Only the provider's own
+ * answers (a status, a shape) may quarantine a route.
+ */
+function transientFailure(error: unknown, message: string) {
+  if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) return true;
+  return /\[Request ID:|Server Error|execution timed out|fetch failed|ECONNRESET|ETIMEDOUT/i.test(message);
+}
+
 function errorParts(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : fallback;
   return {
     errorCode: message.match(/^([A-Z0-9_]+)/)?.[1] ?? fallback,
     errorSummary: message.replace(/^[A-Z0-9_]+:\s*/, "").slice(0, 500),
   };
+}
+
+/**
+ * A blocked connection, looked at again with the key already saved: one call
+ * to the student lookup every key is granted. If ManageBac takes the key, the
+ * block was a single route's refusal (or ManageBac's passing fault) and the
+ * connection opens again; if it still refuses, only a new key will do.
+ */
+async function recheckSavedKey(actor: { schoolId: string; email?: string }) {
+  const { integration } = (await convexQuery("managebac:adminOverview", {})) as {
+    integration?: { baseUrl?: string; authHeaderName?: string; authScheme?: string; status?: string } | null;
+  };
+  if (!integration?.baseUrl) throw new Error("INTEGRATION_NOT_CONFIGURED: ManageBac is not configured.");
+  if (integration.status !== "blocked") return { outcome: "not_blocked" as const };
+  const secret = await loadSchoolSecretForConnector({ schoolId: actor.schoolId, purpose: "managebac-api-token" });
+  if (!secret) return { outcome: "key_missing" as const };
+  const url = new URL("/v2p2/students", normalizeManageBacBaseUrl(integration.baseUrl));
+  if (actor.email) url.searchParams.set("q", actor.email);
+  await assertPublicApiHost(url.origin);
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      [integration.authHeaderName || "auth-token"]: integration.authScheme === "bearer" ? `Bearer ${secret.value}` : secret.value,
+    },
+    redirect: "error",
+    cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (response.status === 401) return { outcome: "key_refused" as const };
+  if (!response.ok) return { outcome: "unreachable" as const, status: response.status };
+  await convexMutation("managebac:reopenBlocked", {});
+  return { outcome: "reopened" as const };
 }
 
 /** Errors after which no other kind can be read in this request either. */
@@ -2275,6 +2359,14 @@ export async function POST(request: NextRequest) {
       return ok(await convexMutation("managebac:disconnect", {}));
     }
 
+    if (action === "recheck") {
+      if (actor.schoolRole !== "school_admin")
+        throw new Error(
+          "AUTH_SCHOOL_ADMIN_REQUIRED: School administrator access is required.",
+        );
+      return ok(await recheckSavedKey(actor));
+    }
+
     const overview = (await convexQuery(
       actor.schoolRole === "school_admin"
         ? "managebac:adminOverview"
@@ -2331,7 +2423,10 @@ export async function POST(request: NextRequest) {
       });
     }
     let context = await connectorContext(actor, integrationId);
-    if (action === "resolveIdentity")
+    // Matching and a student's sync run on Spectra's official routes: a route
+    // Spectra has since corrected replaces the stored one before it runs. The
+    // school reconciliation reads the shared routes, so it leaves them be.
+    if (action === "resolveIdentity" || (action === "sync" && body.kind !== "reconciliation"))
       context = await ensureOfficialPersonalCapabilityManifest(
         actor,
         integrationId,

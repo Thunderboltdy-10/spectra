@@ -13,7 +13,7 @@ describe("ManageBac sync UX honesty", () => {
     const shell = source(
       "src/features/spectra/pages/managebac-integration-shell.tsx",
     );
-    expect(shell).toContain("Validating ManageBac capabilities");
+    expect(shell).toContain("Spectra is checking what it can read from ManageBac. Syncing starts once that is done.");
     expect(shell).toContain("integrationStatusLabel");
     expect(shell).toContain('"ManageBac connection"');
     expect(shell).toContain('"Your ManageBac data"');

@@ -96,7 +96,7 @@ export function CookieConsentManager() {
     <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
       {showBanner ? (
         <section className="fixed inset-x-4 bottom-4 z-toast mx-auto w-full max-w-3xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)] sm:inset-x-0">
-          <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Cookie Preferences</p>
+          <p className="text-xs text-[var(--text-secondary)]">Cookie Preferences</p>
           <h2 className="mt-1 font-display text-2xl text-[var(--text-primary)]">Your privacy choices</h2>
           <p className="mt-2 text-sm text-[var(--text-secondary)]">
             We use required cookies for core functionality. Optional cookies help personalize settings and measure product
@@ -151,7 +151,7 @@ export function CookieConsentManager() {
         className="w-[min(94vw,30rem)] max-w-none gap-0 p-4"
       >
         <DialogHeader className="pr-10">
-          <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-secondary)]">Cookie settings</p>
+          <p className="text-xs text-[var(--text-secondary)]">Cookie settings</p>
           <DialogTitle className="font-display text-2xl font-normal">Manage consent</DialogTitle>
           <DialogDescription className="sr-only">
             Choose which optional cookies Spectra may use.

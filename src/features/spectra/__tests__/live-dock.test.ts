@@ -159,9 +159,6 @@ describe("Live Dock V2", () => {
     expect(css).toContain("min-width: calc((100% - 12px) / 3)");
     expect(css).toContain("flex: 1 1 calc((100% - 12px) / 3)");
     expect(css).not.toContain("flex: 1 1 240px");
-    expect(css).toContain(
-      '[data-studio-mode="tab"][data-blueprint="document"]',
-    );
     expect(css).not.toContain("min-height: 52px !important");
     expect(css).toContain(".spectra-run-tab-strip::-webkit-scrollbar {");
     expect(css).toContain(".spectra-live-dock-progress::-webkit-scrollbar {");
@@ -213,7 +210,7 @@ describe("Live Dock V2", () => {
     // The island is the only composer: thread surfaces render no field of their own.
     expect(surface).not.toContain("CommandBar");
     const island = read("src/features/spectra/island/island.tsx");
-    expect(island).toContain("engine.steer(engine.activeRunId, message.text, message.attachments)");
+    expect(island).toContain("engine.steer(steering, message.text, message.attachments)");
     const panel = read("src/features/spectra/components/live-thread-panel.tsx");
     expect(panel).toContain("ThreadConversation");
   });
@@ -221,16 +218,13 @@ describe("Live Dock V2", () => {
   it("keeps explicit New thread and touch/keyboard disclosure paths", () => {
     const shell = read("src/features/spectra/pages/spectra-shell.tsx");
     expect(shell).toContain("function startFreshComposerThread() ");
-    expect(shell).toContain(
-      "skipAutoContinueThreadIdRef.current = liveThread.id",
-    );
     // The workspace lends the island its engine; the island writes into the
     // thread in focus, or a new one once the user lets go of it.
     expect(shell).toContain("useProvideIslandEngine(");
     expect(shell).toContain("startNewThread: () => islandHandlers.current.startNew()");
     const island = read("src/features/spectra/island/island.tsx");
     expect(island).toContain("threadId: focus?.threadId ?? null");
-    expect(island).toContain("onLetGo={slot?.startNewThread}");
+    expect(island).toContain("if (fresh) slot?.startNewThread?.();");
     // The thread panel's width state is its intent; the row allocator turns
     // intents into actual widths (`allocateWorkbenchPanes`).
     expect(shell).toContain("width={paneWidths.thread ?? liveThreadPanelWidth}");
@@ -272,7 +266,7 @@ describe("Live Dock V2", () => {
     expect(fs.existsSync(path.join(root, "src/features/spectra/components/global-route-workbench.tsx"))).toBe(false);
     expect(fs.existsSync(path.join(root, "src/features/spectra/pages/workbench-dock-shell.tsx"))).toBe(false);
     const host = read("src/features/spectra/island/island-host.tsx");
-    expect(host).toContain('"/chat", "/workspace", "/library", "/agents"');
+    expect(host).toContain('[HOME_PATH, "/workspace", "/library", "/agents"]');
   });
 
   it("keeps conversation and Stop immediate, with Follow Undo and Close in the shared overflow", () => {
@@ -375,6 +369,7 @@ describe("Live Dock V2", () => {
     expect(shell).toContain('if (artifact.blueprintKey === "thread_reference")');
     expect(shell).toContain("setLiveThread({ id: threadId, title: artifact.title })");
     const panel = read("src/features/spectra/components/live-thread-panel.tsx");
-    expect(panel).toContain("Continue this chat in the Live Dock");
+    // The panel's own way out to the full thread page.
+    expect(panel).toContain('label="Open as page"');
   });
 });

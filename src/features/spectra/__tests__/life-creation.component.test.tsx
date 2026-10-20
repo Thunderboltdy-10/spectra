@@ -57,14 +57,16 @@ afterEach(() => {
 });
 
 describe("creating by hand", () => {
-  it("gathers dots where it was asked for, and the surface that opens grows out of them", () => {
+  it("gathers a skeleton where it was asked for, and the surface that opens lands as it fades", () => {
     const creation = beginCreation({ from: [200, 150] });
     expect(field.ghost).toHaveBeenCalledTimes(1);
     expect(field.ghost.mock.calls[0]).toEqual([expect.objectContaining({ strokes: expect.any(Array) }), { from: [200, 150] }]);
     creation.land();
-    render(<Studio id="work-1" />);
-    expect(field.morph).toHaveBeenCalledTimes(1);
-    expect(field.morph.mock.calls[0][0]).toBe(field.seed);
+    const view = render(<Studio id="work-1" />);
+    // The surface is there at once; the skeleton gives way and the band crosses what opened.
+    expect(field.morph).not.toHaveBeenCalled();
+    expect(field.seed.release).toHaveBeenCalledTimes(1);
+    expect(view.getByText("work-1").getAttribute("data-life-working")).toBe("arrival");
   });
 
   it("parts where it gathered when nothing was made", () => {
@@ -83,10 +85,11 @@ describe("creating by hand", () => {
     render(<Row id="event-1" />);
     expect(field.morph).toHaveBeenCalledTimes(1);
     expect(field.morph.mock.calls[0][0]).toBe(field.seed);
-    // Only once: the next arrival forms where the user acted.
-    render(<Row id="event-2" />);
+    // Only once: the next arrival is simply there, crossed by the band.
+    const next = render(<Row id="event-2" />);
     expect(field.morph).toHaveBeenCalledTimes(1);
-    expect(field.form).toHaveBeenCalledTimes(1);
+    expect(field.form).not.toHaveBeenCalled();
+    expect(next.getByText("event-2").getAttribute("data-life-working")).toBe("arrival");
   });
 
   it("an item landed under a key grows only into that item, whatever its arrival", () => {

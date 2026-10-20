@@ -6,26 +6,21 @@ import {
   AlertCircle,
   Archive,
   BookOpen,
-  CheckCircle2,
-  ChevronDown,
-  Copy,
   FileDown,
-  Focus,
   FolderPlus,
   Gauge,
-  ImageIcon,
   Import,
-  LayoutTemplate,
+  Keyboard,
+  Languages,
+  Lightbulb,
+  Sigma,
   Loader2,
   PanelLeft,
   Play,
   Plus,
   Printer,
   RefreshCw,
-  RotateCcw,
   Search,
-  SlidersHorizontal,
-  Trash2,
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -39,10 +34,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { LifeForm, LifeVerdict } from "@/components/ui/life-moments";
-import { useModalFocus } from "@/components/ui/use-modal-focus";
 import { recentCause, verdictAt } from "../life/use-life";
-import { createPortal } from "react-dom";
-import { targetAttrs } from "../collaboration/target-attributes";
 import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
@@ -61,18 +53,11 @@ import {
 } from "../data/api";
 import { parseDelimited } from "../sheets/model";
 import type { WorkCapability } from "../work/registry";
-import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 import { spectraBus } from "../events";
 import { CARD_NOUNS, itemForRegion, itemInPassage, plainOfMarkup, type WorkRegion } from "../anchors/locate";
 import { regionElement, useOpenAnchor, type AnchorLanding } from "../anchors/use-open-anchor";
-import {
-  ArtifactRichTextEditor,
-  Field,
-  deckCards,
-  iconButtonClass,
-  inputClass,
-} from "./artifact-studio";
+import { deckCards } from "./artifact-studio";
 import { plainTextFromStored } from "../rich-content";
 import { SpectraStoredText } from "./spectra-rich-content";
 import {
@@ -93,6 +78,11 @@ import {
 } from "./artifact-studio-file-utils";
 import { useStudioContract } from "./artifact-studio-shell";
 import { StudioItemRail } from "./studio-item-rail";
+import { CardThumbnail } from "./flashcards/card-thumbnail";
+import { QuickCardEntry } from "./flashcards/quick-card-entry";
+import { TypedAnswerDiff, foldForComparison } from "./flashcards/typed-answer-diff";
+import { CardSheet } from "./flashcards/card-sheet";
+import { cardFingerprint } from "./flashcards/card-equality";
 import {
   ArtifactWorkbar,
   WorkbarItemSelector,
@@ -100,13 +90,6 @@ import {
   type CommandBinding,
 } from "./artifact-workbar";
 import { projectBindingsFromIr } from "../capabilities";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 /** The two ways of reading a deck without authoring it, in bar order. */
 const readingViews = [
@@ -119,11 +102,11 @@ const readingViews = [
   requires?: WorkCapability;
 }>;
 
-/** Starting shapes for a new card, offered in the bar's overflow menu. */
+/** Starting shapes for a new card, on the bar's Cards tab. */
 const deckTemplates = [
-  { kind: "concept", label: "Add a concept and cloze card" },
-  { kind: "language", label: "Add a vocabulary card" },
-  { kind: "formula", label: "Add a formula card" },
+  { kind: "concept", label: "Concept card", icon: Lightbulb },
+  { kind: "language", label: "Vocabulary card", icon: Languages },
+  { kind: "formula", label: "Formula card", icon: Sigma },
 ] as const;
 
 /**
@@ -173,7 +156,6 @@ export function FlashcardStudio({
   const [deckSearch, setDeckSearch] = useState("");
   const [draggedCardId, setDraggedCardId] = useState<string>();
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [deckTagDraft, setDeckTagDraft] = useState("");
   /**
    * Capability truth comes from the shell contract, which derives it from
    * `work/registry` permissions — never from the pane's width and never from a
@@ -227,6 +209,8 @@ export function FlashcardStudio({
   const [studyError, setStudyError] = useState<string>();
   const [studyTypedAnswer, setStudyTypedAnswer] = useState("");
   const [studyTypedCorrect, setStudyTypedCorrect] = useState<boolean>();
+  /** The learner's own choice to type answers, over the deck's default. */
+  const [studyTypingChoice, setStudyTypingChoice] = useState<boolean>();
   const [studyNoteDraft, setStudyNoteDraft] = useState("");
   const [studyNoteSaving, setStudyNoteSaving] = useState(false);
   const [studyShortcutsOpen, setStudyShortcutsOpen] = useState(false);
@@ -337,6 +321,7 @@ export function FlashcardStudio({
     ),
   );
   const deckSettings = record(record(content).settings);
+  const studyTyping = studyTypingChoice ?? deckSettings.revealMode === "type";
   const activeDeckMedia = activeCard?.media
     ? deckAssets.find((asset) => asset.assetId === activeCard.media?.assetId)
     : undefined;
@@ -349,11 +334,13 @@ export function FlashcardStudio({
   const activeCardDirty = Boolean(
     activeCard &&
     cardEditBaseline &&
-    JSON.stringify(activeCard) !== JSON.stringify(cardEditBaseline),
+    cardFingerprint(activeCard) !== cardFingerprint(cardEditBaseline),
   );
   const duplicateKeys = new Set(
     Array.from(
       cards.reduce((counts, card) => {
+        // Blank cards are unfinished, not duplicates of one another.
+        if (!card.front.trim() && !card.back.trim()) return counts;
         const key = `${card.front.trim().toLocaleLowerCase()}|${card.back.trim().toLocaleLowerCase()}`;
         counts.set(key, (counts.get(key) ?? 0) + 1);
         return counts;
@@ -587,7 +574,18 @@ export function FlashcardStudio({
   // Escape stays on the dialog's own key handler; the hook moves focus into
   // the session, keeps Tab inside it and returns focus when it closes.
   const studyDialogRef = useRef<HTMLDivElement>(null);
-  useModalFocus(studyDialogRef, { open: studyOpen && studyQueue.length > 0 });
+  // The session sits in the deck, not over the app, so it takes focus without
+  // trapping it: Tab still reaches the rail and the tabs beside it.
+  const studyShown = studyOpen && studyQueue.length > 0;
+  useEffect(() => {
+    if (!studyShown) return;
+    const opener =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    studyDialogRef.current?.focus({ preventScroll: true });
+    return () => {
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+    };
+  }, [studyShown]);
   const beginStudySessionRef = useRef(beginStudySession);
   useEffect(() => {
     beginStudySessionRef.current = beginStudySession;
@@ -650,16 +648,6 @@ export function FlashcardStudio({
         card.id === cardId ? { ...card, ...patch } : card,
       ),
     );
-  }
-
-  function addActiveCardTag() {
-    if (!activeCard) return;
-    const tag = deckTagDraft.trim();
-    if (!tag) return;
-    updateCard(activeCard.id, {
-      tags: [...new Set([...(activeCard.tags ?? []), tag])].slice(0, 8),
-    });
-    setDeckTagDraft("");
   }
 
   function deckMediaUrl(card: DeckCard) {
@@ -798,6 +786,25 @@ export function FlashcardStudio({
     setActiveCardId(card.id);
     setActiveSection(section);
     focusCardIdRef.current = card.id;
+  }
+
+  /** A card written in the quick entry joins the open card's section and
+   *  leaves the open card open. */
+  function appendCard(front: string, back: string) {
+    commit([
+      ...cards,
+      {
+        id: id("card"),
+        variant: "basic" as const,
+        front,
+        back,
+        hint: "",
+        explanation: "",
+        section: activeSection,
+        confidence: "unknown" as const,
+        difficulty: "medium" as const,
+      },
+    ]);
   }
 
   function reorderCard(draggedId: string, targetId: string) {
@@ -1615,28 +1622,11 @@ export function FlashcardStudio({
   function revealStudyAnswer() {
     if (!activeStudyCard) return;
     if (
-      deckSettings.revealMode === "type" &&
+      studyTyping &&
       studyTypedAnswer.trim().length > 0
     ) {
-      const normalize = (value: string) =>
-        plainTextFromStored(value)
-          .normalize("NFKD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLocaleLowerCase()
-          .replace(/[^\p{L}\p{N}]+/gu, " ")
-          .trim();
-      const response = normalize(studyTypedAnswer);
-      const accepted = [
-        activeStudyAnswer,
-        ...(activeStudyItem?.direction === "forward"
-          ? (activeStudyCard.acceptedAlternatives ?? [])
-          : []),
-        ...(activeStudyCard.variant === "cloze"
-          ? clozeParts(activeStudyCard.front).map((part) => part.answer)
-          : []),
-      ]
-        .map(normalize)
-        .filter(Boolean);
+      const response = foldForComparison(studyTypedAnswer);
+      const accepted = activeStudyAccepted.map(foldForComparison).filter(Boolean);
       setStudyTypedCorrect(accepted.includes(response));
     } else setStudyTypedCorrect(undefined);
     setStudyRevealed(true);
@@ -1789,6 +1779,19 @@ export function FlashcardStudio({
           ? activeStudyCard.front
           : activeStudyCard.back
       : "";
+  /** Every answer a typed response may match: the face, its alternatives, the blanks. */
+  const activeStudyAccepted =
+    activeStudyCard && activeStudyItem
+      ? [
+          activeStudyAnswer,
+          ...(activeStudyItem.direction === "forward"
+            ? (activeStudyCard.acceptedAlternatives ?? [])
+            : []),
+          ...(activeStudyCard.variant === "cloze"
+            ? clozeParts(activeStudyCard.front).map((part) => part.answer)
+            : []),
+        ]
+      : [];
   const activeStudyMedia = activeStudyCard?.media
     ? deckAssets.find(
         (asset) => asset.assetId === activeStudyCard.media?.assetId,
@@ -1826,10 +1829,10 @@ export function FlashcardStudio({
     ? ""
     : activeCard.variant === "cloze" &&
         clozeParts(activeCard.front).length === 0
-      ? "Make one answer on the front a cloze deletion before this card can be studied."
+      ? "Hide at least one word on the front before this card can be studied."
       : activeCard.variant === "image_occlusion" &&
           (!activeCard.media || (activeCard.occlusions?.length ?? 0) === 0)
-        ? "Add an image and hide at least one region before this card can be studied."
+        ? "Add a picture and hide at least one part of it before this card can be studied."
         : !activeCard.front.trim() || !activeCard.back.trim()
           ? "Needs a prompt and an answer before it can be studied."
           : "";
@@ -1890,7 +1893,9 @@ export function FlashcardStudio({
       id: "add-section",
       label: "Add section",
       icon: FolderPlus,
-      priority: "advanced",
+      tab: "Cards",
+      priority: "secondary",
+      keepLabel: true,
       requires: "edit",
       onSelect: () => {
         const section = `Section ${sections.length + 1}`;
@@ -1901,30 +1906,41 @@ export function FlashcardStudio({
     ...deckTemplates.map<CommandBinding>((template) => ({
       id: `template-${template.kind}`,
       label: template.label,
-      icon: LayoutTemplate,
-      priority: "advanced",
+      hint: "Adds a card with this shape",
+      icon: template.icon,
+      tab: "Cards",
+      priority: "secondary",
+      keepLabel: true,
       requires: "edit",
       onSelect: () => applyDeckTemplate(template.kind),
     })),
     ...(["csv", "tsv"] as const).map<CommandBinding>((format) => ({
       id: `export-${format}`,
-      label: `Export as ${format.toUpperCase()}`,
+      label: `${format.toUpperCase()} file`,
+      hint: "Opens in any spreadsheet",
       icon: FileDown,
-      priority: "advanced",
+      tab: "Export",
+      priority: "secondary",
+      keepLabel: true,
       onSelect: () => exportDeck(format),
     })),
     {
       id: "export-package",
-      label: "Export a portable deck package",
+      label: "Deck package",
+      hint: "Everything in the deck, to open in Spectra again",
       icon: Archive,
-      priority: "advanced",
+      tab: "Export",
+      priority: "secondary",
+      keepLabel: true,
       onSelect: () => void exportDeckPackage(),
     },
     {
       id: "print",
-      label: "Print or save as PDF",
+      label: "Print or PDF",
       icon: Printer,
-      priority: "advanced",
+      tab: "Export",
+      priority: "secondary",
+      keepLabel: true,
       onSelect: () => window.print(),
     },
   ]);
@@ -2171,7 +2187,7 @@ export function FlashcardStudio({
               {deckActionError
                 ? "Deck action failed"
                 : deckImportError
-                  ? "Import quarantined"
+                  ? "Couldn't import"
                   : "Import complete"}
             </strong>
             <small>
@@ -2216,14 +2232,17 @@ export function FlashcardStudio({
       {showItemRail ? (
         <StudioItemRail
           label="Cards"
+          showIndex={false}
           count={cards.length}
           collapsed={railCollapsed}
           onToggleCollapsed={() => setRailCollapsed((open) => !open)}
           items={filteredCards.map((card) => ({
             id: card.id,
             title: plainTextFromStored(card.front) || "Untitled card",
-            subtitle: `${card.section || "Section 1"} · ${card.difficulty ?? "medium"}`,
+            // The answer under the prompt: a rail of cards reads as the deck.
+            subtitle: plainTextFromStored(card.back).slice(0, 120) || undefined,
             active: card.id === activeCard?.id,
+            preview: <CardThumbnail card={card} />,
           }))}
           onSelect={(id) => {
             setActiveCardId(id);
@@ -2257,763 +2276,79 @@ export function FlashcardStudio({
           }
         />
       ) : null}
-      <section data-anchor-region={activeCard?.id} className="spectra-deck-card-editor min-w-0 overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+      <section className="spectra-deck-card-editor min-w-0 flex-1 overflow-auto pb-10">
         {activeCard ? (
-          <div>
-            <div className="spectra-deck-card-heading mb-4 flex items-center justify-between gap-3">
-              {/* The bar already says which card this is, so this line answers
-                  the question the bar cannot: whether the card is fit to study.
-                  An incomplete card is silently excluded from the queue, and
-                  before this the owner had no way to find out why. */}
-              {duplicateKeys.has(
-                `${activeCard.front.trim().toLocaleLowerCase()}|${activeCard.back.trim().toLocaleLowerCase()}`,
-              ) ? (
-                <p className="flex min-w-0 items-center gap-1.5 text-caption text-[var(--warning)]">
-                  <Copy className="size-3.5 shrink-0" aria-hidden="true" />
-                  Another card has the same prompt and answer.
-                </p>
-              ) : activeCardStudyBlocker ? (
-                <p className="flex min-w-0 items-center gap-1.5 text-caption text-[var(--text-secondary)]">
-                  <AlertCircle className="size-3.5 shrink-0" aria-hidden="true" />
-                  {activeCardStudyBlocker}
-                </p>
-              ) : (
-                <p className="min-w-0 truncate text-caption text-[var(--text-secondary)]">
-                  {activeCard.section || "Section 1"}
-                </p>
-              )}
-              {canEdit ? (
-                <div className="flex shrink-0 items-center gap-2">
-                  <button
-                    type="button"
-                    className={iconButtonClass()}
-                    onClick={() => {
-                      const copy: DeckCard = {
-                        ...activeCard,
-                        id: id("card"),
-                        front: `${activeCard.front}${activeCard.front ? " (copy)" : ""}`,
-                        review: undefined,
-                      };
-                      const next = [...cards];
-                      next.splice(activeCardIndex + 1, 0, copy);
-                      commit(next);
-                      setActiveCardId(copy.id);
-                    }}
-                    aria-label="Duplicate card"
-                    title="Duplicate card"
-                  >
-                    <Copy className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    className={iconButtonClass()}
-                    onClick={() => {
-                      const next = cards.filter(
-                        (card) => card.id !== activeCard.id,
-                      );
-                      const replacement =
-                        next.length > 0
-                          ? next
-                          : [
-                              {
-                                id: id("card"),
-                                front: "",
-                                back: "",
-                                hint: "",
-                                section: activeSection,
-                                confidence: "unknown" as const,
-                                difficulty: "medium" as const,
-                              },
-                            ];
-                      commit(replacement);
-                      setActiveCardId(replacement[0]!.id);
-                    }}
-                    aria-label="Remove card"
-                    title="Remove card"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              ) : null}
-            </div>
-            <CardFace
-              label="Front"
-              value={activeCard.front}
-              placeholder="Question or prompt"
-              disabled={!canEdit}
-              onChange={(value) => updateCard(activeCard.id, { front: value })}
-              onFocus={() => onActiveRegionChange?.(`${activeCard.id}:front`)}
-              clozeMode={activeCard.variant === "cloze"}
-              aiActive={pathTouches(
-                aiChangedPaths,
-                `/cards/${activeCardIndex}/front`,
-              )}
-              path={`/cards/${activeCardIndex}/front`}
-            />
-            {activeCard.variant !== "image_occlusion" &&
-            activeCard.media?.placement !== "back" &&
-            activeDeckMedia?.downloadUrl ? (
-              <div className="mt-3 overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={activeDeckMedia.downloadUrl}
-                  alt={
-                    activeCard.media?.altText ||
-                    activeCard.media?.name ||
-                    "Card image"
-                  }
-                  className="mx-auto block max-h-[360px] max-w-full rounded-chip object-contain"
-                />
-              </div>
-            ) : null}
-            {activeCard.variant === "image_occlusion" ? (
-              <section className="mt-3 rounded-card border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
-                <div className="mb-2 flex items-start gap-3">
-                  <div className="min-w-0 flex-1">
-                    <strong className="block text-caption text-[var(--text-primary)]">
-                      Image occlusion
-                    </strong>
-                    <span className="text-micro leading-4 text-[var(--text-tertiary)]">
-                      Drag over the image to hide a region. Each mask is
-                      revealed with the answer.
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    className="inline-flex h-8 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                    disabled={deckMediaBusy || !canEdit}
-                    onClick={() => deckMediaInputRef.current?.click()}
-                  >
-                    {deckMediaBusy ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <ImageIcon className="h-3.5 w-3.5" />
-                    )}
-                    {activeCard.media ? "Replace image" : "Add image"}
-                  </button>
-                  {activeCard.media ? (
-                    <button
-                      type="button"
-                      className={iconButtonClass()}
-                      disabled={deckMediaBusy || !canEdit}
-                      onClick={removeDeckMedia}
-                      aria-label="Remove image"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  ) : null}
-                </div>
-                {activeDeckMedia?.downloadUrl ? (
-                  <>
-                    <div
-                      className={`relative mx-auto max-h-[440px] w-fit touch-none select-none overflow-hidden rounded-control border border-[var(--border-default)] bg-[var(--text-primary)] ${canEdit ? "cursor-crosshair" : ""}`}
-                      onPointerDown={canEdit ? beginMask : undefined}
-                      onPointerMove={canEdit ? moveMask : undefined}
-                      onPointerUp={canEdit ? finishMask : undefined}
-                      onPointerCancel={() => setMaskDraft(undefined)}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={activeDeckMedia.downloadUrl}
-                        alt={
-                          activeCard.media?.altText || activeCard.media?.name
-                        }
-                        className="pointer-events-none block max-h-[440px] max-w-full object-contain"
-                        draggable={false}
-                      />
-                      {(activeCard.occlusions ?? []).map((mask, index) => (
-                        <button
-                          key={mask.id}
-                          type="button"
-                          className="absolute grid place-items-center border border-white/65 bg-[var(--text-primary)]/90 text-micro font-bold text-white shadow-card hover:bg-[var(--danger)]/90"
-                          style={{
-                            left: `${mask.x * 100}%`,
-                            top: `${mask.y * 100}%`,
-                            width: `${mask.width * 100}%`,
-                            height: `${mask.height * 100}%`,
-                          }}
-                          title="Remove this mask"
-                          onPointerDown={(event) => event.stopPropagation()}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            updateCard(activeCard.id, {
-                              occlusions: (activeCard.occlusions ?? []).filter(
-                                (candidate) => candidate.id !== mask.id,
-                              ),
-                            });
-                          }}
-                        >
-                          {index + 1}
-                        </button>
-                      ))}
-                      {maskDraft ? (
-                        <span
-                          className="pointer-events-none absolute border border-white/75 bg-[var(--accent-cyan)]/75"
-                          style={{
-                            left: `${Math.min(maskDraft.x, maskDraft.currentX) * 100}%`,
-                            top: `${Math.min(maskDraft.y, maskDraft.currentY) * 100}%`,
-                            width: `${Math.abs(maskDraft.currentX - maskDraft.x) * 100}%`,
-                            height: `${Math.abs(maskDraft.currentY - maskDraft.y) * 100}%`,
-                          }}
-                        />
-                      ) : null}
-                    </div>
-                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                      <Field label="Image description">
-                        <input
-                          className={inputClass()}
-                          value={activeCard.media?.altText ?? ""}
-                          onChange={(event) =>
-                            updateCard(activeCard.id, {
-                              media: activeCard.media
-                                ? {
-                                    ...activeCard.media,
-                                    altText: event.target.value,
-                                  }
-                                : undefined,
-                            })
-                          }
-                          placeholder="Describe the image for accessibility"
-                        />
-                      </Field>
-                      <Field label="Hidden regions">
-                        <div className="flex h-10 items-center rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-micro text-[var(--text-secondary)]">
-                          {(activeCard.occlusions ?? []).length
-                            ? `${activeCard.occlusions!.length} ready to reveal`
-                            : canEdit
-                              ? "Drag on the image to add the first mask"
-                              : "None yet"}
-                        </div>
-                      </Field>
-                    </div>
-                    {(activeCard.occlusions ?? []).length ? (
-                      <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
-                        {(activeCard.occlusions ?? []).map((mask, index) => (
-                          <div
-                            key={mask.id}
-                            className="flex items-center gap-2 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] p-1.5"
-                          >
-                            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-chip bg-[var(--text-primary)] text-micro font-bold text-white">
-                              {index + 1}
-                            </span>
-                            <input
-                              value={mask.label ?? ""}
-                              onChange={(event) =>
-                                updateCard(activeCard.id, {
-                                  occlusions: (activeCard.occlusions ?? []).map(
-                                    (candidate) =>
-                                      candidate.id === mask.id
-                                        ? {
-                                            ...candidate,
-                                            label: event.target.value,
-                                          }
-                                        : candidate,
-                                  ),
-                                })
-                              }
-                              className="min-w-0 flex-1 bg-transparent px-1 text-micro text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
-                              placeholder="Optional revealed label"
-                              readOnly={!canEdit}
-                              aria-label={`Label for hidden region ${index + 1}`}
-                            />
-                            {canEdit ? (
-                            <button
-                              type="button"
-                              className="grid h-7 w-7 shrink-0 place-items-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"
-                              onClick={() =>
-                                updateCard(activeCard.id, {
-                                  occlusions: (
-                                    activeCard.occlusions ?? []
-                                  ).filter(
-                                    (candidate) => candidate.id !== mask.id,
-                                  ),
-                                })
-                              }
-                              aria-label={`Remove hidden region ${index + 1}`}
-                            >
-                              <X className="h-3.5 w-3.5" />
-                            </button>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                  </>
-                ) : canEdit ? (
-                  <button
-                    type="button"
-                    className="grid min-h-40 w-full place-items-center rounded-control border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] text-center"
-                    onClick={() => deckMediaInputRef.current?.click()}
-                  >
-                    <span>
-                      <ImageIcon className="mx-auto mb-2 h-5 w-5 text-[var(--text-tertiary)]" />
-                      <strong className="block text-caption text-[var(--text-primary)]">
-                        Add the diagram or image to study
-                      </strong>
-                      <small className="mt-1 block text-micro text-[var(--text-tertiary)]">
-                        PNG, JPEG, WebP, or GIF
-                      </small>
-                    </span>
-                  </button>
-                ) : (
-                  <p className="grid min-h-40 w-full place-items-center rounded-control border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] text-center text-caption text-[var(--text-secondary)]">
-                    This card has no image yet.
-                  </p>
-                )}
-                {deckMediaError ? (
-                  <div
-                    className="mt-2 flex items-center gap-2 rounded-control bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-primary))] px-2.5 py-2 text-micro text-[var(--danger)]"
-                    role="alert"
-                  >
-                    <AlertCircle className="h-3.5 w-3.5" />
-                    <span className="min-w-0 flex-1">{deckMediaError}</span>
-                    <button
-                      type="button"
-                      onClick={() => setDeckMediaError(undefined)}
-                    >
-                      Dismiss
-                    </button>
-                  </div>
-                ) : null}
-              </section>
-            ) : null}
-            {canEdit ? (
-              <div className="my-3 flex justify-center">
-                {/* The audited build left this as a bare circle on the seam
-                    between the two faces, so the one control that rewrites both
-                    of them was a guess. The shared width is overridden here
-                    rather than in the stylesheet because the label belongs to
-                    this button, not to every pill in the product. */}
-                <button
-                  type="button"
-                  className="spectra-deck-swap !w-auto gap-1.5 !px-3 text-micro font-semibold"
-                  onClick={() =>
-                    updateCard(activeCard.id, {
-                      front: activeCard.back,
-                      back: activeCard.front,
-                    })
-                  }
-                  title="Swap front and back"
-                >
-                  <RotateCcw className="h-4 w-4 shrink-0" />
-                  Swap sides
-                </button>
-              </div>
-            ) : null}
-            <CardFace
-              label="Back"
-              value={activeCard.back}
-              placeholder="Answer"
-              disabled={!canEdit}
-              onChange={(value) => updateCard(activeCard.id, { back: value })}
-              onFocus={() => onActiveRegionChange?.(`${activeCard.id}:back`)}
-              noteValue={activeCard.hint ?? ""}
-              onNoteChange={(value) =>
-                updateCard(activeCard.id, { hint: value })
-              }
-              aiActive={pathTouches(
-                aiChangedPaths,
-                `/cards/${activeCardIndex}/back`,
-              )}
-              aiNoteActive={pathTouches(
-                aiChangedPaths,
-                `/cards/${activeCardIndex}/hint`,
-              )}
-              path={`/cards/${activeCardIndex}/back`}
-              notePath={`/cards/${activeCardIndex}/hint`}
-            />
-            {activeCard.variant !== "image_occlusion" &&
-            activeCard.media?.placement === "back" &&
-            activeDeckMedia?.downloadUrl ? (
-              <div className="mt-3 overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={activeDeckMedia.downloadUrl}
-                  alt={activeCard.media.altText || activeCard.media.name}
-                  className="mx-auto block max-h-[360px] max-w-full rounded-chip object-contain"
-                />
-              </div>
-            ) : null}
-            <div className="spectra-deck-tag-field mt-3">
-              <span className="text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
-                Tags
-              </span>
-              <div className="mt-2 flex min-h-9 flex-wrap items-center gap-1.5">
-                {(activeCard.tags ?? []).map((tag) => (
-                  <span
-                    key={tag}
-                    className="inline-flex h-7 items-center gap-1 rounded-chip border border-[color-mix(in_oklab,var(--brand-primary)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--brand-primary)_6%,var(--bg-elevated))] px-2 text-micro text-[var(--text-secondary)]"
-                  >
-                    {tag}
-                    {canEdit ? (
-                      <button
-                        type="button"
-                        className="grid size-4 place-items-center rounded text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"
-                        onClick={() =>
-                          updateCard(activeCard.id, {
-                            tags: (activeCard.tags ?? []).filter(
-                              (candidate) => candidate !== tag,
-                            ),
-                          })
-                        }
-                        aria-label={`Remove ${tag}`}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    ) : null}
-                  </span>
-                ))}
-                {canEdit ? (
-                  <>
-                    <input
-                      value={deckTagDraft}
-                      onChange={(event) => setDeckTagDraft(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          addActiveCardTag();
-                        }
-                      }}
-                      // Not flex-1: stretching the field threw its own Add
-                      // button to the far edge of a 1200px column, so the two
-                      // halves of one control sat a screen apart.
-                      className="h-7 w-40 min-w-24 bg-transparent px-1 text-micro text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
-                      placeholder="Add tag"
-                      aria-label="Add card tag"
-                    />
-                    <button
-                      type="button"
-                      className="inline-flex h-7 items-center gap-1 rounded-chip px-2 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                      onClick={addActiveCardTag}
-                      disabled={!deckTagDraft.trim()}
-                    >
-                      <Plus className="h-3 w-3" /> Add
-                    </button>
-                  </>
-                ) : (activeCard.tags ?? []).length ? null : (
-                  <span className="text-micro text-[var(--text-secondary)]">
-                    No tags
-                  </span>
-                )}
-              </div>
-            </div>
-            <button
-              type="button"
-              className="spectra-deck-advanced-trigger"
-              aria-expanded={advancedOpen}
-              {...(advancedAiPath ? targetAttrs(advancedAiPath) : {})}
-              onClick={() => setAdvancedOpen(!advancedOpen)}
-            >
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              Advanced card settings
-              <ChevronDown
-                className={`ml-auto h-3.5 w-3.5 transition-transform ${advancedOpen ? "rotate-180" : ""}`}
-              />
-            </button>
-            {advancedOpen ? (
-              <div className="spectra-deck-advanced">
-                <div>
-                  <CardChoice
-                    label="Card type"
-                    path={`/cards/${activeCardIndex}/variant`}
-                    aiActive={pathTouches(
-                      aiChangedPaths,
-                      `/cards/${activeCardIndex}/variant`,
-                    )}
-                    disabled={!canEdit}
-                    value={activeCard.variant ?? "basic"}
-                    onChange={(next) => {
-                      const variant = next as DeckCard["variant"];
-                      updateCard(activeCard.id, {
-                        variant,
-                        ...(variant !== "basic"
-                          ? { bidirectional: false }
-                          : {}),
-                      });
-                    }}
-                    options={[
-                      { value: "basic", label: "Basic front and back" },
-                      { value: "cloze", label: "Cloze deletion" },
-                      { value: "image_occlusion", label: "Image occlusion" },
-                    ]}
-                  />
-                  <CardChoice
-                    label="Difficulty"
-                    path={`/cards/${activeCardIndex}/difficulty`}
-                    aiActive={pathTouches(
-                      aiChangedPaths,
-                      `/cards/${activeCardIndex}/difficulty`,
-                    )}
-                    disabled={!canEdit}
-                    value={activeCard.difficulty ?? "medium"}
-                    onChange={(next) =>
-                      updateCard(activeCard.id, {
-                        difficulty: next as DeckCard["difficulty"],
-                      })
-                    }
-                    options={[
-                      { value: "easy", label: "Easy" },
-                      { value: "medium", label: "Medium" },
-                      { value: "hard", label: "Hard" },
-                    ]}
-                  />
-                  <CardChoice
-                    label="Confidence"
-                    path={`/cards/${activeCardIndex}/confidence`}
-                    aiActive={pathTouches(
-                      aiChangedPaths,
-                      `/cards/${activeCardIndex}/confidence`,
-                    )}
-                    disabled={!canEdit}
-                    value={activeCard.confidence ?? "unknown"}
-                    onChange={(next) =>
-                      updateCard(activeCard.id, {
-                        confidence: next as DeckCard["confidence"],
-                      })
-                    }
-                    options={[
-                      { value: "unknown", label: "Not rated yet" },
-                      { value: "weak", label: "Giving you trouble" },
-                      { value: "medium", label: "Still working on it" },
-                      { value: "strong", label: "You find it easy" },
-                    ]}
-                  />
-                  <CardChoice
-                    label="Section"
-                    path={`/cards/${activeCardIndex}/section`}
-                    disabled={!canEdit}
-                    value={activeCard.section ?? "Section 1"}
-                    onChange={(next) =>
-                      updateCard(activeCard.id, { section: next })
-                    }
-                    options={sections.map((section) => ({
-                      value: section,
-                      label: section,
-                    }))}
-                  />
-                  <Field
-                    label="Language"
-                    path={`/cards/${activeCardIndex}/language`}
-                  >
-                    <input
-                      value={activeCard.language ?? ""}
-                      onChange={(event) =>
-                        updateCard(activeCard.id, {
-                          language: event.target.value,
-                        })
-                      }
-                      className={inputClass()}
-                      placeholder="e.g. English, Spanish"
-                      disabled={!canEdit}
-                    />
-                  </Field>
-                </div>
-                {activeCard.variant !== "image_occlusion" ? (
-                  <div className="rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] p-3">
-                    <div className="flex items-start gap-3">
-                      <div className="min-w-0 flex-1">
-                        <strong className="block text-micro text-[var(--text-primary)]">
-                          Card image
-                        </strong>
-                        <span className="text-micro leading-4 text-[var(--text-tertiary)]">
-                          Add a useful visual to the prompt or answer.
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                        disabled={deckMediaBusy || !canEdit}
-                        onClick={() => deckMediaInputRef.current?.click()}
-                      >
-                        {deckMediaBusy ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <ImageIcon className="h-3.5 w-3.5" />
-                        )}
-                        {activeCard.media ? "Replace" : "Add image"}
-                      </button>
-                      {activeCard.media ? (
-                        <button
-                          type="button"
-                          className={iconButtonClass()}
-                          disabled={deckMediaBusy || !canEdit}
-                          onClick={removeDeckMedia}
-                          aria-label="Remove card image"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      ) : null}
-                    </div>
-                    {activeCard.media ? (
-                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                        <CardChoice
-                          label="Place image on"
-                          path={`/cards/${activeCardIndex}/media/placement`}
-                          disabled={!canEdit}
-                          value={activeCard.media.placement ?? "front"}
-                          onChange={(next) =>
-                            updateCard(activeCard.id, {
-                              media: activeCard.media
-                                ? {
-                                    ...activeCard.media,
-                                    placement: next as "front" | "back",
-                                  }
-                                : undefined,
-                            })
-                          }
-                          options={[
-                            { value: "front", label: "The prompt" },
-                            { value: "back", label: "The answer" },
-                          ]}
-                        />
-                        <Field
-                          label="Image description"
-                          path={`/cards/${activeCardIndex}/media/altText`}
-                        >
-                          <input
-                            value={activeCard.media.altText ?? ""}
-                            onChange={(event) =>
-                              updateCard(activeCard.id, {
-                                media: activeCard.media
-                                  ? {
-                                      ...activeCard.media,
-                                      altText: event.target.value,
-                                    }
-                                  : undefined,
-                              })
-                            }
-                            className={inputClass()}
-                            placeholder="Describe it for accessibility"
-                          />
-                        </Field>
-                      </div>
-                    ) : null}
-                    {deckMediaError ? (
-                      <p className="mt-2 text-micro text-[var(--danger)]">
-                        {deckMediaError}
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-                <Field
-                  label="Explanation"
-                  path={`/cards/${activeCardIndex}/explanation`}
-                >
-                  <textarea
-                    value={activeCard.explanation ?? ""}
-                    onChange={(event) =>
-                      updateCard(activeCard.id, {
-                        explanation: event.target.value,
-                      })
-                    }
-                    className={`${inputClass()} min-h-[74px] resize-y py-2`}
-                    placeholder="Why this answer is correct or useful"
-                  />
-                </Field>
-                <Field
-                  label="Accepted alternatives"
-                  path={`/cards/${activeCardIndex}/acceptedAlternatives`}
-                >
-                  <input
-                    value={(activeCard.acceptedAlternatives ?? []).join("; ")}
-                    onChange={(event) =>
-                      updateCard(activeCard.id, {
-                        acceptedAlternatives: event.target.value
-                          .split(";")
-                          .map((value) => value.trim())
-                          .filter(Boolean),
-                      })
-                    }
-                    className={inputClass()}
-                    placeholder="Alternative answer; another accepted form"
-                  />
-                </Field>
-                <Field
-                  label="Learning objective"
-                  path={`/cards/${activeCardIndex}/learningObjective`}
-                >
-                  <input
-                    value={activeCard.learningObjective ?? ""}
-                    onChange={(event) =>
-                      updateCard(activeCard.id, {
-                        learningObjective: event.target.value,
-                      })
-                    }
-                    className={inputClass()}
-                    placeholder="What should this card help the learner retrieve?"
-                  />
-                </Field>
-                <Field
-                  label="Sources / provenance"
-                  path={`/cards/${activeCardIndex}/sourceRefs`}
-                >
-                  <input
-                    value={(activeCard.sourceRefs ?? []).join(", ")}
-                    onChange={(event) =>
-                      updateCard(activeCard.id, {
-                        sourceRefs: event.target.value
-                          .split(",")
-                          .map((item) => item.trim())
-                          .filter(Boolean),
-                      })
-                    }
-                    className={inputClass()}
-                    placeholder="Chapter 3, lecture notes"
-                  />
-                </Field>
-                <label className="spectra-deck-check-field">
-                  <input
-                    type="checkbox"
-                    {...targetAttrs(
-                      `/cards/${activeCardIndex}/bidirectional`,
-                    )}
-                    checked={activeCard.bidirectional === true}
-                    disabled={activeCard.variant !== "basic"}
-                    onChange={() =>
-                      updateCard(activeCard.id, {
-                        bidirectional: !activeCard.bidirectional,
-                      })
-                    }
-                  />
-                  {activeCard.variant === "basic"
-                    ? "Generate and schedule the reverse direction separately"
-                    : "Reverse study is available for basic front / back cards"}
-                </label>
-              </div>
-            ) : null}
-            <div className="spectra-deck-sync-actions">
-              {activeCardDirty && canEdit ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const baseline = cardEditBaseline;
-                    if (!baseline || baseline.id !== activeCard.id) return;
-                    commit(
-                      cards.map((card) =>
-                        card.id === activeCard.id
-                          ? structuredClone(baseline)
-                          : card,
-                      ),
-                    );
-                  }}
-                >
-                  Revert this card
-                </button>
-              ) : null}
-            </div>
-          </div>
+          <CardSheet
+            key={activeCard.id}
+            card={activeCard}
+            cardIndex={activeCardIndex}
+            cardNumber={activeCardIndex + 1}
+            canEdit={canEdit}
+            sections={sections}
+            aiChangedPaths={aiChangedPaths}
+            problem={
+              duplicateKeys.has(`${activeCard.front.trim().toLocaleLowerCase()}|${activeCard.back.trim().toLocaleLowerCase()}`)
+                ? "Another card has the same prompt and answer."
+                : // A blank card plainly needs writing; it is not a problem yet.
+                  (activeCard.front.trim() || activeCard.back.trim() || activeCard.media) && activeCardStudyBlocker
+                  ? activeCardStudyBlocker
+                  : undefined
+            }
+            dirty={activeCardDirty && canEdit}
+            image={{
+              url: activeDeckMedia?.downloadUrl ?? undefined,
+              busy: deckMediaBusy,
+              error: deckMediaError,
+              pick: () => deckMediaInputRef.current?.click(),
+              remove: removeDeckMedia,
+              dismissError: () => setDeckMediaError(undefined),
+            }}
+            masks={{ draft: maskDraft, begin: beginMask, move: moveMask, finish: finishMask, cancel: () => setMaskDraft(undefined) }}
+            detailsOpen={advancedOpen}
+            onDetailsOpenChange={setAdvancedOpen}
+            detailsAiPath={advancedAiPath}
+            onChange={(patch) => updateCard(activeCard.id, patch)}
+            onDuplicate={() => {
+              const copy: DeckCard = {
+                ...activeCard,
+                id: id("card"),
+                front: `${activeCard.front}${activeCard.front ? " (copy)" : ""}`,
+                review: undefined,
+              };
+              const next = [...cards];
+              next.splice(activeCardIndex + 1, 0, copy);
+              commit(next);
+              setActiveCardId(copy.id);
+            }}
+            onRemove={() => {
+              const next = cards.filter((card) => card.id !== activeCard.id);
+              const replacement = next.length
+                ? next
+                : [{ id: id("card"), front: "", back: "", hint: "", section: activeSection, confidence: "unknown" as const, difficulty: "medium" as const }];
+              commit(replacement);
+              setActiveCardId(replacement[0]!.id);
+            }}
+            onRevert={() => {
+              const baseline = cardEditBaseline;
+              if (!baseline || baseline.id !== activeCard.id) return;
+              commit(cards.map((card) => (card.id === activeCard.id ? structuredClone(baseline) : card)));
+            }}
+            onFocusSide={(side) => onActiveRegionChange?.(`${activeCard.id}:${side}`)}
+          />
         ) : null}
+        {canEdit ? <QuickCardEntry onAdd={appendCard} /> : null}
       </section>
       </div>
-      {studyOpen && studyQueue.length && typeof document !== "undefined"
-        ? createPortal(
+      {/* Study happens in the deck's own space, over the editor, not over
+          the whole app: the rail, the tabs and the island stay where they are. */}
+      {studyOpen && studyQueue.length
+        ? (
             <div
               ref={studyDialogRef}
               tabIndex={-1}
               className="spectra-deck-study"
-              role="dialog"
-              aria-modal="true"
-              aria-label="Private flashcard study session"
+              role="region"
+              aria-label="Study session"
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
                   event.preventDefault();
@@ -3074,13 +2409,33 @@ export function FlashcardStudio({
               <header>
                 <span>
                   <BookOpen className="h-4 w-4" />
-                  <strong>Private study session</strong>
+                  <strong>Studying</strong>
                   <small>
                     {studyComplete
                       ? `${studyQueue.length} reviewed`
                       : `${studyIndex + 1} of ${studyQueue.length}`}
                   </small>
                 </span>
+                <i
+                  className="spectra-deck-study-progress"
+                  style={{
+                    width: `${((studyComplete ? studyQueue.length : studyIndex) / studyQueue.length) * 100}%`,
+                  }}
+                  aria-hidden
+                />
+                <button
+                  type="button"
+                  className="spectra-deck-study-typing"
+                  aria-pressed={studyTyping}
+                  title="Type each answer and see which letters were right"
+                  onClick={() => {
+                    setStudyTypingChoice(!studyTyping);
+                    setStudyTypedAnswer("");
+                  }}
+                >
+                  <Keyboard className="h-4 w-4" />
+                  Type answers
+                </button>
                 <button
                   type="button"
                   aria-label="Keyboard shortcuts"
@@ -3132,11 +2487,8 @@ export function FlashcardStudio({
               ) : null}
               {studyComplete ? (
                 <main className="spectra-deck-study-complete">
-                  <LifeForm bars="h3, p" />
-                  <span className="grid size-12 place-items-center rounded-full bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-primary))] text-[var(--success)]">
-                    <CheckCircle2 className="h-6 w-6" />
-                  </span>
-                  <h3>Study queue complete</h3>
+                  <LifeForm />
+                  <h3>That was the whole queue</h3>
                   <p>
                     {canRecordStudy
                       ? "Every result went to your own scheduler. Nobody else can see your answers or your review history."
@@ -3159,12 +2511,9 @@ export function FlashcardStudio({
               ) : activeStudyCard ? (
                 <main>
                   <section>
-                    <span>
-                      Prompt
-                      {activeStudyItem?.direction === "reverse"
-                        ? " · reverse"
-                        : ""}
-                    </span>
+                    {activeStudyItem?.direction === "reverse" ? (
+                      <span>Back to front</span>
+                    ) : null}
                     <SpectraStoredText
                       value={activeStudyPrompt}
                       className="spectra-deck-study-face"
@@ -3233,12 +2582,17 @@ export function FlashcardStudio({
                   </section>
                   {studyRevealed ? (
                     <section data-answer="true">
-                      <LifeForm bars="span, p" />
+                      <LifeForm />
                       <LifeVerdict
                         immediate
                         verdict={studyTypedCorrect === undefined ? null : studyTypedCorrect ? "right" : "wrong"}
                       />
-                      <span>Answer</span>
+                      {studyTypedCorrect !== undefined ? (
+                        <TypedAnswerDiff
+                          typed={studyTypedAnswer}
+                          accepted={activeStudyAccepted}
+                        />
+                      ) : null}
                       <SpectraStoredText
                         value={activeStudyAnswer}
                         className="spectra-deck-study-face"
@@ -3263,19 +2617,6 @@ export function FlashcardStudio({
                       {activeStudyCard.explanation ? (
                         <small>{activeStudyCard.explanation}</small>
                       ) : null}
-                      {studyTypedCorrect !== undefined ? (
-                        <small
-                          className={
-                            studyTypedCorrect
-                              ? "text-[var(--success)]"
-                              : "text-[var(--warning)]"
-                          }
-                        >
-                          {studyTypedCorrect
-                            ? "Your typed answer matched."
-                            : `Your answer: ${studyTypedAnswer}`}
-                        </small>
-                      ) : null}
                       <div className="spectra-deck-study-note">
                         <label htmlFor="spectra-study-note">
                           Your note <kbd>N</kbd>
@@ -3283,7 +2624,7 @@ export function FlashcardStudio({
                         <textarea
                           id="spectra-study-note"
                           ref={studyNoteRef}
-                          rows={2}
+                          rows={1}
                           value={studyNoteDraft}
                           placeholder="Only you can see this."
                           onChange={(event) =>
@@ -3294,25 +2635,22 @@ export function FlashcardStudio({
                         {studyNoteSaving ? <small>Saving…</small> : null}
                       </div>
                     </section>
-                  ) : deckSettings.revealMode === "type" ? (
-                    <div className="spectra-deck-reveal flex-col !items-stretch gap-2">
-                      <label className="text-left text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
-                        Type your answer
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          autoFocus
-                          value={studyTypedAnswer}
-                          onChange={(event) =>
-                            setStudyTypedAnswer(event.target.value)
-                          }
-                          className="h-10 min-w-0 flex-1 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-ui text-[var(--text-primary)] outline-none focus:border-[color-mix(in_oklab,var(--brand-primary)_55%,var(--border-default))]"
-                          placeholder="Recall before revealing"
-                        />
-                        <button type="button" onClick={revealStudyAnswer}>
-                          Check answer
-                        </button>
-                      </div>
+                  ) : studyTyping ? (
+                    <div className="spectra-deck-typed">
+                      <input
+                        autoFocus
+                        value={studyTypedAnswer}
+                        onChange={(event) =>
+                          setStudyTypedAnswer(event.target.value)
+                        }
+                        aria-label="Your answer"
+                        placeholder="Type the answer, then Enter"
+                        spellCheck={false}
+                        autoComplete="off"
+                      />
+                      <button type="button" onClick={revealStudyAnswer}>
+                        Check
+                      </button>
                     </div>
                   ) : (
                     <button
@@ -3353,8 +2691,7 @@ export function FlashcardStudio({
                   )}
                 </footer>
               ) : null}
-            </div>,
-            document.body,
+            </div>
           )
         : null}
       <section className="spectra-deck-print-sheet" aria-hidden="true">
@@ -3446,187 +2783,5 @@ export function FlashcardStudio({
       </section>
       </div>
     </div>
-  );
-}
-
-/**
- * One card-level choice.
- *
- * `path` is applied to the trigger rather than to the label wrapper, so an AI
- * edit or a peer's target resolves to the control that actually changes the
- * card (brief §3.3). `Field` can only decorate native tags, and a Radix trigger
- * is a component, so the annotation is made here instead of being handed over
- * and silently downgraded to the label's padding box.
- */
-function CardChoice({
-  label,
-  path,
-  aiActive = false,
-  disabled,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  path: string;
-  aiActive?: boolean;
-  disabled?: boolean;
-  value: string;
-  onChange: (value: string) => void;
-  options: readonly { value: string; label: string }[];
-}) {
-  return (
-    <Field label={label}>
-      <Select value={value} onValueChange={onChange} disabled={disabled}>
-        <SelectTrigger
-          size="sm"
-          aria-label={label}
-          className="w-full"
-          data-ai-region={aiRegionAttr(aiActive)}
-          {...targetAttrs(path)}
-        >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </Field>
-  );
-}
-
-function CardFace({
-  label,
-  value,
-  placeholder,
-  onChange,
-  onFocus,
-  clozeMode = false,
-  disabled = false,
-  noteValue,
-  onNoteChange,
-  aiActive = false,
-  aiNoteActive = false,
-  path,
-  notePath,
-}: {
-  label: string;
-  value: string;
-  placeholder: string;
-  onChange: (value: string) => void;
-  onFocus?: () => void;
-  clozeMode?: boolean;
-  /** The viewer lacks `edit`. The face still reads; it does not accept typing. */
-  disabled?: boolean;
-  noteValue?: string;
-  onNoteChange?: (value: string) => void;
-  aiActive?: boolean;
-  aiNoteActive?: boolean;
-  /** Canonical pointer for the face, e.g. `/cards/2/front`. */
-  path?: string;
-  /** Canonical pointer for the hint field. */
-  notePath?: string;
-}) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  function markCloze() {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const selected = value.slice(start, end) || "answer";
-    const nextIndex =
-      Math.max(0, ...clozeParts(value).map((part) => part.index)) + 1;
-    const marker = `{{c${nextIndex}::${selected}}}`;
-    onChange(`${value.slice(0, start)}${marker}${value.slice(end)}`);
-    requestAnimationFrame(() => {
-      textarea.focus();
-      const selectionStart = start + `{{c${nextIndex}::`.length;
-      textarea.setSelectionRange(
-        selectionStart,
-        selectionStart + selected.length,
-      );
-    });
-  }
-
-  return (
-    <section data-card-face={label.toLowerCase()}>
-      <div className="mb-2 flex items-center gap-2 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
-        <span>{label}</span>
-        {clozeMode ? (
-          <>
-            {disabled ? null : (
-            <button
-              type="button"
-              onClick={markCloze}
-              className="ml-auto inline-flex h-7 items-center gap-1.5 rounded-chip border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-micro font-semibold normal-case tracking-normal text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              title="Select text, then create a cloze deletion"
-            >
-              <Focus className="h-3.5 w-3.5" />
-              Make cloze
-            </button>
-            )}
-            <span className="ml-auto normal-case tracking-normal text-[var(--text-tertiary)]">
-              {clozeParts(value).length}{" "}
-              {clozeParts(value).length === 1 ? "deletion" : "deletions"}
-            </span>
-          </>
-        ) : null}
-      </div>
-      <div className={onNoteChange ? "spectra-card-face-shell" : undefined}>
-        {clozeMode ? (
-          <textarea
-            ref={textareaRef}
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-            onFocus={() => onFocus?.()}
-            data-ai-region={aiRegionAttr(aiActive)}
-            {...(path ? targetAttrs(path) : {})}
-            readOnly={disabled}
-            className="min-h-[112px] w-full resize-none rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] px-6 py-6 text-center font-display text-metric leading-snug text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,var(--brand-primary)_55%,var(--border-default))]"
-            placeholder={placeholder}
-          />
-        ) : (
-          <div data-ai-region={aiRegionAttr(aiActive)}>
-            <ArtifactRichTextEditor
-              value={value}
-              onChange={onChange}
-              onFocus={onFocus}
-              path={path}
-              placeholder={placeholder}
-              variant="card"
-              disabled={disabled}
-            />
-          </div>
-        )}
-        {onNoteChange ? (
-          <input
-            value={noteValue ?? ""}
-            onChange={(event) => onNoteChange(event.target.value)}
-            onFocus={() => onFocus?.()}
-            data-ai-region={aiRegionAttr(aiNoteActive)}
-            {...(notePath ? targetAttrs(notePath) : {})}
-            className="spectra-card-face-note"
-            readOnly={disabled}
-            placeholder={disabled ? "" : "Add a note (optional)"}
-            aria-label="Note or hint"
-          />
-        ) : null}
-      </div>
-      {clozeMode && clozeParts(value).length ? (
-        <div className="mt-2 rounded-control border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
-          <span className="mb-1 block text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
-            Study preview
-          </span>
-          <p className="font-serif text-subhead leading-6 text-[var(--text-secondary)]">
-            {clozePrompt(value)}
-          </p>
-        </div>
-      ) : null}
-    </section>
   );
 }

@@ -120,3 +120,19 @@ export const dispatchManageBacSync = internalAction({
     );
   },
 });
+
+/** The morning brief, written as the student a little before they wake. */
+export const dispatchDailyBrief = internalAction({
+  args: { clerkId: v.string(), timeZone: v.string(), wakeAt: v.number() },
+  handler: async (_ctx, args) => {
+    await postSigned(
+      "/api/spectra/brief",
+      { action: "scheduled", ...args },
+      derivedKey(
+        "SPECTRA_COLLAB_BRIDGE_KEY",
+        "spectra-event-callback:v1",
+      ),
+      "spectra-scheduler",
+    );
+  },
+});

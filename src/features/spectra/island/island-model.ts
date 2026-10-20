@@ -6,7 +6,7 @@ import { runTabSource } from "./run-tabs";
 
 /*
  * What the island shows, as plain data (ISLAND.md, "The hover structure"):
- * threads in play sit left of the +, newest nearest it; seen, finished
+ * threads in play sit left of the divider, newest nearest it; seen, finished
  * threads sit to its right, newest nearest it. One status says the whole
  * island's state on the prism's dot.
  */
@@ -60,13 +60,19 @@ function chosenSide(arrangement: Arrangement | undefined, tab: SpectraRunTab, st
   return choice.side;
 }
 
-/** Nearest the + first: threads the user never placed, newest first, then the user's order. */
+/**
+ * Nearest the divider first: a thread waiting on the person (a question, an
+ * OK) ahead of everything, even where the person placed it; then threads the
+ * person never placed, most recently active first; then the person's order.
+ */
 function orderSide(tabs: IslandTab[], saved: readonly string[] | undefined) {
   const newestFirst = (a: IslandTab, b: IslandTab) => b.updatedAt - a.updatedAt;
   const rank = new Map((saved ?? []).map((threadId, index) => [threadId, index]));
-  const placed = tabs.filter((tab) => rank.has(tab.threadId)).sort((a, b) => rank.get(a.threadId)! - rank.get(b.threadId)!);
-  const unplaced = tabs.filter((tab) => !rank.has(tab.threadId)).sort(newestFirst);
-  return [...unplaced, ...placed];
+  const asking = tabs.filter((tab) => tab.state === "needs_input").sort(newestFirst);
+  const rest = tabs.filter((tab) => tab.state !== "needs_input");
+  const placed = rest.filter((tab) => rank.has(tab.threadId)).sort((a, b) => rank.get(a.threadId)! - rank.get(b.threadId)!);
+  const unplaced = rest.filter((tab) => !rank.has(tab.threadId)).sort(newestFirst);
+  return [...asking, ...unplaced, ...placed];
 }
 
 /** The island's tabs, in display order on each side (left to right). */
@@ -110,9 +116,9 @@ export function arrangeTabs(
       source: tab,
     });
   }
-  // In play reads toward the +, so its nearest tab is the rightmost.
+  // In play reads toward the divider, so its nearest tab is the rightmost.
   const play = orderSide(all.filter((tab) => tab.side === "play"), arrangement?.order.play).slice(0, MAX_PLAY).reverse();
-  // Done reads away from the +.
+  // Done reads away from the divider.
   const done = orderSide(all.filter((tab) => tab.side === "done"), arrangement?.order.done).slice(0, MAX_DONE);
   return { play, done };
 }
@@ -127,7 +133,7 @@ export function previewTabs(play: readonly IslandTab[], done: readonly IslandTab
   return next;
 }
 
-/** Where a dropped tab lands: its side, and that side's threads nearest the + first, as the store keeps them. */
+/** Where a dropped tab lands: its side, and that side's threads nearest the divider first, as the store keeps them. */
 export function dropTab(play: readonly IslandTab[], done: readonly IslandTab[], runId: string, side: IslandSide, index: number) {
   const next = previewTabs(play, done, runId, side, index);
   const nearestFirst = side === "play" ? [...next.play].reverse() : next.done;
@@ -136,7 +142,7 @@ export function dropTab(play: readonly IslandTab[], done: readonly IslandTab[], 
 
 /**
  * One keyboard step (Alt + arrow): the tab swaps with its neighbour, and the
- * last step before the + carries it across. Null when it is already at an end.
+ * last step before the divider carries it across. Null when it is already at an end.
  */
 export function stepTab(play: readonly IslandTab[], done: readonly IslandTab[], runId: string, delta: -1 | 1): { side: IslandSide; index: number } | null {
   const playIndex = play.findIndex((tab) => tab.runId === runId);
@@ -147,7 +153,7 @@ export function stepTab(play: readonly IslandTab[], done: readonly IslandTab[], 
   }
   const doneIndex = done.findIndex((tab) => tab.runId === runId);
   if (doneIndex < 0) return null;
-  // Across the +, it becomes the nearest tab in play: the rightmost.
+  // Across the divider, it becomes the nearest tab in play: the rightmost.
   if (delta === -1 && doneIndex === 0) return { side: "play", index: play.length };
   const index = doneIndex + delta;
   return index >= done.length ? null : { side: "done", index };

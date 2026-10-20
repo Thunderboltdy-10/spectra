@@ -131,10 +131,12 @@ export type TextFormatAdapter = {
   /** Whether formatting is currently editable at all. */
   disabled?: boolean;
   /** Controls that belong in General as contract favourites. */
-  generalPins?: readonly ("style" | "fontFamily" | "fontSize" | "bold" | "italic")[];
+  generalPins?: readonly GeneralPin[];
 };
 
-const DEFAULT_GENERAL_PINS = ["fontFamily", "fontSize", "bold", "italic"] as const;
+type GeneralPin = "style" | "fontFamily" | "fontSize" | "bold" | "italic" | "underline" | "strike" | "color" | "highlight" | "alignment";
+
+const DEFAULT_GENERAL_PINS: readonly GeneralPin[] = ["fontFamily", "fontSize", "bold", "italic"];
 
 /**
  * Builds the formatting command family for one artifact type. Order here is the
@@ -223,8 +225,8 @@ export function textFormatBindings(type: OfficeWorkType, adapter: TextFormatAdap
   const marks: Array<[FormattingCapabilityLocalId, string, typeof Bold, ToggleFacet | undefined, string, boolean]> = [
     ["format.bold", "Bold", Bold, adapter.bold, "Mod+B", pins.has("bold")],
     ["format.italic", "Italic", Italic, adapter.italic, "Mod+I", pins.has("italic")],
-    ["format.underline", "Underline", Underline, adapter.underline, "Mod+U", false],
-    ["format.strike", "Strikethrough", Strikethrough, adapter.strike, "Mod+Shift+X", false],
+    ["format.underline", "Underline", Underline, adapter.underline, "Mod+U", pins.has("underline")],
+    ["format.strike", "Strikethrough", Strikethrough, adapter.strike, "Mod+Shift+X", pins.has("strike")],
   ];
   for (const [id, label, icon, facet, shortcut, general] of marks) {
     if (!facet) continue;
@@ -250,6 +252,7 @@ export function textFormatBindings(type: OfficeWorkType, adapter: TextFormatAdap
       tab: "Format",
       group: "Font",
       priority: "secondary",
+      general: pins.has("color"),
       disabled,
       hint: "Colour of the selected text",
       control: {
@@ -270,6 +273,7 @@ export function textFormatBindings(type: OfficeWorkType, adapter: TextFormatAdap
       tab: "Format",
       group: "Font",
       priority: "secondary",
+      general: pins.has("highlight"),
       disabled,
       hint: "Highlight the selection",
       control: {
@@ -290,6 +294,7 @@ export function textFormatBindings(type: OfficeWorkType, adapter: TextFormatAdap
       tab: "Format",
       group: "Paragraph",
       priority: "essential",
+      general: pins.has("alignment"),
       disabled,
       control: {
         kind: "segmented",

@@ -385,6 +385,15 @@ const send: Glyph = () => (
   </g>
 );
 
+/* A microphone: the capsule, its cradle and stand. The capsule fills with the accent while listening. */
+const mic: Glyph = () => (
+  <>
+    <Sheet d="M7.25 5.5a2.75 2.75 0 0 1 5.5 0v4.25a2.75 2.75 0 0 1-5.5 0z" />
+    <path d="M4.75 9.5a5.25 5.25 0 0 0 10.5 0" />
+    <path d="M10 14.75v2.5" />
+  </>
+);
+
 const more: Glyph = () => (
   <g fill="currentColor" stroke="none">
     <circle cx={4.75} cy={10} r={1.3} />
@@ -502,6 +511,15 @@ const sidebar: Glyph = () => (
     <Paper d="M7.75 3.75H4.75a2 2 0 0 0-2 2v8.5a2 2 0 0 0 2 2h3z" opacity={0.16} />
     <path d={box(2.75, 3.75, 14.5, 12.5, 2)} />
     <path d="M7.75 3.75v12.5" />
+  </>
+);
+
+/** The sidebar's mirror: a panel standing at the right of the page. */
+const sidePanel: Glyph = () => (
+  <>
+    <Paper d="M12.25 3.75h3a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2h-3z" opacity={0.16} />
+    <path d={box(2.75, 3.75, 14.5, 12.5, 2)} />
+    <path d="M12.25 3.75v12.5" />
   </>
 );
 
@@ -1135,6 +1153,7 @@ export const GLYPHS = {
   search,
   attach,
   send,
+  mic,
   more,
   close,
   collapse,
@@ -1155,6 +1174,7 @@ export const GLYPHS = {
   image,
   star,
   sidebar,
+  sidePanel,
   mail,
   chevronLeft,
   chevronUp,
@@ -1235,12 +1255,12 @@ export const ICON_FAMILIES: { family: string; names: IconName[] }[] = [
   { family: "Status", names: ["saved", "saving", "offline", "syncing", "locked", "readOnly", "versions", "problem", "info", "done", "working", "clock", "shield", "help"] },
   {
     family: "Actions",
-    names: ["add", "share", "filter", "sort", "search", "attach", "send", "more", "close", "collapse", "expand", "pin", "undoSpectra", "openSide", "openFull", "external", "check", "chevronDown", "chevronRight", "trash", "pause", "link", "bell", "people", "image", "star", "sidebar", "mail", "chevronLeft", "chevronUp", "arrowRight", "retry", "play", "stop", "copy", "download", "edit", "grip"],
+    names: ["add", "share", "filter", "sort", "search", "attach", "send", "more", "close", "collapse", "expand", "pin", "undoSpectra", "openSide", "openFull", "external", "check", "chevronDown", "chevronRight", "trash", "pause", "link", "bell", "people", "image", "star", "sidebar", "sidePanel", "mail", "chevronLeft", "chevronUp", "arrowRight", "retry", "play", "stop", "copy", "download", "edit", "grip"],
   },
   { family: "Account", names: ["theme", "keyboard", "signOut", "analytics"] },
   {
     family: "Pages and lists",
-    names: ["arrowLeft", "arrowUp", "arrowDown", "upload", "undo", "reply", "grid", "list", "board", "layers", "zoomIn", "zoomOut", "archive", "bookmark", "checklist", "folderTree", "compare", "location", "target", "pointer", "hidden", "tool", "terminal", "flask", "memory", "signIn", "personRemove", "ticket", "inbox", "globe"],
+    names: ["arrowLeft", "arrowUp", "arrowDown", "upload", "undo", "reply", "grid", "list", "board", "layers", "zoomIn", "zoomOut", "archive", "bookmark", "checklist", "folderTree", "compare", "location", "target", "pointer", "hidden", "tool", "terminal", "flask", "memory", "signIn", "personRemove", "ticket", "inbox", "globe", "mic"],
   },
   { family: "Systems and states", names: ["activity", "gauge", "health", "log", "database", "server", "storage", "network", "identity", "billing", "live", "pending", "blocked", "dot"] },
   { family: "School and subjects", names: ["cas", "grade", "notebook", "atom", "calculator", "sprout"] },

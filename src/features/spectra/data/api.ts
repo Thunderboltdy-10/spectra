@@ -1416,6 +1416,13 @@ export async function disconnectSpectraManageBac() {
   });
 }
 
+/** Looks again at a blocked connection with the key already saved; opens it if ManageBac takes the key. */
+export async function recheckSpectraManageBac() {
+  return postManageBac<{ outcome: "reopened" | "not_blocked" | "key_missing" | "key_refused" | "unreachable"; status?: number }>({
+    action: "recheck",
+  });
+}
+
 export async function upsertSpectraCalendarPeriodMap(input: {
   periodKey: string;
   label: string;
@@ -2299,12 +2306,12 @@ export async function nextSpectraFoundrySection(agentId: string) {
   }>({ operation: "next", agentId });
 }
 
+/** Reads a source for an agent: pasted `text`, or an attached file read on the server. */
 export async function extractSpectraFoundryEvidence(input: {
   agentId: string;
   sourceId: string;
   kind: string;
-  text: string;
-}) {
+} & ({ text: string } | { attachment: { name: string; mimeType: string; size: number; handling: string; data?: string } })) {
   return foundryRequest<{ extraction: unknown }>({
     operation: "extract",
     ...input,

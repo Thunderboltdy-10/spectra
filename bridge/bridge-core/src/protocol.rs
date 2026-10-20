@@ -71,6 +71,10 @@ pub struct PairingOffer {
     pub short_code: String,
     pub browser_origin: String,
     pub expires_at: u64,
+    /// The Convex deployment of the Spectra that made the offer. An installed
+    /// Bridge learns where to sync from the page it pairs with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deployment_url: Option<String>,
 }
 
 pub fn protocol_major(value: &str) -> Option<u32> {

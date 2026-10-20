@@ -112,7 +112,7 @@ export async function writeMorningBrief({ day, timeZone, signal }: { day: string
     const context = await gatherBriefContext(day, timeZone);
     const turn = await callSpectraModel({
       messages: briefMessages(context),
-      reasoning: "medium",
+      reasoning: "high",
       purpose: "daily",
       maxTokens: 2_000,
       responseFormat: { type: "json_object" },

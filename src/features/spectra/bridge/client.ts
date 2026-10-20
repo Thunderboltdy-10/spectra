@@ -582,7 +582,8 @@ export async function offerPairing(input: {
     response = await fetch(`${BRIDGE_URL}/v1/pair`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(input),
+      // The Bridge learns which deployment to sync with from the page it pairs with.
+      body: JSON.stringify({ ...input, deploymentUrl: process.env.NEXT_PUBLIC_CONVEX_URL }),
       signal: bridgeRequestSignal(),
     });
   } catch (error) {

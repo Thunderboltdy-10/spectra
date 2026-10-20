@@ -16,6 +16,7 @@ import { assertPayloadWriteAllowed, computeEffectivePolicy } from "./syncPolicy"
 import { decideMissingResourceAction, policyIncludesPath } from "../shared/sync-policy";
 import type { SyncPolicyValues } from "../shared/sync-policy";
 import { formatByteCount } from "../shared/human-format";
+import { classWorkspaceNodes, matchClass, mountPathBase } from "./bridgePlacement";
 import {
   BRIDGE_CLAIM_REDRIVE_MS,
   BRIDGE_WRITE_EXPIRES_MS,
@@ -116,6 +117,35 @@ async function ensureFolderPath(ctx: Parameters<typeof createFolderNode>[0], acc
     parentId = existing?._id ?? (await createFolderNode(ctx, { accountId, schoolId, name, parentId }))._id;
   }
   return parentId;
+}
+
+/**
+ * The Library folder for a newly added Bridge folder. The same folder on this
+ * computer, brought in before by a Bridge since reinstalled, keeps its Library
+ * folder; a new one goes into the class it is named for, or the top level.
+ */
+async function mountRootFor(
+  ctx: MutationCtx,
+  actor: { accountId: Id<"accounts">; schoolId: Id<"schools"> },
+  rootLabel: string,
+  rootKey: string,
+): Promise<{ rootNodeId: Id<"orgNodes">; earlier?: Doc<"bridgeMounts"> }> {
+  const retiredDevices = await ctx.db.query("bridgeDevices")
+    .withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "revoked"))
+    .take(50);
+  for (const retired of retiredDevices) {
+    const earlier = await ctx.db.query("bridgeMounts")
+      .withIndex("by_device_root_key", (q) => q.eq("deviceId", retired._id).eq("rootKey", rootKey))
+      .unique();
+    const root = earlier?.rootOrgNodeId ? await ctx.db.get(earlier.rootOrgNodeId) : null;
+    if (root && root.accountId === actor.accountId) {
+      if (root.deletedAt !== undefined) await restoreTrashedNode(ctx, root);
+      return { rootNodeId: root._id, earlier: earlier! };
+    }
+  }
+  const classNode = matchClass(rootLabel, await classWorkspaceNodes(ctx, actor.accountId));
+  const rootNode = await createFolderNode(ctx, { accountId: actor.accountId, schoolId: actor.schoolId, name: rootLabel, parentId: classNode?._id ?? null });
+  return { rootNodeId: rootNode._id };
 }
 
 async function failStorageTransitionForRequest(
@@ -234,6 +264,12 @@ export const registerMount = mutation({
     if (existing) {
       const existingRoot = existing.rootOrgNodeId ? await ctx.db.get(existing.rootOrgNodeId) : null;
       if (existingRoot?.deletedAt !== undefined) await restoreTrashedNode(ctx, existingRoot);
+      if (existingRoot && existing.state !== "active" && existingRoot.parentId === null) {
+        // A folder coming back (a reinstall, a re-pair) settles into its class
+        // if it was left at the top level.
+        const classNode = matchClass(input.rootLabel, await classWorkspaceNodes(ctx, actor.accountId));
+        if (classNode) await moveNode(ctx, (await ctx.db.get(existingRoot._id))!, { parentId: classNode._id });
+      }
       await ctx.db.patch(existing._id, { rootLabel: input.rootLabel, grantId: input.grantId, rootKey: input.rootKey, fileCount: input.fileCount, doubleSyncRisk: input.doubleSyncRisk, state: "active", lastScanAt: now, lastScanId: input.scanId, updatedAt: now });
       for (const ownerLockPath of input.ownerLockPaths) {
         const staleOwnerLocks = await ctx.db.query("workReplicas")
@@ -272,8 +308,17 @@ export const registerMount = mutation({
       }
       return existing._id;
     }
-    const rootNode = await createFolderNode(ctx, { accountId: actor.accountId, schoolId: actor.schoolId, name: input.rootLabel });
-    return ctx.db.insert("bridgeMounts", { accountId: actor.accountId, deviceId: device._id, rootLabel: input.rootLabel, grantId: input.grantId, rootKey: input.rootKey, rootOrgNodeId: rootNode._id, state: "active", fileCount: input.fileCount, doubleSyncRisk: input.doubleSyncRisk, lastScanAt: now, lastScanId: input.scanId, createdAt: now, updatedAt: now });
+    const { rootNodeId, earlier } = await mountRootFor(ctx, actor, input.rootLabel, input.rootKey);
+    const mountId = await ctx.db.insert("bridgeMounts", { accountId: actor.accountId, deviceId: device._id, rootLabel: input.rootLabel, grantId: input.grantId, rootKey: input.rootKey, rootOrgNodeId: rootNodeId, state: "active", fileCount: input.fileCount, doubleSyncRisk: input.doubleSyncRisk, lastScanAt: now, lastScanId: input.scanId, createdAt: now, updatedAt: now });
+    if (earlier) {
+      // The earlier files move to this mount, so the scan finds each unchanged
+      // file's work by its path instead of bringing it in a second time.
+      const replicas = await ctx.db.query("workReplicas")
+        .withIndex("by_device_mount_path", (q) => q.eq("deviceId", earlier.deviceId).eq("mountId", earlier._id))
+        .take(5_000);
+      for (const replica of replicas) await ctx.db.patch(replica._id, { deviceId: device._id, mountId, updatedAt: now });
+    }
+    return mountId;
   },
 });
 
@@ -569,7 +614,8 @@ async function discoverResourceForMount(
           const nextParts = input.relativePath.replaceAll("\\", "/").split("/").filter(Boolean);
           const nextName = nextParts.pop()!;
           if (policy.structure === "mirror-from-disk" || policy.structure === "mirror-both") {
-            const nextParent = await ensureFolderPath(ctx, actor.accountId, actor.schoolId, mount.rootOrgNodeId, nextParts);
+            const nextBase = await mountPathBase(ctx, actor.accountId, mount.rootOrgNodeId, nextParts);
+            const nextParent = await ensureFolderPath(ctx, actor.accountId, actor.schoolId, nextBase, nextParts);
             if (node.parentId !== nextParent) await moveNode(ctx, node, { parentId: nextParent });
           }
           if (node.name !== nextName) await renameNode(ctx, node, nextName);
@@ -639,7 +685,8 @@ async function discoverResourceForMount(
     }
     const parts = input.relativePath.replaceAll("\\", "/").split("/").filter(Boolean);
     const title = parts.pop()!;
-    const parentId = await ensureFolderPath(ctx, actor.accountId, actor.schoolId, mount.rootOrgNodeId, parts);
+    const base = await mountPathBase(ctx, actor.accountId, mount.rootOrgNodeId, parts);
+    const parentId = await ensureFolderPath(ctx, actor.accountId, actor.schoolId, base, parts);
     const now = Date.now();
     const workId = await ctx.db.insert("spectraArtifacts", { ownerAccountId: actor.accountId, schoolId: actor.schoolId, blueprintKey: "resource", resourceClass: "resource", nativeFormat: input.nativeFormat, compatibilityProfile: "strict-native", title, summary: formatByteCount(input.size), content: null, schemaVersion: 1, contentHash: input.contentHash, tags: [], status: "active", createdFrom: { source: "manual" }, createdAt: now, updatedAt: now });
     const replicaId = await ctx.db.insert("workReplicas", { accountId: actor.accountId, workId, kind: "local", deviceId: device._id, mountId: mount._id, localResourceId: input.localResourceId, relativePath: input.relativePath, nativeFormat: input.nativeFormat, revision: input.contentHash ?? `discovered:${input.localResourceId}`, contentHash: input.contentHash, state: input.contentHash && mountPolicy.cloudContent !== "full" ? "current" : "ahead", lastVerifiedAt: input.contentHash ? now : undefined, lastSeenScanId: mount.lastScanId, updatedAt: now });

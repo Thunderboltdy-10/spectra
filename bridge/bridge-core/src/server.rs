@@ -666,6 +666,7 @@ mod tests {
             short_code: code.into(),
             browser_origin: ORIGIN.into(),
             expires_at: unix_ms() + 60_000,
+            deployment_url: None,
         }
     }
 
@@ -717,6 +718,7 @@ mod tests {
                     short_code: format!("{index:06}"),
                     browser_origin: ORIGIN.into(),
                     expires_at: unix_ms() + 60_000,
+                    deployment_url: None,
                 })
                 .unwrap();
         }

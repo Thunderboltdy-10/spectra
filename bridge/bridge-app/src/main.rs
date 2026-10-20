@@ -366,7 +366,9 @@ fn record_clean_pass(
             .ok()
             .flatten()
             .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
-            .is_some_and(|value| value.get("state").and_then(|state| state.as_str()) == Some("active"));
+            .is_some_and(|value| {
+                value.get("state").and_then(|state| state.as_str()) == Some("active")
+            });
         if active {
             let _ = journal.set_config(&mount_synced_at_key(&grant.id), &now.to_string());
         }
@@ -542,14 +544,17 @@ impl HealthReporter {
         match &self.last {
             None => true,
             Some((last, sent_at)) => {
-                (last.paused, last.folders, &last.problem, &last.problem_folder)
-                    != (
-                        report.paused,
-                        report.folders,
-                        &report.problem,
-                        &report.problem_folder,
-                    )
-                    || sent_at.elapsed() >= HEALTH_REPORT_INTERVAL
+                (
+                    last.paused,
+                    last.folders,
+                    &last.problem,
+                    &last.problem_folder,
+                ) != (
+                    report.paused,
+                    report.folders,
+                    &report.problem,
+                    &report.problem_folder,
+                ) || sent_at.elapsed() >= HEALTH_REPORT_INTERVAL
             }
         }
     }
@@ -719,7 +724,9 @@ fn taskbar_is_light() -> bool {
 #[cfg(target_os = "macos")]
 fn taskbar_is_light() -> bool {
     static CACHE: Mutex<Option<(std::time::Instant, bool)>> = Mutex::new(None);
-    let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut cache = CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some((checked_at, light)) = *cache
         && checked_at.elapsed() < std::time::Duration::from_secs(60)
     {
@@ -795,9 +802,9 @@ fn devices_page_url(origin: &str) -> Option<String> {
     let origin = origin.trim().trim_end_matches('/');
     let scheme_ok = origin.starts_with("https://") || origin.starts_with("http://");
     let plain = !origin.is_empty()
-        && origin
-            .chars()
-            .all(|character| character.is_ascii_graphic() && !matches!(character, '"' | '\'' | '\x60'));
+        && origin.chars().all(|character| {
+            character.is_ascii_graphic() && !matches!(character, '"' | '\'' | '\x60')
+        });
     (scheme_ok && plain).then(|| format!("{origin}/devices"))
 }
 
@@ -1188,31 +1195,62 @@ fn mount_root_key(grant: &Grant) -> String {
     hex::encode(sha2::Sha256::digest(normalized.as_bytes()))
 }
 
+const UNKNOWN_DEPLOYMENT: &str = "This Bridge does not know which Spectra to sync with yet. Pair it again from Devices in Spectra.";
+
 fn configured_deployment_url(value: Option<String>) -> Result<String, String> {
     let url = value
         .map(|value| value.trim().trim_end_matches('/').to_owned())
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            "Set SPECTRA_CONVEX_URL to this Spectra instance's Convex URL before starting the Bridge."
-                .to_string()
-        })?;
+        .ok_or_else(|| UNKNOWN_DEPLOYMENT.to_string())?;
     let parsed = reqwest::Url::parse(&url).map_err(|_| {
-        "SPECTRA_CONVEX_URL must be a complete http:// or https:// Convex URL.".to_string()
+        "Spectra's sync address must be a complete http:// or https:// URL.".to_string()
     })?;
     if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
         return Err(
-            "SPECTRA_CONVEX_URL must be a complete http:// or https:// Convex URL.".to_string(),
+            "Spectra's sync address must be a complete http:// or https:// URL.".to_string(),
         );
     }
     Ok(url)
 }
 
+/// Where this Bridge syncs. A launch override (`SPECTRA_CONVEX_URL`, set by
+/// the local stack or baked into a release) wins; otherwise the deployment
+/// learned from the Spectra page this computer paired with.
+fn resolve_deployment_url(
+    launch: Option<String>,
+    stored: Option<String>,
+) -> Result<String, String> {
+    match launch.filter(|value| !value.trim().is_empty()) {
+        Some(value) => configured_deployment_url(Some(value)),
+        None => configured_deployment_url(stored),
+    }
+}
+
 fn deployment_url(journal: &Journal) -> Result<String, String> {
-    let url = configured_deployment_url(std::env::var("SPECTRA_CONVEX_URL").ok())?;
-    journal
-        .set_config("deployment_url", &url)
+    let stored = journal
+        .config("deployment_url")
         .map_err(|error| error.to_string())?;
+    let url = resolve_deployment_url(std::env::var("SPECTRA_CONVEX_URL").ok(), stored.clone())?;
+    if stored.as_deref() != Some(url.as_str()) {
+        journal
+            .set_config("deployment_url", &url)
+            .map_err(|error| error.to_string())?;
+    }
     Ok(url)
+}
+
+/// Pairing teaches the Bridge its deployment: the offer comes from a
+/// configured Spectra origin, so its Convex URL is the one to sync with.
+fn deployment_for_offer(journal: &Journal, offer: &PairingOffer) -> Result<String, String> {
+    if std::env::var_os("SPECTRA_CONVEX_URL").is_none() {
+        if let Some(offered) = offer.deployment_url.clone() {
+            let url = configured_deployment_url(Some(offered))?;
+            journal
+                .set_config("deployment_url", &url)
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    deployment_url(journal)
 }
 
 async fn run_replica_migration(
@@ -2360,7 +2398,10 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
     };
     let (detail, synced, total) = mount_pass_status(&pass, repair_delay_ms);
     set_mount_status(journal, &grant.id, "active", &detail, synced, total)?;
-    let _ = journal.set_config(&mount_synced_at_key(&grant.id), &current_time_ms().to_string());
+    let _ = journal.set_config(
+        &mount_synced_at_key(&grant.id),
+        &current_time_ms().to_string(),
+    );
     Ok(())
 }
 
@@ -3537,7 +3578,7 @@ async fn complete_pairing_offer(
     state: &Arc<ServerState>,
     journal: &Arc<Journal>,
 ) -> Result<(), String> {
-    let deployment = deployment_url(journal)?;
+    let deployment = deployment_for_offer(journal, offer)?;
     let device_name = this_device_name();
     let installation_id = match journal
         .config("installation_id")
@@ -3802,7 +3843,9 @@ fn local_document(
 ) -> Result<std::path::PathBuf, String> {
     let path = grants
         .resolve(grant_id, std::path::Path::new(relative_path))
-        .map_err(|_| "This file is not in a folder Spectra can reach on this computer.".to_string())?;
+        .map_err(|_| {
+            "This file is not in a folder Spectra can reach on this computer.".to_string()
+        })?;
     if !path.is_file() {
         return Err("This file is no longer in its folder on this computer.".into());
     }
@@ -3841,7 +3884,10 @@ fn reveal_in_file_manager(path: &std::path::Path) -> std::io::Result<()> {
     }
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open").arg("-R").arg(path).spawn()?;
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .spawn()?;
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -3879,7 +3925,8 @@ fn open_logs_impl(app: &tauri::AppHandle, journal: &Journal) -> Result<(), Strin
         )
     };
     std::fs::write(&path, contents).map_err(|error| error.to_string())?;
-    open_with_system(path.as_os_str()).map_err(|error| format!("Could not open the Bridge log: {error}"))
+    open_with_system(path.as_os_str())
+        .map_err(|error| format!("Could not open the Bridge log: {error}"))
 }
 
 async fn run_sync_iteration(
@@ -3941,7 +3988,11 @@ async fn run_sync_iteration(
                 // key while this report was in flight.
                 let still_current = journal.config("device_id").ok().flatten().as_deref()
                     == Some(device_id.as_str())
-                    && HostPlatform.read_credential(&device_id).ok().flatten().as_deref()
+                    && HostPlatform
+                        .read_credential(&device_id)
+                        .ok()
+                        .flatten()
+                        .as_deref()
                         == Some(credential.as_str());
                 if still_current && unpair_this_computer(grants, journal).is_ok() {
                     state.forget_pairing();
@@ -4072,21 +4123,26 @@ async fn run_sync_iteration(
                 0
             }
         };
-    let payload_handled =
-        match drain_pending_payload_uploads(grants, journal, deployment, &credential, &paused_grants)
-            .await
-        {
-            Ok(handled) => {
-                cloud_request_succeeded = true;
-                let _ = journal.delete_config("payload_queue_error");
-                handled
-            }
-            Err(error) => {
-                failed = true;
-                let _ = journal.set_config("payload_queue_error", &error.to_string());
-                0
-            }
-        };
+    let payload_handled = match drain_pending_payload_uploads(
+        grants,
+        journal,
+        deployment,
+        &credential,
+        &paused_grants,
+    )
+    .await
+    {
+        Ok(handled) => {
+            cloud_request_succeeded = true;
+            let _ = journal.delete_config("payload_queue_error");
+            handled
+        }
+        Err(error) => {
+            failed = true;
+            let _ = journal.set_config("payload_queue_error", &error.to_string());
+            0
+        }
+    };
     let write_handled = match drain_write_requests(
         grants,
         journal,
@@ -4323,7 +4379,8 @@ fn main() {
             // Bridge has no window: the tray, the folder picker and the
             // pairing confirmation are its only native surfaces. Everything
             // else happens on the Devices page in Spectra.
-            let open = MenuItem::with_id(app, "open", "Open Devices in Spectra", true, None::<&str>)?;
+            let open =
+                MenuItem::with_id(app, "open", "Open Devices in Spectra", true, None::<&str>)?;
             let pause = MenuItem::with_id(app, "pause", "Pause syncing", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Bridge", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &pause, &quit])?;
@@ -4431,22 +4488,34 @@ mod devices_tests {
         assert_eq!(tray_view(false, false, false, &[]).dot, TrayDot::Orange);
         let paused = tray_view(true, true, true, &three);
         assert_eq!(paused.dot, TrayDot::Grey);
-        assert_eq!(paused.tooltip, "Spectra Bridge \u{b7} Paused \u{b7} 3 folders");
+        assert_eq!(
+            paused.tooltip,
+            "Spectra Bridge \u{b7} Paused \u{b7} 3 folders"
+        );
     }
 
     #[test]
     fn a_folder_problem_turns_the_dot_red_unless_that_folder_is_paused() {
-        let unreachable = [mount("Biology", "unavailable", false), mount("Maths", "active", false)];
+        let unreachable = [
+            mount("Biology", "unavailable", false),
+            mount("Maths", "active", false),
+        ];
         let view = tray_view(true, true, false, &unreachable);
         assert_eq!(view.dot, TrayDot::Red);
         assert_eq!(view.tooltip, "Spectra Bridge \u{b7} Problem with Biology");
-        let two = [mount("Biology", "error", false), mount("Maths", "unavailable", false)];
+        let two = [
+            mount("Biology", "error", false),
+            mount("Maths", "unavailable", false),
+        ];
         assert_eq!(
             tray_view(true, true, false, &two).tooltip,
             "Spectra Bridge \u{b7} Problem with 2 folders"
         );
         let paused_problem = [mount("Biology", "unavailable", true)];
-        assert_eq!(tray_view(true, true, false, &paused_problem).dot, TrayDot::None);
+        assert_eq!(
+            tray_view(true, true, false, &paused_problem).dot,
+            TrayDot::None
+        );
     }
 
     #[test]
@@ -4507,10 +4576,16 @@ mod devices_tests {
         assert!(!sync_paused(&journal));
 
         set_mount_paused(&grants, &journal, &grant.id, true).unwrap();
-        assert_eq!(paused_mounts(&grants, &journal), HashSet::from([grant.id.clone()]));
+        assert_eq!(
+            paused_mounts(&grants, &journal),
+            HashSet::from([grant.id.clone()])
+        );
         let snapshot = control_snapshot(&grants, &journal);
         assert!(snapshot.mounts[0].paused);
-        assert_eq!(snapshot.mounts[0].friendly_path.split(" \u{203a} ").last(), Some("Biology"));
+        assert_eq!(
+            snapshot.mounts[0].friendly_path.split(" \u{203a} ").last(),
+            Some("Biology")
+        );
         assert!(set_mount_paused(&grants, &journal, "grant_gone", true).is_err());
     }
 
@@ -4518,7 +4593,9 @@ mod devices_tests {
     fn a_work_page_reaches_only_documents_inside_a_selected_folder() {
         let grants = GrantRegistry::default();
         let root = temp_folder("Biology");
-        let grant = grants.add_native_selection("Biology".into(), &root).unwrap();
+        let grant = grants
+            .add_native_selection("Biology".into(), &root)
+            .unwrap();
         std::fs::create_dir_all(root.join("Essays")).unwrap();
         std::fs::write(root.join("Essays").join("Cells.docx"), b"doc").unwrap();
         std::fs::write(root.join("setup.exe"), b"exe").unwrap();
@@ -4530,8 +4607,16 @@ mod devices_tests {
         // A program in the folder can be shown, never launched.
         let program = local_document(&grants, &grant.id, "setup.exe").unwrap();
         assert!(!opens_in_desktop_app(&program));
-        for refused in ["../outside.docx", "Essays/Missing.docx", "Essays", "C:/Windows/notepad.exe"] {
-            assert!(local_document(&grants, &grant.id, refused).is_err(), "{refused}");
+        for refused in [
+            "../outside.docx",
+            "Essays/Missing.docx",
+            "Essays",
+            "C:/Windows/notepad.exe",
+        ] {
+            assert!(
+                local_document(&grants, &grant.id, refused).is_err(),
+                "{refused}"
+            );
         }
         assert!(local_document(&grants, "grant_gone", "Essays/Cells.docx").is_err());
     }
@@ -4596,7 +4681,12 @@ mod devices_tests {
             .unwrap();
         set_mount_status(&journal, &active.id, "active", "Up to date", 2, 2).unwrap();
         set_mount_status(&journal, &paused.id, "active", "Up to date", 1, 1).unwrap();
-        record_clean_pass(&grants, &journal, &HashSet::from([paused.id.clone()]), 1_000);
+        record_clean_pass(
+            &grants,
+            &journal,
+            &HashSet::from([paused.id.clone()]),
+            1_000,
+        );
         let snapshot = control_snapshot(&grants, &journal);
         assert_eq!(snapshot.last_sync_at, Some(1_000));
         let synced_at = |id: &str| {
@@ -4654,15 +4744,26 @@ mod devices_tests {
         let grant = grants
             .add_native_selection("Biology".into(), &temp_folder("Biology"))
             .unwrap();
-        journal.set_config(&format!("mount:{}", grant.id), "{}").unwrap();
-        journal.set_config(&mount_paused_key(&grant.id), "true").unwrap();
-        journal.set_config("browser_origin", "https://spectra.school").unwrap();
-        journal.set_config("browser_session_token", "token").unwrap();
+        journal
+            .set_config(&format!("mount:{}", grant.id), "{}")
+            .unwrap();
+        journal
+            .set_config(&mount_paused_key(&grant.id), "true")
+            .unwrap();
+        journal
+            .set_config("browser_origin", "https://spectra.school")
+            .unwrap();
+        journal
+            .set_config("browser_session_token", "token")
+            .unwrap();
         journal.set_config("installation_id", "install-1").unwrap();
         set_sync_paused(&journal, true).unwrap();
         unpair_this_computer(&grants, &journal).unwrap();
         assert!(grants.device_grants().is_empty());
-        assert_eq!(journal.config(&format!("mount:{}", grant.id)).unwrap(), None);
+        assert_eq!(
+            journal.config(&format!("mount:{}", grant.id)).unwrap(),
+            None
+        );
         assert_eq!(journal.config(&mount_paused_key(&grant.id)).unwrap(), None);
         assert_eq!(journal.config("browser_session_token").unwrap(), None);
         assert!(!sync_paused(&journal));
@@ -4692,7 +4793,10 @@ mod devices_tests {
             ..report.clone()
         };
         assert!(reporter.due(&problem));
-        reporter.last = Some((report.clone(), std::time::Instant::now() - HEALTH_REPORT_INTERVAL));
+        reporter.last = Some((
+            report.clone(),
+            std::time::Instant::now() - HEALTH_REPORT_INTERVAL,
+        ));
         assert!(reporter.due(&report));
     }
 
@@ -4721,17 +4825,36 @@ mod tests {
     use super::{
         ActiveMountSyncGuard, MountRepairRetry, clear_mount_repair_retry,
         configured_deployment_url, current_time_ms, mount_repair_retry_due, mount_repair_retry_key,
-        resolve_bridge_data_dir, retain_current_mounts, schedule_mount_repair_retry,
+        resolve_bridge_data_dir, resolve_deployment_url, retain_current_mounts,
+        schedule_mount_repair_retry,
     };
     use spectra_bridge_core::journal::Journal;
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
 
     #[test]
-    fn bridge_requires_an_explicit_convex_url() {
+    fn bridge_without_a_deployment_asks_to_pair_again() {
         let error = configured_deployment_url(None).unwrap_err();
-        assert!(error.contains("Set SPECTRA_CONVEX_URL"));
+        assert!(error.contains("Pair it again from Devices"));
         assert!(configured_deployment_url(Some("   ".into())).is_err());
+    }
+
+    #[test]
+    fn launch_override_wins_over_the_paired_deployment() {
+        let stored = Some("https://paired.convex.cloud".to_string());
+        assert_eq!(
+            resolve_deployment_url(Some("http://127.0.0.1:3002/".into()), stored.clone()).unwrap(),
+            "http://127.0.0.1:3002"
+        );
+        assert_eq!(
+            resolve_deployment_url(None, stored.clone()).unwrap(),
+            "https://paired.convex.cloud"
+        );
+        assert_eq!(
+            resolve_deployment_url(Some(" ".into()), stored).unwrap(),
+            "https://paired.convex.cloud"
+        );
+        assert!(resolve_deployment_url(None, None).is_err());
     }
 
     #[test]

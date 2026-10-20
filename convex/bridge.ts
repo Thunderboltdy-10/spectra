@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./functions";
 import { internal } from "./_generated/api";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { getAuthenticatedActor, getOptionalAuthenticatedActor } from "./identityShared";
 import { z } from "zod";
@@ -113,6 +113,16 @@ export const confirmPairing = mutation({
       .unique();
     const deviceId = existingDevice?._id ?? await ctx.db.insert("bridgeDevices", { accountId: row.accountId, ...values });
     if (existingDevice) await ctx.db.patch(existingDevice._id, values);
+    // A reinstalled Bridge pairs as another installation. The same computer's
+    // other records (same name and platform) are retired, so this computer
+    // never also shows as another one that went offline.
+    const sameComputer = await ctx.db.query("bridgeDevices")
+      .withIndex("by_account_state", (q) => q.eq("accountId", row.accountId).eq("state", "active"))
+      .collect();
+    for (const device of sameComputer) {
+      if (device._id !== deviceId && device.name === values.name && device.platform === values.platform)
+        await retireDevice(ctx, device._id, now);
+    }
     await ctx.db.patch(row._id, { confirmedAt: now, consumedAt: now });
     return { deviceId, deviceCredential: credential, browserOrigin: row.browserOrigin };
   },
@@ -324,6 +334,24 @@ export const sweepRevokedDevice = internalMutation({
   },
 });
 
+/**
+ * Revokes a device: its credential stops working at once and its folders,
+ * replicas and queued requests are swept in batches.
+ */
+async function retireDevice(ctx: MutationCtx, deviceId: Id<"bridgeDevices">, now: number) {
+  await ctx.db.patch(deviceId, {
+    state: "revoked",
+    credentialHash: `revoked:${crypto.randomUUID()}`,
+    payloadUploadCursor: undefined,
+    lastSeenAt: now,
+  });
+  await ctx.scheduler.runAfter(
+    REVOCATION_BATCH_DELAY_MS,
+    internal.bridge.sweepRevokedDevice,
+    { deviceId, step: 0 },
+  );
+}
+
 export const revokeDevice = mutation({
   args: { deviceId: v.id("bridgeDevices") },
   handler: async (ctx, { deviceId }) => {
@@ -334,19 +362,7 @@ export const revokeDevice = mutation({
       throw new Error("BRIDGE_DEVICE_INVALID");
     if (device.state === "revoked")
       return { deviceId, cleanupQueued: false, alreadyRevoked: true };
-
-    const now = Date.now();
-    await ctx.db.patch(deviceId, {
-      state: "revoked",
-      credentialHash: `revoked:${crypto.randomUUID()}`,
-      payloadUploadCursor: undefined,
-      lastSeenAt: now,
-    });
-    await ctx.scheduler.runAfter(
-      REVOCATION_BATCH_DELAY_MS,
-      internal.bridge.sweepRevokedDevice,
-      { deviceId, step: 0 },
-    );
+    await retireDevice(ctx, deviceId, Date.now());
     return { deviceId, cleanupQueued: true, alreadyRevoked: false };
   },
 });

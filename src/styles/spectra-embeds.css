@@ -227,6 +227,28 @@ button.work-embed-title:hover {
   color: var(--text-tertiary);
 }
 
+/* A work whose contents live on one computer: where it is, in place of a face. */
+.work-embed-kept {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 0 4px;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  line-height: 1.5;
+}
+
+.work-embed-kept svg {
+  margin-top: 2px;
+  color: var(--text-tertiary);
+}
+
+.work-embed-kept strong {
+  display: block;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
 /* --- Faces --- */
 
 .work-embed-document {

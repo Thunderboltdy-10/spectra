@@ -137,6 +137,12 @@ export async function queueMaterializationInTransaction(
   // Refuse protected AI writes before superseding requests or recording pending content.
   if (effects.actorKind === "ai" && policy.protectedOriginal)
     throw new Error("NATIVE_PROMOTION_PROTECTED");
+  // A desktop save Spectra has not taken in yet is the newest truth; writing
+  // now would replace it. Only a write built on that save (Keep Spectra, after
+  // the user saw both) may go ahead; anything else reconciles first.
+  if (!policy.protectedOriginal && (local.state === "ahead" || local.state === "diverged") &&
+      input.baseRevision !== (local.contentHash ?? local.revision))
+    throw new Error("MATERIALIZATION_BASE_STALE");
   const baseIdempotencyKey = await deriveSyncIdempotencyKey({
     workId: String(args.workId),
     target: localMaterializationTarget(String(local.mountId), local.relativePath),

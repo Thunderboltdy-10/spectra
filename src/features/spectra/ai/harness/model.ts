@@ -41,6 +41,9 @@ export type ModelRequest = {
   signal: AbortSignal;
   onText?: (delta: string) => void;
   onRetry?: () => void;
+  onToolDraft?: (draft: { id: string; name: string; arguments: string }) => void;
+  /** The model's private reasoning as it streams; only the caption writer reads it. */
+  onReasoning?: (delta: string) => void;
   /** Only the caption writer ("low") and the daily brief ("medium") pass this. */
   reasoning?: SpectraReasoningProfile;
   /** "daily" runs on SPECTRA_DAILY_MODEL_ID when it is configured. */
@@ -91,7 +94,7 @@ async function attempt(
     model: daily || (route === "fallback" ? getSpectraFallbackModelId() : profile.route),
     reasoning: {
       effort: request.reasoning ?? getSpectraReasoningProfile(),
-      exclude: true,
+      exclude: !request.onReasoning,
     },
     stream: true,
     stream_options: { include_usage: true },
@@ -133,8 +136,8 @@ async function attempt(
     const turn = await readOpenRouterAgentTurn(
       response,
       request.onText,
-      undefined,
-      undefined,
+      request.onReasoning,
+      request.onToolDraft,
       STREAM_IDLE_TIMEOUT_MS,
     );
     return {
@@ -215,6 +218,8 @@ export const openRouterModelCaller: ModelCaller = (input) =>
     signal: input.signal,
     onText: input.onText,
     onRetry: input.onRetry,
+    onToolDraft: input.onToolDraft,
+    onReasoning: input.onReasoning,
   });
 
 let contextWindowCache: { model: string; tokens: number } | null = null;

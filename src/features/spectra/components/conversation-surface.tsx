@@ -1,5 +1,6 @@
 "use client";
 
+import { buttonVariants } from "@/components/ui/button";
 import {
   useCallback,
   useEffect,
@@ -11,9 +12,8 @@ import {
 } from "react";
 import { Code2, Loader2, ShieldCheck, AlertCircle, Bot, Check, ChevronDown, ExternalLink, FileText, FolderPlus, MessageSquare, ArrowDown, CircleDot, GitCompareArrows, Undo2, Wrench } from "@/components/icons/glyph-icons";
 import { toast } from "@/components/ui/toast";
-import { GhostLines } from "@/components/ui/skeleton";
 import { SpectraMark } from "@/components/spectra-mark";
-import { PrismLoader } from "@/components/spectra-prism-optic";
+import { PrismLoader, type PrismOptics } from "@/components/spectra-prism-optic";
 import { SpectraRichContent, type CitationSource } from "./spectra-rich-content";
 import { useStreamingReveal } from "../runs/streaming/use-streaming-reveal";
 import { spectraBus } from "../events";
@@ -22,7 +22,7 @@ import { SelectField } from "@/components/ui/select";
 import { useSpectraRun, type SpectraLiveExchange } from "../ai/use-spectra-run";
 import { isSettledAiRunStatus, isWorkingAiRunStatus } from "../core";
 import { operationCounts, useRunLedger } from "../collaboration/run-ledger";
-import { ProgressTrace } from "./progress-trace";
+import { openTraceWhenShown, ProgressTrace, WorkedForReveal } from "./progress-trace";
 import {
   clearSpectraRunAgent,
   getSpectraOperationConflict,
@@ -48,14 +48,15 @@ import { useWorkspaceCatalog } from "../data/use-catalog-pages";
 import { CatalogProgress } from "./catalog-progress";
 import { ResultCardStack } from "./result-card";
 import { workTypeMeta } from "./artifact-card";
-import { ArtifactEmbedList } from "./artifact-embed-host";
+import { ArtifactEmbedList, useArtifactEmbedContainer } from "./artifact-embed-host";
+import { isReplyEmbedRegion, replyEmbedRegion } from "../../../../shared/artifact-embed";
 import { publicSpectraFailureText } from "../runs/live-dock";
 import { BatchedChoiceBlock, ChoiceBlock } from "./conversation-choice";
 import { compareConflictRegions } from "../collaboration/region-text";
 import { HarnessInputPanel, WorkTouchCards, messageTouches } from "./harness-run-parts";
 import { HarnessWidgets, messageWidgets } from "./thread-widget";
 import { applyHarnessEvent, isHarnessExchangeEvent, type HarnessAnswerValue, type HarnessExchangeFields } from "../ai/harness-exchange";
-import { parseSpectraStreamEvent } from "../ai/stream-events";
+import { parseSpectraStreamEvent, type HarnessArtifactTouchView } from "../ai/stream-events";
 
 function operationLabel(
   operation: SpectraThreadTrace["operations"][number],
@@ -212,6 +213,26 @@ function messageAttachments(message: SpectraThreadDetail["messages"][number]) {
 }
 
 const NO_SOURCES: readonly CitationSource[] = [];
+
+/** How the prism beside a reply being written shows where the run is. */
+const LIVE_OPTICS: Record<SpectraLiveExchange["status"], PrismOptics> = {
+  starting: "working",
+  streaming: "working",
+  waiting: "waiting",
+  failed: "failed",
+};
+
+/** Spectra beside its reply: the live prism, turning while it works, leaning toward a near pointer and turning when pressed. */
+function ReplyMark({ optics = "dormant" }: { optics?: PrismOptics }) {
+  return (
+    <span aria-hidden data-prism-host className="absolute left-0 top-0.5 flex size-6 items-center justify-center">
+      <PrismLoader size={20} optics={optics} interactive />
+    </span>
+  );
+}
+
+/** What a result card asks the user to decide; a card with one of these is never folded away. */
+const DECISION_ACTIONS = new Set(["confirm", "cancel", "reject", "retry"]);
 
 /** The sources a saved reply cites: each opens where it lives. */
 function messageSources(message: SpectraThreadDetail["messages"][number]): readonly CitationSource[] {
@@ -499,7 +520,7 @@ export function ArtifactConflictResolution({
           type="button"
           disabled={Boolean(busy)}
           onClick={() => void resolve("keep_current")}
-          className="min-h-8 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+          className={buttonVariants({ variant: "secondary" })}
         >
           {busy === "keep_current" ? "Keeping…" : "Keep the saved version"}
         </button>
@@ -719,6 +740,57 @@ function CodeProposalReview({
         the proposal is confirmed.
       </footer>
     </section>
+  );
+}
+
+/**
+ * The work one reply made or showed: the works Spectra placed live under it
+ * (show_work), then a card for each other work it touched. A work shown live
+ * needs no card as well. Every reply shares the thread's one embed subscription.
+ */
+function ReplyWork({
+  threadId,
+  runId,
+  touches,
+  onOpen,
+}: {
+  threadId?: string;
+  runId?: string;
+  touches: readonly HarnessArtifactTouchView[];
+  onOpen?: (artifactId: string) => void;
+}) {
+  const region = runId ? replyEmbedRegion(runId) : undefined;
+  const container = useArtifactEmbedContainer("thread", threadId ?? "", Boolean(threadId && region));
+  const shown = new Set(
+    container?.embeds.filter((embed) => embed.containerRegionId === region).map((embed) => String(embed.sourceArtifactId)),
+  );
+  return (
+    <>
+      {threadId && region ? (
+        <ArtifactEmbedList
+          containerType="thread"
+          containerId={threadId}
+          className="mt-4 space-y-3"
+          onOpenSource={onOpen}
+          region={(regionId) => regionId === region}
+        />
+      ) : null}
+      <WorkTouchCards touches={shown.size ? touches.filter((touch) => !shown.has(touch.id)) : touches} onOpen={onOpen} />
+    </>
+  );
+}
+
+/**
+ * The operations ledger belongs to plan-style runs. A harness run already shows
+ * its approval, its work cards and its outcome note, so a second card would
+ * only repeat them, worse; it keeps the ledger only for a conflict to resolve.
+ */
+function showsOperationalTrace(trace: SpectraThreadTrace) {
+  if (harnessTraceFields(trace))
+    return trace.operations.some((operation) => operation.status === "waiting" && operation.conflict);
+  return (
+    trace.operations.length > 0 ||
+    ["failed", "cancelled", "awaiting_confirmation", "awaiting_resolution"].includes(trace.run.status)
   );
 }
 
@@ -1011,7 +1083,7 @@ function TerminalRunFailureNote({
                 setRetrying(false),
               );
             }}
-            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-chip bg-[var(--text-primary)] px-2 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-50"
+            className={buttonVariants({ variant: "primary" })}
           >
             {retrying ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
             Retry
@@ -1054,9 +1126,17 @@ function PersistedProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
         active={trace.run.status === "queued" || trace.run.status === "running"}
         hasOutput={Boolean(trace.run.finalSummary) || !["queued", "running"].includes(trace.run.status)}
         persistKey={trace.run._id}
+        {...traceTiming(trace)}
       />
     );
   return <LegacyProgressTrace trace={trace} />;
+}
+
+/** When a stored run began and settled: its last event, or its last change. */
+function traceTiming(trace: SpectraThreadTrace) {
+  if (trace.run.status === "queued" || trace.run.status === "running") return { startedAt: trace.run.createdAt };
+  const lastEvent = (trace.events ?? []).reduce((latest, event) => Math.max(latest, event.createdAt), 0);
+  return { startedAt: trace.run.createdAt, endedAt: lastEvent || trace.run.updatedAt };
 }
 
 function LegacyProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
@@ -1200,6 +1280,7 @@ function LegacyProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
         !["queued", "running"].includes(trace.run.status)
       }
       persistKey={trace.run._id}
+      {...traceTiming(trace)}
     />
   );
 }
@@ -1660,7 +1741,7 @@ export function ConversationSurface({
   // run shown live is answered in its own panel, not repeated as a card.
   const actionableCards = (activeCards ?? []).filter(
     (card) =>
-      card.actions.some((action) => ["confirm", "cancel", "reject", "retry"].includes(action.key)) &&
+      card.actions.some((action) => DECISION_ACTIONS.has(action.key)) &&
       !(liveExchange?.input && card.runId === liveExchange.runId),
   );
   const observedActiveExecution = useQuery(
@@ -1987,7 +2068,7 @@ export function ConversationSurface({
                 type="button"
                 onClick={() => void loadOlder()}
                 disabled={loadingOlder}
-                className="rounded-control border border-[var(--border-default)] px-3 py-1.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-60"
+                className={buttonVariants({ variant: "ghost" })}
               >
                 {loadingOlder ? "Loading older messages…" : olderError ? "Retry older messages" : "Load older messages"}
               </button>
@@ -2025,6 +2106,10 @@ export function ConversationSurface({
                   card.summary?.trim() === message.content.trim();
                 if (repeatsAnswer && card.status === "completed" &&
                   card.variant === "status" && card.actions.length === 0) return [];
+                // A finished run whose works are already shown under the reply says nothing more:
+                // the work card nearest the message stays, this one goes. Questions and recovery stay.
+                if (touches.length && card.status === "completed" && card.variant !== "error" &&
+                  !card.actions.some((action) => DECISION_ACTIONS.has(action.key))) return [];
                 // Keep work links, recovery and approval controls without
                 // repeating prose already owned by the assistant message.
                 const actions = touches.length ? card.actions.filter((action) => action.key !== "open") : card.actions;
@@ -2107,11 +2192,26 @@ export function ConversationSurface({
                     </>
                   ) : (
                     <div className="relative pl-9">
-                      <span aria-hidden className="absolute left-0 top-0.5 flex size-6 items-center justify-center">
-                        <SpectraMark size={20} />
-                      </span>
+                      <ReplyMark />
                       {trace && trace.run.providerUsed !== "Spectra" ? (
                         <PersistedProgressTrace trace={trace} />
+                      ) : !trace && !activeRun && message.runId ? (
+                        (() => {
+                          const asked = visibleMessages.find((other) => other.role === "user" && other.runId === message.runId);
+                          if (!asked || message.createdAt <= asked.createdAt) return null;
+                          const runId = message.runId;
+                          return (
+                            <WorkedForReveal
+                              durationMs={message.createdAt - asked.createdAt}
+                              loading={traceState?.loading === true}
+                              error={traceState?.error}
+                              onReveal={() => {
+                                openTraceWhenShown(runId);
+                                void requestRunTrace(runId);
+                              }}
+                            />
+                          );
+                        })()
                       ) : null}
                       <SpectraRichContent
                         content={message.content}
@@ -2133,7 +2233,12 @@ export function ConversationSurface({
                       {message.role === "assistant" ? (
                         <HarnessWidgets widgets={messageWidgets(message.metadata)} threadId={observedThreadId} onOpenArtifact={onOpenArtifact} />
                       ) : null}
-                      <WorkTouchCards touches={touches} onOpen={onOpenArtifact} />
+                      <ReplyWork
+                        threadId={observedThreadId}
+                        runId={message.role === "assistant" ? message.runId : undefined}
+                        touches={touches}
+                        onOpen={onOpenArtifact}
+                      />
                       {(() => {
                         const choices = messageChoices(
                           message,
@@ -2197,16 +2302,7 @@ export function ConversationSurface({
                         {messageMeta(message)}
                       </div>
                       {trace ? <AgentRoutingControl trace={trace} /> : null}
-                      {trace &&
-                      (trace.operations.length > 0 ||
-                        [
-                          "failed",
-                          "cancelled",
-                          "awaiting_confirmation",
-                          "awaiting_resolution",
-                        ].includes(trace.run.status)) ? (
-                        <OperationalTrace trace={trace} />
-                      ) : null}
+                      {trace && showsOperationalTrace(trace) ? <OperationalTrace trace={trace} /> : null}
                       {trace ? (
                         <>
                           <PersistedRunOutcomeNote
@@ -2308,9 +2404,7 @@ export function ConversationSurface({
               !persistedAssistantRunIds.has(liveExchange.runId) ? (
                 <article className={cn("relative", compact ? "mb-7" : "mb-10")}>
                   <div className="relative pl-9">
-                    <span aria-hidden className="absolute left-0 top-0.5 flex size-6 items-center justify-center">
-                      <SpectraMark size={20} />
-                    </span>
+                    <ReplyMark optics={LIVE_OPTICS[liveExchange.status]} />
                     <ProgressTrace
                       steps={liveExchange.steps}
                       caption={liveExchange.caption}
@@ -2321,6 +2415,7 @@ export function ConversationSurface({
                         liveExchange.status === "failed"
                       }
                       persistKey={liveExchange.runId ?? liveExchange.id}
+                      startedAt={liveExchange.startedAt}
                     />
                     {liveExchange.content ? (
                       <LiveContentReveal
@@ -2330,12 +2425,13 @@ export function ConversationSurface({
                         sources={liveExchange.sources}
                       />
                     ) : null}
-                    {/* The reply still being written: the lines it will take, as a skeleton, until it is all there. */}
-                    {liveExchange.status === "starting" || liveExchange.status === "streaming" ? (
-                      <GhostLines count={liveExchange.content ? 1 : 3} className={cn("max-w-[34rem]", liveExchange.content ? "mt-3 w-2/3" : "mt-1")} />
-                    ) : null}
                     <HarnessWidgets widgets={liveExchange.widgets} threadId={observedThreadId} onOpenArtifact={onOpenArtifact} />
-                    <WorkTouchCards touches={liveExchange.artifacts ?? []} onOpen={onOpenArtifact} />
+                    <ReplyWork
+                      threadId={observedThreadId}
+                      runId={liveExchange.runId}
+                      touches={liveExchange.artifacts ?? []}
+                      onOpen={onOpenArtifact}
+                    />
                     {liveExchange.input && liveExchange.runId && onAnswer ? (
                       <HarnessInputPanel
                         key={liveExchange.input.toolCallId}
@@ -2391,15 +2487,7 @@ export function ConversationSurface({
                               trace.run.retryable !== false,
                             )}
                     </p>
-                    {trace.operations.length > 0 ||
-                    [
-                      "failed",
-                      "cancelled",
-                      "awaiting_confirmation",
-                      "awaiting_resolution",
-                    ].includes(trace.run.status) ? (
-                      <OperationalTrace trace={trace} />
-                    ) : null}
+                    {showsOperationalTrace(trace) ? <OperationalTrace trace={trace} /> : null}
                     <PersistedRunOutcomeNote
                       trace={trace}
                       onRetryRun={onRetryRun}
@@ -2417,6 +2505,7 @@ export function ConversationSurface({
               containerId={threadId}
               className="mb-8 space-y-3"
               onOpenSource={onOpenArtifact}
+              region={(regionId) => !isReplyEmbedRegion(regionId)}
             />
           ) : null}
           {actionableCards.length ? (

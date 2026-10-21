@@ -86,6 +86,8 @@ export default defineSchema({
     claimedAt: v.number(),
     recap: v.optional(v.string()),
     suggestions: v.optional(v.array(briefSuggestionValidator)),
+    /** The last day's brief, kept on the page until this day's is ready. */
+    previous: v.optional(v.object({ day: v.string(), recap: v.optional(v.string()), suggestions: v.optional(v.array(briefSuggestionValidator)) })),
     updatedAt: v.number(),
   }).index("by_account", ["accountId"]),
 
@@ -98,6 +100,8 @@ export default defineSchema({
     timeZone: v.string(),
     /** The next instant the brief is written: a little before waking. */
     nextAt: v.number(),
+    /** When the reader last opened Home; a schedule left alone for days rests until they come back. */
+    seenAt: v.optional(v.number()),
     updatedAt: v.number(),
   })
     .index("by_account", ["accountId"])
@@ -259,6 +263,21 @@ export default defineSchema({
     ),
     subject: v.string(),
     message: v.string(),
+    // What the reporter was looking at: a screenshot taken as they opened
+    // the feedback form, and the page it came from.
+    screenshotStorageId: v.optional(v.id("_storage")),
+    pagePath: v.optional(v.string()),
+    // Files the reporter added themselves: pictures, recordings, documents.
+    attachments: v.optional(
+      v.array(
+        v.object({
+          storageId: v.id("_storage"),
+          name: v.string(),
+          mediaType: v.string(),
+          bytes: v.number(),
+        }),
+      ),
+    ),
     status: v.union(
       v.literal("new"),
       v.literal("triaged"),
@@ -339,6 +358,17 @@ export default defineSchema({
   })
     .index("by_status_updated", ["status", "updatedAt"])
     .index("by_severity_updated", ["severity", "updatedAt"]),
+
+  // The platform emergency stop: one row per scope. A stopped scope refuses
+  // new work until an operator resumes it; sign-in and the operator console
+  // never depend on it.
+  platformControls: defineTable({
+    scope: v.union(v.literal("ai"), v.literal("background")),
+    stopped: v.boolean(),
+    reason: v.optional(v.string()),
+    updatedByAccountId: v.id("accounts"),
+    updatedAt: v.number(),
+  }).index("by_scope", ["scope"]),
 
   schoolLifecycleJobs: defineTable({
     schoolId: v.id("schools"),
@@ -764,7 +794,7 @@ export default defineSchema({
   // reads a school's usage in O(1) instead of summing usageMeters.
   schoolUsageTotals: defineTable({
     schoolId: v.id("schools"),
-    category: v.literal("model_tokens"),
+    category: v.union(v.literal("model_tokens"), v.literal("storage_bytes")),
     periodKey: v.string(),
     quantity: v.number(),
     updatedAt: v.number(),
@@ -1921,6 +1951,9 @@ export default defineSchema({
       }),
     ),
     permanentDeleteJobId: v.optional(v.id("workspaceDeletionJobs")),
+    // New work filed here is shared with the workspace's people at once.
+    // Absent: new work starts private and is shared one by one.
+    shareNewWork: v.optional(v.boolean()),
     status: v.union(v.literal("active"), v.literal("archived")),
     defaultView: v.union(
       v.literal("cards"),
@@ -1948,6 +1981,20 @@ export default defineSchema({
     .index("by_school_status_activity", ["schoolId", "status", "lastActivityAt"])
     .index("by_account_activity", ["ownerAccountId", "lastActivityAt"])
     .index("by_ai_run", ["aiRunId"]),
+
+  // A workspace someone shared with this account, shown inside one of the
+  // account's own: a teacher's "Physics 11" inside the student's ManageBac
+  // class. Each shared workspace shows in at most one place per account.
+  workspaceLinks: defineTable({
+    accountId: v.id("accounts"),
+    schoolId: v.optional(v.id("schools")),
+    workspaceId: v.id("spectraWorkspaces"),
+    linkedWorkspaceId: v.id("spectraWorkspaces"),
+    createdAt: v.number(),
+  })
+    .index("by_account_workspace", ["accountId", "workspaceId"])
+    .index("by_account_linked", ["accountId", "linkedWorkspaceId"])
+    .index("by_linked", ["linkedWorkspaceId"]),
 
   workspaceDeletionJobs: defineTable({
     workspaceId: v.id("spectraWorkspaces"),
@@ -4297,6 +4344,9 @@ export default defineSchema({
     // is never contextless).
     workspaceContextId: v.optional(v.id("spectraWorkspaces")),
     placedByAccountId: v.optional(v.id("accounts")),
+    // The work is shared with the people its workspace is shared with. Absent
+    // means private: a work in a shared workspace stays its author's own until
+    // they share it (or the workspace shares new work by default).
     accessProjection: v.optional(v.boolean()),
     pinned: v.optional(v.boolean()),
     // Direct live children only. Writes maintain this transactionally; old
@@ -4457,6 +4507,8 @@ export default defineSchema({
     lastRunId: v.optional(v.id("spectraAiRuns")),
     retainedAgentId: v.optional(v.id("spectraArtifacts")),
     retainedAgentVersionId: v.optional(v.id("spectraArtifactVersions")),
+    /** Permission categories the user allowed once in this thread: later steps here do not ask again. */
+    allowedPermissionCategories: v.optional(v.array(v.string())),
     status: v.union(
       v.literal("active"),
       v.literal("archived"),

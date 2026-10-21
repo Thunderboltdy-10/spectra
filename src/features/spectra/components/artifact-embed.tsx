@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpRight, Check, RotateCw, AlertCircle, FileQuestion, LockKeyhole, Maximize2, Minimize2, Pencil, Pin, Plus, Radio, Send, X } from "@/components/icons/glyph-icons";
+import { ArrowUpRight, Check, RotateCw, AlertCircle, FileQuestion, Laptop, LockKeyhole, Maximize2, Minimize2, Pencil, Pin, Plus, Radio, Send, X } from "@/components/icons/glyph-icons";
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import type { SpectraArtifactEmbed } from "../data/api";
@@ -423,7 +423,15 @@ export function ArtifactEmbed({
             }
             className="work-embed-body"
           >
-            {shouldMountArtifactEmbedRuntime({ sourceType: source.blueprintKey, nearViewport, pageVisible }) ? (
+            {embed.keptOn ? (
+              <p className="work-embed-kept">
+                <Laptop className="size-4 shrink-0" aria-hidden />
+                <span>
+                  <strong>Kept on {embed.keptOn.deviceName}</strong>
+                  Its contents stay on that computer, so they don&apos;t show here. Open it there to read it.
+                </span>
+              </p>
+            ) : shouldMountArtifactEmbedRuntime({ sourceType: source.blueprintKey, nearViewport, pageVisible }) ? (
               <EmbedFace embed={embed} />
             ) : (
               <p className="work-embed-empty" aria-label="Published runtime paused">

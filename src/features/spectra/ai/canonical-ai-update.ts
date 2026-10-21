@@ -37,9 +37,11 @@ export async function retryCanonicalAiMutation<T>(attempt: () => Promise<T>, sig
     signal?.throwIfAborted();
     try { return await attempt(); }
     catch (error) {
-      // These explicit CAS refusals prove no effect committed. Ambiguous I/O
-      // and receipt-consumption failures must never repeat a semantic write.
-      if (count >= 2 || !/\bAI_NATIVE_(?:CANONICAL|SOURCE)_STALE\b/.test(String(error))) throw error;
+      // These explicit CAS refusals, and a live document read lost before
+      // anything was written, prove no effect committed. Ambiguous I/O and
+      // receipt-consumption failures must never repeat a semantic write.
+      if (count >= 2 || !/\b(?:AI_NATIVE_(?:CANONICAL|SOURCE)_STALE|AI_ARTIFACT_LIVE_STATE_LOST)\b/.test(String(error))) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 250 * (count + 1)));
     }
   }
 }

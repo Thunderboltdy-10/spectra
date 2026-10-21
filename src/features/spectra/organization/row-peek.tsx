@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
+import { aiWorking } from "../artifacts/ai-working";
 import { authoredSummary } from "../artifacts/registry";
 import { useWorkPreview } from "../artifacts/use-work-previews";
 import { WorkCardBody, workCardStyle } from "../components/work-card";
@@ -107,7 +108,7 @@ function PeekCard({ node, left, top }: Peek) {
         summary={authoredSummary(node.source?.blueprintKey, node.source?.summary)}
         place={node.parentPath?.at(-1)}
         when={relativeTime(node.activityAt, Date.now())}
-        live={node.source?.aiState === "creating" || node.source?.aiState === "updating"}
+        live={aiWorking(node.source)}
       />
     </div>
   );

@@ -27,6 +27,7 @@ import {
   SCHOOL_FILE_MAX_BYTES,
   SCHOOL_FILE_TEXT_MAX_CHARS,
   SCHOOL_SYNC_KINDS,
+  joinsPageSync,
   type SchoolSyncKind,
 } from "../../../../../shared/school-sync";
 import {
@@ -1756,10 +1757,13 @@ async function runStudentSync(
   };
   const enabled = (kind: SchoolSyncKind) => {
     const row = preferences.kinds.find((item) => item.kind === kind);
+    const overrides = preferences.classOverrides.filter((item) => item.kind === kind);
+    const auto = row?.mode === "auto" || overrides.some((item) => item.mode === "auto");
     return Boolean(
       row?.available &&
-        (row.mode !== "off" ||
-          preferences.classOverrides.some((item) => item.kind === kind && item.mode !== "off")),
+        (row.mode !== "off" || overrides.some((item) => item.mode !== "off")) &&
+        // A sync of everything starts from today; history comes when asked for.
+        joinsPageSync(kind, auto),
     );
   };
   const kinds = only ? [only] : SCHOOL_SYNC_KINDS.filter(enabled);

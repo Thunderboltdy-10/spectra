@@ -9,6 +9,7 @@ import { mapOperationArtifactReferences } from "../src/features/spectra/operatio
 import type { ModelOperation } from "../src/features/spectra/operations/schema";
 import { normalizeCalendarTimeInput } from "../shared/calendar-time";
 import { aiRefreshRequest } from "../shared/school-sync";
+import { replyEmbedRegion } from "../shared/artifact-embed";
 import { applicationCommandCategory, LOCAL_FILE_COMMANDS } from "../shared/ai-application-approval";
 import { vUiObservationFence } from "./spectraUiObservationSchema";
 import { assertUiObservationFence } from "./spectraUiObservation";
@@ -26,7 +27,7 @@ function semanticInput(input: Row) {
 }
 
 /** A fixed semantic dispatch. Callers cannot supply a Convex function name. */
-function mutationFor(command: string, args: Row, runId: string, executionId: string, operationId: string, scopeNodeId?: string, derived?: { publicLinkTokenHash: string }) {
+function mutationFor(command: string, args: Row, runId: string, executionId: string, operationId: string, scopeNodeId?: string, derived?: { publicLinkTokenHash: string }, threadId?: string) {
   const targetIds = strings(args.targetIds);
   const destination = typeof args.destinationId === "string" && args.destinationId.trim() ? args.destinationId.trim() : scopeNodeId;
   switch (command) {
@@ -66,6 +67,19 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
       // recheck is an action; the harness calls it directly.
       break;
     }
+    // The reply's own region places the work under the message that showed it.
+    case "show_work":
+      if (!threadId) throw new Error("AI_SHOW_WORK_NEEDS_CONVERSATION: Only a reply in a conversation can show a work.");
+      return { name: "artifactEmbeds:create", args: {
+        containerType: "thread",
+        containerId: threadId,
+        containerRegionId: replyEmbedRegion(runId),
+        sourceArtifactId: String(args.artifactId ?? ""),
+        mode: args.size === "compact" ? "compact" : "expanded",
+        interaction: "interact",
+        versionPolicy: "live",
+        contextPolicy: "summary",
+      } };
     case "change_spectra_settings": return { name: "accountPreferences:writeLayer", args: { scope: "account", scopeKey: "account", values: normalizeAiPreferencePatch(args.patch) } };
     case "organize_library": {
       switch (args.action) {
@@ -252,7 +266,7 @@ export const execute = mutation({
       throw new Error("AI_APPLICATION_APPROVAL_SCOPE_REQUIRED");
     await assertUiObservationFence(operation, args.uiObservation, Date.now());
     const snapshot = row(run.contextSnapshot);
-    const spec = mutationFor(String(input.command), row(input.args), String(run._id), args.executionId, String(operation._id), typeof snapshot.scopeNodeId === "string" ? snapshot.scopeNodeId : undefined, args.derived);
+    const spec = mutationFor(String(input.command), row(input.args), String(run._id), args.executionId, String(operation._id), typeof snapshot.scopeNodeId === "string" ? snapshot.scopeNodeId : undefined, args.derived, run.threadId ? String(run.threadId) : undefined);
     // MutationCtx.runMutation executes inside this transaction. Its permission
     // checks, the effect, this run/operation read set and receipt commit together.
     // A concurrent Stop/steer conflicts with these reads and retries the guard.

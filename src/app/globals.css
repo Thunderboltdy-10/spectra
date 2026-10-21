@@ -17,6 +17,7 @@
 @import "../styles/spectra-library.css";
 @import "../styles/spectra-school.css";
 @import "../styles/spectra-devices.css";
+@import "../styles/spectra-admin.css";
 @import "../styles/spectra-editors.css";
 @import "../styles/spectra-task.css";
 @import "../styles/spectra-quiz.css";
@@ -29,3 +30,5 @@
 @import "../styles/spectra-agent-interview.css";
 @import "../styles/spectra-editor-chrome.css";
 @import "../styles/spectra-embeds.css";
+@import "../styles/spectra-when.css";
+@import "../styles/spectra-share.css";

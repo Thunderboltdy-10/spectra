@@ -4,6 +4,7 @@ import { Loader2, MessageSquarePlus, RotateCcw, Check, ExternalLink, Maximize2, 
 import { useEffect, useMemo, useState } from "react";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { toast } from "@/components/ui/toast";
+import { buttonVariants } from "@/components/ui/button";
 import { spectraBus } from "../events";
 import {
   ConversationSurface,
@@ -271,7 +272,7 @@ export function RunDetailPanel({
               <div className="mt-2 flex gap-2">
                 <button
                   type="button"
-                  className="h-8 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)]"
+                  className={buttonVariants({ variant: "primary" })}
                   onClick={() =>
                     onAction?.(displayCard, "confirm", displayCard.runId)
                   }
@@ -314,7 +315,7 @@ export function RunDetailPanel({
                   const place = Boolean(detail?.run.workspaceId);
                   void keep(place, false, place);
                 }}
-                className="flex h-9 items-center gap-2 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-micro font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] disabled:opacity-50"
+                className={buttonVariants({ variant: "secondary" })}
                 aria-label={
                   detail?.run.workspaceId
                     ? "Save conversation to workspace"

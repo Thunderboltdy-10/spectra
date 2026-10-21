@@ -13,7 +13,7 @@ import {
   ARTIFACT_TYPE_KEYS,
   type ArtifactTypeKey,
 } from "@/features/spectra/artifacts/types";
-import { encodeArtifactContentForStorage } from "../../../../shared/sheet-cells";
+import { decodeSheetsContentFromStorage, encodeArtifactContentForStorage } from "../../../../shared/sheet-cells";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
 const BLUEPRINTS = new Set([
@@ -453,6 +453,7 @@ export async function GET(request: NextRequest) {
         workspaceId: params.get("workspaceId") ?? undefined,
         artifactId: params.get("artifactId") ?? undefined,
         surface: params.get("surface") ?? undefined,
+        since: params.has("since") ? Number(params.get("since")) : undefined,
       });
       return ok({ runTabs });
     }
@@ -662,6 +663,7 @@ export async function GET(request: NextRequest) {
         includeArchived: params.get("includeArchived") === "true",
         limit: params.has("limit") ? Number(params.get("limit")) : undefined,
         cursor: params.get("cursor") || undefined,
+        brief: params.get("brief") === "true" || undefined,
       });
       return ok(result);
     }
@@ -1359,6 +1361,45 @@ export async function POST(request: NextRequest) {
             : {}),
         ...(nativeFormat ? { nativeFormat } : {}),
         source,
+      });
+      return ok(result);
+    }
+
+    if (action === "copyArtifact") {
+      // A copy is the reader's own: what they can see of the work now, filed
+      // where they ask, with nothing shared and a note of where it came from.
+      const artifactId = requireString(body.artifactId, "artifactId");
+      const source = (await spectraQuery("spectraArtifacts:get", { artifactId })) as {
+        blueprintKey: string;
+        title: string;
+        summary?: string;
+        content?: unknown;
+        tags?: string[];
+        nativeFormat?: string;
+      } | null;
+      if (!source) return badRequest("That work is no longer available to copy.");
+      if (source.blueprintKey === "agent" || source.blueprintKey === "timetable")
+        return badRequest("This kind of work cannot be copied.");
+      const content =
+        source.blueprintKey === "sheets"
+          ? decodeSheetsContentFromStorage(source.content)
+          : source.content;
+      const parentNodeId = optionalString(body.parentNodeId);
+      const askedWorkspace = optionalString(body.workspaceId);
+      const workspaceId = askedWorkspace
+        ? ((await spectraQuery("workspaceSharing:copyDestination", { workspaceId: askedWorkspace }).catch(() => null)) as string | null) ?? undefined
+        : undefined;
+      const result = await spectraMutation("spectraArtifacts:create", {
+        blueprintKey: requireBlueprint(source.blueprintKey),
+        title: `${source.title} (copy)`.slice(0, 300),
+        summary: source.summary,
+        content: encodeArtifactContentForStorage(source.blueprintKey, content),
+        tags: source.tags,
+        workspaceId,
+        ...(parentNodeId === "root" ? { parentNodeId: "root" as const } : parentNodeId ? { parentNodeId } : {}),
+        ...(source.nativeFormat ? { nativeFormat: source.nativeFormat } : {}),
+        source: "artifact",
+        sourceArtifactIds: [artifactId],
       });
       return ok(result);
     }

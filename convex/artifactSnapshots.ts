@@ -7,6 +7,7 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { isSurvivingPinnedEmbed } from "./artifactEmbedOwnership";
 import { ensureArtifactDeletionReconciliation } from "./artifactDeletionScheduling";
 import { canonicalSnapshotJson, decodeSnapshotPayload, encodeSnapshotPayload, snapshotHash } from "./snapshotHash";
+import { platformStopped } from "./platformControls";
 
 export { canonicalSnapshotJson, snapshotHash };
 
@@ -181,6 +182,7 @@ export const maintain = internalMutation({
     purgeUnreferencedAfterMs: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    if (await platformStopped(ctx, "background")) return null;
     const now = Date.now();
     const verifyLimit = Math.max(1, Math.min(args.verifyLimit ?? 75, 300));
     const repairLimit = Math.max(1, Math.min(args.repairLimit ?? 30, 100));

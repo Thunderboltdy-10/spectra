@@ -13,6 +13,7 @@ import {
   removeWorkbenchTab,
   setSplitRatio,
   splitWorkbenchPane,
+  swapWorkbenchPanes,
   validateWorkbenchTree,
   type WorkbenchTab,
 } from "../workbench/layout/split-tree";
@@ -172,5 +173,16 @@ describe("Inspector and navigation contracts", () => {
     expect(chatBrowser).toContain("setLoadError(true)");
     expect(chatBrowser).toContain('role={isMobile ? "dialog" : undefined}');
     expect(chatBrowser).toContain("restoreFocusRef.current?.focus()");
+  });
+});
+
+describe("trading tiles", () => {
+  it("swaps two panes and keeps every split's size where it was", () => {
+    const layout = setSplitRatio(createAutomaticWorkbenchLayout(tabs.slice(0, 3))!, "split:root", 0.6);
+    const swapped = swapWorkbenchPanes(layout, "doc", "deck");
+    expect(collectWorkbenchTabs(swapped).map((tab) => tab.id)).toEqual(["deck", "sheet", "doc"]);
+    expect(swapped.type === "split" && swapped.ratio).toBe(0.6);
+    expect(validateWorkbenchTree(swapped)).toEqual([]);
+    expect(swapWorkbenchPanes(layout, "doc", "doc")).toBe(layout);
   });
 });

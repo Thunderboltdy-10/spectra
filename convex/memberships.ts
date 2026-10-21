@@ -350,6 +350,7 @@ export const invite = mutation({
       requestId: args.requestId,
       retentionClass: "security",
     });
-    return { invitationId, expiresAt: args.expiresAt };
+    const school = await ctx.db.get(args.schoolId);
+    return { invitationId, expiresAt: args.expiresAt, schoolName: school?.name };
   },
 });

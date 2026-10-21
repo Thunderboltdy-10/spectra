@@ -18,6 +18,7 @@ import { loadSourceDoc, sourceFor, sourceIndexable, type DurableContent, type Lo
 import { chunkDrafts, finalizeChunks, sha256Hex } from "../shared/semantic-chunks";
 import { centroid } from "../shared/semantic-ranking";
 import { INDEXED_SEMANTIC_KINDS, type IndexedSemanticKind } from "../shared/semantic-types";
+import { platformStopped } from "./platformControls";
 
 const CONCURRENCY = 4;
 const LEASE_MS = 3 * 60_000;
@@ -395,6 +396,7 @@ export const backfillStep = internalMutation({
 export const maintain = internalMutation({
   args: {},
   handler: async (ctx): Promise<{ expiredRelated: number; recovered: number }> => {
+    if (await platformStopped(ctx, "background")) return { expiredRelated: 0, recovered: 0 };
     const now = Date.now();
     const expired = await ctx.db.query("semanticRelatedCache").withIndex("by_expires", (q) => q.lte("expiresAt", now)).take(256);
     for (const row of expired) await ctx.db.delete(row._id);

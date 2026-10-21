@@ -82,12 +82,7 @@ export function useDocumentSpread(
         }
         const pages = Math.max(1, Math.floor(reach / (page.width + SPREAD_GAP)) + 1);
         const style = getComputedStyle(host);
-        const foot = host.querySelector<HTMLElement>(".document-page-foot");
-        const room =
-          host.clientHeight -
-          parseFloat(style.paddingTop) -
-          parseFloat(style.paddingBottom) -
-          (foot ? foot.offsetHeight + parseFloat(getComputedStyle(foot).marginTop) : 0);
+        const room = host.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
         const zoom = fit(page, pages, {
           width: host.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
           height: room,

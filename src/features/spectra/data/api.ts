@@ -860,6 +860,8 @@ export type SpectraArtifactEmbed =
     summary?: string;
     name?: string;
   };
+  /** The computer the work is kept on, when its contents live only there. */
+  keptOn?: { deviceName: string };
   runtimeBuild?: {
     buildId: string;
     artifactVersionId: string;
@@ -1739,9 +1741,12 @@ export async function getSpectraRunTabs(
     workspaceId?: string;
     artifactId?: string;
     surface?: "chat" | "workspace" | "artifact";
+    /** Only tabs touched since this time. */
+    since?: number;
   } = {},
 ) {
   const qs = new URLSearchParams({ action: "runTabs" });
+  if (options.since) qs.set("since", String(options.since));
   if (options.includeHidden) qs.set("includeHidden", "true");
   if (options.limit) qs.set("limit", String(options.limit));
   if (options.threadId) qs.set("threadId", options.threadId);
@@ -2467,11 +2472,14 @@ export async function getSpectraThreads(params?: {
   includeArchived?: boolean;
   limit?: number;
   cursor?: string;
+  /** Titles and ids only, without the works and workspaces each thread is about. */
+  brief?: boolean;
   force?: boolean;
-  signal?: AbortSignal;
 }) {
+  // No abort signal: the request is shared, and one caller leaving must not fail the others.
   const qs = new URLSearchParams({ action: "threads" });
   if (params?.includeArchived) qs.set("includeArchived", "true");
+  if (params?.brief) qs.set("brief", "true");
   qs.set("limit", String(params?.limit ?? SPECTRA_THREAD_INDEX_LIMIT));
   if (params?.cursor) qs.set("cursor", params.cursor);
   const key = qs.toString();
@@ -2480,7 +2488,7 @@ export async function getSpectraThreads(params?: {
     key,
     FIRST_PAINT_FETCH_TTL_MS,
     () =>
-      requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: params?.signal }).then(
+      requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store" }).then(
         (response) => readJson<SpectraThreadPage>(response),
       ),
     { force: params?.force },
@@ -2890,4 +2898,13 @@ export function workspaceItemToArtifactCardView(
         : item.artifact.aiState,
     aiProgress: item.artifact.aiProgress,
   };
+}
+
+/**
+ * Copy a work as the reader's own. With a workspace, the copy lands there when
+ * the reader can add to it, or in their own workspace it shows inside; with a
+ * folder node, right beside the original.
+ */
+export async function copySpectraArtifact(artifactId: string, place?: { workspaceId?: string; parentNodeId?: string }) {
+  return postSpectra<{ artifactId: string }>({ action: "copyArtifact", artifactId, ...place });
 }

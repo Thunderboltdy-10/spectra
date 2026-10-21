@@ -4,6 +4,7 @@ import { PlaceRow, type WorkPicking } from "./library-note";
 import { LibraryShelfSkeleton } from "./library-shelf";
 import { groupByWhen } from "./shelf-model";
 import { ShelfNotes, useShelfStacks } from "./shelf-stacks";
+import { SharedWorkGroups, useSharedWorks } from "./shared-works";
 import { useTreeChildren, type TreeNode } from "./tree-client";
 import { useLoadOnApproach } from "./use-load-on-approach";
 
@@ -15,6 +16,7 @@ import { useLoadOnApproach } from "./use-load-on-approach";
  */
 export function FolderShelf({
   folderId,
+  workspaceId,
   name,
   now,
   onOpen,
@@ -23,6 +25,8 @@ export function FolderShelf({
   picking,
 }: {
   folderId: string;
+  /** When the place is a workspace: works others shared in it, or in workspaces linked into it, show too. */
+  workspaceId?: string;
   name: string;
   now: number;
   onOpen: (node: TreeNode) => void;
@@ -32,6 +36,8 @@ export function FolderShelf({
 }) {
   const children = useTreeChildren(folderId, { sortKey: "updated", direction: "desc", pageSize: 24, withoutThreads: true });
   const mark = useLoadOnApproach(children.status, children.loadMore);
+  const shared = useSharedWorks(workspaceId);
+  const sharedCount = shared.reduce((sum, group) => sum + group.works.length, 0);
   const places = children.nodes.filter((node) => node.kind === "folder" || node.kind === "workspace");
   const work = children.nodes.filter((node) => node.kind !== "folder" && node.kind !== "workspace");
   const items = useShelfStacks(work);
@@ -44,10 +50,11 @@ export function FolderShelf({
         {groups.map((group) => (
           <section key={group.key} aria-label={group.label}>
             <h2 className="library-shelf-heading">{group.label}</h2>
-            <ShelfNotes items={group.items} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} />
+            <ShelfNotes items={group.items} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} whereOf={sharedMark} />
           </section>
         ))}
-        {work.length === 0 && children.status === "Exhausted" ? (
+        <SharedWorkGroups groups={shared} place={name} workspaceId={workspaceId} now={now} onOpen={onOpen} picking={picking} />
+        {work.length === 0 && children.status === "Exhausted" && !sharedCount ? (
           <div className="class-shelf-empty">
             <p>{places.length ? `No work in ${name} itself yet; it is in the folders beside.` : `Nothing in ${name} yet.`}</p>
             {onCreate ? (
@@ -79,3 +86,6 @@ export function FolderShelf({
     </div>
   );
 }
+
+/** Your own work its workspace's people can see says so; private work, the default, says nothing. */
+const sharedMark = (node: TreeNode) => (node.sharedWithWorkspace ? "Shared" : undefined);

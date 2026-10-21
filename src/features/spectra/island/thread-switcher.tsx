@@ -1,8 +1,10 @@
 "use client";
 
+import { buttonVariants } from "@/components/ui/button";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import type { SpectraThread } from "../data/api";
+import type { ThreadScope } from "../events";
 import { ThreadsBrowser, type ThreadsBrowserHandle } from "../threads/threads-view";
 import { ThreadPreview } from "./thread-preview";
 
@@ -15,16 +17,19 @@ const PREVIEW_DELAY = 220;
  * moving threads first, searches by meaning as well as words, and opening a
  * thread takes the student to it. A new thread is the first thing in it, so
  * starting and continuing sit side by side. Resting on a thread shows its
- * last exchange on a sheet beside the list.
+ * last exchange on a sheet beside the list. Opened from a class or workspace,
+ * it lists that place's threads, with every thread one press away.
  */
 
 export function ThreadSwitcher({
   initialQuery,
+  scope,
   onChoose,
   onNewThread,
   onClose,
 }: {
   initialQuery?: string;
+  scope?: ThreadScope;
   onChoose: (thread: SpectraThread) => void;
   onNewThread: () => void;
   onClose: () => void;
@@ -32,6 +37,7 @@ export function ThreadSwitcher({
   const panelRef = useRef<HTMLDivElement>(null);
   const browserRef = useRef<ThreadsBrowserHandle>(null);
   const [preview, setPreview] = useState<SpectraThread | null>(null);
+  const [scoped, setScoped] = useState(scope);
   const previewTimer = useRef(0);
   const point = (thread: SpectraThread) => {
     window.clearTimeout(previewTimer.current);
@@ -68,13 +74,35 @@ export function ThreadSwitcher({
           <button
             type="button"
             onClick={onNewThread}
-            className="inline-flex h-8 items-center gap-1.5 rounded-full bg-[var(--text-primary)] pl-2.5 pr-3 text-caption font-medium [color:var(--bg-primary)] outline-none transition-transform duration-[var(--motion-fast)] hover:-translate-y-px focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] focus-visible:ring-offset-2"
+            className={buttonVariants({ variant: "primary" })}
           >
             <Icon name="add" size={14} />
             New thread
           </button>
         </div>
-        <ThreadsBrowser ref={browserRef} initialQuery={initialQuery} onChoose={(thread) => onChoose(thread)} onPoint={point} className="min-h-0 flex-1" listClassName="pb-3" />
+        {scoped ? (
+          <p className="flex shrink-0 items-center gap-1.5 px-4 pb-2 text-caption text-[var(--text-secondary)]">
+            <span className="min-w-0 truncate">
+              In <span className="font-medium text-[var(--text-primary)]">{scoped.title}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setScoped(undefined)}
+              className="shrink-0 rounded-chip px-1.5 py-0.5 text-[var(--text-tertiary)] underline-offset-2 outline-none transition-colors hover:text-[var(--text-primary)] hover:underline focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
+            >
+              Show every thread
+            </button>
+          </p>
+        ) : null}
+        <ThreadsBrowser
+          ref={browserRef}
+          initialQuery={initialQuery}
+          workspaceId={scoped?.workspaceId}
+          onChoose={(thread) => onChoose(thread)}
+          onPoint={point}
+          className="min-h-0 flex-1"
+          listClassName="pb-3"
+        />
       </div>
       {preview ? (
         <div className="island-preview absolute bottom-0 left-[calc(100%+12px)] h-[min(440px,52vh)] w-[min(420px,30vw)] overflow-hidden rounded-[var(--radius-xl)] border border-[var(--card-border)] bg-[var(--card-paper)] shadow-[var(--shadow-lg)] max-[1279px]:hidden">

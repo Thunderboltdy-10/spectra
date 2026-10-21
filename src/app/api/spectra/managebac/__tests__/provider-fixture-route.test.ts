@@ -418,8 +418,9 @@ describe("ManageBac route provider fixture", () => {
     expect(identityResponse.status).toBe(200);
     expect((await identityResponse.json()).identity.result.status).toBe("verified");
 
-    // "Sync now" runs one job per kind that isn't Off. With no class chosen
-    // yet, only the class list is read.
+    // "Sync now" runs one job per kind that isn't Off, starting from today:
+    // past tasks and handed-in files wait until they are synced on their own.
+    // With no class chosen yet, only the class list is read.
     const syncResponse = await post({ action: "sync" });
     expect(syncResponse.status).toBe(200);
     const syncBody = (await syncResponse.json()) as {
@@ -427,7 +428,7 @@ describe("ManageBac route provider fixture", () => {
       queued: string[];
     };
     expect(syncBody.jobs.map((job) => job.kind)).toEqual([
-      "classes", "current_tasks", "grades", "past_tasks", "dropbox_files",
+      "classes", "current_tasks", "grades",
     ]);
     // ManageBac's API can't read a task's files and links, so that kind never runs.
     expect(syncBody.jobs.filter((job) => job.errorCode)).toEqual([]);
@@ -478,6 +479,9 @@ describe("ManageBac route provider fixture", () => {
 
     const selectedSyncResponse = await post({ action: "sync" });
     expect(selectedSyncResponse.status).toBe(200);
+    expect(fixture.requests.some((request) => request.path.includes("/submissions/"))).toBe(false);
+    const dropboxSyncResponse = await post({ action: "sync", kind: "dropbox_files" });
+    expect(dropboxSyncResponse.status).toBe(200);
     expect(fixture.requests.some((request) => request.path === "/v2p2/classes/101/tasks")).toBe(true);
     expect(fixture.requests.some((request) => request.path === "/v2p2/classes/101/timetable")).toBe(true);
     // A task's resources can't be read through the API, so they are never asked for.

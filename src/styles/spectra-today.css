@@ -270,47 +270,85 @@
   padding-top: 2px;
 }
 
-.morning-sun {
+/* The sky over the time it is now: the sun on its arc by day, the moon by
+   night. It rises over the horizon once when it appears; through the day it
+   moves only as the minutes do, and turns a little toward a near hand. */
+.day-sky {
+  --lean-x: 0;
+  --lean-y: 0;
+  display: flex;
+  min-height: 92px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.day-sky-art {
   width: 64px;
   height: 40px;
   overflow: visible;
 }
 
-.morning-sun-disc {
+.day-sky-place {
+  transition: transform 1.2s var(--ease-standard);
+}
+
+.day-sky-rise {
+  animation: day-sky-rise 1100ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.day-sky-body {
+  transform: translate(calc(var(--lean-x) * 1.5px), calc(var(--lean-y) * 1.5px));
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.day-sky-sun {
   fill: var(--hue-orange);
 }
 
-.morning-sun-rays {
+.day-sky-rays {
   fill: none;
   stroke: var(--hue-yellow);
-  stroke-width: 2.4;
+  stroke-width: 2.2;
   stroke-linecap: round;
+  transform: rotate(calc(var(--lean-x) * 18deg));
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: day-sky-rays 700ms 650ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.morning-sun-horizon {
+.day-sky-moon {
+  fill: color-mix(in oklab, var(--hue-yellow) 85%, var(--ink-orange));
+  stroke: color-mix(in oklab, var(--ink-blue) 35%, transparent);
+  stroke-width: 0.8;
+  transform: rotate(calc(-20deg + var(--lean-x) * 14deg));
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.day-sky-horizon {
   fill: none;
   stroke: color-mix(in oklab, var(--ink-orange) 55%, var(--text-tertiary));
   stroke-width: 2;
   stroke-linecap: round;
 }
 
-/* The sun comes up over the horizon once, then its rays open. */
-.morning-sun[data-rising] .morning-sun-disc {
-  animation: morning-rise 1100ms cubic-bezier(0.22, 1, 0.36, 1) both;
+.day-sky[data-body="moon"] .day-sky-horizon {
+  stroke: color-mix(in oklab, var(--ink-blue) 45%, var(--text-tertiary));
 }
 
-.morning-sun[data-rising] .morning-sun-rays {
-  transform-origin: 32px 31px;
-  animation: morning-rays 700ms 650ms cubic-bezier(0.22, 1, 0.36, 1) both;
+.day-sky-date {
+  font-size: 12.5px;
+  color: var(--text-tertiary);
 }
 
-.morning[data-writing] .morning-sun-disc {
-  transform: translateY(9px);
-  animation: morning-breathe 2.4s ease-in-out infinite;
+.morning-earlier {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-tertiary);
 }
 
-.morning[data-writing] .morning-sun-rays {
-  opacity: 0;
+/* While the brief is written, the sun waits low, breathing. */
+.morning[data-writing] .day-sky-rays {
+  opacity: 0.4;
 }
 
 .morning-time {
@@ -410,6 +448,63 @@
   text-wrap: pretty;
 }
 
+/* How to do a move, folded until asked for: its steps in order. */
+.morning-move-how {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.morning-move-how > summary {
+  width: fit-content;
+  cursor: pointer;
+  list-style: none;
+  font-weight: 500;
+  color: color-mix(in oklab, var(--move-ink) 80%, var(--text-secondary));
+}
+
+.morning-move-how > summary::-webkit-details-marker {
+  display: none;
+}
+
+.morning-move-how > summary:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.morning-move-how ol {
+  margin-top: 4px;
+  padding-left: 18px;
+  list-style: decimal;
+  line-height: 1.5;
+}
+
+.morning-move-how li::marker {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The moves past the first few, folded behind a quiet line. */
+.morning-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 6px 0 0 38px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  border-radius: var(--radius-control, 6px);
+}
+
+.morning-more:hover {
+  color: var(--text-primary);
+}
+
+.morning-more:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
+
 .morning-move-detail,
 .morning-move-draft {
   margin-top: 6px;
@@ -435,14 +530,13 @@
 
 .morning-move-action {
   display: inline-flex;
-  min-width: 84px;
-  height: 32px;
+  height: 36px;
   align-items: center;
   justify-content: center;
-  padding-inline: 14px;
-  border-radius: 999px;
-  background: var(--move-tint);
-  font-size: 13px;
+  padding-inline: 12px;
+  border-radius: var(--radius-control);
+  background: transparent;
+  font-size: var(--text-ui);
   font-weight: 600;
   white-space: nowrap;
   color: var(--move-ink);
@@ -454,8 +548,7 @@
 }
 
 .morning-move-action:hover:not(:disabled) {
-  background: var(--move-ink);
-  color: var(--bg-elevated);
+  background: var(--move-tint);
 }
 
 .morning-move-action:active:not(:disabled) {
@@ -480,29 +573,23 @@
   color: var(--move-ink);
 }
 
-@keyframes morning-rise {
+@keyframes day-sky-rise {
   from {
-    transform: translateY(16px);
+    transform: translateY(22px);
   }
   to {
     transform: none;
   }
 }
 
-@keyframes morning-rays {
+@keyframes day-sky-rays {
   from {
     opacity: 0;
-    transform: scale(0.7);
+    scale: 0.7;
   }
   to {
     opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes morning-breathe {
-  50% {
-    transform: translateY(6px);
+    scale: 1;
   }
 }
 
@@ -518,8 +605,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .morning-sun-disc,
-  .morning-sun-rays,
+  .day-sky-rise,
+  .day-sky-rays,
+  .day-sky-place,
+  .day-sky-body,
+  .day-sky-moon,
   .morning-body {
     animation: none !important;
   }

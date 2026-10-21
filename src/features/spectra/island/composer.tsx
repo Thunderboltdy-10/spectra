@@ -15,6 +15,7 @@ import {
   type MouseEvent,
 } from "react";
 import { Icon } from "@/components/icons";
+import { PrismLoader } from "@/components/spectra-prism-optic";
 import { IconButton } from "@/components/ui/icon-button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -23,7 +24,6 @@ import type { SpectraRunPointer } from "../ai/use-spectra-run";
 import { workTypeMeta, type PresentedWorkType } from "../artifacts/presentation";
 import { readCommandAttachment, type CommandAttachment } from "../components/command-attachments";
 import { getSpectraInstalledAgents, searchSpectra, type SpectraArtifact, type SpectraInstalledAgent } from "../data/api";
-import { MARK_POSE, prismSvg, PRISM_PALETTES } from "../life/prism";
 import { useLifeArrival, useLifeDeparture } from "../life/use-life";
 import { useDictation } from "./dictation";
 
@@ -68,13 +68,6 @@ function loadAgents() {
       return [];
     });
   return agentsCache;
-}
-
-let autoMark: string | null = null;
-function autoMarkUrl() {
-  const dark = document.documentElement.classList.contains("dark");
-  autoMark = `data:image/svg+xml;utf8,${encodeURIComponent(prismSvg(MARK_POSE, { size: 40, palette: PRISM_PALETTES[dark ? "dark" : "light"], detail: "mark" }))}`;
-  return autoMark;
 }
 
 export const IslandComposer = forwardRef<
@@ -329,7 +322,7 @@ export const IslandComposer = forwardRef<
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
-          className="min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-[7px] text-ui leading-[22px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+          className="min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-[7px] text-ui leading-[22px] text-[var(--text-primary)] outline-none placeholder:truncate placeholder:text-[var(--text-tertiary)]"
         />
         <input ref={fileRef} type="file" multiple hidden onChange={(event) => void addFiles(event.target.files).then(() => (event.target.value = ""))} />
         <IconButton
@@ -413,28 +406,20 @@ function AgentSwitch({
   onCycle: (event: MouseEvent) => void;
   onChoose: (index: number) => void;
 }) {
-  const [mark, setMark] = useState<string | null>(autoMark);
-  useEffect(() => setMark(autoMarkUrl()), []);
-  const glyph = agent ? (
-    <span className="grid size-6 place-items-center rounded-full bg-[color-mix(in_oklab,var(--accent-cyan)_14%,transparent)] text-[var(--accent-cyan)]">
-      <Icon name="agent" size={15} />
-    </span>
-  ) : mark ? (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={mark} alt="" className="size-6" />
-  ) : (
-    <Icon name="agent" size={18} />
-  );
-  // Keyed by the count, so every send starts the turn afresh.
-  const face = (
+  // Auto is Spectra itself: the live prism, which turns toward the pointer and round once for each message sent.
+  const face = agent ? (
     <span key={sends} className="composer-mark grid place-items-center" data-sent={sends ? "" : undefined}>
-      {glyph}
+      <span className="grid size-6 place-items-center rounded-full bg-[color-mix(in_oklab,var(--accent-cyan)_14%,transparent)] text-[var(--accent-cyan)]">
+        <Icon name="agent" size={15} />
+      </span>
     </span>
+  ) : (
+    <PrismLoader size={24} optics="dormant" interactive turns={sends} />
   );
   if (!agents.length) {
     return (
       <Tooltip label="Auto: Spectra picks the agent">
-        <span data-agent-switch data-island-home className="grid size-9 shrink-0 place-items-center">
+        <span data-agent-switch data-island-home data-prism-host className="grid size-9 shrink-0 place-items-center">
           {face}
         </span>
       </Tooltip>

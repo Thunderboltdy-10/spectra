@@ -276,16 +276,16 @@ export const commit = internalMutation({
       projectionHash: updated.contentHash!, localReplicaId: local._id, localPayloadRef: input.localPayloadRef,
       localRevision: input.localRevision, nativeBaseRevision: args.expectedNativeBaseRevision ?? undefined, committedAt: now };
     await ctx.db.patch(operation._id, { state: "verified", reconciliationReceipt: committedReceipt, updatedAt: now });
-    if (input.resolution) {
-      const regions = new Set(input.regionIds);
-      const conflicts = await ctx.db.query("syncConflicts")
-        .withIndex("by_work_state", q => q.eq("workId", input.workId).eq("state", "open")).collect();
-      for (const conflict of conflicts) {
-        if (conflict.localRevision !== local.revision || !conflict.replicaIds.includes(local._id) ||
-            (input.resolution !== "local" && !conflict.regionIds.every(region => regions.has(region)))) continue;
-        await ctx.db.patch(conflict._id, { state: input.resolution === "local" ? "resolved-local" : "resolved-merged",
-          resolvedAt: now, updatedAt: now });
-      }
+    // A clean merge (no resolution was needed) settles every open conflict
+    // about this local revision; a chosen resolution settles what it covered.
+    const regions = new Set(input.regionIds);
+    const conflicts = await ctx.db.query("syncConflicts")
+      .withIndex("by_work_state", q => q.eq("workId", input.workId).eq("state", "open")).take(20);
+    for (const conflict of conflicts) {
+      if (conflict.localRevision !== local.revision || !conflict.replicaIds.includes(local._id) ||
+          (input.resolution === "merged" && !conflict.regionIds.every(region => regions.has(region)))) continue;
+      await ctx.db.patch(conflict._id, { state: input.resolution === "local" ? "resolved-local" : "resolved-merged",
+        resolvedAt: now, updatedAt: now });
     }
     return { state: "applied" as const, duplicate: false, receipt: committedReceipt };
   },

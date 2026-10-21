@@ -20,14 +20,14 @@ import {
 } from "./identityShared";
 import { writeAuditEvent } from "./auditShared";
 import {
-  appendOrderKey,
   findNodesForSource,
-  findPrimaryNode,
   placeSourceNode,
   purgeAccountSourceNodes,
   workspaceContextNodes,
+  sharesWithWorkspace,
 } from "./orgTreeShared";
 import { releaseClaimsForAccount } from "./regionClaims";
+import { placeSharedWorkspace } from "./workspaceLinksShared";
 import {
   projectQuizContentForLearner,
   projectTimetableSharedContent,
@@ -148,95 +148,116 @@ export const invite = mutation({
       args.resourceId,
       "share",
     );
-    const loaded = await loadResource(ctx, args.resourceType, args.resourceId);
-    if (!loaded)
-      throw new Error("RESOURCE_NOT_FOUND: The resource does not exist.");
-    const invitee = await ctx.db.get(args.inviteeAccountId);
-    const membership = invitee
-      ? await getActiveMembership(ctx, invitee._id)
-      : null;
-    if (
-      !invitee ||
-      invitee.status !== "active" ||
-      !membership ||
-      membership.schoolId !== decision.actor.schoolId
-    )
-      throw new Error(
-        "SHARING_SCHOOL_BOUNDARY: Select an active member of this school.",
-      );
-    if (invitee._id === loaded.ownerAccountId)
-      throw new Error(
-        "SHARING_OWNER_INVARIANT: The owner already has full access.",
-      );
-    if (invitee._id === decision.actor.accountId)
-      throw new Error(
-        "SHARING_SELF_INVARIANT: You already have access to this work.",
-      );
-    const now = Date.now();
-    if (args.expiresAt && args.expiresAt <= now)
-      throw new Error("SHARING_EXPIRY_INVALID: Expiry must be in the future.");
-    const prior = await ctx.db
-      .query("shareInvitations")
-      .withIndex("by_resource_invitee", (q) =>
-        q
-          .eq("resourceType", args.resourceType)
-          .eq("resourceId", args.resourceId)
-          .eq("inviteeAccountId", invitee._id),
-      )
-      .collect();
-    const accepted = prior.find(
-      (candidate) => candidate.status === "accepted" && candidate.grantId,
-    );
-    if (accepted?.grantId) {
-      const grant = await ctx.db.get(accepted.grantId);
-      if (grant && !grant.revokedAt)
-        throw new Error(
-          "SHARING_ALREADY_ACCEPTED: Change this collaborator's permission instead.",
-        );
-    }
-    const pending = prior.find((candidate) => candidate.status === "pending");
-    let invitationId;
-    if (pending) {
-      await ctx.db.patch(pending._id, {
-        level: args.level,
-        expiresAt: args.expiresAt,
-        message: args.message?.trim().slice(0, 500),
-        updatedAt: now,
-      });
-      invitationId = pending._id;
-    } else {
-      invitationId = await ctx.db.insert("shareInvitations", {
-        schoolId: decision.actor.schoolId,
-        resourceType: args.resourceType,
-        resourceId: args.resourceId,
-        inviterAccountId: decision.actor.accountId,
-        inviteeAccountId: invitee._id,
-        level: args.level,
-        status: "pending",
-        message: args.message?.trim().slice(0, 500),
-        expiresAt: args.expiresAt,
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
-    await writeAuditEvent(ctx, {
-      actorAccountId: decision.actor.accountId,
-      schoolId: loaded.schoolId,
-      action: "authority.invitation.sent",
-      targetType: args.resourceType,
-      targetId: args.resourceId,
-      metadata: {
-        invitationId,
-        inviteeAccountId: invitee._id,
-        level: args.level,
-        expiresAt: args.expiresAt ?? null,
-      },
-      requestId: args.requestId,
-      retentionClass: "security",
-    });
-    return { invitationId, status: "pending" as const };
+    return sendShareInvitation(ctx, decision.actor, args);
   },
 });
+
+/**
+ * One invitation from someone already allowed to share the resource. Shared
+ * by the single invite and the class invite, so both keep the school
+ * boundary, the owner and self rules, and the one-pending-per-person rule.
+ */
+export async function sendShareInvitation(
+  ctx: MutationCtx,
+  actor: AuthenticatedActor,
+  args: {
+    resourceType: "workspace" | "artifact" | "agent";
+    resourceId: string;
+    inviteeAccountId: Id<"accounts">;
+    level: "read" | "modify";
+    expiresAt?: number;
+    message?: string;
+    requestId?: string;
+  },
+) {
+  const loaded = await loadResource(ctx, args.resourceType, args.resourceId);
+  if (!loaded)
+    throw new Error("RESOURCE_NOT_FOUND: The resource does not exist.");
+  const invitee = await ctx.db.get(args.inviteeAccountId);
+  const membership = invitee
+    ? await getActiveMembership(ctx, invitee._id)
+    : null;
+  if (
+    !invitee ||
+    invitee.status !== "active" ||
+    !membership ||
+    membership.schoolId !== actor.schoolId
+  )
+    throw new Error(
+      "SHARING_SCHOOL_BOUNDARY: Select an active member of this school.",
+    );
+  if (invitee._id === loaded.ownerAccountId)
+    throw new Error(
+      "SHARING_OWNER_INVARIANT: The owner already has full access.",
+    );
+  if (invitee._id === actor.accountId)
+    throw new Error(
+      "SHARING_SELF_INVARIANT: You already have access to this work.",
+    );
+  const now = Date.now();
+  if (args.expiresAt && args.expiresAt <= now)
+    throw new Error("SHARING_EXPIRY_INVALID: Expiry must be in the future.");
+  const prior = await ctx.db
+    .query("shareInvitations")
+    .withIndex("by_resource_invitee", (q) =>
+      q
+        .eq("resourceType", args.resourceType)
+        .eq("resourceId", args.resourceId)
+        .eq("inviteeAccountId", invitee._id),
+    )
+    .collect();
+  const accepted = prior.find(
+    (candidate) => candidate.status === "accepted" && candidate.grantId,
+  );
+  if (accepted?.grantId) {
+    const grant = await ctx.db.get(accepted.grantId);
+    if (grant && !grant.revokedAt)
+      throw new Error(
+        "SHARING_ALREADY_ACCEPTED: Change this collaborator's permission instead.",
+      );
+  }
+  const pending = prior.find((candidate) => candidate.status === "pending");
+  let invitationId;
+  if (pending) {
+    await ctx.db.patch(pending._id, {
+      level: args.level,
+      expiresAt: args.expiresAt,
+      message: args.message?.trim().slice(0, 500),
+      updatedAt: now,
+    });
+    invitationId = pending._id;
+  } else {
+    invitationId = await ctx.db.insert("shareInvitations", {
+      schoolId: actor.schoolId,
+      resourceType: args.resourceType,
+      resourceId: args.resourceId,
+      inviterAccountId: actor.accountId,
+      inviteeAccountId: invitee._id,
+      level: args.level,
+      status: "pending",
+      message: args.message?.trim().slice(0, 500),
+      expiresAt: args.expiresAt,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  await writeAuditEvent(ctx, {
+    actorAccountId: actor.accountId,
+    schoolId: loaded.schoolId,
+    action: "authority.invitation.sent",
+    targetType: args.resourceType,
+    targetId: args.resourceId,
+    metadata: {
+      invitationId,
+      inviteeAccountId: invitee._id,
+      level: args.level,
+      expiresAt: args.expiresAt ?? null,
+    },
+    requestId: args.requestId,
+    retentionClass: "security",
+  });
+  return { invitationId, status: "pending" as const };
+}
 
 export async function loadIncomingShareInvitations(
   ctx: QueryCtx,
@@ -310,34 +331,8 @@ async function placeAcceptedShare(
   title: string,
 ) {
   if (resourceType === "workspace") {
-    const existing = await findPrimaryNode(
-      ctx,
-      actor.accountId,
-      "workspace",
-      resourceId,
-    );
-    if (existing) return;
     const workspaceId = ctx.db.normalizeId("spectraWorkspaces", resourceId);
-    const workspace = workspaceId ? await ctx.db.get(workspaceId) : null;
-    if (!workspace) return;
-    const now = Date.now();
-    await ctx.db.insert("orgNodes", {
-      accountId: actor.accountId,
-      schoolId: actor.schoolId,
-      parentId: null,
-      kind: "workspace",
-      name: workspace.title,
-      sourceId: workspace._id,
-      typeKey: "workspace",
-      activityAt: now,
-      orderKey: await appendOrderKey(ctx, actor.accountId, null),
-      workspaceContextId: workspace._id,
-      placedByAccountId: actor.accountId,
-      childCount: 0,
-      createdAt: now,
-      updatedAt: now,
-    });
-    return;
+    return workspaceId ? placeSharedWorkspace(ctx, actor, workspaceId) : null;
   }
   await placeSourceNode(ctx, {
     accountId: actor.accountId,
@@ -347,6 +342,7 @@ async function placeAcceptedShare(
     name: title,
     keepExistingPlacement: true,
   });
+  return null;
 }
 
 export const acceptShareInvitation = mutation({
@@ -387,7 +383,7 @@ export const acceptShareInvitation = mutation({
         "SHARING_RESOURCE_UNAVAILABLE: The shared item is no longer available.",
       );
     if (invitation.status === "accepted" && invitation.grantId) {
-      await placeAcceptedShare(
+      const linkedInto = await placeAcceptedShare(
         ctx,
         actor,
         invitation.resourceType,
@@ -395,6 +391,7 @@ export const acceptShareInvitation = mutation({
         loaded.resource.title,
       );
       return {
+        linkedInto,
         grantId: invitation.grantId,
         resourceType: invitation.resourceType,
         resourceId: invitation.resourceId,
@@ -428,7 +425,7 @@ export const acceptShareInvitation = mutation({
       respondedAt: now,
       updatedAt: now,
     });
-    await placeAcceptedShare(
+    const linkedInto = await placeAcceptedShare(
       ctx,
       actor,
       invitation.resourceType,
@@ -458,6 +455,7 @@ export const acceptShareInvitation = mutation({
       retentionClass: "security",
     });
     return {
+      linkedInto,
       grantId,
       resourceType: invitation.resourceType,
       resourceId: invitation.resourceId,
@@ -776,10 +774,7 @@ export const artifactInheritedAudience = query({
         workspace.schoolId !== decision.actor.schoolId
       )
         continue;
-      const projectsAccess =
-        placement.accessProjection === true ||
-        (placement.accessProjection === undefined &&
-          artifact.ownerAccountId === workspace.ownerAccountId);
+      const projectsAccess = sharesWithWorkspace(placement);
       if (!projectsAccess) continue;
       const grants = await ctx.db
         .query("accessGrants")
@@ -1354,10 +1349,7 @@ export const publicProjection = query({
                 artifact.blueprintKey === "thread_reference"
               )
                 return null;
-              const projectsAccess =
-                placement.accessProjection === true ||
-                (placement.accessProjection === undefined &&
-                  artifact.ownerAccountId === workspace.ownerAccountId);
+              const projectsAccess = sharesWithWorkspace(placement);
               if (!projectsAccess) return null;
               return {
                 artifactId: artifact._id,

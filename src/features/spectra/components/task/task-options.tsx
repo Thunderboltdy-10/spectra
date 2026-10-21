@@ -3,6 +3,7 @@
 import { SelectField } from "@/components/ui/select";
 import { uniqueToken } from "@/lib/unique-token";
 import { reminderLabel, TaskReminders, type ReminderTiming } from "./task-reminders";
+import { NumberField } from "@/components/ui/number-field";
 
 /*
  * What most tasks never need (EDITORS.md, "Planner task"): repeating, priority,
@@ -112,8 +113,7 @@ export function TaskOptions({
       <label className="sheet-option">
         <span>Takes about</span>
         <span className="sheet-option-minutes">
-          <input
-            type="number"
+          <NumberField
             min={5}
             step={5}
             className="sheet-input"

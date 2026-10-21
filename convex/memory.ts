@@ -18,6 +18,7 @@ import {
 } from "./memoryEmbeddingPolicy";
 import { EMBEDDING_FAILURES, embedQuery, embeddingVersion, validEmbeddingVector } from "./embeddingProvider";
 import { createManagebacVisibilityReader } from "./managebacVisibility";
+import { platformStopped } from "./platformControls";
 
 const DEFAULT_TARGET_TOKENS = 1_000;
 const MAX_TARGET_TOKENS = 4_000;
@@ -1985,6 +1986,7 @@ async function rebuildCapsulesForAccount(
 export const maintain = internalMutation({
   args: {},
   handler: async (ctx) => {
+    if (await platformStopped(ctx, "background")) return null;
     const now = Date.now();
     await ctx.scheduler.runAfter(0, internal.memory.dispatchEmbeddings, {});
     // Embedding backlog never consumes capture/delete admission. Bounded per-kind reads,
@@ -2193,6 +2195,7 @@ export const maintain = internalMutation({
 export const evaluateSafety = internalMutation({
   args: {},
   handler: async (ctx) => {
+    if (await platformStopped(ctx, "background")) return null;
     const startedAt = Date.now();
     const claims = await ctx.db.query("memoryClaims").order("desc").take(160);
     const capsules = await ctx.db

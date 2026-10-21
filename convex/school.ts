@@ -27,6 +27,7 @@ import {
   CAS_WRITE_BACK,
   SCHOOL_FILE_MAX_BYTES,
   SCHOOL_SYNC_KINDS,
+  joinsPageSync,
   SCHOOL_SYNC_KIND_INFO,
   describeSchoolSyncProblem,
   type SchoolSyncKind,
@@ -408,7 +409,9 @@ export const syncNow = mutation({
     const prefs = await loadSyncPreferences(ctx, actor.accountId, integration._id);
     if (args.kind && !prefs.hasAny(args.kind))
       throw new Error(`SCHOOL_SYNC_KIND_OFF: ${SCHOOL_SYNC_KIND_INFO[args.kind].label} is turned off.`);
-    const kinds = args.kind ? [args.kind] : SCHOOL_SYNC_KINDS.filter((kind) => prefs.hasAny(kind));
+    const kinds = args.kind
+      ? [args.kind]
+      : SCHOOL_SYNC_KINDS.filter((kind) => prefs.hasAny(kind) && joinsPageSync(kind, prefs.hasAuto(kind)));
     const now = Date.now();
     for (const kind of kinds)
       await queueSyncJob(ctx, { accountId: actor.accountId, schoolId: actor.schoolId, integrationId: integration._id, kind }, "user", now);
@@ -541,72 +544,89 @@ async function liveWork(ctx: Ctx, projectionId: string) {
 /** One task with its brief, resources, the student's grade and feedback, and their submission. */
 export const task = query({
   args: { recordId: v.id("externalRecords") },
+  handler: async (ctx, args) => readTask(ctx, await requireStudent(ctx), args.recordId),
+});
+
+/** The same, for the task work sync made for it: what a school task's work shows from ManageBac. */
+export const taskOfWork = query({
+  args: { artifactId: v.id("spectraArtifacts") },
   handler: async (ctx, args) => {
-    const actor = await requireStudent(ctx);
-    const own = await ownRecord(ctx, actor, args.recordId);
-    if (!own || (own.record.syncKind !== "current_tasks" && own.record.syncKind !== "past_tasks")) return null;
-    const { integration, record, reader } = own;
-    const ids = taskIds(record);
-    const classId = record.providerClassId;
-    const forTask = (row: Doc<"externalRecords">) => ids.has(str(fields(row.normalized).taskId, 200));
-    const [titles, grades, submissions, resources] = await Promise.all([
-      classTitles(ctx, actor, integration._id),
-      readableOfKind(ctx, actor, integration._id, "grades", reader.canReadRecord, classId),
-      readableOfKind(ctx, actor, integration._id, "dropbox_files", reader.canReadRecord, classId),
-      readableOfKind(ctx, actor, integration._id, "task_resources", reader.canReadRecord, classId),
-    ]);
-    const value = fields(record.normalized);
-    const grade = grades.find(forTask);
-    const submission = submissions.find(forTask);
-    const cached = submission
-      ? await ctx.db.query("schoolFiles")
-          .withIndex("by_account_source", (q) => q.eq("accountId", actor.accountId).eq("sourceRecordId", submission._id))
-          .take(100)
-      : [];
-    const gradeValue = fields(grade?.normalized);
-    return {
-      ...taskSummary(record, classId ? titles.get(classId) : undefined),
-      brief: str(value.description ?? value.body ?? value.notes, 20_000) || null,
-      resources: resources
-        .filter((row) => forTask(row) || !str(fields(row.normalized).taskId))
-        .slice(0, 50)
-        .map((row) => {
-          const resource = fields(row.normalized);
-          return { recordId: row._id, title: str(resource.title) || str(resource.name) || "Resource",
-            url: str(resource.url ?? resource.link, 2_000) || null, forThisTask: forTask(row) };
-        }),
-      grade: grade
-        ? {
-            recordId: grade._id,
-            score: num(gradeValue.score ?? gradeValue.grade ?? gradeValue.mark) ?? null,
-            maxScore: num(gradeValue.maxScore ?? gradeValue.max_score ?? gradeValue.outOf) ?? null,
-            label: str(gradeValue.gradeLabel ?? gradeValue.grade, 80) || null,
-            criteria: Array.isArray(gradeValue.criteria) ? gradeValue.criteria.slice(0, 20) : [],
-            feedback: str(gradeValue.feedback ?? gradeValue.comments, 20_000) || null,
-          }
-        : null,
-      submission: submission
-        ? {
-            recordId: submission._id,
-            status: str(fields(submission.normalized).status, 80) || null,
-            submittedAt: time(fields(submission.normalized).submittedAt) ?? null,
-            files: submissionFiles(submission.normalized).map((file) => {
-              const kept = cached.find((row) => row.providerFileId === file.id);
-              return {
-                providerFileId: file.id,
-                filename: file.filename,
-                mimeType: kept?.mimeType ?? file.mimeType,
-                bytes: kept?.bytes ?? file.bytes ?? null,
-                state: kept?.state ?? ("listed" as const),
-                schoolFileId: kept?._id ?? null,
-                tooLarge: (file.bytes ?? 0) > SCHOOL_FILE_MAX_BYTES,
-              };
-            }),
-          }
-        : null,
-    };
+    // Opened by someone it was shared with, a task shows only what it holds.
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) return null;
+    const made = await ctx.db
+      .query("externalProjections")
+      .withIndex("by_projection", (q) => q.eq("projectionType", "planner_task").eq("projectionId", args.artifactId))
+      .take(4);
+    const mine = made.find((row) => row.accountId === actor.accountId && row.schoolId === actor.schoolId);
+    return mine ? readTask(ctx, actor, mine.recordId) : null;
   },
 });
+
+async function readTask(ctx: QueryCtx, actor: Actor, recordId: Id<"externalRecords">) {
+  const own = await ownRecord(ctx, actor, recordId);
+  if (!own || (own.record.syncKind !== "current_tasks" && own.record.syncKind !== "past_tasks")) return null;
+  const { integration, record, reader } = own;
+  const ids = taskIds(record);
+  const classId = record.providerClassId;
+  const forTask = (row: Doc<"externalRecords">) => ids.has(str(fields(row.normalized).taskId, 200));
+  const [titles, grades, submissions, resources] = await Promise.all([
+    classTitles(ctx, actor, integration._id),
+    readableOfKind(ctx, actor, integration._id, "grades", reader.canReadRecord, classId),
+    readableOfKind(ctx, actor, integration._id, "dropbox_files", reader.canReadRecord, classId),
+    readableOfKind(ctx, actor, integration._id, "task_resources", reader.canReadRecord, classId),
+  ]);
+  const value = fields(record.normalized);
+  const grade = grades.find(forTask);
+  const submission = submissions.find(forTask);
+  const cached = submission
+    ? await ctx.db.query("schoolFiles")
+        .withIndex("by_account_source", (q) => q.eq("accountId", actor.accountId).eq("sourceRecordId", submission._id))
+        .take(100)
+    : [];
+  const gradeValue = fields(grade?.normalized);
+  return {
+    ...taskSummary(record, classId ? titles.get(classId) : undefined),
+    brief: str(value.description ?? value.body ?? value.notes, 20_000) || null,
+    resources: resources
+      .filter((row) => forTask(row) || !str(fields(row.normalized).taskId))
+      .slice(0, 50)
+      .map((row) => {
+        const resource = fields(row.normalized);
+        return { recordId: row._id, title: str(resource.title) || str(resource.name) || "Resource",
+          url: str(resource.url ?? resource.link, 2_000) || null, forThisTask: forTask(row) };
+      }),
+    grade: grade
+      ? {
+          recordId: grade._id,
+          score: num(gradeValue.score ?? gradeValue.grade ?? gradeValue.mark) ?? null,
+          maxScore: num(gradeValue.maxScore ?? gradeValue.max_score ?? gradeValue.outOf) ?? null,
+          label: str(gradeValue.gradeLabel ?? gradeValue.grade, 80) || null,
+          criteria: Array.isArray(gradeValue.criteria) ? gradeValue.criteria.slice(0, 20) : [],
+          feedback: str(gradeValue.feedback ?? gradeValue.comments, 20_000) || null,
+        }
+      : null,
+    submission: submission
+      ? {
+          recordId: submission._id,
+          status: str(fields(submission.normalized).status, 80) || null,
+          submittedAt: time(fields(submission.normalized).submittedAt) ?? null,
+          files: submissionFiles(submission.normalized).map((file) => {
+            const kept = cached.find((row) => row.providerFileId === file.id);
+            return {
+              providerFileId: file.id,
+              filename: file.filename,
+              mimeType: kept?.mimeType ?? file.mimeType,
+              bytes: kept?.bytes ?? file.bytes ?? null,
+              state: kept?.state ?? ("listed" as const),
+              schoolFileId: kept?._id ?? null,
+              tooLarge: (file.bytes ?? 0) > SCHOOL_FILE_MAX_BYTES,
+            };
+          }),
+        }
+      : null,
+  };
+}
 
 // ---------------------------------------------------------------------------------------------
 // Files

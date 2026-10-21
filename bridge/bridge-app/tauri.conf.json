@@ -21,7 +21,7 @@
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhDM0VEQjczNDM0Q0IwNzAKUldSd3NFeERjOXMrakdhUnRGL0pIQTFXYnd0K0FvTlVLVCtYblQwOWxJQUtCemRzY3ZpVDZ3MVoK",
-      "endpoints": ["https://updates.spectra.school/bridge/{{target}}/{{arch}}/{{current_version}}"]
+      "endpoints": ["https://github.com/Thunderboltdy-10/spectra-bridge/releases/latest/download/latest.json"]
     }
   }
 }

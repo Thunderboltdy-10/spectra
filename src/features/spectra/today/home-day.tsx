@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
+import { aiWorking } from "../artifacts/ai-working";
 import { useWorkPreviews } from "../artifacts/use-work-previews";
 import { meaningfulSummary } from "../artifacts/work-preview";
 import { openWorkInSide } from "../components/side-open";
@@ -76,7 +77,7 @@ export function HomeDay({ onAllThreads }: { onAllThreads: () => void }) {
                     when={formatRelativeTime(work.updatedAt)}
                     href={`/library/${encodeURIComponent(work._id)}`}
                     onOpen={() => openWorkInSide(work._id)}
-                    live={work.aiState === "creating" || work.aiState === "updating"}
+                    live={aiWorking(work)}
                   />
                 ) : (
                   <div key={index} data-life-ghost className="h-[236px] animate-pulse rounded-surface bg-[var(--bg-secondary)]" />

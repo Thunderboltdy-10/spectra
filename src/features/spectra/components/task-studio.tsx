@@ -20,6 +20,7 @@ import { dateBlock, taskInputs, taskInstant, taskZone } from "./task/task-time";
 import { TaskWhen } from "./task/task-when";
 import { TaskElapsed } from "./task/task-elapsed";
 import { useReminderTime } from "./task/task-reminders";
+import { SchoolTaskNotice } from "../school/school-task-details";
 
 export { dueDistance, taskInputs, taskInstant } from "./task/task-time";
 
@@ -29,7 +30,8 @@ export { dueDistance, taskInputs, taskInstant } from "./task/task-time";
  * school asked, the student's notes, and a checklist when it needs one.
  * Repeating, reminders, priority, time and the work it is for wait folded at
  * the foot, with one line saying what is set. A new task is a title and one
- * press for its day.
+ * press for its day. A task set in ManageBac is the same task, with a notice
+ * of where it came from and what the school holds for it (grade, hand-in).
  */
 
 type TaskContent = Record<string, unknown> & {
@@ -204,6 +206,8 @@ export function TaskStudio({
               <SpectraStoredText value={task.description} className="task-brief-text" />
             </section>
           ) : null}
+
+          {fromSchool && artifactId ? <SchoolTaskNotice artifactId={artifactId} /> : null}
 
           <section className="sheet-section" aria-label={fromSchool ? "Your notes" : "Notes"} data-anchor-region={fromSchool ? undefined : "task:description"}>
             <header className="sheet-section-head">

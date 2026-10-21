@@ -5,6 +5,10 @@ import type { ReferenceNode } from "../references";
 import type { AiSyncPurpose } from "../../../../shared/school-sync";
 import type { Figure } from "../life/figure";
 import type { NavigationShow } from "../collaboration/follow-navigation";
+import type { FirstTipId } from "../onboarding/first-tips";
+
+/** A thread list kept to one class or workspace, named for the person reading it. */
+export type ThreadScope = { workspaceId: string; title: string };
 
 export type SpectraCommandOutcome = {
   status: "completed" | "pending" | "needs-human" | "failed";
@@ -122,9 +126,11 @@ export type SpectraEvents = {
   "shell.focusSidebarSearch": Record<string, never>;
   "shell.openCommandBar": Record<string, never>;
   /* Find a thread: the chat page's search, else the island's thread switcher (SHELL.md). */
-  "threads.open": { query?: string };
+  "threads.open": { query?: string; scope?: ThreadScope };
   /** Play Spectra's tour of the app from the start (the account menu's "Take the tour"). */
   "tour.start": Record<string, never>;
+  /** The student did something for the first time; its tip is said once (onboarding/first-tips). */
+  "tip.moment": { id: FirstTipId };
   /** Open the island's composer; `fresh` lets go of the thread in focus first. */
   /** Open the composer; `text` and `references` start it written, for the student to edit and send. */
   /** `send` sends the text at once, as if the student had pressed send (the daily brief's "Make it"). */

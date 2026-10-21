@@ -2,7 +2,7 @@ import { deleteStorageIfNoOtherBinding } from "./durableStorageBindings";
 import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./functions";
 import { writeAuditEvent } from "./auditShared";
-import { recordMeterEvent } from "./metering";
+import { recordMeterEvent, assertSchoolStorageCeiling } from "./metering";
 import { requireArtifactCapability } from "./spectraShared";
 import { getAuthenticatedActor, type AuthenticatedActor } from "./identityShared";
 import { canReadPinnedContent } from "./retainedContentAccess";
@@ -179,6 +179,7 @@ export const beginUpload = mutation({
     );
     if (retainedBytes + bytes > MAX_RETAINED_ASSET_BYTES)
       throw new Error("ASSET_ARTIFACT_BUDGET_EXCEEDED");
+    await assertSchoolStorageCeiling(ctx, artifact.schoolId, bytes);
     const now = Date.now();
     const uploadReceipt = crypto.randomUUID();
     const assetId = await ctx.db.insert("artifactAssets", {

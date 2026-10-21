@@ -107,6 +107,26 @@
     color 150ms var(--ease-standard);
 }
 
+/* Questions put aside: a red count on the tab, and a red lip that shows even at rest. */
+.island-tab-waiting {
+  display: inline-grid;
+  min-width: 16px;
+  height: 16px;
+  place-items: center;
+  flex: none;
+  border-radius: 999px;
+  background: var(--danger);
+  padding: 0 4px;
+  color: var(--bg-primary);
+  font-size: 10.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.island-rail-tab:has(> .island-tab-waiting) {
+  --tab-ink: var(--danger);
+}
+
 /* What is put away has no lip: at rest only the threads in play show. */
 .island-rail:not([data-raised]) :is(.island-rail-tab[data-side="done"], .island-rail-threads) {
   translate: 0 100%;

@@ -1370,7 +1370,7 @@ export const placeWork = mutation({
       placedByAccountId: actor.accountId,
       /* Never let a recipient's own filing promote itself into an access grant:
          only somebody who can share the work can project access with it. */
-      accessProjection: capabilities.includes("share") ? true : undefined,
+      mayShare: capabilities.includes("share"),
       relocate: !parent && !args.workspaceId,
     });
     const workspaceId = node.workspaceContextId;

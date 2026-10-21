@@ -30,6 +30,7 @@ export function CalendarItemCard({
   timezone,
   onCommit,
   onRemove,
+  onMerge,
   onClose,
 }: {
   opened: OpenedCalendarItem | null;
@@ -37,6 +38,8 @@ export function CalendarItemCard({
   timezone: string;
   onCommit: (action: Record<string, unknown>) => Promise<void>;
   onRemove: (item: CalendarItem) => Promise<boolean>;
+  /** Time given to a deadline goes back into it. */
+  onMerge: (item: CalendarItem) => Promise<void>;
   onClose: () => void;
 }) {
   const anchor = opened?.anchor;
@@ -68,6 +71,7 @@ export function CalendarItemCard({
             timezone={timezone}
             onCommit={onCommit}
             onRemove={onRemove}
+            onMerge={onMerge}
           />
         </PopoverContent>
       ) : null}
@@ -81,6 +85,7 @@ function CalendarItemDetails({
   timezone,
   onCommit,
   onRemove,
+  onMerge,
 }: {
   item: CalendarItem;
   /** The class it is due in, or works towards. */
@@ -88,6 +93,7 @@ function CalendarItemDetails({
   timezone: string;
   onCommit: (action: Record<string, unknown>) => Promise<void>;
   onRemove: (item: CalendarItem) => Promise<boolean>;
+  onMerge: (item: CalendarItem) => Promise<void>;
 }) {
   const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -105,6 +111,8 @@ function CalendarItemDetails({
   // Time given to a school task says which task it is for and when that is due.
   const towards = item.kind === "scheduled_work_block" ? schoolClass?.task : undefined;
   const work = item.kind === "scheduled_work_block";
+  // Time given to a task, and a task of one's own, are checked off (and back on).
+  const checkable = work || item.kind === "task";
   const completed = item.status === "completed";
   const resizable = isReschedulable(item) && item.startAt !== undefined && item.endAt !== undefined;
   const resize = (minutes: number) =>
@@ -144,15 +152,21 @@ function CalendarItemDetails({
         {removable ? <IconButton icon="trash" size="compact" label="Remove from Calendar" onClick={() => setConfirmRemove(true)} /> : null}
       </div>
       <div className="calendar-card-title">
-        {/* Time given to a task is checked off like the task. */}
-        {work ? (
+        {checkable ? (
           <button
             type="button"
             role="checkbox"
             aria-checked={completed}
-            aria-label={completed ? "Completed" : "Mark complete"}
-            disabled={completed}
-            onClick={() => void onCommit({ action: "completeWorkBlock", itemId: item.id, expectedRevision: item.revision })}
+            aria-label={completed ? "Mark as not done" : "Mark as done"}
+            title={completed ? "Mark as not done" : "Mark as done"}
+            onClick={() =>
+              void onCommit({
+                action: "completeWorkBlock",
+                itemId: item.id,
+                expectedRevision: item.revision,
+                ...(completed ? { done: false } : {}),
+              })
+            }
             className="calendar-card-check"
           >
             {completed ? <Icon name="check" size={14} /> : null}
@@ -180,6 +194,13 @@ function CalendarItemDetails({
         </p>
       ) : towards?.dueAt ? (
         <p className="calendar-card-line">{dueLabel(towards.dueAt, Date.now())}</p>
+      ) : null}
+      {/* Time dragged out of a deadline can go back into it (or be dropped on it). */}
+      {item.officialDeadlineItemId ? (
+        <button type="button" className="calendar-card-merge" onClick={() => void onMerge(item)}>
+          <Icon name="undo" size={13} />
+          Merge back into the deadline
+        </button>
       ) : null}
       {item.location ? (
         <p className="calendar-card-line">

@@ -3,6 +3,10 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { useQuery } from "convex/react";
+import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
+import { useAuthedArgs } from "../data/use-authed-args";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
@@ -535,11 +539,23 @@ export function ChatShell() {
     threadId,
   ]);
 
+  // The name Spectra gives a thread arrives live, as fast as the sidebar shows it.
+  const liveName = useQuery(
+    api.spectraThreads.liveName,
+    useAuthedArgs(threadId ? { threadId: threadId as Id<"spectraThreads"> } : "skip", "account"),
+  );
+  const liveThread = liveName?._id === threadId ? liveName : undefined;
   const visibleTitle =
+    (liveThread ? threadName(liveThread) : undefined) ??
     (detail ? threadName(detail.thread) : undefined) ??
     (threadId ? (loading ? "Opening thread…" : "Thread") : "New thread");
   // The thread on screen is named the way its row and header name it.
-  const title = detail && composerThread?.id === detail.thread._id ? threadName(detail.thread) : (composerThread?.title ?? visibleTitle);
+  const title =
+    liveThread && composerThread?.id === liveThread._id
+      ? threadName(liveThread)
+      : detail && composerThread?.id === detail.thread._id
+        ? threadName(detail.thread)
+        : (composerThread?.title ?? visibleTitle);
   const activeWorkspace = workspaces.find(
     (workspace) =>
       workspace._id === (chatWorkspaceId ?? detail?.thread.workspaceId),

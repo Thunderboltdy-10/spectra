@@ -132,6 +132,11 @@ const COMMANDS: Record<string, ApplicationCommand> = {
       }),
     authority: "content",
   },
+  // A work shown in the reply is a live embed in this conversation; the work itself is untouched.
+  show_work: {
+    input: z.object({ artifactId: z.string().trim().min(1).max(200), size: z.enum(["compact", "expanded"]).optional() }),
+    authority: "content",
+  },
   change_spectra_settings: { input: z.object({ patch: preferenceLayerValuesSchema }), authority: "settings" },
   change_sync_policy: {
     input: z.object({ targetIds: z.array(z.string()).min(1).max(100), patch: z.record(z.string(), z.unknown()) }),

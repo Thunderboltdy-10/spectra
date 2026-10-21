@@ -287,6 +287,18 @@ function boardColor(chosen: string | undefined) {
   return chosen && !PAPER_DEFAULTS.has(chosen.toLowerCase()) ? chosen : undefined;
 }
 
+/**
+ * The dot grid as drawn at a zoom: the dots grow and shrink with the board,
+ * and once they would crowd into a haze the grid shows every second step, then
+ * every fourth, as a map drops its finer lines when zoomed out.
+ */
+function dotGrid(gridSize: number, zoom: number) {
+  let step = gridSize * zoom;
+  while (step < 14) step *= 2;
+  const dot = Math.min(2.25, Math.max(0.75, 1.25 * zoom));
+  return { "--board-grid": `${step}px`, "--board-dot-size": `${dot}px` };
+}
+
 function visual(
   node: WhiteboardNode,
   content: Record<string, unknown>,
@@ -538,6 +550,17 @@ function BoardNode({
             "var(--text-primary)",
           ),
         ),
+      }}
+      onKeyDown={(event) => {
+        // Escape puts the pen down: the words stay, the object stays picked,
+        // and the board's own keys (Delete, arrows) answer again.
+        // (ProseMirror marks every Escape handled, so `defaultPrevented` says nothing;
+        // the floating format bar stops the ones it uses.)
+        if (event.key !== "Escape" || !editingText) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setEditingText(false);
+        nodeElementRef.current?.closest<HTMLElement>(".whiteboard-canvas")?.focus({ preventScroll: true });
       }}
       onClick={(event) => {
         event.stopPropagation();
@@ -996,9 +1019,15 @@ export function WhiteboardStudio({
     if (!selectedNodeId && !selectedEdgeId) setInspectorOpen(false);
   }, [selectedEdgeId, selectedNodeId]);
 
+  // The saved view is taken up when it really changes, not whenever an edit
+  // copies the board: otherwise every edit threw the reader back to the saved
+  // page and zoom.
+  const savedView = board.viewport;
+  const savedViewKey = `${savedView.pageId}:${savedView.x}:${savedView.y}:${savedView.zoom}`;
   useEffect(() => {
-    setViewport(board.viewport);
-  }, [artifactId, board.viewport]);
+    setViewport(savedView);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by value, above
+  }, [artifactId, savedViewKey]);
 
   useEffect(() => {
     let active = true;
@@ -1610,6 +1639,14 @@ export function WhiteboardStudio({
     }
     const point = worldPoint(event.clientX, event.clientY);
     addNode(tool, point.x - 120, point.y - 75);
+  }
+  /** A double-click on bare board starts words there, as in a notebook margin. */
+  function canvasDoubleClick(event: ReactMouseEvent<HTMLDivElement>) {
+    if (readOnly || tool !== "select") return;
+    if ((event.target as HTMLElement).closest(".whiteboard-node, .whiteboard-edges text, button, input, textarea")) return;
+    const point = worldPoint(event.clientX, event.clientY);
+    // The caret lands where the pointer was: the box's padding to the left, half a line above.
+    addNode("text", point.x - 12, point.y - 24);
   }
   function selectNode(node: WhiteboardNode, additive = false) {
     if (tool === "connector") {
@@ -3057,8 +3094,7 @@ export function WhiteboardStudio({
         data-dots={board.settings?.showGrid === true || undefined}
         style={
           {
-            "--board-zoom": viewport.zoom,
-            "--board-grid": `${board.settings?.gridSize ?? 24}px`,
+            ...dotGrid(board.settings?.gridSize ?? 24, viewport.zoom),
             "--board-x": `${-viewport.x * viewport.zoom}px`,
             "--board-y": `${-viewport.y * viewport.zoom}px`,
             backgroundColor: boardColor(
@@ -3067,6 +3103,7 @@ export function WhiteboardStudio({
           } as CSSProperties
         }
         onClick={compact ? undefined : canvasClick}
+        onDoubleClick={compact ? undefined : canvasDoubleClick}
         onPointerDown={compact ? undefined : beginCanvasPointer}
         onPointerMove={compact ? undefined : movePointer}
         onPointerUp={compact ? undefined : finishPointer}

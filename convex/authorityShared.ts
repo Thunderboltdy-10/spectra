@@ -7,6 +7,7 @@ import {
   artifactSummaryFor,
   findNodesForSource,
   workspaceContextNodes,
+  sharesWithWorkspace,
 } from "./orgTreeShared";
 
 export type AuthorityCtx = QueryCtx | MutationCtx;
@@ -270,10 +271,9 @@ async function inheritedArtifactAccess(
     if (!workspace || workspace.status !== "active" || workspace.schoolId !== actor.schoolId) continue;
     // A recipient may organize an accepted shared artifact in any workspace
     // they can modify. That personal placement must not silently re-share the
-    // artifact with the workspace audience. Older placements predate this flag;
-    // only an owner-to-owner placement is safe to treat as projecting access.
-    const projectsAccess = placement.accessProjection === true
-      || (placement.accessProjection === undefined && ownerAccountId === workspace.ownerAccountId);
+    // artifact with the workspace audience, and the owner's own placement
+    // shares only once they share it.
+    const projectsAccess = sharesWithWorkspace(placement);
     if (!projectsAccess) continue;
     const grants = await ctx.db.query("accessGrants").withIndex("by_resource", (q) => q.eq("resourceType", "workspace").eq("resourceId", workspace._id)).collect();
     for (const grant of grants) {
@@ -699,8 +699,7 @@ export async function bumpPolicyVersion(ctx: MutationCtx, resourceType: Resource
         const artifactId = ctx.db.normalizeId("spectraArtifacts", placement.sourceId);
         const artifact = artifactId ? await ctx.db.get(artifactId) : null;
         if (!artifact || artifact.status === "deleted" || artifact.schoolId !== workspace.schoolId) continue;
-        const projectsAccess = placement.accessProjection === true
-          || (placement.accessProjection === undefined && artifact.ownerAccountId === workspace.ownerAccountId);
+        const projectsAccess = sharesWithWorkspace(placement);
         if (projectsAccess) affectedArtifactIds.add(artifact._id);
       }
       for (const artifactId of affectedArtifactIds) {

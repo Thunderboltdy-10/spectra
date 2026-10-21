@@ -14,6 +14,22 @@ import { InlineEmphasis } from "./inline-emphasis";
 import { pastTenseProgressTitle } from "./progress-title";
 
 const groupOpenByKey = new Map<string, boolean>();
+// When a trace saw its run finish, so a remount still says how long it worked.
+const finishedAtByKey = new Map<string, number>();
+
+/** Opens a trace's step list when it next mounts: the reader asked to see it. */
+export function openTraceWhenShown(persistKey: string) {
+  groupOpenByKey.set(persistKey, true);
+}
+
+/** "8s", "1m 20s", "1h 4m": how long Spectra has been at it. */
+export function workedDuration(milliseconds: number) {
+  const seconds = Math.max(1, Math.round(milliseconds / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
 
 export function ProgressTrace({
   steps,
@@ -24,6 +40,8 @@ export function ProgressTrace({
   persistKey,
   caption,
   answers,
+  startedAt,
+  endedAt,
 }: {
   steps: SpectraLiveExchange["steps"];
   active: boolean;
@@ -38,6 +56,10 @@ export function ProgressTrace({
   caption?: string;
   /** Questions and approvals already answered: one line each. */
   answers?: AnsweredInput[];
+  /** When the run began; with it the header reads "Working for 12s", then "Worked for 1m 20s". */
+  startedAt?: number;
+  /** When the run settled, if known; otherwise the moment this trace saw it finish. */
+  endedAt?: number;
 }) {
   /* The trace is run feedback, so it runs on the completion/reveal grammar:
      steps entering are `reveal`, the group opening is `morph`, and the whole
@@ -62,6 +84,29 @@ export function ProgressTrace({
   const pendingReorderRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevRunningRef = useRef<string | null>(null);
   const finished = !thinking && (steps.length > 0 || hasOutput);
+  const [now, setNow] = useState(() => Date.now());
+  // The clock runs for the whole turn, writing included, so a long silent
+  // stretch still visibly moves and the total matches the saved reply's.
+  useEffect(() => {
+    if (!active || startedAt === undefined) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active, startedAt]);
+  const [sawFinish, setSawFinish] = useState(() => (persistKey ? finishedAtByKey.get(persistKey) : undefined));
+  useEffect(() => {
+    if (active) {
+      // A run that resumes after a question is working again.
+      if (sawFinish !== undefined) {
+        if (persistKey) finishedAtByKey.delete(persistKey);
+        setSawFinish(undefined);
+      }
+      return;
+    }
+    if (!finished || endedAt !== undefined || sawFinish !== undefined) return;
+    const at = Date.now();
+    if (persistKey) finishedAtByKey.set(persistKey, at);
+    setSawFinish(at);
+  }, [active, finished, persistKey, endedAt, sawFinish]);
 
   useEffect(() => {
     const running = steps.find((step) => step.status === "running");
@@ -140,7 +185,9 @@ export function ProgressTrace({
     };
   }, [steps]);
 
-  if (!thinking && steps.length === 0 && !summary?.trim() && !caption?.trim() && !answers?.length) return null;
+  const settledAt = endedAt ?? sawFinish;
+  const timed = startedAt !== undefined && (active || settledAt !== undefined);
+  if (!thinking && !timed && steps.length === 0 && !summary?.trim() && !caption?.trim() && !answers?.length) return null;
 
   const orderedSteps = displayOrder
     .map((id) => steps.find((step) => step.id === id))
@@ -159,12 +206,17 @@ export function ProgressTrace({
   // A step shows only once a caption or a tool has something true to say;
   // until then the header alone says Spectra is thinking.
   const expandable = steps.length > 0;
-  const showTraceToggle = thinking || expandable;
+  const showTraceToggle = thinking || expandable || timed;
   // The header says what Spectra is doing now, then what it did.
   const runningStep = [...steps].reverse().find((step) => step.status === "running");
-  const headline = finished
-    ? caption?.trim() || (steps.length ? pastTenseProgressTitle(steps.at(-1)!.title, true) : "Done")
-    : runningStep?.title || steps.at(-1)?.title || "Thinking";
+  const headline = timed
+    ? finished
+      ? "Worked for"
+      : "Working for"
+    : finished
+      ? caption?.trim() || (steps.length ? pastTenseProgressTitle(steps.at(-1)!.title, true) : "Done")
+      : runningStep?.title || steps.at(-1)?.title || "Thinking";
+  const elapsed = timed ? workedDuration((active ? Math.max(now, startedAt!) : settledAt!) - startedAt!) : null;
 
   return (
     <div
@@ -182,6 +234,7 @@ export function ProgressTrace({
           }}
           className="mb-1.5 flex w-full min-w-0 items-center gap-1.5 py-0.5 text-left"
           aria-expanded={expandable ? groupOpen : undefined}
+          title={finished && timed ? caption?.trim() : undefined}
         >
           <span
             className={cn(
@@ -192,6 +245,7 @@ export function ProgressTrace({
           >
             {/* Present tense becomes past tense with a quick cross-fade. */}
             <CrossfadeText value={headline} primitive="completion" />
+            {elapsed ? <span className="tabular-nums"> {elapsed}</span> : null}
           </span>
           {expandable ? (
             <ChevronDown
@@ -347,6 +401,39 @@ export function ProgressTrace({
           {summary.trim()}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * A finished reply's "Worked for 12s" before its trace is loaded: the same
+ * header the live trace settles into, and pressing it brings the steps back.
+ */
+export function WorkedForReveal({
+  durationMs,
+  loading,
+  error,
+  onReveal,
+}: {
+  durationMs: number;
+  loading: boolean;
+  error?: string;
+  onReveal: () => void;
+}) {
+  return (
+    <div className="mb-3 py-1">
+      <button
+        type="button"
+        onClick={onReveal}
+        disabled={loading}
+        aria-expanded={false}
+        className="mb-1.5 flex min-w-0 items-center gap-1.5 py-0.5 text-left"
+      >
+        <span className={cn("min-w-0 truncate text-caption font-medium tracking-[-0.01em] text-[var(--text-secondary)] opacity-70", loading && "thinking-wave")}>
+          {error ? "The steps did not load. Try again" : <>Worked for <span className="tabular-nums">{workedDuration(durationMs)}</span></>}
+        </span>
+        <ChevronDown className="h-3.5 w-3.5 text-[var(--text-tertiary)] opacity-70" />
+      </button>
     </div>
   );
 }

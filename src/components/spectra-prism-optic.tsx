@@ -15,7 +15,9 @@ import { drawPrism, PrismBody, PRISM_PALETTES, type PrismMode } from "@/features
  *
  * `interactive` (the rail's brand): it answers the control it sits in as the
  * island's prism does: it leans toward the pointer, turns once on hover,
- * squashes on press and rebounds with a half turn.
+ * squashes on press and rebounds with a half turn. The control can mark itself
+ * `data-prism-host` when it is not a link or a button. `turns` counts events
+ * that each turn it round once, such as a message sent.
  */
 
 export type PrismOptics = "dormant" | "working" | "waiting" | "completed" | "failed";
@@ -42,15 +44,18 @@ export function PrismLoader({
   className,
   label,
   interactive = false,
+  turns = 0,
 }: {
   size?: number;
   optics?: PrismOptics;
   className?: string;
   label?: string;
   interactive?: boolean;
+  turns?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bodyRef = useRef<PrismBody | null>(null);
+  const wakeRef = useRef<() => void>(() => undefined);
   const [drawn, setDrawn] = useState(false);
   const box = Math.round(size * ROOM);
 
@@ -96,6 +101,7 @@ export function PrismLoader({
     const wake = () => {
       if (!frame && visible) frame = requestAnimationFrame(tick);
     };
+    wakeRef.current = wake;
     draw();
     wake();
     const seen =
@@ -109,7 +115,7 @@ export function PrismLoader({
     const theme = new MutationObserver(draw);
     theme.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
     // The control it sits in is what the pointer touches.
-    const host = interactive ? (canvas.parentElement?.closest<HTMLElement>("a, button") ?? canvas.parentElement) : null;
+    const host = interactive ? (canvas.parentElement?.closest<HTMLElement>("a, button, [data-prism-host]") ?? canvas.parentElement) : null;
     const lean = (event: PointerEvent) => {
       const r = canvas.getBoundingClientRect();
       if (!r.width) return;
@@ -150,6 +156,12 @@ export function PrismLoader({
       host?.removeEventListener("pointerup", lift);
     };
   }, [box, interactive, optics, size]);
+
+  useEffect(() => {
+    if (!turns) return;
+    bodyRef.current?.spin(1);
+    wakeRef.current();
+  }, [turns]);
 
   return (
     <span

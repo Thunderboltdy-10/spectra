@@ -8,14 +8,14 @@ import { setToastSink, type ToastTone } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import type { SpectraRunPointer } from "../ai/use-spectra-run";
 import { postSpectra } from "../data/api";
-import { spectraBus } from "../events";
+import { spectraBus, type ThreadScope } from "../events";
 import type { LightColour } from "../life/engine";
 import { life, rectOf } from "../life/life";
 import type { PrismStatus } from "../life/prism";
 import { STATUS_COLOURS } from "../life/prism";
 import { figureOf } from "../life/figure-dom";
 import { markArrival } from "../life/use-life";
-import { registerComposerBand } from "../components/composer-safe-area";
+import { refreshComposerBands, registerComposerBand } from "../components/composer-safe-area";
 import { useSpectraRouter } from "../hooks/use-spectra-router";
 import { useSpectraMotion } from "../motion";
 import { useSpectraPreferences } from "../settings/preference-store";
@@ -34,6 +34,7 @@ import { ThreadSwitcher } from "./thread-switcher";
 import { ThreadView } from "./thread-view";
 import { useFlip, useTabDrag } from "./use-tab-drag";
 import { threadHref } from "../chat/home-routes";
+import { firstTipMoment } from "../onboarding/first-tips";
 
 const TOAST_TONE: Record<ToastTone, NoticeTone> = { success: "done", error: "problem", warning: "needs", info: "info" };
 
@@ -49,8 +50,23 @@ type Shape = "composer";
 type ReplyTo = { runId: string; threadId: string; title: string } | "new" | null;
 
 const CLOSE_DELAY = 450;
-const VIEW_DELAY = 250;
+/** A hand resting on a tab this long means to look; passing over it does not. */
+const VIEW_DELAY = 420;
+/** Moving from one open card's tab to the next. */
+const VIEW_SWITCH_DELAY = 140;
 const ARRIVAL_MS = 1600;
+
+const PLACEHOLDER_TITLE = 36;
+/** How long a question stands untouched before it folds onto its thread's tab. */
+const QUESTION_IDLE_MS = 90_000;
+
+function shortTitle(title: string) {
+  const clean = title.replace(/\s+/g, " ").trim();
+  if (clean.length <= PLACEHOLDER_TITLE) return clean;
+  const cut = clean.slice(0, PLACEHOLDER_TITLE);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > PLACEHOLDER_TITLE / 2 ? cut.slice(0, space) : cut).replace(/[\s,.;:–—-]+$/, "")}…`;
+}
 
 /** The island's own centre line: the middle of the stage, between the rail and the Side. */
 function stageCentre() {
@@ -313,8 +329,43 @@ export function Island() {
 
   /* ------------------------------------------------------------ questions */
 
+  // Questions put aside wait on their thread's tab, counted, until answered or brought back.
+  const [later, setLater] = useState<ReadonlySet<string>>(new Set());
+  const asking = useMemo(() => questions.filter((candidate) => !later.has(candidate.key)), [later, questions]);
+  const waitingByThread = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const candidate of questions)
+      if (later.has(candidate.key) && candidate.threadId) counts.set(candidate.threadId, (counts.get(candidate.threadId) ?? 0) + 1);
+    return counts;
+  }, [later, questions]);
   const [questionIndex, setQuestionIndex] = useState(0);
-  const question = questions.length ? questions[Math.min(questionIndex, questions.length - 1)] : null;
+  const question = asking.length ? asking[Math.min(questionIndex, asking.length - 1)] : null;
+  const putAside = useCallback((key: string) => setLater((current) => new Set(current).add(key)), []);
+  const bringBack = useCallback(
+    (threadId: string) => {
+      const keys = questions.filter((candidate) => candidate.threadId === threadId && later.has(candidate.key)).map((candidate) => candidate.key);
+      if (!keys.length) return false;
+      setLater((current) => new Set([...current].filter((key) => !keys.includes(key))));
+      setQuestionIndex(0);
+      return true;
+    },
+    [later, questions],
+  );
+  // A question left alone for a while folds onto its tab rather than standing over the page.
+  const idleTimer = useRef(0);
+  const questionActivity = useCallback(() => {
+    window.clearTimeout(idleTimer.current);
+    const key = question?.key;
+    if (!key) return;
+    idleTimer.current = window.setTimeout(() => {
+      putAside(key);
+      setAnnouncement("The question waits on its thread's tab.");
+    }, QUESTION_IDLE_MS);
+  }, [putAside, question?.key]);
+  useEffect(() => {
+    questionActivity();
+    return () => window.clearTimeout(idleTimer.current);
+  }, [questionActivity]);
   const [questionShown, setQuestionShown] = useState(false);
   const formedQuestions = useRef(new Set<string>());
 
@@ -498,17 +549,19 @@ export function Island() {
         closeTimer.current = window.setTimeout(close, CLOSE_DELAY);
         return;
       }
-      if (view?.pinned) return;
-      // A keyboard in the island keeps it open as the hand does.
-      if (document.activeElement?.closest("[data-island]") && document.activeElement.matches(":focus-visible")) return;
       const composer = composerRef.current;
-      const composing = targetRef.current === "composer" && (composer?.hasContent() || composer?.element()?.contains(document.activeElement));
-      if (composing) return;
+      // A reply being written keeps its thread in view; otherwise leaving puts the card away, chosen or not.
+      if (targetRef.current === "composer" && composer?.hasContent()) return;
+      const writing = targetRef.current === "composer" && Boolean(composer?.element()?.contains(document.activeElement));
+      // A keyboard moving through the island keeps it open as the hand does.
+      if (!writing && document.activeElement?.closest("[data-island]") && document.activeElement.matches(":focus-visible")) return;
       setView(null);
+      // The field stays up while it has the keyboard.
+      if (writing) return;
       setReaching(false);
       void go(restRef.current);
     }, CLOSE_DELAY);
-  }, [go, view?.pinned]);
+  }, [go]);
 
   // Whatever held the rail up let go while the hand was elsewhere: it goes back down.
   useEffect(() => {
@@ -563,6 +616,8 @@ export function Island() {
     (message: ComposerSend) => {
       if (!engine) return;
       sentAt.current = performance.now();
+      // Someone who already points at works or attaches files needs no tip about it.
+      if (!message.references.length && !message.attachments.length) firstTipMoment("message");
       // Answered, a thread brought to the rail stays there.
       if (focus?.threadId === brought.current) brought.current = null;
       const home = islandHome();
@@ -626,14 +681,14 @@ export function Island() {
   /* ------------------------------------------------------------ switcher */
 
   // Every thread, from anywhere. A page that binds a thread (chat) has its own search and answers instead.
-  const [switcher, setSwitcher] = useState<{ query?: string } | null>(null);
+  const [switcher, setSwitcher] = useState<{ query?: string; scope?: ThreadScope } | null>(null);
   const bindsThread = Boolean(slot?.bindsThread);
   useEffect(
     () =>
-      spectraBus.on("threads.open", ({ query }) => {
+      spectraBus.on("threads.open", ({ query, scope }) => {
         if (bindsThread) return;
         setHidden(false);
-        setSwitcher({ query });
+        setSwitcher({ query, scope });
       }),
     [bindsThread],
   );
@@ -713,7 +768,8 @@ export function Island() {
     focusOnShow.current = false;
     composerRef.current?.focus();
   }, [composerVisible]);
-  const placeholder = focus ? `Reply to ${focus.title}` : "Ask Spectra anything";
+  // One line whatever the thread is called: a long name is shortened, never wrapped or cut mid-word.
+  const placeholder = focus ? `Reply to ${shortTitle(focus.title)}` : "Ask Spectra anything";
 
   /* ------------------------------------------------------------ rail */
 
@@ -721,6 +777,8 @@ export function Island() {
   const seat = useRailSeat(shown, findShown);
   const raised = Boolean(seat) && (composerVisible || reaching);
   const railHas = composerVisible || allTabs.length > 0;
+  // The tab rail stands over the band; the clearance follows it as it comes and goes.
+  useEffect(() => refreshComposerBands(), [railHas, seat]);
   // The tab in hand: the thread whose card is open, else the thread the field writes into.
   const focusTab = focus ? allTabs.find((tab) => tab.threadId === focus.threadId) : undefined;
   const current = view?.runId ?? (composerVisible ? focusTab?.runId ?? null : null);
@@ -731,6 +789,8 @@ export function Island() {
   /** Pressing a thread keeps it open over the island and turns the field to it: a reply is just typed. */
   const pressTab = (tab: IslandTab) => {
     markSeen(tab.runId);
+    // A tab holding questions put aside gives them back first.
+    if (bringBack(tab.threadId)) return;
     // A page that shows one thread changes to it.
     if (bindsThread) {
       openThread(tab.runId, tab.threadId, tab.title);
@@ -745,6 +805,9 @@ export function Island() {
     replyIn(tab);
   };
 
+  const onScreen = (threadId: string) =>
+    (bindsThread && slot?.focus?.threadId === threadId) || spectraBus.getQuery("side.thread")?.threadId === threadId;
+
   const replyIn = (tab: IslandTab) => {
     setReplyTo({ runId: tab.runId, threadId: tab.threadId, title: tab.title });
     void go("composer", { focus: true }).then(() => composerRef.current?.focus());
@@ -752,9 +815,10 @@ export function Island() {
 
   const railHandlers: RailHandlers = {
     onHover: (tab) => {
-      if (tabDrag.dragging) return;
       window.clearTimeout(viewTimer.current);
-      viewTimer.current = window.setTimeout(() => openView(tab.runId, false), view ? 60 : VIEW_DELAY);
+      // A thread already on screen (this page's, or the Side's) needs no card over it.
+      if (tabDrag.dragging || onScreen(tab.threadId)) return;
+      viewTimer.current = window.setTimeout(() => openView(tab.runId, false), view ? VIEW_SWITCH_DELAY : VIEW_DELAY);
     },
     onPress: (tab) => {
       if (tabDrag.consumeClick()) return;
@@ -799,10 +863,12 @@ export function Island() {
           <QuestionCard
             ref={questionRef}
             question={question}
-            index={Math.min(questionIndex, questions.length - 1)}
-            count={questions.length}
+            index={Math.min(questionIndex, asking.length - 1)}
+            count={asking.length}
             visible={questionShown}
-            onStep={(delta) => setQuestionIndex((current) => (current + delta + questions.length) % questions.length)}
+            onStep={(delta) => setQuestionIndex((current) => (current + delta + asking.length) % asking.length)}
+            onLater={() => putAside(question.key)}
+            onActivity={questionActivity}
             onAnswer={answer}
             onOpenThread={question.threadId ? () => openThread(question.runId, question.threadId!, question.threadTitle) : undefined}
           />
@@ -830,7 +896,7 @@ export function Island() {
               openView(viewTab.runId, true);
               replyIn(viewTab);
             }}
-            onDismiss={() => void dismiss(viewTab.runId)}
+            onMinimise={closeView}
           />
         </div>
       ) : null}
@@ -855,6 +921,7 @@ export function Island() {
       {switcher ? (
         <ThreadSwitcher
           initialQuery={switcher.query}
+          scope={switcher.scope}
           onClose={closeSwitcher}
           onNewThread={() => {
             setSwitcher(null);
@@ -882,6 +949,7 @@ export function Island() {
             bottom={16 + seat.height - 1}
             maxWidth={seat.width - 2 * seat.radius}
             handlers={railHandlers}
+            waiting={waitingByThread}
             onKeyDown={onRailKey}
             threadsOpen={Boolean(switcher)}
             onThreads={() => setSwitcher((open) => (open ? null : {}))}

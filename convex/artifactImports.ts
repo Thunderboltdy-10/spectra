@@ -5,7 +5,7 @@ import { action, query } from "./functions";
 import { mutation, internalMutation } from "./orgNodeMutation";
 import { api, internal } from "./_generated/api";
 import { writeAuditEvent } from "./auditShared";
-import { recordMeterEvent } from "./metering";
+import { recordMeterEvent, assertSchoolStorageCeiling } from "./metering";
 import { isHollowDefaultContent, requireArtifactCapability } from "./spectraShared";
 import { getAuthenticatedActor } from "./identityShared";
 import { validateIntakeAttestation, vIntakeAttestation } from "./intakeAttestation";
@@ -133,6 +133,7 @@ export const prepareUpload = mutation({
         storageId: job.originalStorageId ?? job.candidateStorageId ?? null,
       };
     }
+    await assertSchoolStorageCeiling(ctx, actor.schoolId, job.originalBytes ?? 0);
     return {
       uploadUrl: await ctx.storage.generateUploadUrl(),
       uploadReceipt: job.uploadReceipt,

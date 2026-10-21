@@ -238,7 +238,7 @@ function operationCategory(operation: Doc<"spectraOperations">): PermissionCateg
 }
 
 /** The user's stored choice: full control, or "Always allow" this category, unless they set it to Never. */
-async function storedAllows(ctx: QueryCtx | MutationCtx, accountId: Id<"accounts">, category: PermissionCategory) {
+async function storedAllows(ctx: QueryCtx | MutationCtx, accountId: Id<"accounts">, run: Doc<"spectraAiRuns">, category: PermissionCategory) {
   const layer = await ctx.db
     .query("accountPreferences")
     .withIndex("by_account_scope_key", (q) =>
@@ -248,7 +248,22 @@ async function storedAllows(ctx: QueryCtx | MutationCtx, accountId: Id<"accounts
   const ai = record(record(layer?.values).ai);
   if (Array.isArray(ai.permissionDeny) && ai.permissionDeny.includes(category)) return false;
   if (ai.permissionFullControl === true) return true;
-  return Array.isArray(ai.permissionAllow) && ai.permissionAllow.includes(category);
+  if (Array.isArray(ai.permissionAllow) && ai.permissionAllow.includes(category)) return true;
+  return threadAllows(ctx, run, category);
+}
+
+/** An "Allow" given in a thread covers the same kind of step for the rest of that thread. */
+async function threadAllows(ctx: QueryCtx | MutationCtx, run: Doc<"spectraAiRuns">, category: PermissionCategory) {
+  if (!run.threadId) return false;
+  const thread = await ctx.db.get(run.threadId);
+  return thread?.allowedPermissionCategories?.includes(category) === true;
+}
+
+async function addThreadAllow(ctx: MutationCtx, run: Doc<"spectraAiRuns">, category: string) {
+  if (!run.threadId || !isPermissionCategory(category)) return;
+  const thread = await ctx.db.get(run.threadId);
+  if (!thread || thread.allowedPermissionCategories?.includes(category)) return;
+  await ctx.db.patch(thread._id, { allowedPermissionCategories: [...(thread.allowedPermissionCategories ?? []), category] });
 }
 
 async function addAlwaysAllow(ctx: MutationCtx, accountId: Id<"accounts">, category: string) {
@@ -384,8 +399,10 @@ export const answer = mutation({
         await ctx.db.patch(operation._id, { output: { ...output, approvedArtifactScope: digest } });
       }
     }
-    if (args.answer.allowed && args.answer.alwaysAllow && typeof pending.category === "string")
-      await addAlwaysAllow(ctx, actor._id, pending.category);
+    if (args.answer.allowed && typeof pending.category === "string") {
+      await addThreadAllow(ctx, run, pending.category);
+      if (args.answer.alwaysAllow) await addAlwaysAllow(ctx, actor._id, pending.category);
+    }
     await ctx.db.patch(row._id, {
       answer: { kind: "approval", allowed: args.answer.allowed, ...(args.answer.alwaysAllow ? { alwaysAllow: true } : {}) },
       updatedAt: now,
@@ -448,7 +465,7 @@ export const ensureApproved = mutation({
         (output.approvedApplicationScope ?? output.approvedArtifactScope) === scope;
       if (approvedByUser) continue;
       const category = operationCategory(operation);
-      if (!category || !(await storedAllows(ctx, actor._id, category)))
+      if (!category || !(await storedAllows(ctx, actor._id, run, category)))
         throw new Error("AI_PERMISSION_REQUIRED: Ask the user first.");
       if (operation.type === "app.command") {
         await ctx.db.patch(operation._id, { output: { ...output, pendingApplicationScope: scope, approvedApplicationScope: scope } });

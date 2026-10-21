@@ -249,7 +249,7 @@ export function OverflowMenu<T extends string>({
   layer,
   avoidCollisions = true,
   active = false,
-  size = 40,
+  size = 36,
   icon: TriggerIcon = "more",
   triggerClassName,
   contentClassName,
@@ -337,9 +337,9 @@ export function OverflowMenu<T extends string>({
         style={{ width: size, height: size }}
       >
         {typeof TriggerIcon === "string" ? (
-          <Icon name={TriggerIcon} size={16} aria-hidden="true" className="pointer-events-none" />
+          <Icon name={TriggerIcon} size={size < 32 ? 16 : 18} aria-hidden="true" className="pointer-events-none" />
         ) : (
-          <TriggerIcon aria-hidden="true" className="pointer-events-none size-4" />
+          <TriggerIcon aria-hidden="true" className={cn("pointer-events-none", size < 32 ? "size-4" : "size-[18px]")} />
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent

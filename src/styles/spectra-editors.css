@@ -15,7 +15,8 @@
   position: relative;
   isolation: isolate;
   display: flex;
-  width: min(760px, calc(100% - 48px));
+  /* Wide enough to be the page in a full window, never a card lost in it. */
+  width: min(880px, calc(100% - 64px));
   flex-direction: column;
   gap: 28px;
   margin: 32px auto 0;

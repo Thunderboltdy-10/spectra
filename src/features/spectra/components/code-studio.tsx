@@ -142,6 +142,7 @@ import {
   downloadDocumentBlob,
 } from "./artifact-studio-file-utils";
 import { requestSpectra } from "../data/request";
+import { NumberField } from "@/components/ui/number-field";
 
 type RunState =
   | "idle"
@@ -2266,7 +2267,7 @@ export function CodeStudio({
             }
             compact={false}
             toolbar={false}
-            viewportHeight={workbook.preview?.height ?? 580}
+            viewportHeight={workbook.preview?.height}
             className="min-h-full border-0 shadow-none"
             onEvent={handleSandboxEvent}
             onStatusChange={handleRuntimeStatus}
@@ -3240,8 +3241,7 @@ function CodeParameterPanel({
                           })
                         }
                       />
-                      <input
-                        type="number"
+                      <NumberField
                         aria-label={`${parameter.label} numeric value`}
                         className="code-field-control text-right font-mono"
                         value={Number(parameter.value)}
@@ -3259,8 +3259,7 @@ function CodeParameterPanel({
                       <div className="grid grid-cols-3 gap-2 sm:col-span-2">
                         <label className="code-field-label m-0">
                           Minimum
-                          <input
-                            type="number"
+                          <NumberField
                             className="code-field-control"
                             value={parameter.min ?? 0}
                             disabled={readOnly}
@@ -3278,8 +3277,7 @@ function CodeParameterPanel({
                         </label>
                         <label className="code-field-label m-0">
                           Maximum
-                          <input
-                            type="number"
+                          <NumberField
                             className="code-field-control"
                             value={parameter.max ?? 100}
                             disabled={readOnly}
@@ -3297,8 +3295,7 @@ function CodeParameterPanel({
                         </label>
                         <label className="code-field-label m-0">
                           Step
-                          <input
-                            type="number"
+                          <NumberField
                             min="0.000001"
                             className="code-field-control"
                             value={parameter.step ?? 1}
@@ -3805,7 +3802,7 @@ function CodeSettings({
               min={360}
               max={1000}
               step={20}
-              value={content.preview?.height ?? 580}
+              value={content.preview?.height ?? 600}
               disabled={readOnly}
               onChange={(event) =>
                 onChange((draft) => {
@@ -3816,7 +3813,22 @@ function CodeSettings({
                 })
               }
             />
-            <span>{content.preview?.height ?? 580}px</span>
+            {content.preview?.height ? (
+              <button
+                type="button"
+                disabled={readOnly}
+                title="Let the preview grow to what the work draws"
+                onClick={() =>
+                  onChange((draft) => {
+                    draft.preview = { ...draft.preview, height: undefined };
+                  })
+                }
+              >
+                {content.preview.height}px, fit instead
+              </button>
+            ) : (
+              <span>Fits the work</span>
+            )}
           </label>
         </section>
         <section

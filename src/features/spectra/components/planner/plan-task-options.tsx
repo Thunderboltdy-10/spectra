@@ -6,6 +6,7 @@ import { uniqueToken } from "@/lib/unique-token";
 import type { PlanContent, PlanTask } from "../../plan/model";
 import { reminderLabel, TaskReminders, type ReminderTiming } from "../task/task-reminders";
 import { plural } from "./plan-format";
+import { NumberField } from "@/components/ui/number-field";
 
 /*
  * What a task in a plan rarely needs, folded under its page's More options
@@ -108,8 +109,7 @@ export function PlanTaskOptions({
       <label className="sheet-option">
         <span>Takes about</span>
         <span className="sheet-option-minutes">
-          <input
-            type="number"
+          <NumberField
             min={5}
             step={5}
             className="sheet-input"

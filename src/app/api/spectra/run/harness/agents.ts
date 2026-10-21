@@ -1,4 +1,5 @@
 import { act, mutate, query } from "./io";
+import { isPermissionCategory, type PermissionCategory } from "@/features/spectra/settings/schema/ai-permissions";
 
 /*
  * The user's custom agents. Spectra lists them for the model, which hands a
@@ -86,7 +87,7 @@ export async function readAgentIndex(actorClerkId: string, prompt = ""): Promise
     .slice(0, OFFERED_AGENTS);
 }
 
-export type ThreadSummary = { retainedAgentId?: string; needsTitle: boolean };
+export type ThreadSummary = { retainedAgentId?: string; needsTitle: boolean; allowedPermissionCategories: PermissionCategory[] };
 
 /**
  * What a run needs to know about its thread: the agent it used last (unless
@@ -94,7 +95,7 @@ export type ThreadSummary = { retainedAgentId?: string; needsTitle: boolean };
  */
 export async function readThreadSummary(actorClerkId: string, threadId: string | undefined): Promise<ThreadSummary | null> {
   if (!threadId) return null;
-  const summary = await query<unknown & object, { retainedAgentId?: unknown; needsTitle?: unknown } | null>(
+  const summary = await query<unknown & object, { retainedAgentId?: unknown; needsTitle?: unknown; allowedPermissionCategories?: unknown } | null>(
     "spectraThreads:getSummary",
     { actorClerkId, threadId },
   ).catch(() => null);
@@ -102,6 +103,9 @@ export async function readThreadSummary(actorClerkId: string, threadId: string |
   return {
     ...(typeof summary.retainedAgentId === "string" ? { retainedAgentId: summary.retainedAgentId } : {}),
     needsTitle: summary.needsTitle === true,
+    allowedPermissionCategories: Array.isArray(summary.allowedPermissionCategories)
+      ? summary.allowedPermissionCategories.filter(isPermissionCategory)
+      : [],
   };
 }
 

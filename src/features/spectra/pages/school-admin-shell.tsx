@@ -5,12 +5,11 @@ import {
   useEffect,
   useMemo,
   useState,
-  type FormEvent,
 } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
-import { BookOpen, FileClock, KeyRound, MessageCircle, Save, Settings2, ShieldCheck, UserCheck, UserPlus, Bell, Bot, Check, ChevronDown, Folder, LockKeyhole, Mail, Plus, RefreshCw, School, Search, Send, Users, Activity, Archive, Building2, CircleGauge, Database, HardDrive, Inbox, Network, UsersRound, type GlyphIcon } from "@/components/icons/glyph-icons";
+import { BookOpen, FileClock, KeyRound, MessageCircle, Save, Settings2, ShieldCheck, UserCheck, Bell, Bot, Check, ChevronDown, Folder, LockKeyhole, Mail, Plus, Send, Users, Activity, Archive, Building2, CircleGauge, HardDrive, Inbox, Network, UsersRound, type GlyphIcon } from "@/components/icons/glyph-icons";
 import { toast } from "@/components/ui/toast";
 import {
   getAdministration,
@@ -38,7 +37,6 @@ import {
   MetricCard,
   PrivacyNotice,
   SelectField,
-  Sparkline,
   StatusBadge,
   statusToneFor,
   TextAreaField,
@@ -46,22 +44,8 @@ import {
 } from "@/features/spectra/administration/shared";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
-
-const MEMBER_ROLE_OPTIONS = [
-  { value: "student", label: "Student" },
-  { value: "teacher", label: "Teacher" },
-  { value: "school_admin", label: "School admin" },
-] as const;
-
-const MEMBER_STATUS_OPTIONS = [
-  { value: "active", label: "Active" },
-  // `invited` is set by sending an invitation, never by an administrator
-  // picking it, but it has to be visible or a pending member's row would show
-  // no status at all.
-  { value: "invited", label: "Invited", disabled: true },
-  { value: "suspended", label: "Suspended" },
-  { value: "ended", label: "Ended" },
-] as const;
+import { PeopleSurface } from "@/features/spectra/administration/people/people-surface";
+import type { Person } from "@/features/spectra/administration/people/people-model";
 
 const ADMIN_BAR_PLAN: readonly CollapseStep[] = [{ toMenu: "refresh" }];
 
@@ -91,27 +75,6 @@ const tabs: Array<PanelTab & { id: Tab }> = [
   { id: "profile", label: "School profile", icon: "school" },
   { id: "audit", label: "Audit", icon: "log" },
 ];
-
-type Person = {
-  membershipId: string;
-  accountId: string;
-  name: string;
-  email: string;
-  avatarUrl?: string;
-  role: "student" | "teacher" | "school_admin";
-  status: "active" | "invited" | "suspended" | "ended";
-  joinedAt?: number;
-  lastSeenAt?: number;
-};
-
-type Invitation = {
-  invitationId: string;
-  email: string;
-  role: string;
-  status: string;
-  expiresAt: number;
-  createdAt: number;
-};
 
 type SchoolGroup = {
   groupId: string;
@@ -185,10 +148,6 @@ function OverviewSurface({
   data: SchoolAdministrationOverview;
   onTab: (tab: Tab) => void;
 }) {
-  const series = data.usage.series.map(
-    (point) =>
-      Object.values(point.values).reduce((sum, value) => sum + value, 0) || 0,
-  );
   return (
     <div className="min-w-0">
       <div className="min-w-0 space-y-3">
@@ -264,13 +223,12 @@ function OverviewSurface({
           />
           {data.groupWorkspaces.length ? (
             <div className="overflow-x-auto px-4 pb-4">
-              <table className="w-full min-w-[620px] text-left text-micro">
-                <thead className="text-[var(--text-tertiary)]">
+              <table className="w-full min-w-[520px] text-left text-ui">
+                <thead className="text-caption text-[var(--text-tertiary)]">
                   <tr>
                     <th className="pb-2 font-normal">Workspace</th>
                     <th className="pb-2 font-normal">Type</th>
                     <th className="pb-2 font-normal">Activity</th>
-                    <th className="pb-2 font-normal">Usage trend</th>
                     <th className="pb-2 text-right font-normal">Open</th>
                   </tr>
                 </thead>
@@ -281,19 +239,13 @@ function OverviewSurface({
                       className="rounded-card transition-colors hover:bg-[var(--bg-secondary)]"
                     >
                       <td className="py-2.5">
-                        <span className="flex items-center gap-2 font-medium text-[var(--text-primary)]">
-                          <School size={13} className="text-[var(--brand-primary)]" />
-                          {workspace.title}
-                        </span>
+                        <span className="font-medium text-[var(--text-primary)]">{workspace.title}</span>
                       </td>
                       <td className="py-2.5 capitalize text-[var(--text-secondary)]">
                         {workspace.type}
                       </td>
                       <td className="py-2.5 text-[var(--text-secondary)]">
                         {formatRelative(workspace.lastActivityAt)}
-                      </td>
-                      <td className="py-2.5">
-                        <Sparkline values={series} />
                       </td>
                       <td className="py-2.5 text-right">
                         <Link
@@ -419,14 +371,14 @@ function SchoolContext({
         <section>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-ui font-semibold">Usage</h2>
-              <p className="mt-1 text-micro text-[var(--text-tertiary)]">
+              <h2 className="font-display text-subhead font-medium">Usage</h2>
+              <p className="mt-1 text-caption text-[var(--text-secondary)]">
                 Totals for the school, never anyone&rsquo;s work.
               </p>
             </div>
             <AdminButton tone="ghost" onClick={() => onTab("usage")}>View usage</AdminButton>
           </div>
-          <div className="mt-4 space-y-2 text-micro">
+          <div className="mt-4 space-y-1 text-ui">
             {(
               [
                 ["Storage", data.usage.totals.storage_bytes, "bytes"],
@@ -443,7 +395,7 @@ function SchoolContext({
               .map(([label, value, kind]) => (
                 <div key={label} className="flex justify-between gap-4 rounded-control px-2 py-1.5 hover:bg-[var(--bg-hover)]">
                   <span className="text-[var(--text-secondary)]">{label}</span>
-                  <strong>
+                  <strong className="font-medium">
                     {kind === "bytes"
                       ? formatBytes(value as number)
                       : formatCompact(value as number)}
@@ -456,7 +408,7 @@ function SchoolContext({
               data.usage.totals.model_output_tokens,
               data.usage.totals.collaboration_bytes,
             ].every((value) => value === null || value === undefined) ? (
-              <p className="text-micro text-[var(--text-tertiary)]">
+              <p className="text-caption text-[var(--text-secondary)]">
                 No metered usage has been recorded for this range yet.
               </p>
             ) : null}
@@ -465,8 +417,7 @@ function SchoolContext({
 
         <section>
           <div className="flex items-center gap-2">
-            <Database size={14} className="text-[var(--brand-primary)]" />
-            <h2 className="text-ui font-semibold">ManageBac</h2>
+            <h2 className="font-display text-subhead font-medium">ManageBac</h2>
           </div>
           <div className="mt-3">
             <StatusBadge
@@ -475,20 +426,20 @@ function SchoolContext({
               {data.integration?.status ?? "Not configured"}
             </StatusBadge>
           </div>
-          <div className="mt-3 flex justify-between text-micro text-[var(--text-tertiary)]">
+          <div className="mt-3 flex justify-between text-caption text-[var(--text-secondary)]">
             <span>Last synced</span>
             <span>{formatRelative(data.integration?.lastSyncAt)}</span>
           </div>
           <Link
             href="/managebac"
-            className="mt-3 block text-micro font-medium text-[var(--accent-mint)] hover:underline"
+            className="mt-3 block text-ui font-medium text-[var(--text-primary)] hover:underline"
           >
             Sync settings
           </Link>
         </section>
 
         <section>
-          <h2 className="text-ui font-semibold">School settings</h2>
+          <h2 className="font-display text-subhead font-medium">School settings</h2>
           <div className="mt-3 space-y-1">
             {(
               [
@@ -505,7 +456,7 @@ function SchoolContext({
                 onClick={() => onTab(tab as Tab)}
                 className="w-full justify-start"
               >
-                <Icon size={14} />
+                <Icon size={18} />
                 {label}
               </AdminButton>
             ))}
@@ -814,394 +765,6 @@ function SchoolAdminTab({
   );
 }
 
-function PeopleSurface({
-  operatorSessionId,
-  busy,
-  mutate,
-  refreshKey,
-  onRefresh,
-}: {
-  operatorSessionId?: string;
-  busy: string;
-  mutate: SchoolAdminTabProps["mutate"];
-  refreshKey: number;
-  onRefresh: () => void;
-}) {
-  const [people, setPeople] = useState<Person[]>([]);
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState("student");
-  const [manualInvitationUrl, setManualInvitationUrl] = useState("");
-  /* The member search asks the server once typing settles, not per key, and
-     the table stays on screen while it does; invitations do not depend on
-     the search, so typing never refetches them. */
-  const [query, setQuery] = useState("");
-  useEffect(() => {
-    const timer = window.setTimeout(() => setQuery(search.trim()), 250);
-    return () => window.clearTimeout(timer);
-  }, [search]);
-  useEffect(() => {
-    let active = true;
-    void getAdministration<{ people: Person[] }>("people", {
-      operatorSessionId,
-      search: query,
-    })
-      .then((members) => {
-        if (active) setPeople(members.people);
-      })
-      .catch((error) => {
-        if (active)
-          toast.error(
-            describeFailure(error, { fallback: "Members could not load." })
-              .message,
-          );
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [operatorSessionId, refreshKey, query]);
-  useEffect(() => {
-    let active = true;
-    void getAdministration<{ invitations: Invitation[] }>("invitations", {
-      operatorSessionId,
-    })
-      .then((invites) => {
-        if (active) setInvitations(invites.invitations);
-      })
-      .catch((error) => {
-        if (active)
-          toast.error(
-            describeFailure(error, { fallback: "Invitations could not load." })
-              .message,
-          );
-      });
-    return () => {
-      active = false;
-    };
-  }, [operatorSessionId, refreshKey]);
-
-  async function invite(event: FormEvent) {
-    event.preventDefault();
-    const invited = email;
-    const done = await mutate<{
-      delivery: { status: "sent" | "skipped" | "failed"; reason?: string };
-      manualInvitationUrl?: string;
-    }>("invite", "invite", { email, role }, null);
-    if (!done) return;
-    setEmail("");
-    setInviteOpen(false);
-    if (done.result.manualInvitationUrl) {
-      setManualInvitationUrl(done.result.manualInvitationUrl);
-      toast.warning(
-        done.result.delivery.reason ??
-          "Email delivery is unavailable. Share the secure invitation manually.",
-      );
-    } else toast.success(`Invitation sent to ${invited}.`);
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <MetricCard
-          icon={Users}
-          label="Active members"
-          value={formatCompact(
-            people.filter((person) => person.status === "active").length,
-          )}
-          detail="Across all ordinary product roles"
-        />
-        <MetricCard
-          icon={UserCheck}
-          label="Administrators"
-          value={formatCompact(
-            people.filter((person) => person.role === "school_admin").length,
-          )}
-          detail="Last active admin is protected"
-          tone="violet"
-        />
-        <MetricCard
-          icon={Mail}
-          label="Pending invitations"
-          value={formatCompact(
-            invitations.filter((invite) => invite.status === "pending").length,
-          )}
-          detail="Expiring, revocable, single-use"
-          tone="orange"
-        />
-      </div>
-      <AdminCard className="rounded-none border-0 bg-transparent shadow-none">
-        <AdminSectionHeader
-          title="People"
-          detail="Roles only add management surfaces; students and teachers retain the same ordinary Spectra capabilities."
-          action={
-            <AdminButton tone="primary" onClick={() => setInviteOpen(true)}>
-              <UserPlus size={13} />
-              Invite member
-            </AdminButton>
-          }
-        />
-        <div className="flex items-center gap-2 px-4 pb-3">
-          <label className="relative max-w-sm flex-1">
-            <Search
-              size={13}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]"
-            />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search verified school members"
-              className="h-9 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] pl-9 pr-3 text-micro outline-none focus:border-[var(--brand-primary)]"
-            />
-          </label>
-          <AdminButton onClick={onRefresh}>
-            <RefreshCw size={12} />
-          </AdminButton>
-        </div>
-        {loading ? (
-          <LoadingPanel label="Loading members" />
-        ) : (
-          <div className="overflow-x-auto px-4 pb-4">
-            <table className="w-full min-w-[760px] text-left text-micro">
-              <thead className="text-[var(--text-tertiary)]">
-                <tr>
-                  <th className="pb-2 font-normal">Member</th>
-                  <th className="pb-2 font-normal">Role</th>
-                  <th className="pb-2 font-normal">Status</th>
-                  <th className="pb-2 font-normal">Last active</th>
-                  <th className="pb-2 font-normal">Joined</th>
-                </tr>
-              </thead>
-              <tbody>
-                {people.map((person) => (
-                  <tr
-                    key={person.membershipId}
-                    className="rounded-card transition-colors hover:bg-[var(--bg-secondary)]"
-                  >
-                    <td className="py-2.5">
-                      <div className="flex items-center gap-2">
-                        <span className="grid size-7 place-items-center rounded-full bg-[var(--bg-user-bubble)] text-micro font-semibold text-[var(--brand-primary)]">
-                          {person.name
-                            .split(/\s+/)
-                            .slice(0, 2)
-                            .map((part) => part[0])
-                            .join("")
-                            .toUpperCase()}
-                        </span>
-                        <span>
-                          <strong className="block font-medium">
-                            {person.name}
-                          </strong>
-                          <span className="text-micro text-[var(--text-tertiary)]">
-                            {person.email}
-                          </span>
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-2.5">
-                      <SelectField
-                        ariaLabel={`Role for ${person.name}`}
-                        value={person.role}
-                        disabled={busy === `member-${person.membershipId}`}
-                        onChange={(role) =>
-                          void mutate(
-                            `member-${person.membershipId}`,
-                            "changeMember",
-                            { membershipId: person.membershipId, role },
-                            "Member role updated.",
-                          )
-                        }
-                        options={MEMBER_ROLE_OPTIONS}
-                        size="sm"
-                        triggerClassName="w-[132px]"
-                      />
-                    </td>
-                    <td className="py-2.5">
-                      <SelectField
-                        ariaLabel={`Status for ${person.name}`}
-                        value={person.status}
-                        disabled={busy === `member-${person.membershipId}`}
-                        onChange={(status) =>
-                          void mutate(
-                            `member-${person.membershipId}`,
-                            "changeMember",
-                            { membershipId: person.membershipId, status },
-                            "Member status updated.",
-                          )
-                        }
-                        options={MEMBER_STATUS_OPTIONS}
-                        size="sm"
-                        triggerClassName="w-[124px]"
-                      />
-                    </td>
-                    <td className="py-2.5 text-[var(--text-secondary)]">
-                      {formatRelative(person.lastSeenAt)}
-                    </td>
-                    <td className="py-2.5 text-[var(--text-secondary)]">
-                      {person.joinedAt
-                        ? new Intl.DateTimeFormat(undefined, {
-                            dateStyle: "medium",
-                          }).format(person.joinedAt)
-                        : "Pending"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </AdminCard>
-      <AdminCard className="rounded-none border-0 bg-transparent shadow-none">
-        <AdminSectionHeader
-          title="Invitations"
-          detail="Tokens are hashed, expiring, single-use, domain checked, and revocable."
-        />
-        {invitations.length ? (
-          <div className="px-4 pb-4">
-            {invitations.slice(0, 100).map((invite) => (
-              <div
-                key={invite.invitationId}
-                className="flex flex-wrap items-center gap-3 border-b border-[var(--border-subtle)] py-2.5 last:border-0"
-              >
-                <LifeKey id={`invitation:${invite.invitationId}`} />
-                <Mail size={13} className="text-[var(--text-tertiary)]" />
-                <span className="min-w-0 flex-1">
-                  <strong className="block truncate text-micro">
-                    {invite.email}
-                  </strong>
-                  <span className="text-micro text-[var(--text-tertiary)]">
-                    {invite.role.replaceAll("_", " ")} · expires{" "}
-                    {new Intl.DateTimeFormat(undefined, {
-                      dateStyle: "medium",
-                    }).format(invite.expiresAt)}
-                  </span>
-                </span>
-                <StatusBadge
-                  tone={invite.status === "pending" ? "attention" : "neutral"}
-                >
-                  {invite.status}
-                </StatusBadge>
-                {invite.status === "pending" ? (
-                  <AdminButton
-                    tone="danger"
-                    disabled={busy === `invite-${invite.invitationId}`}
-                    onClick={() =>
-                      void mutate(
-                        `invite-${invite.invitationId}`,
-                        "revokeInvitation",
-                        { invitationId: invite.invitationId },
-                        "Invitation revoked.",
-                      )
-                    }
-                  >
-                    Revoke
-                  </AdminButton>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <EmptyPanel
-            icon={Mail}
-            title="No invitations yet"
-            detail="Invite a verified school email to add a member."
-          />
-        )}
-      </AdminCard>
-      <AdminDialog
-        open={inviteOpen}
-        onClose={() => setInviteOpen(false)}
-        title="Invite a school member"
-        detail="The invitation is restricted to this school and cannot create a second school membership."
-        footer={
-          <>
-            <AdminButton onClick={() => setInviteOpen(false)}>
-              Cancel
-            </AdminButton>
-            <AdminButton
-              tone="primary"
-              type="submit"
-              disabled={!email || busy === "invite"}
-              onClick={() =>
-                document
-                  .querySelector<HTMLFormElement>("#school-invite-form")
-                  ?.requestSubmit()
-              }
-            >
-              Send invitation
-            </AdminButton>
-          </>
-        }
-      >
-        <form id="school-invite-form" onSubmit={(event) => void invite(event)}>
-          <div className="space-y-4">
-            <TextField
-              label="Verified school email"
-              value={email}
-              onChange={setEmail}
-              type="email"
-              required
-              placeholder="name@school.example"
-            />
-            <SelectField
-              label="School profile"
-              value={role}
-              onChange={setRole}
-              options={[
-                { value: "student", label: "Student" },
-                { value: "teacher", label: "Teacher" },
-                { value: "school_admin", label: "School admin" },
-              ]}
-            />
-            <PrivacyNotice>
-              Student and teacher profiles have identical ordinary creation,
-              sharing, work, and agent capabilities.
-            </PrivacyNotice>
-          </div>
-        </form>
-      </AdminDialog>
-      <AdminDialog
-        open={Boolean(manualInvitationUrl)}
-        onClose={() => setManualInvitationUrl("")}
-        title="Deliver this invitation securely"
-        detail="SMTP did not accept the message. This single-use link is bound to the invited verified email and expires automatically."
-        footer={
-          <>
-            <AdminButton onClick={() => setManualInvitationUrl("")}>
-              Done
-            </AdminButton>
-            <AdminButton
-              tone="primary"
-              onClick={() =>
-                void navigator.clipboard
-                  .writeText(manualInvitationUrl)
-                  .then(
-                    () => toast.success("Invitation link copied."),
-                    () =>
-                      toast.error(
-                        "Copying was blocked. Select the link and copy it.",
-                      ),
-                  )
-              }
-            >
-              Copy secure link
-            </AdminButton>
-          </>
-        }
-      >
-        <div className="break-all rounded-control border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 font-mono text-micro leading-5">
-          {manualInvitationUrl}
-        </div>
-      </AdminDialog>
-    </div>
-  );
-}
-
 type SchoolAdminTabProps = Parameters<typeof SchoolAdminTab>[0];
 
 function GroupsSurface({
@@ -1470,7 +1033,7 @@ function CommunicationSurface({
         ) : rows.length ? (
           <div className="overflow-x-auto px-4 pb-4">
             <table className="w-full min-w-[720px] text-left text-micro">
-              <thead className="text-[var(--text-tertiary)]">
+              <thead className="text-caption text-[var(--text-tertiary)]">
                 <tr>
                   <th className="pb-2 font-normal">Announcement</th>
                   <th className="pb-2 font-normal">Audience</th>
@@ -1890,7 +1453,7 @@ function AgentsResourcesSurface({
           />
           <div className="overflow-x-auto px-4 pb-4">
             <table className="w-full min-w-[760px] text-left text-micro">
-              <thead className="text-[var(--text-tertiary)]">
+              <thead className="text-caption text-[var(--text-tertiary)]">
                 <tr>
                   <th className="py-2">Agent</th>
                   <th>Invocations</th>
@@ -2129,7 +1692,7 @@ function GovernanceSurface() {
       </AdminCard>
       <div className="space-y-3">
         <AdminCard className="p-4">
-          <h2 className="font-[var(--font-serif)] text-subhead font-medium">
+          <h2 className="font-display text-subhead font-medium">
             What administration can do
           </h2>
           <p className="mt-2 text-micro leading-5 text-[var(--text-secondary)]">
@@ -2405,7 +1968,7 @@ function ProfileSurface({
       </AdminCard>
       <div className="space-y-3">
         <AdminCard className="p-4">
-          <h2 className="font-[var(--font-serif)] text-subhead font-medium">
+          <h2 className="font-display text-subhead font-medium">
             Accessibility defaults
           </h2>
           <div className="mt-3 space-y-3">
@@ -2492,7 +2055,7 @@ function AuditSurface({
       ) : events.length ? (
         <div className="overflow-x-auto px-4 pb-4">
           <table className="w-full min-w-[760px] text-left text-micro">
-            <thead className="text-[var(--text-tertiary)]">
+            <thead className="text-caption text-[var(--text-tertiary)]">
               <tr className="border-b border-[var(--border-subtle)]">
                 <th className="pb-2 font-normal">Event</th>
                 <th className="pb-2 font-normal">Target</th>

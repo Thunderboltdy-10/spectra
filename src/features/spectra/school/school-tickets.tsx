@@ -27,6 +27,23 @@ function whenLabel(dueAt: number | null, now: number, past: boolean) {
   return time;
 }
 
+/** The day a task is due, on a leaf in its class's ink. */
+function DayLeaf({ dueAt }: { dueAt: number | null }) {
+  const due = dueAt ? new Date(dueAt) : null;
+  return (
+    <span aria-hidden className="school-ticket-leaf">
+      {due ? (
+        <>
+          <span className="school-ticket-month">{due.toLocaleDateString(undefined, { month: "short" })}</span>
+          <span className="school-ticket-day">{due.getDate()}</span>
+        </>
+      ) : (
+        <span className="school-ticket-month">Any</span>
+      )}
+    </span>
+  );
+}
+
 export function TaskTicket({
   task,
   identity,
@@ -42,7 +59,6 @@ export function TaskTicket({
   compact?: boolean;
   onSelect: () => void;
 }) {
-  const due = task.dueAt ? new Date(task.dueAt) : null;
   const late = !task.past && task.dueAt !== null && task.dueAt < now;
   const when = whenLabel(task.dueAt, now, task.past);
   return (
@@ -57,16 +73,7 @@ export function TaskTicket({
       style={inkStyle(identity)}
       className={cn("school-ticket", compact && "school-ticket--compact")}
     >
-      <span aria-hidden className="school-ticket-leaf">
-        {due ? (
-          <>
-            <span className="school-ticket-month">{due.toLocaleDateString(undefined, { month: "short" })}</span>
-            <span className="school-ticket-day">{due.getDate()}</span>
-          </>
-        ) : (
-          <span className="school-ticket-month">Any</span>
-        )}
-      </span>
+      <DayLeaf dueAt={task.dueAt} />
       <span className="min-w-0 flex-1">
         <span className="school-ticket-title">{task.title}</span>
         <span className="school-ticket-meta">

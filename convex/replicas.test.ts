@@ -2379,6 +2379,22 @@ describe("replica truth machine", () => {
     return { keepHash, keepPayloadId };
   }
 
+  it("refuses a desktop write that was not built on the unread Word save", async () => {
+    const t = setupTest();
+    const fixture = await seedWork(t);
+    const asUser = t.withIdentity(identity);
+    const seeded = await seedKeepSpectraConflict(t, fixture);
+    await expect(queueNative(asUser, {
+      workId: fixture.workId,
+      payloadRef: String(seeded.keepPayloadId),
+      contentHash: seeded.keepHash,
+      baseRevision: baseHash,
+      fidelityMap: { entries: [] },
+      regionIds: ["body"],
+      partNames: ["word/document.xml"],
+    })).rejects.toThrow("MATERIALIZATION_BASE_STALE");
+  });
+
   it("binds Keep Spectra to the queued write even when open conflict regions are a unioned superset", async () => {
     const t = setupTest();
     const fixture = await seedWork(t);

@@ -42,6 +42,7 @@ import {
   purgeSourceNodes,
   syncSourceNodes,
   upsertArtifactSummary,
+  sharesWithWorkspace,
 } from "./orgTreeShared";
 import {
   hydrateVersionSafely,
@@ -565,10 +566,7 @@ export const list = query({
       const summary = rowByArtifact.get(node.sourceId);
       const workspaceAccess = grantedWorkspaces.get(node.workspaceContextId);
       if (!summary || !workspaceAccess) continue;
-      const projectsAccess =
-        node.accessProjection === true ||
-        (node.accessProjection === undefined &&
-          summary.ownerAccountId === workspaceAccess.workspace.ownerAccountId);
+      const projectsAccess = sharesWithWorkspace(node);
       if (!projectsAccess) continue;
       inheritedLevels.set(
         node.sourceId,
@@ -2203,7 +2201,7 @@ export const create = mutation({
           ? { workspaceId: args.workspaceId }
           : {},
       placedByAccountId: actor.accountId,
-      accessProjection: true,
+      mayShare: true,
     });
     const nodeId = placementNode._id;
     if (args.workspaceId) {
@@ -2331,7 +2329,7 @@ export const createImportedResource = mutation({
           : {},
       placedByAccountId: actor.accountId,
       typeKey: "resource",
-      accessProjection: true,
+      mayShare: true,
     });
     if (args.workspaceId) {
       await ctx.db.patch(args.workspaceId, {
@@ -2436,7 +2434,7 @@ export const createPending = mutation({
       name: title,
       target: args.workspaceId ? { workspaceId: args.workspaceId } : {},
       placedByAccountId: actor.accountId,
-      accessProjection: true,
+      mayShare: true,
     });
     const nodeId = pendingNode._id;
     if (args.workspaceId) {
@@ -3579,6 +3577,10 @@ export const listVersions = query({
       throw new Error("ARTIFACT_HISTORY_PAGE_SIZE_INVALID");
     if (artifact.blueprintKey === "quiz" && decision.level === "read")
       return { versions: [], continueCursor: null, isDone: true };
+    // History, and who changed what, is the author's alone: not the readers',
+    // and not the collaborators', who edit the work but do not keep its past.
+    if (decision.reason !== "owner")
+      return { versions: [], continueCursor: null, isDone: true };
     // Legacy versions may carry inline bodies. Bound those database reads as
     // well as the response; only getVersion opens retained snapshot objects.
     const page = await ctx.db
@@ -3629,6 +3631,7 @@ export const getVersion = query({
   handler: async (ctx, args) => {
     const { artifact, decision } = await requireArtifactCapability(ctx, args.artifactId);
     if (artifact.blueprintKey === "quiz" && decision.level === "read") return null;
+    if (decision.reason !== "owner") return null;
     const version = await ctx.db.get(args.versionId);
     if (!version || version.artifactId !== artifact._id)
       throw new Error("ARTIFACT_VERSION_NOT_FOUND");

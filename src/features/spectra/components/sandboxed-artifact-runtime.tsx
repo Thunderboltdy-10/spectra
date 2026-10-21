@@ -67,6 +67,8 @@ export function SandboxedArtifactRuntime({
   const [status, setStatus] = useState<SpectraRuntimeStatus>("loading");
   const [message, setMessage] = useState<string | null>(null);
   const [height, setHeight] = useState(viewportHeight ?? (compact ? 220 : 420));
+  // The frame shares the page's colour scheme, so its transparent paper shows the page behind it.
+  const [scheme, setScheme] = useState(() => readSpectraSandboxTheme().theme);
   const onEventRef = useRef(onEvent);
   const onStatusChangeRef = useRef(onStatusChange);
   const safeResources = useMemo(() => {
@@ -172,12 +174,8 @@ export function SandboxedArtifactRuntime({
         );
       } else if (payload.type === "spectra:resize") {
         if (viewportHeight === undefined)
-          setHeight(
-            Math.max(
-              compact ? 180 : 260,
-              Math.min(SPECTRA_EMBED_BUDGETS.maxHeight, payload.height),
-            ),
-          );
+          // As tall as the work inside, however short.
+          setHeight(Math.max(48, Math.min(SPECTRA_EMBED_BUDGETS.maxHeight, payload.height)));
       } else if (payload.type === "spectra:error") {
         setStatus("error");
         setMessage(payload.message);
@@ -198,22 +196,25 @@ export function SandboxedArtifactRuntime({
     }
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
-  }, [channel, compact, document.diagnostics, viewportHeight]);
+  }, [channel, document.diagnostics, viewportHeight]);
 
   useEffect(() => {
     if (status !== "ready") return;
-    const sendHostState = () =>
+    const sendHostState = () => {
+      const theme = readSpectraSandboxTheme(forceReducedMotion);
+      setScheme(theme.theme);
       frameRef.current?.contentWindow?.postMessage(
         {
           type: "spectra:host",
           channel,
-          ...readSpectraSandboxTheme(forceReducedMotion),
+          ...theme,
           resources: safeResources,
           parameters: safeParameters,
           ...(exportRequest ? { exportRequest } : {}),
         },
         "*",
       );
+    };
     sendHostState();
     const observer = new MutationObserver(sendHostState);
     observer.observe(window.document.documentElement, {
@@ -282,8 +283,8 @@ export function SandboxedArtifactRuntime({
           referrerPolicy="no-referrer"
           loading="lazy"
           allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'; payment 'none'; serial 'none'; usb 'none'"
-          className="block w-full border-0 bg-[var(--bg-primary)] transition-[height] duration-[var(--motion-slow)] ease-standard motion-reduce:transition-none"
-          style={{ height }}
+          className="block w-full border-0 bg-transparent transition-[height] duration-[var(--motion-slow)] ease-standard motion-reduce:transition-none"
+          style={{ height, colorScheme: scheme }}
         />
       ) : (
         <div aria-hidden="true" style={{ height }} />

@@ -13,8 +13,11 @@ import { getArtifactTypeManifest } from "./registry";
  * that cannot be read is simply absent.
  */
 
+/** A line of a document's opening: words, or a table drawn as one. */
+export type PreviewLine = string | { rows: string[][] };
+
 export type WorkPreview =
-  | { kind: "text"; heading?: string; lines: string[] }
+  | { kind: "text"; heading?: string; lines: PreviewLine[] }
   | { kind: "cards"; count: number; fronts: string[] }
   | { kind: "questions"; count: number; first: string; options: string[] }
   | { kind: "tasks"; items: Array<{ title: string; done: boolean }> }
@@ -41,17 +44,46 @@ const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 const text = (value: unknown, limit = 160) => (typeof value === "string" ? previewText(value).slice(0, limit) : "");
 
 const HEADING = /^(heading|title|h[1-3])/i;
+/** The corner of a table a card shows, as a sheet's corner is. */
+const TABLE = { rows: 4, columns: 4 };
+
+/**
+ * A block's words without what stands in for its pictures: an imported
+ * picture's alternative text is often only Word's "Picture 1", which read on
+ * a card as if the document said it.
+ */
+function blockWords(block: Json, limit: number) {
+  const inline = list(block.inlineContent).map(record);
+  if (!inline.length) return text(block.text, limit);
+  return text(inline.map((item) => (item.kind === "text" ? String(item.text ?? "") : item.kind === "equation" ? String(item.latex ?? "") : "")).join(""), limit);
+}
+
+function tableCorner(block: Json): PreviewLine | null {
+  const rows = list(block.rows)
+    .slice(0, TABLE.rows)
+    .map((row) => list(row).slice(0, TABLE.columns).map((cell) => text(cell, 40)));
+  return rows.some((row) => row.some(Boolean)) ? { rows } : null;
+}
 
 function documentPreview(content: Json): WorkPreview | null {
   const blocks = list(content.blocks).map(record);
-  const filled = blocks.map((block) => ({ type: String(block.type ?? ""), text: text(block.text, 220) })).filter((block) => block.text);
+  const filled = blocks.flatMap((block) => {
+    const type = String(block.type ?? "");
+    if (type === "image") return [];
+    if (type === "table") {
+      const table = tableCorner(block);
+      return table ? [{ type, line: table }] : [];
+    }
+    const words = blockWords(block, 220);
+    return words ? [{ type, line: words as PreviewLine }] : [];
+  });
   if (!filled.length) return null;
   const [first, ...rest] = filled;
   // A short or heading-typed opening line is the document's own title for its body.
-  const titled = HEADING.test(first.type) || (first.text.length < 70 && rest.length > 0);
+  const titled = typeof first.line === "string" && (HEADING.test(first.type) || (first.line.length < 70 && rest.length > 0));
   return titled
-    ? { kind: "text", heading: first.text, lines: rest.slice(0, 4).map((block) => block.text) }
-    : { kind: "text", lines: filled.slice(0, 5).map((block) => block.text) };
+    ? { kind: "text", heading: first.line as string, lines: rest.slice(0, 4).map((block) => block.line) }
+    : { kind: "text", lines: filled.slice(0, 5).map((block) => block.line) };
 }
 
 function deckPreview(content: Json): WorkPreview | null {
@@ -100,9 +132,29 @@ function slidesPreview(content: Json): WorkPreview | null {
   const slides = list(content.slides).map(record);
   if (!slides.length) return null;
   const titles = slides
-    .map((slide) => text(slide.title, 80) || text(list(slide.elements).map(record).find((element) => typeof element.text === "string")?.text, 80))
+    .map((slide) => text(slide.title, 80) || text(list(slide.objects).map((object) => firstWords(record(object).content)).find(Boolean), 80))
     .filter(Boolean);
   return { kind: "slides", count: slides.length, titles: titles.slice(0, 3) };
+}
+
+/** The first words a slide object holds, wherever its rich text keeps them. */
+function firstWords(value: unknown, depth = 0): string | undefined {
+  if (typeof value === "string") return value.trim() || undefined;
+  if (depth > 5 || !value || typeof value !== "object") return undefined;
+  if (Array.isArray(value)) {
+    for (const child of value) {
+      const found = firstWords(child, depth + 1);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  // Only the fields that hold words: a style name or a run's font is not one.
+  const holder = value as Record<string, unknown>;
+  for (const key of ["text", "content", "paragraphs", "runs", "children", "items"]) {
+    const found = firstWords(holder[key], depth + 1);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 /** The rows and columns a sheet's corner shows: enough to read as a table. */
@@ -213,4 +265,17 @@ export function meaningfulSummary(type: PresentedWorkType, summary?: string) {
 export function fileKind(title: string) {
   const match = /\.([a-z0-9]{2,5})$/i.exec(title.trim());
   return match ? match[1].toUpperCase() : null;
+}
+
+/** How much a work holds, in words ("12 cards", "3 slides"), when its kind counts anything. */
+export function previewExtent(preview: WorkPreview) {
+  if (preview.kind === "cards") return plural(preview.count, "card");
+  if (preview.kind === "questions") return plural(preview.count, "question");
+  if (preview.kind === "slides") return plural(preview.count, "slide");
+  if (preview.kind === "board" && preview.pages > 1) return plural(preview.pages, "page");
+  return null;
+}
+
+function plural(count: number, noun: string) {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }

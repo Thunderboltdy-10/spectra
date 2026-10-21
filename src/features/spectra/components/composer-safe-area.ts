@@ -30,7 +30,7 @@ function publish() {
     const rect = band.getBoundingClientRect();
     const visible =
       rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
-    if (visible) tallest = Math.max(tallest, rect.height);
+    if (visible) tallest = Math.max(tallest, rect.bottom - overhangTop(band, rect.top));
   }
   if (tallest > 0) {
     root.style.setProperty(
@@ -42,6 +42,20 @@ function publish() {
   }
 }
 
+/**
+ * What a band holds above its own box (the island's tab rail stands over the
+ * composer) covers the page too; it is marked `data-band-overhang`.
+ */
+function overhangTop(band: HTMLElement, top: number) {
+  let highest = top;
+  for (const part of band.querySelectorAll<HTMLElement>("[data-band-overhang]")) {
+    sharedObserver().observe(part);
+    const rect = part.getBoundingClientRect();
+    if (rect.height > 0) highest = Math.min(highest, rect.top);
+  }
+  return highest;
+}
+
 function schedule() {
   if (frame) return;
   frame = window.requestAnimationFrame(publish);
@@ -50,6 +64,11 @@ function schedule() {
 function sharedObserver(): ResizeObserver {
   observer ??= new ResizeObserver(schedule);
   return observer;
+}
+
+/** Measures the bands again, when something above one came or went. */
+export function refreshComposerBands() {
+  schedule();
 }
 
 /** Registers one mounted band; the returned cleanup must run on unmount. */

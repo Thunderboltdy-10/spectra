@@ -2,7 +2,7 @@
 
 import { useCallback, type MouseEvent } from "react";
 import { useConvex } from "convex/react";
-import { useRouter } from "next/navigation";
+import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { openWorkInSide } from "../components/side-open";

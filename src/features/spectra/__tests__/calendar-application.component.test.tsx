@@ -31,7 +31,7 @@ vi.mock("convex/react", () => ({ useConvexAuth: () => ({ isAuthenticated: false,
 import { CalendarApplication } from "../calendar/ui/calendar-application";
 
 /** A block's title leads with its time ("09:00 – 10:00: Essay draft"); match it by the event. */
-const blockTitled = (title: string) => new RegExp(`: ${title}$`);
+const blockTitled = (title: string) => new RegExp(`: ${title}(\.|$)`);
 
 const ORIGINAL_TZ = process.env.TZ;
 
@@ -139,32 +139,34 @@ describe("Calendar application", () => {
     expect(heads.at(-1)).toBe(2);
   });
 
+  // The composer shows wall-clock times; after the last hour of the day it
+  // offers tomorrow morning instead of a slot past midnight.
   it.each([
-    ["2026-09-30T18:05:19", "2026-09-30T19:00", "2026-09-30T20:00"],
-    ["2026-09-30T18:00:00", "2026-09-30T19:00", "2026-09-30T20:00"],
-    ["2026-09-30T23:59:59", "2026-10-01T00:00", "2026-10-01T01:00"],
-    ["2027-03-28T01:35:00", "2027-03-28T03:00", "2027-03-28T04:00"],
-    ["2026-10-25T01:35:00", "2026-10-25T02:00", "2026-10-25T03:00"],
+    ["2026-09-30T18:05:19", "19:00", "20:00"],
+    ["2026-09-30T18:00:00", "19:00", "20:00"],
+    ["2026-09-30T23:59:59", "9:00", "10:00"],
+    ["2027-03-28T01:35:00", "2:00", "3:00"],
+    ["2026-10-25T01:35:00", "2:00", "3:00"],
   ])("defaults to the next whole local hour at %s", async (now, start, end) => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date(now) });
     installFetch(() => undefined);
     render(<CalendarApplication />);
-    fireEvent.click(screen.getByRole("button", { name: "Add event" }));
-    expect((screen.getByLabelText("Starts") as HTMLInputElement).value).toBe(start);
-    expect((screen.getByLabelText("Ends") as HTMLInputElement).value).toBe(end);
-    expect(Date.parse(end)).toBeGreaterThan(Date.parse(start));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    const dialog = screen.getByRole("dialog", { name: "Add an event" });
+    expect((within(dialog).getByLabelText("Starts") as HTMLInputElement).value).toBe(start);
+    expect((within(dialog).getByLabelText("Ends") as HTMLInputElement).value).toBe(end);
   });
 
   it("refreshes whole-hour defaults when the composer reopens", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 30, 18, 5) });
     installFetch(() => undefined);
     render(<CalendarApplication />);
-    fireEvent.click(screen.getByRole("button", { name: "Add event" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     vi.setSystemTime(new Date(2026, 8, 30, 19, 17));
-    fireEvent.click(screen.getByRole("button", { name: "Add event" }));
-    expect((screen.getByLabelText("Starts") as HTMLInputElement).value).toBe("2026-09-30T20:00");
-    expect((screen.getByLabelText("Ends") as HTMLInputElement).value).toBe("2026-09-30T21:00");
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect((screen.getByLabelText("Starts") as HTMLInputElement).value).toBe("20:00");
+    expect((screen.getByLabelText("Ends") as HTMLInputElement).value).toBe("21:00");
   });
 
   it("saves whole-hour defaults in the browser zone when Calendar reports UTC", async () => {
@@ -172,8 +174,8 @@ describe("Calendar application", () => {
     installFetch(() => undefined, [], "UTC");
     render(<CalendarApplication />);
     await waitFor(() => expect(gets).toBeGreaterThan(0));
-    fireEvent.click(screen.getByRole("button", { name: "Add event" }));
-    const dialog = screen.getByRole("dialog", { name: "Add personal event" });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    const dialog = screen.getByRole("dialog", { name: "Add an event" });
     fireEvent.change(within(dialog).getByLabelText("Title"), { target: { value: "Revision" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Add event" }));
     await waitFor(() => expect(posts.find((post) => post.action === "createPersonalItem")).toMatchObject({
@@ -182,27 +184,6 @@ describe("Calendar application", () => {
       endAt: Date.parse("2026-09-30T20:00"),
       timezone: "Europe/Madrid",
     }));
-  });
-
-  it("explains an end before the start instead of sending it", async () => {
-    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 10, 0) });
-    installFetch(() => undefined);
-    render(<CalendarApplication />);
-    fireEvent.click(screen.getByRole("button", { name: "Add event" }));
-    const dialog = await screen.findByRole("dialog", { name: "Add personal event" });
-    fireEvent.change(within(dialog).getByLabelText("Title"), {
-      target: { value: "Football" },
-    });
-    fireEvent.change(within(dialog).getByLabelText("Ends"), {
-      target: { value: "2026-09-29T10:30" },
-    });
-    expect(within(dialog).getByRole("alert").textContent).toBe(
-      "End must be after start.",
-    );
-    const submit = within(dialog).getByRole("button", { name: "Add event" });
-    expect((submit as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.submit(submit.closest("form")!);
-    expect(posts.some((post) => post.action === "createPersonalItem")).toBe(false);
   });
 
   it("places events on the user's own clock even when Calendar reports UTC", async () => {
@@ -285,8 +266,10 @@ describe("Calendar application", () => {
     expect(block.style.width).toBe("calc(50% - 8px)");
     expect(official.style.width).toBe("calc(50% - 8px)");
     expect(new Set([block.style.left, official.style.left]).size).toBe(2);
-    fireEvent.click(block);
-    expect(screen.getByRole("button", { name: /Open plan/ })).toBeTruthy();
+    fireEvent.contextMenu(block);
+    expect(screen.getByLabelText("Essay draft details")).toBeTruthy();
+    fireEvent.contextMenu(official);
+    expect(screen.getByLabelText("Maths Unit 7 Test details")).toBeTruthy();
   });
 
   it("removes a personal event after confirmation", async () => {
@@ -367,7 +350,7 @@ describe("Calendar application", () => {
     );
   });
 
-  it("opens a plan's scheduled block in its details, with the plan one click away", async () => {
+  it("keeps a plan's scheduled block's own actions a right-click away", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
     installFetch(() => undefined, [
       {
@@ -379,10 +362,8 @@ describe("Calendar application", () => {
       },
     ]);
     render(<CalendarApplication />);
-    fireEvent.click(await screen.findByTitle(blockTitled("Essay draft")));
-    expect(screen.getByRole("checkbox", { name: "Mark complete" })).toBeTruthy();
+    fireEvent.contextMenu(await screen.findByTitle(blockTitled("Essay draft")));
     expect(screen.getByRole("button", { name: "30 minutes longer" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Open plan/ })).toBeTruthy();
   });
 
   it("does not offer removal for an official school record", async () => {
@@ -442,7 +423,6 @@ describe("Calendar application", () => {
     ]);
     render(<CalendarApplication />);
     fireEvent.click(await screen.findByTitle(blockTitled("Essay draft")));
-    fireEvent.click(screen.getByRole("button", { name: /Open plan/ }));
     expect(opened).toHaveBeenCalledWith({ workId: "plan-1" });
     stop();
   });

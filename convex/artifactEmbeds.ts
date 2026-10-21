@@ -212,6 +212,26 @@ async function codeRuntimeResources(
   return Object.keys(resources).length ? resources : undefined;
 }
 
+/**
+ * The computer a work is kept on when Spectra holds only its name: a work set
+ * to stay on one device, or one Bridge has not uploaded. Its contents cannot
+ * show anywhere else, so an embed of it says where it lives instead.
+ */
+async function keptOnDevice(ctx: QueryCtx, workId: Id<"spectraArtifacts">) {
+  const cloud = await ctx.db
+    .query("workReplicas")
+    .withIndex("by_work_kind", (q) => q.eq("workId", workId).eq("kind", "cloud"))
+    .unique();
+  if (cloud && !(cloud.state === "unavailable" && cloud.unavailableReason === "metadata-only")) return undefined;
+  const local = await ctx.db
+    .query("workReplicas")
+    .withIndex("by_work_kind", (q) => q.eq("workId", workId).eq("kind", "local"))
+    .first();
+  if (!local) return undefined;
+  const device = local.deviceId ? await ctx.db.get(local.deviceId) : null;
+  return { deviceName: device?.name ?? "another computer" };
+}
+
 async function projection(
   ctx: QueryCtx,
   actorValue: EmbedActor,
@@ -467,6 +487,8 @@ async function projection(
       snapshot,
     },
     version,
+    keptOn:
+      version || retainedAccess?.allowed ? undefined : await keptOnDevice(ctx, source._id),
     runtimeBuild,
     runtimeResources,
   };

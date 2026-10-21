@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { SpectraMark } from "@/components/spectra-mark";
 import { Button } from "@/components/ui/button";
@@ -87,6 +87,7 @@ export function TourLayer({
   onBack,
   onNext,
   onEnd,
+  children,
 }: {
   stepKey: string;
   targets: readonly string[];
@@ -96,6 +97,8 @@ export function TourLayer({
   onBack: () => void;
   onNext: () => void;
   onEnd: () => void;
+  /** A choice the step asks for, under Spectra's words. */
+  children?: ReactNode;
 }) {
   const viewport = useViewport();
   const box = useTargetBox(stepKey, targets.join("\n"));
@@ -180,6 +183,7 @@ export function TourLayer({
             </span>
           </p>
         </div>
+        {children ? <div className="mt-3 pl-[34px]">{children}</div> : null}
         <div className="mt-4 flex items-center gap-1.5 pl-[34px]">
           <Button variant="ghost" size="sm" onClick={onEnd}>
             End tour

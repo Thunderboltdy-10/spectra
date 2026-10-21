@@ -2,6 +2,12 @@ import { Gunzip, strFromU8, strToU8, zipSync } from "fflate";
 import { normalizeCodeNetworkOrigins } from "./network-policy";
 import { DEFAULT_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 
+/**
+ * Heights Spectra itself once wrote into every new work as a default. They
+ * were never anyone's choice, so they read as no height: the preview fits.
+ */
+const LEGACY_PREVIEW_HEIGHTS = new Set([580, 640]);
+
 export type CodeRuntime = "browser" | "react" | "python" | "none";
 
 export const SPECTRA_CODE_RUNTIME_VERSIONS = Object.freeze({
@@ -384,10 +390,10 @@ export function normalizeCodeContent(value: unknown): CodeContent {
       orientation:
         preview.orientation === "vertical" ? "vertical" : "horizontal",
       autoRun: preview.autoRun !== false,
-      height:
-        typeof preview.height === "number"
-          ? Math.max(240, Math.min(1_400, Math.round(preview.height)))
-          : 580,
+      // No height is the work's own: the preview grows to what it draws.
+      ...(typeof preview.height === "number" && !LEGACY_PREVIEW_HEIGHTS.has(preview.height)
+        ? { height: Math.max(240, Math.min(1_400, Math.round(preview.height))) }
+        : {}),
     },
     networkPolicy:
       runtime === "browser" || runtime === "react"

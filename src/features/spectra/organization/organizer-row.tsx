@@ -1,9 +1,11 @@
 "use client";
 
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ChevronRight, Check, MoreHorizontal, Share2, Star } from "@/components/icons/glyph-icons";
+import { ChevronRight, Check, MoreHorizontal, Star, Users } from "@/components/icons/glyph-icons";
+import { sharedLabel } from "./library-note";
 import { StatusBadge, type StatusTone } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { aiWorking } from "../artifacts/ai-working";
 import { MOTION_DURATIONS, MOTION_EASINGS } from "../motion/tokens";
 import { getSpectraMotionSnapshot } from "../motion/motion-level";
 import { useLifeArrival } from "../life/use-life";
@@ -72,8 +74,9 @@ export const OrganizerRow = memo(function OrganizerRow({
     ? { ...type, color: ink, soft: `color-mix(in oklab, ${ink} 14%, var(--bg-elevated))` }
     : type;
   const Icon = identity.icon;
+  const shared = sharedLabel(node);
   const working =
-    node.source?.aiState === "creating" || node.source?.aiState === "updating";
+    aiWorking(node.source);
   const missing =
     node.source?.available === false || node.target?.available === false;
 
@@ -216,12 +219,10 @@ export const OrganizerRow = memo(function OrganizerRow({
               {node.childCount ?? 0} {node.childCount === 1 ? "item" : "items"}
             </span>
           ) : null}
-          {node.source?.shared ? (
-            <Share2
+          {shared ? (
+            <Users
               className="ml-1.5 inline size-3 -translate-y-px text-[var(--text-tertiary)]"
-              aria-label={
-                node.source.owned ? "Shared by you" : "Shared with you"
-              }
+              aria-label={shared}
             />
           ) : null}
           {working ? (

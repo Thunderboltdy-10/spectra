@@ -6,15 +6,17 @@ import { WorkingMark } from "@/components/ui/skeleton";
 import { workTypeMeta, type PresentedWorkType } from "../artifacts/presentation";
 import { dueSentence, taskInstant } from "../components/task/task-time";
 import type { BriefSuggestion, BriefTaskDraft } from "./daily-brief";
+import { DaySky, dayPart } from "./day-sky";
 import type { TodayAgenda } from "./today-model";
 import { useBriefActions } from "./use-brief-actions";
 import type { BriefState } from "./use-daily-brief";
 
 /*
  * The morning brief on Home (HOME.md, "The morning brief"). It is waiting
- * when the student wakes: the sun over the time they wake, yesterday in a
+ * when the student wakes: the sky over the time it is now, yesterday in a
  * few lines, then the day's few moves, each one press away. Nothing on it is
- * a card and there is no writing it again; tomorrow brings the next one.
+ * a card and there is no writing it again; tomorrow brings the next one, and
+ * until it is ready the last one stays.
  */
 
 const ACTION: Record<BriefSuggestion["kind"], { label: string; done: string }> = {
@@ -25,6 +27,9 @@ const ACTION: Record<BriefSuggestion["kind"], { label: string; done: string }> =
   ask: { label: "Ask", done: "Asked" },
 };
 
+/** How many moves show before the rest fold away. */
+const SHOWN_MOVES = 3;
+
 const presented = (key: string | undefined): key is PresentedWorkType => Boolean(key && key in workTypeMeta);
 
 /** The type a suggestion is drawn in: the work it makes or opens, a task, or a thread. */
@@ -34,34 +39,12 @@ function typeOf(suggestion: BriefSuggestion): PresentedWorkType {
   return presented(suggestion.workType) ? suggestion.workType : "document";
 }
 
-/** "7:00" or "07:00", as the reader's clock writes it. */
-function clockTime(wakeTime: string) {
-  const [hour = 0, minute = 0] = wakeTime.split(":").map(Number);
-  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(2000, 0, 1, hour, minute));
-}
-
-function SunMark({ rising }: { rising?: boolean }) {
-  return (
-    <svg className="morning-sun" data-rising={rising || undefined} viewBox="0 0 64 40" aria-hidden>
-      <g className="morning-sun-rays">
-        <path d="M32 4v5M14.5 11.5l3.4 3.4M49.5 11.5l-3.4 3.4M6 27h5M53 27h5" />
-      </g>
-      <clipPath id="morning-horizon">
-        <rect x="0" y="0" width="64" height="31" />
-      </clipPath>
-      <circle className="morning-sun-disc" cx="32" cy="31" r="13" clipPath="url(#morning-horizon)" />
-      <path className="morning-sun-horizon" d="M2 31h60" />
-    </svg>
-  );
-}
-
 export function TodayBrief({ brief, agenda }: { brief: BriefState; agenda: TodayAgenda | null }) {
   if (brief.status === "writing")
     return (
       <section aria-label="Your morning" className="morning" data-writing>
         <div className="morning-dawn">
-          <SunMark />
-          <span className="morning-time">{clockTime(brief.wakeTime)}</span>
+          <DaySky />
         </div>
         <p className="morning-writing">
           <WorkingMark />
@@ -76,6 +59,11 @@ export function TodayBrief({ brief, agenda }: { brief: BriefState; agenda: Today
 function ReadyBrief({ brief, agenda }: { brief: Extract<BriefState, { status: "ready" }>; agenda: TodayAgenda | null }) {
   const act = useBriefActions(brief.day, agenda);
   const [busy, setBusy] = useState<number | null>(null);
+  const [all, setAll] = useState(false);
+  // What is still to do comes first; what was done today sinks to the end, each keeping its place in the brief.
+  const moves = brief.suggestions
+    .map((suggestion, index) => ({ suggestion, index }))
+    .sort((a, b) => Number(Boolean(a.suggestion.done)) - Number(Boolean(b.suggestion.done)));
   const press = (suggestion: BriefSuggestion, index: number) => {
     if (busy !== null) return;
     setBusy(index);
@@ -87,27 +75,33 @@ function ReadyBrief({ brief, agenda }: { brief: Extract<BriefState, { status: "r
   return (
     <section aria-labelledby="morning-title" className="morning">
       <div className="morning-dawn">
-        <SunMark rising />
-        <span className="morning-time">{clockTime(brief.wakeTime)}</span>
+        <DaySky />
         <h2 id="morning-title" className="morning-title">
-          Your morning
+          {brief.earlier ? "Yesterday's brief" : `Your ${dayPart(new Date().getHours())}`}
         </h2>
+        {brief.earlier ? <p className="morning-earlier">Today&apos;s is on its way.</p> : null}
       </div>
       <div className="morning-body">
         {brief.recap ? (
           <div>
-            <h3 className="morning-label">Yesterday</h3>
+            <h3 className="morning-label">{brief.earlier ? "The day before" : "Yesterday"}</h3>
             <p className="morning-recap">{brief.recap}</p>
           </div>
         ) : null}
         {brief.suggestions.length ? (
           <div>
-            <h3 className="morning-label">For today</h3>
+            <h3 className="morning-label">{brief.earlier ? "From yesterday" : "For today"}</h3>
             <ul className="morning-moves">
-              {brief.suggestions.map((suggestion, index) => (
+              {moves.slice(0, all ? undefined : SHOWN_MOVES).map(({ suggestion, index }) => (
                 <Move key={index} suggestion={suggestion} busy={busy === index} onPress={() => press(suggestion, index)} />
               ))}
             </ul>
+            {moves.length > SHOWN_MOVES ? (
+              <button type="button" className="morning-more" aria-expanded={all} onClick={() => setAll((open) => !open)}>
+                {all ? "Show fewer" : `${moves.length - SHOWN_MOVES} more`}
+                <Icon name={all ? "chevronUp" : "chevronDown"} size={12} />
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -130,6 +124,16 @@ function Move({ suggestion, busy, onPress }: { suggestion: BriefSuggestion; busy
         {suggestion.why ? <p className="morning-move-why">{suggestion.why}</p> : null}
         {suggestion.kind === "add" && suggestion.task ? <TaskDraft task={suggestion.task} /> : null}
         {suggestion.kind === "make" ? <p className="morning-move-detail">{meta.label}</p> : null}
+        {suggestion.steps?.length && !done ? (
+          <details className="morning-move-how">
+            <summary>How to do it</summary>
+            <ol>
+              {suggestion.steps.map((step, index) => (
+                <li key={index}>{step}</li>
+              ))}
+            </ol>
+          </details>
+        ) : null}
       </div>
       <button
         type="button"

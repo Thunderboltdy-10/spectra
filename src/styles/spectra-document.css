@@ -77,7 +77,6 @@
    paper, so what the writer measures on screen is what comes out of the
    printer. */
 .spectra-document-studio[data-layout="page"] .ProseMirror {
-  min-height: var(--spectra-page-height);
   padding: var(--spectra-page-margin);
 }
 
@@ -375,8 +374,9 @@
   cursor: col-resize;
 }
 
-/* A read-only native region says so instead of quietly refusing keystrokes. */
-.spectra-document-studio .ProseMirror [data-native-read-only="true"] {
+/* A read-only native region says so instead of quietly refusing keystrokes.
+   A picture needs no such mark: nobody types into one. */
+.spectra-document-studio .ProseMirror [data-native-read-only="true"]:not(img) {
   border-left: 2px solid var(--warning);
   padding-left: 8px;
   background: color-mix(in oklab, var(--warning) 5%, transparent);

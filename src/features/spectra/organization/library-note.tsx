@@ -3,6 +3,7 @@
 import { useRef, type CSSProperties } from "react";
 import { Icon } from "@/components/icons";
 import type { ClassIdentity } from "../../../../shared/class-identity";
+import { aiWorking } from "../artifacts/ai-working";
 import type { PresentedWorkType } from "../artifacts/presentation";
 import { authoredSummary } from "../artifacts/registry";
 import { useWorkPreview, type PreviewSource } from "../artifacts/use-work-previews";
@@ -41,6 +42,7 @@ export function LibraryNote({
   const type = workType(node);
   const card = useRef<HTMLButtonElement>(null);
   const preview = useWorkPreview(previewSource(node), card);
+  const shared = sharedLabel(node);
   return (
     <button
       ref={card}
@@ -63,11 +65,27 @@ export function LibraryNote({
         summary={authoredSummary(node.source?.blueprintKey, node.source?.summary)}
         place={where}
         when={relativeTime(node.activityAt, now)}
-        live={node.source?.aiState === "creating" || node.source?.aiState === "updating"}
+        live={aiWorking(node.source)}
+        marks={
+          shared ? (
+            <span className="work-card-shared" title={shared} aria-label={shared}>
+              <Icon name="people" size={12} />
+            </span>
+          ) : null
+        }
       />
       {picking ? <PickMark /> : null}
     </button>
   );
+}
+
+/** Whether other people can open this work, said the way its mark reads. */
+export function sharedLabel(node: TreeNode) {
+  if (node.kind !== "work") return null;
+  if (node.source && node.source.owned === false) return "Shared with you";
+  if (node.source?.shared) return "Shared by you";
+  if (node.sharedWithWorkspace) return "Shared with the workspace";
+  return null;
 }
 
 /** Picking work for Spectra or the tiles (Select): which work is picked, and how to pick or put back one. */

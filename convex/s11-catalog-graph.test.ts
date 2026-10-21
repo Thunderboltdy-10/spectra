@@ -272,7 +272,8 @@ describe("S11 actor graph prototype", () => {
       const w = await f.workspace(ctx, "Granted");
       await f.grant(ctx, "workspace", w, { principalType: "school", principalId: f.ids.schoolId });
       await f.placement(ctx, await add("inherited", true), w);
-      await f.placement(ctx, await add("legacy owner match", true), w, { accessProjection: undefined });
+      // Unshared is private, the owner's own placement included: works are shared one by one.
+      await f.placement(ctx, await add("owner placement not shared", false), w, { accessProjection: undefined });
       await f.placement(ctx, await add("no projection", false), w, { accessProjection: false });
       await f.placement(ctx, await add("deleted placement", false), w, { deletedAt: 0 });
       await f.placement(ctx, await add("legacy mismatch", false, { ownerAccountId: f.ids.readerId, schoolId: undefined }), w, { accessProjection: undefined });

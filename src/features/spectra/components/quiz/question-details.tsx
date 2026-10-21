@@ -5,6 +5,7 @@ import { targetAttrs } from "../../collaboration/target-attributes";
 import { aiRegionAttr } from "../ai-region-path";
 import type { QuizQuestion } from "../artifact-content-model";
 import { ChipInput } from "../sheet/chip-input";
+import { NumberField } from "@/components/ui/number-field";
 
 /*
  * What most questions never need, folded under the sheet's "More options"
@@ -59,8 +60,7 @@ export function QuestionDetails({ question, qPath, aiField, onChange }: DetailsP
       <label className="sheet-option">
         <span>Worth</span>
         <span className="sheet-option-minutes">
-          <input
-            type="number"
+          <NumberField
             min={1}
             className="sheet-input"
             value={question.points ?? 1}
@@ -86,8 +86,7 @@ export function QuestionDetails({ question, qPath, aiField, onChange }: DetailsP
       <label className="sheet-option">
         <span>Time to answer</span>
         <span className="sheet-option-minutes">
-          <input
-            type="number"
+          <NumberField
             min={0}
             className="sheet-input"
             value={question.timeLimitSeconds ?? 90}
@@ -167,8 +166,7 @@ export function QuestionDetails({ question, qPath, aiField, onChange }: DetailsP
           {question.poolId ? (
             <>
               draw
-              <input
-                type="number"
+              <NumberField
                 min={1}
                 max={100}
                 className="sheet-input"

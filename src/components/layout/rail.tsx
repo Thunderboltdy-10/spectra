@@ -22,6 +22,7 @@ import { useClassBook } from "@/features/spectra/school/use-class-book";
 import { threadName } from "@/features/spectra/threads/threads-model";
 import { cn } from "@/lib/utils";
 import { AccountMenu } from "./account-menu";
+import { FeedbackButton } from "./feedback-button";
 import { reviewShareInvitations, type ShellNotification } from "./shell-notifications";
 import { useShellNotifications } from "./use-shell-notifications";
 import { WorkingMark } from "@/components/ui/skeleton";
@@ -280,16 +281,19 @@ export function Rail() {
           </div>
         )}
 
-        <div className={cn("shrink-0 border-t border-[var(--border-subtle)] py-2", collapsed ? "flex flex-col items-center gap-1 px-2" : "px-2")}>
-          <AccountMenu
-            identity={identity}
-            collapsed={collapsed}
-            unreadCount={notifications.unreadCount}
-            onOpenNotifications={() => {
-              setNotificationsOpen(true);
-              void notifications.refresh();
-            }}
-          />
+        <div className={cn("shrink-0 border-t border-[var(--border-subtle)] py-2", collapsed ? "flex flex-col items-center gap-1 px-2" : "flex items-center gap-1 px-2")}>
+          <div className={collapsed ? undefined : "min-w-0 flex-1"}>
+            <AccountMenu
+              identity={identity}
+              collapsed={collapsed}
+              unreadCount={notifications.unreadCount}
+              onOpenNotifications={() => {
+                setNotificationsOpen(true);
+                void notifications.refresh();
+              }}
+            />
+          </div>
+          <FeedbackButton collapsed={collapsed} />
         </div>
       </aside>
       {notificationsOpen ? (
@@ -321,7 +325,7 @@ function RailThreads() {
   useEffect(() => {
     let live = true;
     const load = () =>
-      void getSpectraThreads({ limit: THREAD_LIMIT * 2 })
+      void getSpectraThreads({ brief: true })
         .then(({ threads: rows }) => live && setThreads(rows.filter((thread) => thread.status === "active")))
         .catch(() => live && setThreads((current) => current ?? []));
     load();

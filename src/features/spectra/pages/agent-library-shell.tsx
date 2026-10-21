@@ -1,7 +1,8 @@
 "use client";
 
+import { SearchField } from "@/components/ui/search-field";
 import dynamic from "next/dynamic";
-import { Loader2, ShieldCheck, Bot, CheckCircle2, Plus, Search, Grid3X3 } from "@/components/icons/glyph-icons";
+import { Loader2, ShieldCheck, Bot, CheckCircle2, Plus, Grid3X3 } from "@/components/icons/glyph-icons";
 import { useSearchParams } from "next/navigation";
 import {
   useCallback,
@@ -43,7 +44,6 @@ import {
 import { useProvideIslandEngine } from "../island/engine";
 import { Button } from "@/components/ui/button";
 import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
-import { IconButton } from "@/components/ui/icon-button";
 import { PageBody, PageHeader } from "@/components/ui/page-header";
 import { AgentStarters, type AgentStarter } from "../agents/agent-starters";
 import { AgentLibraryEntry, type LibraryCard, type LibrarySection } from "../agents/agent-library-entry";
@@ -184,6 +184,8 @@ export function AgentLibraryShell({
   const [publicError, setPublicError] = useState<string | null>(null);
   const publicRequest = useRef<{ key: string; controller: AbortController; promise: Promise<void> } | null>(null);
   const currentScope = useRef(catalogKey);
+  /** The scope whose first read has started; a scope torn down starts over. */
+  const firstLoad = useRef<string | null>(null);
   currentScope.current = catalogKey;
   const loading = !agentCatalog.unavailable && (publicLoading || ((agentCatalog.status === "idle" || agentCatalog.status === "loading") && artifacts.length === 0));
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -248,6 +250,8 @@ export function AgentLibraryShell({
     openLoader.cancel();
     return () => {
       currentScope.current = null;
+      // The read cut short here starts again when the scope comes back.
+      firstLoad.current = null;
       publicRequest.current?.controller.abort();
       publicRequest.current = null;
       requests.current++;
@@ -303,10 +307,12 @@ export function AgentLibraryShell({
           setPublicSources({ key: catalogKey, public: published.agents, installed: installed.agents });
           setPublicError(null);
         }).catch((error) => {
+          // A read this page called off is not a failure; another one replaces it.
+          if (controller.signal.aborted) return;
           if (currentScope.current === catalogKey) setPublicError(error instanceof Error ? error.message : "Could not load published agents.");
         }).finally(() => {
           if (publicRequest.current?.promise === promise) publicRequest.current = null;
-          if (currentScope.current === catalogKey) setPublicLoading(false);
+          if (!controller.signal.aborted && currentScope.current === catalogKey) setPublicLoading(false);
         });
       publicRequest.current = { key: catalogKey, controller, promise };
     }
@@ -314,7 +320,6 @@ export function AgentLibraryShell({
   }, [catalogKey, publicSources.key, refreshCatalog]);
   const reload = useCallback(() => load(true), [load]);
 
-  const firstLoad = useRef<string | null>(null);
   useEffect(() => {
     if (!catalogKey || firstLoad.current === catalogKey) return;
     firstLoad.current = catalogKey;
@@ -633,16 +638,13 @@ export function AgentLibraryShell({
           {/* Nothing to search until there is an agent; the starters below lead instead. */}
           {cards.length || search ? (
             <div className="mt-6 flex items-center gap-2.5">
-              <label className="agent-library-filter min-w-0 flex-1">
-                <Search className="size-4 shrink-0 text-[var(--text-tertiary)]" />
-                <input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search agents by name, subject, or capability…"
-                  className="min-w-0 flex-1 bg-transparent text-micro outline-none placeholder:text-[var(--text-tertiary)]"
-                />
-                {search ? <IconButton icon="close" label="Clear search" size="compact" onClick={() => setSearch("")} /> : null}
-              </label>
+              <SearchField
+                value={search}
+                onChange={setSearch}
+                label="Search agents"
+                placeholder="Search agents by name, subject, or capability"
+                className="flex-1"
+              />
             </div>
           ) : null}
           {filtersOpen ? (
@@ -656,7 +658,7 @@ export function AgentLibraryShell({
                   ...subjects.map((value) => ({ value, label: value })),
                 ]}
                 size="lg"
-                triggerClassName="min-w-[180px] bg-[var(--bg-elevated)]"
+               
               />
               <SelectField
                 ariaLabel="Capability"
@@ -667,7 +669,7 @@ export function AgentLibraryShell({
                   ...capabilities.map((value) => ({ value, label: value })),
                 ]}
                 size="lg"
-                triggerClassName="min-w-[200px] bg-[var(--bg-elevated)]"
+               
               />
               <SelectField
                 ariaLabel="Sort agents"
@@ -679,7 +681,7 @@ export function AgentLibraryShell({
                   { value: "title", label: "Name" },
                 ]}
                 size="lg"
-                triggerClassName="min-w-[160px] bg-[var(--bg-elevated)]"
+               
               />
               {subject !== "all" || capability !== "all" || sortMode !== "relevance" ? (
                 <Button variant="ghost" size="lg" onClick={() => { setSubject("all"); setCapability("all"); setSortMode("relevance"); }}>

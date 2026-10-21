@@ -6,15 +6,14 @@ import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spec
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
-import { Download, Eye, Loader2, FileText, X } from "@/components/icons/glyph-icons";
+import { Download, ExternalLink, Eye, FileText, FolderOpen, Loader2, Settings, X } from "@/components/icons/glyph-icons";
 import { Button } from "@/components/ui/button";
 import type { SpectraArtifact } from "../data/api";
 import { spectraBus } from "../events";
 import { humanizePublicFailure } from "./humanize";
-import { locationLabel } from "./status";
 import { useSyncPresentation } from "./use-sync-presentation";
 import { useBridgeHealth } from "./use-bridge";
-import { DEVICES_HREF } from "./client";
+import { DEVICES_HREF, openBridgeFile, revealBridgeFile, type BridgeFile } from "./client";
 import { ReconnectAction } from "./storage-toggle-group";
 import { FileStorageControls } from "./file-storage-controls";
 import { readConvexError } from "../../../../shared/convex-error.mjs";
@@ -64,6 +63,7 @@ export function ResourceSurface({
     api.replicas.discardProtectedPending,
   );
   const bridge = useBridgeHealth();
+  const activeMounts = useQuery(api.bridge.activeMounts, useAuthedArgs({}));
   const presentation = useSyncPresentation(truth);
   const format = (
     artifact.nativeFormat ??
@@ -201,215 +201,140 @@ export function ResourceSurface({
       setFileAction(null);
     }
   }
+  const localReplica = truth?.replicas.find(
+    (replica) => replica.kind === "local" && replica.deviceId === bridge.status?.deviceId && replica.relativePath,
+  );
+  const localMount = activeMounts?.find((mount) => mount._id === localReplica?.mountId);
+  const onThisComputer: BridgeFile | null =
+    bridge.reachability === "connected" && localMount?.grantId && localReplica?.relativePath
+      ? { grantId: localMount.grantId, relativePath: localReplica.relativePath }
+      : null;
+  const lens = DOCUMENT_LENS.has(format) || OFFICE_LENS.has(format);
+  async function onComputer(action: "open" | "reveal") {
+    if (!onThisComputer) return;
+    setOpenError(undefined);
+    try {
+      await (action === "open" ? openBridgeFile(onThisComputer) : revealBridgeFile(onThisComputer));
+    } catch (error) {
+      setOpenError(error instanceof Error ? error.message : String(error));
+    }
+  }
   return (
-    <section
-      className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]"
-      aria-label={`${artifact.title} file`}
-    >
-      <header className="flex min-h-[74px] shrink-0 items-center justify-between gap-4 border-b border-[var(--border-subtle)] px-5 py-3">
+    <section className="resource-surface" aria-label={`${artifact.title} file`}>
+      <header className="resource-surface-head">
         <div className="min-w-0">
-          <h1 className="truncate font-display text-title font-semibold text-[var(--text-primary)]">
-            {artifact.title}
-          </h1>
+          <h1 className="truncate font-display text-title font-semibold text-[var(--text-primary)]">{artifact.title}</h1>
           <button
             type="button"
             title={presentation.detail}
-            className="mt-1 text-micro font-medium text-[var(--text-secondary)]"
-            onClick={
-              presentation.action?.kind === "reconnect"
-                ? () => router.push(DEVICES_HREF)
-                : undefined
-            }
+            className="mt-1 text-caption text-[var(--text-secondary)]"
+            onClick={presentation.action?.kind === "reconnect" ? () => router.push(DEVICES_HREF) : undefined}
           >
             {presentation.label}
           </button>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Close file"
-          onClick={onClose}
-        >
+        <Button variant="ghost" size="icon" aria-label="Close file" onClick={onClose}>
           <X aria-hidden="true" className="size-4" />
         </Button>
       </header>
-      <div className="min-h-0 flex-1 overflow-auto p-5">
-        <div className="mx-auto grid max-w-[860px] gap-5 lg:grid-cols-[minmax(0,1fr)_260px]">
-          <div className="flex min-h-[360px] items-center justify-center rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 text-center">
-            <div>
-              {previewKind === "image" && hasPayload ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={nativeUrl}
-                  alt=""
-                  className="mx-auto max-h-[320px] max-w-full rounded-control object-contain"
-                />
-              ) : (
-                <FileText className="mx-auto size-10 text-[var(--text-tertiary)]" />
-              )}
-              <p className="mt-4 text-caption font-medium text-[var(--text-primary)]">
-                {previewKind === "image" && hasPayload
-                  ? artifact.title
-                  : `${format.toUpperCase()} file`}
-              </p>
-              <p className="mt-1 max-w-[420px] text-micro leading-5 text-[var(--text-secondary)]">
-                {DOCUMENT_LENS.has(format)
-                  ? "Open this file as an editable Spectra Document. Unsupported Word features remain in the original package and unrelated edits do not rewrite them."
-                  : OFFICE_LENS.has(format)
-                    ? `Open this file as editable Spectra ${["xlsx", "xlsm", "xltx", "xltm", "xlam"].includes(format) ? "Sheets" : "Presentation"}. Native features Spectra cannot edit remain preserved in the original package.`
-                    : legacy
-                      ? "Spectra shows Word, PowerPoint and Excel files saved as .docx, .pptx or .xlsx. Download this older file to open it in its own app, or save it in the newer format and add it again."
-                      : bridge.reachability === "connected"
-                      ? "This file is in a selected folder on this PC."
-                      : bridge.reachability === "running"
-                        ? "Spectra Bridge is running on this PC. Connect this device to use this file."
-                        : "This file lives on a computer. Connect Spectra Bridge to use it here."}
-              </p>
-              {DOCUMENT_LENS.has(format) || OFFICE_LENS.has(format) ? (
-                <Button
-                  variant="primary"
-                  className="mt-5 px-4"
-                  disabled={
-                    opening ||
-                    !truth?.replicas.some((replica) =>
-                      Boolean(replica.payloadRef),
-                    )
-                  }
-                  onClick={() => void openInSpectra()}
-                >
-                  {opening ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <FileText className="size-3.5" />
-                  )}
-                  {opening ? "Opening safely…" : "Open in Spectra"}
-                </Button>
-              ) : null}
-              {viewable ? (
-                <Button
-                  variant={DOCUMENT_LENS.has(format) || OFFICE_LENS.has(format) ? "secondary" : "primary"}
-                  className={DOCUMENT_LENS.has(format) || OFFICE_LENS.has(format) ? "ml-2 mt-5 px-4" : "mt-5 px-4"}
-                  onClick={() =>
-                    setViewing({ key: artifact._id, filename: artifact.title, kind: viewable, url: nativeUrl })
-                  }
-                >
-                  <Eye className="size-3.5" />
-                  View read-only
-                </Button>
-              ) : null}
-              {openError ? (
-                <p
-                  className="mt-3 max-w-[430px] text-micro leading-5 text-[var(--danger)]"
-                  role="alert"
-                >
-                  {humanizePublicFailure(openError)} The file has not been
-                  changed.
-                </p>
-              ) : null}
-            </div>
-          </div>
-          <aside className="space-y-5">
-            {protectedPending ? (
-              <div className="rounded-control border border-[color-mix(in_oklab,var(--warning)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_10%,var(--bg-elevated))] p-3">
-                <div className="text-caption font-semibold text-[var(--text-primary)]">
-                  Original untouched
-                </div>
-                <p className="mt-1 text-micro leading-5 text-[var(--text-secondary)]">
-                  Spectra has pending changes. The linked file has not been
-                  written.
-                </p>
-                <div className="mt-3 grid gap-2">
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => void protectedAction("apply")}
-                    disabled={fileAction !== null}
-                  >
-                    Apply to original
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => void protectedAction("fork")}
-                    disabled={fileAction !== null}
-                  >
-                    Keep as Spectra copy
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => void protectedAction("discard")}
-                    disabled={fileAction !== null}
-                  >
-                    Discard pending changes
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-            <div>
-              <h2 className="text-caption font-semibold text-[var(--text-primary)]">
-                File details
-              </h2>
-              <dl className="mt-3 space-y-2 text-micro">
-                <div className="flex justify-between gap-3">
-                  <dt className="text-[var(--text-tertiary)]">Format</dt>
-                  <dd>{format.toUpperCase()}</dd>
-                </div>
-                <div className="flex justify-between gap-3">
-                  <dt className="text-[var(--text-tertiary)]">Location</dt>
-                  <dd>
-                    {locationLabel(
-                      (truth?.replicas ?? []).map((replica) => ({
-                        kind: replica.kind,
-                        state: replica.state,
-                      })),
-                    )}
-                  </dd>
-                </div>
-                <div className="flex justify-between gap-3">
-                  <dt className="text-[var(--text-tertiary)]">Profile</dt>
-                  <dd>Strict native</dd>
-                </div>
-              </dl>
-            </div>
-            <div>
-              <h2 className="text-caption font-semibold text-[var(--text-primary)]">
-                Where this file lives
-              </h2>
-              {presentation.action?.kind === "reconnect" ? (
-                <div className="mt-2">
-                  <ReconnectAction href={DEVICES_HREF} />
-                </div>
-              ) : null}
-              <ul className="mt-3 space-y-2 text-micro text-[var(--text-secondary)]">
-                {presentation.disclosure.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            </div>
-            <FileStorageControls
-              artifactId={artifact._id}
-              artifactTitle={artifact.title}
-            />
-            <div className="grid gap-2">
-              <Button
-                variant="secondary"
-                disabled={
-                  fileAction !== null ||
-                  !truth?.replicas.some((replica) =>
-                    Boolean(replica.payloadRef),
-                  )
-                }
-                onClick={() => void downloadCopy()}
-              >
-                <Download className="size-3.5" />
-                {fileAction === "download"
-                  ? "Preparing copy…"
-                  : "Download original file"}
+      <div className="resource-surface-body">
+        <figure className="resource-surface-figure">
+          {previewKind === "image" && hasPayload ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={nativeUrl} alt="" className="max-h-[360px] max-w-full rounded-control object-contain" />
+          ) : (
+            <span className="resource-surface-mark" aria-hidden="true">
+              <FileText className="size-10" />
+              <span>{format.toUpperCase()}</span>
+            </span>
+          )}
+        </figure>
+        <p className="resource-surface-lede">
+          {DOCUMENT_LENS.has(format)
+            ? "Open it as a Spectra document to edit it. Anything Spectra cannot edit stays in the original file."
+            : OFFICE_LENS.has(format)
+              ? `Open it as Spectra ${["xlsx", "xlsm", "xltx", "xltm", "xlam"].includes(format) ? "Sheets" : "Slides"} to edit it. Anything Spectra cannot edit stays in the original file.`
+              : legacy
+                ? "This is an older Office format. Download it to open in its own app, or save it as .docx, .pptx or .xlsx and Spectra opens it here."
+                : viewable
+                  ? "Spectra shows this file as it is. Open it on your computer to change it."
+                  : hasPayload
+                    ? "Spectra keeps this file as it is. Open it in its own app to use it."
+                    : bridge.reachability === "connected"
+                      ? "This file is on this computer. Open it in its own app to use it."
+                      : "This file is on one of your computers. Start Spectra Bridge there to open it."}
+        </p>
+        <div className="resource-surface-actions">
+          {lens ? (
+            <Button variant="primary" disabled={opening || !hasPayload} onClick={() => void openInSpectra()}>
+              {opening ? <Loader2 className="size-4 animate-spin" /> : <FileText className="size-4" />}
+              {opening ? "Opening…" : "Open in Spectra"}
+            </Button>
+          ) : null}
+          {viewable ? (
+            <Button
+              variant={lens ? "ghost" : "primary"}
+              onClick={() => setViewing({ key: artifact._id, filename: artifact.title, kind: viewable, url: nativeUrl })}
+            >
+              <Eye className="size-4" />
+              View
+            </Button>
+          ) : null}
+          {onThisComputer ? (
+            <>
+              <Button variant={lens || viewable ? "ghost" : "primary"} onClick={() => void onComputer("open")}>
+                <ExternalLink className="size-4" />
+                Open on this computer
+              </Button>
+              <Button variant="ghost" onClick={() => void onComputer("reveal")}>
+                <FolderOpen className="size-4" />
+                Show in folder
+              </Button>
+            </>
+          ) : null}
+          {hasPayload ? (
+            <Button variant="ghost" disabled={fileAction !== null} onClick={() => void downloadCopy()}>
+              <Download className="size-4" />
+              {fileAction === "download" ? "Preparing…" : "Download"}
+            </Button>
+          ) : null}
+          {presentation.action?.kind === "reconnect" ? <ReconnectAction href={DEVICES_HREF} /> : null}
+        </div>
+        {openError ? (
+          <p className="resource-surface-error" role="alert">
+            {humanizePublicFailure(openError)} The file itself has not changed.
+          </p>
+        ) : null}
+        {protectedPending ? (
+          <div className="resource-surface-pending">
+            <p className="text-ui font-medium text-[var(--text-primary)]">Changes waiting for the original</p>
+            <p className="text-caption text-[var(--text-secondary)]">Spectra has changes the file on the computer does not have yet.</p>
+            <div className="resource-surface-actions">
+              <Button variant="primary" size="sm" disabled={fileAction !== null} onClick={() => void protectedAction("apply")}>
+                Save to the original
+              </Button>
+              <Button variant="ghost" size="sm" disabled={fileAction !== null} onClick={() => void protectedAction("fork")}>
+                Keep as a Spectra copy
+              </Button>
+              <Button variant="ghost" size="sm" disabled={fileAction !== null} onClick={() => void protectedAction("discard")}>
+                Discard the changes
               </Button>
             </div>
-          </aside>
-        </div>
+          </div>
+        ) : null}
+        <details className="resource-surface-more">
+          <summary>File settings</summary>
+          <ul className="resource-surface-facts">
+            {presentation.disclosure.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          <FileStorageControls artifactId={artifact._id} artifactTitle={artifact.title} embedded />
+          <button type="button" className="resource-surface-link" onClick={() => router.push(DEVICES_HREF)}>
+            <Settings className="size-4" aria-hidden="true" />
+            Folder and sync settings are in Devices
+          </button>
+        </details>
       </div>
       <FileViewer file={viewing} onClose={() => setViewing(null)} />
     </section>

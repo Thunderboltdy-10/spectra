@@ -61,7 +61,7 @@ describe("join page", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("This invitation has expired.");
     expect(alert.textContent).not.toContain("INVITATION_EXPIRED");
-    expect(screen.queryByRole("button", { name: "Retry invitation check" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Check the invitation again" })).toBeNull();
     expect(document.cookie).not.toContain("expired-token");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -81,10 +81,11 @@ describe("join page", () => {
     render(<JoinSchoolPage />);
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("This invitation is unavailable.");
-    expect(screen.queryByRole("button", { name: "Retry invitation check" })).toBeNull();
-    expect(
-      (screen.getByRole("button", { name: "Join school" }) as HTMLButtonElement).disabled,
-    ).toBe(true);
+    expect(screen.queryByRole("button", { name: "Check the invitation again" })).toBeNull();
+    // A link that can never work offers no Join at all, only the way back.
+    expect(screen.getByRole("heading", { name: "This invitation can’t be used" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Join/ })).toBeNull();
+    expect(screen.getByRole("link", { name: "Open Spectra" }).getAttribute("href")).toBe("/workspace");
     expect(document.cookie).not.toContain("unknown-token");
   });
 
@@ -102,7 +103,7 @@ describe("join page", () => {
     );
     render(<JoinSchoolPage />);
     expect(
-      await screen.findByRole("button", { name: "Retry invitation check" }),
+      await screen.findByRole("button", { name: "Check the invitation again" }),
     ).toBeTruthy();
     fireEvent.click(
       screen.getByRole("button", { name: "Use a different account" }),
@@ -131,7 +132,7 @@ describe("join page", () => {
     render(<JoinSchoolPage />);
     await screen.findByRole("heading", { name: "Join Riverside School" });
     expect(
-      (screen.getByRole("button", { name: "Join school" }) as HTMLButtonElement).disabled,
+      (screen.getByRole("button", { name: "Join as a student" }) as HTMLButtonElement).disabled,
     ).toBe(true);
     fireEvent.click(
       screen.getByRole("button", { name: "Use a different account" }),

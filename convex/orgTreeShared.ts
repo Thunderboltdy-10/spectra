@@ -778,8 +778,22 @@ export async function stampSubtreeContext(
        its id while everything around it takes the moved subtree's (D32). */
     const value = ownWorkspaceContext(node) ?? rootContext;
     if (node.workspaceContextId === value) continue;
+    // A work that changes workspace starts over there: shared only if that
+    // workspace shares new work and the work is its filer's own to share.
+    const artifactId =
+      node.kind === "work" && node.sourceId
+        ? ctx.db.normalizeId("spectraArtifacts", node.sourceId)
+        : null;
+    const owned =
+      artifactId !== null &&
+      (await artifactSummaryFor(ctx, artifactId))?.ownerAccountId === node.accountId;
+    const projection =
+      node.kind === "work" ? await startingProjection(ctx, value, owned) : undefined;
     await ctx.db.patch(node._id, {
       workspaceContextId: value,
+      ...(node.kind === "work" && projection !== node.accessProjection
+        ? { accessProjection: projection }
+        : {}),
       updatedAt: now,
     });
   }
@@ -931,6 +945,29 @@ async function resolveTargetParent(
   return (await ensureGeneralNode(ctx, accountId, schoolId)).node;
 }
 
+/**
+ * Whether a placement shares its work with the people its workspace is shared
+ * with. Only an explicit share does: a work in a shared workspace is private
+ * to its author until they share it.
+ */
+export function sharesWithWorkspace(node: { accessProjection?: boolean }) {
+  return node.accessProjection === true;
+}
+
+/**
+ * How a work filed in a workspace starts out: shared when the workspace shares
+ * new work and the person filing it may share it, private otherwise.
+ */
+async function startingProjection(
+  ctx: OrgCtx,
+  workspaceId: Id<"spectraWorkspaces"> | undefined,
+  mayShare: boolean | undefined,
+) {
+  if (!mayShare || !workspaceId) return undefined;
+  const workspace = await ctx.db.get(workspaceId);
+  return workspace?.shareNewWork === true ? true : undefined;
+}
+
 export type PlaceSourceParams = {
   accountId: Id<"accounts">;
   schoolId?: Id<"schools">;
@@ -939,7 +976,8 @@ export type PlaceSourceParams = {
   name: unknown;
   target?: PlacementTarget;
   placedByAccountId?: Id<"accounts">;
-  accessProjection?: boolean;
+  /** The person filing it may share the work, so it follows the workspace's default for new work. */
+  mayShare?: boolean;
   pinned?: boolean;
   /** Leave an existing placement where it is; only create when absent. */
   keepExistingPlacement?: boolean;
@@ -1016,8 +1054,6 @@ export async function placeSourceNode(
         params.typeKey ??
         (await typeKeyForSource(ctx, params.kind, params.sourceId));
     if (existing.activityAt === undefined) patch.activityAt = now;
-    if (params.accessProjection === true && existing.accessProjection !== true)
-      patch.accessProjection = true;
     if (params.pinned !== undefined && existing.pinned !== params.pinned)
       patch.pinned = params.pinned;
     if (params.placedByAccountId && !existing.placedByAccountId)
@@ -1058,7 +1094,9 @@ export async function placeSourceNode(
           ? existing.orderKey
           : await appendOrderKey(ctx, params.accountId, parent?._id ?? null),
       accessProjection:
-        params.accessProjection === true ? true : existing.accessProjection,
+        existing.workspaceContextId === context && existing.deletedAt === undefined
+          ? existing.accessProjection
+          : await startingProjection(ctx, context, params.mayShare),
       pinned: params.pinned ?? existing.pinned,
       placedByAccountId: existing.placedByAccountId ?? params.placedByAccountId,
       deletedAt: undefined,
@@ -1087,7 +1125,7 @@ export async function placeSourceNode(
     orderKey: await appendOrderKey(ctx, params.accountId, parent?._id ?? null),
     workspaceContextId: context,
     placedByAccountId: params.placedByAccountId ?? params.accountId,
-    accessProjection: params.accessProjection,
+    accessProjection: await startingProjection(ctx, context, params.mayShare),
     pinned: params.pinned,
     createdAt: now,
     updatedAt: now,

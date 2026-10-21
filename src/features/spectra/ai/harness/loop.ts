@@ -88,6 +88,10 @@ export type ModelCaller = (input: {
   onText: (delta: string) => void;
   /** A failed attempt streamed text; the retry starts the turn again. */
   onRetry: () => void;
+  /** A tool call is being written: its id, name and the arguments so far. */
+  onToolDraft?: (draft: { id: string; name: string; arguments: string }) => void;
+  /** The model's private reasoning, streamed only to summarise it in captions. */
+  onReasoning?: (delta: string) => void;
 }) => Promise<ModelTurn>;
 
 export type PermissionDecision = "allow" | "ask" | "deny";
@@ -107,6 +111,13 @@ export type LoopHooks = {
   onTextReset?: (text: string) => void;
   onModelTurn?: (turn: ModelTurn) => void;
   onToolStart?: (step: ToolStepInfo) => void;
+  /**
+   * The model is still writing a call's arguments (a whole deck, a long
+   * document): the step is named early so the turn never looks frozen.
+   */
+  onToolDraft?: (draft: { id: string; tool: AnyHarnessTool; label: string }) => void;
+  /** Private reasoning while the model thinks; never shown or stored as is. */
+  onReasoning?: (delta: string) => void;
   onToolEnd?: (
     step: ToolStepInfo & { outcome: ToolOutcome; durationMs: number },
   ) => void;
@@ -314,6 +325,20 @@ function safeQuestion(prepared: Prepared) {
     // Fall through to the label.
   }
   return `Allow Spectra to continue: ${prepared.label.replace(/^\w/, (letter) => letter.toLowerCase())}?`;
+}
+
+/** The short string fields a call's arguments already hold, while they still stream. */
+function partialArguments(text: string): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  for (const match of text.slice(0, 4_000).matchAll(/"(\w{1,40})"\s*:\s*"((?:[^"\\]|\\.){0,200})"/g)) {
+    if (match[1]! in fields) continue;
+    try {
+      fields[match[1]!] = JSON.parse(`"${match[2]}"`);
+    } catch {
+      // A half-written escape waits for the next chunk.
+    }
+  }
+  return fields;
 }
 
 function safeLabel(tool: AnyHarnessTool, args: Record<string, unknown>) {
@@ -666,6 +691,8 @@ export async function runHarnessLoop(
     }
     hooks.onTurnStart?.(state.turns + 1);
     const textBeforeTurn = state.text;
+    // Each drafted call is named once, as soon as its arguments say enough to name it.
+    const drafted = new Set<string>();
     let separatorPending = Boolean(state.text) && !/\n\n$/.test(state.text);
     let turn: ModelTurn;
     try {
@@ -684,6 +711,18 @@ export async function runHarnessLoop(
           }
           state.text += delta;
           hooks.onText?.(delta);
+        },
+        ...(hooks.onReasoning ? { onReasoning: hooks.onReasoning } : {}),
+        onToolDraft: (draft) => {
+          if (!hooks.onToolDraft || !draft.id || !draft.name) return;
+          const tool = tools.get(draft.name);
+          if (!tool || tool.quiet) return;
+          if (drafted.has(draft.id) || draft.arguments.length > 4_000) return;
+          const label = safeLabel(tool, partialArguments(draft.arguments));
+          // "Creating *undefined*": the title has not streamed yet.
+          if (/\b(undefined|null)\b|\*\*/.test(label)) return;
+          drafted.add(draft.id);
+          hooks.onToolDraft({ id: draft.id, tool, label });
         },
         onRetry: () => {
           if (state.text !== textBeforeTurn) {

@@ -1,7 +1,7 @@
 "use client";
 
-import { Loader2, ChevronDown, Mail, Share2, LayoutGrid } from "@/components/icons/glyph-icons";
-import { cn } from "@/lib/utils";
+import { Check, ChevronDown, LayoutGrid, Loader2, Mail } from "@/components/icons/glyph-icons";
+import { Button } from "@/components/ui/button";
 import { LifeKey } from "@/components/ui/life-moments";
 import { workTypeMeta } from "./artifact-card";
 import type { SpectraShareInvitation } from "../data/api";
@@ -27,142 +27,63 @@ export function InvitationStrip({
   onToggle: () => void;
   onRespond: (invitationId: string, response: "accept" | "decline") => void;
 }) {
+  const count = invitations.length;
   return (
-    <div className="shrink-0 border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--brand-primary)_5%,var(--bg-primary))]">
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className="flex h-10 w-full items-center gap-2 px-4 text-left text-ui text-[var(--text-primary)]"
-      >
-        <Mail className="size-4 shrink-0 text-[var(--brand-primary)]" />
-        <span className="font-medium">
-          {invitations.length === 1
-            ? "1 invitation is waiting for you"
-            : `${invitations.length} invitations are waiting for you`}
-        </span>
-        <span className="text-[var(--text-secondary)]">
-          Nothing appears in your Library until you accept.
-        </span>
-        <ChevronDown
-          className={cn(
-            "ml-auto size-4 shrink-0 text-[var(--text-tertiary)] transition-transform",
-            open && "rotate-180",
-          )}
-        />
+    <section className="invitation-strip" data-open={open || undefined} aria-label="Invitations waiting for you">
+      <button type="button" onClick={onToggle} aria-expanded={open} className="invitation-strip-toggle">
+        <Mail className="size-4" aria-hidden />
+        <strong>{count === 1 ? "Something was shared with you" : `${count} things were shared with you`}</strong>
+        <span>Nothing appears in your Library until you accept.</span>
+        <ChevronDown className="invitation-strip-chevron size-4" aria-hidden />
       </button>
       {open ? (
-        <div className="max-h-[46vh] overflow-y-auto border-t border-[var(--border-subtle)] px-4 pb-4">
-          <InvitationInbox
-            invitations={invitations}
-            busyKey={busyKey}
-            onRespond={onRespond}
-          />
-        </div>
+        <ul className="invitation-strip-list">
+          {invitations.map((invitation) => (
+            <InvitationLine
+              key={invitation.invitationId}
+              invitation={invitation}
+              working={busyKey === `invitation:${invitation.invitationId}`}
+              onRespond={onRespond}
+            />
+          ))}
+        </ul>
       ) : null}
-    </div>
+    </section>
   );
 }
 
-function InvitationInbox({
-  invitations,
-  busyKey,
+function InvitationLine({
+  invitation,
+  working,
   onRespond,
 }: {
-  invitations: SpectraShareInvitation[];
-  busyKey: string | null;
+  invitation: SpectraShareInvitation;
+  working: boolean;
   onRespond: (invitationId: string, response: "accept" | "decline") => void;
 }) {
+  const meta = invitation.resource.typeKey !== "workspace" ? workTypeMeta[invitation.resource.typeKey] : null;
+  const Icon = meta?.icon ?? LayoutGrid;
+  const kind = invitation.resourceType === "workspace" ? "a workspace" : `a ${(meta?.label ?? "work").toLowerCase()}`;
   return (
-    <section className="mt-4" aria-labelledby="share-invitations-title">
-      <div className="mb-4">
-        <h2
-          id="share-invitations-title"
-          className="font-display text-heading font-semibold text-[var(--text-primary)]"
-        >
-          Waiting for you
-        </h2>
-        <p className="mt-1 text-ui text-[var(--text-secondary)]">
-          Nothing appears in Shared until you accept. You can review the
-          requested access first.
-        </p>
+    <li className="invitation-line">
+      <LifeKey id={`invitation:${invitation.invitationId}`} />
+      <Icon className="invitation-line-glyph size-[18px]" style={{ color: meta?.color }} aria-hidden />
+      <div className="invitation-line-what">
+        <strong>{invitation.resource.title}</strong>
+        <span>
+          {invitation.inviter?.name ?? "Someone in your school"} shared {kind} for you to {invitation.level === "modify" ? "edit" : "view"}
+        </span>
+        {invitation.message ? <q>{invitation.message}</q> : null}
       </div>
-      <div className="grid gap-3 xl:grid-cols-2">
-        {invitations.map((invitation) => {
-          const artifactMeta =
-            invitation.resource.typeKey !== "workspace"
-              ? workTypeMeta[invitation.resource.typeKey]
-              : null;
-          const Icon = artifactMeta?.icon ?? LayoutGrid;
-          const working = busyKey === `invitation:${invitation.invitationId}`;
-          return (
-            <article
-              key={invitation.invitationId}
-              className="rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-sm)]"
-            >
-              <LifeKey id={`invitation:${invitation.invitationId}`} />
-              <div className="flex items-start gap-3.5">
-                <span
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-card bg-[var(--bg-secondary)]"
-                  style={{
-                    color: artifactMeta?.color ?? "var(--text-secondary)",
-                  }}
-                >
-                  <Icon className="h-[18px] w-[18px]" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <h3 className="truncate font-display text-heading font-semibold text-[var(--text-primary)]">
-                      {invitation.resource.title}
-                    </h3>
-                    <span className="rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro font-medium text-[var(--text-secondary)]">
-                      {invitation.resourceType === "workspace"
-                        ? "Workspace"
-                        : (artifactMeta?.label ?? "Work")}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-caption text-[var(--text-secondary)]">
-                    <span className="font-medium text-[var(--text-primary)]">
-                      {invitation.inviter?.name ?? "A school member"}
-                    </span>{" "}
-                    invited you with{" "}
-                    {invitation.level === "modify" ? "modify" : "read-only"}{" "}
-                    access.
-                  </p>
-                  {invitation.message ? (
-                    <p className="mt-3 rounded-control border-l-2 border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-2 text-caption leading-5 text-[var(--text-secondary)]">
-                      {invitation.message}
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-              <div className="mt-4 flex items-center justify-end gap-2 border-t border-[var(--border-subtle)] pt-3">
-                <button
-                  type="button"
-                  disabled={working}
-                  onClick={() => onRespond(invitation.invitationId, "decline")}
-                  className="h-8 rounded-control px-3 text-caption font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45"
-                >
-                  Decline
-                </button>
-                <button
-                  type="button"
-                  disabled={working}
-                  onClick={() => onRespond(invitation.invitationId, "accept")}
-                  className="inline-flex h-8 items-center gap-2 rounded-control bg-[var(--text-primary)] px-3 text-caption font-medium text-[var(--bg-primary)] disabled:opacity-45"
-                >
-                  {working ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Share2 className="h-3.5 w-3.5" />
-                  )}
-                  Accept
-                </button>
-              </div>
-            </article>
-          );
-        })}
+      <div className="invitation-line-actions">
+        <Button variant="ghost" size="sm" disabled={working} onClick={() => onRespond(invitation.invitationId, "decline")}>
+          Decline
+        </Button>
+        <Button variant="primary" size="sm" disabled={working} onClick={() => onRespond(invitation.invitationId, "accept")}>
+          {working ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+          Accept
+        </Button>
       </div>
-    </section>
+    </li>
   );
 }

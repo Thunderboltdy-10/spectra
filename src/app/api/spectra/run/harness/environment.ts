@@ -137,6 +137,7 @@ export function attachmentParts(attachments: PreparedAttachment[] | undefined): 
       continue;
     }
     if (attachment.handling === "pdf" && dataUrl) parts.push({ type: "file", file: { filename: attachment.name, file_data: dataUrl } });
+    else if (typeof attachment.extractedText === "string") parts.push({ type: "text", text: `Attached file "${attachment.name}" was read and has no text in it.` });
     else parts.push({ type: "text", text: `Attached file "${attachment.name}" could not be read.` });
   }
   return parts;

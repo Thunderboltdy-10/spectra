@@ -1,9 +1,9 @@
 "use client";
 
+import { SearchField } from "@/components/ui/search-field";
 import { useMemo, useState } from "react";
 import { useQuery } from "convex/react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/page-state";
 import { Segmented } from "@/components/ui/segmented";
 import { SelectField } from "@/components/ui/select";
@@ -76,10 +76,10 @@ export function TasksSection({
         compact
         icon="task"
         title={view === "past" ? "No past tasks yet" : view === "current" ? "Nothing due" : "No tasks yet"}
-        detail={view === "past" ? "The first sync brings in your full history from ManageBac." : "New tasks from ManageBac show up here."}
+        detail={view === "past" ? "Spectra starts from today. Bring in your earlier tasks from ManageBac when you want them for revision." : "New tasks from ManageBac show up here."}
         action={
           <Button size="sm" disabled={syncing} onClick={() => onSync(view === "past" ? "past_tasks" : view === "current" ? "current_tasks" : undefined)}>
-            {syncing ? "Syncing" : "Sync now"}
+            {syncing ? "Syncing" : view === "past" ? "Bring in past tasks" : "Sync now"}
           </Button>
         }
       />
@@ -111,14 +111,7 @@ export function TasksSection({
           ]}
         />
         <SelectField ariaLabel="Class" size="sm" value={classId} onChange={setClassId} options={classOptions} triggerClassName="w-52" />
-        <Input
-          type="search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Find a task"
-          aria-label="Find a task"
-          className="h-8 w-48 min-w-0 flex-1 text-caption sm:max-w-72"
-        />
+        <SearchField value={query} onChange={setQuery} label="Find a task" className="w-48 flex-1 sm:max-w-72" />
       </div>
       {tasks === undefined ? (
         <TicketsSkeleton count={6} />

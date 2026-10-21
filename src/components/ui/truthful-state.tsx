@@ -111,7 +111,7 @@ export function MetricValue({
     <span className={cn("inline-flex min-w-0 items-center gap-2", className)}>
       <strong
         className={cn(
-          "truncate font-sans text-metric font-normal tracking-[-.02em] text-[var(--text-primary)]",
+          "truncate font-display text-metric font-normal tracking-[-.01em] text-[var(--text-primary)] [font-variant-numeric:lining-nums]",
           valueClassName,
         )}
       >

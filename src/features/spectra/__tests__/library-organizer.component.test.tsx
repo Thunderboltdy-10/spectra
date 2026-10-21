@@ -159,7 +159,7 @@ describe("LibraryOrganizer", () => {
     tree.search = [node("s1", "Water Cycle Field Guide"), node("s2", "Draft notes")];
     const onOpenWork = vi.fn();
     render(<LibraryOrganizer onOpenWork={onOpenWork} onOpenThread={vi.fn()} />);
-    const input = screen.getByRole("textbox", { name: "Search Library" });
+    const input = screen.getByRole("searchbox", { name: "Search Library" });
     fireEvent.change(input, { target: { value: "Photosynthesis lecture draft" } });
     expect(screen.getAllByText("Partial match")).toHaveLength(2);
     expect(screen.getByText("No exact title match. Showing ranked partial matches.")).toBeTruthy();
@@ -172,7 +172,7 @@ describe("LibraryOrganizer", () => {
   it("distinguishes exact titles without changing the provider's result order", () => {
     tree.search = [node("s1", "Photosynthesis notes"), node("s2", "PHOTOSYNTHESIS   lecture draft")];
     renderOrganizer();
-    fireEvent.change(screen.getByRole("textbox", { name: "Search Library" }), {
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search Library" }), {
       target: { value: "  Photosynthesis lecture draft  " },
     });
     const rows = screen.getAllByRole("row");
@@ -189,7 +189,7 @@ describe("LibraryOrganizer", () => {
     tree.search = [node("s1", "Water Cycle Field Guide"), node("s2", "Draft notes")];
     const onOpenWork = vi.fn();
     render(<LibraryOrganizer onOpenWork={onOpenWork} onOpenThread={vi.fn()} />);
-    const input = screen.getByRole("textbox", { name: "Search Library" });
+    const input = screen.getByRole("searchbox", { name: "Search Library" });
     fireEvent.change(input, { target: { value: "Photosynthesis lecture draft" } });
     fireEvent.keyDown(input, { key: "ArrowDown" });
     const grid = screen.getByRole("grid", { name: "Library items" });
@@ -203,7 +203,7 @@ describe("LibraryOrganizer", () => {
   it("keeps Enter in the unfiltered search input opening the first visible work", () => {
     const onOpenWork = vi.fn();
     render(<LibraryOrganizer onOpenWork={onOpenWork} onOpenThread={vi.fn()} />);
-    fireEvent.keyDown(screen.getByRole("textbox", { name: "Search Library" }), { key: "Enter" });
+    fireEvent.keyDown(screen.getByRole("searchbox", { name: "Search Library" }), { key: "Enter" });
     expect(onOpenWork).toHaveBeenCalledWith("work-n1");
     expect(screen.queryByText(/Enter in search opens/)).toBeNull();
   });
@@ -212,7 +212,7 @@ describe("LibraryOrganizer", () => {
     tree.search = [node("s1", "Water Cycle Field Guide")];
     tree.searchStatus = "CanLoadMore";
     renderOrganizer();
-    fireEvent.change(screen.getByRole("textbox", { name: "Search Library" }), {
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search Library" }), {
       target: { value: "Photosynthesis lecture draft" },
     });
     expect(screen.getByText("No exact title match in the loaded results. Showing ranked partial matches.")).toBeTruthy();
@@ -223,7 +223,7 @@ describe("LibraryOrganizer", () => {
     tree.searchStatus = "LoadingFirstPage";
     const onOpenWork = vi.fn();
     render(<LibraryOrganizer onOpenWork={onOpenWork} onOpenThread={vi.fn()} />);
-    const input = screen.getByRole("textbox", { name: "Search Library" });
+    const input = screen.getByRole("searchbox", { name: "Search Library" });
     fireEvent.change(input, { target: { value: "Photosynthesis lecture draft" } });
     expect(screen.getByText("Searching titles…")).toBeTruthy();
     expect(screen.queryByText(/Enter in search opens/)).toBeNull();

@@ -1,7 +1,9 @@
 "use client";
 
+import { SearchField } from "@/components/ui/search-field";
+import { buttonVariants } from "@/components/ui/button";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, MessageSquare, MessagesSquare, Search, X } from "@/components/icons/glyph-icons";
+import { CalendarDays, MessageSquare, MessagesSquare, X } from "@/components/icons/glyph-icons";
 import type { SpectraThread } from "../data/api";
 import { getSpectraThread, getSpectraThreads } from "../data/api";
 import { formatRelativeTime } from "./spectra-view-model";
@@ -86,7 +88,7 @@ export function ChatBrowserPanel({
     let alive = true;
     setLoading(true);
     setLoadError(false);
-    void getSpectraThreads({ limit: 120 })
+    void getSpectraThreads({ limit: 120, brief: true })
       .then((result) => {
         if (!alive) return;
         setThreads(result.threads);
@@ -185,10 +187,10 @@ export function ChatBrowserPanel({
     const needle = query.trim().toLowerCase();
     const scoped = threads.filter((thread) => {
       if (scope === "workspace" && workspaceId) {
-        return thread.workspaceId === workspaceId || thread.contexts?.workspaces?.some((item) => item.id === workspaceId);
+        return thread.workspaceId === workspaceId || thread.contextWorkspaceIds?.includes(workspaceId);
       }
       if (scope === "artifact" && artifactId) {
-        return thread.artifactId === artifactId || thread.contexts?.artifacts?.some((item) => item.id === artifactId);
+        return thread.artifactId === artifactId || thread.contextArtifactIds?.includes(artifactId);
       }
       return true;
     });
@@ -242,14 +244,14 @@ export function ChatBrowserPanel({
         <button type="button" onClick={onClose} className="grid size-8 place-items-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-label="Close threads" title="Close"><X className="size-4" /></button>
       </div>
       <div className="shrink-0 space-y-2 border-b border-[var(--border-subtle)] p-3">
-        <label className="flex h-9 items-center gap-2 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-[var(--text-tertiary)]"><Search className="size-3.5" /><input ref={searchInputRef} value={query} onChange={(event) => { setQuery(event.target.value); setVisibleCount(24); }} placeholder="Search threads" className="min-w-0 flex-1 bg-transparent text-caption text-[var(--text-primary)] outline-none" aria-label="Search threads" /></label>
+        <SearchField ref={searchInputRef} value={query} onChange={(next) => { setQuery(next); setVisibleCount(24); }} label="Search threads" />
         <div className="flex items-center gap-1" role="tablist" aria-label="Thread filters">
-          {(["all", "recent", "pinned"] as const).map((key) => <button key={key} type="button" role="tab" aria-selected={filter === key} onClick={() => setFilter(key)} className={`rounded-chip px-2.5 py-1 text-micro font-medium capitalize ${filter === key ? "bg-[var(--text-primary)] text-[var(--bg-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}>{key}</button>)}
+          {(["all", "recent", "pinned"] as const).map((key) => <button key={key} type="button" role="tab" aria-selected={filter === key} onClick={() => setFilter(key)} className={`h-9 rounded-control px-3 text-ui font-medium capitalize ${filter === key ? "bg-[var(--bg-hover)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}>{key}</button>)}
           <span className="ml-auto text-micro text-[var(--text-tertiary)]">{filtered.length} chats</span>
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-        {loading ? <div data-life-ghost className="space-y-2" aria-label="Loading threads">{[1, 2, 3, 4].map((item) => <div key={item} data-life-ghost-bar className="h-12 animate-pulse bg-[var(--bg-secondary)]" />)}</div> : loadError ? <ProductErrorState title="Threads couldn’t load" detail="Check your connection, then try again." action={<button type="button" onClick={() => setLoadAttempt((attempt) => attempt + 1)} className="inline-flex h-8 items-center rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)]">Try again</button>} /> : groups.length === 0 ? <div className="flex min-h-52 flex-col items-center justify-center px-8 text-center"><MessageSquare className="size-6 text-[var(--text-tertiary)]" /><p className="mt-3 text-caption font-medium text-[var(--text-primary)]">No threads found</p><p className="mt-1 text-micro leading-5 text-[var(--text-secondary)]">Try a different search or filter.</p></div> : groups.map(([label, rows]) => <section key={label} className="mb-4"><h3 className="mb-1.5 flex items-center gap-1.5 px-1 text-micro font-semibold text-[var(--text-tertiary)]"><CalendarDays className="size-3" />{label}</h3><div className="">{rows.map((thread) => <button key={thread._id} type="button" onMouseEnter={() => setHoveredId(thread._id)} onMouseLeave={() => { setHoveredId(null); setPreview(null); }} onClick={() => onOpenChat(thread)} className="group relative w-full border-b border-[var(--border-subtle)] px-2 py-2 text-left transition last:border-b-0 hover:bg-[var(--bg-hover)]"><span className="flex items-start gap-2"><span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-control bg-[color-mix(in_oklab,var(--brand-primary)_8%,var(--bg-elevated))] text-[var(--brand-primary)]"><MessageSquare className="size-3" /></span><span className="min-w-0 flex-1"><span className="block truncate text-caption font-semibold text-[var(--text-primary)]">{thread.title}</span><span className="mt-0.5 block line-clamp-1 text-micro leading-4 text-[var(--text-secondary)]">{thread.summaryShort || "No summary available."}</span><span className="mt-0.5 block text-micro text-[var(--text-tertiary)]">{thread.messageCount ?? 0} messages, {formatRelativeTime(thread.lastMessageAt ?? thread.updatedAt)}</span></span></span>{preview?.id === thread._id ? <span className="pointer-events-none absolute right-3 top-full z-tooltip mt-1 w-[min(320px,calc(100vw-44px))] rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 text-micro leading-5 text-[var(--text-secondary)] shadow-hover">{preview.text}</span> : null}</button>)}</div></section>)}
+        {loading ? <div data-life-ghost className="space-y-2" aria-label="Loading threads">{[1, 2, 3, 4].map((item) => <div key={item} data-life-ghost-bar className="h-12 animate-pulse bg-[var(--bg-secondary)]" />)}</div> : loadError ? <ProductErrorState title="Threads couldn’t load" detail="Check your connection, then try again." action={<button type="button" onClick={() => setLoadAttempt((attempt) => attempt + 1)} className={buttonVariants({ variant: "primary" })}>Try again</button>} /> : groups.length === 0 ? <div className="flex min-h-52 flex-col items-center justify-center px-8 text-center"><MessageSquare className="size-6 text-[var(--text-tertiary)]" /><p className="mt-3 text-caption font-medium text-[var(--text-primary)]">No threads found</p><p className="mt-1 text-micro leading-5 text-[var(--text-secondary)]">Try a different search or filter.</p></div> : groups.map(([label, rows]) => <section key={label} className="mb-4"><h3 className="mb-1.5 flex items-center gap-1.5 px-1 text-micro font-semibold text-[var(--text-tertiary)]"><CalendarDays className="size-3" />{label}</h3><div className="">{rows.map((thread) => <button key={thread._id} type="button" onMouseEnter={() => setHoveredId(thread._id)} onMouseLeave={() => { setHoveredId(null); setPreview(null); }} onClick={() => onOpenChat(thread)} className="group relative w-full border-b border-[var(--border-subtle)] px-2 py-2 text-left transition last:border-b-0 hover:bg-[var(--bg-hover)]"><span className="flex items-start gap-2"><span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-control bg-[color-mix(in_oklab,var(--brand-primary)_8%,var(--bg-elevated))] text-[var(--brand-primary)]"><MessageSquare className="size-3" /></span><span className="min-w-0 flex-1"><span className="block truncate text-caption font-semibold text-[var(--text-primary)]">{thread.title}</span><span className="mt-0.5 block line-clamp-1 text-micro leading-4 text-[var(--text-secondary)]">{thread.summaryShort || "No summary available."}</span><span className="mt-0.5 block text-micro text-[var(--text-tertiary)]">{thread.messageCount ?? 0} messages, {formatRelativeTime(thread.lastMessageAt ?? thread.updatedAt)}</span></span></span>{preview?.id === thread._id ? <span className="pointer-events-none absolute right-3 top-full z-tooltip mt-1 w-[min(320px,calc(100vw-44px))] rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 text-micro leading-5 text-[var(--text-secondary)] shadow-hover">{preview.text}</span> : null}</button>)}</div></section>)}
           {visibleCount < filtered.length ? <button type="button" onClick={() => setVisibleCount((count) => count + 24)} className="flex w-full items-center justify-center rounded-control border border-dashed border-[var(--border-default)] py-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">Load more chats</button> : null}
       </div>
       </aside>

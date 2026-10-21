@@ -314,6 +314,8 @@ export async function POST(request: NextRequest) {
         to: text(body.email, 320),
         role: text(body.role, 40),
         joinUrl: invitationUrl.toString(),
+        orgName: optionalText(bodyObject(result).schoolName, 140),
+        expiresAt: number(bodyObject(result).expiresAt),
         invitationId: text(bodyObject(result).invitationId, 80) || undefined,
       });
       return ok({
@@ -520,6 +522,7 @@ export async function POST(request: NextRequest) {
         role: "school admin",
         joinUrl: invitationUrl.toString(),
         orgName: text(body.name, 140),
+        expiresAt: number(bodyObject(result).expiresAt),
         invitationId: text(bodyObject(result).invitationId, 80) || undefined,
       });
       return ok({

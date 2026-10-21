@@ -57,6 +57,7 @@ const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: 
   { command: "restore_version", args: { artifactId: "work", versionId: "version" }, event: "version_restored" },
   { command: "publish_code", args: { artifactId: "work", action: "publish" }, event: "runtime_published" },
   { command: "manage_embed", args: { artifactId: "work", embedId: "embed", action: "resize", mode: "expanded" }, mutation: "artifactEmbeds:update", event: "embed_changed" },
+  { command: "show_work", args: { artifactId: "work" }, mutation: "artifactEmbeds:create" },
   { command: "set_school_sync_mode", args: { kind: "grades", mode: "manual" }, mutation: "school:setMode", event: "managebac_sync_preferences" },
   { command: "manage_class_workspaces", args: { action: "create", recordIds: ["class"] }, mutation: "managebac:materializeClassWorkspaces", event: "managebac_class_workspaces" },
   { command: "complete_calendar_block", args: { itemId: "block", expectedRevision: 2 }, mutation: "calendar:completeWorkBlock", event: "calendar_changed" },

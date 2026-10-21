@@ -46,6 +46,7 @@ import {
   RUN_TAB_PROJECTION_VERSION,
   upsertResultCardSummary,
 } from "./spectraRunProjection";
+import { assertPlatformRunning, platformStopped } from "./platformControls";
 
 function usageTokenCounts(usage: unknown) {
   const usageRecord =
@@ -610,6 +611,7 @@ async function assertRunAdmission(
   ownerAccountId: Id<"accounts">,
   now: number,
 ) {
+  await assertPlatformRunning(ctx, "ai");
   const byStatus = (status: "queued" | "running") =>
     ctx.db
       .query("spectraAiRuns")
@@ -1769,6 +1771,7 @@ export const claimExecution = mutation({
     requireCurrentExecution(run.executionId, args.executionId);
     if (run.status !== "queued" && run.status !== "running")
       throw new Error("This run is no longer available for execution.");
+    await assertPlatformRunning(ctx, "ai");
     const now = Date.now();
     if (
       run.workerId &&
@@ -1826,6 +1829,8 @@ export const heartbeat = mutation({
       (run.status !== "queued" && run.status !== "running")
     )
       return { alive: false };
+    // The emergency stop ends a running turn at its next heartbeat.
+    if (await platformStopped(ctx, "ai")) return { alive: false };
     const now = Date.now();
     const operation = args.awaitedOperationId ? await ctx.db.get(args.awaitedOperationId) : null;
     const observation = operation?.runId === run._id && operation.executionId === args.executionId
@@ -1890,6 +1895,8 @@ export const listTabs = query({
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     artifactId: v.optional(v.id("spectraArtifacts")),
     surface: v.optional(vSurface),
+    /** Only tabs touched since then: the island lets a thread idle for a week go, without a job to remove it. */
+    since: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
@@ -1925,7 +1932,7 @@ export const listTabs = query({
           : await ctx.db
               .query("spectraRunTabs")
               .withIndex("by_account_updated", (q) =>
-                q.eq("ownerAccountId", actor._id),
+                q.eq("ownerAccountId", actor._id).gte("updatedAt", args.since ?? 0),
               )
               .order("desc")
               .take(readLimit);

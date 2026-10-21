@@ -240,6 +240,11 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
           emit({ type: "step_start", id: step.call.id, label: step.label, effect: step.effect, ...(work ? { work } : {}) });
           captions?.stepStarted({ id: step.call.id, label: step.label });
         },
+        ...(captions ? { onReasoning: (delta: string) => captions.thinking(delta) } : {}),
+        onToolDraft: (draft) => {
+          emit({ type: "step_start", id: draft.id, label: draft.label, effect: "write" });
+          captions?.stepStarted({ id: draft.id, label: draft.label });
+        },
         onToolEnd: (step) => {
           if (step.tool?.quiet) return;
           const label = step.outcome.doneLabel ?? step.label;

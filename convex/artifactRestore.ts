@@ -40,6 +40,8 @@ async function authorize(ctx: ReadCtx, request: RestoreRequest, accountId: Id<"a
   await requireActorArtifactCapability(ctx, actor, request.artifactId, "modify");
   const artifact = await ctx.db.get(request.artifactId);
   if (!artifact || !["active", "draft"].includes(artifact.status)) throw new Error("ARTIFACT_NOT_FOUND");
+  // History is its author's: collaborators edit the work, its author keeps its past.
+  if (artifact.ownerAccountId !== actor.accountId) throw new Error("ARTIFACT_HISTORY_OWNER_ONLY");
   return { actor, artifact };
 }
 

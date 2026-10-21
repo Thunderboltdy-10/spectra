@@ -45,6 +45,28 @@ describe("captions", () => {
     expect(titles).toEqual(["Greeting"]);
   });
 
+  it("summarises a long stretch of thinking before the first step, and again once it moves on", async () => {
+    const timers = fakeTimers();
+    const captions: CaptionEvent[] = [];
+    const write = vi.fn(async (request: { thinking?: string }) => ({ caption: request.thinking ? `About ${request.thinking.length}` : "Working" }));
+    const scheduler = new CaptionScheduler({ prompt: "deck", write, timers, onCaption: (c) => captions.push(c) });
+    scheduler.thinking("plan the cards ");
+    await timers.advance(2_000);
+    expect(captions.map((c) => c.text)).toEqual(["About 15"]);
+    // Thinking that has not moved on adds nothing.
+    scheduler.thinking("x".repeat(200));
+    await timers.advance(7_000);
+    expect(captions).toHaveLength(1);
+    scheduler.thinking("y".repeat(1_200));
+    await timers.advance(2_500);
+    expect(captions).toHaveLength(2);
+    expect(captions[1]!.stepIds).toEqual(["thinking:1"]);
+    // A real step ends the stretch; the caption describes the step.
+    scheduler.stepStarted({ id: "a", label: "Creating *Deck*" });
+    await timers.advance(2_500);
+    expect(write.mock.calls.at(-1)![0].thinking).toBeUndefined();
+  });
+
   it("captions steps after two seconds, at most every 2.5 s, and ends in the past tense", async () => {
     const timers = fakeTimers();
     const captions: CaptionEvent[] = [];

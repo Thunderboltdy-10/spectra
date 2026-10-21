@@ -11,6 +11,9 @@ import { HOME_PATH } from "../chat/home-routes";
 
 export type TourPerson = { firstName: string; school: string | null };
 
+/** A choice the step asks for, answered right in Spectra's note. */
+export type TourAsk = "reminders" | "bridge";
+
 export type TourStep = {
   id: string;
   /** The page the step happens on. */
@@ -18,6 +21,7 @@ export type TourStep = {
   /** What it points at, in order of preference; none speaks from the middle. */
   targets: string[];
   say: (person: TourPerson) => string;
+  ask?: TourAsk;
 };
 
 const PAGE = "[data-spectra-app-surface]";
@@ -59,11 +63,26 @@ export const TOUR_STEPS: readonly TourStep[] = [
       "The Library holds everything we make, on a shelf for each of your classes. Open any piece of work and I can edit it beside you, or you can follow along as I go.",
   },
   {
+    id: "select",
+    path: "/library",
+    targets: ["[data-library-select]"],
+    say: () =>
+      "Select lets you pick several works at once. Ask me about all of them together, or lay them side by side to work across them.",
+  },
+  {
     id: "calendar",
     path: "/calendar",
     targets: [PAGE],
     say: () =>
       "Your calendar puts ManageBac deadlines next to your own plans. Ask me to plan your week and I'll fit work blocks around what's due, then move them when things change.",
+  },
+  {
+    id: "reminders",
+    path: "/calendar",
+    targets: [],
+    ask: "reminders",
+    say: () =>
+      "Each morning I write you a short brief on Home: what's due, and what to start on. I also remind you of work dated for the day. Pick when they arrive; Settings can change it later.",
   },
   {
     id: "school",
@@ -83,6 +102,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     id: "devices",
     path: "/devices",
     targets: [PAGE],
+    ask: "bridge",
     say: () =>
       "Devices connects Spectra Bridge on your computer. With it I can open, read and organise files on your own machine, only ever where you allow it.",
   },

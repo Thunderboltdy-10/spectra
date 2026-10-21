@@ -7,10 +7,11 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { SearchField } from "@/components/ui/search-field";
 import { useSearchParams } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { useNow } from "@/hooks/use-now";
-import { FileClock, KeyRound, MessageCircle, Settings2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, BarChart3, CalendarDays, Plus, School, Search, Users, Activity, CircleGauge, CloudCog, Database, HardDrive, HeartPulse, LifeBuoy, Network, TicketCheck, Workflow } from "@/components/icons/glyph-icons";
+import { FileClock, KeyRound, MessageCircle, Settings2, ShieldAlert, ShieldCheck, UserPlus, AlertTriangle, BarChart3, CalendarDays, Plus, School, Users, Activity, CircleGauge, CloudCog, Database, HardDrive, HeartPulse, LifeBuoy, Network, TicketCheck, Workflow } from "@/components/icons/glyph-icons";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import {
@@ -19,6 +20,8 @@ import {
   type PlatformAdministrationOverview,
 } from "@/features/spectra/administration/api";
 import { metricDefinition } from "@/features/spectra/administration/metric-registry";
+import { EmergencyStop } from "@/features/spectra/administration/emergency-stop";
+import { FeedbackInbox } from "@/features/spectra/administration/feedback-inbox";
 import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { PageBody, PageHeader } from "@/components/ui/page-header";
 import { LoadingRows } from "@/components/ui/page-state";
@@ -61,7 +64,7 @@ const tabs: Array<PanelTab & { id: Tab }> = [
   { id: "schools", label: "Schools", icon: "school" },
   { id: "operations", label: "Operations", icon: "server" },
   { id: "usage", label: "Usage & finance", icon: "billing" },
-  { id: "requests", label: "Requests & support", icon: "help" },
+  { id: "requests", label: "Feedback & requests", icon: "help" },
   { id: "governance", label: "Governance", icon: "shield" },
   { id: "security", label: "Audit & security", icon: "locked" },
 ];
@@ -272,6 +275,7 @@ function PlatformOverviewSurface({
   );
   return (
     <div className="space-y-6">
+      <EmergencyStop />
       <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard
           icon={School}
@@ -332,7 +336,7 @@ function PlatformOverviewSurface({
         </section>
         <div className="grid gap-8 md:grid-cols-2">
         <section className="rounded-card px-4 py-3 hover:bg-[var(--bg-secondary)]">
-          <h2 className="font-[var(--font-serif)] text-subhead font-medium">
+          <h2 className="font-display text-subhead font-medium">
             Storage & compute
           </h2>
           <p className="mt-1 text-micro text-[var(--text-tertiary)]">
@@ -361,7 +365,7 @@ function PlatformOverviewSurface({
           </AdminButton>
         </section>
         <section className="rounded-card px-4 py-3 hover:bg-[var(--bg-secondary)]">
-          <h2 className="font-[var(--font-serif)] text-subhead font-medium">
+          <h2 className="font-display text-subhead font-medium">
             Seats & access
           </h2>
           <p className="mt-1 text-micro text-[var(--text-tertiary)]">
@@ -1130,18 +1134,7 @@ function SchoolsSurface({
           }
         />
         <div className="px-4 pb-3">
-          <label className="relative block max-w-md">
-            <Search
-              size={13}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]"
-            />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search schools, slugs, and domains"
-              className="h-9 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] pl-9 pr-3 text-micro outline-none"
-            />
-          </label>
+          <SearchField value={search} onChange={setSearch} label="Search schools" placeholder="Search schools, slugs, and domains" className="max-w-md" />
         </div>
         {loading ? (
           <LoadingPanel label="Loading schools" />
@@ -1984,6 +1977,9 @@ function RequestsSurface({
   }, [refreshKey]);
   return (
     <>
+      <AdminCard className="mb-3">
+        <FeedbackInbox />
+      </AdminCard>
       <AdminCard>
         <AdminSectionHeader
           title="School requests"
@@ -2180,7 +2176,7 @@ function PlatformGovernanceSurface() {
       </AdminCard>
       <div className="space-y-3">
         <AdminCard className="p-4">
-          <h2 className="font-[var(--font-serif)] text-subhead font-medium">
+          <h2 className="font-display text-subhead font-medium">
             Operational boundaries
           </h2>
           <p className="mt-2 text-micro leading-5 text-[var(--text-secondary)]">

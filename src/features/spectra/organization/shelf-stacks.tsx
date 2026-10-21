@@ -9,6 +9,7 @@ import { describeFailure } from "@/components/ui/truthful-state";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import type { ClassIdentity } from "../../../../shared/class-identity";
+import { aiWorking } from "../artifacts/ai-working";
 import { authoredSummary } from "../artifacts/registry";
 import { useWorkPreview } from "../artifacts/use-work-previews";
 import { workTypeMeta } from "../components/artifact-card";
@@ -238,7 +239,7 @@ function LibraryStack({
           summary={authoredSummary(active.source?.blueprintKey, active.source?.summary)}
           place={whereOf(active)}
           when={relativeTime(active.activityAt, now)}
-          live={active.source?.aiState === "creating" || active.source?.aiState === "updating"}
+          live={aiWorking(active.source)}
         />
         {picked !== undefined ? <PickMark /> : null}
       </button>

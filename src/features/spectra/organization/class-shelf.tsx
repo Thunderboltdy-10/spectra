@@ -10,6 +10,7 @@ import { inkStyle, type ClassBook } from "../school/use-class-book";
 import { DueTask, TaskLink, type TaskOpen } from "./due-task";
 import type { WorkPicking } from "./library-note";
 import { ShelfNotes, useShelfStacks } from "./shelf-stacks";
+import { SharedWorkGroups, useSharedWorks } from "./shared-works";
 import { useTreeChildren, type TreeNode } from "./tree-client";
 
 /*
@@ -74,6 +75,7 @@ export function classSentence(identity: ClassIdentity, name: string, ahead: read
 
 export function ClassShelf({
   folderId,
+  workspaceId,
   name,
   identity,
   providerClassId,
@@ -84,6 +86,8 @@ export function ClassShelf({
   picking,
 }: {
   folderId: string;
+  /** The class's workspace, whose linked workspaces (a teacher's) show their shared works here. */
+  workspaceId?: string;
   name: string;
   identity: ClassIdentity;
   providerClassId: string | null;
@@ -98,6 +102,7 @@ export function ClassShelf({
   const [allMonths, setAllMonths] = useState(false);
   const { loading, ahead, months } = useClassTasks(providerClassId, now);
   const children = useTreeChildren(folderId, { sortKey: "updated", direction: "desc", pageSize: 100, withoutThreads: true });
+  const shared = useSharedWorks(workspaceId);
 
   const folders = children.nodes.filter((node) => node.kind === "folder");
   const work = children.nodes.filter((node) => node.kind !== "folder" && node.source?.blueprintKey !== "planner_task");
@@ -168,7 +173,7 @@ export function ClassShelf({
                   </ul>
                 ) : null}
                 {/* Inside the class every card is the class's, so each keeps its kind's colour. */}
-                <ShelfNotes items={shownWork} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} />
+                <ShelfNotes items={shownWork} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} whereOf={sharedMark} />
                 {workItems.length > WORK_SHOWN ? (
                   <button type="button" className="today-link mt-3 inline-block" aria-expanded={allWork} onClick={() => setAllWork((open) => !open)}>
                     {allWork ? "Show fewer" : `Show all ${workItems.length}`}
@@ -186,6 +191,8 @@ export function ClassShelf({
               </div>
             )}
           </section>
+
+          <SharedWorkGroups groups={shared} place={name} workspaceId={workspaceId} now={now} onOpen={onOpen} picking={picking} />
         </div>
 
         {months.length ? (
@@ -247,3 +254,6 @@ export const isClassWorkspace = (node: TreeNode | null | undefined) => node?.kin
 /** The identity a class workspace is drawn in: School's, or one from its own name when School does not list it. */
 export const classWorkspaceIdentity = (node: TreeNode, book: ClassBook) =>
   book.named(node.name) ?? classIdentity({ providerClassId: node.workspace?.workspaceId ?? node.nodeId, title: node.name });
+
+/** Your own work its workspace's people can see says so; private work, the default, says nothing. */
+const sharedMark = (node: TreeNode) => (node.sharedWithWorkspace ? "Shared with the class" : undefined);

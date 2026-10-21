@@ -26,6 +26,8 @@ export type CaptionRequest = {
   final: boolean;
   wantTitle: boolean;
   previous?: string[];
+  /** The latest of Spectra's private reasoning, to summarise, never to quote. */
+  thinking?: string;
   /** The user's workspaces, offered with the title for an unfiled thread. */
   places?: Array<{ id: string; title: string }>;
 };
@@ -51,6 +53,7 @@ const CAPTION_SYSTEM = `You write the one-line progress caption Spectra shows wh
 
 Reply with JSON only: {"caption": "...", "detail": "...", "thread_title": "...", "thread_place": "..."}.
 - caption: at most 60 characters, sentence case, no full stop, no ids, no tool names, no quotes. Say what is happening for the user in plain words, naming the subject ("Drafting six slides on photosynthesis"). Use the present tense while working. When told the run is finished, use the past tense and say what was done ("Made a six-slide deck on photosynthesis"). Do not repeat a previous caption.
+- When Spectra's current thinking is given, the caption says in plain words what it is working out right now ("Planning six cards on the water cycle"). Never quote the thinking or reveal reasoning steps.
 - detail: optional, one to three short lines, only when there is something more worth knowing (what was found, what changed). Usually omit it.
 - thread_title: only when asked. A 2-6 word name for the conversation, sentence case, no full stop, no quotes, in the user's language. Give it only once the conversation has a clear subject; for a greeting or small talk, omit it and a later message names it. Otherwise omit it.
 - thread_place: only with thread_title, and only when the user's workspaces are listed. The id of the one workspace (a class or project) the conversation is clearly about. When it is general or could be several, omit it.`;
@@ -64,6 +67,8 @@ function describe(request: CaptionRequest) {
     `User's request: ${request.prompt.slice(0, 1_200)}`,
     steps ? `Steps:\n${steps}` : "No tool steps.",
     request.reply ? `Reply so far (start): ${request.reply.slice(0, 400)}` : "",
+    request.thinking && !request.final ? `Spectra's current thinking (private):
+${request.thinking.slice(-800)}` : "",
     request.previous?.length
       ? `Previous captions:\n${request.previous.slice(-4).map((caption) => `- ${caption}`).join("\n")}`
       : "",
@@ -145,6 +150,8 @@ export class CaptionScheduler {
   private inFlight: Promise<void> | null = null;
   private dirty = false;
   private reply = "";
+  /** The current stretch of reasoning between steps, as one pseudo-step. */
+  private reasoning = { text: "", total: 0, stretch: 0, coveredLength: 0, coveredAt: 0 };
   private readonly previous: string[] = [];
   private titled: boolean;
   private finished = false;
@@ -180,6 +187,7 @@ export class CaptionScheduler {
   }
 
   stepStarted(step: { id: string; label: string }) {
+    this.endThinking();
     this.steps.set(step.id, { id: step.id, label: step.label, status: "running" });
     this.schedule();
   }
@@ -189,6 +197,39 @@ export class CaptionScheduler {
     if (!known) return;
     known.status = step.ok ? "done" : "failed";
     if (step.doneLabel) known.doneLabel = step.doneLabel;
+  }
+
+  /**
+   * The model is thinking before its next step. A long stretch becomes its own
+   * caption ("Planning the deck"), and a new one when the thinking moves on,
+   * so a silent half-minute still reads as progress.
+   */
+  thinking(delta: string) {
+    if (this.finished || !delta) return;
+    const reasoning = this.reasoning;
+    reasoning.text = (reasoning.text + delta).slice(-2_000);
+    reasoning.total += delta.length;
+    const id = `thinking:${reasoning.stretch}`;
+    const current = this.steps.get(id);
+    const now = this.timers.now();
+    if (current && !this.covered.has(id)) return;
+    if (current) {
+      // Roll to a fresh stretch once the thinking has clearly moved on.
+      if (now - reasoning.coveredAt < 6_000 || reasoning.total - reasoning.coveredLength < 1_200) return;
+      current.status = "done";
+      reasoning.stretch += 1;
+    }
+    this.steps.set(`thinking:${reasoning.stretch}`, { id: `thinking:${reasoning.stretch}`, label: "Thinking it through", status: "running" });
+    this.schedule();
+  }
+
+  /** A real step began: the thinking before it is over. */
+  private endThinking() {
+    const id = `thinking:${this.reasoning.stretch}`;
+    const current = this.steps.get(id);
+    if (!current) return;
+    current.status = "done";
+    this.reasoning = { text: "", total: 0, stretch: this.reasoning.stretch + 1, coveredLength: 0, coveredAt: 0 };
   }
 
   text(delta: string) {
@@ -232,6 +273,11 @@ export class CaptionScheduler {
     const stepIds = (final ? [...this.steps.values()] : fresh).map((step) => step.id);
     for (const id of stepIds) this.covered.add(id);
     this.lastCaptionAt = this.timers.now();
+    const thinking = this.steps.get(`thinking:${this.reasoning.stretch}`)?.status === "running" ? this.reasoning.text : "";
+    if (thinking) {
+      this.reasoning.coveredLength = this.reasoning.total;
+      this.reasoning.coveredAt = this.lastCaptionAt;
+    }
     const wantTitle = !this.titled;
     const request: CaptionRequest = {
       prompt: this.options.prompt,
@@ -240,6 +286,7 @@ export class CaptionScheduler {
       final,
       wantTitle,
       previous: [...this.previous],
+      ...(thinking ? { thinking } : {}),
       ...(wantTitle ? this.placesFor() : {}),
     };
     this.inFlight = (async () => {

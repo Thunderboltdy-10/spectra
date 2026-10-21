@@ -402,7 +402,7 @@ export function defaultArtifactContent(blueprintKey: BlueprintKey) {
           aspectRatio: 1.6,
         },
         dependencies: {},
-        preview: { orientation: "horizontal", autoRun: true, height: 640 },
+        preview: { orientation: "horizontal", autoRun: true },
         networkPolicy: { mode: "none", allowlist: [] },
         environmentSchema: [],
         tests: [],

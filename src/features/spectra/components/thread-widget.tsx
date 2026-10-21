@@ -140,7 +140,7 @@ export function ThreadWidget({
   return (
     <figure data-spectra-widget={widget.id} className="m-0 flex flex-col">
       <figcaption className="order-last flex items-center gap-2 border-t border-[var(--border-subtle)] pt-1.5">
-        <span className="min-w-0 flex-1 truncate font-[var(--font-serif)] text-caption italic text-[var(--text-secondary)]">{widget.title}</span>
+        <span className="min-w-0 flex-1 truncate font-display text-caption italic text-[var(--text-secondary)]">{widget.title}</span>
         {save.status === "saved" ? (
           onOpenArtifact ? (
             <button

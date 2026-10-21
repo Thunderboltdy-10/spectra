@@ -4,6 +4,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import { Icon } from "@/components/icons";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { SearchField } from "@/components/ui/search-field";
 import { formatRelativeTime } from "../components/spectra-view-model";
 import { getSpectraThreads, type SpectraThread } from "../data/api";
 import { spectraBus } from "../events";
@@ -41,12 +42,14 @@ export const ThreadsBrowser = forwardRef<
     onPoint?: (thread: SpectraThread) => void;
     /** What the search starts with (a query handed over from elsewhere). */
     initialQuery?: string;
+    /** Only the threads of this class or workspace. */
+    workspaceId?: string;
     autoFocus?: boolean;
     /** Room under the list, e.g. to scroll clear of the island. */
     listClassName?: string;
     className?: string;
   }
->(function ThreadsBrowser({ selectedId, onChoose, onPoint, initialQuery = "", autoFocus, listClassName, className }, ref) {
+>(function ThreadsBrowser({ selectedId, onChoose, onPoint, initialQuery = "", workspaceId, autoFocus, listClassName, className }, ref) {
   const fieldRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState(initialQuery);
   const [threads, setThreads] = useState<SpectraThread[]>([]);
@@ -67,11 +70,16 @@ export const ThreadsBrowser = forwardRef<
     [],
   );
 
+  // The newest page first; older ones as the list is scrolled to its end. A change reads the newest page again
+  // and keeps the older rows it does not reach, so a long history is read once, not on every change.
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [more, setMore] = useState(false);
   const load = useCallback(() => {
     setFailed(false);
     void getSpectraThreads()
-      .then(({ threads: rows }) => {
-        setThreads(rows);
+      .then(({ threads: rows, nextCursor }) => {
+        setThreads((current) => mergeNewest(current, rows));
+        setCursor((known) => (known && rows.length ? known : nextCursor ?? null));
         setLoaded(true);
       })
       .catch(() => setFailed(true));
@@ -80,52 +88,79 @@ export const ThreadsBrowser = forwardRef<
     load();
     return spectraBus.on("threads.changed", load);
   }, [load]);
+  const loadOlder = useCallback(() => {
+    if (!cursor || more) return;
+    setMore(true);
+    void getSpectraThreads({ cursor })
+      .then(({ threads: rows, nextCursor }) => {
+        setThreads((current) => [...current, ...rows.filter((row) => !current.some((known) => known._id === row._id))]);
+        setCursor(nextCursor ?? null);
+      })
+      .catch(() => undefined)
+      .finally(() => setMore(false));
+  }, [cursor, more]);
+  const endRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const end = endRef.current;
+    if (!end || !cursor) return;
+    const observer = new IntersectionObserver((entries) => entries.some((entry) => entry.isIntersecting) && loadOlder(), { rootMargin: "320px" });
+    observer.observe(end);
+    return () => observer.disconnect();
+  }, [cursor, loadOlder, loaded]);
 
   useEffect(() => {
     if (autoFocus) fieldRef.current?.focus({ preventScroll: true });
   }, [autoFocus]);
 
   const activeIds = useMemo(() => new Set(tabs.filter((tab) => isActiveRunStatus(tab.run.status)).map((tab) => tab.threadId)), [tabs]);
-  const groups = useMemo(() => groupThreads(threads, { activeIds }), [activeIds, threads]);
-  const byId = useMemo(() => new Map(threads.map((thread) => [thread._id, thread])), [threads]);
+  // A place's threads are read from the same pages; scrolling on reads older ones in.
+  const listed = useMemo(
+    () => (workspaceId ? threads.filter((thread) => threadInWorkspace(thread, workspaceId)) : threads),
+    [threads, workspaceId],
+  );
+  const groups = useMemo(() => groupThreads(listed, { activeIds }), [activeIds, listed]);
+  const byId = useMemo(() => new Map(listed.map((thread) => [thread._id, thread])), [listed]);
 
   const searching = query.trim().length > 0;
   const found: ThreadGroup | null = useMemo(() => {
     if (!searching) return null;
     const semantic = search.results
-      .map((result) => (result.anchor.kind === "thread" ? { thread: byId.get(result.anchor.threadId), snippet: result.snippet } : null))
+      .map((result) =>
+        result.anchor.kind === "thread" ? { thread: byId.get(result.anchor.threadId) ?? (workspaceId ? undefined : foundThread(result.anchor.threadId, result.title, result.updatedAt)), snippet: result.snippet } : null,
+      )
+      // In one place, a match whose thread is not known to be there is left out.
       .filter((hit): hit is { thread: SpectraThread; snippet: string } => Boolean(hit?.thread));
-    const rows = semantic.length ? semantic.map((hit) => ({ ...hit.thread, previewText: hit.snippet || hit.thread.previewText })) : matchThreads(threads, query);
+    const rows = semantic.length ? semantic.map((hit) => ({ ...hit.thread, previewText: hit.snippet || hit.thread.previewText })) : matchThreads(listed, query);
     return { key: "found", title: search.status === "loading" && !rows.length ? "Searching" : "Best matches", threads: rows };
-  }, [byId, query, search.results, search.status, searching, threads]);
+  }, [byId, listed, query, search.results, search.status, searching, workspaceId]);
 
   const shown = found ? [found] : groups;
 
   return (
     <div className={cn("flex min-h-0 flex-col", className)}>
-      <label className="mx-3 flex h-9 shrink-0 items-center gap-2 rounded-control bg-[var(--bg-secondary)] px-2.5 text-[var(--text-tertiary)] transition-colors focus-within:bg-[var(--bg-elevated)] focus-within:shadow-[inset_0_0_0_1px_var(--border-strong)]">
-        <Icon name="search" size={15} />
-        <input
-          ref={fieldRef}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape" && query) {
-              event.preventDefault();
-              event.stopPropagation();
-              setQuery("");
-            }
-          }}
-          placeholder="Search threads by topic or words"
-          aria-label="Search threads"
-          className="min-w-0 flex-1 bg-transparent text-caption text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
-        />
-        {search.degraded && searching ? (
-          <Tooltip label="Matching words only right now">
-            <span className="size-1.5 rounded-full bg-[var(--warning)]" />
-          </Tooltip>
-        ) : null}
-      </label>
+      <SearchField
+        ref={fieldRef}
+        value={query}
+        onChange={setQuery}
+        clearable={false}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && query) {
+            event.preventDefault();
+            event.stopPropagation();
+            setQuery("");
+          }
+        }}
+        label="Search threads"
+        placeholder="Search threads by topic or words"
+        className="mx-3 shrink-0"
+        trailing={
+          search.degraded && searching ? (
+            <Tooltip label="Matching words only right now">
+              <span className="size-1.5 rounded-full bg-[var(--warning)]" />
+            </Tooltip>
+          ) : null
+        }
+      />
       <div className={cn("spectra-thin-scrollbar min-h-0 flex-1 overflow-y-auto px-2 pt-2", listClassName)}>
         {failed ? (
           <div className="px-3 py-8 text-center text-caption text-[var(--text-secondary)]">
@@ -134,7 +169,10 @@ export const ThreadsBrowser = forwardRef<
               Try again
             </button>
           </div>
-        ) : !loaded || (searching && search.status === "loading" && !found?.threads.length) ? (
+        ) : !loaded ||
+          (searching && search.status === "loading" && !found?.threads.length) ||
+          // A place whose threads are further back than the pages read so far.
+          (workspaceId && cursor && !listed.length) ? (
           // A ghost of what is coming, never "nothing matches" before the answer is in.
           <div data-life-ghost className="space-y-1 px-1 py-1" role="status" aria-label={loaded ? "Searching threads" : "Loading threads"}>
             {Array.from({ length: loaded ? 3 : 7 }, (_, index) => (
@@ -143,7 +181,11 @@ export const ThreadsBrowser = forwardRef<
           </div>
         ) : shown.every((group) => !group.threads.length) ? (
           <p className="px-3 py-10 text-center text-caption text-[var(--text-tertiary)]">
-            {searching ? `No thread matches “${query.trim()}”.` : "Your threads will appear here."}
+            {searching
+              ? `No thread matches “${query.trim()}”.`
+              : workspaceId
+                ? "No threads here yet. Ask from this place and the thread stays with it."
+                : "Your threads will appear here."}
           </p>
         ) : (
           shown.map((group) =>
@@ -172,10 +214,24 @@ export const ThreadsBrowser = forwardRef<
             ) : null,
           )
         )}
+        {cursor && !searching ? <div ref={endRef} aria-hidden className="h-px" /> : null}
       </div>
     </div>
   );
 });
+
+/** The newest page over the rows already known: rows it covers are replaced (or gone), older ones stay. */
+function mergeNewest(current: SpectraThread[], newest: SpectraThread[]) {
+  if (!current.length || !newest.length) return newest.length ? newest : current;
+  const oldest = newest.reduce((low, row) => Math.min(low, row.updatedAt), Infinity);
+  const fresh = new Set(newest.map((row) => row._id));
+  return [...newest, ...current.filter((row) => !fresh.has(row._id) && row.updatedAt < oldest)];
+}
+
+/** A thread search found beyond the pages read so far: enough of it to show and open. */
+function foundThread(threadId: string, title: string, updatedAt = 0): SpectraThread {
+  return { _id: threadId, title, origin: "chat", status: "active", createdAt: updatedAt, updatedAt };
+}
 
 /** The shape a row will have, so the list never jumps when it arrives. */
 function ThreadRowGhost({ index }: { index: number }) {
@@ -269,4 +325,9 @@ function ThreadRow({
       </span>
     </button>
   );
+}
+
+/** A thread belongs to a place when it was started there or reads from it. */
+function threadInWorkspace(thread: SpectraThread, workspaceId: string) {
+  return thread.workspaceId === workspaceId || Boolean(thread.contextWorkspaceIds?.includes(workspaceId));
 }

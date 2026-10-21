@@ -32,6 +32,12 @@ export function readPermissionPrefs(ai: unknown): PermissionPrefs {
   return { fullControl: record.permissionFullControl === true, allow, deny };
 }
 
+/** Adds what the user allowed once in this thread; their Never still wins. */
+export function withThreadAllows(prefs: PermissionPrefs, allowed: readonly PermissionCategory[] | undefined): PermissionPrefs {
+  const added = (allowed ?? []).filter((category) => !prefs.deny.includes(category) && !prefs.allow.includes(category));
+  return added.length ? { ...prefs, allow: [...prefs.allow, ...added] } : prefs;
+}
+
 export function permissionDecision(
   effect: ToolEffect,
   category: PermissionCategory | undefined,

@@ -154,8 +154,8 @@ describe("Button", () => {
     expect(className).toContain("focus-visible:ring-2");
     expect(className).toContain("active:scale-[0.97]");
     expect(className).not.toContain("hover:-translate-y-px");
-    expect(className.split(/\s+/)).toContain("[color:var(--bg-primary)]");
-    expect(className.split(/\s+/)).toContain("text-caption");
+    expect(className.split(/\s+/)).toContain("[color:var(--text-primary)]");
+    expect(className.split(/\s+/)).toContain("text-ui");
   });
 });
 

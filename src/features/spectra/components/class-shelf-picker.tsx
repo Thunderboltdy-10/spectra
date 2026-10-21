@@ -1,9 +1,9 @@
 "use client";
 
-import { LoaderCircle, Check, GraduationCap, Search } from "@/components/icons/glyph-icons";
+import { SearchField } from "@/components/ui/search-field";
+import { LoaderCircle, Check, GraduationCap } from "@/components/icons/glyph-icons";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ProductEmptyState } from "./product-state";
 import { cn } from "@/lib/utils";
 import { requestSpectra } from "../data/request";
@@ -269,19 +269,16 @@ export function ClassShelfPicker({
           <label className="sr-only" htmlFor="class-shelf-search">
             Search classes
           </label>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--text-tertiary)]" />
-            <Input
-              ref={searchRef}
-              id="class-shelf-search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={onListKeyDown}
-              placeholder="Search by name, programme, or grade"
-              autoComplete="off"
-              className="pl-9"
-            />
-          </div>
+          <SearchField
+            ref={searchRef}
+            id="class-shelf-search"
+            value={query}
+            onChange={setQuery}
+            onKeyDown={onListKeyDown}
+            label="Search classes"
+            placeholder="Search by name, programme, or grade"
+            autoComplete="off"
+          />
           <p className="mt-2 text-micro text-[var(--text-secondary)]">
             {selected.size === 0
               ? `${visible.length} class${visible.length === 1 ? "" : "es"}`

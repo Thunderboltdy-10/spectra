@@ -797,10 +797,11 @@ export const createPersonalItem = mutation({
   },
   handler: async (ctx, args) => {
     const actor = await actorOrThrow(ctx);
+    // A task's time is a moment (due then): it starts and ends together.
     if (
       args.startAt !== undefined &&
       args.endAt !== undefined &&
-      args.endAt <= args.startAt
+      (args.endAt < args.startAt || (args.endAt === args.startAt && args.kind !== "task"))
     )
       throw new Error("CALENDAR_TIME_INVALID: End must be after start.");
     const idempotencyKey = args.idempotencyKey?.trim().slice(0, 240);
@@ -1055,10 +1056,12 @@ export const resizeWorkBlock = mutation({
   },
 });
 
+/** Marks a work block done, or (`done: false`) takes the mark back. */
 export const completeWorkBlock = mutation({
   args: {
     itemId: v.id("calendarItems"),
     expectedRevision: v.number(),
+    done: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const actor = await actorOrThrow(ctx);
@@ -1066,7 +1069,7 @@ export const completeWorkBlock = mutation({
     if (
       !item ||
       item.ownerAccountId !== actor.accountId ||
-      item.kind !== "scheduled_work_block"
+      (item.kind !== "scheduled_work_block" && item.kind !== "task")
     )
       throw new Error("CALENDAR_WORK_BLOCK_NOT_FOUND: This work block is not on your Calendar any more. Refresh Calendar.");
     if (item.revision !== args.expectedRevision)
@@ -1076,7 +1079,7 @@ export const completeWorkBlock = mutation({
     if (item.status === "removed" || item.status === "cancelled")
       throw new Error("CALENDAR_WORK_BLOCK_UNAVAILABLE: This work block was removed or cancelled, so it cannot be completed.");
     await ctx.db.patch(item._id, {
-      status: "completed",
+      status: args.done === false ? "active" : "completed",
       revision: item.revision + 1,
       updatedAt: Date.now(),
     });

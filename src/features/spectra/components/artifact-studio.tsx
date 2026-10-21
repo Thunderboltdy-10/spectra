@@ -158,6 +158,7 @@ import { usePresencePreview } from "../collaboration/scoped-hooks";
 import { useInteractionPresence } from "../collaboration/use-interaction-presence";
 import { contextSourceRegistry } from "../context";
 import {
+  copySpectraArtifact,
   getSpectraArtifactLinks,
   getSpectraArtifactVersions,
   getSpectraArtifactVersion,
@@ -169,6 +170,7 @@ import {
 } from "../data/api";
 import type { SpectraSandboxAsset } from "../embed/sandbox-protocol";
 import { spectraBus } from "../events";
+import { SharedPeopleButton } from "./share/shared-people";
 import type { SpectraCommandOutcome } from "../events/contracts";
 import { StudioViewportContext, withStudioViewportReady } from "./studio-viewport-ready";
 import {
@@ -275,6 +277,8 @@ import {
 } from "./spectra-view-model";
 import { requestSpectra } from "../data/request";
 import { threadHref } from "../chat/home-routes";
+import { firstTipMoment } from "../onboarding/first-tips";
+
 function StudioTypePlaceholder() {
   return <div className="min-h-0 min-w-0 flex-1" role="status" aria-busy="true" aria-label="Opening editor" />;
 }
@@ -2911,7 +2915,9 @@ function ArtifactStudioEditor({
     artifact.accessLevel === "read" || protectedOriginal
       ? "read_only"
       : "edit";
-  const permissionReadOnly = replicaTruth === null || (workType
+  // An archived work's room is closed, so editing it could only queue edits
+  // that never sync. It opens read-only until it is restored.
+  const permissionReadOnly = replicaTruth === null || artifact.status === "archived" || (workType
     ? !workCan(workType, sharingRole, "edit")
     : artifact.accessLevel === "read");
   // The live room is the editing substrate, not a feature unlocked by sharing.
@@ -2987,6 +2993,20 @@ function ArtifactStudioEditor({
   );
   const livePermissionLost =
     isCollaborativeArtifact && live.state === "permission_lost";
+  const historyIsMine = artifact.ownership !== "shared";
+  const makeCopy = async () => {
+    const creation = beginCreation();
+    try {
+      const copy = await copySpectraArtifact(artifact._id, { workspaceId: artifact.placements?.[0]?.workspaceId });
+      creation.land();
+      spectraBus.emit("workspace.refreshRequested", {});
+      toast.success("Copied. The copy is yours alone.");
+      onOpenArtifact(copy.artifactId);
+    } catch (error) {
+      creation.cancel();
+      toast.error(describeFailure(error, { fallback: "The copy was not made." }).message);
+    }
+  };
   // Owners stay editable if a room token glitches to read. Shared
   // collaborators follow the live token as soon as a downgrade arrives,
   // even when the Library snapshot still says modify.
@@ -3584,7 +3604,8 @@ function ArtifactStudioEditor({
       syncingRef.current = true;
       rememberLocalSyncKey(localSyncKeysRef.current, key);
       setSyncBusy(true);
-      setLiveConflict(null);
+      // A standing notice clears only when a retry succeeds; clearing it at
+      // the start of every retry made it flicker on and off.
       try {
         if (!live.supported) throw new Error("ARTIFACT_LIVE_MODEL_UNAVAILABLE");
         const hadPendingTransportUpdate = live.unsynchronizedChanges > 0;
@@ -3691,6 +3712,7 @@ function ArtifactStudioEditor({
         } else {
           await queueNativeMaterialization(snapshot);
         }
+        setLiveConflict(null);
         return true;
       } catch (error) {
         localSyncKeysRef.current.delete(key);
@@ -5045,7 +5067,7 @@ function ArtifactStudioEditor({
   useEffect(() => {
     function requestClose(request: { workId: string; instance?: string }) {
       if (closeRequestReaches(request, { workId: artifact._id, instanceKey }))
-        requestStudioClose();
+        void requestStudioClose();
     }
     function beforeUnload(event: BeforeUnloadEvent) {
       if (!dirty) return;
@@ -5091,7 +5113,7 @@ function ArtifactStudioEditor({
       // tab is where the person is, and stays until its tab is closed.
       if (mode === "tab") return;
       event.preventDefault();
-      requestStudioClose();
+      void requestStudioClose();
     }
     const removeRequestClose = spectraBus.handle("work.requestClose", requestClose);
     window.addEventListener("beforeunload", beforeUnload);
@@ -5280,12 +5302,38 @@ function ArtifactStudioEditor({
     return synchronizeDraft(snapshot);
   }
 
-  function requestStudioClose() {
+  async function requestStudioClose() {
     if (decideClose(dirty, live.unsynchronizedChanges) === "close") {
       onClose();
       return;
     }
+    // Closing saves. Only an edit that cannot reach the room within a moment
+    // asks what to do; a draft that is merely mid-save just closes.
+    if (!readOnly && live.state !== "closed" && claimCloseAction(closeActionRef)) {
+      setCloseActionBusy(true);
+      try {
+        if (await saveQuietly()) {
+          onClose();
+          return;
+        }
+      } finally {
+        closeActionRef.current = false;
+        setCloseActionBusy(false);
+      }
+    }
     setUnsavedCloseOpen(true);
+  }
+
+  async function saveQuietly() {
+    const settled = (async () => {
+      while (syncingRef.current) await new Promise((resolve) => window.setTimeout(resolve, 40));
+      if (dirtyRef.current && !(await synchronizeDraft(currentSnapshotRef.current))) return false;
+      if (!live.transport) return !dirtyRef.current;
+      await live.transport.flush();
+      return true;
+    })().catch(() => false);
+    const patience = new Promise<false>((resolve) => window.setTimeout(() => resolve(false), 4_000));
+    return Promise.race([settled, patience]);
   }
 
   async function saveAndClose() {
@@ -5318,10 +5366,19 @@ function ArtifactStudioEditor({
   async function discardQueuedDraft() {
     if (recoveryAdoptionRequest.current) return false;
     const branch = live.recovery.branches.find((candidate) => candidate.id === live.recovery.activeBranchId);
-    if (!branch?.canReadCurrent || !branch.currentAnchor || recoveryNeedsReview.current === branch.id) {
-      setUnsavedCloseOpen(false);
-      setLocalDraftsArtifactId(artifact._id);
-      return false;
+    // Discard always closes. When there is no reachable room to adopt (a
+    // closed or offline room, or a draft already under review), discarding
+    // drops this device's copy of the draft instead of trapping the work open.
+    if (!branch) return true;
+    if (!branch.canReadCurrent || !branch.currentAnchor || recoveryNeedsReview.current === branch.id) {
+      try {
+        await live.discardLocalRecovery({ branchId: branch.id, expectedGeneration: branch.generation });
+        recoveryNeedsReview.current = null;
+      } catch (error) {
+        toast.error(describeLocalRecoveryFailure(error, "discard"));
+        return false;
+      }
+      return true;
     }
     const origin = recoveryViewRef.current;
     const request = new AbortController();
@@ -5561,6 +5618,7 @@ function ArtifactStudioEditor({
     },
   );
   const statusNow = useNow(30_000);
+  useEffect(() => firstTipMoment("work"), []);
   const [statusActionBusy, setStatusActionBusy] = useState(false);
   const [statusCompareOpen, setStatusCompareOpen] = useState(false);
   const statusLocalReplica = replicaTruth?.replicas.find(
@@ -5599,6 +5657,7 @@ function ArtifactStudioEditor({
           : undefined,
         nativeActivity: Boolean(nativeMaterialization),
         nativeConflict: Boolean(nativeConflict),
+        draftReview: live.recovery.state === "review_required",
         savedAt: dirty ? undefined : artifact.updatedAt,
         now: statusNow || Date.now(),
         can: {
@@ -5607,8 +5666,9 @@ function ArtifactStudioEditor({
           reconnect: true,
           "keep-spectra": Boolean(nativeConflict) && !readOnly,
           "keep-office": Boolean(nativeConflict) && !readOnly,
-          compare: true,
-          history: true,
+          compare: historyIsMine || Boolean(nativeConflict?.previews?.length),
+          history: historyIsMine,
+          "review-draft": true,
           "open-in-office": Boolean(statusLocalFile) && nativeOfficeDocument,
           "show-in-folder": Boolean(statusLocalFile),
         },
@@ -5616,6 +5676,7 @@ function ArtifactStudioEditor({
     [
       artifact.updatedAt,
       dirty,
+      live.recovery.state,
       nativeConflict,
       nativeMaterialization,
       nativeOfficeApplication,
@@ -5643,6 +5704,10 @@ function ArtifactStudioEditor({
     }
     if (kind === "history") {
       setHistoryOpen(true);
+      return;
+    }
+    if (kind === "review-draft") {
+      setLocalDraftsArtifactId(artifact._id);
       return;
     }
     if (kind === "open-in-office" || kind === "show-in-folder") {
@@ -6020,6 +6085,8 @@ function ArtifactStudioEditor({
           </div>
           <ArtifactHeaderActions
             presence={
+              <>
+              <SharedPeopleButton artifactId={artifact._id} onShare={onShare} onCopy={() => void makeCopy()} />
               <StudioPresenceIndicator
                 transport={live.transport}
                 currentAccountId={live.accountId}
@@ -6081,6 +6148,7 @@ function ArtifactStudioEditor({
                   });
                 }}
               />
+              </>
             }
             status={
               <ArtifactStatusControl
@@ -6143,13 +6211,19 @@ function ArtifactStudioEditor({
                     {detailsOpen ? "Close details" : "Open details"}
                   </WorkbarMenuAction>
                 ) : null}
-                <WorkbarMenuAction
-                  onSelect={() => {
-                    loadVersionHistory();
-                  }}
-                >
-                  <History className="h-4 w-4" /> Version history
+                <WorkbarMenuAction onSelect={() => void makeCopy()}>
+                  <Copy className="h-4 w-4" /> Make a copy
                 </WorkbarMenuAction>
+                {/* History, and who changed what, is the author's alone. */}
+                {historyIsMine ? (
+                  <WorkbarMenuAction
+                    onSelect={() => {
+                      loadVersionHistory();
+                    }}
+                  >
+                    <History className="h-4 w-4" /> Version history
+                  </WorkbarMenuAction>
+                ) : null}
                 <WorkbarMenuAction onSelect={() => setLocalDraftsArtifactId(artifact._id)}>
                   <RotateCcw className="h-4 w-4" /> Local drafts
                 </WorkbarMenuAction>
@@ -6157,12 +6231,8 @@ function ArtifactStudioEditor({
             }
             close={
               <IconButton
-                label={
-                  decideClose(dirty, live.unsynchronizedChanges) === "confirm"
-                    ? "Save or discard before closing"
-                    : "Close"
-                }
-                onClick={requestStudioClose}
+                label="Close"
+                onClick={() => void requestStudioClose()}
                 icon={X}
               />
             }
@@ -6459,6 +6529,7 @@ function ArtifactStudioEditor({
                   key={`${artifact._id}:deck`}
                   artifactId={artifact._id}
                   mode={contentMode}
+                  onOpenFull={mode === "split" && !compact ? onExpand : undefined}
                   content={editorContent}
                   onChange={editorChange}
                   aiChangedPaths={highlightPaths}

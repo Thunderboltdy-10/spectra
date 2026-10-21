@@ -12,7 +12,9 @@ import { nextDay, zonedDay, zonedInstant, type BriefSuggestion } from "./daily-b
  * so the scheduler writes the brief a little before they wake; when Home opens
  * after that time and there is none (they were signed out, or the scheduler
  * is not set up), Home asks for it once. It arrives through the live query,
- * so every open tab shows it together. There is no writing it again.
+ * so every open tab shows it together. There is no writing it again. On a
+ * new day the last brief stays until the new one is ready, so Home never
+ * opens on an empty morning.
  */
 
 const RETRY_AFTER_MS = 15 * 60_000;
@@ -20,7 +22,15 @@ const RETRY_AFTER_MS = 15 * 60_000;
 export type BriefState =
   | { status: "off" | "waiting" | "failed" }
   | { status: "writing"; wakeTime: string }
-  | { status: "ready"; day: string; wakeTime: string; recap: string; suggestions: BriefSuggestion[] };
+  | {
+      status: "ready";
+      day: string;
+      wakeTime: string;
+      recap: string;
+      suggestions: BriefSuggestion[];
+      /** The last day's brief, shown while today's is written. */
+      earlier?: boolean;
+    };
 
 const localZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
@@ -51,7 +61,7 @@ export function useDailyBrief(now: number | null): BriefState {
     );
   }, [hydrated, on, setSchedule, timeZone, wakeTime]);
 
-  const missing = row === null || (row?.state === "failed" && Date.now() - row.claimedAt > RETRY_AFTER_MS);
+  const missing = row === null || row?.state === "absent" || (row?.state === "failed" && Date.now() - row.claimedAt > RETRY_AFTER_MS);
   useEffect(() => {
     if (!on || !awake || !missing || !day || asked.current === day) return;
     asked.current = day;
@@ -68,6 +78,16 @@ export function useDailyBrief(now: number | null): BriefState {
     // Written before they wake, it is there as soon as they look.
     if (row?.state === "ready")
       return { status: "ready", day, wakeTime, recap: row.recap ?? "", suggestions: row.suggestions as BriefSuggestion[] };
+    // Until today's is ready, the last one stays.
+    if (row?.previous)
+      return {
+        status: "ready",
+        day: row.previous.day,
+        wakeTime,
+        recap: row.previous.recap,
+        suggestions: row.previous.suggestions as BriefSuggestion[],
+        earlier: true,
+      };
     if (!awake) return { status: "waiting" };
     return row?.state === "failed" ? { status: "failed" } : { status: "writing", wakeTime };
   }, [awake, day, on, row, wakeTime]);

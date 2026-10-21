@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   diffCharacters,
+  diffWords,
   foldForComparison,
 } from "../components/flashcards/typed-answer-diff";
 
@@ -30,5 +31,15 @@ describe("typed answer diff", () => {
 
   it("folds answers the same way for the right-or-wrong check", () => {
     expect(foldForComparison("  Café, au lait! ")).toBe(foldForComparison("cafe au   lait"));
+  });
+
+  it("marks a typed sentence word by word against the answer's own words", () => {
+    expect(
+      render(diffWords("condensashun forms clouds", "Water vapour cools and condensation forms droplets that gather into clouds.")),
+    ).toBe("condensa[-shu]n forms clouds");
+  });
+
+  it("marks a typed word with nothing near it in the answer as a whole", () => {
+    expect(render(diffWords("banana", "Water vapour cools into droplets."))).toBe("[-banana]");
   });
 });

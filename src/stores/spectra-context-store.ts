@@ -34,6 +34,8 @@ export type SpectraOpenObject = {
   label: string;
   presentation: SpectraOpenPresentation;
   workspaceId?: string;
+  /** A side-panel work opened full: leaving it shrinks it back beside the page. */
+  returnsTo?: "split";
 };
 
 type SpectraContextState = {
@@ -61,6 +63,8 @@ type SpectraContextState = {
   openObject: (object: SpectraOpenObject) => void;
   focusObject: (type: SpectraOpenObjectType, id: string) => boolean;
   deactivateObject: () => void;
+  /** Shrinks the work in front back into the side panel when it was opened full from there; its id, or null. */
+  returnToSide: () => string | null;
   closeObject: (type: SpectraOpenObjectType, id: string) => void;
   closePresentation: (presentation: SpectraOpenPresentation) => void;
   setTileObjects: (objects: SpectraOpenObject[]) => void;
@@ -218,8 +222,14 @@ export const useSpectraContextStore = create<SpectraContextState>()(persist((set
       revision: state.revision + 1,
     };
   }),
-  openObject: (object) => set((state) => {
-    const key = spectraObjectKey(object);
+  openObject: (requested) => set((state) => {
+    const key = spectraObjectKey(requested);
+    const previous = state.openObjects.find((row) => spectraObjectKey(row) === key);
+    const { returnsTo: _returnsTo, ...plain } = requested;
+    const object: SpectraOpenObject =
+      requested.presentation === "tab" && (previous?.presentation === "split" || previous?.returnsTo === "split")
+        ? { ...plain, returnsTo: "split" }
+        : plain;
     const movesOutOfTiles = object.type === "artifact" && object.presentation !== "tile" && state.tileArtifactIds.includes(object.id);
     const isAuxiliaryPanel = object.presentation === "thread-panel" || object.presentation === "run-panel";
     return {
@@ -240,6 +250,14 @@ export const useSpectraContextStore = create<SpectraContextState>()(persist((set
     return true;
   },
   deactivateObject: () => set((state) => ({ activeOpenObjectKey: null, revision: state.revision + 1 })),
+  returnToSide: () => {
+    const state = get();
+    const active = state.openObjects.find((row) => spectraObjectKey(row) === state.activeOpenObjectKey);
+    if (active?.returnsTo !== "split") return null;
+    const { returnsTo: _returnsTo, ...side } = active;
+    set({ openObjects: upsertOpenObject(state.openObjects, { ...side, presentation: "split" }), revision: state.revision + 1 });
+    return active.id;
+  },
   closeObject: (type, id) => set((state) => {
     const key = `${type}:${id}`;
     const nextOpen = state.openObjects.filter((row) => spectraObjectKey(row) !== key);

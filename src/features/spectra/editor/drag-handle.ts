@@ -4,8 +4,9 @@ import type { EditorView } from "@tiptap/pm/view";
 
 type Block = { pos: number; size: number; element: HTMLElement };
 
-const GUTTER_GAP = 8;
-const CONTROL_WIDTH = 48;
+// The handles stand in the margin, clear of the words they move.
+const GUTTER_GAP = 12;
+const CONTROL_WIDTH = 46;
 
 function blocks(view: EditorView): Block[] {
   const result: Block[] = [];

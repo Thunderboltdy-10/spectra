@@ -436,6 +436,10 @@ export async function executeApplicationCommand(
     onUiEvent?.({ key: "embed_changed", payload: { targetId: artifactId, embedId: String(parsed.embedId), action, note: EMBED_NOTES[action] ?? "Changed an embed" } });
     return result ?? { ok: true };
   }
+  if (command === "show_work") {
+    const result = await applyMutation<typeof parsed, { embedId?: string }>("artifactEmbeds:create", parsed);
+    return { ok: true, embedId: result?.embedId };
+  }
   if (command === "publish_code")
     return publishCode({ artifactId: String(parsed.artifactId), action: parsed.action === "unpublish" ? "unpublish" : "publish", signal, onUiEvent });
   if (command === "respond_share_invitation") {

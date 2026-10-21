@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { GripVertical, PanelRightClose, Maximize2, Plus, X } from "@/components/icons/glyph-icons";
+import { GripVertical, Maximize2, Plus, X } from "@/components/icons/glyph-icons";
 import {
   useEffect,
   useMemo,
@@ -16,6 +16,7 @@ import type { SpectraArtifact } from "../data/api";
 import type { ApplicationCommandDispatcher } from "../commands/application-dispatcher";
 import { getWorkDefinition } from "../work/registry";
 import { isArtifactTypeKey } from "../artifacts/registry";
+import { presentWork, type PresentedWorkType } from "../artifacts/presentation";
 import { spectraBus } from "../events";
 import {
   createAutomaticWorkbenchLayout,
@@ -23,6 +24,7 @@ import {
   enforceWorkbenchMinimums,
   firstWorkbenchPaneId,
   readSharedWorkbenchSession,
+  swapWorkbenchPanes,
   writeSharedWorkbenchSession,
   validateWorkbenchTree,
   type WorkbenchNode,
@@ -42,7 +44,6 @@ type ArtifactTileSurfaceProps = {
   onCloseAll: () => void;
   onAddArtifact?: (artifactId: string) => void;
   onFocusSet: () => void;
-  onExitFocusSet: () => void;
   onArchive?: (artifact: SpectraArtifact) => Promise<void> | void;
   onDirtyChange: (artifactId: string, dirty: boolean) => void;
   onContinueThread?: (threadId: string, title: string) => void;
@@ -68,7 +69,6 @@ export function ArtifactTileSurface({
   onCloseAll,
   onAddArtifact,
   onFocusSet,
-  onExitFocusSet,
   onArchive,
   onDirtyChange,
   onContinueThread,
@@ -88,6 +88,7 @@ export function ArtifactTileSurface({
     (state) => state.moveTileBefore,
   );
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const stageRef = useRef<HTMLElement | null>(null);
   const [inlineSize, setInlineSize] = useState(1200);
@@ -119,7 +120,8 @@ export function ArtifactTileSurface({
     () => createAutomaticWorkbenchLayout(workbenchTabs),
     [workbenchTabs],
   );
-  const tabSignature = workbenchTabs.map((tab) => tab.id).join(":");
+  // Which works are laid out, not their order: a tile moved by hand keeps the layout it was moved in.
+  const tabSignature = workbenchTabs.map((tab) => tab.id).sort().join(":");
   const [layout, setLayout] = useState<WorkbenchNode | null>(null);
   const [fallbackLayout, setFallbackLayout] = useState<WorkbenchNode | null>(
     null,
@@ -143,9 +145,8 @@ export function ArtifactTileSurface({
         ? session.openPanes
         : automaticLayout,
     );
-    // tabSignature already tracks workbenchTabs identity for this restore.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- workbenchTabs is represented by tabSignature
-  }, [automaticLayout, tabSignature]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the works laid out are represented by tabSignature
+  }, [tabSignature]);
   useEffect(() => {
     if (!layout) return;
     const session = readSharedWorkbenchSession(window.localStorage);
@@ -175,9 +176,14 @@ export function ArtifactTileSurface({
     minimumFallback && fallbackLayout ? fallbackLayout : fittedLayout;
   useEffect(() => setFallbackLayout(null), [inlineSize, layout]);
 
-  function moveBefore(event: DragEvent, targetId: string) {
+  // A tile dropped on another trades places with it, and the order follows.
+  function dropOn(event: DragEvent, targetId: string) {
+    if (!draggingId) return;
     event.preventDefault();
-    if (!draggingId || draggingId === targetId) return;
+    event.stopPropagation();
+    setDropTargetId(null);
+    if (draggingId === targetId) return;
+    setLayout((current) => (current ? swapWorkbenchPanes(current, draggingId, targetId) : current));
     moveTileBefore(draggingId, targetId);
   }
 
@@ -242,62 +248,28 @@ export function ArtifactTileSurface({
               <Plus className="h-4 w-4" />
             </button>
             {addOpen ? (
-              <div className="absolute right-0 top-[calc(100%+7px)] max-h-[280px] w-[260px] overflow-y-auto rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-hover">
-                {allArtifacts
-                  .filter(
-                    (artifact) =>
-                      !visibleArtifacts.some(
-                        (visible) => visible._id === artifact._id,
-                      ),
-                  )
-                  .map((artifact) => (
-                    <button
-                      key={artifact._id}
-                      type="button"
-                      onClick={() => {
-                        onAddArtifact(artifact._id);
-                        setAddOpen(false);
-                      }}
-                      className="flex w-full items-center gap-2 rounded-control px-2.5 py-2 text-left transition hover:bg-[var(--bg-hover)]"
-                    >
-                      <span className="min-w-0 flex-1 truncate text-ui text-[var(--text-primary)]">
-                        {artifact.title}
-                      </span>
-                      <span className="text-micro capitalize text-[var(--text-tertiary)]">
-                        {artifact.blueprintKey.replaceAll("_", " ")}
-                      </span>
-                    </button>
-                  ))}
-                {allArtifacts.every((artifact) =>
-                  visibleArtifacts.some(
-                    (visible) => visible._id === artifact._id,
-                  ),
-                ) ? (
-                  <div className="px-2.5 py-3 text-caption text-[var(--text-tertiary)]">
-                    All available work is already open.
-                  </div>
-                ) : null}
-              </div>
+              <AddWorkPicker
+                artifacts={allArtifacts.filter((artifact) => !visibleArtifacts.some((visible) => visible._id === artifact._id))}
+                onPick={(artifactId) => {
+                  onAddArtifact(artifactId);
+                  setAddOpen(false);
+                }}
+                onClose={() => setAddOpen(false)}
+              />
             ) : null}
           </div>
         ) : null}
-        <button
-          type="button"
-          onClick={isolated ? onExitFocusSet : onFocusSet}
-          className="flex h-9 items-center gap-1.5 rounded-control px-2.5 text-ui font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-          title={
-            isolated
-              ? "Return to workspace with these tiles still available"
-              : "Expand tiled workspace"
-          }
-        >
-          {isolated ? (
-            <PanelRightClose className="h-3.5 w-3.5" />
-          ) : (
+        {isolated ? null : (
+          <button
+            type="button"
+            onClick={onFocusSet}
+            className="flex h-9 items-center gap-1.5 rounded-control px-2.5 text-ui font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            title="Give these works their own tab"
+          >
             <Maximize2 className="h-3.5 w-3.5" />
-          )}
-          {isolated ? "Return" : "Expand tiles"}
-        </button>
+            Expand tiles
+          </button>
+        )}
         <button
           type="button"
           onClick={safeCloseAll}
@@ -328,19 +300,40 @@ export function ArtifactTileSurface({
               )!;
               return (
                 <div
-                  draggable
-                  onDragStart={() => setDraggingId(artifact._id)}
-                  onDragEnd={() => setDraggingId(null)}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) => moveBefore(event, artifact._id)}
-                  className={`relative flex h-full min-h-0 min-w-0 flex-1 ${draggingId === artifact._id ? "opacity-60" : ""}`}
+                  onDragOver={(event) => {
+                    if (!draggingId) return;
+                    event.preventDefault();
+                    setDropTargetId(artifact._id === draggingId ? null : artifact._id);
+                  }}
+                  onDragLeave={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTargetId(null);
+                  }}
+                  onDrop={(event) => dropOn(event, artifact._id)}
+                  data-dragging={draggingId === artifact._id || undefined}
+                  data-drop-target={dropTargetId === artifact._id || undefined}
+                  className="tile-slot relative flex h-full min-h-0 min-w-0 flex-1"
                 >
-                  <span
-                    className="absolute left-2 top-2 z-chrome flex h-7 w-7 cursor-grab items-center justify-center rounded-control bg-[color-mix(in_oklab,var(--bg-primary)_88%,transparent)] text-[var(--text-tertiary)]"
-                    title="Drag to rearrange"
-                  >
-                    <GripVertical className="h-3.5 w-3.5" />
-                  </span>
+                  {visibleArtifacts.length > 1 ? (
+                    <span
+                      draggable
+                      onDragStart={(event) => {
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("application/x-spectra-tile", artifact._id);
+                        const tile = event.currentTarget.parentElement;
+                        if (tile) event.dataTransfer.setDragImage(tile, 24, 24);
+                        setDraggingId(artifact._id);
+                      }}
+                      onDragEnd={() => {
+                        setDraggingId(null);
+                        setDropTargetId(null);
+                      }}
+                      className="tile-grip"
+                      title="Drag onto another work to trade places"
+                      aria-hidden
+                    >
+                      <GripVertical className="h-3.5 w-3.5 rotate-90" />
+                    </span>
+                  ) : null}
                   <ArtifactStudio
                     mode="tab"
                     compact={false}
@@ -368,5 +361,67 @@ export function ArtifactTileSurface({
         ) : null}
       </div>
     </section>
+  );
+}
+
+/** The works that can join the set, found by name; Escape or a click away closes it. */
+function AddWorkPicker({
+  artifacts,
+  onPick,
+  onClose,
+}: {
+  artifacts: SpectraArtifact[];
+  onPick: (artifactId: string) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const away = (event: PointerEvent) => {
+      if (!rootRef.current?.parentElement?.contains(event.target as Node)) onClose();
+    };
+    document.addEventListener("pointerdown", away);
+    return () => document.removeEventListener("pointerdown", away);
+  }, [onClose]);
+  const term = query.trim().toLowerCase();
+  const found = term ? artifacts.filter((artifact) => artifact.title.toLowerCase().includes(term)) : artifacts;
+  return (
+    <div
+      ref={rootRef}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onClose();
+      }}
+      className="absolute right-0 top-[calc(100%+7px)] z-dropdown flex max-h-[340px] w-[280px] flex-col overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-hover"
+    >
+      <input
+        autoFocus
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && found[0]) onPick(found[0]._id);
+        }}
+        placeholder="Find a work to add"
+        aria-label="Find a work to add"
+        className="h-10 shrink-0 border-b border-[var(--border-subtle)] bg-transparent px-3 text-ui text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+        {found.map((artifact) => (
+          <button
+            key={artifact._id}
+            type="button"
+            onClick={() => onPick(artifact._id)}
+            className="flex w-full items-center gap-2 rounded-control px-2.5 py-2 text-left transition hover:bg-[var(--bg-hover)]"
+          >
+            <span className="min-w-0 flex-1 truncate text-ui text-[var(--text-primary)]">{artifact.title}</span>
+            <span className="text-micro text-[var(--text-tertiary)]">{presentWork(artifact.blueprintKey as PresentedWorkType, artifact.title)?.label}</span>
+          </button>
+        ))}
+        {found.length === 0 ? (
+          <p className="px-2.5 py-3 text-caption text-[var(--text-tertiary)]">
+            {artifacts.length ? "No work by that name." : "Every work is already here."}
+          </p>
+        ) : null}
+      </div>
+    </div>
   );
 }

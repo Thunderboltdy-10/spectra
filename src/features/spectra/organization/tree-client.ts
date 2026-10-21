@@ -38,6 +38,8 @@ export type TreeNode = {
   trashedAt?: number;
   /** The shelf stack this work is gathered into, if any. */
   stackId?: string;
+  /** A work in a workspace that its people can see; absent, it is private to its author. */
+  sharedWithWorkspace?: boolean;
   target?: {
     nodeId: string;
     kind: TreeNode["kind"];

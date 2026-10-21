@@ -4,54 +4,53 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 /**
- * Spectra's one action treatment.
+ * Spectra's one action treatment, the same as the page bars' commands: words
+ * and a glyph on the page itself, no fill and no outline, one height and one
+ * size of type everywhere around the app. What a button is says itself in its
+ * tone, not a block of colour:
  *
- * `primary` is filled near-black on the page surface, not violet. Spectra violet
- * is an actor identity colour (`--ownership-ai`, `--presence-1`) and the Designer
- * charter reserves the actor colours for where actors act — if every primary CTA
- * were violet, violet would stop meaning "Spectra did this". Near-black also
- * matches `.spectra-workbar-primary`, so the editor workbar and the routes agree.
+ *   primary      the step the place is for, in the reading ink and set firmer
+ *   secondary    any other action, in the reading ink
+ *   ghost        a quiet action, in the secondary ink until pointed at
+ *   destructive  a confirmation that removes something, in rose
  *
- * One hover/focus/active treatment for every variant:
- *   hover         a 1px lift, slightly softened
- *   active        settles back to 0 (a real push)
- *   focus-visible a 2px `--focus-ring-color` ring, offset from the surface
- *   disabled      muted fill (primary) or 45% opacity (other variants), not-allowed cursor, no lift
+ * One hover/focus/active treatment for every variant: the hover wash that
+ * bar commands use, a press that settles back (MOTION.md, Controls), and a
+ * 2px `--focus-ring-color` ring. Disabled is 45% opacity with no pointer.
  *
- * `whitespace-nowrap` is part of the contract, not decoration: a primary CTA
- * label must never wrap. If a label does not fit, shorten the label.
+ * `whitespace-nowrap` is part of the contract, not decoration: a label must
+ * never wrap. If a label does not fit, shorten the label. Works keep their own
+ * controls (workbars, sheet chips); this is for the app around them.
  */
 const buttonVariants = cva(
   [
-    "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-control font-semibold",
-    "outline-none transition-[color,background-color,border-color,opacity,transform]",
-    // A press compresses in 90 ms and springs back out (MOTION.md, Controls); hover raises tone, not size.
-    "[transition-timing-function:var(--ease-standard),var(--ease-standard),var(--ease-standard),var(--ease-standard),var(--ease-spring)] [transition-duration:var(--motion-fast),var(--motion-fast),var(--motion-fast),var(--motion-fast),var(--motion-spring)]",
+    "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-control bg-transparent text-ui",
+    "[&_svg]:size-[18px] [&_svg]:shrink-0",
+    "outline-none transition-[color,background-color,opacity,transform]",
+    "[transition-timing-function:var(--ease-standard),var(--ease-standard),var(--ease-standard),var(--ease-spring)] [transition-duration:var(--motion-fast),var(--motion-fast),var(--motion-fast),var(--motion-spring)]",
     "active:scale-[0.97] active:[transition-duration:90ms]",
-    "focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)]",
-    // `disabled:pointer-events-none` below means hover can never fire while
-    // disabled, so the press needs no `enabled:` guard (which would also skip
-    // anchors rendered through `asChild`).
-    "disabled:pointer-events-none disabled:cursor-not-allowed",
+    "focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]",
+    // `disabled:pointer-events-none` means hover can never fire while disabled,
+    // so the press needs no `enabled:` guard (which would also skip anchors
+    // rendered through `asChild`).
+    "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-45",
   ].join(" "),
   {
     variants: {
       variant: {
-        /** The one primary. 15.7:1 against its own fill. */
-        primary:
-          "border border-[var(--text-primary)] bg-[var(--text-primary)] [color:var(--bg-primary)] hover:opacity-90 disabled:border-transparent disabled:bg-[color-mix(in_oklab,var(--text-primary)_72%,var(--bg-elevated))] disabled:[color:var(--bg-primary)]",
-        secondary:
-          "border border-[var(--border-default)] bg-[var(--bg-elevated)] [color:var(--text-primary)] hover:bg-[var(--bg-secondary)] disabled:opacity-45",
-        ghost:
-          "border border-transparent bg-transparent [color:var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:[color:var(--text-primary)] disabled:opacity-45",
+        primary: "font-semibold [color:var(--text-primary)] hover:bg-[var(--bg-hover)]",
+        secondary: "font-medium [color:var(--text-primary)] hover:bg-[var(--bg-hover)]",
+        ghost: "font-medium [color:var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:[color:var(--text-primary)]",
         /** Destructive confirmation only. Rose stays a local discontinuity. */
         destructive:
-          "border border-[color-mix(in_oklab,var(--danger)_34%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_10%,var(--bg-secondary))] [color:color-mix(in_oklab,var(--danger)_80%,var(--text-primary))] hover:bg-[color-mix(in_oklab,var(--danger)_16%,var(--bg-secondary))] disabled:opacity-45",
+          "font-semibold [color:color-mix(in_oklab,var(--danger)_85%,var(--text-primary))] hover:bg-[color-mix(in_oklab,var(--danger)_9%,transparent)]",
       },
+      /* Every size is the bar's size: the names stay so callers need not
+         change, and a place never mixes two sizes of button. */
       size: {
-        sm: "min-h-8 px-2.5 text-micro",
-        md: "min-h-9 px-3 text-caption",
-        lg: "min-h-10 px-4 text-ui",
+        sm: "min-h-9 px-3",
+        md: "min-h-9 px-3",
+        lg: "min-h-9 px-3",
         icon: "size-9 px-0",
       },
     },

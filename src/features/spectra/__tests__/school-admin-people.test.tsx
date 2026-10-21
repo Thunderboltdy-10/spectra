@@ -74,11 +74,11 @@ afterEach(() => {
 
 async function openInvite(email: string) {
   render(<SchoolAdminShell />);
-  fireEvent.click(await screen.findByRole("button", { name: /Invite member/ }));
-  fireEvent.change(await screen.findByPlaceholderText("name@school.example"), {
+  fireEvent.click(await screen.findByRole("button", { name: "Invite people" }));
+  fireEvent.change(await screen.findByLabelText("School email addresses"), {
     target: { value: email },
   });
-  fireEvent.submit(document.querySelector("#school-invite-form")!);
+  fireEvent.click(screen.getByRole("button", { name: /^Invite as / }));
 }
 
 describe("School admin People", () => {
@@ -101,39 +101,31 @@ describe("School admin People", () => {
     expect(navigation.replace).not.toHaveBeenCalled();
     expect(toasts.error).toHaveBeenCalledExactlyOnceWith("Spectra could not reach the server. Check your connection, then try again.");
     expect(peopleCalls()).toHaveLength(0);
-    expect(screen.queryByPlaceholderText("Search verified school members")).toBeNull();
+    expect(screen.queryByPlaceholderText("Find someone by name or email")).toBeNull();
   });
 
-  it("answers a sent invitation with exactly one toast", async () => {
+  it("answers a sent invitation in the dialog, without a toast", async () => {
     api.mutateAdministration.mockResolvedValue({
       delivery: { status: "sent" },
     });
     await openInvite("ana@sol.example");
-    await waitFor(() => expect(toasts.success).toHaveBeenCalled());
-    await act(async () => {});
-    expect(toasts.success).toHaveBeenCalledTimes(1);
-    expect(toasts.success).toHaveBeenCalledWith(
-      "Invitation sent to ana@sol.example.",
-    );
+    expect(await screen.findByText("Invitation emailed.")).toBeTruthy();
+    expect(toasts.success).not.toHaveBeenCalled();
     expect(toasts.warning).not.toHaveBeenCalled();
   });
 
-  it("answers a manual-delivery invitation with only the warning", async () => {
+  it("hands over the link when the invitation email could not go out", async () => {
     api.mutateAdministration.mockResolvedValue({
       delivery: { status: "failed", reason: "Mail is not configured." },
       manualInvitationUrl: "https://spectra.example/invite/abc",
     });
     await openInvite("ana@sol.example");
-    await waitFor(() =>
-      expect(toasts.warning).toHaveBeenCalledWith("Mail is not configured."),
-    );
+    const link = (await screen.findByLabelText("Invitation link for ana@sol.example")) as HTMLInputElement;
+    expect(link.value).toBe("https://spectra.example/invite/abc");
     expect(toasts.success).not.toHaveBeenCalled();
-    expect(
-      await screen.findByText("https://spectra.example/invite/abc"),
-    ).toBeTruthy();
   });
 
-  it("reports a refused invitation once, keeps the dialog, and never rejects", async () => {
+  it("reports a refused invitation beside its address, keeps the dialog, and never rejects", async () => {
     const rejections: unknown[] = [];
     const onRejection = (reason: unknown) => rejections.push(reason);
     process.on("unhandledRejection", onRejection);
@@ -142,11 +134,11 @@ describe("School admin People", () => {
         new Error("That email is outside this school's verified domains."),
       );
       await openInvite("ana@elsewhere.example");
-      await waitFor(() => expect(toasts.error).toHaveBeenCalledTimes(1));
+      expect(await screen.findByText("ana@elsewhere.example")).toBeTruthy();
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(rejections).toEqual([]);
       expect(toasts.success).not.toHaveBeenCalled();
-      expect(screen.getByPlaceholderText("name@school.example")).toBeTruthy();
+      expect(screen.getByRole("dialog")).toBeTruthy();
     } finally {
       process.off("unhandledRejection", onRejection);
     }
@@ -155,7 +147,7 @@ describe("School admin People", () => {
   it("searches once after typing settles, without refetching invitations", async () => {
     render(<SchoolAdminShell />);
     const input = await screen.findByPlaceholderText(
-      "Search verified school members",
+      "Find someone by name or email",
     );
     await waitFor(() => expect(peopleCalls()).toHaveLength(1));
     expect(invitationCalls()).toHaveLength(1);

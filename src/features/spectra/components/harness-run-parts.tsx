@@ -1,9 +1,9 @@
 "use client";
 
+import { buttonVariants } from "@/components/ui/button";
 import { useState, type CSSProperties } from "react";
 import { Icon as Glyph } from "@/components/icons";
 import { Loader2, ShieldCheck } from "@/components/icons/glyph-icons";
-import { cn } from "@/lib/utils";
 import { workTypeMeta } from "../artifacts/presentation";
 import type { HarnessAnswerValue } from "../ai/harness-exchange";
 import { mergeTouch } from "../ai/harness-exchange";
@@ -53,7 +53,13 @@ export function HarnessInputPanel({
       <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
         {approval ? (
           <>
-            <AnswerButton primary busy={busy === "allow"} disabled={Boolean(busy)} onClick={() => void send("allow", { kind: "approval", allowed: true })}>
+            <AnswerButton
+              primary
+              busy={busy === "allow"}
+              disabled={Boolean(busy)}
+              title="Spectra will not ask again for this kind of change in this thread"
+              onClick={() => void send("allow", { kind: "approval", allowed: true })}
+            >
               Allow
             </AnswerButton>
             {input.alwaysAllowLabel ? (
@@ -102,7 +108,7 @@ export function HarnessInputPanel({
           <button
             type="submit"
             disabled={!text.trim() || Boolean(busy)}
-            className="h-8 rounded-chip bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-35"
+            className={buttonVariants({ variant: "primary" })}
           >
             {busy === "text" ? <Loader2 className="h-3 w-3 animate-spin" /> : "Send"}
           </button>
@@ -133,12 +139,7 @@ function AnswerButton({
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className={cn(
-        "inline-flex h-8 items-center gap-1.5 rounded-chip px-3 text-micro font-semibold disabled:opacity-50",
-        primary
-          ? "bg-[var(--text-primary)] text-[var(--bg-primary)] hover:opacity-90"
-          : "border border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]",
-      )}
+      className={buttonVariants({ variant: primary ? "primary" : "ghost" })}
     >
       {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
       {children}

@@ -13,26 +13,27 @@
   grid-template-columns: minmax(0, 1fr);
   gap: 48px;
   align-items: start;
-  max-width: 1480px;
+  max-width: 1840px;
   padding-bottom: 32px;
 }
 
-@media (min-width: 1280px) {
+/* The side column only when the Library itself is wide, not the window:
+   with a work open beside it the shelf is one column. */
+@container library-body (min-width: 1000px) {
   .library-shelf {
     grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
   }
 }
 
-/* A shelf with nothing down the side (a folder of only work) gives the
-   cards the whole width, three to a row, rather than leaving a blank column. */
-.library-shelf:not(:has(> .library-shelf-side)) {
-  grid-template-columns: minmax(0, 1fr);
+.library-shelf-wide {
+  grid-column: 1 / -1;
+  min-width: 0;
 }
 
-@media (min-width: 1280px) {
-  .library-shelf:not(:has(> .library-shelf-side)) .library-notes {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
+/* A shelf with nothing down the side (a folder of only work) gives the
+   cards the whole width rather than leaving a blank column. */
+.library-shelf:not(:has(> .library-shelf-side)) {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .library-shelf section + section {
@@ -75,11 +76,11 @@
   color: var(--text-primary);
 }
 
-/* Work touched lately: the work cards Home shows, in their place's colour,
-   always two to a row so each face is wide enough to read. */
+/* Work touched lately: the work cards Home shows, in their place's colour.
+   As many cards to a row as the room holds, none narrower than a card reads at. */
 .library-notes {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
   gap: 22px 18px;
 }
 
@@ -163,7 +164,7 @@
   align-items: start;
 }
 
-@media (min-width: 1280px) {
+@container library-body (min-width: 1000px) {
   .class-shelf-columns {
     grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
   }
@@ -171,6 +172,21 @@
 
 .class-shelf-columns section + section {
   margin-top: 40px;
+}
+
+/* Works others shared into this place, under their author's name. */
+.shared-works {
+  margin-top: 36px;
+}
+
+.shared-works .library-shelf-heading {
+  margin-bottom: 4px;
+}
+
+.shared-works-note {
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--text-tertiary);
 }
 
 .class-shelf-quiet {
@@ -446,15 +462,16 @@
 
 /* --- Quick access -----------------------------------------------------------
    The list's side pane (LIBRARY.md, "Views"): the top, Recent, Favorites and
-   Shared, every place as a tree, the Trash at the foot. It closes from the
-   bar and stays closed on this device. */
+   Shared, every place as a tree, the Trash at the foot. It sits on the left
+   like the chat's threads, closes from the bar and stays closed on this
+   device. */
 
 .library-quick-pane {
   display: flex;
   width: 256px;
   flex-shrink: 0;
   min-height: 0;
-  border-left: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--border-subtle);
   background: color-mix(in oklab, var(--bg-secondary) 55%, var(--bg-primary));
   animation: library-pane-in var(--motion-medium, 220ms) var(--ease-standard);
 }
@@ -462,7 +479,7 @@
 @keyframes library-pane-in {
   from {
     opacity: 0;
-    transform: translateX(12px);
+    transform: translateX(-12px);
   }
 }
 

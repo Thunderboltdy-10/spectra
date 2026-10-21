@@ -41,6 +41,7 @@ import {
   queueMaterializationInTransaction,
   commitCloudMaterializationInTransaction,
 } from "./replicaMaterialization";
+import { platformStopped } from "./platformControls";
 
 const strategyPreset = v.union(v.literal("spectra"), v.literal("device"), v.literal("both"), v.literal("linked"));
 
@@ -405,6 +406,26 @@ export const transitionStorageStrategy = mutation({
   },
 });
 
+/**
+ * The open conflicts that still ask for a choice. Once the cloud and the
+ * conflict's desktop copy hold the same revision again, it was merged.
+ */
+function liveConflicts(
+  conflicts: Doc<"syncConflicts">[],
+  replicas: ReadonlyArray<Pick<Doc<"workReplicas">, "_id" | "kind" | "state" | "revision">>,
+) {
+  const cloud = replicas.find((replica) => replica.kind === "cloud" && replica.state === "current");
+  if (!cloud) return conflicts;
+  const agreed = new Set(
+    replicas
+      .filter((replica) => replica.kind === "local" && replica.state === "current" && replica.revision === cloud.revision)
+      .map((replica) => String(replica._id)),
+  );
+  return conflicts.filter(
+    (conflict) => conflict.localRevision !== cloud.revision && !conflict.replicaIds.some((id) => agreed.has(String(id))),
+  );
+}
+
 export const forWork = query({
   args: { workId: v.id("spectraArtifacts") },
   handler: async (ctx, { workId }) => {
@@ -445,7 +466,10 @@ export const forWork = query({
         unavailableReason: "not-on-this-computer",
       };
     });
-    const openConflicts = await ctx.db.query("syncConflicts").withIndex("by_work_state", (q) => q.eq("workId", workId).eq("state", "open")).take(20);
+    const openConflicts = liveConflicts(
+      await ctx.db.query("syncConflicts").withIndex("by_work_state", (q) => q.eq("workId", workId).eq("state", "open")).take(20),
+      presented,
+    );
     const pending = await ctx.db.query("syncOperations").withIndex("by_work_created", (q) => q.eq("workId", workId)).order("desc").take(50);
     const replicaById = new Map(presented.map((replica) => [String(replica._id), replica]));
     const pendingCount = pending.filter((operation) => isActionablePendingOperation(operation, replicaById)).length;
@@ -547,9 +571,7 @@ export const presentationsForAccount = query({
       byWork.set(workId, created);
       return created;
     };
-    for (const conflict of openConflicts) {
-      ensure(String(conflict.workId)).openConflictCount += 1;
-    }
+    for (const conflict of openConflicts) ensure(String(conflict.workId));
     for (const replica of replicaBatches.flat()) {
       ensure(String(replica.workId));
     }
@@ -568,6 +590,10 @@ export const presentationsForAccount = query({
         unavailableReason: replica.unavailableReason,
       }));
       row.pendingCount = workReplicas.filter((replica) => replica.state === "pending").length;
+      row.openConflictCount = liveConflicts(
+        openConflicts.filter((conflict) => String(conflict.workId) === workId),
+        workReplicas,
+      ).length;
     }
     return [...byWork.entries()].map(([workId, value]) => ({ workId, ...value }));
   },
@@ -1596,6 +1622,8 @@ function createDocumentBudget(limit = SWEEP_DOCUMENT_BUDGET) {
 export const sweepReplicaTruth = internalMutation({
   args: {},
   handler: async (ctx) => {
+    if (await platformStopped(ctx, "background"))
+      return { redriven: 0, failedWrites: 0, orphanedReplicas: 0, orphanedOperations: 0, expiredExternalOperations: 0, failedTransitions: 0, verifiedTransitions: 0, reopenedConflicts: 0, abandonedConflicts: 0, releasedPayloads: 0, documentsRead: 0 };
     const now = Date.now();
     const budget = createDocumentBudget();
     const claimCutoff = now - BRIDGE_CLAIM_REDRIVE_MS;
@@ -1979,6 +2007,7 @@ async function reconcileWorkReplicaTruth(
 export const reconcileReplicaTruthMigration = internalMutation({
   args: {},
   handler: async (ctx) => {
+    if (await platformStopped(ctx, "background")) return { state: "running" as const, scanned: 0, repaired: 0, conflicts: 0 };
     const key = "replica-truth-v1";
     let migration = await ctx.db.query("replicaTruthMigrations").withIndex("by_key", (q) => q.eq("key", key)).unique();
     if (migration?.state === "complete") return migration;

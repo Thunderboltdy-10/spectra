@@ -5,6 +5,7 @@ import {
   artifactSummaryProjection,
   artifactSummaryFor,
   isContainerKind,
+  sharesWithWorkspace,
   type OrgNode,
 } from "./orgTreeShared";
 
@@ -39,6 +40,8 @@ export type OrgNodeView = {
   trashedAt?: number;
   /** The shelf stack this work is gathered into, if any. */
   stackId?: string;
+  /** A work in a workspace that its people can see; absent, it is private to its author. */
+  sharedWithWorkspace?: boolean;
   /** For links: what they point at, resolved for display. */
   target?: {
     nodeId: Id<"orgNodes">;
@@ -134,6 +137,8 @@ export function baseView(node: OrgNode): OrgNodeView {
     typeKey: node.typeKey,
     trashedAt: node.deletedAt,
     stackId: node.stackId,
+    sharedWithWorkspace:
+      node.kind === "work" && node.workspaceContextId && sharesWithWorkspace(node) ? true : undefined,
   };
 }
 

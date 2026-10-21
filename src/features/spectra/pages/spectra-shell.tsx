@@ -2806,6 +2806,21 @@ export function SpectraShell({
   }
 
   // The picked work goes into the island's message as references, and picking ends: the question is the next step.
+  const setWorksShared = useMutation(api.workspaceSharing.setWorksShared);
+  function shareSelection(shared: boolean) {
+    void setWorksShared({ artifactIds: [...selectedContextIds], shared }).then(
+      (result) => {
+        const done = result.changed === 1 ? "1 work" : `${result.changed} works`;
+        if (result.changed)
+          toast.success(shared ? `Shared ${done} with their workspace.` : `Made ${done} private.`);
+        else if (!result.skipped) toast.success(shared ? "Already shared." : "Already private.");
+        if (result.skipped)
+          toast.error(`${result.skipped} stayed as they were: only your own works inside a workspace can be shared with it.`);
+      },
+      (error) => toast.error(describeFailure(error, { fallback: "The picked works did not change." }).message),
+    );
+  }
+
   function askAboutSelection() {
     const references = [...selectedContextIds].flatMap((id) => {
       const loaded = allArtifacts.find((artifact) => artifact._id === id);
@@ -3279,16 +3294,20 @@ export function SpectraShell({
       setWorkSetIsolated(true);
     } else leaveWorkSet();
     setActiveHubTabId(tabId);
-    studio.closeStudio();
+    // A work opened full from the side panel goes back beside the page.
+    const beside = studio.returnToSide();
+    if (!beside) studio.closeStudio();
     setSelection(null);
     if (tab.workspaceId) void loadWorkspace(tab.workspaceId);
     else {
       setSelectedWorkspaceId(undefined);
     }
+    if (beside) openedDeepLinkRef.current = beside;
     pushShellNav({
-      kind: "hub",
+      kind: beside ? "artifact-split" : "hub",
       hubTabId: tabId,
       workspaceId: tab.workspaceId,
+      artifactId: beside ?? undefined,
     });
   }
 
@@ -4138,8 +4157,6 @@ export function SpectraShell({
                   onCloseAll={closeTileSet}
                   onAddArtifact={addArtifactTile}
                   onFocusSet={() => setWorkSetIsolated(true)}
-                  // Returning from a work set's own tab is closing it, back to the page before.
-                  onExitFocusSet={() => (activeWorkSetTab ? closeHubTab(activeWorkSetTab.id) : setWorkSetIsolated(false))}
                   onArchive={archiveArtifact}
                   onDirtyChange={studio.setDirty}
                   onContinueThread={(threadId, title) =>
@@ -4232,14 +4249,18 @@ export function SpectraShell({
                             setWorkspaceDeleteConfirmation("");
                             setWorkspaceDeleteOpen(true);
                           }}
-                          onOpenChats={openChatBrowser}
+                          onOpenChats={() =>
+                            spectraBus.emit("threads.open", {
+                              scope: workspaceHeader?._id ? { workspaceId: workspaceHeader._id, title: workspaceHeader.title } : undefined,
+                            })
+                          }
                         />
                       ) : (
                         <LibraryHeader
                           surface={surface}
                           folderId={currentLibraryNodeId}
                           workspaceCount={workspaces.length}
-                          onOpenChats={openChatBrowser}
+                          onOpenChats={() => spectraBus.emit("threads.open", {})}
                         />
                       )}
                       {needsSchool ? (
@@ -4397,7 +4418,6 @@ export function SpectraShell({
                         onCloseAll={closeTileSet}
                         onAddArtifact={addArtifactTile}
                         onFocusSet={() => setWorkSetIsolated(true)}
-                        onExitFocusSet={() => setWorkSetIsolated(false)}
                         onArchive={archiveArtifact}
                         onDirtyChange={studio.setDirty}
                         onContinueThread={(threadId, title) =>
@@ -4426,6 +4446,7 @@ export function SpectraShell({
                         : undefined
                     }
                     onAsk={selectedContextIds.size ? askAboutSelection : undefined}
+                    onShare={selectedContextIds.size ? shareSelection : undefined}
                   />
                 </div>
               </div>

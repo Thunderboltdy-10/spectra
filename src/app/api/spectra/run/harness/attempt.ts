@@ -1,7 +1,7 @@
 import { createRunItem } from "@/features/spectra/actions/protocol";
 import { runHarness, type HarnessEvent, type RunCheckpoint } from "@/features/spectra/ai/harness/run";
 import type { LoopState } from "@/features/spectra/ai/harness/loop";
-import { alwaysAllowLabel } from "@/features/spectra/ai/harness/permissions";
+import { alwaysAllowLabel, withThreadAllows } from "@/features/spectra/ai/harness/permissions";
 import { citedSources, withoutCitations } from "@/features/spectra/ai/harness/sources";
 import type { ArtifactTouch, HarnessMessage, InputAnswer, PendingInput, Steer } from "@/features/spectra/ai/harness/types";
 import { SPECTRA_RUN_HEARTBEAT_INTERVAL_MS } from "@/features/spectra/ai/run-lease";
@@ -432,7 +432,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
         ...(agents.agent ? { agent: { title: agents.agent.title, instructions: agents.agent.instructions } } : {}),
         ...(agents.agents.length ? { agents: agents.agents } : {}),
       },
-      permissions,
+      permissions: withThreadAllows(permissions, threadSummary?.allowedPermissionCategories),
       workspaceId: params.workspaceId,
       // Any attempt names a thread that still needs it, resumed ones too.
       wantTitle: Boolean(threadSummary?.needsTitle),

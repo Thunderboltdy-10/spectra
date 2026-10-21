@@ -37,7 +37,8 @@ export async function insertArtifact(ctx: MutationCtx, input: ArtifactInput) {
   if (input.workspaceId)
     await ctx.db.insert("orgNodes", { accountId: input.ownerAccountId, schoolId: input.schoolId, parentId: null, kind: "work",
       name: input.title, sourceId: artifactId, orderKey: "a0", typeKey: input.blueprintKey, workspaceContextId: input.workspaceId,
-      createdAt: updatedAt, updatedAt });
+      // Filed and shared with the workspace's people, as the fixture's authors chose.
+      accessProjection: true, createdAt: updatedAt, updatedAt });
   return artifactId;
 }
 

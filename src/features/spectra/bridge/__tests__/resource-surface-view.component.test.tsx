@@ -6,7 +6,8 @@ import type { SpectraArtifact } from "../../data/api";
 const mocks = vi.hoisted(() => ({ load: vi.fn(), fetch: vi.fn(), replicas: [] as Array<Record<string, unknown>> }));
 
 vi.mock("convex/react", () => ({
-  useQuery: () => ({ replicas: mocks.replicas }),
+  // activeMounts is the one query called with no arguments.
+  useQuery: (_query: unknown, args: object) => (Object.keys(args).length === 0 ? [] : { replicas: mocks.replicas }),
   useMutation: () => vi.fn(),
 }));
 vi.mock("../../data/use-authed-args", () => ({ useAuthedArgs: <T,>(args: T) => args }));
@@ -43,7 +44,7 @@ afterEach(() => {
 describe("A Library file's read-only view", () => {
   it("shows a PDF in the shared viewer instead of an icon alone", async () => {
     render(<ResourceSurface artifact={artifact("Syllabus.pdf", "pdf")} onClose={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: "View read-only" }));
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByTitle("Syllabus.pdf").getAttribute("src")).toBe("/api/spectra/native?artifactId=work-pdf");
   });
@@ -58,20 +59,20 @@ describe("A Library file's read-only view", () => {
     });
     render(<ResourceSurface artifact={artifact("Budget.xlsx", "xlsx")} onClose={() => {}} />);
     expect(await screen.findByRole("alert")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "View read-only" }));
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
     expect(await screen.findByRole("region", { name: "Budget, read-only" })).toBeTruthy();
     expect(mocks.load).toHaveBeenCalledWith({ kind: "sheet", url: "/api/spectra/native?artifactId=work-xlsx", bytes: undefined }, expect.any(AbortSignal));
   });
 
   it("names an older Office format honestly and offers no viewer", () => {
     render(<ResourceSurface artifact={artifact("Report.doc", "doc")} onClose={() => {}} />);
-    expect(screen.getByText(/saved as \.docx, \.pptx or \.xlsx/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "View read-only" })).toBeNull();
+    expect(screen.getByText(/save it as \.docx, \.pptx or \.xlsx/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "View" })).toBeNull();
   });
 
   it("offers nothing to view before the file's bytes are in Spectra", async () => {
     mocks.replicas = [{ kind: "local", state: "current" }];
     render(<ResourceSurface artifact={artifact("Syllabus.pdf", "pdf")} onClose={() => {}} />);
-    await waitFor(() => expect(screen.queryByRole("button", { name: "View read-only" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("button", { name: "View" })).toBeNull());
   });
 });

@@ -38,6 +38,7 @@ export function IslandRail({
   bottom,
   maxWidth,
   handlers,
+  waiting,
   onKeyDown,
   threadsOpen,
   onThreads,
@@ -57,6 +58,8 @@ export function IslandRail({
   bottom: number;
   maxWidth: number;
   handlers: RailHandlers;
+  /** Questions put aside, by thread: the tab counts them until they are answered. */
+  waiting: ReadonlyMap<string, number>;
   onKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
   threadsOpen: boolean;
   /** Every thread, past what the rail holds. */
@@ -88,6 +91,7 @@ export function IslandRail({
       lifted={dragging === item.runId}
       tabRefs={tabRefs}
       handlers={handlers}
+      waiting={waiting.get(item.threadId) ?? 0}
     />
   );
   return (
@@ -95,6 +99,7 @@ export function IslandRail({
       role="toolbar"
       aria-label="Spectra threads"
       data-island-rail
+      data-band-overhang
       data-raised={raised || undefined}
       inert={!raised}
       onKeyDown={onKeyDown}
@@ -187,6 +192,7 @@ function RailTab({
   lifted,
   tabRefs,
   handlers,
+  waiting,
 }: {
   tab: IslandTab;
   order: number;
@@ -194,6 +200,7 @@ function RailTab({
   lifted: boolean;
   tabRefs: RefObject<Map<string, HTMLButtonElement>>;
   handlers: RailHandlers;
+  waiting: number;
 }) {
   const state = railState(tab);
   const finished = useJustFinished(state);
@@ -212,7 +219,7 @@ function RailTab({
       data-finished={finished || undefined}
       data-current={current || undefined}
       data-life-working={tab.status === "working" ? "" : undefined}
-      aria-label={`${tab.title}: ${tab.caption}`}
+      aria-label={`${tab.title}: ${waiting ? `${waiting} question${waiting === 1 ? "" : "s"} waiting` : tab.caption}`}
       aria-pressed={current}
       aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight Delete"
       style={{ "--order": order } as CSSProperties}
@@ -234,6 +241,11 @@ function RailTab({
       <span data-tab-title className="min-w-0 truncate">
         {tabTitle(tab.title)}
       </span>
+      {waiting ? (
+        <span data-tab-waiting aria-hidden className="island-tab-waiting">
+          {waiting}
+        </span>
+      ) : null}
     </button>
   );
 }

@@ -36,6 +36,7 @@ import type * as authority from "../authority.js";
 import type * as authorityShared from "../authorityShared.js";
 import type * as bridge from "../bridge.js";
 import type * as bridgeIdentity from "../bridgeIdentity.js";
+import type * as bridgePlacement from "../bridgePlacement.js";
 import type * as bridgeStructure from "../bridgeStructure.js";
 import type * as bridgeSync from "../bridgeSync.js";
 import type * as bridgeWriteOperations from "../bridgeWriteOperations.js";
@@ -64,6 +65,7 @@ import type * as embeddingDimensions from "../embeddingDimensions.js";
 import type * as embeddingProvider from "../embeddingProvider.js";
 import type * as env from "../env.js";
 import type * as executionScheduler from "../executionScheduler.js";
+import type * as feedbackInbox from "../feedbackInbox.js";
 import type * as flashcardStudy from "../flashcardStudy.js";
 import type * as functions from "../functions.js";
 import type * as identity from "../identity.js";
@@ -98,6 +100,7 @@ import type * as orgTreeViews from "../orgTreeViews.js";
 import type * as payloadLifecycle from "../payloadLifecycle.js";
 import type * as payloads from "../payloads.js";
 import type * as plannerReminders from "../plannerReminders.js";
+import type * as platformControls from "../platformControls.js";
 import type * as quizPractice from "../quizPractice.js";
 import type * as quizPrivacy from "../quizPrivacy.js";
 import type * as regionClaims from "../regionClaims.js";
@@ -117,6 +120,7 @@ import type * as semanticIndex from "../semanticIndex.js";
 import type * as semanticKeys from "../semanticKeys.js";
 import type * as semanticQueue from "../semanticQueue.js";
 import type * as semanticSources from "../semanticSources.js";
+import type * as sharingPeople from "../sharingPeople.js";
 import type * as snapshotHash from "../snapshotHash.js";
 import type * as spectraApplicationWriteScope from "../spectraApplicationWriteScope.js";
 import type * as spectraApplicationWrites from "../spectraApplicationWrites.js";
@@ -142,6 +146,8 @@ import type * as syncOperationLifecycle from "../syncOperationLifecycle.js";
 import type * as syncPolicy from "../syncPolicy.js";
 import type * as timetableReminders from "../timetableReminders.js";
 import type * as workStacks from "../workStacks.js";
+import type * as workspaceLinksShared from "../workspaceLinksShared.js";
+import type * as workspaceSharing from "../workspaceSharing.js";
 
 import type {
   ApiFromModules,
@@ -178,6 +184,7 @@ declare const fullApi: ApiFromModules<{
   authorityShared: typeof authorityShared;
   bridge: typeof bridge;
   bridgeIdentity: typeof bridgeIdentity;
+  bridgePlacement: typeof bridgePlacement;
   bridgeStructure: typeof bridgeStructure;
   bridgeSync: typeof bridgeSync;
   bridgeWriteOperations: typeof bridgeWriteOperations;
@@ -206,6 +213,7 @@ declare const fullApi: ApiFromModules<{
   embeddingProvider: typeof embeddingProvider;
   env: typeof env;
   executionScheduler: typeof executionScheduler;
+  feedbackInbox: typeof feedbackInbox;
   flashcardStudy: typeof flashcardStudy;
   functions: typeof functions;
   identity: typeof identity;
@@ -240,6 +248,7 @@ declare const fullApi: ApiFromModules<{
   payloadLifecycle: typeof payloadLifecycle;
   payloads: typeof payloads;
   plannerReminders: typeof plannerReminders;
+  platformControls: typeof platformControls;
   quizPractice: typeof quizPractice;
   quizPrivacy: typeof quizPrivacy;
   regionClaims: typeof regionClaims;
@@ -259,6 +268,7 @@ declare const fullApi: ApiFromModules<{
   semanticKeys: typeof semanticKeys;
   semanticQueue: typeof semanticQueue;
   semanticSources: typeof semanticSources;
+  sharingPeople: typeof sharingPeople;
   snapshotHash: typeof snapshotHash;
   spectraApplicationWriteScope: typeof spectraApplicationWriteScope;
   spectraApplicationWrites: typeof spectraApplicationWrites;
@@ -284,6 +294,8 @@ declare const fullApi: ApiFromModules<{
   syncPolicy: typeof syncPolicy;
   timetableReminders: typeof timetableReminders;
   workStacks: typeof workStacks;
+  workspaceLinksShared: typeof workspaceLinksShared;
+  workspaceSharing: typeof workspaceSharing;
 }>;
 
 /**

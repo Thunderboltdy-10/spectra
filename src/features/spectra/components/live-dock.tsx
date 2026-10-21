@@ -12,6 +12,7 @@ import {
 } from "react";
 import { useNow } from "@/hooks/use-now";
 import { toast } from "@/components/ui/toast";
+import { buttonVariants } from "@/components/ui/button";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { OverflowMenu } from "@/components/ui/dropdown-menu";
 import { LAYER_CLASS } from "@/components/ui/layers";
@@ -1167,7 +1168,7 @@ export function LiveDock({
                                 if (response)
                                   void respondToInput(tab, response);
                             }}
-                            className="sticky bottom-0 h-9 w-full rounded-control bg-[var(--text-primary)] text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
+                            className={buttonVariants({ variant: "primary", className: "sticky bottom-0 w-full bg-[var(--bg-elevated)]" })}
                           >
                             Continue with these answers
                           </button>
@@ -1233,7 +1234,7 @@ export function LiveDock({
                               if (!answer) return;
                               void respondToInput(tab, answer);
                             }}
-                            className="h-9 rounded-chip bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
+                            className={buttonVariants({ variant: "primary" })}
                           >
                             Continue
                           </button>
@@ -1282,7 +1283,7 @@ export function LiveDock({
                             <button
                               type="button"
                               onClick={() => void onAction?.(card, "confirm")}
-                              className="h-8 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)]"
+                              className={buttonVariants({ variant: "primary" })}
                             >
                               Apply changes
                             </button>

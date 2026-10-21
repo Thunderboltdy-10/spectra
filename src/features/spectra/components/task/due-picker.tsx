@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { CalendarDays, X } from "@/components/icons/glyph-icons";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { DayField, TimeField } from "@/components/ui/when-fields";
 import { quickDays, taskInputs, taskInstant } from "./task-time";
 
 /*
@@ -95,14 +96,8 @@ export function DuePicker({
             if (date) choose(date, time || null);
           }}
         >
-          <label>
-            <span>Day</span>
-            <input type="date" className="sheet-input" value={date} onChange={(event) => setDate(event.target.value)} />
-          </label>
-          <label>
-            <span>Time</span>
-            <input type="time" className="sheet-input" value={time} onChange={(event) => setTime(event.target.value)} />
-          </label>
+          <DayField label="Day" value={date} onChange={setDate} />
+          <TimeField label="Time" placeholder="Any time" value={time} onChange={setTime} opensAt="17:00" />
           <button type="submit" className="due-picker-set" disabled={!date}>
             Set
           </button>

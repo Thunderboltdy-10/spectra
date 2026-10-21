@@ -132,7 +132,8 @@ describe("a planner task", () => {
     expect(screen.queryByRole("button", { name: /^Due / })).toBeNull();
     expect(screen.getByText(/^Due /)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Set your own date" }));
-    fireEvent.change(screen.getByLabelText("Day"), { target: { value: "2026-10-12" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Day: / }));
+    fireEvent.click(screen.getByRole("gridcell", { name: /October 12, 2026|12 October 2026/ }));
     fireEvent.click(screen.getByRole("button", { name: "Set" }));
     expect(taskInputs((latest.personalOverlay as { targetDueAt: number }).targetDueAt, ZONE).date).toBe("2026-10-12");
     expect(latest.dueAt).toBe(fromSchool.dueAt);

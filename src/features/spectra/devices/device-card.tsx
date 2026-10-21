@@ -34,6 +34,7 @@ export function DeviceCard({
   lifeKey,
   onAction,
   onRemove,
+  downloadUrl,
 }: {
   device: DeviceView;
   now: number;
@@ -43,6 +44,8 @@ export function DeviceCard({
   lifeKey: string;
   onAction: (request: LocalDeviceRequest) => void;
   onRemove: () => void;
+  /** Where to get Bridge, offered while this computer's Bridge is not running. */
+  downloadUrl?: string | null;
 }) {
   const ref = useRef<HTMLElement>(null);
   useLifeArrival(ref, lifeKey, fresh ? "human" : undefined, DEVICE_FIGURE);
@@ -127,6 +130,14 @@ export function DeviceCard({
         {device.isThisComputer && (local || device.updateRequired) ? (
           <Button variant={device.updateRequired ? "primary" : "ghost"} size="sm" disabled={busy === "update"} onClick={() => onAction({ action: "update" })}>
             Update Bridge
+          </Button>
+        ) : null}
+        {device.isThisComputer && !local && !device.updateRequired && downloadUrl ? (
+          <Button asChild variant="ghost" size="sm">
+            <a href={downloadUrl} rel="noopener">
+              <Icon name="download" size={16} />
+              Download Bridge
+            </a>
           </Button>
         ) : null}
         {device.id ? (

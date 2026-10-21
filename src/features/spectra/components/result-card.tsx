@@ -3,6 +3,7 @@
 import { Clock3, Loader2, MessageSquarePlus, RotateCcw, ShieldCheck, AlertCircle, Bot, Check, CheckCircle2, ChevronDown, ExternalLink, FolderPlus, X, Undo2, type GlyphIcon } from "@/components/icons/glyph-icons";
 import { useState } from "react";
 import { toast } from "@/components/ui/toast";
+import { buttonVariants } from "@/components/ui/button";
 import { SpectraRichContent } from "./spectra-rich-content";
 import { cn } from "@/lib/utils";
 import { IconAction, type SpectraCardState } from "./card-system";
@@ -173,7 +174,7 @@ export function ResultCardStack({
                 >
                   <button
                     type="button"
-                    className="rounded-chip bg-[var(--text-primary)] px-2 py-1 text-micro font-semibold text-[var(--bg-primary)] hover:opacity-90"
+                    className={buttonVariants({ variant: "primary" })}
                     onClick={() => onAction?.(card, "confirm", card.runId)}
                   >
                     Allow
@@ -201,7 +202,7 @@ export function ResultCardStack({
                       setRevision("");
                       setRevisingCardId(null);
                     });
-                  }}><input autoFocus value={revision} onChange={(event) => setRevision(event.target.value)} placeholder="What should Spectra change?" className="h-8 min-w-0 flex-1 rounded-chip bg-[var(--bg-elevated)] px-2.5 text-micro text-[var(--text-primary)] outline-none" /><button type="submit" disabled={!revision.trim()} className="h-8 rounded-chip bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-35">Send</button></form> : null}
+                  }}><input autoFocus value={revision} onChange={(event) => setRevision(event.target.value)} placeholder="What should Spectra change?" className="h-8 min-w-0 flex-1 rounded-chip bg-[var(--bg-elevated)] px-2.5 text-micro text-[var(--text-primary)] outline-none" /><button type="submit" disabled={!revision.trim()} className={buttonVariants({ variant: "primary" })}>Send</button></form> : null}
                 </div>
               ) : null}
             </div>

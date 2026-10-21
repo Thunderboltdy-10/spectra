@@ -214,6 +214,22 @@ export function moveWorkbenchTab(
   return removed ? addWorkbenchTab(removed, tab, { paneId: targetPaneId }) : node;
 }
 
+/** Trades the places of the panes holding two tabs; the sizes stay where they are. */
+export function swapWorkbenchPanes(node: WorkbenchNode, firstTabId: string, secondTabId: string): WorkbenchNode {
+  const first = findPaneForTab(node, firstTabId);
+  const second = findPaneForTab(node, secondTabId);
+  if (!first || !second || first === second) return node;
+  const swap = (current: WorkbenchNode): WorkbenchNode =>
+    current.type === "pane"
+      ? current === first
+        ? second
+        : current === second
+          ? first
+          : current
+      : { ...current, first: swap(current.first), second: swap(current.second) };
+  return swap(node);
+}
+
 export function rebalanceWorkbenchTree(node: WorkbenchNode): WorkbenchNode {
   if (node.type === "pane") return node;
   const first = rebalanceWorkbenchTree(node.first);

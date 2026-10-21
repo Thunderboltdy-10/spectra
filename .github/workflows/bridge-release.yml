@@ -1,0 +1,123 @@
+name: Spectra Bridge release
+
+# Pushing a tag `bridge-v<version>` (matching bridge-app/tauri.conf.json)
+# builds signed installers and publishes them, with the updater manifest, as a
+# release of the public releases repository. Spectra's /bridge/download route
+# and the Bridge updater both read the latest release there.
+#
+# Repository configuration:
+#   vars.SPECTRA_CONVEX_URL       hosted Convex URL baked into the Bridge
+#   vars.SPECTRA_ORIGINS          hosted browser origin(s), comma-separated
+#   vars.BRIDGE_RELEASES_REPO     owner/name of the public releases repository
+#   secrets.BRIDGE_RELEASES_TOKEN a token that can create releases there
+#   secrets.TAURI_SIGNING_PRIVATE_KEY(_PASSWORD), Apple signing secrets
+on:
+  push:
+    tags:
+      - "bridge-v*"
+
+permissions:
+  contents: read
+
+env:
+  RELEASES_REPO: ${{ vars.BRIDGE_RELEASES_REPO || 'Thunderboltdy-10/spectra-bridge' }}
+
+jobs:
+  release:
+    name: Create the release
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag matches the app version
+        run: |
+          version=$(jq -r .version bridge/bridge-app/tauri.conf.json)
+          test "${GITHUB_REF_NAME}" = "bridge-v${version}" || {
+            echo "Tag ${GITHUB_REF_NAME} does not match bridge-app version ${version}" >&2
+            exit 1
+          }
+
+      - name: Create the release
+        id: create
+        env:
+          GH_TOKEN: ${{ secrets.BRIDGE_RELEASES_TOKEN }}
+        run: |
+          id=$(gh api "repos/${RELEASES_REPO}/releases" \
+            -f tag_name="${GITHUB_REF_NAME}" \
+            -f name="Spectra Bridge ${GITHUB_REF_NAME#bridge-v}" \
+            -F draft=true --jq .id)
+          echo "release_id=${id}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: ${{ matrix.platform }} ${{ matrix.target }}
+    needs: release
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: windows-latest
+            bundles: nsis
+            target: x86_64-pc-windows-msvc
+          - platform: macos-14
+            bundles: app,dmg
+            target: aarch64-apple-darwin
+          - platform: macos-15-intel
+            bundles: app,dmg
+            target: x86_64-apple-darwin
+    env:
+      SPECTRA_CONVEX_URL: ${{ vars.SPECTRA_CONVEX_URL }}
+      SPECTRA_ORIGINS: ${{ vars.SPECTRA_ORIGINS }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Verify the release configuration
+        shell: bash
+        run: python bridge/scripts/verify-release-env.py
+
+      - name: Install the pinned Tauri CLI
+        shell: bash
+        run: cargo install tauri-cli --version 2.11.5 --locked
+
+      - name: Generate bundle icons
+        shell: bash
+        working-directory: bridge/bridge-app
+        run: cargo tauri icon icons/app-icon.png
+
+      - name: Build and upload installers
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.BRIDGE_RELEASES_TOKEN }}
+        with:
+          projectPath: bridge/bridge-app
+          tauriScript: cargo tauri
+          args: --bundles ${{ matrix.bundles }} --target ${{ matrix.target }}
+          owner: ${{ vars.BRIDGE_RELEASES_OWNER || 'Thunderboltdy-10' }}
+          repo: ${{ vars.BRIDGE_RELEASES_NAME || 'spectra-bridge' }}
+          releaseId: ${{ needs.release.outputs.release_id }}
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
+
+  publish:
+    name: Publish the release
+    needs: [release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.BRIDGE_RELEASES_TOKEN }}
+        run: gh api -X PATCH "repos/${RELEASES_REPO}/releases/${{ needs.release.outputs.release_id }}" -F draft=false -F make_latest=true

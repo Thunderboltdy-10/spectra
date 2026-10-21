@@ -27,7 +27,7 @@ Settings sit on the School page's **Sync** tab, not buried in Settings.
 | Data | Default | Notes |
 | --- | --- | --- |
 | Current tasks and deadlines | Auto | They feed the Calendar and the planner |
-| Past tasks (archive) | Manual | The first sync brings in the full history, then it can be set to Auto |
+| Past tasks (archive) | Manual | A sync starts from today: history comes in when the student syncs past tasks, or sets them to Auto |
 | Dropbox files (the student's own submissions) | Manual | Downloaded on demand, cached once fetched |
 | Task resources from teachers | Auto | Attachments and links on tasks |
 | Grades and feedback | Auto | Only the student's own |

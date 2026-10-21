@@ -1,18 +1,17 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, LoaderCircle, LockKeyhole, Plus } from "@/components/icons/glyph-icons";
+import { ChevronLeft, ChevronRight, LockKeyhole } from "@/components/icons/glyph-icons";
 import type { BarCommand } from "@/components/ui/adaptive-bar";
 import { IconButton } from "@/components/ui/icon-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/ui/page-header";
-import { beginCreation, useLifeArrival, useLifeDeparture } from "../../life/use-life";
+import { useLifeArrival, useLifeDeparture } from "../../life/use-life";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { uniqueToken } from "@/lib/unique-token";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,7 +34,6 @@ import {
   localDaysAround,
   startOfLocalDay,
   startOfLocalWeek,
-  defaultLocalEventTimes,
 } from "../domain/local-days";
 import { requestSpectra } from "../../data/request";
 import { layoutTimedLanes, type TimedLane } from "../domain/timed-lanes";
@@ -46,6 +44,8 @@ import { schoolRecordOf, useTaskPeek } from "./use-task-peek";
 import { useOpenSchoolTask } from "../../school/open-school-task";
 import { formatTime, isDeadline, isReschedulable, layerFor } from "../domain/item-format";
 import { CalendarItemCard, type OpenedCalendarItem } from "./calendar-item-card";
+import { CalendarComposer } from "./calendar-composer";
+import { firstTipMoment } from "../../onboarding/first-tips";
 
 const HOUR = 60 * 60_000;
 // Tall enough that a school day, 07:00 to about 20:00, fills the grid and a lesson has room for its title.
@@ -73,6 +73,13 @@ const MONTHS = [
   "November",
   "December",
 ];
+
+/** Each day's width so `span` days fill the scroller beside the hours column; set on it as `--day-width`. */
+function fitDayWidth(scroller: HTMLElement, span: number) {
+  const width = Math.max(88, (scroller.clientWidth - 54) / span);
+  scroller.style.setProperty("--day-width", `${width}px`);
+  return width;
+}
 
 function daysAround(center: number) {
   return localDaysAround(center, EXTEND_DAYS, EXTEND_DAYS * 2);
@@ -201,7 +208,7 @@ function CalendarDatePicker({
                 type="button"
                 className={cn(
                   "h-9 rounded-control text-caption font-semibold hover:bg-[var(--bg-hover)]",
-                  entry === year && "bg-[var(--text-primary)] text-[var(--bg-primary)]",
+                  entry === year && "bg-[var(--bg-hover)] text-[var(--text-primary)]",
                 )}
                 onClick={() => {
                   setCursor(new Date(entry, month, 1));
@@ -220,7 +227,7 @@ function CalendarDatePicker({
                 type="button"
                 className={cn(
                   "h-9 rounded-control text-caption font-semibold hover:bg-[var(--bg-hover)]",
-                  index === month && "bg-[var(--text-primary)] text-[var(--bg-primary)]",
+                  index === month && "bg-[var(--bg-hover)] text-[var(--text-primary)]",
                 )}
                 onClick={() => {
                   setCursor(new Date(year, index, 1));
@@ -530,14 +537,22 @@ export function CalendarApplication() {
       });
   }, [load, overview?.sourceState.kind, visibleRange.from, visibleRange.to]);
 
-  useEffect(() => {
+  // Lands on the day asked for (this week, on opening), at the width the days
+  // really have. Until the days are laid out the scroll cannot reach it and
+  // the browser clamps it; the target then waits for the next layout, and the
+  // clamped scroll is never read as the reader moving to the past.
+  useLayoutEffect(() => {
     const target = scrollWeekRef.current;
     const scroller = scrollerRef.current;
     if (target === null || !scroller) return;
     const index = days.findIndex((day) => day === target);
     if (index < 0) return;
     ignoreScrollRef.current = true;
-    scroller.scrollLeft = index * dayWidthRef.current;
+    const width = fitDayWidth(scroller, daySpanRef.current);
+    dayWidthRef.current = width;
+    scroller.style.setProperty("--loaded-days", String(days.length));
+    scroller.scrollLeft = index * width;
+    if (Math.abs(scroller.scrollLeft - index * width) > 1) return;
     scrollWeekRef.current = null;
     window.requestAnimationFrame(() => {
       ignoreScrollRef.current = false;
@@ -548,10 +563,9 @@ export function CalendarApplication() {
     const scroller = scrollerRef.current;
     if (!scroller) return;
     const measure = () => {
-      const width = Math.max(88, (scroller.clientWidth - 54) / daySpanRef.current);
       const previous = dayWidthRef.current;
+      const width = fitDayWidth(scroller, daySpanRef.current);
       dayWidthRef.current = width;
-      scroller.style.setProperty("--day-width", `${width}px`);
       scroller.style.setProperty("--loaded-days", String(daysRef.current.length));
       if (loadLockRef.current || Math.abs(previous - width) < 0.5) return;
       const index = daysRef.current.findIndex((day) => day === focusedStartRef.current);
@@ -566,7 +580,7 @@ export function CalendarApplication() {
     const observer = new ResizeObserver(measure);
     observer.observe(scroller);
     return () => observer.disconnect();
-  }, [daySpan, days.length, error]);
+  }, [daySpan, days.length, error, overview === null]);
 
   // The grid opens on working hours (SHELL.md): 07:00 just under the day heads,
   // before its first paint, so it never shows the night while the week loads.
@@ -576,10 +590,13 @@ export function CalendarApplication() {
     if (openedOnHoursRef.current || !scroller) return;
     const hours = scroller.querySelector<HTMLElement>("[data-calendar-hours]");
     const head = scroller.querySelector<HTMLElement>(".spectra-calendar-day-head");
+    const undated = scroller.querySelector<HTMLElement>(".spectra-calendar-allday-cell");
     if (!hours) return;
     openedOnHoursRef.current = true;
+    // The day heads and the undated row stay pinned over the hours.
+    const pinned = (head?.offsetHeight ?? 0) + (undated?.offsetHeight ?? 0);
     const hoursTop = hours.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
-    scroller.scrollTop = Math.max(0, hoursTop + WORKDAY_START_HOUR * HOUR_PX - (head?.offsetHeight ?? 0) - 8);
+    scroller.scrollTop = Math.max(0, hoursTop + WORKDAY_START_HOUR * HOUR_PX - pinned - 8);
   }, [overview, error]);
 
   // The grid's columns, drops and resizes are all in the browser's zone, so
@@ -610,6 +627,15 @@ export function CalendarApplication() {
       return due ? classOf(due.title, due.startAt) : null;
     };
   }, [classOf, overview?.items]);
+
+  // Time given to a school deadline is the same task: it opens the deadline's task work.
+  const recordOf = useMemo(() => {
+    const byId = new Map((overview?.items ?? []).map((item) => [item.id, item]));
+    return (item: CalendarItem) => {
+      const deadline = item.officialDeadlineItemId ? byId.get(item.officialDeadlineItemId) : undefined;
+      return schoolRecordOf(item) ?? (deadline ? schoolRecordOf(deadline) : undefined);
+    };
+  }, [overview?.items]);
 
   // A school deadline cannot move, but the plan behind it can be given time:
   // dragging the deadline into the week places that plan.
@@ -709,6 +735,30 @@ export function CalendarApplication() {
     if (item.kind === "scheduled_work_block")
       void load("merge", visibleRange.from, visibleRange.to);
     return true;
+  }
+
+  /** Time given to a deadline goes back into it: the block is taken off. */
+  async function mergeBack(block: CalendarItem) {
+    if (await removeItem(block)) toast.success(`Merged back into “${block.title}”.`);
+  }
+
+  function mergeTarget(deadline: CalendarItem) {
+    const dragged = () => {
+      const payload = dragRef.current;
+      return payload?.type === "block" && payload.item.officialDeadlineItemId === deadline.id ? payload.item : null;
+    };
+    return {
+      accepts: () => {
+        const block = dragged();
+        if (block) setGesturePreview(null);
+        return Boolean(block);
+      },
+      onMerge: () => {
+        const block = dragged();
+        dragRef.current = null;
+        if (block) void mergeBack(block);
+      },
+    };
   }
 
   async function commitWorkGesture(item: CalendarItem, startAt: number, endAt: number) {
@@ -903,17 +953,16 @@ export function CalendarApplication() {
 
   function openItem(item: CalendarItem, from?: HTMLElement) {
     openedOn.current = item.startAt;
-    // A scheduled block has its own actions (duration, complete, remove); its
-    // plan is one click away in the details. Only an unscheduled plan opens
-    // straight into the plan.
-    const workId = item.kind === "scheduled_work_block" ? undefined : planWorkId(item);
+    // Every task opens as its work in the Side, a block of time for it too;
+    // a block's own actions (length, done, remove) are a right-click away.
+    const workId = planWorkId(item);
     if (workId) {
       openWork(workId);
       return;
     }
     taskPeek.close();
     // A school deadline opens as its task work, made now if sync has not made it.
-    const recordId = schoolRecordOf(item);
+    const recordId = recordOf(item);
     if (recordId) {
       void schoolTask.workOf(recordId).then((planner) => (planner ? openWork(planner) : showDetails(item, from)));
       return;
@@ -942,11 +991,16 @@ export function CalendarApplication() {
     const scroller = scrollerRef.current;
     const anchor = around === undefined ? -1 : daysRef.current.indexOf(startOfLocalDay(around));
     const index = anchor >= 0 ? Math.max(0, anchor - (span > 1 ? 1 : 0)) : daysRef.current.findIndex((day) => day === focusedStartRef.current);
+    // The resize that follows realigns on the focused day, so it must already be the new one.
+    const start = daysRef.current[index];
+    if (start !== undefined) {
+      focusedStartRef.current = start;
+      setFocusedStart(start);
+    }
     requestAnimationFrame(() => {
       if (!scroller) return;
-      const width = Math.max(88, (scroller.clientWidth - 54) / span);
+      const width = fitDayWidth(scroller, span);
       dayWidthRef.current = width;
-      scroller.style.setProperty("--day-width", `${width}px`);
       if (index >= 0) scroller.scrollLeft = index * width;
     });
   }, []);
@@ -1009,6 +1063,8 @@ export function CalendarApplication() {
         else if (trimmed > 0) scroller.scrollLeft -= trimmed * dayWidth;
         requestAnimationFrame(() => {
           ignoreScrollRef.current = false;
+          // A scroll made while the days were added still moves the range named above.
+          onScrollerScroll();
         });
       });
     } finally {
@@ -1049,7 +1105,7 @@ export function CalendarApplication() {
   }, [changeDaySpan, error, overview]);
 
   const commands: BarCommand[] = [
-    { id: "add", icon: "add", label: "Add event", pinned: true, onSelect: () => setComposerOpen(true) },
+    { id: "add", icon: "add", label: "Add", pinned: true, onSelect: () => setComposerOpen(true) },
     {
       id: "layers",
       icon: "layers",
@@ -1161,7 +1217,12 @@ export function CalendarApplication() {
                   onPreview={previewDrop}
                   onDrop={dropOnDay}
                   onOpen={openItem}
+                  onDetails={(item, from) => {
+                    taskPeek.close();
+                    showDetails(item, from);
+                  }}
                   onRest={taskPeek.rest}
+                  merge={mergeTarget}
                   planOf={planOfDeadline}
                   schoolClassOf={schoolClassOf}
                   onPlanDragStart={beginPlanDrag}
@@ -1183,10 +1244,11 @@ export function CalendarApplication() {
 
         <CalendarComposer
           open={composerOpen}
-          timezone={timezone}
           onClose={() => setComposerOpen(false)}
-          onCreated={() => {
+          onCreate={async (draft) => {
+            await calendarPost({ action: "createPersonalItem", ...draft, timezone });
             setComposerOpen(false);
+            firstTipMoment("task");
             void load("merge", visibleRange.from, visibleRange.to, true);
           }}
         />
@@ -1199,7 +1261,7 @@ export function CalendarApplication() {
           resolveWork={() => {
             const item = taskPeek.peek!.item;
             const workId = planWorkId(item);
-            const recordId = schoolRecordOf(item);
+            const recordId = recordOf(item);
             return workId ? Promise.resolve(workId) : recordId ? schoolTask.workOf(recordId) : Promise.resolve(null);
           }}
           onOpenFull={(workId) => {
@@ -1218,6 +1280,7 @@ export function CalendarApplication() {
         timezone={timezone}
         onCommit={commit}
         onRemove={removeItem}
+        onMerge={mergeBack}
         onClose={() => setOpened(null)}
       />
     </div>
@@ -1241,6 +1304,35 @@ function CalendarWeekGhost({ span }: { span: number }) {
   );
 }
 
+/**
+ * A deadline the block of time dragged out of it can be dropped back on: the
+ * block goes, and the task is whole again. `accepts` says whether the block
+ * being dragged is one of its own.
+ */
+type MergeTarget = { accepts: () => boolean; onMerge: () => void };
+
+function mergeHandlers(target: MergeTarget, onOver?: (over: boolean) => void) {
+  return {
+    onDragOver(event: React.DragEvent<HTMLElement>) {
+      if (!target.accepts()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "move";
+      onOver?.(true);
+    },
+    onDragLeave() {
+      onOver?.(false);
+    },
+    onDrop(event: React.DragEvent<HTMLElement>) {
+      onOver?.(false);
+      if (!target.accepts()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      target.onMerge();
+    },
+  };
+}
+
 function WeekGrid({
   days,
   timezone,
@@ -1252,7 +1344,9 @@ function WeekGrid({
   onPreview,
   onDrop,
   onOpen,
+  onDetails,
   onRest,
+  merge,
   planOf,
   schoolClassOf,
   onPlanDragStart,
@@ -1270,8 +1364,12 @@ function WeekGrid({
   onPreview: (event: React.DragEvent<HTMLDivElement>, day: Date) => void;
   onDrop: (event: React.DragEvent<HTMLDivElement>, day: Date) => void;
   onOpen: (item: CalendarItem, from: HTMLElement) => void;
+  /** Its details and actions, on a right-click. */
+  onDetails: (item: CalendarItem, from: HTMLElement) => void;
   /** The pointer rests on an item (its element), or leaves it (null): a task opens beside it. */
   onRest: (item: CalendarItem, element: HTMLElement | null) => void;
+  /** How a deadline takes back the time given to it when that block is dropped on it. */
+  merge: (item: CalendarItem) => MergeTarget;
   /** The plan a deadline's task has, which dragging the deadline places. */
   planOf: (item: CalendarItem) => CalendarItem | undefined;
   schoolClassOf: (item: CalendarItem) => DeadlineClass | null;
@@ -1327,8 +1425,13 @@ function WeekGrid({
                     title={item.title}
                     data-life-launch
                     onClick={(event) => onOpen(item, event.currentTarget)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      onDetails(item, event.currentTarget);
+                    }}
                     onPointerEnter={(event) => onRest(item, event.currentTarget)}
                     onPointerLeave={() => onRest(item, null)}
+                    {...mergeHandlers(merge(item))}
                     className="spectra-calendar-chip"
                     style={{ boxShadow: `inset 3px 0 0 ${layer.color}` }}
                   >
@@ -1407,7 +1510,9 @@ function WeekGrid({
                     pending={pendingItemIds.has(item.id)}
                     canMove={isReschedulable(item) && !pendingItemIds.has(item.id) && !resizeGesture}
                     givesTime={Boolean(plan)}
+                    merge={merge(item)}
                     onOpen={(from) => onOpen(item, from)}
+                    onDetails={(from) => onDetails(item, from)}
                     onRest={(element) => onRest(item, element)}
                     onDragStart={(offset) => (plan ? onPlanDragStart(plan) : onBlockDragStart(item, offset))}
                     onDragEnd={onBlockDragEnd}
@@ -1468,7 +1573,9 @@ function TimedBlock({
   pending,
   canMove,
   givesTime,
+  merge,
   onOpen,
+  onDetails,
   onRest,
   onDragStart,
   onDragEnd,
@@ -1484,7 +1591,9 @@ function TimedBlock({
   canMove: boolean;
   /** A deadline whose plan can be dragged out of it into the week. */
   givesTime: boolean;
+  merge: MergeTarget;
   onOpen: (from: HTMLElement) => void;
+  onDetails: (from: HTMLElement) => void;
   onRest: (element: HTMLElement | null) => void;
   onDragStart: (grabOffsetMinutes: number) => void;
   onDragEnd: () => void;
@@ -1509,14 +1618,17 @@ function TimedBlock({
      line in its class's ink. A short block keeps its title on one line too. */
   const due = isDeadline(item);
   const short = due || height < 40;
+  const [merging, setMerging] = useState(false);
   return (
     <button
       ref={ref}
+      {...mergeHandlers(merge, setMerging)}
+      data-merge-target={merging || undefined}
       type="button"
       title={
         due
           ? `Due ${formatTime(item.startAt!, timezone)}: ${item.title}${givesTime ? ". Drag to give it time" : ""}`
-          : `${formatTime(item.startAt!, timezone)}${item.endAt ? ` – ${formatTime(item.endAt, timezone)}` : ""}: ${item.title}`
+          : `${formatTime(item.startAt!, timezone)}${item.endAt ? ` – ${formatTime(item.endAt, timezone)}` : ""}: ${item.title}${item.kind === "scheduled_work_block" ? `. Right-click to change or finish it${item.officialDeadlineItemId ? ", or drop it on its deadline to merge it back" : ""}` : ""}`
       }
       data-life-launch
       draggable={canMove || givesTime}
@@ -1526,6 +1638,10 @@ function TimedBlock({
       }}
       onDragEnd={onDragEnd}
       onClick={(event) => onOpen(event.currentTarget)}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onDetails(event.currentTarget);
+      }}
       onPointerEnter={(event) => onRest(event.currentTarget)}
       onPointerLeave={() => onRest(null)}
       data-due={due || undefined}
@@ -1567,125 +1683,3 @@ function TimedBlock({
   );
 }
 
-function CalendarComposer({
-  open,
-  timezone,
-  onClose,
-  onCreated,
-}: {
-  open: boolean;
-  timezone: string;
-  onClose: () => void;
-  onCreated: () => void;
-}) {
-  const [title, setTitle] = useState("");
-  const [{ start, end }, setTimes] = useState(() => defaultLocalEventTimes(Date.now()));
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (!open) return;
-    setTitle("");
-    setTimes(defaultLocalEventTimes(Date.now()));
-  }, [open]);
-  const startAt = Date.parse(start);
-  const endAt = Date.parse(end);
-  const endBeforeStart =
-    Number.isFinite(startAt) && Number.isFinite(endAt) && endAt <= startAt;
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        if (!next && !busy) onClose();
-      }}
-    >
-      <DialogContent className="max-w-[460px] gap-0 p-5">
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (endBeforeStart) return;
-            setBusy(true);
-            // Dots gather at the press; the event grows out of them where it lands.
-            const creation = beginCreation({ into: "item" });
-            void calendarPost({
-              action: "createPersonalItem",
-              kind: "personal_event",
-              title,
-              startAt,
-              endAt,
-              timezone,
-            })
-              .then(() => {
-                creation.land();
-                onCreated();
-              })
-              .catch((error) => {
-                creation.cancel();
-                toast.error(error instanceof Error ? error.message : "Could not add event.");
-              })
-              .finally(() => setBusy(false));
-          }}
-        >
-          <DialogTitle>Add personal event</DialogTitle>
-          <label className="mt-5 block text-micro font-semibold">
-            Title
-            <input
-              autoFocus
-              required
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              className="mt-1.5 h-10 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-ui outline-none focus:border-[var(--brand-primary)]"
-            />
-          </label>
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <label className="text-micro font-semibold">
-              Starts
-              <input
-                type="datetime-local"
-                required
-                value={start}
-                onChange={(event) => {
-                  const start = event.target.value;
-                  setTimes((current) => ({ ...current, start }));
-                }}
-                className="mt-1.5 h-10 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro"
-              />
-            </label>
-            <label className="text-micro font-semibold">
-              Ends
-              <input
-                type="datetime-local"
-                required
-                min={start}
-                value={end}
-                aria-invalid={endBeforeStart || undefined}
-                onChange={(event) => {
-                  const end = event.target.value;
-                  setTimes((current) => ({ ...current, end }));
-                }}
-                className="mt-1.5 h-10 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro"
-              />
-            </label>
-          </div>
-          {endBeforeStart ? (
-            <p role="alert" className="mt-2 text-micro text-[var(--danger)]">
-              End must be after start.
-            </p>
-          ) : null}
-          <DialogFooter className="mt-5">
-            <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              size="sm"
-              disabled={busy || !title.trim() || endBeforeStart}
-            >
-              {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-              Add event
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}

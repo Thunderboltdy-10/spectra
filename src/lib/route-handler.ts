@@ -61,7 +61,9 @@ function normalizeErrorStatus(message: string) {
   const worded = message.match(/^([A-Z][A-Z0-9_]+):\s*\S/);
   if (worded) {
     if (/_NOT_FOUND$/.test(worded[1])) return 404;
-    if (/_(UNAVAILABLE|MISMATCH|LOCKED|CONFLICT)$/.test(worded[1])) return 409;
+    if (/_FORBIDDEN$/.test(worded[1])) return 403;
+    if (/_STOPPED$/.test(worded[1])) return 503;
+    if (/_(UNAVAILABLE|MISMATCH|LOCKED|CONFLICT|CLOSED)$/.test(worded[1])) return 409;
   }
   return 500;
 }
@@ -125,7 +127,7 @@ export async function withRouteErrorHandling<T>(
       error instanceof Error ? readConvexError(error).message : rawMessage;
     const status = normalizeErrorStatus(unwrapped);
     const { code, message } = parseCodeAndMessage(unwrapped);
-    const safeMessage = status >= 500 ? PUBLIC_SERVER_FAILURE : message;
+    const safeMessage = status >= 500 && status !== 503 ? PUBLIC_SERVER_FAILURE : message;
     const requestId = logger.context.requestId || randomUUID().slice(0, 8);
 
     // Log the error with structured logger

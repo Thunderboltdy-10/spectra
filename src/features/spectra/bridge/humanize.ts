@@ -237,6 +237,9 @@ export function humanizeUnavailableReason(reason: string | undefined): string {
   return humanizePublicFailure(reason);
 }
 
+/** A fault inside Spectra itself: nothing the student did, and nothing lost. */
+const INTERNAL_FAILURE = "Something went wrong inside Spectra. Your work on this device is safe; try again.";
+
 /**
  * Turns any thrown value, stored error code, or dock failure string into a
  * sentence a student can act on. Unknown SNAKE_CASE tokens never pass through.
@@ -253,15 +256,20 @@ export function humanizePublicFailure(
   if (isCloudDiscoveryFailure(raw)) {
     return "Spectra could not list files in this folder right now. The files on this PC are unchanged.";
   }
+  // "CODE: A sentence." is a refusal written for the person: keep the sentence.
+  const worded = raw.match(/^[A-Z][A-Z0-9_]{3,}:\s*([A-Z].{8,})$/);
+  if (worded && !/[A-Z]{3,}_[A-Z0-9_]{3,}/.test(worded[1])) return worded[1].trim();
   if (!raw || /^[A-Z][A-Z0-9_]{4,}$/.test(raw) || /[A-Z]{3,}_[A-Z0-9_]{3,}/.test(raw)) {
-    return `Spectra could not finish this step. Keep working here, or open the file from Library with Spectra Bridge connected.`;
+    return /BRIDGE|REPLICA|MOUNT|FILE|NATIVE|PAYLOAD|LOCAL|FOLDER|DEVICE/.test(raw)
+      ? "Spectra couldn't reach this file just now. Check that Spectra Bridge is running on the computer that has it, then try again."
+      : INTERNAL_FAILURE;
   }
   if (
     /typeerror|referenceerror|syntaxerror|work_yjs_|stack trace|\.tsx?:\d+|cannot read propert|json\.stringify|could not safely complete/i.test(
       raw,
     )
   ) {
-    return `Spectra could not finish this step. Your work on this device is still here.`;
+    return INTERNAL_FAILURE;
   }
   const stripped = stripInternalNoise(raw)
     .replace(/\b[A-Z][A-Z0-9_]{5,}\b/g, "")
@@ -270,7 +278,7 @@ export function humanizePublicFailure(
   if (/convex|public function|request id/i.test(stripped)) {
     return "Spectra could not list files in this folder right now. The files on this PC are unchanged.";
   }
-  return stripped || `Spectra could not finish this step. Your work on this device is still here.`;
+  return stripped || INTERNAL_FAILURE;
 }
 
 export function humanizeNativeError(error: unknown, application = "Office"): string {

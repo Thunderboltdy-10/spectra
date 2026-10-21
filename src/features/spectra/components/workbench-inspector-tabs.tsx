@@ -4,6 +4,7 @@ import { Clock3, Loader2, Bot, Check, MessageSquare, RefreshCw, Send, CornerUpLe
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
+import { buttonVariants } from "@/components/ui/button";
 import {
   getSpectraArtifactComments,
   getSpectraArtifactVersions,
@@ -291,7 +292,7 @@ export function WorkbenchInspectorTabs({
           <div className="mt-3 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2">
             <LocalAutocompleteTextarea surface="comment" value={commentBody} onValueChange={setCommentBody} placeholder="Add a general comment…" className="min-h-16 w-full" textareaClassName="min-h-16 w-full resize-y px-1 text-caption leading-5 text-[var(--text-primary)] outline-none" />
             <div className="flex justify-end">
-              <button type="button" disabled={!commentBody.trim() || busy === "create"} onClick={() => void createGeneralComment()} className="inline-flex h-7 items-center gap-1.5 rounded-chip bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40">
+              <button type="button" disabled={!commentBody.trim() || busy === "create"} onClick={() => void createGeneralComment()} className={buttonVariants({ variant: "primary" })}>
                 {busy === "create" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />} Add
               </button>
             </div>

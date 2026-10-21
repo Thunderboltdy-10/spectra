@@ -42,24 +42,22 @@ export function SplitButton({
   layer?: SpectraLayer;
   className?: string;
 }) {
-  const tone =
-    variant === "primary"
-      ? "bg-[var(--text-primary)] [color:var(--bg-primary)] hover:opacity-90"
-      : "bg-[var(--bg-elevated)] text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] border border-[var(--border-default)]";
+  // The same treatment as Button: words on the page, the hover wash, no fill.
+  const tone = cn("text-[var(--text-primary)] hover:bg-[var(--bg-hover)]", variant === "primary" ? "font-semibold" : "font-medium");
   const segment = cn(
-    "inline-flex min-h-8 items-center outline-none transition-[opacity,background-color] duration-[var(--motion-fast)]",
+    "inline-flex min-h-9 items-center outline-none transition-[opacity,background-color] duration-[var(--motion-fast)]",
     "focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)]",
     "disabled:pointer-events-none disabled:opacity-45",
     tone,
   );
   return (
     <span className={cn("inline-flex shrink-0 items-stretch", className)} data-split-button>
-      <button type="button" onClick={onClick} disabled={disabled} className={cn(segment, "whitespace-nowrap rounded-l-control px-3 text-caption font-semibold", variant === "secondary" && "border-r-0")}>
+      <button type="button" onClick={onClick} disabled={disabled} className={cn(segment, "whitespace-nowrap rounded-l-control px-3 text-ui")}>
         {label}
       </button>
-      <span aria-hidden className={cn("w-px", variant === "primary" ? "bg-[color-mix(in_oklab,var(--bg-primary)_30%,transparent)]" : "bg-[var(--border-default)]")} />
+      <span aria-hidden className="my-2 w-px bg-[var(--border-default)]" />
       <DropdownMenu>
-        <DropdownMenuTrigger aria-label={menuLabel} disabled={disabled} className={cn(segment, "rounded-r-control px-2", variant === "secondary" && "border-l-0")}>
+        <DropdownMenuTrigger aria-label={menuLabel} disabled={disabled} className={cn(segment, "rounded-r-control px-2")}>
           <Icon name="chevronDown" size={14} />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" layer={layer} className="min-w-[12rem]">

@@ -16,6 +16,7 @@ import {
   benchPromptKey,
   normalizeBenchChecks,
 } from "../src/features/spectra/agents/foundry/bench";
+import { assertPlatformRunning } from "./platformControls";
 
 const vEvalResult = v.object({
   caseId: v.string(),
@@ -189,6 +190,7 @@ export const beginEvalRun = mutation({
     if (artifact.blueprintKey !== "agent" || !artifact.schoolId)
       throw new Error("AGENT_EVAL_INVALID: This artifact is not an agent.");
     // An evaluation is model work billed to the school, like a run.
+    await assertPlatformRunning(ctx, "ai");
     await assertSchoolModelTokenCeiling(ctx, actor.schoolId, Date.now());
     const content =
       artifact.content &&
@@ -265,6 +267,7 @@ export const admitModelWork = mutation({
     const { actor, artifact } = await requireArtifactCapability(ctx, args.agentId, "modify");
     if (artifact.blueprintKey !== "agent")
       throw new Error("AGENT_INVALID: This artifact is not an agent.");
+    await assertPlatformRunning(ctx, "ai");
     await assertSchoolModelTokenCeiling(ctx, actor.schoolId, Date.now());
     return { admitted: true as const };
   },

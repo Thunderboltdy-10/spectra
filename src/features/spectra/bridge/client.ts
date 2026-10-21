@@ -321,6 +321,9 @@ export function pairingFailureMessage(
   if (/pairing offer expired|pairing expired/i.test(raw)) {
     return "This connection attempt timed out. Try again.";
   }
+  if (/PAIRING_CHALLENGE_INVALID/.test(raw)) {
+    return "Spectra could not confirm this computer. Start connecting again from Bridge.";
+  }
   return humanizePublicFailure(error);
 }
 
@@ -634,7 +637,7 @@ export function bridgePlatform(nav: { userAgent?: string; platform?: string; use
 }
 
 const BRIDGE_DOWNLOAD_BASE =
-  process.env.NEXT_PUBLIC_SPECTRA_BRIDGE_DOWNLOAD_URL || "https://updates.spectra.school/bridge/download";
+  process.env.NEXT_PUBLIC_SPECTRA_BRIDGE_DOWNLOAD_URL || "/bridge/download";
 
 /** Where this computer downloads Bridge, or null when Bridge does not run on it. */
 export function bridgeDownloadUrl(platform: BridgePlatform): string | null {

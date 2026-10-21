@@ -11,6 +11,7 @@ import { useSpectraPreferences } from "../settings/preference-store";
 import { HOME_PATH } from "../chat/home-routes";
 import { TOUR_STEPS, type TourPerson } from "./tour-steps";
 import { TourLayer } from "./tour-layer";
+import { TourAskControl } from "./tour-asks";
 import { useTourStore } from "./tour-store";
 
 /*
@@ -89,6 +90,8 @@ export function TourMount() {
       onBack={back}
       onNext={finishOrNext}
       onEnd={end}
-    />
+    >
+      {step.ask ? <TourAskControl ask={step.ask} /> : null}
+    </TourLayer>
   );
 }

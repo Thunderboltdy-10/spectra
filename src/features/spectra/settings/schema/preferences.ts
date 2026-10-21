@@ -129,6 +129,8 @@ const integrationsSchema = z.object({
   classShelfRecordIds: z.array(z.string().min(1).max(128)).max(100).default([]),
   /** Spectra's tour of the app: offered once after the school's first sync. */
   tourStatus: z.enum(["pending", "done"]).default("pending"),
+  /** First-time tips already said (onboarding/first-tips), so none is said twice. */
+  tipsSeen: z.array(z.string().min(1).max(64)).max(64).default([]),
 });
 
 const accessibilitySchema = z.object({
@@ -483,6 +485,7 @@ export function restoreDefaultPreferences(
       classShelvesStatus: current.integrations.classShelvesStatus,
       classShelfRecordIds: [...current.integrations.classShelfRecordIds],
       tourStatus: current.integrations.tourStatus,
+      tipsSeen: [...current.integrations.tipsSeen],
     },
   };
 }

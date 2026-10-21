@@ -11,7 +11,7 @@ export type IconButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>
   /** The name: the accessible label and the tooltip. */
   label: string;
   shortcut?: string;
-  /** 28 (compact), 32 (default) or 40 (large). */
+  /** 28 (compact), 36 (default, the bar's height) or 40 (large). */
   size?: "compact" | "default" | "large";
   /** The glyph's accent colour. */
   accent?: string;
@@ -20,14 +20,15 @@ export type IconButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>
   tooltipSide?: "top" | "bottom" | "right";
 };
 
-const SIZES = { compact: "size-7", default: "size-8", large: "size-10" } as const;
+const SIZES = { compact: "size-7", default: "size-9", large: "size-10" } as const;
+const GLYPHS = { compact: 16, default: 18, large: 20 } as const;
 
 /** An icon-only control: always named, always with a tooltip (LANGUAGE.md). */
 export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
   { icon, label, shortcut, size = "default", accent, pressed, tooltipSide = "top", className, type, ...props },
   ref,
 ) {
-  const glyph = typeof icon === "string" ? <Icon name={icon as IconName} size={size === "large" ? 20 : 16} accent={accent} /> : icon;
+  const glyph = typeof icon === "string" ? <Icon name={icon as IconName} size={GLYPHS[size]} accent={accent} /> : icon;
   return (
     <Tooltip label={label} shortcut={shortcut} side={tooltipSide}>
       <button

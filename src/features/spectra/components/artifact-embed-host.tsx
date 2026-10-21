@@ -33,6 +33,7 @@ export function editableInPlace(embed: SpectraArtifactEmbed) {
     embed.state === "ready" &&
       embed.versionPolicy === "live" &&
       !embed.sourceUnavailable &&
+      !embed.keptOn &&
       embed.canEditSource &&
       embed.source &&
       EDITABLE_IN_PLACE.has(embed.source.blueprintKey),
@@ -232,17 +233,21 @@ export function ArtifactEmbedList({
   containerId,
   className,
   onOpenSource = openSource,
+  region,
 }: {
   containerType: "artifact" | "thread";
   containerId: string;
   className?: string;
   onOpenSource?: (artifactId: string) => void;
+  /** Only the embeds placed in these regions; the container shares one subscription across lists. */
+  region?: (regionId: string) => boolean;
 }) {
   const result = useArtifactEmbedContainer(containerType, containerId);
   const update = useMutation(api.artifactEmbeds.update);
   const remove = useMutation(api.artifactEmbeds.remove);
+  const embeds = region ? result?.embeds.filter((embed) => region(embed.containerRegionId)) : result?.embeds;
 
-  if (!result?.embeds.length) return null;
+  if (!result || !embeds?.length) return null;
   return (
     <section
       className={className}
@@ -252,7 +257,7 @@ export function ArtifactEmbedList({
           : "Live references"
       }
     >
-      {result.embeds.map((embed) => (
+      {embeds.map((embed) => (
         <ArtifactEmbed
           key={embed.embedId}
           embed={embed}

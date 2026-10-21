@@ -711,6 +711,14 @@ export function useArtifactNativeSync({
     )
       return;
     if (nativeLocalReplica.state === "pending") return;
+    // An Office save not yet taken in comes first; promoting now would write
+    // over it.
+    if (
+      (nativeLocalReplica.state === "ahead" ||
+        nativeLocalReplica.state === "diverged") &&
+      nativeLocalReplica.protectedOriginal !== true
+    )
+      return;
     const liveValue = live.modelSnapshot.value;
     if (!liveValue?.content) return;
     const contentKey = nativeLiveContentKey(liveValue.content);
@@ -850,8 +858,10 @@ export function useArtifactNativeSync({
       nativeReconciliationRevisionRef.current === reconcilableLocalRevision
     )
       return;
-    nativeReconciliationRevisionRef.current = reconcilableLocalRevision;
+    // Marked only once sent: a re-render inside the delay cancels the timer,
+    // and the next run must still send it.
     const timer = window.setTimeout(() => {
+      nativeReconciliationRevisionRef.current = reconcilableLocalRevision;
       void reconcileNativeRevision().catch((error: unknown) => {
         setNativeWriteError(
           error instanceof Error

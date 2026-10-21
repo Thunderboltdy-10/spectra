@@ -122,6 +122,8 @@ export async function recordMeterEvent(
       args.category === "model_output_tokens")
   )
     await addSchoolModelTokens(ctx, args.schoolId, args.quantity, args.occurredAt, now);
+  if (args.schoolId && args.category === "storage_bytes")
+    await addSchoolStorageBytes(ctx, args.schoolId, args.quantity, now);
   return { eventId, duplicate: false };
 }
 
@@ -198,6 +200,78 @@ async function addSchoolModelTokens(
       });
   }
 }
+
+/** Storage is a running balance, not a period: one "total" row per school. */
+async function schoolStorageRow(ctx: IdentityCtx, schoolId: Id<"schools">) {
+  return ctx.db
+    .query("schoolUsageTotals")
+    .withIndex("by_school_period", (q) =>
+      q.eq("schoolId", schoolId).eq("category", "storage_bytes").eq("periodKey", "total"),
+    )
+    .unique();
+}
+
+async function addSchoolStorageBytes(
+  ctx: MutationCtx,
+  schoolId: Id<"schools">,
+  quantity: number,
+  now: number,
+) {
+  const row = await schoolStorageRow(ctx, schoolId);
+  if (row) await ctx.db.patch(row._id, { quantity: Math.max(0, row.quantity + quantity), updatedAt: now });
+  else
+    await ctx.db.insert("schoolUsageTotals", {
+      schoolId,
+      category: "storage_bytes",
+      periodKey: "total",
+      quantity: Math.max(0, quantity),
+      updatedAt: now,
+    });
+}
+
+/**
+ * Upload admission against an enforced storage rule. A storage rule caps
+ * what the school keeps, whatever period it names.
+ */
+export async function assertSchoolStorageCeiling(
+  ctx: MutationCtx,
+  schoolId: Id<"schools"> | undefined,
+  incomingBytes: number,
+) {
+  if (!schoolId) return;
+  const { policy } = await effectiveLimitPolicy(ctx, schoolId);
+  if (!policy || policy.enforcement !== "enforced") return;
+  const rules = policy.rules.filter((rule) => rule.category === "storage_bytes");
+  if (!rules.length) return;
+  const used = (await schoolStorageRow(ctx, schoolId))?.quantity ?? 0;
+  if (rules.some((rule) => used + Math.max(0, incomingBytes) > rule.maximum))
+    throw new Error(
+      "STORAGE_LIMIT_REACHED: Your school has used all of its Spectra storage. Remove files you no longer need, or ask a school administrator about the limit.",
+    );
+}
+
+/** Rebuilds each school's storage balance from its storage meters. */
+export const backfillStorageTotals = internalMutation({
+  args: { cursor: v.optional(v.union(v.string(), v.null())) },
+  handler: async (ctx, args) => {
+    const page = await ctx.db.query("schools").paginate({ cursor: args.cursor ?? null, numItems: 5 });
+    const now = Date.now();
+    for (const school of page.page) {
+      let total = 0;
+      for await (const meter of ctx.db
+        .query("usageMeters")
+        .withIndex("by_school_category_day", (q) => q.eq("schoolId", school._id).eq("category", "storage_bytes")))
+        total += meter.quantity;
+      const row = await schoolStorageRow(ctx, school._id);
+      if (row) await ctx.db.patch(row._id, { quantity: Math.max(0, total), updatedAt: now });
+      else if (total > 0)
+        await ctx.db.insert("schoolUsageTotals", { schoolId: school._id, category: "storage_bytes", periodKey: "total", quantity: total, updatedAt: now });
+    }
+    if (!page.isDone)
+      await ctx.scheduler.runAfter(0, internal.metering.backfillStorageTotals, { cursor: page.continueCursor });
+    return { done: page.isDone };
+  },
+});
 
 async function effectiveLimitPolicy(ctx: IdentityCtx, schoolId: Id<"schools">) {
   const school = await ctx.db

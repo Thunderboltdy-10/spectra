@@ -5,7 +5,7 @@ import type { MutationCtx } from "./_generated/server";
 import { writeAuditEvent } from "./auditShared";
 import { deleteStorageIfNoOtherBinding } from "./durableStorageBindings";
 import { internalMutation } from "./orgNodeMutation";
-import { purgeNode, purgeSourceNodes } from "./orgTreeShared";
+import { purgeNode, purgeSourceNodes, sharesWithWorkspace } from "./orgTreeShared";
 import { releasePayloadIfUnreferenced } from "./payloadLifecycle";
 import { scheduleDeletion } from "./spectraArtifactDeletion";
 import { enqueueSemanticItem } from "./semanticQueue";
@@ -133,9 +133,7 @@ async function workIsShared(
     if (!placement.workspaceContextId) continue;
     const facts = await workspaceFacts(ctx, cache, placement.workspaceContextId, accountId);
     if (!facts?.shared) continue;
-    const projects =
-      placement.accessProjection === true ||
-      (placement.accessProjection === undefined && facts.ownerAccountId === artifact.ownerAccountId);
+    const projects = sharesWithWorkspace(placement);
     if (projects) return true;
   }
   return false;

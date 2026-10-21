@@ -36,7 +36,9 @@ export function applicationCommandCategory(command: string, args: Args): Permiss
     // A release only the owner reaches changes nothing for anyone else.
     case "release_agent":
       return args.action === "release_private" ? null : "sharing";
+    // Refreshing school records only reads from ManageBac, so it never asks.
     case "trigger_managebac_sync":
+      return null;
     case "select_managebac_classes":
     case "set_school_sync_mode":
     case "manage_class_workspaces":

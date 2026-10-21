@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("convex/react", () => ({
   useQuery: (reference: Parameters<typeof getFunctionName>[0]) => mocks.data[getFunctionName(reference)],
+  useConvexAuth: () => ({ isAuthenticated: true }),
   useConvex: () => ({ query: async (reference: Parameters<typeof getFunctionName>[0]) => mocks.data[getFunctionName(reference)] }),
 }));
 vi.mock("../../data/use-authed-args", () => ({ useAuthedArgs: <T,>(args: T) => args }));
@@ -23,7 +24,7 @@ vi.mock("../../files/office-preview-client", async (original) => ({
   loadOfficePreview: mocks.load,
 }));
 
-import { TaskDetails } from "../school-task-details";
+import { SchoolTaskNotice } from "../school-task-details";
 
 function file(providerFileId: string, filename: string, mimeType: string) {
   return { providerFileId, filename, mimeType, bytes: 4096, tooLarge: false, state: "cached", schoolFileId: `kept-${providerFileId}` };
@@ -39,7 +40,7 @@ beforeEach(() => {
   mocks.open.mockReset();
   vi.stubGlobal("open", mocks.open);
   mocks.data = {
-    "school:task": {
+    "school:taskOfWork": {
       title: "Enzymes lab",
       className: "Biology HL",
       past: false,
@@ -76,7 +77,7 @@ describe("A task's handed-in files", () => {
       media: [],
       deck: { theme: { id: "native-pptx", name: "PowerPoint theme" }, settings: { aspectRatio: "16:9" }, slides: [{ id: "s1", title: "Catalase", objects: [] }] },
     });
-    render(<TaskDetails recordId="task-1" now={Date.now()} onNotice={() => {}} />);
+    render(<SchoolTaskNotice artifactId="work-1" />);
     fireEvent.click(screen.getByRole("button", { name: "Open Enzymes.pptx" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Enzymes.pptx")).toBeTruthy();
@@ -90,7 +91,7 @@ describe("A task's handed-in files", () => {
   });
 
   it("say plainly that an older Office file can't show, without a viewer", async () => {
-    render(<TaskDetails recordId="task-1" now={Date.now()} onNotice={() => {}} />);
+    render(<SchoolTaskNotice artifactId="work-1" />);
     fireEvent.click(screen.getByRole("button", { name: "Open Notes.doc" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Notes.doc is an older Office file.")).toBeTruthy();
@@ -101,7 +102,7 @@ describe("A task's handed-in files", () => {
   it("send a file Spectra has no reader for to a new tab, as before", async () => {
     const tab = { location: { href: "" }, close: vi.fn() };
     mocks.open.mockReturnValue(tab);
-    render(<TaskDetails recordId="task-1" now={Date.now()} onNotice={() => {}} />);
+    render(<SchoolTaskNotice artifactId="work-1" />);
     fireEvent.click(screen.getByRole("button", { name: "Open Data.zip" }));
     await waitFor(() => expect(tab.location.href).toBe("https://files.example/kept"));
     expect(screen.queryByRole("dialog")).toBeNull();

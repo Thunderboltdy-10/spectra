@@ -315,6 +315,15 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     reach: tool("manage_embed", { appCommand: "manage_embed", example: { artifactId: "wx1", embedId: "e1", action: "resize", mode: "expanded" } }),
   },
   {
+    id: "work.show_in_reply",
+    area: "work",
+    title: "Show a work in the reply",
+    description: "Place a live, usable work in Spectra's reply: a deck to study, a quiz to take, slides to step through.",
+    keywords: ["show", "embed", "inline", "play", "study", "here", "in the chat"],
+    server: ["artifactEmbeds:create"],
+    reach: tool("show_work", { appCommand: "show_work", example: { artifactId: "wx1" } }),
+  },
+  {
     id: "work.save_version",
     area: "work",
     title: "Save a version",
@@ -1014,7 +1023,7 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     area: "school",
     title: "School administration",
     description: "School profile, members, groups, announcements, feedback, incidents, limits and data requests.",
-    server: ["administration:*", "schools:*", "memberships:invite", "metering:setLimitPolicy"],
+    server: ["administration:*", "schools:*", "memberships:invite", "metering:setLimitPolicy", "feedbackInbox:setStatus", "platformControls:setStopped"],
     reach: user("School administration belongs to school admins in the admin console. Spectra AI acts for one person's own account."),
   },
 ];

@@ -198,6 +198,10 @@ export function collaborationSessionRequestKey(
   return `${artifactId}:${partitionKey}:${clientId}:${schemaVersion}`;
 }
 
+function roomClosed(message: string) {
+  return /^COLLABORATION_(ROOM_CLOSED|SESSION_FORBIDDEN)\b/.test(message);
+}
+
 async function fetchCollaborationSession(
   artifactId: string,
   partitionKey: string,
@@ -226,14 +230,15 @@ async function fetchCollaborationSession(
     });
     const payload = (await response.json()) as
       | SessionResponse
-      | { error?: string | { message?: string } };
+      | { error?: string | { code?: string; message?: string } };
     if (!response.ok || !("token" in payload)) {
+      const failure = "error" in payload ? payload.error : undefined;
       const error =
-        "error" in payload
-          ? typeof payload.error === "string"
-            ? payload.error
-            : payload.error?.message
-          : undefined;
+        typeof failure === "string"
+          ? failure
+          : failure?.code && failure.code !== "INTERNAL_ERROR"
+            ? `${failure.code}: ${failure.message ?? ""}`
+            : failure?.message;
       throw new Error(error || "Could not start collaboration.");
     }
     return payload;
@@ -734,6 +739,12 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
               error instanceof Error
                 ? error.message
                 : "Could not start collaboration.";
+            if (roomClosed(reason)) {
+              this.intentionallyDisconnected = true;
+              this.websocketProvider?.disconnect();
+              this.settleClosed();
+              throw error;
+            }
             this.update({
               state: collaborationNeedsSignIn(reason)
                 ? "unsynchronized"
@@ -1182,6 +1193,10 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       this.provider = null;
       this.websocketProvider?.destroy();
       this.websocketProvider = null;
+      if (roomClosed(error instanceof Error ? error.message : "")) {
+        this.settleClosed();
+        return;
+      }
       this.update({
         state: "unsynchronized",
         error:
@@ -1191,6 +1206,13 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       });
       this.scheduleConnectionRetry();
     }
+  }
+
+  /** A closed room (an archived or retired work) will not reopen by retrying.
+   * Settle read-only with nothing pending, instead of a reconnect loop that
+   * keeps a phantom draft "held on this device". */
+  private settleClosed() {
+    this.update({ state: "closed", level: "read", unsynchronizedChanges: 0, error: undefined });
   }
 
   private scheduleConnectionRetry() {

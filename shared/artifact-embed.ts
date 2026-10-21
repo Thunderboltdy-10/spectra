@@ -83,3 +83,12 @@ export type ArtifactEmbedReference = {
   createdAt?: number;
   updatedAt?: number;
 };
+
+/** Where a conversation shows a work under the reply of one run (Spectra's show_work). */
+export function replyEmbedRegion(runId: string) {
+  return `reply:${runId}`;
+}
+
+export function isReplyEmbedRegion(regionId: string) {
+  return regionId.startsWith("reply:");
+}

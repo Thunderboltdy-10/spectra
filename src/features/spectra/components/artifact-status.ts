@@ -31,6 +31,7 @@ export type ArtifactStatusActionKind =
   | "compare"
   | "open-in-office"
   | "show-in-folder"
+  | "review-draft"
   | "history";
 
 export type ArtifactStatusAction = { kind: ArtifactStatusActionKind; label: string };
@@ -55,6 +56,8 @@ export type ArtifactStatusInput = {
   nativeActivity?: boolean;
   /** Spectra and the desktop file both changed (the native conflict). */
   nativeConflict?: boolean;
+  /** A draft kept on this device overlaps a newer change and waits for review. */
+  draftReview?: boolean;
   /** When this work was last saved, if no replica has said. */
   savedAt?: number;
   now: number;
@@ -133,7 +136,7 @@ export function folderTrailOf(folderLabel: string | undefined, relativePath: str
 function stateOf(input: ArtifactStatusInput): ArtifactStatusState {
   const { presentation, replicas } = input;
   if (presentation.state === "read_only") return "readOnly";
-  if (input.nativeConflict || presentation.key === "conflict") return "versions";
+  if (input.nativeConflict || input.draftReview || presentation.key === "conflict") return "versions";
   if (presentation.key === "error") return "problem";
   if (presentation.action?.kind === "sign-in") return "problem";
   if (presentation.state === "saving" || presentation.state === "pending") {
@@ -205,6 +208,8 @@ export function artifactStatusOf(input: ArtifactStatusInput): ArtifactStatus {
       return `${app} has this file open. Spectra saves it as soon as ${app} lets go of it.`;
     }
     if (state === "versions") {
+      if (input.draftReview && !input.nativeConflict)
+        return `A draft kept on this device overlaps a newer change${input.officeApplication ? ` from ${input.officeApplication}` : ""}. Nothing was overwritten: review it to choose.`;
       return input.nativeConflict
         ? `This work changed here and in ${app}. Nothing was overwritten: choose the version to keep.`
         : "This work changed in two places. Nothing was overwritten: choose the version to keep.";
@@ -227,7 +232,8 @@ export function artifactStatusOf(input: ArtifactStatusInput): ArtifactStatus {
       offer("keep-spectra", "Keep this version");
       offer("keep-office", `Keep the ${app} version`);
     }
-    offer("compare", "Compare");
+    if (input.draftReview) offer("review-draft", "Review the draft");
+    else offer("compare", "Compare");
   }
   if (input.presentation.action?.kind === "retry") offer("retry", input.presentation.action.label);
   if (input.presentation.action?.kind === "sign-in") offer("sign-in", input.presentation.action.label);

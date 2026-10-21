@@ -325,7 +325,7 @@ describe("sync toggles (P1.I4)", () => {
         { kind: "cloud", state: "current" },
       ]),
     ).toBe("This device + Spectra");
-    expect(resource).toContain("locationLabel");
+    expect(resource).toContain("presentation.disclosure");
   });
 
   it("prints the storage-change failure sentence once", () => {

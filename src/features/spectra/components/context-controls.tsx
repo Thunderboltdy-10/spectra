@@ -1,5 +1,6 @@
 "use client";
 
+import { buttonVariants } from "@/components/ui/button";
 import { AnimatePresence, motion } from "framer-motion";
 import { BookOpen, Files, Search } from "@/components/icons/glyph-icons";
 import { useEffect, useRef, useState } from "react";
@@ -61,7 +62,7 @@ export function showContinuationConflict({
               toast.dismiss(id);
               onReplace();
             }}
-            className="min-h-9 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)]"
+            className={buttonVariants({ variant: "primary" })}
           >
             Replace continuation
           </button>
@@ -83,12 +84,15 @@ export function SelectionActionBar({
   onExit,
   onTile,
   onAsk,
+  onShare,
 }: {
   count: number;
   onClear: () => void;
   onExit: () => void;
   onTile?: () => void;
   onAsk?: () => void;
+  /** Show the picked works to the people of the workspaces they are in, or make them private again. */
+  onShare?: (shared: boolean) => void;
 }) {
   return (
     <AnimatePresence>
@@ -114,6 +118,16 @@ export function SelectionActionBar({
             <button type="button" onClick={onTile} className="selection-bar-action">
               Side by side
             </button>
+          ) : null}
+          {onShare ? (
+            <>
+              <button type="button" onClick={() => onShare(true)} className="selection-bar-action" title="Show these to the people of the workspace they are in">
+                Share
+              </button>
+              <button type="button" onClick={() => onShare(false)} className="selection-bar-action" title="Only you see these">
+                Private
+              </button>
+            </>
           ) : null}
           <button type="button" onClick={onClear} className="selection-bar-action">
             Clear

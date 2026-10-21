@@ -407,7 +407,14 @@
 
 .work-preview-grid-row {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+}
+
+/* A table inside a document's opening sits among its lines. */
+.work-preview-text .work-preview-grid {
+  margin: 6px 0;
+  font-family: var(--font-sans);
 }
 
 .work-preview-grid-row + .work-preview-grid-row {
@@ -947,4 +954,49 @@ button.work-slip:focus-visible .work-slip-open {
   height: 16px;
   margin-inline: 4px;
   background: var(--card-border);
+}
+
+/* Works laid side by side: a grip at the top of each; drop one on another and they trade places. */
+.tile-grip {
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  z-index: calc(var(--z-chrome) + 1);
+  display: flex;
+  width: 40px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: var(--text-tertiary);
+  cursor: grab;
+  transform: translateX(-50%);
+  transition: background-color 150ms, color 150ms;
+}
+
+.tile-grip:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.tile-slot[data-dragging] {
+  opacity: 0.55;
+}
+
+.tile-slot[data-drop-target]::after {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  z-index: var(--z-chrome, 20);
+  border: 2px solid var(--brand-primary);
+  border-radius: var(--radius-card, 12px);
+  background: color-mix(in oklab, var(--brand-primary) 6%, transparent);
+  pointer-events: none;
+}
+
+/* Others can open this work: a quiet people mark beside the type. */
+.work-card-shared {
+  display: inline-flex;
+  margin-left: 2px;
+  opacity: 0.8;
 }

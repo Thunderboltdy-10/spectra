@@ -1503,6 +1503,18 @@ export const submitFeedback = mutation({
     ),
     subject: v.string(),
     message: v.string(),
+    screenshotStorageId: v.optional(v.id("_storage")),
+    pagePath: v.optional(v.string()),
+    attachments: v.optional(
+      v.array(
+        v.object({
+          storageId: v.id("_storage"),
+          name: v.string(),
+          mediaType: v.string(),
+          bytes: v.number(),
+        }),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
     const actor = await resolveActorContext(ctx);
@@ -1518,12 +1530,35 @@ export const submitFeedback = mutation({
       sentiment: args.sentiment,
       subject,
       message,
+      ...(args.screenshotStorageId ? { screenshotStorageId: args.screenshotStorageId } : {}),
+      ...(args.pagePath ? { pagePath: clean(args.pagePath, 300) } : {}),
+      ...(args.attachments?.length
+        ? {
+            attachments: args.attachments.slice(0, FEEDBACK_ATTACHMENT_LIMIT).map((file) => ({
+              storageId: file.storageId,
+              name: clean(file.name, 200) || "Attachment",
+              mediaType: clean(file.mediaType, 120) || "application/octet-stream",
+              bytes: Math.max(0, Math.floor(file.bytes)),
+            })),
+          }
+        : {}),
       status: "new",
       visibility: "reporter_and_responders",
       createdAt: now,
       updatedAt: now,
     });
     return { feedbackId, status: "new" as const };
+  },
+});
+
+const FEEDBACK_ATTACHMENT_LIMIT = 6;
+
+/** Where the feedback form uploads its screenshot and attachments. */
+export const feedbackUploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await resolveActorContext(ctx);
+    return ctx.storage.generateUploadUrl();
   },
 });
 

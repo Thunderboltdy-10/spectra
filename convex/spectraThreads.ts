@@ -1001,6 +1001,8 @@ export const list = query({
     includeArchived: v.optional(v.boolean()),
     limit: v.optional(v.number()),
     cursor: v.optional(v.string()),
+    /** Only the threads themselves: lists that show titles skip reading the works and workspaces each one is about. */
+    brief: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
@@ -1049,6 +1051,9 @@ export const list = query({
           status,
           cursor: page.continueCursor,
         } satisfies ThreadListCursor);
+    if (args.brief) {
+      return { threads: visible.map((thread) => ({ ...compactThread(thread), contexts: undefined })), hasMore: nextCursor !== null, nextCursor };
+    }
     const workspaceIds = [...new Set(visible.flatMap((thread) =>
       [thread.workspaceId, ...(thread.contextWorkspaceIds ?? [])].filter(Boolean).map(String),
     ))].slice(0, 48);
@@ -1224,7 +1229,22 @@ export const getSummary = query({
       retainedAgentId: thread.retainedAgentId,
       // Neither the owner nor an earlier run has named it yet.
       needsTitle: !thread.titleSetByOwner && !thread.titleGeneratedAt,
+      // What the user already allowed in this thread: it is not asked again here.
+      allowedPermissionCategories: thread.allowedPermissionCategories ?? [],
     };
+  },
+});
+
+/** The thread's name as it changes, or null once it is gone: the chat header follows it live. */
+export const liveName = query({
+  args: { threadId: v.id("spectraThreads") },
+  handler: async (ctx, args) => {
+    const actor = await getOptionalAuthenticatedActor(ctx);
+    if (!actor) return null;
+    const thread = await ctx.db.get(args.threadId);
+    if (!thread || thread.ownerAccountId !== actor.accountId || thread.schoolId !== actor.schoolId || thread.status === "deleted")
+      return null;
+    return { _id: thread._id, title: thread.title, summaryShort: thread.summaryShort, previewText: thread.previewText };
   },
 });
 

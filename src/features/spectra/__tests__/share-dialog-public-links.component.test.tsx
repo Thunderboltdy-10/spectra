@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 
 vi.mock("@/components/ui/toast", () => ({ toast }));
+vi.mock("convex/react", () => ({ useMutation: () => vi.fn(), useQuery: () => undefined }));
 vi.mock("../data/api", () => ({
   getSpectraShareState: vi.fn(async () => ({ shares: [] })),
   getSpectraPublicLinks: vi.fn(async () => ({ publicLinks: api.links })),

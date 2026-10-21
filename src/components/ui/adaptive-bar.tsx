@@ -126,13 +126,13 @@ function Command({ command, iconOnly }: { command: BarCommand; iconOnly: boolean
       aria-pressed={command.active}
       aria-keyshortcuts={command.shortcut}
       className={cn(
-        "inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-control px-2.5 text-caption font-medium text-[var(--text-secondary)] outline-none",
+        "inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-control px-3 text-ui font-medium text-[var(--text-secondary)] outline-none",
         "transition-[color,background-color] duration-[var(--motion-fast)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
         "focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] disabled:pointer-events-none disabled:opacity-45",
         command.active && "bg-[var(--bg-hover)] text-[var(--text-primary)]",
       )}
     >
-      {glyphOf(command.icon)}
+      {glyphOf(command.icon, 18)}
       {command.label}
     </button>
   );

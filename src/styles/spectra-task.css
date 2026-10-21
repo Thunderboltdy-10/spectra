@@ -212,12 +212,33 @@
   color: var(--text-primary);
 }
 
+/* A task set in ManageBac says so once, quietly, with the way back to it. */
+.task-school-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  line-height: 1.55;
+}
+.task-school-notice a {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--border-default);
+  text-underline-offset: 3px;
+}
+.task-school-notice a:hover {
+  text-decoration-color: currentColor;
+}
+
 .task-notes {
   min-height: 72px;
   padding: 2px 0;
 }
-/* Notes are written straight on the sheet; the formatting floats above them
-   only while they are being written. */
+/* Notes are written straight on the sheet, with their formatting docked at
+   the top of the field (never floating over the words): quiet until the
+   notes are being written, gone where they cannot be. */
 .task-notes .ProseMirror {
   min-height: 72px;
   color: var(--text-primary);
@@ -227,13 +248,26 @@
 .task-notes .ProseMirror p.is-editor-empty:first-child::before {
   color: var(--text-placeholder);
 }
-.task-notes .spectra-rich-text-editor:not(:focus-within) .spectra-rich-text-format-bar {
-  display: none;
+.task-notes .spectra-rich-text-editor .spectra-rich-text-format-bar [role="toolbar"] {
+  position: sticky;
+  top: 0;
+  bottom: auto;
+  left: auto;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 8px -6px;
+  overflow-x: auto;
+  border-color: var(--card-border-soft);
+  background: var(--card-paper);
+  box-shadow: none;
+  opacity: 0.6;
+  transition: opacity var(--motion-fast) var(--ease-standard);
 }
-.task-notes .spectra-rich-text-format-bar [role="toolbar"] {
-  bottom: calc(100% + 6px);
-  left: -12px;
-  animation: sheet-unfold var(--motion-fast) var(--ease-standard) both;
+.task-notes .spectra-rich-text-editor:focus-within .spectra-rich-text-format-bar [role="toolbar"] {
+  opacity: 1;
+}
+.task-notes .spectra-rich-text-editor[data-disabled] .spectra-rich-text-format-bar {
+  display: none;
 }
 
 /* Steps, and the rule that fills as they are ticked. */
@@ -458,23 +492,18 @@
 }
 .due-picker-own {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px auto;
+  grid-template-columns: minmax(0, 1fr) 104px auto;
   align-items: end;
   gap: 6px;
   margin-top: 6px;
   padding: 10px 6px 4px;
   border-top: 1px solid var(--card-border);
 }
-.due-picker-own label {
-  display: grid;
-  gap: 4px;
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  font-weight: 500;
-}
-.due-picker-own .sheet-input {
-  width: 100%;
+.due-picker-own .when-field {
   height: 32px;
+  padding: 0 8px;
+  gap: 6px;
+  font-size: var(--text-caption);
 }
 .due-picker-set {
   height: 32px;

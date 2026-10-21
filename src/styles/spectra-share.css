@@ -1,0 +1,582 @@
+/* Sharing (components/share-dialog.tsx and components/share/): a sheet of
+   paper with one line per person, the invite field at the top. */
+
+.share-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: min(720px, calc(100dvh - 32px));
+  overflow: hidden;
+}
+.share-head {
+  /* Clear of the dialog's close button. */
+  padding: 22px 56px 0 24px;
+}
+.share-head-title {
+  overflow: hidden;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-head .share-quiet {
+  margin-top: 4px;
+}
+.share-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 24px 24px;
+}
+
+.share-quiet {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+  line-height: 1.45;
+}
+
+/* Invite: the field gathers people as it goes, then the note and Send. */
+.share-invite {
+  position: relative;
+}
+.share-invite-field {
+  display: flex;
+  min-height: 42px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--control-radius);
+  background: color-mix(in oklab, var(--card-paper) 70%, var(--bg-primary));
+  color: var(--text-tertiary);
+  transition: border-color var(--motion-fast) var(--ease-standard);
+}
+.share-invite-field:focus-within {
+  border-color: var(--brand-primary);
+}
+.share-invite-field input {
+  min-width: 140px;
+  height: 30px;
+  flex: 1;
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--text-ui);
+  outline: none;
+}
+.share-invite-field input::placeholder {
+  color: var(--text-tertiary);
+}
+.share-invite-person {
+  display: inline-flex;
+  height: 26px;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px 0 10px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  font-weight: 500;
+}
+.share-invite-person button {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  color: var(--text-tertiary);
+}
+.share-invite-person button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.share-invite-results {
+  margin: 6px 0 0;
+  padding: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--control-radius);
+  list-style: none;
+}
+.share-invite-results li[role="option"] {
+  display: flex;
+  min-height: 40px;
+  flex-direction: column;
+  justify-content: center;
+  padding: 4px 10px;
+  border-radius: calc(var(--control-radius) - 2px);
+  cursor: pointer;
+}
+.share-invite-results li[data-active] {
+  background: var(--bg-hover);
+}
+.share-invite-results li[aria-disabled] {
+  cursor: default;
+  opacity: 0.55;
+}
+.share-invite-name {
+  color: var(--text-primary);
+  font-size: var(--text-ui);
+  font-weight: 500;
+}
+.share-invite-meta {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-invite-empty {
+  padding: 10px;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+.share-invite-send {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.share-invite-send > input {
+  height: 36px;
+  min-width: 0;
+  padding: 0 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--control-radius);
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  outline: none;
+}
+.share-invite-send > input:focus {
+  border-color: var(--brand-primary);
+}
+
+/* Sections: a display-serif name, then their lines. */
+.share-section {
+  margin-top: 26px;
+}
+.share-section-title {
+  margin: 0 0 6px;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+/* A setting with its explanation under it and its control at the end. */
+.share-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.share-switch-row > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.share-switch-row .share-quiet {
+  font-size: 12.5px;
+}
+.share-section > .share-quiet {
+  margin-bottom: 8px;
+}
+
+.share-people {
+  margin: 6px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--border-subtle);
+  list-style: none;
+}
+.share-person {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.share-person--request {
+  flex-wrap: wrap;
+}
+.share-person-who {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+.share-person-name {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-person[data-pending] .share-person-name {
+  color: var(--text-secondary);
+}
+.share-person-meta {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-person-note {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-family: var(--font-display);
+  font-size: var(--text-ui);
+  font-style: italic;
+}
+.share-person-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+.share-person--request .share-person-actions {
+  margin-left: auto;
+}
+.share-person-level {
+  padding: 0 10px;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+.share-person-remove {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: var(--control-radius);
+  color: var(--text-tertiary);
+}
+.share-person-remove:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--danger) 8%, transparent);
+  color: var(--danger);
+}
+.share-person-remove:disabled {
+  opacity: 0.45;
+}
+
+/* A select that reads as text until it is pointed at. */
+.share-quiet-select {
+  border-color: transparent;
+  background: none;
+  color: var(--text-secondary);
+}
+.share-quiet-select:hover,
+.share-quiet-select[data-state="open"] {
+  border-color: var(--border-default);
+  color: var(--text-primary);
+}
+
+/* Through workspaces: folded until asked for. */
+.share-fold-toggle {
+  display: inline-flex;
+  height: 32px;
+  align-items: center;
+  gap: 6px;
+  margin-left: -4px;
+  padding: 0 6px 0 4px;
+  border-radius: var(--control-radius);
+  color: var(--text-secondary);
+  font-size: var(--text-ui);
+  font-weight: 500;
+}
+.share-fold-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.share-fold-toggle span {
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+.share-fold-toggle svg {
+  transition: transform var(--motion-fast) var(--ease-standard);
+}
+.share-fold[data-open] .share-fold-toggle svg {
+  transform: rotate(90deg);
+}
+.share-fold .share-quiet {
+  margin-top: 4px;
+}
+
+/* Links. */
+.share-link-glyph {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.share-link-made {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.share-link-made input {
+  height: 32px;
+  min-width: 0;
+  flex: 1;
+  padding: 0 10px;
+  border: 1px solid color-mix(in oklab, var(--success) 40%, var(--border-default));
+  border-radius: var(--control-radius);
+  background: color-mix(in oklab, var(--success) 5%, transparent);
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  outline: none;
+}
+.share-link-make {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+@media (max-width: 520px) {
+  .share-head {
+    padding: 18px 52px 0 18px;
+  }
+  .share-body {
+    padding: 14px 18px 20px;
+  }
+  .share-invite-send {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .share-invite-send > input {
+    grid-column: 1 / -1;
+  }
+  .share-person {
+    flex-wrap: wrap;
+  }
+  .share-person-actions {
+    margin-left: auto;
+  }
+}
+
+/* Invitations waiting for the reader (components/invitation-strip.tsx): one
+   quiet line above the Library that opens into the list. */
+.invitation-strip {
+  flex: none;
+  border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in oklab, var(--card-paper) 60%, var(--bg-primary));
+}
+.invitation-strip-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 24px;
+  color: var(--text-secondary);
+  font-size: var(--text-ui);
+  text-align: left;
+}
+.invitation-strip-toggle > svg:first-child {
+  flex: none;
+  color: var(--brand-primary);
+}
+.invitation-strip-toggle strong {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.invitation-strip-toggle span {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.invitation-strip-chevron {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-tertiary);
+  transition: transform var(--motion-fast) var(--ease-standard);
+}
+.invitation-strip[data-open] .invitation-strip-chevron {
+  transform: rotate(180deg);
+}
+.invitation-strip-list {
+  max-height: 46vh;
+  margin: 0;
+  padding: 0 24px 8px;
+  overflow-y: auto;
+  list-style: none;
+}
+.invitation-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.invitation-line-glyph {
+  flex: none;
+  align-self: flex-start;
+  margin-top: 2px;
+  color: var(--text-secondary);
+}
+.invitation-line-what {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+.invitation-line-what strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.invitation-line-what span {
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+.invitation-line-what q {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-family: var(--font-display);
+  font-style: italic;
+}
+.invitation-line-actions {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+@media (max-width: 640px) {
+  .invitation-strip-toggle span {
+    display: none;
+  }
+  .invitation-line {
+    flex-wrap: wrap;
+  }
+  .invitation-line-actions {
+    margin-left: auto;
+  }
+}
+
+/* Who has this work: the people button in its header, and its list. */
+.shared-people-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 9px;
+  border-radius: var(--radius-control, 8px);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background-color var(--motion-fast, 120ms) ease, color var(--motion-fast, 120ms) ease;
+}
+.shared-people-button:hover,
+.shared-people-button[data-state="open"] {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.shared-people-button:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--brand-primary));
+  outline-offset: 2px;
+}
+.shared-people-head {
+  padding: 14px 16px 10px;
+}
+.shared-people-head h3 {
+  font-family: var(--font-display, var(--font-serif));
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.shared-people-head p {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+}
+.shared-people-list {
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0 8px 6px;
+  list-style: none;
+}
+.shared-people-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 8px;
+}
+.shared-people-face {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--bg-sunken, var(--bg-hover));
+  color: var(--text-tertiary);
+}
+.shared-people-face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.shared-people-who {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+.shared-people-name {
+  overflow: hidden;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shared-people-meta {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+.shared-people-meta:empty {
+  display: none;
+}
+.shared-people-role {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.shared-people-role[data-role="owner"] {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.shared-people-school {
+  margin: 0 16px 8px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.shared-people-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 16px 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+.shared-people-foot .share-switch-row {
+  width: 100%;
+  border-top: 0;
+  padding-bottom: 4px;
+}

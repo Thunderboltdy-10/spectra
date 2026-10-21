@@ -10,11 +10,13 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { Pencil, RotateCcw, ChevronRight, FolderPlus, Link2, Share2, Star, Trash2, ArrowRight } from "@/components/icons/glyph-icons";
+import { Pencil, RotateCcw, ChevronRight, Copy, FolderPlus, Link2, Lock, Share2, Star, Trash2, ArrowRight, Users } from "@/components/icons/glyph-icons";
+import { copyWorkHere } from "./shared-works";
 import { toast } from "@/components/ui/toast";
 import { showRetryToast } from "@/components/ui/retry-toast";
-import { useConvexAuth, useQuery } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 import { IsolatedErrorBoundary } from "@/components/global-error-boundary";
 import { TrashPurgeDialog } from "../components/shell-dialogs";
 import { cn } from "@/lib/utils";
@@ -64,6 +66,7 @@ import {
   type SortKey,
   type TypeFilter,
 } from "./tree-model";
+import { IconButton } from "@/components/ui/icon-button";
 import { useOrganizerDrag } from "./organizer-drag";
 import { OrganizerRail, type OrganizerLocation } from "./organizer-rail";
 import { OrganizerRow, ROW_HEIGHT, type RowCallbacks } from "./organizer-row";
@@ -76,6 +79,7 @@ import {
   SurfaceMoreMenu,
   SurfaceNewMenu,
   SurfaceSearch,
+  SurfaceSelectToggle,
   type BlueprintChoiceKey,
 } from "./surface-chrome";
 import { Button } from "@/components/ui/button";
@@ -87,12 +91,13 @@ import { LibraryCrumbs, crumbSteps } from "./library-crumbs";
 import { useLibraryView, useQuickPane } from "./library-view";
 import type { WorkPicking } from "./library-note";
 import { useClassBook } from "../school/use-class-book";
+import { firstTipMoment } from "../onboarding/first-tips";
 
 /**
  * The Library, as a filesystem.
  *
- * One hierarchy, one surface: a rail of containers on the left and one level of
- * rows on the right. Recent, Favorites, Shared and type filters are ways of
+ * One hierarchy, one surface: a rail of containers on the left (closed and
+ * opened from the bar) and one level of rows on the right. Recent, Favorites, Shared and type filters are ways of
  * looking at that hierarchy, not separate places — which is why they change the
  * rows and nothing else, and why every one of them can still be dragged out of.
  *
@@ -374,6 +379,9 @@ function LibraryOrganizerContent({
 
   const searchHelpId = useId();
   const searching = term.trim().length >= 2;
+  useEffect(() => {
+    if (searching) firstTipMoment("search");
+  }, [searching]);
   const inFolder = location.kind === "folder";
   const currentParentId = inFolder ? location.nodeId : null;
   const currentParentRef = useRef(currentParentId);
@@ -552,6 +560,7 @@ function LibraryOrganizerContent({
     if (location.kind !== "folder" || location.nodeId !== target) moveTo({ kind: "folder", nodeId: target });
   }, [floorId, folderId, location, moveTo]);
 
+  const setWorksShared = useMutation(api.workspaceSharing.setWorksShared);
   const run = useCallback(async function execute(
     label: string,
     operation: () => Promise<unknown>,
@@ -1130,6 +1139,10 @@ function LibraryOrganizerContent({
             controls fold to their icons and search gives up width; nothing
             wraps to a second row (spectra-library.css, "The bar"). */}
         <div className="surface-bar-where">
+          {/* The places open and close here, the way the chat's threads do. */}
+          {showRail && !shelf ? (
+            <IconButton icon="sidebar" label={paneOpen ? "Hide places" : "Show places"} aria-pressed={paneOpen} onClick={togglePane} />
+          ) : null}
           {toolbarLead}
           <nav
             aria-label="Location"
@@ -1196,8 +1209,11 @@ function LibraryOrganizerContent({
             }}
           />
           )}
-          {/* How the place is shown, narrowed and ordered, and picking several
-              at once: one menu, so the bar is where you are, search and New. */}
+          {onToggleSelect && location.kind !== "trash" ? (
+            <SurfaceSelectToggle selecting={Boolean(selecting)} onToggle={onToggleSelect} />
+          ) : null}
+          {/* How the place is shown, narrowed and ordered: one menu, so the
+              bar is where you are, search, New and Select. */}
           <SurfaceMoreMenu
             view={shelfable ? (shelf ? "shelf" : "list") : undefined}
             onViewChange={shelfable ? setView : undefined}
@@ -1207,10 +1223,6 @@ function LibraryOrganizerContent({
             direction={sortDirection}
             onSortKeyChange={setSortKey}
             onDirectionChange={setSortDirection}
-            selecting={selecting}
-            onToggleSelect={onToggleSelect}
-            quickAccess={paneOpen}
-            onToggleQuickAccess={showRail && !shelf ? togglePane : undefined}
             onEmptyTrash={location.kind === "trash" && rows.length > 0 ? () => requestPurge(rows, true) : undefined}
           />
         </div>
@@ -1249,6 +1261,7 @@ function LibraryOrganizerContent({
             <ClassShelf
               key={classFolder.nodeId}
               folderId={classFolder.nodeId}
+              workspaceId={classFolder.workspace?.workspaceId}
               name={classFolder.name}
               identity={classWorkspaceIdentity(classFolder, book)}
               providerClassId={book.idNamed(classFolder.name)}
@@ -1284,6 +1297,7 @@ function LibraryOrganizerContent({
             <FolderShelf
               key={folderShelf.nodeId}
               folderId={folderShelf.nodeId}
+              workspaceId={folderShelf.kind === "workspace" ? folderShelf.workspace?.workspaceId : undefined}
               name={folderShelf.name}
               now={now}
               onOpen={openNode}
@@ -1301,6 +1315,9 @@ function LibraryOrganizerContent({
           </section>
         ) : (
           <>
+          {showRail && paneOpen ? (
+            <aside className="library-quick-pane spectra-composer-clearance">{rail}</aside>
+          ) : null}
           <section className="@container/rows flex min-w-0 flex-1 flex-col">
             <div className="flex h-7 shrink-0 items-center gap-2 border-b border-[var(--border-subtle)] px-4 pr-3.5 text-micro font-semibold text-[var(--text-tertiary)]">
               <span className="w-[22px] shrink-0" />
@@ -1486,9 +1503,6 @@ function LibraryOrganizerContent({
               </span>
             </footer>
           </section>
-          {showRail && paneOpen ? (
-            <aside className="library-quick-pane spectra-composer-clearance">{rail}</aside>
-          ) : null}
           </>
         )}
       </div>
@@ -1522,6 +1536,20 @@ function LibraryOrganizerContent({
           }
           onPurge={(nodes) => requestPurge(nodes)}
           onShare={onShareWork}
+          onSetShared={(nodes, shared) =>
+            void run(shared ? "Those works stayed private." : "Those works stayed shared.", async () => {
+              const result = await setWorksShared({ nodeIds: nodes.map((node) => node.nodeId as Id<"orgNodes">), shared });
+              const done = result.changed === 1 ? "1 work" : `${result.changed} works`;
+              if (result.changed) toast.success(shared ? `Shared ${done} with the workspace.` : `${done[0]!.toUpperCase()}${done.slice(1)} private again.`);
+              if (result.skipped) toast.error(`${result.skipped} could not change: only your own works in a workspace can be shared with it.`);
+            })
+          }
+          onCopy={(nodes) =>
+            void (async () => {
+              for (const node of nodes)
+                if (node.sourceId) await copyWorkHere(node.sourceId, { workspaceId: node.workspaceContextId, parentNodeId: node.parentId ?? "root" });
+            })()
+          }
           onNewFolder={createFolderHere}
           onNewWork={createWorkHere}
           onReveal={(node) => {
@@ -1635,6 +1663,8 @@ function NodeMenu({
   onRestore,
   onPurge,
   onShare,
+  onSetShared,
+  onCopy,
   onNewFolder,
   onNewWork,
   onReveal,
@@ -1651,11 +1681,17 @@ function NodeMenu({
   onRestore: (nodeIds: string[]) => void;
   onPurge: (nodes: TreeNode[]) => void;
   onShare?: (artifactId: string) => void;
+  onSetShared: (nodes: TreeNode[], shared: boolean) => void;
+  onCopy: (nodes: TreeNode[]) => void;
   onNewFolder: () => void;
   onNewWork: (key: Parameters<typeof createDefaultArtifactPayload>[0]) => void;
   onReveal: (node: TreeNode) => void;
 }) {
   const single = nodes.length === 1 ? nodes[0] : null;
+  // Works of yours inside a workspace: private to you until shared with its people.
+  const sharable = nodes.length > 0 && nodes.every((node) => node.kind === "work" && node.workspaceContextId && node.source?.owned !== false);
+  const allShared = sharable && nodes.every((node) => node.sharedWithWorkspace);
+  const copyable = nodes.length > 0 && nodes.length <= 20 && nodes.every((node) => node.kind === "work" && node.sourceId);
   const inTrash = location.kind === "trash";
   const flat = location.kind !== "folder";
   const work = single?.kind === "work" ? single : null;
@@ -1764,6 +1800,24 @@ function NodeMenu({
               >
                 <Share2 className="size-3.5 text-[var(--text-tertiary)]" />
                 Share…
+              </DropdownMenuItem>
+            ) : null}
+            {copyable ? (
+              <DropdownMenuItem onSelect={() => onCopy(nodes)}>
+                <Copy className="size-3.5 text-[var(--text-tertiary)]" />
+                {count === 1 ? "Make a copy" : `Make ${count} copies`}
+              </DropdownMenuItem>
+            ) : null}
+            {sharable ? (
+              <DropdownMenuItem onSelect={() => onSetShared(nodes, !allShared)}>
+                {allShared ? (
+                  <Lock className="size-3.5 text-[var(--text-tertiary)]" />
+                ) : (
+                  <Users className="size-3.5 text-[var(--text-tertiary)]" />
+                )}
+                {allShared
+                  ? count === 1 ? "Make private" : `Make ${count} private`
+                  : count === 1 ? "Share with this workspace" : `Share ${count} with this workspace`}
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuSeparator />

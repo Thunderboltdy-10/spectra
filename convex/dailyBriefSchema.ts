@@ -21,6 +21,7 @@ export const briefSuggestionValidator = v.object({
       steps: v.optional(v.array(v.string())),
     }),
   ),
+  steps: v.optional(v.array(v.string())),
   done: v.optional(v.boolean()),
   doneId: v.optional(v.string()),
 });

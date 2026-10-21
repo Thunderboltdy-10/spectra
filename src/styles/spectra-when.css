@@ -1,0 +1,231 @@
+/* Day and time fields (components/ui/when-fields.tsx): a quiet framed field
+   that opens a month or a column of quarter hours. */
+
+.when-field {
+  display: inline-flex;
+  min-width: 0;
+  height: 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--control-radius);
+  background: color-mix(in oklab, var(--card-paper) 70%, var(--bg-primary));
+  color: var(--text-primary);
+  font-size: var(--text-ui);
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  transition: border-color var(--motion-fast) var(--ease-standard);
+}
+.when-field > svg {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.when-field > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.when-field[data-empty] {
+  color: var(--text-tertiary);
+}
+.when-field:hover {
+  border-color: var(--border-strong);
+}
+.when-field:is(:focus-visible, :focus-within, [data-state="open"]) {
+  border-color: var(--brand-primary);
+  outline: none;
+}
+.when-field--time input {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  outline: none;
+}
+.when-field--time input::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* The month: its name with the turns beside it, then the weeks. */
+.when-month {
+  width: 264px;
+  padding: 10px;
+}
+.when-month-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px 28px;
+  align-items: center;
+  gap: 2px;
+  padding: 0 2px 8px 6px;
+}
+.when-month-head strong {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+}
+.when-month-head button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: var(--control-radius);
+  color: var(--text-secondary);
+}
+.when-month-head button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.when-month-grid {
+  display: grid;
+  gap: 2px;
+}
+.when-month-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+.when-month-weekday {
+  display: grid;
+  height: 24px;
+  place-items: center;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+}
+.when-month-week button {
+  display: grid;
+  height: 32px;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+.when-month-week button[data-outside] {
+  color: var(--text-tertiary);
+}
+.when-month-week button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.when-month-week button:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: -2px;
+}
+.when-month-week button[aria-current="date"] {
+  color: var(--brand-primary);
+  font-weight: 700;
+}
+.when-month-week button[aria-selected="true"] {
+  background: var(--brand-primary);
+  color: var(--card-paper);
+  font-weight: 600;
+}
+.when-month-week button:disabled {
+  opacity: 0.35;
+}
+.when-month-today {
+  width: 100%;
+  height: 30px;
+  margin-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 6px;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+.when-month-today:hover:not(:disabled) {
+  color: var(--brand-primary);
+}
+
+/* The quarter hours, with how long each would last after a start. */
+.when-times {
+  width: var(--radix-popover-trigger-width, 180px);
+  min-width: 168px;
+  max-height: 248px;
+  padding: 4px;
+}
+.when-times ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.when-times li {
+  display: flex;
+  height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 10px;
+  border-radius: calc(var(--control-radius) - 2px);
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.when-times li span {
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+}
+.when-times li:is(:hover, [data-active]) {
+  background: var(--bg-hover);
+}
+.when-times li[aria-selected="true"] {
+  color: var(--brand-primary);
+  font-weight: 600;
+}
+
+/* The calendar's composer: what it is, its title as one line of type, then when. */
+.calendar-composer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  /* Clear of the dialog's close button. */
+  padding-right: 28px;
+}
+.calendar-composer-title {
+  width: 100%;
+  margin-top: 16px;
+  padding: 6px 0 8px;
+  border: 0;
+  border-bottom: 1px solid var(--border-default);
+  background: none;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 20px;
+  outline: none;
+  transition: border-color var(--motion-fast) var(--ease-standard);
+}
+.calendar-composer-title::placeholder {
+  color: var(--text-tertiary);
+}
+.calendar-composer-title:focus {
+  border-color: var(--brand-primary);
+}
+.calendar-composer-when {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 8px;
+  margin-top: 16px;
+}
+.calendar-composer-hours {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+  color: var(--text-tertiary);
+}
+.calendar-composer-hint {
+  margin: 8px 0 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+@media (max-width: 480px) {
+  .calendar-composer-when {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

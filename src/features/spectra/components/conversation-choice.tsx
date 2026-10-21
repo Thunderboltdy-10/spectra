@@ -1,5 +1,6 @@
 "use client";
 
+import { buttonVariants } from "@/components/ui/button";
 import { useId, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import type {
@@ -228,7 +229,7 @@ export function BatchedChoiceBlock({
             saveFailure(error, "Could not send these answers. Try again.");
           });
         }}
-        className="mt-2 h-9 w-full rounded-control bg-[var(--text-primary)] text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
+        className={buttonVariants({ variant: "primary", className: "mt-2 w-full" })}
       >
         {pending ? "Sending answers…" : "Continue with these answers"}
       </button>

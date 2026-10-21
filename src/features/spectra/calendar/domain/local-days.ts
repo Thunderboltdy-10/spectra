@@ -40,28 +40,3 @@ export function localDaysAround(center: number, before: number, after: number) {
 export function endOfLocalDay(dayStart: number) {
   return addLocalDays(dayStart, 1) - 1;
 }
-
-/**
- * The `YYYY-MM-DDTHH:mm` value a `datetime-local` input expects, in the
- * browser's own zone. `toISOString()` is UTC, so it showed a time hours away
- * from the user's clock and `Date.parse` read it back as local time.
- */
-export function toLocalDateTimeInput(value: number) {
-  const date = new Date(value);
-  const pad = (part: number) => String(part).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-/** Whole local hours for a newly opened personal-event composer. */
-export function defaultLocalEventTimes(value: number) {
-  const start = new Date(value);
-  start.setHours(start.getHours() + 1, 0, 0, 0);
-  const end = new Date(start);
-  // Advance the displayed local hour, including DST gaps and repeated hours.
-  // datetime-local cannot distinguish the two occurrences of an autumn hour.
-  end.setHours(end.getHours() + 1, 0, 0, 0);
-  return {
-    start: toLocalDateTimeInput(start.getTime()),
-    end: toLocalDateTimeInput(end.getTime()),
-  };
-}

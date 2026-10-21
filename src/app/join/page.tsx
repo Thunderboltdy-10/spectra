@@ -4,8 +4,8 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
 import { useRouter, useSearchParams } from "next/navigation";
-import { LoaderCircle, ShieldCheck, Check, School } from "@/components/icons/glyph-icons";
-import { SpectraLogo } from "@/components/spectra-logo";
+import { LoaderCircle, Check } from "@/components/icons/glyph-icons";
+import { SpectraMark } from "@/components/spectra-mark";
 import { Button } from "@/components/ui/button";
 import { mutateAdministration } from "@/features/spectra/administration/api";
 import {
@@ -62,6 +62,8 @@ function JoinSchoolContent() {
   >(token ? "loading" : "idle");
   const [previewRetryable, setPreviewRetryable] = useState(false);
   const [previewAttempt, setPreviewAttempt] = useState(0);
+  /** An unknown, withdrawn or expired link: nothing here can make it work. */
+  const [ended, setEnded] = useState(false);
 
   useEffect(() => {
     if (token) persistJoinTokenCookie(token, document);
@@ -80,6 +82,7 @@ function JoinSchoolContent() {
         if (!active) return;
         if (next.outcome === "unavailable") {
           clearJoinTokenCookie(document);
+          setEnded(true);
           setPreview(null);
           setPreviewState("error");
           setStatus("error");
@@ -97,8 +100,10 @@ function JoinSchoolContent() {
           /INVITATION_INVALID|INVITATION_EXPIRED|INVITATION_SCHOOL_UNAVAILABLE/.test(
             raw,
           )
-        )
+        ) {
           clearJoinTokenCookie(document);
+          setEnded(true);
+        }
         setPreview(null);
         setPreviewState("error");
         setPreviewRetryable(retryable);
@@ -167,7 +172,9 @@ function JoinSchoolContent() {
       ? schoolName
         ? `You joined ${schoolName}`
         : "Welcome to your school"
-      : schoolName
+      : ended
+        ? "This invitation can’t be used"
+        : schoolName
         ? `Join ${schoolName}`
         : token
           ? "Accept your school invitation"
@@ -177,7 +184,9 @@ function JoinSchoolContent() {
   const detail =
     status === "accepted"
       ? "Spectra is opening your workspace."
-      : !token
+      : ended
+        ? "Ask the teacher or school administrator who invited you to send a new one."
+        : !token
         ? "You join a school through the invitation link your school emailed you. Open that link on this device. No invitation yet? Ask your teacher or school administrator to invite the email you sign in with."
         : preview?.emailMatches === false
         ? "Sign in with the invited email, then return to this page."
@@ -188,48 +197,45 @@ function JoinSchoolContent() {
     status === "accepted"
       ? "Accepted"
       : status === "accepting"
-        ? "Checking invitation"
+        ? "Joining"
         : previewState === "loading"
-          ? "Checking invitation"
-        : "Join school";
+          ? "Checking the invitation"
+          : schoolName
+            ? `Join as a ${roleLabel(preview?.role ?? "student")}`
+            : "Join school";
 
   return (
-    <main className="relative isolate grid min-h-dvh place-items-center bg-[radial-gradient(circle_at_50%_0%,color-mix(in_oklab,var(--accent-mint)_11%,transparent),transparent_42%),var(--bg-primary)] p-5 text-[var(--text-primary)]">
-      <section className="w-full max-w-[470px] rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-7 shadow-[var(--shadow-lg)]">
-        <div className="flex items-center gap-2">
-          <SpectraLogo size={28} />
-          <span className="font-[var(--font-serif)] text-title font-medium">
-            Spectra
-          </span>
-        </div>
-        <span className="mt-8 grid size-12 place-items-center rounded-surface bg-[color-mix(in_oklab,var(--accent-mint)_10%,var(--bg-primary))] text-[var(--accent-mint)]">
-          {status === "accepted" ? <Check size={22} /> : <School size={22} />}
-        </span>
-        <h1 className="mt-5 font-[var(--font-serif)] text-display font-medium tracking-[-.025em]">
+    <main className="spectra-wave-y relative isolate grid min-h-dvh place-items-center bg-[var(--bg-primary)] px-4 py-8 text-[var(--text-primary)]">
+      <section className="w-full max-w-[460px] rounded-[var(--radius-container)] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-7 shadow-[var(--shadow-soft)] md:p-9">
+        <Link href="/" aria-label="Spectra home" className="inline-flex items-center gap-2.5 rounded-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]">
+          <SpectraMark size={28} />
+          <span className="font-display text-subhead font-semibold">Spectra</span>
+        </Link>
+        <h1 className="mt-10 font-display text-display font-semibold leading-tight tracking-[-0.03em]">
           {heading}
         </h1>
-        <p className="mt-2 text-caption leading-5 text-[var(--text-tertiary)]">
+        <p className="mt-3 text-ui leading-6 text-[var(--text-secondary)]">
           {detail}
         </p>
         {status === "error" ? (
           <div
             role="alert"
-            className="mt-5 rounded-control border border-[color-mix(in_oklab,var(--danger)_28%,var(--bg-elevated))] bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))] p-3 text-caption leading-5 [color:color-mix(in_oklab,var(--danger)_80%,var(--text-primary))]"
+            className="mt-5 border-l-2 border-[var(--danger)] pl-3 text-ui leading-6 [color:color-mix(in_oklab,var(--danger)_80%,var(--text-primary))]"
           >
             <p>{error}</p>
             {previewRetryable && previewState === "error" ? (
               <Button variant="secondary" size="sm" className="mt-2" onClick={retryPreview}>
-                Retry invitation check
+                Check the invitation again
               </Button>
             ) : null}
           </div>
         ) : null}
-        {token ? (
+        {token && !ended ? (
           <>
             <Button
               variant="primary"
               size="lg"
-              className="mt-6 w-full"
+              className="mt-8 w-full"
               onClick={() => void accept()}
               disabled={
                 status === "accepting" ||
@@ -239,17 +245,17 @@ function JoinSchoolContent() {
                 preview?.emailMatches === false
               }
             >
-              {status === "accepting" ? (
+              {status === "accepting" || previewState === "loading" ? (
                 <LoaderCircle size={15} className="animate-spin" />
-              ) : (
-                <ShieldCheck size={15} />
-              )}
+              ) : status === "accepted" ? (
+                <Check size={15} />
+              ) : null}
               {buttonLabel}
             </Button>
             {/* Anyone on this page is already signed in, so a "Sign in" link
                 came straight back here. Switching means signing out first;
                 the invitation link is kept for the sign-in that follows. */}
-            <div className="mt-5 border-t border-[var(--border-subtle)] pt-4 text-micro leading-4 text-[var(--text-tertiary)]">
+            <p className="mt-6 text-caption leading-5 text-[var(--text-tertiary)]">
               Signed in with a different email than the one invited?{" "}
               <button
                 type="button"
@@ -262,15 +268,15 @@ function JoinSchoolContent() {
                     ),
                   });
                 }}
-                className="font-medium text-[var(--text-primary)] underline"
+                className="font-medium text-[var(--text-primary)] underline underline-offset-2"
               >
                 Use a different account
               </button>
-            </div>
+            </p>
           </>
         ) : (
-          <Button asChild size="lg" className="mt-6 w-full">
-            <Link href="/request-access">How to get an invitation</Link>
+          <Button asChild size="lg" className="mt-8 w-full">
+            {ended ? <Link href="/workspace">Open Spectra</Link> : <Link href="/request-access">How to get an invitation</Link>}
           </Button>
         )}
       </section>

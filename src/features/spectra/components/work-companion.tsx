@@ -9,13 +9,13 @@ import { EmptyState, LoadingRows, ProblemState } from "@/components/ui/page-stat
 import { PanelTabs, SidePanel } from "@/components/ui/side-panel";
 import { useLifeLanding } from "../life/use-life";
 import { workTypeMeta } from "../artifacts/presentation";
+import { meaningfulSummary, previewExtent, workPreview } from "../artifacts/work-preview";
 import { getSpectraThreads, type SpectraArtifact, type SpectraThread } from "../data/api";
 import { spectraBus } from "../events";
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { useRelated } from "../semantic/use-semantic";
 import type { RelatedReason } from "../semantic/types";
-import { artifactPlacements, formatRelativeTime } from "./spectra-view-model";
-import { previewText } from "./preview-text";
+import { artifactPlacements, formatRelativeTime, formatShortDate } from "./spectra-view-model";
 import { WorkbenchInspectorTabs } from "./workbench-inspector-tabs";
 import { expectLanding } from "../anchors/open-anchor";
 import { regionOfResult } from "../anchors/locate";
@@ -144,54 +144,79 @@ function CompanionBody({ work, artifacts, tab, onOpenWork, onOpenThread }: Compa
   return <WorkConversations work={work} onOpenThread={onOpenThread} />;
 }
 
+/** One line of the work's colophon: what it records on the left, the record on the right. */
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 py-1">
-      <dt className="text-caption text-[var(--text-tertiary)]">{label}</dt>
-      <dd className="min-w-0 truncate text-right text-ui text-[var(--text-primary)]">{children}</dd>
+    <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-3 border-t border-[var(--border-subtle)] py-2.5">
+      <dt className="text-caption leading-5 text-[var(--text-tertiary)]">{label}</dt>
+      <dd className="min-w-0 text-ui leading-5 text-[var(--text-primary)]">{children}</dd>
     </div>
   );
 }
 
+/*
+ * The work's colophon, as on the last page of a book: what it is and how much
+ * it holds, what it is about, then where it is kept, how it was made, and who
+ * may read it. The title stays because over a side-panel work this sheet
+ * covers the work's own header.
+ */
 export function WorkDetails({ work }: { work: SpectraArtifact }) {
   const meta = workTypeMeta[work.blueprintKey];
+  const preview = workPreview(work.blueprintKey, work.content);
+  const extent = preview ? previewExtent(preview) : null;
+  const summary = meaningfulSummary(work.blueprintKey, work.summary);
   const placements = artifactPlacements(work);
   const source = work.createdFrom?.source;
   const files = work.createdFrom?.sourceAttachmentNames?.length ?? 0;
+  const shared = work.sharedWithCount ?? 0;
   return (
     <div className="px-1 pb-4 pt-3">
-      <span className="inline-flex items-center gap-2 text-caption font-medium text-[var(--text-secondary)]">
+      <p className="flex items-center gap-2 text-caption text-[var(--text-secondary)]">
         <Icon name={meta.glyph} size={16} accent={meta.color} />
-        {meta.label}
-      </span>
-      <h3 className="mt-2 text-title font-semibold leading-tight text-[var(--text-primary)]">{work.title}</h3>
-      <p className="mt-1 text-caption text-[var(--text-tertiary)]">Updated {formatRelativeTime(work.updatedAt)}</p>
-      <p className="mt-4 text-ui leading-6 text-[var(--text-secondary)]">{previewText(work.summary, "No description yet.")}</p>
-      <dl className="mt-4 border-t border-[var(--border-subtle)] pt-3">
-        <Fact label="Owner">{work.owner?.name ?? "You"}</Fact>
-        <Fact label="You can">{work.accessLevel === "read" ? "Read" : "Edit"}</Fact>
-        <Fact label="Shared with">
-          {work.isShared ? `${work.sharedWithCount ?? 0} ${work.sharedWithCount === 1 ? "person" : "people"}` : "Only you"}
+        <span className="font-medium">{meta.label}</span>
+        {extent ? <span className="text-[var(--text-tertiary)]">{extent}</span> : null}
+      </p>
+      <h3 className="mt-2 font-display text-title font-semibold leading-tight text-[var(--text-primary)]">{work.title}</h3>
+      {summary ? <p className="mt-3 font-display text-body leading-6 text-[var(--text-secondary)]">{summary}</p> : null}
+      <dl className="mt-5 border-b border-[var(--border-subtle)]">
+        <Fact label="Kept in">
+          {placements.length ? (
+            <ul>
+              {placements.map((placement) => (
+                <li key={placement.nodeId} className="truncate">
+                  {placement.workspaceTitle}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            "Your library"
+          )}
         </Fact>
-        <Fact label="In">{placements.length ? placements.map((placement) => placement.workspaceTitle).join(", ") : "General"}</Fact>
+        <Fact label="Made">
+          {formatShortDate(work.createdAt)}
+          {source ? (
+            <span className="block text-caption text-[var(--text-tertiary)]">
+              {MADE_FROM[source] ?? "In Spectra"}
+              {files ? `, from ${files} file${files === 1 ? "" : "s"}` : ""}
+            </span>
+          ) : null}
+        </Fact>
+        <Fact label="Changed">{formatRelativeTime(work.updatedAt)}</Fact>
+        <Fact label="Owner">{work.owner?.name ?? "You"}</Fact>
+        <Fact label="Access">{work.accessLevel === "read" ? "You can read it" : "You can edit it"}</Fact>
+        <Fact label="Shared">{work.isShared ? `With ${shared} ${shared === 1 ? "person" : "people"}` : "Only you"}</Fact>
       </dl>
-      {source ? (
-        <p className="mt-3 text-caption leading-5 text-[var(--text-tertiary)]">
-          {MADE_FROM[source] ?? "Made in Spectra"}
-          {files ? `, from ${files} file${files === 1 ? "" : "s"}` : ""}.
-        </p>
-      ) : null}
     </div>
   );
 }
 
 /** Where a work came from, in words. */
 const MADE_FROM: Record<string, string> = {
-  chat: "Made by Spectra in a thread",
-  ai: "Made by Spectra",
-  workspace: "Made in a workspace",
-  artifact: "Made from another work",
-  manual: "Made by you",
+  chat: "By Spectra in a thread",
+  ai: "By Spectra",
+  workspace: "In a workspace",
+  artifact: "From another work",
+  manual: "By you",
 };
 
 function CompanionRow({
@@ -307,8 +332,7 @@ function RelatedWork({
 function aboutWork(thread: SpectraThread, workId: string) {
   return (
     thread.artifactId === workId ||
-    thread.contextArtifactIds?.includes(workId) ||
-    thread.contexts?.artifacts?.some((item) => item.id === workId)
+    thread.contextArtifactIds?.includes(workId)
   );
 }
 
@@ -325,14 +349,20 @@ export function WorkConversations({
   });
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    const controller = new AbortController();
+    // The thread list is one request shared by every caller, so it is never
+    // aborted here; a panel that has moved on only ignores the answer.
+    let current = true;
     setState({ status: "loading", threads: [] });
-    getSpectraThreads({ limit: 120, signal: controller.signal })
-      .then((result) => setState({ status: "ready", threads: result.threads.filter((thread) => aboutWork(thread, work._id)) }))
+    getSpectraThreads({ limit: 120, brief: true })
+      .then((result) => {
+        if (current) setState({ status: "ready", threads: result.threads.filter((thread) => aboutWork(thread, work._id)) });
+      })
       .catch(() => {
-        if (!controller.signal.aborted) setState({ status: "failed", threads: [] });
+        if (current) setState({ status: "failed", threads: [] });
       });
-    return () => controller.abort();
+    return () => {
+      current = false;
+    };
   }, [attempt, work._id]);
 
   if (state.status === "loading") return <LoadingRows label="Loading conversations" count={3} className="pt-2" />;

@@ -28,9 +28,14 @@
 }
 .whiteboard-canvas[data-dots]:not([data-compact]) {
   --board-dot: color-mix(in oklab, var(--board-ink, var(--type-whiteboard)) 30%, var(--card-border));
-  background-image: radial-gradient(circle at 1.5px 1.5px, var(--board-dot) 1.25px, transparent 1.5px);
-  background-size: calc(var(--board-grid) * var(--board-zoom, 1))
-    calc(var(--board-grid) * var(--board-zoom, 1));
+  --board-dot-size: 1.25px;
+  /* The step and the dot are drawn already scaled to the zoom (dotGrid). */
+  background-image: radial-gradient(
+    circle at calc(var(--board-dot-size) + 0.25px) calc(var(--board-dot-size) + 0.25px),
+    var(--board-dot) var(--board-dot-size),
+    transparent calc(var(--board-dot-size) + 0.25px)
+  );
+  background-size: var(--board-grid) var(--board-grid);
   background-position: var(--board-x) var(--board-y);
 }
 

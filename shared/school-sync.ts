@@ -81,7 +81,7 @@ export const SCHOOL_SYNC_KIND_INFO: Record<SchoolSyncKind, SchoolSyncKindInfo> =
   },
   past_tasks: {
     label: "Past tasks",
-    description: "Finished tasks, kept for revision and portfolios. The first sync brings in the full history.",
+    description: "Finished tasks, kept for revision and portfolios. Sync them here when you want your history; Sync now for the whole page starts from today.",
     defaultMode: "manual", autoEveryMinutes: 24 * 60, classScoped: true, availability: "available",
   },
   dropbox_files: {
@@ -102,6 +102,18 @@ export const SCHOOL_SYNC_KIND_INFO: Record<SchoolSyncKind, SchoolSyncKindInfo> =
     unavailableReason: "ManageBac's API has no school events to read, so Spectra can't sync them.",
   },
 };
+
+/**
+ * Kinds that reach back through the student's history. A sync of the whole page (and the
+ * first one) starts from today: it leaves these out unless they are Auto, and they come in
+ * when the student syncs them on their own.
+ */
+export const HISTORY_SYNC_KINDS: readonly SchoolSyncKind[] = ["past_tasks", "dropbox_files"];
+
+/** Whether a kind runs in a sync of the whole page, given whether it is Auto anywhere. */
+export function joinsPageSync(kind: SchoolSyncKind, auto: boolean) {
+  return auto || !HISTORY_SYNC_KINDS.includes(kind);
+}
 
 export function isSchoolSyncKind(value: unknown): value is SchoolSyncKind {
   return typeof value === "string" && (SCHOOL_SYNC_KINDS as readonly string[]).includes(value);

@@ -10,7 +10,16 @@ import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { readConvexError } from "../../../../shared/convex-error.mjs";
 import { POLICY_PRESETS } from "../../../../shared/sync-policy";
-import { bridgeReachabilityCopy, DEVICES_HREF, pairingFailureMessage, unpairBridge } from "../bridge/client";
+import {
+  bridgeDownloadUrl,
+  bridgePlatform,
+  bridgeReachabilityCopy,
+  DEVICES_HREF,
+  pairingFailureMessage,
+  unpairBridge,
+  type BridgeReachability,
+} from "../bridge/client";
+import { Icon } from "@/components/icons";
 import { useBridgeHealth } from "../bridge/use-bridge";
 import { spectraBus } from "../events";
 import { permissionChoicePatch } from "../settings/schema/ai-permissions";
@@ -22,6 +31,7 @@ import { devicesModel, nativeWritesChoice, nativeWritesPlan, type CloudOverview,
 import { NativeWritesChoice } from "./native-writes-choice";
 import { PairingPanel, THIS_COMPUTER_LIFE_KEY } from "./pairing-panel";
 import { devicePairing } from "./pairing";
+import { firstTipMoment } from "../onboarding/first-tips";
 
 const BAR_PLAN: readonly CollapseStep[] = [{ hideLabel: "pause" }, { toMenu: "pause" }, { hideLabel: "add" }];
 
@@ -75,6 +85,10 @@ export function DevicesPage() {
     [cloud, local.reachability, local.status, now],
   );
   const here = model.thisComputer;
+  // Read after mount: the server cannot tell which computer this is.
+  const [platform, setPlatform] = useState<ReturnType<typeof bridgePlatform>>("other");
+  useEffect(() => setPlatform(bridgePlatform()), []);
+  const downloadUrl = bridgeDownloadUrl(platform);
   const stored = {
     permissionFullControl: preferences.ai.permissionFullControl,
     permissionAllow: preferences.ai.permissionAllow,
@@ -84,7 +98,9 @@ export function DevicesPage() {
 
   const connect = useCallback(() => {
     setNotice(undefined);
-    void pairing.start(requestPairing);
+    void pairing.start(requestPairing).then((state) => {
+      if (state.phase === "paired") firstTipMoment("bridge");
+    });
   }, [pairing, requestPairing]);
 
   // The command bar, Spectra AI and ?connect=1 ask this page to connect.
@@ -218,6 +234,7 @@ export function DevicesPage() {
       lifeKey={device.isThisComputer ? THIS_COMPUTER_LIFE_KEY : `device:${device.id}`}
       onAction={(request) => void act(request)}
       onRemove={() => setConfirm({ kind: "remove-device", device })}
+      downloadUrl={local.reachability === "not-running" ? downloadUrl : null}
     />
   );
 
@@ -245,6 +262,26 @@ export function DevicesPage() {
               <PairingPanel state={pairingState} onCancel={() => pairing.cancel()} onRetry={connect} />
               {here ? (
                 deviceCard(here)
+              ) : !connecting && isAuthenticated && bridgeMissing(local.reachability) && downloadUrl ? (
+                // No Bridge here yet: the download is the first step. Pressing it
+                // also starts connecting, which carries on once Bridge opens.
+                <div className="device-connect" data-step="download">
+                  <p className="text-ui font-medium text-[var(--text-primary)]">Get Spectra Bridge</p>
+                  <p className="max-w-xl text-ui leading-6 text-[var(--text-secondary)]">
+                    Bridge keeps the folders you choose on this computer in sync with Spectra. Download and open it, and this computer connects by itself.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button asChild variant="primary" size="sm">
+                      <a href={downloadUrl} rel="noopener" onClick={connect}>
+                        <Icon name="download" size={16} />
+                        Download for {platform === "macos" ? "Mac" : "Windows"}
+                      </a>
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={connect}>
+                      I already have it
+                    </Button>
+                  </div>
+                </div>
               ) : !connecting ? (
                 <div className="device-connect">
                   <p className="max-w-xl text-ui leading-6 text-[var(--text-secondary)]">
@@ -301,3 +338,7 @@ export function DevicesPage() {
   );
 }
 
+/** Bridge is not on this computer (or not started): the page leads with the download. */
+function bridgeMissing(reachability: BridgeReachability) {
+  return reachability === "not-running" || reachability === "not-set-up";
+}

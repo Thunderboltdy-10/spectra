@@ -62,6 +62,8 @@ export type BriefSuggestion = {
   workType?: string;
   targetId?: string;
   task?: BriefTaskDraft;
+  /** How to do it: a few concrete instructions, in order. */
+  steps?: string[];
   /** Already acted on today: what it made or added, when that has an id. */
   done?: boolean;
   doneId?: string;
@@ -156,10 +158,11 @@ export function briefMessages(context: BriefContext): HarnessMessage[] {
         "Each suggestion is one of:",
         '- {"kind":"task","targetId":"<id>"}: work on a due, late or undated task from the lists.',
         '- {"kind":"open","targetId":"<id>"}: pick up a recent work from the lists.',
-        `- {"kind":"make","workType":"${BRIEF_WORK_TYPES.join('"|"')}","prompt":"..."}: Spectra makes a new work for a deadline or class, such as a revision quiz before a test or a document to plan an essay. prompt is the request to Spectra, written as the student would, asking for that kind of work and naming the class, the topic and the deadline.`,
+        `- {"kind":"make","workType":"${BRIEF_WORK_TYPES.join('"|"')}","prompt":"..."}: Spectra makes a new work for a deadline or class, such as a revision quiz before a test or a document to plan an essay. prompt is the request to Spectra, written as the student would and precise enough to need no follow-up: the kind of work, the class, the topic and its subtopics, the deadline, and the size and shape (how many questions or cards, which sections, what level).`,
         '- {"kind":"add","task":{"title":"...","notes":"...","dueDay":"YYYY-MM-DD","dueTime":"HH:MM","estimateMinutes":45,"steps":["..."]}}: add a task the lists do not have yet but should, such as preparing for a coming deadline. Fill in every detail you can; dueTime and steps are optional.',
         '- {"kind":"ask","prompt":"..."}: a question worth asking Spectra today, written as the student would.',
         "Every suggestion also has title (under eight words, starting with a verb) and why (one short sentence naming the reason: a date, a class, what is left).",
+        'A suggestion may also have "steps": two to four short, concrete instructions for doing it today, in order, each naming exactly what to do and for how long (such as "Answer questions 1 to 5 without notes, 20 minutes"). Give steps whenever the title alone would leave the student unsure how to start; leave them out of "add", whose task has its own.',
         "Use only ids from the lists. Never invent classes, dates or works. Plain words, no emoji, no markdown.",
       ].join("\n"),
     },
@@ -219,18 +222,20 @@ export function parseBrief(text: string, context: BriefContext): DailyBrief {
     const targetId = typeof item.targetId === "string" ? item.targetId : "";
     const prompt = str(item.prompt, 800);
     if (!title) return [];
+    const steps = Array.isArray(item.steps) ? item.steps.flatMap((step) => str(step, 160) ?? []).slice(0, 4) : [];
+    const how = steps.length ? { steps } : {};
     if (item.kind === "open" && works.has(targetId)) {
       const workType = works.get(targetId);
-      return [{ kind: "open", title, why, targetId, ...(workType ? { workType } : {}) }];
+      return [{ kind: "open", title, why, targetId, ...(workType ? { workType } : {}), ...how }];
     }
-    if (item.kind === "task" && tasks.has(targetId)) return [{ kind: "task", title, why, targetId }];
+    if (item.kind === "task" && tasks.has(targetId)) return [{ kind: "task", title, why, targetId, ...how }];
     if (item.kind === "make" && prompt && BRIEF_WORK_TYPES.includes(item.workType as BriefWorkType))
-      return [{ kind: "make", title, why, prompt, workType: item.workType as BriefWorkType }];
+      return [{ kind: "make", title, why, prompt, workType: item.workType as BriefWorkType, ...how }];
     if (item.kind === "add") {
       const task = readTask(item.task);
       return task ? [{ kind: "add", title, why, task }] : [];
     }
-    if (item.kind === "ask" && prompt) return [{ kind: "ask", title, why, prompt }];
+    if (item.kind === "ask" && prompt) return [{ kind: "ask", title, why, prompt, ...how }];
     return [];
   });
   if (!recap && !suggestions.length) throw new Error("The brief came back empty.");

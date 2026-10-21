@@ -54,7 +54,7 @@ describe("threads browser life", () => {
   it("narrowing a search is a filter: nothing parts", async () => {
     render(<ThreadsBrowser onChoose={() => {}} />);
     await act(async () => {});
-    fireEvent.change(screen.getByRole("textbox", { name: "Search threads" }), { target: { value: "essay" } });
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search threads" }), { target: { value: "essay" } });
     expect(screen.getByText("Essay plan")).toBeTruthy();
     expect(h.departures.get("thread:t1")).toBe(false);
   });
@@ -63,7 +63,7 @@ describe("threads browser life", () => {
     h.search = { results: [], status: "loading", degraded: false };
     render(<ThreadsBrowser onChoose={() => {}} />);
     await act(async () => {});
-    fireEvent.change(screen.getByRole("textbox", { name: "Search threads" }), { target: { value: "photosynthesis" } });
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search threads" }), { target: { value: "photosynthesis" } });
     expect(screen.getByRole("status", { name: "Searching threads" })).toBeTruthy();
     expect(screen.queryByText(/No thread matches/)).toBeNull();
   });

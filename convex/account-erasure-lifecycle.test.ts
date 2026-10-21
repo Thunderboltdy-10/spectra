@@ -63,7 +63,7 @@ async function seed(t: T) {
       schoolId: schoolB, resourceType: "workspace", resourceId: sharedWorkspace, principalType: "school", principalId: schoolB,
       level: "read", capabilities: ["read"], source: "direct", createdByAccountId: erased, createdAt: now, updatedAt: now,
     });
-    const node = (fields: { accountId: Id<"accounts">; parentId: Id<"orgNodes"> | null; kind: "workspace" | "work" | "folder"; sourceId?: string; workspaceContextId?: Id<"spectraWorkspaces"> }) =>
+    const node = (fields: { accountId: Id<"accounts">; parentId: Id<"orgNodes"> | null; kind: "workspace" | "work" | "folder"; sourceId?: string; workspaceContextId?: Id<"spectraWorkspaces">; accessProjection?: boolean }) =>
       ctx.db.insert("orgNodes", { ...fields, name: "node", orderKey: "a", createdAt: now, updatedAt: now });
     const privateWorkspaceNode = await node({ accountId: erased, parentId: null, kind: "workspace", sourceId: privateWorkspace });
     const sharedWorkspaceNode = await node({ accountId: erased, parentId: null, kind: "workspace", sourceId: sharedWorkspace });
@@ -80,7 +80,7 @@ async function seed(t: T) {
     });
     const grantedWorkNode = await node({ accountId: erased, parentId: privateWorkspaceNode, kind: "work", sourceId: grantedWork, workspaceContextId: privateWorkspace });
     const workspaceWork = await artifact(erased, schoolB, "Notes in the shared workspace");
-    const workspaceWorkNode = await node({ accountId: erased, parentId: sharedWorkspaceNode, kind: "work", sourceId: workspaceWork, workspaceContextId: sharedWorkspace });
+    const workspaceWorkNode = await node({ accountId: erased, parentId: sharedWorkspaceNode, kind: "work", sourceId: workspaceWork, workspaceContextId: sharedWorkspace, accessProjection: true });
     const peerWork = await artifact(peer, schoolA, "Peer's lesson");
     const bystanderWork = await artifact(bystander, schoolB, "Bystander essay");
     const accountGrant = await ctx.db.insert("accessGrants", {

@@ -141,6 +141,7 @@ export async function POST(request: NextRequest) {
         data: await convexMutation("calendar:completeWorkBlock", {
           itemId: text(body.itemId, 180),
           expectedRevision,
+          ...(body.done === false ? { done: false } : {}),
         }),
       });
     }

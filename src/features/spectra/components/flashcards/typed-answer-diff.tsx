@@ -80,10 +80,50 @@ function sharedLength(parts: DiffPart[]) {
   );
 }
 
+/** An answer longer than a term is read word by word, not letter by letter. */
+const TERM_LENGTH = 40;
+
+/**
+ * A typed answer against a sentence: each typed word is set against the word
+ * of the answer it comes closest to, and its letters marked against that word.
+ * Letters left out are not shown, since the whole answer is read just below;
+ * a word with nothing near it in the answer is marked as a whole.
+ */
+export function diffWords(typed: string, expected: string): DiffPart[] {
+  const words = Array.from(new Set(expected.split(/[^\p{L}\p{N}]+/u).filter(Boolean)));
+  const parts: DiffPart[] = [];
+  const push = (kind: DiffPart["kind"], text: string) => {
+    const last = parts.at(-1);
+    if (last?.kind === kind) last.text += text;
+    else parts.push({ kind, text });
+  };
+  for (const token of typed.split(/([^\p{L}\p{N}]+)/u)) {
+    if (!token) continue;
+    if (!/[\p{L}\p{N}]/u.test(token)) {
+      push("same", token);
+      continue;
+    }
+    let best: DiffPart[] | null = null;
+    let bestShare = 0;
+    for (const word of words) {
+      const diff = diffCharacters(token, word);
+      const share = sharedLength(diff) / Math.max(token.length, word.length);
+      if (share > bestShare) {
+        best = diff;
+        bestShare = share;
+      }
+    }
+    if (!best || bestShare < MISSPELLING_OVERLAP) push("extra", token);
+    else for (const part of best) if (part.kind !== "missing") push(part.kind, part.text);
+  }
+  return parts;
+}
+
 /**
  * The typed answer marked up against the closest accepted answer: kept
- * letters in the right colour, extra ones struck through, missing ones shown
- * where they belong. Shown on reveal when the deck asks for typed answers.
+ * letters in the right colour, extra ones struck through, and for a term the
+ * missing ones shown where they belong. Shown on reveal when the deck asks
+ * for typed answers.
  */
 export function TypedAnswerDiff({
   typed,
@@ -98,14 +138,19 @@ export function TypedAnswerDiff({
     .filter(Boolean);
   if (!answer || !candidates.length) return null;
   const closest = candidates
-    .map((candidate) => ({ candidate, parts: diffCharacters(answer, candidate) }))
+    .map((candidate) => ({
+      candidate,
+      parts: candidate.length > TERM_LENGTH ? diffWords(answer, candidate) : diffCharacters(answer, candidate),
+    }))
     .reduce((best, next) =>
       sharedLength(next.parts) > sharedLength(best.parts) ? next : best,
     );
   // An answer that shares little with the card is a different answer, not a
-  // misspelling; marking it letter by letter would only be noise.
+  // misspelling; marking it letter by letter would only be noise. A sentence
+  // is measured against what was typed, since nobody types all of it.
   const overlap =
-    sharedLength(closest.parts) / Math.max(answer.length, closest.candidate.length);
+    sharedLength(closest.parts) /
+    (closest.candidate.length > TERM_LENGTH ? answer.length : Math.max(answer.length, closest.candidate.length));
   const parts: DiffPart[] =
     overlap < MISSPELLING_OVERLAP ? [{ kind: "extra", text: answer }] : closest.parts;
   return (

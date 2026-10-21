@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
+import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { EmptyState, LoadingRows } from "@/components/ui/page-state";
 import { Segmented } from "@/components/ui/segmented";
@@ -223,12 +224,14 @@ export function ClassDetails({
   return (
     <article aria-labelledby="school-class-title" style={inkStyle(identity)}>
       <header className="school-detail-head">
-        <h3 id="school-class-title" data-artifact-title className="font-display text-title font-semibold leading-snug text-[var(--text-primary)]">
-          {identity.name}
-        </h3>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {identity.code ? <span className="school-fact">{identity.code}</span> : null}
-          <span className="school-fact">{item.archived ? "An earlier class" : "This year"}</span>
+        <span aria-hidden className="school-detail-spine" />
+        <div className="min-w-0 flex-1">
+          <h3 id="school-class-title" data-artifact-title className="font-display text-title font-semibold leading-snug text-[var(--text-primary)]">
+            {identity.name}
+          </h3>
+          <p className="mt-1 text-caption text-[var(--text-secondary)]">
+            {[identity.code, item.archived ? "An earlier class" : "This year", due.length ? `${due.length} to do` : null].filter(Boolean).join(", ")}
+          </p>
         </div>
       </header>
 
@@ -247,16 +250,23 @@ export function ClassDetails({
         />
       </div>
 
-      <DetailHeading>{due.length ? `To do in ${identity.name}` : "Nothing due in this class"}</DetailHeading>
-      {due.length ? (
-        <div className="grid gap-2">
-          {due.map((task) => (
-            <TaskTicket key={task.recordId} task={task} identity={identity} now={now} compact selected={false} onSelect={() => onSelectTask(task.recordId)} />
-          ))}
-        </div>
-      ) : null}
+      <section className="school-detail-section">
+        <DetailHeading>{due.length ? "To do" : "Nothing due in this class"}</DetailHeading>
+        {due.length ? (
+          <div className="grid gap-2">
+            {due.map((task) => (
+              <TaskTicket key={task.recordId} task={task} identity={identity} now={now} compact selected={false} onSelect={() => onSelectTask(task.recordId)} />
+            ))}
+          </div>
+        ) : null}
+      </section>
 
-      <DetailHeading>What syncs for this class</DetailHeading>
+      <details className="school-detail-section group">
+        <summary className="flex cursor-pointer list-none items-center gap-2 font-display text-subhead font-medium text-[var(--text-primary)] [&::-webkit-details-marker]:hidden">
+          What syncs for this class
+          <Icon name="chevronDown" className="size-3.5 text-[var(--text-tertiary)] transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="mt-2">
       <p className="mb-2 text-caption text-[var(--text-secondary)]">Each kind follows your choice in Sync unless you set it here.</p>
       <ul className="space-y-2">
         {CLASS_KIND_ORDER.filter((kind) => SCHOOL_SYNC_KIND_INFO[kind].classScoped).map((kind) => {
@@ -276,6 +286,8 @@ export function ClassDetails({
           );
         })}
       </ul>
+        </div>
+      </details>
     </article>
   );
 }

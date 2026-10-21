@@ -11,7 +11,6 @@ export type AttachmentInput = {
 };
 
 import {
-  bytesToArrayBuffer,
   decodeBase64DataUrl,
   OFFICE_ARCHIVE_LIMITS,
   readBoundedArchive,
@@ -265,8 +264,10 @@ export async function prepareAttachments(
       const buffer = attachmentBuffer(row.data, name, 8 * 1024 * 1024);
       const checked = await readBoundedArchive(buffer, OFFICE_ARCHIVE_LIMITS);
       const mammoth = await import("mammoth");
-      const result = await mammoth.extractRawText({ arrayBuffer: bytesToArrayBuffer(checked.bytes) });
-      const html = await mammoth.convertToHtml({ arrayBuffer: bytesToArrayBuffer(checked.bytes) });
+      // The Node build of mammoth opens a Buffer; it has no arrayBuffer option.
+      const docx = { buffer: Buffer.from(checked.bytes) };
+      const result = await mammoth.extractRawText(docx);
+      const html = await mammoth.convertToHtml(docx);
       const full = result.value.replace(/\u0000/g, "");
       extractions.push({
         attachment: { name, mimeType, size, handling: "docx", data: row.data, extractedText: full.slice(0, 40_000), structuredRepresentation: { kind: "docx", value: { html: html.value, messages: [...result.messages, ...html.messages].map((message) => message.message) } } },

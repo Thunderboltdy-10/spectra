@@ -13,6 +13,7 @@ import type { SpectraRun, SpectraWorkspace, SpectraWorkspaceItem } from "../data
 import { classSentence, classWorkspaceIdentity, isClassWorkspace, useClassTasks } from "../organization/class-shelf";
 import { useTreePath, type TreeNode } from "../organization/tree-client";
 import { inkStyle, useClassBook } from "../school/use-class-book";
+import { WorkspaceLinksMenu } from "../organization/workspace-links-menu";
 
 /*
  * The Library's greeting (SHELL.md, "Page anatomy"). At the top it is the
@@ -40,13 +41,15 @@ export function LibraryHeader({
   const path = useTreePath(surface === "library" ? folderId : null);
   const folder = folderId && path?.node.nodeId === folderId ? path.node : null;
   const threads: BarCommand[] = onOpenChats ? [{ id: "chats", icon: "conversations", label: "Threads", onSelect: onOpenChats }] : [];
+  // A workspace place says which shared workspaces show inside it, or where it shows.
+  const linked = folder?.kind === "workspace" && folder.workspace ? [linksCommand(folder.workspace.workspaceId)] : [];
 
-  if (folder && isClassWorkspace(folder)) return <ClassHeader folder={folder} threads={threads} />;
+  if (folder && isClassWorkspace(folder)) return <ClassHeader folder={folder} threads={[...linked, ...threads]} />;
   if (folder)
     return (
       <Frame>
         {/* The list under it says what is here; a count or an "empty" over it only repeats it, or, unread, gets it wrong. */}
-        <PageHeader title={folder.name} level="place" commands={threads} plan={WORKSPACE_BAR_PLAN} barLabel="Library commands" />
+        <PageHeader title={folder.name} level="place" commands={[...linked, ...threads]} plan={WORKSPACE_BAR_PLAN} barLabel="Library commands" />
       </Frame>
     );
   return (
@@ -168,6 +171,15 @@ export function WorkspaceHeader({
       />
     </Frame>
   );
+}
+
+function linksCommand(workspaceId: string): BarCommand {
+  return {
+    id: "links",
+    icon: "link",
+    label: "Shared workspaces",
+    render: () => <WorkspaceLinksMenu workspaceId={workspaceId} />,
+  };
 }
 
 function ClassHeader({ folder, threads }: { folder: TreeNode; threads: BarCommand[] }) {

@@ -55,7 +55,8 @@ vi.mock("@/lib/utils", () => ({ cn: (...values: unknown[]) => values.filter(Bool
 vi.mock("../components/spectra-rich-content", () => ({
   SpectraRichContent: ({ content }: { content: string }) => <div>{content}</div>,
 }));
-vi.mock("../components/progress-trace", () => ({
+vi.mock("../components/progress-trace", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   ProgressTrace: ({ steps, summary }: {
     steps: Array<{ id: string; title: string }>;
     summary?: string;
@@ -64,7 +65,7 @@ vi.mock("../components/progress-trace", () => ({
     {summary ? <p>{summary}</p> : null}
   </div>,
 }));
-vi.mock("../components/artifact-embed-host", () => ({ ArtifactEmbedList: () => null }));
+vi.mock("../components/artifact-embed-host", () => ({ ArtifactEmbedList: () => null, useArtifactEmbedContainer: () => undefined }));
 vi.mock("../components/result-card", () => ({
   ResultCardStack: ({ cards }: { cards: Array<{ title: string; summary?: string; actions?: Array<{ key: string; label: string }> }> }) => (
     <div data-testid="result-cards">{cards.map((card, index) => <div key={index}><span>{card.title}</span>{card.summary ? <p>{card.summary}</p> : null}{card.actions?.map(action => <button key={action.key}>{action.label}</button>)}</div>)}</div>

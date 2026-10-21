@@ -502,10 +502,20 @@ button.occlusion-empty:hover {
   overflow: auto;
   outline: none;
 }
+/* The session takes the deck's place under its bar, whose verb becomes Edit.
+   The deck stays mounted behind it, so leaving finds it as it was. */
+.spectra-flashcard-studio .spectra-editor-body:has(> .spectra-deck-study) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.spectra-flashcard-studio .spectra-editor-body:has(> .spectra-deck-study) > :not(.spectra-deck-study) {
+  display: none;
+}
 .spectra-flashcard-studio .spectra-deck-study {
-  position: absolute;
-  z-index: var(--z-chrome);
-  inset: 0;
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   padding-bottom: var(--spectra-composer-safe-area, 72px);
   background: var(--bg-primary);
   animation: sheet-unfold var(--motion-base) var(--ease-standard) both;
@@ -795,11 +805,16 @@ button.occlusion-empty:hover {
 /* Grading: four answers to "how well did you know it", each in its own ink,
    with the next interval underneath so the choice is concrete. */
 .spectra-deck-study > footer {
+  /* The grades stay in reach above the composer however long the answer runs. */
+  position: sticky;
+  bottom: calc(var(--spectra-composer-safe-area, 72px) + 12px);
   display: grid;
   width: min(680px, calc(100% - 32px));
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
-  margin: 0 auto 24px;
+  margin: 0 auto;
+  padding: 12px 0;
+  background: var(--bg-primary);
 }
 .spectra-deck-study > footer button {
   --rating-ink: var(--text-primary);
@@ -829,6 +844,10 @@ button.occlusion-empty:hover {
 }
 .spectra-deck-study > footer button[data-rating="easy"] {
   --rating-ink: var(--ink-blue);
+}
+/* Good is what Enter gives: drawn as the one already in hand. */
+.spectra-deck-study > footer button[data-default] {
+  border-color: color-mix(in oklab, var(--rating-ink) 40%, var(--card-border));
 }
 .spectra-deck-study > footer button:hover:not(:disabled) {
   border-color: color-mix(in oklab, var(--rating-ink) 45%, var(--card-border));

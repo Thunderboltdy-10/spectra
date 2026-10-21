@@ -15,7 +15,9 @@ import {
   Lightbulb,
   Sigma,
   Loader2,
+  Maximize2,
   PanelLeft,
+  PenLine,
   Play,
   Plus,
   Printer,
@@ -81,6 +83,8 @@ import { StudioItemRail } from "./studio-item-rail";
 import { CardThumbnail } from "./flashcards/card-thumbnail";
 import { QuickCardEntry } from "./flashcards/quick-card-entry";
 import { TypedAnswerDiff, foldForComparison } from "./flashcards/typed-answer-diff";
+import { useOnceHint } from "./flashcards/use-once-hint";
+import { carriedStudy, carryStudy, dropCarriedStudy } from "./flashcards/study-carry";
 import { CardSheet } from "./flashcards/card-sheet";
 import { cardFingerprint } from "./flashcards/card-equality";
 import {
@@ -134,9 +138,12 @@ export function FlashcardStudio({
   onChange,
   aiChangedPaths = [],
   onActiveRegionChange,
+  onOpenFull,
 }: {
   artifactId: string;
   mode: "split" | "tab";
+  /** Gives the work the whole window, when it is beside a page. */
+  onOpenFull?: () => void;
   content: unknown;
   onChange: (content: unknown) => void;
   aiChangedPaths?: string[];
@@ -198,26 +205,29 @@ export function FlashcardStudio({
     : (deckViewModes[0]?.id ?? "browse");
   const [previewRevealed, setPreviewRevealed] = useState(false);
   const [railCollapsed, setRailCollapsed] = useState(mode === "split");
-  const [studyOpen, setStudyOpen] = useState(false);
-  const [studyRevealed, setStudyRevealed] = useState(false);
-  const [studyIndex, setStudyIndex] = useState(0);
-  const [studyQueue, setStudyQueue] = useState<DeckStudyItem[]>([]);
-  const [studyComplete, setStudyComplete] = useState(false);
-  const [studyCardStartedAt, setStudyCardStartedAt] = useState(0);
+  // A session opened full from the side panel picks up on the same card.
+  const [carried] = useState(() => carriedStudy(artifactId));
+  useEffect(() => dropCarriedStudy(artifactId), [artifactId]);
+  const [studyOpen, setStudyOpen] = useState(Boolean(carried));
+  const [studyRevealed, setStudyRevealed] = useState(carried?.revealed ?? false);
+  const [studyIndex, setStudyIndex] = useState(carried?.index ?? 0);
+  const [studyQueue, setStudyQueue] = useState<DeckStudyItem[]>(carried?.queue ?? []);
+  const [studyComplete, setStudyComplete] = useState(carried?.complete ?? false);
+  const [studyCardStartedAt, setStudyCardStartedAt] = useState(() => (carried ? currentTimeMs() : 0));
   const [studyClock, setStudyClock] = useState(0);
   const [studyReviewBusy, setStudyReviewBusy] = useState(false);
   const [studyError, setStudyError] = useState<string>();
-  const [studyTypedAnswer, setStudyTypedAnswer] = useState("");
-  const [studyTypedCorrect, setStudyTypedCorrect] = useState<boolean>();
+  const [studyTypedAnswer, setStudyTypedAnswer] = useState(carried?.typedAnswer ?? "");
+  const [studyTypedCorrect, setStudyTypedCorrect] = useState<boolean | undefined>(carried?.typedCorrect);
   /** The learner's own choice to type answers, over the deck's default. */
-  const [studyTypingChoice, setStudyTypingChoice] = useState<boolean>();
+  const [studyTypingChoice, setStudyTypingChoice] = useState<boolean | undefined>(carried?.typingChoice);
   const [studyNoteDraft, setStudyNoteDraft] = useState("");
   const [studyNoteSaving, setStudyNoteSaving] = useState(false);
   const [studyShortcutsOpen, setStudyShortcutsOpen] = useState(false);
   const studyNoteRef = useRef<HTMLTextAreaElement>(null);
   const [studyRatings, setStudyRatings] = useState<
     Record<SpectraFlashcardRating, number>
-  >({ again: 0, hard: 0, good: 0, easy: 0 });
+  >(carried?.ratings ?? { again: 0, hard: 0, good: 0, easy: 0 });
   const [studyStates, setStudyStates] = useState<
     Map<string, SpectraFlashcardStudyState>
   >(() => new Map());
@@ -564,13 +574,11 @@ export function FlashcardStudio({
     setStudyClock(now);
     setStudyError(undefined);
     setStudyOpen(true);
-    void document.documentElement.requestFullscreen?.().catch(() => undefined);
   };
-  const closeStudySession = () => {
-    setStudyOpen(false);
-    if (document.fullscreenElement)
-      void document.exitFullscreen().catch(() => undefined);
-  };
+  // Study stays inside Spectra: in the side panel first, and full only through
+  // the work's own Open full, never the browser's fullscreen.
+  const closeStudySession = () => setStudyOpen(false);
+  const [spaceHintSeen, markSpaceHintSeen] = useOnceHint("spectra.study-space-hint");
   // Escape stays on the dialog's own key handler; the hook moves focus into
   // the session, keeps Tab inside it and returns focus when it closes.
   const studyDialogRef = useRef<HTMLDivElement>(null);
@@ -1630,6 +1638,9 @@ export function FlashcardStudio({
       setStudyTypedCorrect(accepted.includes(response));
     } else setStudyTypedCorrect(undefined);
     setStudyRevealed(true);
+    markSpaceHintSeen();
+    // The typed answer's field goes away; the keys stay with the session.
+    studyDialogRef.current?.focus({ preventScroll: true });
   }
 
   async function rateStudyCard(rating: SpectraFlashcardRating) {
@@ -2007,7 +2018,7 @@ export function FlashcardStudio({
         label="Deck"
         modes={[]}
         selector={
-          activeView === "progress" || !cards.length ? undefined : (
+          studyShown || activeView === "progress" || !cards.length ? undefined : (
             <WorkbarItemSelector
               ariaLabel="Current card"
               itemNoun="card"
@@ -2020,14 +2031,25 @@ export function FlashcardStudio({
             />
           )
         }
-        primary={{
-          label: studyPrimaryLabel,
-          icon: Play,
-          onSelect: () => beginStudySession(),
-          disabled: !studyCards.length,
-          requires: "attempt",
-        }}
-        actions={deckActions}
+        primary={
+          studyShown
+            ? {
+                // The same place leaves the session: the deck is one press away.
+                label: canEdit ? "Edit" : "Back to the deck",
+                icon: PenLine,
+                onSelect: closeStudySession,
+                requires: "attempt",
+              }
+            : {
+                label: studyPrimaryLabel,
+                icon: Play,
+                onSelect: () => beginStudySession(),
+                disabled: !studyCards.length,
+                requires: "attempt",
+              }
+        }
+        // The deck's own tools wait behind the session; Edit brings them back.
+        actions={studyShown ? [] : deckActions}
       />
       <div className="spectra-editor-body">
       {deckUpdateNotice ? (
@@ -2369,6 +2391,13 @@ export function FlashcardStudio({
                   return;
                 }
                 if (typing) return;
+                // Enter carries on: once the answer shows, it grades the card
+                // good, the grade most cards get.
+                if (studyRevealed && event.key === "Enter") {
+                  event.preventDefault();
+                  void rateStudyCard("good");
+                  return;
+                }
                 // Study runs entirely from the keyboard: reveal, grade, note,
                 // skip and undo all have a key, so a session never needs a
                 // pointer (§11B).
@@ -2436,6 +2465,28 @@ export function FlashcardStudio({
                   <Keyboard className="h-4 w-4" />
                   Type answers
                 </button>
+                {onOpenFull ? (
+                  <button
+                    type="button"
+                    aria-label="Study in the whole window"
+                    title="Study in the whole window"
+                    onClick={() => {
+                      carryStudy(artifactId, {
+                        queue: studyQueue,
+                        index: studyIndex,
+                        revealed: studyRevealed,
+                        complete: studyComplete,
+                        typedAnswer: studyTypedAnswer,
+                        typedCorrect: studyTypedCorrect,
+                        typingChoice: studyTypingChoice,
+                        ratings: studyRatings,
+                      });
+                      onOpenFull();
+                    }}
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   aria-label="Keyboard shortcuts"
@@ -2444,20 +2495,14 @@ export function FlashcardStudio({
                 >
                   <kbd className="!px-1 !text-micro">?</kbd>
                 </button>
-                <button
-                  type="button"
-                  aria-label="Close study session"
-                  onClick={closeStudySession}
-                >
-                  <X className="h-4 w-4" />
-                </button>
               </header>
               {studyShortcutsOpen ? (
                 <dl className="spectra-deck-study-shortcuts">
                   {(
                     [
-                      ["Space", "Reveal the answer"],
+                      ["Space or Enter", "Reveal the answer"],
                       ["1 to 4", "Grade it: again, hard, good, or easy"],
+                      ["Enter", "Once revealed, grade it good and go on"],
                       ["N", "Write a private note"],
                       ["S or →", "Skip without grading"],
                       ["←", "Go back a card"],
@@ -2659,7 +2704,7 @@ export function FlashcardStudio({
                       onClick={revealStudyAnswer}
                     >
                       Reveal answer
-                      <kbd>Space</kbd>
+                      {spaceHintSeen ? null : <kbd>Space</kbd>}
                     </button>
                   )}
                 </main>
@@ -2672,6 +2717,8 @@ export function FlashcardStudio({
                         key={rating}
                         type="button"
                         data-rating={rating}
+                        data-default={rating === "good" || undefined}
+                        title={rating === "good" ? "Enter grades it good" : undefined}
                         disabled={studyReviewBusy}
                         onClick={() => void rateStudyCard(rating)}
                       >

@@ -108,6 +108,16 @@ export function runIdForLiveThread(threadId: string): string | null {
   return sharedTabs.find((tab) => tab.threadId === id)?.runId ?? null;
 }
 
+/** The most tabs the island reads, and how long a thread no one touches stays on it. */
+const ISLAND_TABS = 60;
+const ISLAND_IDLE_MS = 7 * 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+
+/** A week ago, to the hour, so repeated reads within the hour ask the same question. */
+function islandWindowStart() {
+  return Math.floor((Date.now() - ISLAND_IDLE_MS) / HOUR_MS) * HOUR_MS;
+}
+
 export function refreshRunTabs(force = false) {
   if (sharedRefresh && !force) return sharedRefresh;
   if (force) {
@@ -115,7 +125,7 @@ export function refreshRunTabs(force = false) {
     sharedRefresh = null;
   }
   const generation = ++refreshGeneration;
-  const pending = getSpectraRunTabs({ limit: 120, force })
+  const pending = getSpectraRunTabs({ limit: ISLAND_TABS, since: islandWindowStart(), force })
     .then((result) => {
       if (generation < appliedRefreshGeneration) return;
       appliedRefreshGeneration = generation;

@@ -33,6 +33,7 @@ import { validateNativeSaveReceipt, type NativeSaveReceipt } from "../shared/nat
 import { storageHasOtherBinding } from "./durableStorageBindings";
 import { normalizeSha256 } from "../shared/intake-integrity";
 import { bridgeWriteForTarget, settleRunNativeOutcome, syncOperationForBridgeWrite } from "./bridgeWriteOperations";
+import { platformStopped } from "./platformControls";
 
 type WriteCompletionState = "pending" | "verified" | "failed" | "conflicted";
 
@@ -427,6 +428,7 @@ export const reconcileMissingResources = mutation({
 export const sweepStaleBridgeWork = internalMutation({
   args: {},
   handler: async (ctx) => {
+    if (await platformStopped(ctx, "background")) return null;
     const now = Date.now();
     const cutoff = now - 2 * 60_000;
     const abandonedFs = await ctx.db.query("bridgeFsRequests")
@@ -522,10 +524,14 @@ async function discoverResourceForMount(
         (!input.contentHash || input.contentHash === activeWrite.baseRevision || input.contentHash === activeWrite.targetRevision),
       );
       const unexpectedDuringWrite = Boolean(activeWrite && input.contentHash && !writeObservedAsExpected);
+      // Only two moved sides disagree: a desktop save on top of the cloud's
+      // current revision is an ordinary edit for Spectra to take in.
+      const localBase = existingReplica.baseRevision ?? existingReplica.contentHash ?? existingReplica.revision;
       const replicasDisagree = Boolean(
         input.contentHash &&
         existingCloud?.contentHash &&
         input.contentHash !== existingCloud.contentHash &&
+        existingCloud.contentHash !== localBase &&
         !writeObservedAsExpected,
       );
       const nextState = unexpectedDuringWrite || replicasDisagree

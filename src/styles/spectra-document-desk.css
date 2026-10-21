@@ -92,21 +92,77 @@
   max-width: none;
 }
 
-/* Continuous: one long page, as tall as the desk at least, so it never reads
-   as a strip of text floating in the window. */
+/* Flowing: no sheet at all, as a note. The words keep a reading measure in
+   the middle while the whole pane is the writing surface, edge to edge and
+   top to bottom, so a press anywhere writes and nothing is cut off. */
+.spectra-document-studio[data-layout="continuous"] .document-desk {
+  padding: 0;
+}
+.spectra-document-studio[data-layout="continuous"] .document-page {
+  width: 100%;
+  flex: 1 0 auto;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  animation: none;
+}
+.spectra-document-studio[data-layout="continuous"] .document-page::before,
+.spectra-document-studio[data-layout="continuous"] .document-page::after {
+  content: none;
+}
+.spectra-document-studio[data-layout="continuous"] .document-page .tiptap-root {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+}
 .spectra-document-studio[data-layout="continuous"] .document-page .ProseMirror {
-  min-height: max(520px, calc(100vh - 360px));
-  padding: 64px 88px 96px;
+  flex: 1 0 auto;
+  min-height: 320px;
+  padding: 56px max(56px, calc((100% - 720px) / 2)) calc(var(--spectra-composer-safe-area, 0px) + 96px);
+}
+/* A long document opens as fast as a short one: blocks out of view are not
+   laid out or painted until they scroll near, keeping the size they last had.
+   Flowing only, since the page views measure every block to place breaks;
+   pictures and floats are left whole, as containment would clip them. */
+.spectra-document-studio[data-layout="continuous"] .ProseMirror > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre, .tableWrapper):not(:has(img, [data-float])) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 1.6em;
 }
 .spectra-document-studio .document-page .ProseMirror > :first-child {
   margin-top: 0;
 }
 
-/* Page: the paper's own size and margins (spectra-document.css); the corners
-   square up because a printed page has square corners. */
+/* Pages: the paper's own size and margins (spectra-document.css), squared up
+   as printed and cut into sheets with the desk showing between them. The
+   words move on to the next sheet whole (editor/page-flow.ts); the paper
+   runs to the end of the last sheet they reach. Zoomed from the rail; at
+   any zoom the desk scrolls rather than squeezing the sheet. */
+.spectra-document-studio[data-layout="page"] .document-desk {
+  align-items: safe center;
+  overflow: auto;
+}
 .spectra-document-studio[data-layout="page"] .document-page {
-  width: min(100%, var(--spectra-page-width));
-  border-radius: 2px 0 2px 2px;
+  --sheet-gap: 14px;
+  width: var(--spectra-page-width);
+  border-color: var(--card-border);
+  border-radius: 0;
+  background:
+    linear-gradient(
+        to bottom,
+        var(--card-border) 0 1px,
+        transparent 1px calc(100% - var(--sheet-gap) - 1px),
+        var(--card-border) calc(100% - var(--sheet-gap) - 1px) calc(100% - var(--sheet-gap))
+      )
+      0 0 / 100% var(--spectra-page-height) repeat-y border-box,
+    var(--card-paper);
+  box-shadow: none;
+  mask: linear-gradient(to bottom, #000 calc(100% - var(--sheet-gap)), transparent 0) 0 0 / 100%
+    var(--spectra-page-height) repeat-y;
+}
+.spectra-document-studio[data-layout="page"] .document-page .ProseMirror {
+  /* The last sheet's gap falls past the paper's end, so it never shows. */
+  min-height: calc(var(--spectra-page-height) * var(--doc-pages, 1) - var(--sheet-gap));
 }
 
 /* Reading narrows the page to a comfortable measure. */
@@ -117,17 +173,96 @@
   caret-color: transparent;
 }
 
-.document-page-foot {
-  width: min(816px, 100%);
-  margin-top: 14px;
-  padding: 0 4px;
+/* --- The status rail --------------------------------------------------- */
+/* One line at the very foot of the studio, just tall enough for its words:
+   the counts at one end and the view and its zoom at the other, either side
+   of the island. In the side panel the island lies over the panel's left,
+   so everything gathers to the right. */
+
+.document-rail {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: 26px;
+  padding: 0 10px 0 14px;
+  border-top: 1px solid var(--card-border-soft);
+  background: var(--bg-primary);
   color: var(--text-tertiary);
   font-size: var(--text-micro);
   font-variant-numeric: tabular-nums;
-  text-align: right;
+  line-height: 1;
+  white-space: nowrap;
 }
-.spectra-document-studio[data-layout="page"] .document-page-foot {
-  width: min(100%, var(--spectra-page-width));
+.document-rail-counts {
+  display: flex;
+  min-width: 0;
+  gap: 14px;
+  margin: 0;
+  overflow: hidden;
+}
+.document-rail-view,
+.document-rail-zoom,
+.document-rail-views {
+  display: flex;
+  align-items: center;
+}
+.document-rail-view {
+  gap: 10px;
+}
+.spectra-document-studio[data-compact] .document-rail {
+  justify-content: flex-end;
+}
+.spectra-document-studio[data-compact] .document-rail-view {
+  padding-left: 10px;
+  border-left: 1px solid var(--card-border-soft);
+}
+.document-rail :is(button) {
+  display: inline-flex;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+}
+.document-rail button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.document-rail button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.document-rail button:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--type-document));
+  outline-offset: -2px;
+}
+.document-rail-zoom button {
+  min-width: 20px;
+  padding: 0 4px;
+}
+.document-rail-zoom button svg {
+  width: 12px;
+  height: 12px;
+}
+.document-rail-zoom button:nth-child(2) {
+  min-width: 40px;
+}
+.document-rail-views {
+  gap: 1px;
+  padding-left: 10px;
+  border-left: 1px solid var(--card-border-soft);
+}
+.document-rail-views button[aria-checked="true"] {
+  background: color-mix(in oklab, var(--type-document) 12%, transparent);
+  color: var(--text-primary);
 }
 
 /* --- Pages side by side ------------------------------------------------ */
@@ -141,14 +276,6 @@
   justify-content: safe center;
   padding: 28px 40px calc(var(--spectra-composer-safe-area, 0px) + 20px);
   overflow: auto hidden;
-}
-
-/* The count stays under the window's edge while the pages pass beneath. */
-.spectra-document-studio[data-layout="spread"] .document-page-foot {
-  position: sticky;
-  left: 0;
-  width: auto;
-  align-self: stretch;
 }
 
 .spectra-document-studio[data-layout="spread"] .document-page {
@@ -649,11 +776,11 @@
 /* --- In the side panel the page is the panel -------------------------- */
 
 .spectra-document-studio[data-compact] .document-desk {
-  padding: 0 0 calc(var(--spectra-composer-safe-area, 0px) + 24px);
+  padding: 0;
 }
 .spectra-document-studio[data-compact] .document-page {
   width: 100%;
-  border-width: 0 0 1px;
+  border-width: 0;
   border-radius: 0;
   box-shadow: none;
   animation: none;
@@ -665,11 +792,18 @@
   --prose-size: var(--text-body);
   --prose-leading: 1.62;
   min-height: 320px;
-  padding: 24px 24px 48px;
+  /* Room on the left for the block handles, which stand in the margin. */
+  padding: 24px 32px calc(var(--spectra-composer-safe-area, 0px) + 48px) 64px;
 }
-.spectra-document-studio[data-compact] .document-page-foot {
-  width: 100%;
-  padding: 0 24px;
+.spectra-document-studio[data-compact][data-layout="page"] .document-desk {
+  padding: 20px 16px calc(var(--spectra-composer-safe-area, 0px) + 32px);
+}
+.spectra-document-studio[data-compact][data-layout="page"] .document-page {
+  width: var(--spectra-page-width);
+  border-width: 1px;
+}
+.spectra-document-studio[data-compact] .document-rail-counts > [data-count="characters"] {
+  display: none;
 }
 .spectra-document-studio[data-compact] :is(.spectra-document-outline, .spectra-document-sources, .spectra-document-revisions) {
   position: absolute;
@@ -704,7 +838,7 @@
 
 @media print {
   .spectra-document-studio > :not(.spectra-editor-body),
-  .document-page-foot,
+  .page-flow-gap,
   .document-page::before {
     display: none !important;
   }

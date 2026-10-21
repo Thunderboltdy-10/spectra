@@ -1,7 +1,7 @@
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import { getAuthenticatedAccount, type AuthenticatedActor } from "./identityShared";
-import { ARTIFACT_SUMMARY_READ_MODEL_VERSION } from "./orgTreeShared";
+import { ARTIFACT_SUMMARY_READ_MODEL_VERSION, sharesWithWorkspace } from "./orgTreeShared";
 import { CATALOG_MIGRATION_KEY } from "./catalogPages";
 import { openCatalogCursor, sealCatalogCursor } from "./catalogCursor";
 import { normalizeWorkspaceView } from "../shared/workspace-view";
@@ -145,8 +145,7 @@ async function proofStamp(ctx: QueryCtx, budget: Budget, actor: AuthenticatedAct
   if (!workspace || workspace.status !== "active" || workspace.schoolId !== actor.schoolId) return null;
   const node = loaded?.node ?? await budget.read(1, () => ctx.db.get(proof.nodeId));
   if (!node || node.kind !== "work" || node.sourceId !== row.artifactId || node.deletedAt !== undefined ||
-    node.workspaceContextId !== workspace._id || !(node.accessProjection === true ||
-      (node.accessProjection === undefined && row.ownerAccountId === workspace.ownerAccountId))) return null;
+    node.workspaceContextId !== workspace._id || !sharesWithWorkspace(node)) return null;
   const override = await budget.read(2, () => ctx.db.query("artifactAccessOverrides")
     .withIndex("by_artifact_account", q => q.eq("artifactId", row.artifactId).eq("accountId", actor.accountId)).unique());
   if (override?.effect === "deny") return null;

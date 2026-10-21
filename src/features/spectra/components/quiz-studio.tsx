@@ -95,6 +95,7 @@ import { StudioItemRail } from "./studio-item-rail";
 import { QuestionSheet } from "./quiz/question-sheet";
 import { QUIZ_TYPE_LABELS, retypeQuestion } from "./quiz/question-types";
 import { QuestionThumbnail } from "./quiz/question-thumbnail";
+import { NumberField } from "@/components/ui/number-field";
 
 /**
  * `work/registry` mode ids to the quiz's own mode vocabulary. The registry is
@@ -242,8 +243,7 @@ function QuizExperienceSection({
           {experience.timing === "countdown" ? (
             <label className="block min-w-0">
               <span className={settingLabelClass}>Minutes per attempt</span>
-              <input
-                type="number"
+              <NumberField
                 min={1}
                 max={720}
                 disabled={readOnly}
@@ -294,8 +294,7 @@ function QuizExperienceSection({
 
           <label className="block min-w-0">
             <span className={settingLabelClass}>Attempts</span>
-            <input
-              type="number"
+            <NumberField
               min={1}
               max={100}
               disabled={readOnly}

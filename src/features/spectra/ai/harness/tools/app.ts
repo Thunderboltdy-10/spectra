@@ -424,6 +424,28 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       command: (args) => ({ command: "save_version", args: { artifactId: args.artifactId, name: args.name } }),
     }),
     commandTool(session, {
+      name: "show_work",
+      description:
+        "Place a work live in your reply, where the user can use it without leaving the conversation: flashcards they turn, a quiz they answer, slides they step through, a sheet or document they read. Use it right after you create something meant to be used now (\"quiz me\", \"make flashcards and let me practise\"), or when the user asks to see a work here. It appears under your reply; write the reply as if it is there. Opening a work in its own panel is open_in_spectra.",
+      parameters: {
+        type: "object",
+        properties: {
+          artifactId: { type: "string" },
+          size: { type: "string", enum: ["compact", "expanded"], description: "expanded (the default) gives the work room to be used; compact is a small preview." },
+        },
+        required: ["artifactId"],
+        additionalProperties: false,
+      },
+      effect: "write",
+      label: (args: { artifactId: string }) => `Placing ${titled(session, args.artifactId, "the work")} here`,
+      doneLabel: (args: { artifactId: string }) => `Placed ${titled(session, args.artifactId, "the work")} here`,
+      parse: (raw) => {
+        const size = raw.size === undefined ? undefined : oneOf(raw, "size", ["compact", "expanded"] as const);
+        return { artifactId: requireString(raw, "artifactId", 200), ...(size ? { size } : {}) };
+      },
+      command: (args) => ({ command: "show_work", args }),
+    }),
+    commandTool(session, {
       name: "manage_conversation",
       description:
         "Rename, pin, unpin, archive or restore a conversation in the user's chat list, or file it in one of the user's workspaces. Omit threadId for this conversation.",
@@ -538,7 +560,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "managebac",
       description:
-        "Act on the user's ManageBac connection: sync {purpose: upcoming_deadlines|class_resources|timetable|classes|past_tasks|grades|cas} refreshes school records; select_classes {classIds, expectedRevision?} sets which classes sync. set_sync_mode {kind, mode: auto|manual|off} sets whether a kind of school record syncs automatically, only when asked, or not at all; with classId (as read_school_data names it) it sets one class's own choice, and mode follow lets that class follow the kind's mode again. create_class_workspaces {classIds} makes a workspace for each class; release_class_workspaces {classIds, retention?: keep_in_spectra|archive_projection} lets them go. import_resource {resourceId} copies a class resource into the user's Library, as the class shelf's Import does: resourceId is the id of a record read_school_data {purpose: class_resources} returned, and Office files become editable works. When the resource changed since an earlier import, the result says so; refresh true then makes a new copy beside the earlier one. The user approves unless they allowed ManageBac changes.",
+        "Act on the user's ManageBac connection: sync {purpose: upcoming_deadlines|class_resources|timetable|classes|past_tasks|grades|cas} refreshes school records; select_classes {classIds, expectedRevision?} sets which classes sync. set_sync_mode {kind, mode: auto|manual|off} sets whether a kind of school record syncs automatically, only when asked, or not at all; with classId (as read_school_data names it) it sets one class's own choice, and mode follow lets that class follow the kind's mode again. create_class_workspaces {classIds} makes a workspace for each class; release_class_workspaces {classIds, retention?: keep_in_spectra|archive_projection} lets them go. import_resource {resourceId} copies a class resource into the user's Library, as the class shelf's Import does: resourceId is the id of a record read_school_data {purpose: class_resources} returned, and Office files become editable works. When the resource changed since an earlier import, the result says so; refresh true then makes a new copy beside the earlier one. sync runs at once; the other actions need the user's approval unless they allowed ManageBac changes.",
       parameters: {
         type: "object",
         properties: {
@@ -556,7 +578,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
         required: ["action"],
         additionalProperties: false,
       },
-      effect: "irreversible",
+      effect: (args: { action: string }) => (args.action === "sync" ? "write" : "irreversible"),
       label: (args: { action: string }) => MANAGEBAC_LABELS[args.action as ManageBacAction]?.[0] ?? "Updating ManageBac",
       doneLabel: (args: { action: string }) => MANAGEBAC_LABELS[args.action as ManageBacAction]?.[1] ?? "Updated ManageBac",
       question: (args: { action: string; classIds?: string[]; kind?: string; mode?: string; classId?: string; refresh?: boolean }) => {

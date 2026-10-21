@@ -16,17 +16,19 @@ import { ArtifactStatusControl } from "../components/artifact-status-control";
 import { syncSpectraManageBac } from "../data/api";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { useLifeLanding } from "../life/use-life";
+import { openWorkInSide } from "../components/side-open";
 import { ClassDetails, ClassesSection } from "./school-classes";
+import { useOpenSchoolTask } from "./open-school-task";
 import { ago, groupCurrentTasks, schoolStatus, sentenceOf, type SchoolSyncStatus } from "./school-model";
 import { Overview } from "./school-overview";
 import { SyncSection } from "./school-sync";
-import { TaskDetails } from "./school-task-details";
 import { TasksSection, type TaskView } from "./school-tasks";
 
 /*
  * School (docs/product/SCHOOL.md): the student's ManageBac in Spectra, on
  * the per-student API (convex/school.README.md). The stage holds Overview,
- * Tasks, Classes and Sync. A task or class chosen opens beside the stage,
+ * Tasks, Classes and Sync. A task opens as its task work in the Side, the
+ * same as from Home or the Calendar; a class chosen opens beside the stage,
  * and the panel goes when it is let go: nothing waits there empty.
  */
 
@@ -40,6 +42,7 @@ const SECTIONS: { id: Section; label: string; icon: "home" | "task" | "school" |
 const isSection = (value: string | null): value is Section => SECTIONS.some((section) => section.id === value);
 
 type Selection = { kind: "task" | "class"; id: string };
+type ClassSelection = { kind: "class"; id: string };
 
 const BAR_PLAN: readonly CollapseStep[] = [{ hideLabel: "connection" }, { toMenu: "connection" }, { hideLabel: "sync" }];
 
@@ -66,7 +69,9 @@ class SectionBoundary extends Component<{ children: ReactNode; label: string }, 
 export function SchoolPage() {
   const [section, setSection] = useState<Section>("overview");
   const [taskView, setTaskView] = useState<TaskView>("current");
-  const [selection, setSelection] = useState<Selection | null>(null);
+  const [selection, setSelection] = useState<ClassSelection | null>(null);
+  const [openedTask, setOpenedTask] = useState<string | null>(null);
+  const { workOf } = useOpenSchoolTask();
   const [now, setNow] = useState(() => Date.now());
   const [syncing, setSyncing] = useState<SchoolSyncKind | "all" | null>(null);
   const [notice, setNotice] = useState<string>();
@@ -80,10 +85,10 @@ export function SchoolPage() {
     const query = new URLSearchParams(window.location.search);
     const section = query.get("section");
     if (isSection(section)) setSection(section);
-    // Home and the Calendar open a task straight into its panel; a class's page in the Library opens the class.
+    // A link to a task opens its work; a class's page in the Library opens the class.
     const task = query.get("task");
     const cls = query.get("class");
-    if (task) setSelection({ kind: "task", id: task });
+    if (task) openTaskRef.current(task);
     else if (cls) setSelection({ kind: "class", id: cls });
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
     let live = true;
@@ -140,8 +145,23 @@ export function SchoolPage() {
     ...(admin ? [{ id: "connection", icon: "settings", label: "Connection", onSelect: () => router.push("/managebac") } satisfies BarCommand] : []),
   ];
 
-  const select = (next: Selection) => setSelection(next);
+  const select = (next: Selection) => {
+    if (next.kind === "class") {
+      setSelection({ kind: "class", id: next.id });
+      return;
+    }
+    // A task is one kind of work wherever it opens: its work, in the Side.
+    setSelection(null);
+    setOpenedTask(next.id);
+    void workOf(next.id).then((workId) => {
+      if (workId) openWorkInSide(workId);
+      else setNotice("This task can't open in Spectra any more. It may have been removed in ManageBac.");
+    });
+  };
+  const openTaskRef = useRef((id: string) => select({ kind: "task", id }));
+  openTaskRef.current = (id: string) => select({ kind: "task", id });
   const selectedId = selection?.id ?? null;
+  const chosen: Selection | null = selection ?? (openedTask ? { kind: "task", id: openedTask } : null);
 
   return (
     <main className="spectra-wave-y relative isolate flex h-full min-h-0 flex-1" data-spectra-app-surface="true" data-school-page>
@@ -157,7 +177,7 @@ export function SchoolPage() {
               <Overview
                 now={now}
                 status={status}
-                chosen={selection}
+                chosen={chosen}
                 onChoose={select}
                 onOpenTasks={() => go("tasks")}
                 onOpenClasses={() => go("classes")}
@@ -171,7 +191,7 @@ export function SchoolPage() {
                 now={now}
                 view={taskView}
                 onViewChange={setTaskView}
-                selectedId={selection?.kind === "task" ? selectedId : null}
+                selectedId={openedTask}
                 onSelect={(id) => select({ kind: "task", id })}
                 preferences={preferences}
                 onSync={(kind) => void sync(kind)}
@@ -187,7 +207,7 @@ export function SchoolPage() {
         </PageBody>
       </div>
       {selection ? (
-        <SidePanel id="school.chosen" title={selection.kind === "task" ? "Task" : "Class"} icon={selection.kind === "task" ? "task" : "school"} stageMin={600} onClose={() => setSelection(null)}>
+        <SidePanel id="school.chosen" title="Class" icon="school" stageMin={600} onClose={() => setSelection(null)}>
           <Chosen selection={selection} now={now} onSelect={select} onNotice={setNotice} />
         </SidePanel>
       ) : null}
@@ -214,22 +234,18 @@ function Chosen({
   onSelect,
   onNotice,
 }: {
-  selection: Selection;
+  selection: ClassSelection;
   now: number;
   onSelect: (next: Selection) => void;
   onNotice: (message: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  // What was chosen grows out of the ticket or tile it was chosen from.
-  useLifeLanding(ref, `${selection.kind}:${selection.id}`);
+  // The class grows out of the tile it was chosen from.
+  useLifeLanding(ref, `class:${selection.id}`);
   return (
-    <div ref={ref} key={`${selection.kind}:${selection.id}`}>
-      <SectionBoundary label="This">
-        {selection.kind === "task" ? (
-          <TaskDetails recordId={selection.id} now={now} onNotice={onNotice} />
-        ) : (
-          <ClassDetails providerClassId={selection.id} now={now} onSelectTask={(id) => onSelect({ kind: "task", id })} onNotice={onNotice} />
-        )}
+    <div ref={ref} key={selection.id}>
+      <SectionBoundary label="This class">
+        <ClassDetails providerClassId={selection.id} now={now} onSelectTask={(id) => onSelect({ kind: "task", id })} onNotice={onNotice} />
       </SectionBoundary>
     </div>
   );

@@ -317,9 +317,20 @@ describe("bounded Calendar discovery", () => {
       endAt: 3 * DAY + 3 * 60 * 60 * 1_000,
       expectedRevision: moved.revision,
     });
-    await user.mutation(api.calendar.completeWorkBlock, {
+    const completed = await user.mutation(api.calendar.completeWorkBlock, {
       itemId: block.id,
       expectedRevision: resized.revision,
+    });
+    expect(completed.status).toBe("completed");
+    const reopened = await user.mutation(api.calendar.completeWorkBlock, {
+      itemId: block.id,
+      expectedRevision: completed.revision,
+      done: false,
+    });
+    expect(reopened.status).toBe("active");
+    await user.mutation(api.calendar.completeWorkBlock, {
+      itemId: block.id,
+      expectedRevision: reopened.revision,
     });
     const personal = await user.mutation(api.calendar.createPersonalItem, {
       kind: "personal_event",

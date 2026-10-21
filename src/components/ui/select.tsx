@@ -23,7 +23,7 @@ const SelectValue = SelectPrimitive.Value;
 /** Trigger heights match the three real densities in the product. */
 const triggerSizes = {
   sm: "h-8 px-2.5 text-caption",
-  md: "h-9 px-3 text-caption",
+  md: "h-9 px-3 text-ui",
   lg: "h-10 px-3 text-ui",
 } as const;
 
@@ -38,13 +38,14 @@ const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex min-w-0 items-center justify-between gap-2 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] font-medium text-[var(--text-primary)] outline-none transition-colors",
+      // No box: the same words-and-glyph treatment as the buttons around it.
+      "flex min-w-0 items-center justify-between gap-2 rounded-control bg-transparent font-medium text-[var(--text-primary)] outline-none transition-colors",
       // SelectValue must stay a direct child of Trigger. An extra span around
       // it makes Radix ItemText re-render until the tree blows the update cap
       // (sheet/slide pickers in a tight tab workbar were the first to hit it).
       "[&>[data-radix-select-value]]:min-w-0 [&>[data-radix-select-value]]:truncate [&>[data-radix-select-value]]:text-left",
-      "hover:bg-[var(--bg-hover)]",
-      "focus-visible:border-[color-mix(in_oklab,var(--brand-primary)_45%,var(--border-default))] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]",
+      "hover:bg-[var(--bg-hover)] data-[state=open]:bg-[var(--bg-hover)]",
+      "focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]",
       // `--text-placeholder` and `--text-tertiary` both fail WCAG AA against
       // the page surface; placeholder text uses `--text-secondary` (4.9:1).
       "data-[placeholder]:font-normal data-[placeholder]:text-[var(--text-secondary)]",
@@ -58,7 +59,7 @@ const SelectTrigger = React.forwardRef<
     <SelectPrimitive.Icon asChild>
       <ChevronDown
         aria-hidden="true"
-        className="size-3.5 shrink-0 text-[var(--text-secondary)]"
+        className="size-4 shrink-0 text-[var(--text-secondary)]"
       />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>

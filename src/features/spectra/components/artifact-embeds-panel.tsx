@@ -10,6 +10,7 @@ import type { Id } from "../../../../convex/_generated/dataModel";
 import { api } from "../../../../convex/_generated/api";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "@/components/ui/toast";
+import { buttonVariants } from "@/components/ui/button";
 import {
   postSpectra,
   type SpectraArtifact,
@@ -378,7 +379,7 @@ export function ArtifactEmbedsPanel({
                       }
                       setCreating((value) => !value);
                     }}
-                    className="flex h-8 items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)]"
+                    className={buttonVariants({ variant: "primary" })}
                     title={
                       compatibilityProfile === "strict-native"
                         ? "Live references need Enhanced compatibility."
@@ -577,7 +578,7 @@ export function ArtifactEmbedsPanel({
                       busy === "create"
                     }
                     onClick={() => void createEmbed()}
-                    className="flex h-8 items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-35"
+                    className={buttonVariants({ variant: "primary" })}
                   >
                     {busy === "create" ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { EMAIL_INK, EMAIL_SANS, emailPage, escapeHtml } from "@/lib/email-layout";
 
 // Simple in-memory rate limiter (resets on server restart)
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
@@ -19,15 +20,6 @@ function checkRateLimit(ip: string): boolean {
 
 function sanitize(s: string, maxLen = 2000): string {
   return s.replace(/[<>]/g, "").trim().slice(0, maxLen);
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }
 
 export async function POST(request: NextRequest) {
@@ -70,12 +62,6 @@ export async function POST(request: NextRequest) {
   const safeRole = role ? sanitize(role, 100) : "";
   const safeMessage = sanitize(message);
 
-  // HTML-encode all user values before interpolation into email body
-  const htmlName = escapeHtml(safeName);
-  const htmlEmail = escapeHtml(safeEmail);
-  const htmlSchool = escapeHtml(safeSchool);
-  const htmlRole = escapeHtml(safeRole);
-  const htmlMessage = escapeHtml(safeMessage);
 
   const apiKey = process.env.RESEND_API_KEY;
   const fromEmail = process.env.INVITE_FROM_EMAIL;
@@ -99,21 +85,7 @@ export async function POST(request: NextRequest) {
         from: fromEmail,
         to: ["pablo.martinez.dovale@gmail.com"],
         subject: `[Spectra Contact] New message from ${safeName}`,
-        html: `
-          <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;">
-            <h2 style="color:#1a1510;margin:0 0 16px;">New contact form submission</h2>
-            <table style="width:100%;border-collapse:collapse;">
-              <tr><td style="padding:8px 0;color:var(--text-secondary);width:120px;">Name</td><td style="padding:8px 0;color:#1a1510;">${htmlName}</td></tr>
-              <tr><td style="padding:8px 0;color:var(--text-secondary);">Email</td><td style="padding:8px 0;"><a href="mailto:${htmlEmail}" style="color:var(--accent-cyan);">${htmlEmail}</a></td></tr>
-              ${htmlSchool ? `<tr><td style="padding:8px 0;color:var(--text-secondary);">School</td><td style="padding:8px 0;color:#1a1510;">${htmlSchool}</td></tr>` : ""}
-              ${htmlRole ? `<tr><td style="padding:8px 0;color:var(--text-secondary);">Role</td><td style="padding:8px 0;color:#1a1510;">${htmlRole}</td></tr>` : ""}
-            </table>
-            <div style="margin-top:16px;padding:16px;background:#f5f3ef;border-radius:12px;">
-              <p style="margin:0 0 4px;color:var(--text-secondary);font-size:12px;text-transform:uppercase;letter-spacing:0.1em;">Message</p>
-              <p style="margin:0;color:#1a1510;white-space:pre-wrap;">${htmlMessage}</p>
-            </div>
-          </div>
-        `,
+        html: contactEmailHtml({ name: safeName, email: safeEmail, school: safeSchool, role: safeRole, message: safeMessage }),
       }),
     });
 
@@ -133,4 +105,23 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+/** The message, laid out on Spectra's paper. Every value is escaped here, once. */
+function contactEmailHtml(raw: { name: string; email: string; school: string; role: string; message: string }) {
+  const sent = Object.fromEntries(Object.entries(raw).map(([key, value]) => [key, escapeHtml(value)])) as typeof raw;
+  const row = (label: string, value: string) =>
+    value
+      ? `<tr><td style="padding:6px 16px 6px 0;width:96px;font-family:${EMAIL_SANS};font-size:13px;color:${EMAIL_INK.secondary};vertical-align:top;">${label}</td><td style="padding:6px 0;font-family:${EMAIL_SANS};font-size:15px;color:${EMAIL_INK.ink};">${value}</td></tr>`
+      : "";
+  const body = [
+    `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 20px;">${row("Name", sent.name)}${row("Email", `<a href="mailto:${sent.email}" style="color:${EMAIL_INK.violet};">${sent.email}</a>`)}${row("School", sent.school)}${row("Role", sent.role)}</table>`,
+    `<div style="padding:16px 0 4px;border-top:1px solid ${EMAIL_INK.rule};font-family:${EMAIL_SANS};font-size:15px;line-height:1.6;color:${EMAIL_INK.ink};white-space:pre-wrap;">${sent.message}</div>`,
+  ].join("\n");
+  return emailPage({
+    preheader: `${raw.name} wrote through the Spectra contact form.`,
+    title: `A message from ${raw.name}`,
+    body,
+    footer: "Sent from the contact form on the Spectra site. Reply to the address above to answer.",
+  });
 }

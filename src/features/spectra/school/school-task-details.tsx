@@ -1,64 +1,71 @@
 "use client";
 
 import { useState } from "react";
-import { useConvex, useQuery } from "convex/react";
+import { useConvex, useConvexAuth, useQuery } from "convex/react";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import type { IconName } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { EmptyState, LoadingRows } from "@/components/ui/page-state";
 import { Row } from "@/components/ui/row";
+import { toast } from "@/components/ui/toast";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { plainText } from "../../../../shared/semantic-chunks";
 import { fetchSpectraSchoolFile } from "../data/api";
-import { useAuthedArgs } from "../data/use-authed-args";
 import { FileViewer, type ViewedFile } from "../files/file-viewer";
 import { fileViewKind, type FileViewKind } from "../files/file-kind";
 import { handOffToLibrary } from "../workbench/library-handoff";
-import { dateLabel, dueLabel, sentenceOf, sizeLabel, type SchoolTaskDetail } from "./school-model";
-import { inkStyle, useClassBook } from "./use-class-book";
+import { dateLabel, sentenceOf, sizeLabel, type SchoolTaskDetail } from "./school-model";
+import { useClassBook } from "./use-class-book";
 
 /*
- * A task, chosen: its class's ink across the head, the brief, the grade and
+ * What a school task's work adds from ManageBac, below the task itself: the
+ * notice that it was set there (and where to open it), then the grade and
  * feedback, what was handed in (opened in Spectra or copied into the
- * Library) and the resources for it.
+ * Library) and the resources for it. The title, the day and the brief are
+ * the task's own, so they are not said twice.
  */
 
 function Prose({ text }: { text: string | null }) {
   const plain = text ? plainText(text) : "";
   if (!plain) return null;
-  return <p className="whitespace-pre-line text-ui leading-6 text-[var(--text-primary)]">{plain}</p>;
+  return <p className="max-w-[62ch] whitespace-pre-line text-ui leading-[1.65] text-[var(--text-primary)]">{plain}</p>;
 }
 
 export function DetailHeading({ children }: { children: React.ReactNode }) {
-  return <h4 className="mb-2 mt-6 font-display text-subhead font-medium text-[var(--text-primary)]">{children}</h4>;
+  return <h4 className="mb-2 font-display text-subhead font-medium text-[var(--text-primary)]">{children}</h4>;
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="sheet-section" aria-label={title}>
+      <header className="sheet-section-head">
+        <h3>{title}</h3>
+      </header>
+      {children}
+    </section>
+  );
 }
 
 type SubmittedFile = NonNullable<SchoolTaskDetail["submission"]>["files"][number];
 
 const FILE_GLYPHS = { image: "image", pdf: "pdf", document: "document", slides: "slides", sheet: "sheet", legacy: "document" } as const satisfies Record<FileViewKind, IconName>;
 
-export function TaskDetails({ recordId, now, onNotice }: { recordId: string; now: number; onNotice: (message: string) => void }) {
-  const task = useQuery(api.school.task, useAuthedArgs({ recordId: recordId as Id<"externalRecords"> }));
+/** The ManageBac side of a school task's work; nothing for a task of the student's own. */
+export function SchoolTaskNotice({ artifactId }: { artifactId: string }) {
+  const { isAuthenticated } = useConvexAuth();
+  const task = useQuery(api.school.taskOfWork, isAuthenticated ? { artifactId: artifactId as Id<"spectraArtifacts"> } : "skip");
   const convex = useConvex();
   const router = useRouter();
   const book = useClassBook();
   const [busy, setBusy] = useState<string | null>(null);
   const [viewing, setViewing] = useState<ViewedFile | null>(null);
+  const now = Date.now();
 
-  if (task === undefined) return <LoadingRows label="Loading the task" count={4} />;
-  if (task === null)
-    return (
-      <EmptyState
-        compact
-        icon="task"
-        title="This task isn't here any more"
-        detail="It may have been removed in ManageBac, or its kind of data was turned off in Sync."
-      />
-    );
+  if (!task) return null;
   const submission = task.submission;
   const viewedFile = viewing ? submission?.files.find((file) => file.providerFileId === viewing.key) : undefined;
+  const grade = task.grade;
 
   async function keptCopy(file: SubmittedFile) {
     if (!submission) throw new Error("Nothing was handed in for this task.");
@@ -75,8 +82,7 @@ export function TaskDetails({ recordId, now, onNotice }: { recordId: string; now
     const kind = fileViewKind(file.mimeType, file.filename);
     if (kind) {
       // Photos, PDFs and Office files open in Spectra; the viewer holds a ghost
-      // until the kept copy is ready. An older Office file opens to a line that
-      // says why it can't show, with the same ways out.
+      // until the kept copy is ready.
       const key = file.providerFileId;
       setViewing({ key, filename: file.filename, kind, bytes: file.bytes ?? undefined });
       setBusy(`open:${key}`);
@@ -85,14 +91,13 @@ export function TaskDetails({ recordId, now, onNotice }: { recordId: string; now
         setViewing((current) => (current?.key === key ? { ...current, url: kept.url } : current));
       } catch (error) {
         setViewing((current) => (current?.key === key ? null : current));
-        onNotice(sentenceOf(error, `${file.filename} didn't open. Try again.`));
+        toast.error(sentenceOf(error, `${file.filename} didn't open. Try again.`));
       } finally {
         setBusy(null);
       }
       return;
     }
-    // Spectra has no reader for this kind of file in place (Copy into Library makes it editable).
-    // Opened now, while the press still counts, then pointed at the file.
+    // Spectra has no reader for this kind of file: opened now, while the press still counts.
     const opened = window.open("about:blank", "_blank");
     setBusy(`open:${file.providerFileId}`);
     try {
@@ -101,7 +106,7 @@ export function TaskDetails({ recordId, now, onNotice }: { recordId: string; now
       else window.location.assign(kept.url);
     } catch (error) {
       opened?.close();
-      onNotice(sentenceOf(error, `${file.filename} didn't open. Try again.`));
+      toast.error(sentenceOf(error, `${file.filename} didn't open. Try again.`));
     } finally {
       setBusy(null);
     }
@@ -115,114 +120,76 @@ export function TaskDetails({ recordId, now, onNotice }: { recordId: string; now
       if (!response.ok) throw new Error(`${file.filename} didn't download. Try again.`);
       const blob = await response.blob();
       handOffToLibrary(new File([blob], kept.filename, { type: kept.mimeType || blob.type }));
-      onNotice(`Copying ${kept.filename} into your Library.`);
+      toast.info(`Copying ${kept.filename} into your Library.`);
       router.push("/library");
     } catch (error) {
-      onNotice(sentenceOf(error, `${file.filename} wasn't copied. Try again.`));
+      toast.error(sentenceOf(error, `${file.filename} wasn't copied. Try again.`));
     } finally {
       setBusy(null);
     }
   }
 
-  const identity = book.of(task.providerClassId ?? null, task.className);
-  const facts = [task.past ? "Past task" : dueLabel(task.dueAt, now), task.taskType, task.status, task.term].filter(Boolean);
+  const about = [book.of(task.providerClassId ?? null, task.className)?.name, task.taskType, task.status].filter(Boolean).join(", ");
 
   return (
-    <article aria-labelledby="school-task-title" style={inkStyle(identity)}>
-      <header className="school-detail-head">
-        {identity ? (
-          <p className="school-ticket-class text-caption">
-            <span aria-hidden className="school-class-dot" />
-            {identity.name}
-          </p>
+    <>
+      <p className="task-school-notice">
+        <span>
+          Set in ManageBac{about ? ` (${about})` : ""}. Moving it in the Calendar gives you your own time for it; your teacher&apos;s date stays as they set it.
+        </span>
+        {task.provenanceUrl ? (
+          <a href={task.provenanceUrl} target="_blank" rel="noreferrer">
+            Open in ManageBac
+          </a>
         ) : null}
-        <h3 id="school-task-title" data-artifact-title className="mt-1.5 font-display text-title font-semibold leading-snug text-[var(--text-primary)]">
-          {task.title}
-        </h3>
-        {facts.length ? (
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
-            {facts.map((fact) => (
-              <span key={fact} className="school-fact">
-                {fact}
-              </span>
+      </p>
+
+      {grade ? (
+        <Section title="Grade">
+          <p className="flex items-baseline gap-3">
+            <span className="font-display text-title leading-none text-[var(--text-primary)] [font-variant-numeric:lining-nums]">
+              {grade.score !== null && grade.maxScore !== null
+                ? `${grade.score} / ${grade.maxScore}`
+                : grade.label ?? (grade.score !== null ? String(grade.score) : "Graded")}
+            </span>
+            {grade.label && grade.score !== null ? <span className="text-ui text-[var(--text-secondary)]">{grade.label}</span> : null}
+          </p>
+          <Prose text={grade.feedback} />
+        </Section>
+      ) : null}
+
+      <Section title="What you handed in">
+        {!submission ? (
+          <p className="text-caption text-[var(--text-secondary)]">{task.past ? "Nothing was handed in for this task." : "Nothing handed in yet. Hand it in on ManageBac."}</p>
+        ) : !submission.files.length ? (
+          <p className="text-caption text-[var(--text-secondary)]">
+            {submission.submittedAt ? `Handed in ${dateLabel(submission.submittedAt, now)}, without files.` : "No files."}
+          </p>
+        ) : (
+          <div className="-mx-2.5">
+            {submission.files.map((file) => (
+              <Row
+                key={file.providerFileId}
+                glyph={FILE_GLYPHS[fileViewKind(file.mimeType, file.filename) ?? "legacy"]}
+                title={file.filename}
+                meta={file.tooLarge ? "Too large to keep in Spectra (over 50 MB)" : [sizeLabel(file.bytes), file.state === "cached" ? "kept in Spectra" : null].filter(Boolean).join(", ") || undefined}
+                actionsVisible
+                actions={
+                  file.tooLarge ? null : (
+                    <>
+                      <IconButton icon="openFull" label={`Open ${file.filename}`} size="compact" disabled={busy !== null} onClick={() => void openFile(file)} />
+                      <IconButton icon="library" label="Copy into Library" size="compact" disabled={busy !== null} onClick={() => void copyIntoLibrary(file)} />
+                    </>
+                  )
+                }
+              />
             ))}
           </div>
-        ) : null}
-        {task.provenanceUrl ? (
-          <Button variant="ghost" size="sm" className="-ml-2.5 mt-2" asChild>
-            <a href={task.provenanceUrl} target="_blank" rel="noreferrer">
-              Open in ManageBac
-            </a>
-          </Button>
-        ) : null}
-      </header>
-
-      {task.brief ? (
-        <>
-          <DetailHeading>Brief</DetailHeading>
-          <Prose text={task.brief} />
-        </>
-      ) : null}
-
-      {task.grade ? (
-        <>
-          <DetailHeading>Grade</DetailHeading>
-          <p className="text-ui font-semibold text-[var(--text-primary)]">
-            {task.grade.score !== null && task.grade.maxScore !== null
-              ? `${task.grade.score} / ${task.grade.maxScore}`
-              : task.grade.label ?? (task.grade.score !== null ? String(task.grade.score) : "Graded")}
-            {task.grade.label && task.grade.score !== null ? <span className="ml-2 font-normal text-[var(--text-secondary)]">{task.grade.label}</span> : null}
-          </p>
-          <div className="mt-1">
-            <Prose text={task.grade.feedback} />
-          </div>
-        </>
-      ) : null}
-
-      <DetailHeading>What you handed in</DetailHeading>
-      {!submission ? (
-        <p className="text-caption text-[var(--text-secondary)]">{task.past ? "Nothing was handed in for this task." : "Nothing handed in yet."}</p>
-      ) : !submission.files.length ? (
-        <p className="text-caption text-[var(--text-secondary)]">
-          {submission.submittedAt ? `Handed in ${dateLabel(submission.submittedAt, now)}, without files.` : "No files."}
-        </p>
-      ) : (
-        <div className="-mx-2.5">
-          {submission.files.map((file) => (
-            <Row
-              key={file.providerFileId}
-              glyph={FILE_GLYPHS[fileViewKind(file.mimeType, file.filename) ?? "legacy"]}
-              title={file.filename}
-              meta={file.tooLarge ? "Too large to keep in Spectra (over 50 MB)" : [sizeLabel(file.bytes), file.state === "cached" ? "kept in Spectra" : null].filter(Boolean).join(", ") || undefined}
-              actionsVisible
-              actions={
-                file.tooLarge ? null : (
-                  <>
-                    <IconButton
-                      icon="openFull"
-                      label={`Open ${file.filename}`}
-                      size="compact"
-                      disabled={busy !== null}
-                      onClick={() => void openFile(file)}
-                    />
-                    <IconButton
-                      icon="library"
-                      label="Copy into Library"
-                      size="compact"
-                      disabled={busy !== null}
-                      onClick={() => void copyIntoLibrary(file)}
-                    />
-                  </>
-                )
-              }
-            />
-          ))}
-        </div>
-      )}
+        )}
+      </Section>
 
       {task.resources.length ? (
-        <>
-          <DetailHeading>Resources</DetailHeading>
+        <Section title="Resources">
           <div className="-mx-2.5">
             {task.resources.map((resource) => (
               <Row
@@ -233,18 +200,13 @@ export function TaskDetails({ recordId, now, onNotice }: { recordId: string; now
                 actionsVisible
                 actions={
                   resource.url ? (
-                    <IconButton
-                      icon="external"
-                      label={`Open ${resource.title}`}
-                      size="compact"
-                      onClick={() => window.open(resource.url!, "_blank", "noopener,noreferrer")}
-                    />
+                    <IconButton icon="external" label={`Open ${resource.title}`} size="compact" onClick={() => window.open(resource.url!, "_blank", "noopener,noreferrer")} />
                   ) : null
                 }
               />
             ))}
           </div>
-        </>
+        </Section>
       ) : null}
       <FileViewer
         file={viewing}
@@ -257,6 +219,6 @@ export function TaskDetails({ recordId, now, onNotice }: { recordId: string; now
           ) : null
         }
       />
-    </article>
+    </>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { buttonVariants } from "@/components/ui/button";
 import { forwardRef, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { IconButton } from "@/components/ui/icon-button";
@@ -17,8 +18,10 @@ import type { PendingQuestion, QuestionAnswer } from "./questions";
  * to do instead.
  */
 
-const chip =
-  "inline-flex min-h-8 items-center rounded-control border border-[var(--border-default)] px-3 text-caption font-medium text-[var(--text-primary)] outline-none transition-colors duration-[var(--motion-fast)] hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] disabled:opacity-45";
+const chip = buttonVariants({ variant: "secondary" });
+
+const footerLink =
+  "rounded-control underline-offset-2 outline-none hover:text-[var(--text-primary)] hover:underline focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] disabled:opacity-45";
 
 export const QuestionCard = forwardRef<
   HTMLDivElement,
@@ -30,8 +33,12 @@ export const QuestionCard = forwardRef<
     onStep: (delta: number) => void;
     onAnswer: (answer: QuestionAnswer) => Promise<boolean>;
     onOpenThread?: () => void;
+    /** Puts the question aside, still waiting: its thread's tab counts it until it is answered. */
+    onLater: () => void;
+    /** The reader is with the question (pointer, keys): it is not put aside for being idle. */
+    onActivity: () => void;
   }
->(function QuestionCard({ question, index, count, visible, onStep, onAnswer, onOpenThread }, ref) {
+>(function QuestionCard({ question, index, count, visible, onStep, onAnswer, onOpenThread, onLater, onActivity }, ref) {
   const [busy, setBusy] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [batch, setBatch] = useState<Record<string, string>>({});
@@ -69,6 +76,9 @@ export const QuestionCard = forwardRef<
       data-island-question
       inert={!visible}
       aria-hidden={!visible}
+      onPointerMove={onActivity}
+      onKeyDown={onActivity}
+      onFocus={onActivity}
       className={cn(
         "box-border w-[min(440px,calc(100vw-32px))] rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 pb-3 pt-3.5 shadow-[var(--shadow-lg)]",
         "transition-opacity duration-150",
@@ -77,9 +87,17 @@ export const QuestionCard = forwardRef<
     >
       <div className="flex items-start gap-2.5">
         <span aria-hidden className="mt-[7px] size-2 shrink-0 rounded-full bg-[var(--warning)]" />
-        <p data-question-text className="min-w-0 flex-1 whitespace-pre-wrap text-ui font-medium leading-6 text-[var(--text-primary)]">
-          <InlineEmphasis text={question.prompt} />
-        </p>
+        <div className="min-w-0 flex-1">
+          {/* Several questions at once: each says which thread asks it. */}
+          {count > 1 && question.threadTitle ? (
+            <p data-question-thread className="truncate text-micro leading-5 text-[var(--text-tertiary)]">
+              {question.threadTitle}
+            </p>
+          ) : null}
+          <p data-question-text className="whitespace-pre-wrap text-ui font-medium leading-6 text-[var(--text-primary)]">
+            <InlineEmphasis text={question.prompt} />
+          </p>
+        </div>
         {count > 1 ? (
           <span className="flex shrink-0 items-center gap-0.5 text-micro text-[var(--text-tertiary)]">
             <IconButton icon="chevronRight" label="Previous question" size="compact" className="size-6 rotate-180" onClick={() => onStep(-1)} />
@@ -131,7 +149,7 @@ export const QuestionCard = forwardRef<
                 type="button"
                 disabled={Boolean(busy)}
                 onClick={() => void send("allow", { kind: "allow" })}
-                className="inline-flex min-h-8 items-center rounded-control bg-[var(--text-primary)] px-3 text-caption font-semibold [color:var(--bg-primary)] outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] disabled:opacity-45"
+                className={buttonVariants({ variant: "primary" })}
               >
                 {busy === "allow" ? "Allowing…" : "Allow"}
               </button>
@@ -145,7 +163,7 @@ export const QuestionCard = forwardRef<
             type="button"
             disabled={Boolean(busy) || question.batch.some((item) => !batch[item.id])}
             onClick={() => void send("batch", { kind: "batch", selections: batch })}
-            className="inline-flex min-h-8 items-center rounded-control bg-[var(--text-primary)] px-3 text-caption font-semibold [color:var(--bg-primary)] outline-none hover:opacity-90 disabled:opacity-45"
+            className={buttonVariants({ variant: "primary" })}
           >
             Continue
           </button>
@@ -206,16 +224,17 @@ export const QuestionCard = forwardRef<
         </form>
       ) : null}
 
-      <div className="mt-2.5 flex items-center justify-between text-micro text-[var(--text-tertiary)]">
+      <div className="mt-2.5 flex items-center gap-3 text-micro text-[var(--text-tertiary)]">
         {onOpenThread ? (
-          <button type="button" onClick={onOpenThread} className="rounded-control underline-offset-2 outline-none hover:text-[var(--text-primary)] hover:underline focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]">
+          <button type="button" onClick={onOpenThread} className={footerLink}>
             Open thread
           </button>
-        ) : (
-          <span />
-        )}
+        ) : null}
+        <button type="button" onClick={onLater} title="Spectra waits; the thread's tab keeps the question until you answer" className={footerLink}>
+          Answer later
+        </button>
         {!approval && !question.batch ? (
-          <button type="button" disabled={Boolean(busy)} onClick={() => void send("skip", { kind: "skip" })} className="rounded-control outline-none hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]">
+          <button type="button" disabled={Boolean(busy)} onClick={() => void send("skip", { kind: "skip" })} className={cn(footerLink, "ml-auto")}>
             Skip, use your judgement
           </button>
         ) : null}

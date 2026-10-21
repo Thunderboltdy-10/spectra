@@ -50,6 +50,10 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => mocks.searchParams,
 }));
 
+vi.mock("convex/react", () => ({
+  useConvexAuth: () => ({ isAuthenticated: false, isLoading: false }),
+  useQuery: () => undefined,
+}));
 vi.mock("next/dynamic", () => ({
   default: () => () => null,
 }));

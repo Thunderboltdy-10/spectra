@@ -21,9 +21,9 @@ export function schoolRecordOf(item: CalendarItem) {
   return item.kind === "official_deadline" && item.source?.provider === "managebac" ? item.source.recordId : undefined;
 }
 
-/** Whether a calendar item is a task that can open beside its block. */
+/** Whether a calendar item is a task (or time given to one) that can open beside its block. */
 export function isPeekable(item: CalendarItem) {
-  return item.kind !== "scheduled_work_block" && Boolean(planWorkId(item) || schoolRecordOf(item));
+  return Boolean(planWorkId(item) || schoolRecordOf(item));
 }
 
 export function useTaskPeek() {

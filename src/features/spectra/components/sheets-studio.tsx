@@ -149,6 +149,7 @@ import {
 import { xlsxFormulaSupport } from "../lenses/xlsx-formula-support";
 import { OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 import { requestSpectra } from "../data/request";
+import { NumberField } from "@/components/ui/number-field";
 
 /** Clipboards rewrite line endings and may add a trailing newline. */
 function normalizeClipboardText(value: string) {
@@ -5263,8 +5264,7 @@ export const SheetsStudio = memo(function SheetsStudio({
                 {conditionalKind !== "color_scale" ? (
                   <label className="block">
                     <span className={PANEL_LABEL}>Compare with</span>
-                    <input
-                      type="number"
+                    <NumberField
                       value={conditionalThreshold}
                       onChange={(event) =>
                         setConditionalThreshold(event.target.value)

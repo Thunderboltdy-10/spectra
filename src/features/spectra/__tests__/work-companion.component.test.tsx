@@ -23,6 +23,7 @@ const work = {
   title: "Photosynthesis notes",
   blueprintKey: "document",
   summary: "How plants make sugar.",
+  createdAt: Date.now() - 86_400_000,
   updatedAt: Date.now() - 60_000,
   accessLevel: "edit",
   isShared: false,

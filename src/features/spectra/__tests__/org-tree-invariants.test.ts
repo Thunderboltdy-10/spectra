@@ -579,8 +579,9 @@ describe("revoked access removes only the recipient's filing", () => {
       kind: "work",
       sourceId: artifactId,
       name: "Essay",
-      accessProjection: true,
     });
+    // Shared with the workspace's people, as the owner chose for this placement.
+    await db.patch(projected._id, { accessProjection: true });
 
     const purged = await purgeAccountSourceNodes(
       ctx,

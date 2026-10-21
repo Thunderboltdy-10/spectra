@@ -213,7 +213,8 @@ function when(value: unknown) {
 function DocumentReadFace({ work }: { work: PreviewSource }) {
   const ref = useRef<HTMLDivElement>(null);
   const preview = useWorkPreview(work, ref);
-  const lines = preview?.kind === "text" ? preview.lines : [];
+  // A table's corner belongs on a card; the embed reads on as words.
+  const lines = preview?.kind === "text" ? preview.lines.filter((line): line is string => typeof line === "string") : [];
   const heading = preview?.kind === "text" ? preview.heading : undefined;
   return (
     <div ref={ref} className="work-embed-document">

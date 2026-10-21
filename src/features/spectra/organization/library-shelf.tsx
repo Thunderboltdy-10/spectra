@@ -228,21 +228,6 @@ export function LibraryShelf({
           </section>
         ) : null}
 
-        {recentGroups.map((group) => (
-          <section key={group.key} aria-label={group.label}>
-            <h2 className="library-shelf-heading">{group.label}</h2>
-            <ShelfNotes
-              items={group.items}
-              now={now}
-              placeOf={inkOf}
-              whereOf={(node) => node.parentPath?.[node.parentPath.length - 1]}
-              onOpen={onOpen}
-              onMenu={onMenu}
-              picking={picking}
-            />
-          </section>
-        ))}
-        <div ref={mark} aria-hidden />
       </div>
 
       <aside aria-label="Workspaces" className="library-shelf-side">
@@ -303,6 +288,25 @@ export function LibraryShelf({
           </section>
         ) : null}
       </aside>
+
+      {/* The work touched lately runs the shelf's whole width, as many cards to a row as fit. */}
+      <div className="library-shelf-wide">
+        {recentGroups.map((group) => (
+          <section key={group.key} aria-label={group.label}>
+            <h2 className="library-shelf-heading">{group.label}</h2>
+            <ShelfNotes
+              items={group.items}
+              now={now}
+              placeOf={inkOf}
+              whereOf={(node) => node.parentPath?.[node.parentPath.length - 1]}
+              onOpen={onOpen}
+              onMenu={onMenu}
+              picking={picking}
+            />
+          </section>
+        ))}
+        <div ref={mark} aria-hidden />
+      </div>
     </div>
   );
 }

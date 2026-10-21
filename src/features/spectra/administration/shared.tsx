@@ -64,11 +64,11 @@ export function AdminSectionHeader({
   return (
     <header className="flex min-h-14 items-start justify-between gap-4 px-4 pb-2 pt-4">
       <div>
-        <h2 className="font-[var(--font-serif)] text-subhead font-medium tracking-[-.01em] text-[var(--text-primary)]">
+        <h2 className="font-display text-subhead font-medium tracking-[-.01em] text-[var(--text-primary)]">
           {title}
         </h2>
         {detail ? (
-          <p className="mt-0.5 text-micro leading-4 text-[var(--text-tertiary)]">
+          <p className="mt-0.5 text-caption text-[var(--text-secondary)]">
             {detail}
           </p>
         ) : null}
@@ -111,8 +111,8 @@ export function MetricCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-[var(--text-secondary)]">
-            <Icon size={14} className={toneClass} strokeWidth={1.8} />
-            <p className="text-micro">{label}</p>
+            <Icon size={16} className={toneClass} strokeWidth={1.8} />
+            <p className="text-caption">{label}</p>
             {state && state.kind !== "available" ? (
               <CapabilityTruthBadge state={state} className="min-h-5 px-2 text-micro" />
             ) : null}
@@ -126,7 +126,7 @@ export function MetricCard({
             className="mt-2 flex"
             valueClassName="min-w-0 leading-none"
           />
-          <p className="mt-2 text-micro leading-4 text-[var(--text-secondary)]">
+          <p className="mt-2 text-caption text-[var(--text-secondary)]">
             {detail}
           </p>
         </div>
@@ -280,7 +280,7 @@ export function AdminDialog({
               </span>
             ) : null}
             <div>
-              <DialogTitle className="font-[var(--font-serif)] text-heading font-medium text-[var(--text-primary)]">
+              <DialogTitle className="font-display text-heading font-medium text-[var(--text-primary)]">
                 {title}
               </DialogTitle>
               {detail ? (
@@ -351,7 +351,7 @@ export function InlineLink({
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1 text-micro font-medium text-[var(--brand-primary)] hover:underline"
+      className="inline-flex items-center gap-1 text-ui font-medium text-[var(--brand-primary)] hover:underline"
     >
       {children}
       <ArrowUpRight size={11} />

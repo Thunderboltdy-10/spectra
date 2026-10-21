@@ -44,6 +44,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import type * as Y from "yjs";
@@ -97,6 +98,7 @@ import { nextWordNoteId, type WordTextAnchor } from "../lenses/docx-academic-sch
 import type { WordSource } from "../lenses/docx-citation-schema";
 import { CitationSourcePickers } from "./document-citation-pickers";
 import { DocumentSpreadSheets, spreadStyle, useDocumentCanvas, useDocumentSpread } from "./document-spread";
+import { DocumentStatusRail, useDocumentZoom, usePageCount, useSheetFit } from "./document-status-rail";
 import { editNoteText } from "../editor/note-text-edit";
 import {
   PageBreak,
@@ -119,6 +121,8 @@ import {
   type SlashCommandDispatcher,
 } from "../editor/slash-command-extension";
 import { createSlashCommandRenderer } from "../editor/slash-command-renderer";
+import { FORMAT_BAR_KEY, FormatMenu, formatMenuOpen } from "../editor/format-menu";
+import { PageFlow } from "../editor/page-flow";
 import { StableBlockId } from "../editor/stable-block-id";
 import { spectraBus } from "../events";
 import type { WorkRegion } from "../anchors/locate";
@@ -745,9 +749,10 @@ export function DocumentStudio({
   );
   /** Owners always enter the authoring surface. Reader preview and Focus are
    * actions inside the overflow, never peer tabs competing with editing. */
-  const [docMode, setDocMode] = useState<DocumentMode>(
-    readOnly ? "read" : "write",
-  );
+  const [chosenMode, setDocMode] = useState<DocumentMode>("write");
+  // Without edit access the page reads; it writes again the moment access
+  // arrives (it is often still loading when the studio opens).
+  const docMode: DocumentMode = readOnly && chosenMode !== "review" ? "read" : chosenMode;
   const focusMode = docMode === "focus";
   const [canvasChoice, setPageLayout] = useDocumentCanvas(artifactId);
   // Pages side by side need the width of the full screen; the side panel
@@ -965,12 +970,6 @@ export function DocumentStudio({
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [artifactId, focusMode]);
 
-  useEffect(() => {
-    // Losing edit access mid-session drops the surface to Read rather than
-    // leaving a writing UI that no longer writes.
-    if (readOnly)
-      setDocMode((current) => (current === "review" ? current : "read"));
-  }, [readOnly]);
   const editor = useEditor(
     {
       extensions: [
@@ -1047,6 +1046,8 @@ export function DocumentStudio({
         WordCommentBoundary,
         WordRevision,
         DragHandle,
+        FormatMenu,
+        PageFlow,
         StableBlockId.configure({
           nativeReadOnlyBlockIds: nativeReadOnlyRegionIds,
         }),
@@ -1273,6 +1274,9 @@ export function DocumentStudio({
     Boolean(editor && !editor.isDestroyed && editor.isInitialized && editor.view),
   );
   const spread = useDocumentSpread(editor, deskRef, pageLayout === "spread");
+  const [zoom, setZoom] = useDocumentZoom();
+  const sheetScale = zoom * useSheetFit(deskRef, pageLayout === "page");
+  const pageCount = usePageCount(editor, deskRef, pageLayout === "page", sheetScale, zoom, setZoom);
 
   useEffect(() => {
     if (!editor || readOnly) return;
@@ -1629,6 +1633,7 @@ export function DocumentStudio({
   const wordCount = editorText.trim()
     ? editorText.trim().split(/\s+/).length
     : 0;
+  const characterCount = editorText.replace(/\n/g, "").length;
   const outlineEntries = (() => {
     if (!outlineOpen && !sourcesOpen) return [] as DocumentOutlineEntry[];
     const entries: DocumentOutlineEntry[] = [];
@@ -3233,7 +3238,7 @@ export function DocumentStudio({
         label="Document tools"
         selectionContext={selectionKind}
         modes={[]}
-        context={docMode === "read" ? "Reading" : undefined}
+        context={docMode === "read" ? (readOnly ? "Read only" : "Reader preview") : undefined}
         {...(docMode === "read" || docMode === "review"
           ? {
               primary: {
@@ -3249,35 +3254,23 @@ export function DocumentStudio({
       {canEdit && editor ? (
         <BubbleMenu
           editor={editor}
+          pluginKey={FORMAT_BAR_KEY}
           appendTo={() => document.body}
           options={{ placement: "top", offset: 10, flip: true, shift: true }}
           shouldShow={({ editor: current, state }) => {
-            if (!current.isEditable || readOnly) return false;
+            if (!current.isEditable || readOnly || !formatMenuOpen(state)) return false;
             if (document.querySelector(".slash-command-portal")) return false;
             const selectedNode = (
               state.selection as { node?: { type: { name: string } } }
             ).node;
             // A selected atom gets its own contextual tab in the bar; only the
-            // three that have something to offer here open the floating bar.
-            if (
-              selectedNode &&
-              ![
-                "table",
-                "tableRow",
-                "image",
-                "equation",
-                "inlineEquation",
-              ].includes(selectedNode.type.name)
-            ) {
-              return false;
-            }
-            if (
-              current.isActive("table") ||
-              current.isActive("image") ||
-              current.isActive("nativeDocxImage")
-            )
-              return true;
-            return !state.selection.empty;
+            // ones that have something to offer here open the floating bar.
+            return (
+              !selectedNode ||
+              ["table", "tableRow", "image", "nativeDocxImage", "equation", "inlineEquation"].includes(
+                selectedNode.type.name,
+              )
+            );
           }}
           className="spectra-document-selection-toolbar"
         >
@@ -3835,7 +3828,13 @@ export function DocumentStudio({
           <main ref={deskRef} className="document-desk">
             <div
               className="document-page"
-              style={pageLayout === "spread" ? spreadStyle(spread) : undefined}
+              style={
+                pageLayout === "spread"
+                  ? spreadStyle(spread)
+                  : pageLayout === "page"
+                    ? ({ zoom: sheetScale, "--doc-pages": pageCount?.total ?? 1 } as CSSProperties)
+                    : undefined
+              }
             >
               {pageLayout === "spread" ? (
                 <DocumentSpreadSheets
@@ -3859,13 +3858,22 @@ export function DocumentStudio({
                 </p>
               ) : null}
             </div>
-            <p className="document-page-foot" aria-live="polite">
-              {wordCount.toLocaleString()} {wordCount === 1 ? "word" : "words"}
-              {wordCount >= 200 ? `, about ${Math.round(wordCount / 200)} min to read` : null}
-            </p>
           </main>
         </div>
       </div>
+      {!focusMode ? (
+        <DocumentStatusRail
+          canvas={pageLayout}
+          setCanvas={setPageLayout}
+          spreadReason={mode === "split" ? "Open the document full to lay its pages side by side" : undefined}
+          pages={pageLayout === "page" ? pageCount : pageLayout === "spread" ? { total: spread.pages } : null}
+          words={wordCount}
+          characters={characterCount}
+          zoom={zoom}
+          shownZoom={sheetScale}
+          setZoom={setZoom}
+        />
+      ) : null}
     </div>
   );
 }

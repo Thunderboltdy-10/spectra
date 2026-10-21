@@ -37,7 +37,7 @@ import {
 } from "./schoolSyncShared";
 import { deleteStorageIfNoOtherBinding, storageHasOtherBinding } from "./durableStorageBindings";
 import {
-  SCHOOL_FILE_MAX_BYTES, SCHOOL_FILE_TEXT_MAX_CHARS, SCHOOL_SYNC_KINDS, SCHOOL_SYNC_KIND_INFO, capabilitySyncKinds, recordSyncKind,
+  SCHOOL_FILE_MAX_BYTES, SCHOOL_FILE_TEXT_MAX_CHARS, SCHOOL_SYNC_KINDS, SCHOOL_SYNC_KIND_INFO, capabilitySyncKinds, joinsPageSync, recordSyncKind,
   type SchoolSyncKind,
 } from "../shared/school-sync";
 
@@ -2390,7 +2390,9 @@ export const requestAiRefresh = mutation({
     const now = Date.now();
     const preferences = await loadSyncPreferences(ctx, actor.accountId, integration._id);
     const kinds = SCHOOL_SYNC_KINDS.filter(
-      (kind) => preferences.hasAny(kind) && (!args.kinds || args.kinds.includes(kind)),
+      (kind) =>
+        preferences.hasAny(kind) &&
+        (args.kinds ? args.kinds.includes(kind) : joinsPageSync(kind, preferences.hasAuto(kind))),
     );
     const states = (
       await Promise.all(kinds.map((kind) => syncStateFor(ctx, actor.accountId, integration._id, kind)))
@@ -2889,7 +2891,7 @@ export async function ensurePlannerProjection(
     name: title,
     target: workspaceId ? { workspaceId } : {},
     placedByAccountId: accountId,
-    accessProjection: true,
+    mayShare: true,
   });
   const projectionId = await ctx.db.insert("externalProjections", {
     integrationId: integration._id,
@@ -6339,7 +6341,7 @@ async function ensureClassWorkPlacement(
     name: artifact.title,
     target: { workspaceId },
     placedByAccountId: accountId,
-    accessProjection: true,
+    mayShare: true,
   });
   return before === null || before.workspaceContextId !== workspaceId;
 }

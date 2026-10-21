@@ -269,6 +269,7 @@ export function useArtifactStudioState(
     (state) => state.deactivateObject,
   );
   const closeObject = useSpectraContextStore((state) => state.closeObject);
+  const returnToSide = useSpectraContextStore((state) => state.returnToSide);
   const setArtifactDirty = useSpectraContextStore(
     (state) => state.setArtifactDirty,
   );
@@ -367,6 +368,7 @@ export function useArtifactStudioState(
     activateTab,
     closeTab,
     closeStudio,
+    returnToSide,
     setDirty,
   };
 }

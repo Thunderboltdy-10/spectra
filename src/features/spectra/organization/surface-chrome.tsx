@@ -1,7 +1,8 @@
 "use client";
 
+import { SearchField } from "@/components/ui/search-field";
 import { type ReactNode } from "react";
-import { Loader2, FolderPlus, Laptop, Plus, Search, SlidersHorizontal, X, ArrowDownUp, Columns3, Upload, MoreHorizontal, Files, PanelRightClose, PanelRightOpen } from "@/components/icons/glyph-icons";
+import { Loader2, FolderPlus, Laptop, Plus, SlidersHorizontal, X, ArrowDownUp, Columns3, Upload, MoreHorizontal, CheckSquare } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -40,11 +41,11 @@ import type { SortDirection, SortKey, TypeFilter } from "./tree-model";
 
 /** Every control in the toolbar is this button. One height, one radius. */
 export const controlClass =
-  "flex h-8 shrink-0 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-caption font-medium text-[var(--text-secondary)] outline-none transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] focus-visible:border-[var(--brand-primary)] disabled:opacity-40";
+  "flex h-9 shrink-0 items-center gap-2 rounded-control px-3 text-ui font-medium text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] disabled:opacity-40 [&_svg]:size-[18px]";
 
 /** The engaged state: a control that is currently narrowing what you see. */
 export const controlActiveClass =
-  "border-[var(--brand-primary)] text-[var(--text-primary)]";
+  "bg-[var(--bg-hover)] text-[var(--text-primary)]";
 
 /**
  * One vocabulary for "what kind of thing".
@@ -80,38 +81,24 @@ export function SurfaceSearch({
   descriptionId?: string;
 }) {
   return (
-    <div className={cn("relative min-w-9 w-[240px] max-w-full shrink", className)}>
-      <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
-      <input
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={`Search ${scopeLabel}`}
-        aria-label={`Search ${scopeLabel}`}
-        aria-describedby={descriptionId}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowDown" && onMoveToResults) {
-            event.preventDefault();
-            onMoveToResults();
-            return;
-          }
-          if (event.key === "Enter" && onOpenFirstResult) {
-            event.preventDefault();
-            onOpenFirstResult();
-          }
-        }}
-        className="h-8 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-7 text-ui text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--brand-primary)]"
-      />
-      {value ? (
-        <button
-          type="button"
-          aria-label="Clear search"
-          onClick={() => onChange("")}
-          className="absolute right-1.5 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
-        >
-          <X className="size-3.5" />
-        </button>
-      ) : null}
-    </div>
+    <SearchField
+      value={value}
+      onChange={onChange}
+      label={`Search ${scopeLabel}`}
+      aria-describedby={descriptionId}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowDown" && onMoveToResults) {
+          event.preventDefault();
+          onMoveToResults();
+          return;
+        }
+        if (event.key === "Enter" && onOpenFirstResult) {
+          event.preventDefault();
+          onOpenFirstResult();
+        }
+      }}
+      className={cn("w-[240px] max-w-full shrink", className)}
+    />
   );
 }
 
@@ -334,7 +321,7 @@ export function SurfaceNewMenu({
      explain why New is inactive (e.g. quick views / Trash). */
   const triggerNode = (
     <span
-      className="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-control bg-[var(--text-primary)] px-3 text-ui font-medium text-[var(--text-inverse)] transition-opacity hover:opacity-90"
+      className={cn(controlClass, "cursor-pointer font-semibold text-[var(--text-primary)]")}
       title={disabled ? disabledTitle : undefined}
       aria-description={disabled ? disabledTitle : undefined}
     >
@@ -412,9 +399,29 @@ export function SurfaceNewMenu({
 
 
 /**
- * Everything the bar does that is not finding or making something: how the
- * shelf is shown, what it holds, its order, picking several things. One menu,
- * so the bar stays the place you are, a search, and New (LIBRARY.md, "Views").
+ * Picking several things at once, beside New: what is picked can be asked
+ * about together or laid side by side, so the way in stays in sight.
+ */
+export function SurfaceSelectToggle({ selecting, onToggle }: { selecting: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      data-library-select
+      aria-pressed={selecting}
+      title={selecting ? "Stop picking" : "Pick several works to ask about or lay side by side"}
+      onClick={onToggle}
+      className={cn(controlClass, selecting && controlActiveClass)}
+    >
+      <CheckSquare className="size-3.5" />
+      {selecting ? "Done" : "Select"}
+    </button>
+  );
+}
+
+/**
+ * Everything the bar does that is not finding, making or picking something:
+ * how the shelf is shown, what it holds, its order. One menu, so the bar
+ * stays the place you are, a search, and New (LIBRARY.md, "Views").
  */
 export function SurfaceMoreMenu({
   view,
@@ -425,10 +432,6 @@ export function SurfaceMoreMenu({
   direction,
   onSortKeyChange,
   onDirectionChange,
-  selecting,
-  onToggleSelect,
-  quickAccess,
-  onToggleQuickAccess,
   onEmptyTrash,
 }: {
   view?: "shelf" | "list";
@@ -439,10 +442,6 @@ export function SurfaceMoreMenu({
   direction: SortDirection;
   onSortKeyChange: (next: "manual" | SortKey) => void;
   onDirectionChange: (next: SortDirection) => void;
-  selecting?: boolean;
-  onToggleSelect?: () => void;
-  quickAccess?: boolean;
-  onToggleQuickAccess?: () => void;
   onEmptyTrash?: () => void;
 }) {
   const narrowed = filter !== "all" || sortKey !== "manual";
@@ -511,23 +510,7 @@ export function SurfaceMoreMenu({
             ) : null}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
-        {onToggleSelect || onToggleQuickAccess || onEmptyTrash ? <DropdownMenuSeparator /> : null}
-        {onToggleSelect ? (
-          <DropdownMenuItem onSelect={onToggleSelect}>
-            <Files className="size-3.5 text-[var(--text-tertiary)]" />
-            {selecting ? "Done selecting" : "Select several"}
-          </DropdownMenuItem>
-        ) : null}
-        {onToggleQuickAccess ? (
-          <DropdownMenuItem onSelect={onToggleQuickAccess}>
-            {quickAccess ? (
-              <PanelRightClose className="size-3.5 text-[var(--text-tertiary)]" />
-            ) : (
-              <PanelRightOpen className="size-3.5 text-[var(--text-tertiary)]" />
-            )}
-            {quickAccess ? "Hide quick access" : "Show quick access"}
-          </DropdownMenuItem>
-        ) : null}
+        {onEmptyTrash ? <DropdownMenuSeparator /> : null}
         {onEmptyTrash ? (
           <DropdownMenuItem onSelect={onEmptyTrash} className="text-[var(--danger)]">
             <X className="size-3.5" />

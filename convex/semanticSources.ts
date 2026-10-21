@@ -23,7 +23,7 @@ import {
 } from "./authorityShared";
 import type { AuthenticatedActor } from "./identityShared";
 import { createManagebacVisibilityReader } from "./managebacVisibility";
-import { artifactSummaryFor, findNodesForSource } from "./orgTreeShared";
+import { artifactSummaryFor, findNodesForSource, sharesWithWorkspace } from "./orgTreeShared";
 import {
   audienceKeys, grantKeyOf, itemKeyOf, MAX_VECTOR_PARTITIONS, ownerKeyOf, ownerWorkspaceKeyOf, workspaceKeyOf,
   type ItemScope, type LexicalScope,
@@ -141,8 +141,7 @@ async function artifactPlacements(ctx: QueryCtx, artifact: Doc<"spectraArtifacts
     const workspace = await ctx.db.get(placement.workspaceContextId);
     if (!workspace || workspace.status !== "active") continue;
     workspaceId ??= workspace._id;
-    const projects = placement.accessProjection === true ||
-      (placement.accessProjection === undefined && artifact.ownerAccountId === workspace.ownerAccountId);
+    const projects = sharesWithWorkspace(placement);
     if (projects) keys.push(workspaceKeyOf("artifact", workspace._id));
   }
   return { workspaceKeys: [...new Set(keys)].sort().slice(0, 2), workspaceId };

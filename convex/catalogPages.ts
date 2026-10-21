@@ -2,7 +2,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import { requireSpectraActor } from "./spectraShared";
 import { hasDirectReadGrant } from "./authorityShared";
-import { ARTIFACT_SUMMARY_READ_MODEL_VERSION } from "./orgTreeShared";
+import { ARTIFACT_SUMMARY_READ_MODEL_VERSION, sharesWithWorkspace } from "./orgTreeShared";
 import { sealCatalogCursor, openCatalogCursor } from "./catalogCursor";
 import { normalizeWorkspaceView } from "../shared/workspace-view";
 
@@ -279,9 +279,7 @@ export async function artifactPage(ctx: QueryCtx, args: ArtifactArgs) {
         const inherited =
           override?.effect !== "deny" &&
           proof.projects &&
-          (node.accessProjection === true ||
-            (node.accessProjection === undefined &&
-              row.ownerAccountId === proof.workspace.ownerAccountId));
+          sharesWithWorkspace(node);
         if (direct || inherited) {
           emit({
             workspaceId: proof.workspace._id,

@@ -141,6 +141,16 @@ export function refreshRunTabs(force = false) {
   return pending;
 }
 
+/** Forget the tabs without reading again; whoever mounts next reads its own. */
+export function clearRunTabs() {
+  refreshGeneration += 1;
+  appliedRefreshGeneration = refreshGeneration;
+  sharedRefresh = null;
+  clearPoll();
+  sharedTabs = [];
+  listeners.forEach((listener) => listener(sharedTabs));
+}
+
 export function subscribeRunTabs(listener: (tabs: SpectraRunTab[]) => void) {
   listeners.add(listener);
   return () => {

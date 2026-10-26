@@ -21,6 +21,7 @@ import {
 import { NativeArtifactYjsModel } from "../work/models/yjs/native-artifact-model";
 import { useArtifactCollaboration } from "./use-artifact-collaboration";
 import { realtimeProviderForWorkType } from "../realtime/providers/provider-factory";
+import { useLocalOnlyCollaboration } from "./local-only";
 import { nativeRoomBaselineExpected } from "./native-bootstrap";
 import { useLocalRecoveryController } from "./recovery-controller";
 
@@ -42,8 +43,9 @@ export function useArtifactLiveModel(
 ) {
   const supported = isArtifactTypeKey(typeKey);
   const manifest = supported ? requireArtifactTypeManifest(typeKey) : null;
+  const localOnly = useLocalOnlyCollaboration();
   const collaboration = useArtifactCollaboration(
-    supported && connect ? artifactId : null,
+    supported && connect && !localOnly ? artifactId : null,
     "root",
     manifest?.schemas.currentVersion ?? 1,
     realtimeProviderForWorkType(typeKey),

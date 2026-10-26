@@ -87,6 +87,7 @@ const PLATFORM_WRITES = new Set([
   "simulateLimits",
   "setLimitPolicy",
   "cancelOnboarding",
+  "recoverOnboardingInvitation",
 ]);
 
 export async function GET(request: NextRequest) {
@@ -528,9 +529,20 @@ export async function POST(request: NextRequest) {
       return ok({
         ...bodyObject(result),
         delivery,
-        manualInvitationUrl:
-          delivery.status === "sent" ? undefined : invitationUrl.toString(),
+        manualInvitationUrl: invitationUrl.toString(),
       });
+    }
+    if (action === "recoverOnboardingInvitation") {
+      const invitationToken = randomBytes(32).toString("base64url");
+      const result = await convexMutation("schools:recoverOnboardingInvitation", {
+        sagaId: text(body.sagaId, 180),
+        initialAdminEmail: text(body.initialAdminEmail, 320),
+        tokenHash: createHash("sha256").update(invitationToken).digest("base64url"),
+        requestId,
+      });
+      const invitationUrl = new URL("/join", request.nextUrl.origin);
+      invitationUrl.searchParams.set("token", invitationToken);
+      return ok({ ...bodyObject(result), manualInvitationUrl: invitationUrl.toString() });
     }
     if (action === "cancelOnboarding")
       return ok(

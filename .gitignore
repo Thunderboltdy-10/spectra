@@ -33,7 +33,6 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 !.env.example
-!.env.local.example
 
 # Parameterized local Convex/Next/collaboration instances. Each directory may
 # contain credentials, a Convex SQLite database, object storage, and PID state.

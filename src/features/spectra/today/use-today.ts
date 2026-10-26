@@ -6,6 +6,7 @@ import { fetchCalendarOverview } from "../calendar/data/overview-client";
 import { addLocalDays, startOfLocalDay } from "../calendar/domain/local-days";
 import { getSpectraOverview, getSpectraThreads, type SpectraArtifact, type SpectraThread } from "../data/api";
 import { spectraBus } from "../events";
+import { useShowcaseTime } from "../showcase/showcase-time";
 import { AGENDA_DAYS, splitAgenda, type TodayAgenda } from "./today-model";
 
 /*
@@ -33,11 +34,12 @@ export function useToday(): TodayData {
   const [works, setWorks] = useState<SpectraArtifact[] | null>(null);
   const [agenda, setAgenda] = useState<TodayAgenda | null>(null);
   const [agendaFailed, setAgendaFailed] = useState(false);
+  const story = useShowcaseTime();
 
   useEffect(() => {
     const controller = new AbortController();
     const live = () => !controller.signal.aborted;
-    const at = Date.now();
+    const at = story ?? Date.now();
     setNow(at);
 
     const loadThreads = () =>
@@ -72,7 +74,7 @@ export function useToday(): TodayData {
       controller.abort();
       offThreads();
     };
-  }, []);
+  }, [story]);
 
   return { now, name, threads, works, agenda, agendaFailed };
 }

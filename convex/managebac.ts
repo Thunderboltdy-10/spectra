@@ -17,6 +17,7 @@ import {
   getAccountByClerkId,
   getActorForAccountId,
   getAuthenticatedActor,
+  getAuthenticatedAccount,
 } from "./identityShared";
 import {
   buildArtifactTextIndex,
@@ -32,8 +33,8 @@ import {
 } from "./managebacProjectionJobs";
 import { vSchoolSyncKind } from "./schoolSyncSchema";
 import {
-  CLASS_IDENTITY_TYPES, hiddenByPreferences, isArchived, loadSyncPreferences, nextAutoRunAt, queueSyncJob, syncStateFor,
-  syncTargets, writeSyncState, type SyncPreferences, type SyncTargets, type SyncTrigger,
+  CLASS_IDENTITY_TYPES, hiddenByPreferences, isArchived, loadSyncPreferences, queueSyncJob, syncStateFor,
+  syncTargets, writeSyncState, settleStudentSyncState, schoolSetupForAccount, LOGIN_SYNC_SETUP_VERSION, type SyncPreferences, type SyncTargets, type SyncTrigger,
 } from "./schoolSyncShared";
 import { deleteStorageIfNoOtherBinding, storageHasOtherBinding } from "./durableStorageBindings";
 import {
@@ -2246,6 +2247,103 @@ export const connectorContext = mutation({
   },
 });
 
+/** Claim first-login work atomically across reloads, tabs and devices. */
+export const onboardingStatus = query({
+  args: {},
+  handler: async (ctx) => {
+    const account = await getAuthenticatedAccount(ctx);
+    if (!account || account.status !== "active") return null;
+    return schoolSetupForAccount(ctx, account._id);
+  },
+});
+
+/** Refresh asynchronous projection outcomes before the request reports success. */
+export const studentSyncProgress = query({
+  args: { runIds: v.array(v.id("externalSyncRuns")) },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    if (args.runIds.length > SCHOOL_SYNC_KINDS.length) throw new Error("INTEGRATION_SYNC_LIMIT: Too many sync runs.");
+    const runs = await Promise.all(args.runIds.map((id) => ctx.db.get(id)));
+    return runs.map((run) => {
+      if (!run || run.accountId !== actor.accountId || run.schoolId !== actor.schoolId)
+        throw new Error("AUTH_FORBIDDEN: This sync belongs to another account.");
+      return { syncRunId: run._id, status: run.status, counts: run.counts };
+    });
+  },
+});
+
+export const claimLoginSync = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const actor = await requireActor(ctx);
+    const integration = await integrationForSchool(ctx, actor.schoolId);
+    if (!integration || !["connected", "degraded"].includes(integration.status))
+      return { claimed: false, reason: "not_connected" };
+    const previous = await ctx.db.query("schoolSyncBootstraps")
+      .withIndex("by_account_integration", (q) => q.eq("accountId", actor.accountId).eq("integrationId", integration._id))
+      .unique();
+    const now = Date.now();
+    const currentSetup = previous?.setupVersion === LOGIN_SYNC_SETUP_VERSION;
+    if (currentSetup && previous.completedAt !== undefined) return { claimed: false, reason: "completed" };
+    if (currentSetup && previous.classesListedAt !== undefined && previous.classSelectionConfirmedAt === undefined)
+      return { claimed: false, reason: "choose_classes" };
+    if (currentSetup && previous.nextAttemptAt > now)
+      return { claimed: false, reason: "cooldown", nextAttemptAt: previous.nextAttemptAt };
+    const attemptCount = (currentSetup ? previous.attemptCount : 0) + 1;
+    // A request can run for four minutes. Retry no sooner than five minutes,
+    // then 15, 30 and 60 minutes; later failures stay at one attempt per hour.
+    const delay = [5, 15, 30, 60][Math.min(attemptCount - 1, 3)]! * 60_000;
+    const fields = { setupVersion: LOGIN_SYNC_SETUP_VERSION, attemptCount, lastAttemptAt: now, nextAttemptAt: now + delay, completedAt: undefined };
+    if (previous) await ctx.db.patch(previous._id, fields);
+    else await ctx.db.insert("schoolSyncBootstraps", { accountId: actor.accountId, integrationId: integration._id, ...fields });
+    return { claimed: true, attemptAt: now, nextAttemptAt: now + delay, classesOnly: previous?.classSelectionConfirmedAt === undefined };
+  },
+});
+
+/** Only completed runs belonging to this account can finish its bootstrap. */
+export const finishLoginSync = mutation({
+  args: { attemptAt: v.number(), runIds: v.array(v.id("externalSyncRuns")) },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const integration = await integrationForSchool(ctx, actor.schoolId);
+    if (!integration) return { completed: false };
+    const attempt = await ctx.db.query("schoolSyncBootstraps")
+      .withIndex("by_account_integration", (q) => q.eq("accountId", actor.accountId).eq("integrationId", integration._id))
+      .unique();
+    if (!attempt || attempt.lastAttemptAt !== args.attemptAt || args.runIds.length > SCHOOL_SYNC_KINDS.length)
+      return { completed: false };
+    const completed = attempt.classSelectionConfirmedAt !== undefined;
+    const runs = await Promise.all(args.runIds.map((id) => ctx.db.get(id)));
+    if ((!completed && !runs.some((run) => run?.syncKind === "classes")) || runs.some((run) =>
+      !run || run.accountId !== actor.accountId || run.integrationId !== integration._id ||
+      run.createdAt < attempt.lastAttemptAt || run.status !== "completed"))
+      return { completed: false };
+    if (!runs.length) {
+      const preferences = await loadSyncPreferences(ctx, actor.accountId, integration._id);
+      if (SCHOOL_SYNC_KINDS.some((kind) => SCHOOL_SYNC_KIND_INFO[kind].availability === "available" && preferences.hasAny(kind) && joinsPageSync(kind, preferences.hasAuto(kind)))) return { completed: false };
+    }
+    await ctx.db.patch(attempt._id, { classesListedAt: Date.now(), ...(completed ? { completedAt: Date.now() } : {}) });
+    return { completed, waitingForClasses: !completed };
+  },
+});
+
+/** A person confirms the saved choice, including choosing no classes. */
+export const confirmSchoolSetup = mutation({
+  args: { expectedRevision: v.number() },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const integration = await integrationForSchool(ctx, actor.schoolId);
+    if (!integration || !["connected", "degraded"].includes(integration.status)) throw new Error("INTEGRATION_NOT_READY: Connect ManageBac first.");
+    const selection = await selectionSnapshot(ctx, integration._id, actor.accountId);
+    if (selection.revision !== args.expectedRevision && !(selection.revision === 0 && args.expectedRevision === 1 && selection.selectedClassIds.length === 0)) throw new Error("INTEGRATION_SELECTION_CONFLICT: Reload your class choices.");
+    const attempt = await ctx.db.query("schoolSyncBootstraps").withIndex("by_account_integration", (q) => q.eq("accountId", actor.accountId).eq("integrationId", integration._id)).unique();
+    if (!attempt || attempt.classesListedAt === undefined) throw new Error("INTEGRATION_NOT_READY: Sync your class list first.");
+    if (attempt.setupVersion === LOGIN_SYNC_SETUP_VERSION && attempt.classSelectionConfirmedAt !== undefined) return { confirmed: true };
+    await ctx.db.patch(attempt._id, { setupVersion: LOGIN_SYNC_SETUP_VERSION, classSelectionConfirmedAt: Date.now(), completedAt: undefined, nextAttemptAt: Date.now(), attemptCount: 0 });
+    return { confirmed: true };
+  },
+});
+
 export const beginSync = mutation({
   args: {
     /** identity: resolve the student; manual: one student job for `syncKind`;
@@ -2296,6 +2394,12 @@ export const beginSync = mutation({
         throw new Error(
           "INTEGRATION_SYNC_BUSY: A sync for this account and connection is already running.",
         );
+      const latest = await ctx.db.query("externalSyncRuns")
+        .withIndex("by_account_integration_kind_created", (q) =>
+          q.eq("accountId", actor.accountId).eq("integrationId", integration._id).eq("kind", "identity"))
+        .order("desc").first();
+      if (latest && now - latest.createdAt < 60_000)
+        throw new Error("INTEGRATION_RATE_LIMITED: Account matching was just attempted. Try again in a minute.");
       const leaseToken = crypto.randomUUID();
       const capabilityIds = readable
         .filter((item) => item.recordType === "person" || item.recordType === "membership")
@@ -2549,7 +2653,8 @@ export const commitIdentityResolution = mutation({
     });
     // A newly matched student's Auto kinds start in the background. The
     // class list comes first, in the request that resolved the identity.
-    if (status === "verified" && existing?.status !== "verified") {
+    if (status === "verified" && existing?.status !== "verified" &&
+        (await selectionSnapshot(ctx, integration._id, actor.accountId)).selectedClassIds.length) {
       const preferences = await loadSyncPreferences(ctx, actor.accountId, integration._id);
       for (const kind of SCHOOL_SYNC_KINDS)
         if (kind !== "classes" && preferences.hasAuto(kind))
@@ -4573,19 +4678,9 @@ async function reconcileSyncPass(
   await closePass(ctx, syncRun._id);
   const jobScope = stateScope(syncRun);
   if (jobScope) {
-    // The job is done: Auto runs it again on its own schedule.
-    const preferences = await loadSyncPreferences(ctx, jobScope.accountId, jobScope.integrationId);
-    const dueAt = nextAutoRunAt(preferences, jobScope.kind, now, now);
-    await writeSyncState(ctx, jobScope, {
-      state: "idle",
-      lastSuccessAt: now,
-      dueAt,
-      dueTrigger: dueAt === undefined ? undefined : "schedule",
-      errorCode: undefined,
-      errorSummary: undefined,
-    });
+    await settleStudentSyncState(ctx, latestRun, status, now);
     await ctx.db.patch(integration._id, {
-      lastSyncAt: now,
+      ...(status === "completed" ? { lastSyncAt: now } : {}),
       ...(integration.status === "degraded" && !integration.blockedReason && syncRun.counts.errors === 0
         ? { status: "connected" as const }
         : {}),
@@ -5837,6 +5932,8 @@ export const setSelectedClasses = mutation({
   args: {
     recordIds: v.array(v.id("externalRecords")),
     expectedRevision: v.optional(v.number()),
+    // First-login request imports these kinds sequentially after class details.
+    initialSetup: v.optional(v.boolean()),
     retention: v.optional(
       v.union(v.literal("keep_in_spectra"), v.literal("archive_projection")),
     ),
@@ -6016,9 +6113,10 @@ export const setSelectedClasses = mutation({
     });
     // Newly followed classes fill in soon: every class-scoped kind on Auto runs again.
     const preferences = await loadSyncPreferences(ctx, actor.accountId, integration._id);
-    for (const kind of SCHOOL_SYNC_KINDS)
-      if (kind !== "classes" && SCHOOL_SYNC_KIND_INFO[kind].classScoped && preferences.hasAuto(kind))
-        await queueSyncJob(ctx, { accountId: actor.accountId, schoolId: actor.schoolId, integrationId: integration._id, kind }, "schedule", now);
+    if (!args.initialSetup)
+      for (const kind of SCHOOL_SYNC_KINDS)
+        if (kind !== "classes" && SCHOOL_SYNC_KIND_INFO[kind].classScoped && preferences.hasAuto(kind))
+          await queueSyncJob(ctx, { accountId: actor.accountId, schoolId: actor.schoolId, integrationId: integration._id, kind }, "schedule", now);
     return {
       selectionRevision: revision,
       selectedClassIds: [...selectedKeys],

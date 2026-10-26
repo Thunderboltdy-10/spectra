@@ -22,7 +22,7 @@ function scaffold(instanceId) {
       "--instance",
       String(instanceId),
       "--source-env",
-      ".env.local.example",
+      ".env.example",
     ],
     {
       cwd: repositoryRoot,

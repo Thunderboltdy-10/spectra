@@ -182,6 +182,23 @@ describe("resumable ManageBac sync", () => {
     vi.unstubAllGlobals();
   });
 
+  it("retries a rolled-back Convex write without quarantining the provider route", async () => {
+    const { t, sync } = await setup();
+    const commit = harness.mutation!;
+    let conflicts = 0;
+    harness.mutation = (name, args) => {
+      if (name === "managebac:commitNormalizedPage" && conflicts++ === 0)
+        throw new Error('{"code":"OptimisticConcurrencyControlFailure","message":"Documents changed while this mutation was being run"}');
+      return commit(name, args);
+    };
+    const result = await sync();
+    expect(result.suspended).toBe(true);
+    expect(await t.run((ctx) => ctx.db.query("externalQuarantineRecords").collect())).toEqual([]);
+    const capability = await t.run((ctx) => ctx.db.query("integrationCapabilities").first());
+    expect(capability?.verificationStatus).toBe("verified");
+    expect(conflicts).toBeGreaterThan(1);
+  });
+
   it("finishes a large school across several requests and removes only after the whole pass", async () => {
     const { t, seeded, sync, state, requestedPages, advance } = await setup();
 

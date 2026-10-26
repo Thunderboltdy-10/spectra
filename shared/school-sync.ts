@@ -226,6 +226,10 @@ export function describeSchoolSyncProblem(code: string, kind?: SchoolSyncKind): 
     case "INTEGRATION_NOT_READY":
     case "INTEGRATION_NOT_CONNECTED":
       return pick("Your school hasn't connected ManageBac yet.", "school_admin");
+    case "INTEGRATION_SYNC_PARTIAL":
+      return pick(`Some ${what} could not be synced.`, "student");
+    case "INTEGRATION_REVIEW_REQUIRED":
+      return pick("Some ManageBac changes need review.", "student");
     case "INTEGRATION_IDENTITY_REQUIRED":
       return pick("Spectra hasn't matched you to your ManageBac account yet.", "student");
     case "INTEGRATION_RATE_LIMITED":

@@ -70,7 +70,7 @@ The main subsystems in `src/features/spectra/`:
 
 ## Run and test
 
-Node and dependencies come from `package.json`. Copy `.env.example` or `.env.local.example` to `.env.local`. Spectra has no built-in model: `SPECTRA_MODEL_ID`, `SPECTRA_REASONING_PROFILE` and `SPECTRA_MODEL_PROVIDER` (plus the optional fallback and judge settings documented in `.env.example`) choose the model, reasoning level and provider. `src/features/spectra/ai/model-config.ts` throws when they are missing, and `check:deploy-env` fails a production build without them. The Convex deployment's own environment is listed in `docs/spectra-launch-audit/reports/P2-OPS-PERFORMANCE.md` ("Deploy checklist").
+Node and dependencies come from `package.json`. Copy `.env.example` to `.env.local`; see [ENVIRONMENT.md](ENVIRONMENT.md) for values and runtime placement. Spectra has no built-in model: `SPECTRA_MODEL_ID`, `SPECTRA_REASONING_PROFILE` and `SPECTRA_MODEL_PROVIDER` (plus the optional fallback and judge settings described in `docs/ENVIRONMENT.md`) choose the model, reasoning level and provider. `src/features/spectra/ai/model-config.ts` throws when they are missing, and `check:deploy-env` fails a production build without them. The Convex deployment's own environment is listed in `docs/spectra-launch-audit/reports/P2-OPS-PERFORMANCE.md` ("Deploy checklist").
 
 | Task | Command |
 | --- | --- |

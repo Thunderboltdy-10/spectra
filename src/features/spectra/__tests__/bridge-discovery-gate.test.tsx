@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, renderHook } from "@testing-library/react";
+import { act, render, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BRIDGE_DISCOVERY_STORAGE_KEY,
@@ -10,6 +10,10 @@ import {
   persistBridgeSession,
 } from "../bridge/client";
 import { resetBridgeProbeForTests, useBridgeHealth } from "../bridge/use-bridge";
+import { BridgeDiscoveryMount } from "../bridge/bridge-discovery-mount";
+
+const auth = vi.hoisted(() => ({ isAuthenticated: true }));
+vi.mock("convex/react", () => ({ useConvexAuth: () => auth }));
 
 function healthCalls(fetchMock: ReturnType<typeof vi.fn>) {
   return fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/v1/health"))
@@ -20,6 +24,7 @@ beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
   resetBridgeProbeForTests();
+  auth.isAuthenticated = true;
   vi.useFakeTimers();
 });
 afterEach(() => {
@@ -28,7 +33,7 @@ afterEach(() => {
 });
 
 describe("Bridge discovery gate (LV-012)", () => {
-  it("never probes Bridge on a device that has not connected it", async () => {
+  it("waits until discovery is enabled", async () => {
     const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
     vi.stubGlobal("fetch", fetchMock);
     const { result } = renderHook(() => useBridgeHealth());
@@ -41,6 +46,24 @@ describe("Bridge discovery gate (LV-012)", () => {
     expect(result.current.checked).toBe(true);
     expect(result.current.reachability).toBe("not-set-up");
     expect(bridgeReachabilityCopy("not-set-up").detail).toContain("Connect Bridge");
+  });
+
+  it("discovers an installed Bridge for a signed-in account before any device is paired", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ version: "0.1.0", paired: false, protocolVersion: "1.0", port: 47615 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useBridgeHealth());
+    render(<BridgeDiscoveryMount />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(healthCalls(fetchMock)).toBeGreaterThan(0);
+    expect(result.current.health?.paired).toBe(false);
+    expect(bridgeDiscoveryEnabled()).toBe(true);
+    expect(window.localStorage.getItem(BRIDGE_SESSION_STORAGE_KEY)).toBeNull();
+  });
+
+  it("leaves automatic discovery disabled for signed-out visitors", () => {
+    auth.isAuthenticated = false;
+    render(<BridgeDiscoveryMount />);
+    expect(bridgeDiscoveryEnabled()).toBe(false);
   });
 
   it("checks automatically once connected, backing off while Bridge is unreachable", async () => {

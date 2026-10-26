@@ -1192,6 +1192,7 @@ export function useSpectraRun({
                 : current,
             );
             spectraBus.emit("threads.changed", {});
+            spectraBus.emit("calendar.changed", {});
             void onFinal?.({
               runId: event.runId,
               summary: event.summary,

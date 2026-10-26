@@ -664,8 +664,11 @@ export function Island() {
       window.setTimeout(() => {
         void go("composer", { focus: true }).then(() => {
           // Sent at once, the words go as the student's own message, from the thread now in focus.
-          if (sendNow && prefill?.text)
+          if (sendNow && prefill?.text) {
+            // Words typed into the field on the way (a demonstration types them) go with it.
+            if (composerRef.current?.hasContent()) composerRef.current.prefill("");
             return latestSend.current({ text: prefill.text, references: prefill.references ?? [], attachments: [], wordsRect: null, lineCount: 1 });
+          }
           // Work handed over without words (picked work to ask about) comes in as references, under an empty field.
           if (prefill?.text || prefill?.references?.length) composerRef.current?.prefill(prefill.text ?? "", prefill.references);
         });

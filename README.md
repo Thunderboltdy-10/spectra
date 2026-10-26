@@ -7,7 +7,7 @@ Start with [docs/README.md](docs/README.md). It has the architecture map, how to
 Quick start:
 
 ```sh
-cp .env.local.example .env.local   # fill in Clerk, Convex and bridge keys
+cp .env.example .env.local   # fill in Clerk, Convex and bridge keys
 npm run convex:dev                 # in one terminal
 npm run dev                        # web app and collaboration gateway
 npx vitest run <files>             # focused tests

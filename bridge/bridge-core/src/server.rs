@@ -17,6 +17,17 @@ use subtle::ConstantTimeEq;
 use crate::protocol::{HealthResponse, LocalBridgeStatus, LocalControlSnapshot, PairingOffer};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
+/// Development instances use different ports. Discovery and a pairing offer
+/// may reach the local process; file controls still require confirmed pairing
+/// and the exact pinned browser origin in `authenticate`.
+fn is_local_development_origin(value: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(value) else { return false; };
+    matches!(url.scheme(), "http" | "https")
+        && matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))
+        && url.username().is_empty() && url.password().is_none()
+        && url.path() == "/" && url.query().is_none() && url.fragment().is_none()
+}
+
 /*
  * The local control API. Spectra's Devices page drives the Bridge through it:
  * pairing, status, folders, pausing, logs, updates and unpairing. The Bridge
@@ -146,7 +157,7 @@ impl ServerState {
             self.allowed_origins
                 .read()
                 .unwrap()
-                .contains(&offer.browser_origin),
+                .contains(&offer.browser_origin) || is_local_development_origin(&offer.browser_origin),
             "origin is not configured for Spectra"
         );
         self.prune_expired_pairing();
@@ -276,13 +287,7 @@ pub fn router(state: Arc<ServerState>) -> Router {
         .route("/v1/file/reveal", post(reveal_file))
         .route("/v1/unpair", post(unpair))
         .route_layer(middleware::from_fn_with_state(state.clone(), authenticate));
-    let origins = state
-        .allowed_origins
-        .read()
-        .unwrap()
-        .iter()
-        .filter_map(|value| value.parse().ok())
-        .collect::<Vec<_>>();
+    let cors_state = state.clone();
     Router::new()
         .route("/v1/health", get(health))
         .route("/v1/pair", post(pair_offer))
@@ -292,7 +297,11 @@ pub fn router(state: Arc<ServerState>) -> Router {
         .merge(protected)
         .layer(
             CorsLayer::new()
-                .allow_origin(AllowOrigin::list(origins))
+                .allow_origin(AllowOrigin::predicate(move |origin, _| {
+                    origin.to_str().is_ok_and(|value|
+                        cors_state.allowed_origins.read().unwrap().contains(value)
+                            || is_local_development_origin(value))
+                }))
                 .allow_methods([http::Method::GET, http::Method::POST])
                 .allow_headers([http::header::AUTHORIZATION, http::header::CONTENT_TYPE]),
         )
@@ -573,6 +582,32 @@ mod tests {
     use std::sync::Mutex;
 
     const ORIGIN: &str = "http://localhost:3000";
+
+    #[test]
+    fn development_origins_are_exact_loopback_hosts() {
+        for origin in ["http://localhost:3160", "http://127.0.0.1:3180", "https://localhost:3000"] {
+            assert!(is_local_development_origin(origin));
+        }
+        for origin in ["http://localhost.evil.test:3160", "http://evil.test", "file:///etc/passwd", "http://localhost:3160/path", "http://user@localhost:3160"] {
+            assert!(!is_local_development_origin(origin));
+        }
+    }
+
+    #[tokio::test]
+    async fn fresh_local_instance_can_discover_but_cannot_read_files_before_pairing() {
+        let state = Arc::new(ServerState::unpaired());
+        let base = spawn(state.clone()).await;
+        let client = reqwest::Client::new();
+        let origin = "http://localhost:3160";
+        let health = client.get(format!("{base}/v1/health")).header("origin", origin).send().await.unwrap();
+        assert_eq!(health.headers().get("access-control-allow-origin").unwrap(), origin);
+        let status = client.get(format!("{base}/v1/status")).header("origin", origin).send().await.unwrap();
+        assert_eq!(status.status(), 401);
+        let token = state.pair(origin.into());
+        let status = client.get(format!("{base}/v1/status")).header("origin", origin).bearer_auth(token).send().await.unwrap();
+        assert_eq!(status.headers().get("access-control-allow-origin").unwrap(), origin);
+        assert_ne!(status.status(), 401);
+    }
 
     #[derive(Default)]
     struct FakeControl {

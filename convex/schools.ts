@@ -245,6 +245,75 @@ export const cancelOnboarding = mutation({
   },
 });
 
+export const recoverOnboardingInvitation = mutation({
+  args: {
+    sagaId: v.id("schoolOnboardingSagas"),
+    initialAdminEmail: v.string(),
+    tokenHash: v.string(),
+    requestId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await resolveActorContext(ctx);
+    if (!actor.platformOperator)
+      throw new Error("AUTH_OPERATOR_REQUIRED: Platform operator access is required.");
+    const saga = await ctx.db.get(args.sagaId);
+    if (!saga || !["reserved", "invited", "failed", "cancelled"].includes(saga.status))
+      throw new Error("SCHOOL_ONBOARDING_NOT_REVERSIBLE: This onboarding has already completed.");
+    const school = await ctx.db.get(saga.schoolId);
+    if (!school || (school.status !== "active" && !(school.status === "archived" && saga.status === "cancelled")))
+      throw new Error("SCHOOL_UNAVAILABLE: This school cannot resume onboarding.");
+    const member = await ctx.db.query("schoolMemberships")
+      .withIndex("by_school_status", (q) => q.eq("schoolId", school._id).eq("status", "active"))
+      .first();
+    if (member)
+      throw new Error("SCHOOL_ONBOARDING_NOT_REVERSIBLE: A member has already joined. Manage administrators through the school's people settings.");
+    const initialAdminEmail = email(args.initialAdminEmail);
+    const adminDomain = initialAdminEmail.split("@")[1]!;
+    if (school.verifiedDomains.length && !school.verifiedDomains.some((domain) => adminDomain === domain || adminDomain.endsWith(`.${domain}`)))
+      throw new Error("SCHOOL_ADMIN_DOMAIN_MISMATCH: The initial admin email must use a verified school domain.");
+    if (args.tokenHash.length < 32)
+      throw new Error("INVITATION_TOKEN_INVALID: Generate a new secure invitation link.");
+    const now = Date.now();
+    if (saga.invitationId) {
+      const previous = await ctx.db.get(saga.invitationId);
+      if (previous?.status === "pending")
+        await ctx.db.patch(previous._id, { status: "revoked", revokedAt: now, updatedAt: now });
+    }
+    const expiresAt = now + 14 * 24 * 60 * 60_000;
+    const invitationId = await ctx.db.insert("membershipInvitations", {
+      schoolId: school._id,
+      email: initialAdminEmail,
+      role: "school_admin",
+      tokenHash: args.tokenHash,
+      status: "pending",
+      invitedByAccountId: actor.accountId,
+      expiresAt,
+      createdAt: now,
+      updatedAt: now,
+    });
+    if (school.status === "archived")
+      await ctx.db.patch(school._id, { status: "active", policyVersion: school.policyVersion + 1, updatedAt: now });
+    await ctx.db.patch(saga._id, {
+      invitationId,
+      initialAdminEmail,
+      status: "invited",
+      errorSummary: undefined,
+      updatedAt: now,
+    });
+    await writeAuditEvent(ctx, {
+      actorAccountId: actor.accountId,
+      schoolId: school._id,
+      action: "school.onboarding.invitation_replaced",
+      targetType: "school_onboarding",
+      targetId: saga._id,
+      metadata: { invitationId, resumed: saga.status === "cancelled" },
+      requestId: args.requestId,
+      retentionClass: "security",
+    });
+    return { schoolId: school._id, invitationId, expiresAt };
+  },
+});
+
 export const getOperational = query({
   args: { operatorSessionId: v.id("operatorSchoolSessions") },
   handler: async (ctx, args) => {

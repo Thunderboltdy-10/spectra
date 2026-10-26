@@ -527,6 +527,9 @@ export function CalendarApplication() {
     };
   }, []);
 
+  // A run that finished may have planned work onto the calendar.
+  useEffect(() => spectraBus.on("calendar.changed", () => void loadRef.current("merge")), []);
+
   useEffect(() => {
     if (overview?.sourceState.kind !== "stale" || staleSyncRef.current) return;
     staleSyncRef.current = true;

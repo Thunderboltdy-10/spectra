@@ -31,6 +31,7 @@ function normalizeErrorStatus(message: string) {
   )
     return 404;
   if (message.startsWith("INVITATION_EMAIL_FAILED")) return 502;
+  if (message.startsWith("INTEGRATION_RATE_LIMITED")) return 429;
   if (
     message.startsWith("INTEGRATION_NOT_READY") ||
     message.startsWith("INTEGRATION_CAPABILITY_REQUIRED") ||

@@ -1292,10 +1292,13 @@ export async function importSpectraManageBacReference(input: {
 }
 
 export async function resolveSpectraManageBacIdentity() {
-  return postManageBac<Record<string, unknown>>({
+  const result = await postManageBac<{ identity: { result: { status: string } }; classes?: { jobs: SpectraSchoolSyncJob[]; queued: SchoolSyncKind[] } }>({
     action: "resolveIdentity",
     syncClasses: true,
   });
+  if (result.identity?.result?.status !== "verified")
+    throw new Error("Spectra couldn't uniquely match your verified email to a ManageBac student. Ask your school to check the email on your ManageBac account.");
+  return result;
 }
 
 /** One job of a student's "Sync now": one kind of School data. */
@@ -1320,6 +1323,10 @@ export async function syncSpectraManageBac(kind?: SchoolSyncKind) {
     action: "sync",
     ...(kind ? { kind } : {}),
   });
+}
+
+export async function syncSpectraManageBacOnLogin() {
+  return postManageBac<{ jobs: SpectraSchoolSyncJob[]; queued: SchoolSyncKind[]; skipped?: boolean; reason?: string; nextAttemptAt?: number }>({ action: "syncOnLogin" });
 }
 
 /** Requests one school reconciliation may take to finish a large school's pass. */

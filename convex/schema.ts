@@ -1181,6 +1181,18 @@ export default defineSchema({
     // School export pages through one school's rows instead of every tenant's.
     .index("by_school", ["schoolId", "updatedAt"]),
 
+  schoolSyncBootstraps: defineTable({
+    accountId: v.id("accounts"),
+    integrationId: v.id("schoolIntegrations"),
+    setupVersion: v.optional(v.number()),
+    attemptCount: v.number(),
+    lastAttemptAt: v.number(),
+    nextAttemptAt: v.number(),
+    completedAt: v.optional(v.number()),
+    classesListedAt: v.optional(v.number()),
+    classSelectionConfirmedAt: v.optional(v.number()),
+  }).index("by_account_integration", ["accountId", "integrationId"]),
+
   externalSyncRuns: defineTable({
     integrationId: v.id("schoolIntegrations"),
     schoolId: v.id("schools"),
@@ -1254,6 +1266,7 @@ export default defineSchema({
     .index("by_status_next_attempt", ["status", "nextAttemptAt"])
     .index("by_integration_created", ["integrationId", "createdAt"])
     .index("by_account_created", ["accountId", "createdAt"])
+    .index("by_account_integration_kind_created", ["accountId", "integrationId", "kind", "createdAt"])
     .index("by_integration_account_status", [
       "integrationId",
       "accountId",

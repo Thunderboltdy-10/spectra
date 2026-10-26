@@ -103,6 +103,8 @@ export type SpectraEvents = {
   "artifact.lensActivated": { artifactId: string; projection?: unknown };
   "workspace.refreshRequested": Record<string, never>;
   "threads.changed": Record<string, never>;
+  /** Something may have put work on the calendar or moved it (a finished run); an open calendar reads again. */
+  "calendar.changed": Record<string, never>;
   /** Something about this computer's Bridge changed: refresh what shows it. */
   "devices.changed": Record<string, never>;
   /** A Code work's published build changed (Spectra published or took it down). */

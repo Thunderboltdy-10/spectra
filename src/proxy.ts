@@ -6,6 +6,7 @@ import { hasClerkServerConfig } from "@/lib/clerk-config";
 const isPublicRoute = createRouteMatcher([
   "/",
   "/landing(.*)",
+  "/contact(.*)",
   "/legal(.*)",
   "/sign-in(.*)",
   "/sign-up(.*)",

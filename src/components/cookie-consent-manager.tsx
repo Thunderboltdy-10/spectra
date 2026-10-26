@@ -95,21 +95,22 @@ export function CookieConsentManager() {
   return (
     <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
       {showBanner ? (
-        <section className="fixed inset-x-4 bottom-4 z-toast mx-auto w-full max-w-3xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-soft)] sm:inset-x-0">
-          <p className="text-xs text-[var(--text-secondary)]">Cookie Preferences</p>
-          <h2 className="mt-1 font-display text-2xl text-[var(--text-primary)]">Your privacy choices</h2>
-          <p className="mt-2 text-sm text-[var(--text-secondary)]">
-            We use required cookies for core functionality. Optional cookies help personalize settings and measure product
-            usage. You can change this anytime.
+        // A small note in the corner, never a sheet over the page: it waits
+        // there until it is answered, and the page stays usable meanwhile.
+        <section
+          aria-label="Cookies"
+          className="fixed bottom-4 left-4 z-toast w-[min(calc(100vw-2rem),21rem)] rounded-[14px] border border-[var(--card-border)] bg-[var(--card-paper)] px-4 pb-3 pt-3.5 shadow-[var(--shadow-card)] max-sm:bottom-24"
+        >
+          <p className="text-[13px] leading-[1.5] text-[var(--text-secondary)]">
+            Spectra uses the cookies it needs to work. Optional ones remember your settings and show us how it is used.{" "}
+            <Link href="/legal/cookies" className="underline decoration-[var(--border-strong)] underline-offset-2 hover:text-[var(--text-primary)]">
+              Cookie policy
+            </Link>
           </p>
-          <p className="mt-1 text-xs text-[var(--text-secondary)]">
-            See our <Link href="/legal/privacy" className="underline underline-offset-2">Privacy Notice</Link>,{" "}
-            <Link href="/legal/cookies" className="underline underline-offset-2">Cookie Policy</Link>, and{" "}
-            <Link href="/legal/terms" className="underline underline-offset-2">Terms</Link>.
-          </p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             <Button
               type="button"
+              size="sm"
               variant="primary"
               onClick={() =>
                 persist({
@@ -118,10 +119,11 @@ export function CookieConsentManager() {
                   analytics: true,
                 })}
             >
-              Accept all
+              Allow all
             </Button>
             <Button
               type="button"
+              size="sm"
               variant="secondary"
               onClick={() =>
                 persist({
@@ -130,16 +132,16 @@ export function CookieConsentManager() {
                   analytics: false,
                 })}
             >
-              Reject all
+              Only necessary
             </Button>
             <DialogTrigger asChild>
-              <Button type="button" variant="ghost" onClick={openSettings}>
-                Configure
+              <Button type="button" size="sm" variant="ghost" onClick={openSettings}>
+                Choose
               </Button>
             </DialogTrigger>
           </div>
           {saveError ? (
-            <p role="alert" className="mt-3 text-xs text-[var(--danger)]">
+            <p role="alert" className="mt-2 text-xs text-[var(--danger)]">
               {saveError}
             </p>
           ) : null}
@@ -224,7 +226,7 @@ export function CookieConsentManager() {
                 analytics: true,
               })}
           >
-            Accept all
+            Allow all
           </Button>
           <Button
             type="button"
@@ -236,7 +238,7 @@ export function CookieConsentManager() {
                 analytics: false,
               })}
           >
-            Reject all
+            Only necessary
           </Button>
         </div>
 

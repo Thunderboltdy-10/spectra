@@ -104,7 +104,7 @@ function officialPersonalCapabilities() {
     contractVersion: "v2p2",
     freshnessSlaMinutes: 60,
   };
-  return [
+  const capabilities = [
     {
       ...shared,
       category: "People",
@@ -140,12 +140,10 @@ function officialPersonalCapabilities() {
       category: "Classes",
       name: "My class memberships",
       recordType: "class",
-      // Archived classes are included: their tasks are the student's archive
-      // (past tasks). The response is either membership rows naming a
-      // class_id, or the classes themselves; both normalize to one class row.
-      path: "/v2p2/students/{student_id}/memberships?archived=true",
+      // archived=true returns only archived classes, hiding current classes.
+      path: "/v2p2/students/{student_id}/memberships",
       purpose:
-        "Retrieve only the resolved signed-in student's own classes, archived ones included.",
+        "Retrieve only the resolved signed-in student's current classes.",
       personalIdParameter: "student_id",
       pagination: "page" as const,
       changeStrategy: "full_reconciliation",
@@ -482,6 +480,10 @@ function officialPersonalCapabilities() {
       },
     },
   ];
+  const memberships = capabilities.find((item) => item.name === "My class memberships")!;
+  return [...capabilities, { ...memberships, name: "My archived class memberships",
+    path: "/v2p2/students/{student_id}/memberships?archived=true",
+    purpose: "Keep the resolved student's archived classes available for past work." }];
 }
 
 function exactDigest(value: unknown) {
@@ -1019,24 +1021,33 @@ async function signedCommit(
     ...(input.leaseToken ? { leaseToken: input.leaseToken } : {}),
   };
   const payloadDigest = exactDigest(payload);
-  const bridge = await bridgeArgs({
-    operation: input.operation,
-    subject: actor.clerkId,
-    integrationId: input.integrationId,
-    syncRunId: input.syncRunId,
-    payloadDigest,
-  });
-  const args = {
-    integrationId: input.integrationId,
-    syncRunId: input.syncRunId,
-    ...(input.serviceSubject ? { serviceSubject: input.serviceSubject } : {}),
-    ...payload,
-    payloadDigest,
-    ...bridge,
-  };
-  return input.serviceSubject
-    ? convexPublicMutation(input.mutation, args)
-    : convexMutation(input.mutation, args);
+  for (let attempt = 0; ; attempt += 1) {
+    const bridge = await bridgeArgs({
+      operation: input.operation,
+      subject: actor.clerkId,
+      integrationId: input.integrationId,
+      syncRunId: input.syncRunId,
+      payloadDigest,
+    });
+    const args = {
+      integrationId: input.integrationId,
+      syncRunId: input.syncRunId,
+      ...(input.serviceSubject ? { serviceSubject: input.serviceSubject } : {}),
+      ...payload,
+      payloadDigest,
+      ...bridge,
+    };
+    try {
+      return await (input.serviceSubject
+        ? convexPublicMutation(input.mutation, args)
+        : convexMutation(input.mutation, args));
+    } catch (error) {
+      // Convex already retried the transaction, but a parallel projection may
+      // still be writing. Retry its rolled-back commit, never the provider read.
+      if (attempt >= 2 || !/OptimisticConcurrencyControlFailure|Documents read from or written to.*changed while/i.test(error instanceof Error ? error.message : "")) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
+    }
+  }
 }
 
 async function resolveIdentity(
@@ -1687,7 +1698,7 @@ type StudentSyncJob = {
  */
 function transientFailure(error: unknown, message: string) {
   if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) return true;
-  return /\[Request ID:|Server Error|execution timed out|fetch failed|ECONNRESET|ETIMEDOUT/i.test(message);
+  return /\[Request ID:|Server Error|OptimisticConcurrencyControlFailure|Documents read from or written to.*changed while|execution timed out|fetch failed|ECONNRESET|ETIMEDOUT/i.test(message);
 }
 
 function errorParts(error: unknown, fallback: string) {
@@ -1798,9 +1809,30 @@ async function runStudentSync(
       if (STOPS_EVERY_JOB.has(parts.errorCode)) stopped = true;
     }
   }
-  for (const kind of queued)
-    await convexMutation("school:syncNow", { kind }).catch(() => undefined);
-  return { jobs, queued };
+  const accepted: SchoolSyncKind[] = [];
+  for (const kind of queued) {
+    try {
+      await convexMutation("school:syncNow", { kind });
+      accepted.push(kind);
+    } catch (error) {
+      jobs.push({ kind, ...errorParts(error, "INTEGRATION_SYNC_FAILED") });
+    }
+  }
+  // A class job can finish its projections while later task jobs are read.
+  // Refresh that earlier snapshot so the final toast reflects the saved result.
+  const projecting = jobs.filter((job) => job.syncRunId && object(job.completion).status === "running");
+  if (projecting.length) {
+    for (let attempt = 0; attempt < 3 && Date.now() < deadline - 1_000; attempt += 1) {
+      const progress = await convexQuery<{ runIds: string[] }, Array<{ syncRunId: string; status: string; counts: unknown }>>("managebac:studentSyncProgress", { runIds: projecting.map((job) => job.syncRunId!) });
+      for (const row of progress) {
+        const job = projecting.find((entry) => entry.syncRunId === row.syncRunId);
+        if (job) job.completion = { ...object(job.completion), status: row.status, counts: row.counts };
+      }
+      if (progress.every((row) => row.status !== "running")) break;
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+  return { jobs, queued: accepted };
 }
 
 /** Reads a response body, refusing more than `maximum` bytes. */
@@ -2223,6 +2255,11 @@ export async function POST(request: NextRequest) {
     }
     const actor = await requireActor({ fresh: true });
 
+    const loginAttempt = action === "syncOnLogin"
+      ? await convexMutation<Record<string, never>, { claimed: boolean; attemptAt?: number; nextAttemptAt?: number; reason?: string; classesOnly?: boolean }>("managebac:claimLoginSync", {})
+      : undefined;
+    if (loginAttempt && !loginAttempt.claimed) return ok({ skipped: true, ...loginAttempt });
+
     if (action === "upsertPeriodMap") {
       if (actor.schoolRole !== "school_admin")
         throw new Error("AUTH_SCHOOL_ADMIN_REQUIRED: School administrator access is required.");
@@ -2385,6 +2422,7 @@ export async function POST(request: NextRequest) {
         "INTEGRATION_NOT_CONFIGURED: ManageBac is not configured.",
       );
     if (action === "selectClasses") {
+      const initialSetup = object(await convexQuery("managebac:onboardingStatus", {})).phase === "choose_classes";
       const recordIds = Array.isArray(body.recordIds)
         ? body.recordIds.filter(
             (item): item is string => typeof item === "string" && item.length > 0,
@@ -2401,6 +2439,7 @@ export async function POST(request: NextRequest) {
           ? { expectedRevision: body.expectedRevision }
           : {}),
         ...(retention ? { retention } : {}),
+        ...(initialSetup ? { initialSetup: true } : {}),
       })) as {
         selectionRevision: number;
         selectedClassIds: string[];
@@ -2419,6 +2458,7 @@ export async function POST(request: NextRequest) {
             retention: selection.retention ?? retention ?? "keep_in_spectra",
           })
         : { requested: 0, removed: 0, skipped: 0, done: true };
+      if (initialSetup) await convexMutation("managebac:confirmSchoolSetup", { expectedRevision: selection.selectionRevision });
       return ok({
         ...selection,
         materialization,
@@ -2430,7 +2470,7 @@ export async function POST(request: NextRequest) {
     // Matching and a student's sync run on Spectra's official routes: a route
     // Spectra has since corrected replaces the stored one before it runs. The
     // school reconciliation reads the shared routes, so it leaves them be.
-    if (action === "resolveIdentity" || (action === "sync" && body.kind !== "reconciliation"))
+    if (action === "resolveIdentity" || action === "syncOnLogin" || (action === "sync" && body.kind !== "reconciliation"))
       context = await ensureOfficialPersonalCapabilityManifest(
         actor,
         integrationId,
@@ -2482,20 +2522,29 @@ export async function POST(request: NextRequest) {
       return ok({ identity });
     }
 
-    if (action === "sync") {
+    if (action === "sync" || action === "syncOnLogin") {
       // The school-wide reconciliation of shared routes (administrators).
       if (body.kind === "reconciliation")
         return ok(await runSync(actor, "reconciliation", context, secret.value));
       if (body.kind !== undefined && !isSchoolSyncKind(body.kind))
         return badRequest("Choose a kind of School data to sync.");
-      return ok(
-        await runStudentSync(
-          actor,
-          context,
-          secret.value,
-          isSchoolSyncKind(body.kind) ? body.kind : undefined,
-        ),
+      if (context.mapping.status !== "verified") {
+        const identity = await resolveIdentity(actor, integrationId, context, secret.value);
+        if (object(identity.result).status !== "verified")
+          throw new Error("INTEGRATION_IDENTITY_REQUIRED: No unique ManageBac student matches your verified email. Ask your school to check the email on your ManageBac account.");
+        context = await connectorContext(actor, integrationId);
+      }
+      const result = await runStudentSync(
+        actor, context, secret.value, loginAttempt?.classesOnly ? "classes" : isSchoolSyncKind(body.kind) ? body.kind : undefined,
       );
+      if (loginAttempt?.attemptAt !== undefined && !result.queued.length &&
+          result.jobs.every((job) => !job.errorCode && !job.suspended && object(job.completion).status === "completed")) {
+        await convexMutation("managebac:finishLoginSync", {
+          attemptAt: loginAttempt.attemptAt,
+          runIds: result.jobs.map((job) => job.syncRunId),
+        });
+      }
+      return ok({ ...result, ...(loginAttempt ? { nextAttemptAt: loginAttempt.nextAttemptAt } : {}) });
     }
 
     if (action === "fetchSchoolFile") {

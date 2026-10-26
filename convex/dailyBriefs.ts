@@ -6,6 +6,7 @@ import type { QueryCtx } from "./_generated/server";
 import { briefSuggestionValidator } from "./dailyBriefSchema";
 import { getAuthenticatedAccount } from "./identityShared";
 import { platformStopped } from "./platformControls";
+import { schoolSetupForAccount } from "./schoolSyncShared";
 
 /*
  * The morning brief (docs/product/HOME.md, "The morning brief"). Each account
@@ -60,8 +61,11 @@ export const today = query({
   handler: async (ctx, { day }) => {
     const account = await getAuthenticatedAccount(ctx);
     if (!account) return null;
+    const setup = await schoolSetupForAccount(ctx, account._id);
+    if (!setup.tourComplete || setup.phase !== "ready") return null;
     const row = await rowOf(ctx, account._id);
     if (!row) return null;
+    if (row.claimedAt < setup.completedAt!) return null;
     const previous = row.day === day && row.state === "ready" ? undefined : earlierBrief(row, day);
     if (row.day !== day) return { state: "absent" as const, claimedAt: 0, recap: undefined, suggestions: [], ...(previous ? { previous } : {}) };
     return {
@@ -80,14 +84,18 @@ export const claim = mutation({
   handler: async (ctx, { day }) => {
     const account = await getAuthenticatedAccount(ctx);
     if (!account) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    const setup = await schoolSetupForAccount(ctx, account._id);
+    if (!setup.tourComplete || setup.phase !== "ready") return false;
     const now = Date.now();
     const row = await rowOf(ctx, account._id);
     if (row && row.day === day) {
-      if (row.state === "ready") return false;
-      if (now - row.claimedAt < RECLAIM_AFTER_MS) return false;
+      if (row.claimedAt >= setup.completedAt!) {
+        if (row.state === "ready") return false;
+        if (now - row.claimedAt < RECLAIM_AFTER_MS) return false;
+      }
     }
     // The last brief stays on the page while this one is written.
-    const previous = row ? earlierBrief(row, day) : undefined;
+    const previous = row && row.claimedAt >= setup.completedAt! ? earlierBrief(row, day) : undefined;
     const fresh = { day, state: "writing" as const, claimedAt: now, recap: undefined, suggestions: undefined, previous, updatedAt: now };
     if (row) await ctx.db.patch(row._id, fresh);
     else await ctx.db.insert("dailyBriefs", { accountId: account._id, ...fresh });
@@ -168,6 +176,11 @@ export const dispatchDue = internalMutation({
       .withIndex("by_next", (q) => q.lte("nextAt", now))
       .take(DISPATCH_BATCH);
     for (const schedule of due) {
+      const setup = await schoolSetupForAccount(ctx, schedule.accountId);
+      if (!setup.tourComplete || setup.phase !== "ready") {
+        await ctx.db.patch(schedule._id, { nextAt: now + DAY_MS });
+        continue;
+      }
       if (now - (schedule.seenAt ?? schedule.updatedAt) > IDLE_AFTER_MS) {
         await ctx.db.patch(schedule._id, { nextAt: now + RESTING_MS });
         continue;

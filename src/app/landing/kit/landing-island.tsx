@@ -1,0 +1,40 @@
+"use client";
+
+import { useMemo } from "react";
+import { useSpectraRun } from "@/features/spectra/ai/use-spectra-run";
+import { useProvideIslandEngine } from "@/features/spectra/island/engine";
+import { Island } from "@/features/spectra/island/island";
+import { spectraBus } from "@/features/spectra/events";
+
+/*
+ * The real island, docked at the bottom of the landing page exactly where it
+ * lives in Spectra. It sends, streams and keeps threads like the app's own;
+ * the story world answers it. A work it opens goes to the page's side panel.
+ */
+
+export function LandingIsland({ onOpenWork }: { onOpenWork: (workId: string) => void }) {
+  const engine = useSpectraRun({
+    surface: "chat",
+    currentView: "/landing",
+    observeDurableRuns: false,
+    onOpenArtifact: (workId) => onOpenWork(workId),
+  });
+  useProvideIslandEngine(useMemo(() => ({ engine, focus: null }), [engine]), { fallback: true });
+  return <Island />;
+}
+
+/** Henry types into the island, a few letters at a time, and sends. */
+export function typeIntoIsland(text: string, { fresh = false, perLetter = 46 } = {}) {
+  return new Promise<void>((resolve) => {
+    let index = 0;
+    const timer = window.setInterval(() => {
+      index = Math.min(text.length, index + 1 + Math.round(Math.random()));
+      const done = index >= text.length;
+      spectraBus.emit("island.compose", { fresh: fresh && index <= 2, text: text.slice(0, index), send: done });
+      if (done) {
+        window.clearInterval(timer);
+        resolve();
+      }
+    }, perLetter);
+  });
+}

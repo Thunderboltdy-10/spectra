@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useShowcaseTime } from "../showcase/showcase-time";
 
 /*
  * The time on Home, drawn as the sky (HOME.md, "The morning brief"). The
@@ -41,7 +42,9 @@ const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute:
 const dateFormat = new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long" });
 
 export function DaySky() {
-  const now = useMinute();
+  const clock = useMinute();
+  const story = useShowcaseTime();
+  const now = story === null ? clock : new Date(story);
   const clip = useId();
   const root = useRef<HTMLDivElement>(null);
 

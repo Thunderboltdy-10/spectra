@@ -300,7 +300,8 @@ export const syncStatus = query({
     return {
       connection: {
         state: connectionProblem ? ("blocked" as const) : integration.status === "degraded" ? ("degraded" as const) : ("connected" as const),
-        lastSyncAt: integration.lastSyncAt ?? null,
+        lastSyncAt: states.reduce<number | null>((latest, row) =>
+          row.lastSuccessAt === undefined ? latest : Math.max(latest ?? 0, row.lastSuccessAt), null),
         problem: connectionProblem,
       },
       running: kinds.some((row) => row.state === "running" || row.state === "queued"),

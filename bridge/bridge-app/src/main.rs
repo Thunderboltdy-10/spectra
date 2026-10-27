@@ -181,6 +181,10 @@ struct SpectraLocalControl {
 #[async_trait::async_trait]
 impl LocalBridgeControl for SpectraLocalControl {
     async fn auto_pair(&self, challenge: &str) -> Result<(), String> {
+        let _selection = self
+            .selection_gate
+            .try_lock()
+            .map_err(|_| "Finish the current connection or file selection first.".to_string())?;
         let offer = self
             .state
             .take_pairing_offer(challenge)
@@ -203,7 +207,7 @@ impl LocalBridgeControl for SpectraLocalControl {
 
     async fn select_mount(&self) -> Result<(), String> {
         let _selection = self.selection_gate.try_lock().map_err(|_| {
-            "Finish choosing files or a folder in the open picker first.".to_string()
+            "Finish the current connection or file selection first.".to_string()
         })?;
         let result = select_mount_impl(
             &self.app,
@@ -220,7 +224,7 @@ impl LocalBridgeControl for SpectraLocalControl {
 
     async fn select_files(&self) -> Result<usize, String> {
         let _selection = self.selection_gate.try_lock().map_err(|_| {
-            "Finish choosing files or a folder in the open picker first.".to_string()
+            "Finish the current connection or file selection first.".to_string()
         })?;
         let result = select_files_impl(
             &self.app,
@@ -285,6 +289,10 @@ impl LocalBridgeControl for SpectraLocalControl {
     }
 
     async fn unpair(&self) -> Result<(), String> {
+        let _selection = self
+            .selection_gate
+            .try_lock()
+            .map_err(|_| "Finish the current connection or file selection first.".to_string())?;
         unpair_this_computer(&self.grants, &self.journal)?;
         self.state.forget_pairing();
         self.wake.wake_configuration();
@@ -512,17 +520,33 @@ fn unpair_this_computer(grants: &GrantRegistry, journal: &Journal) -> Result<(),
         grants.remove(&grant.id);
         forget_mount_config(journal, &grant.id)?;
     }
+    // Unavailable or differently bound selections may not be in the registry.
+    // Forget their persisted permissions too, so a later repair cannot revive them.
+    for prefix in ["mount:", "file-mount:"] {
+        for (key, _) in journal
+            .config_prefix(prefix)
+            .map_err(|error| error.to_string())?
+        {
+            let (_, id) = key.split_once(':').expect("persisted grant prefix");
+            forget_mount_config(journal, id)?;
+        }
+    }
     for key in [
         "device_id",
         "browser_origin",
         "browser_session_token",
         SYNC_PAUSED_KEY,
         LAST_SYNC_KEY,
+        "replica_migration_complete",
+        "replica_migration_dry_run",
+        "replica_migration_cutover",
+        "replica_migration_verify",
     ] {
         journal
             .delete_config(key)
             .map_err(|error| error.to_string())?;
     }
+    journal.retire_pairing_work().map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -1260,6 +1284,7 @@ fn deployment_url(journal: &Journal) -> Result<String, String> {
         .config("deployment_url")
         .map_err(|error| error.to_string())?;
     let url = resolve_deployment_url(std::env::var("SPECTRA_CONVEX_URL").ok(), stored.clone())?;
+    guard_paired_deployment(journal, &url)?;
     if stored.as_deref() != Some(url.as_str()) {
         journal
             .set_config("deployment_url", &url)
@@ -1268,18 +1293,44 @@ fn deployment_url(journal: &Journal) -> Result<String, String> {
     Ok(url)
 }
 
-/// Pairing teaches the Bridge its deployment: the offer comes from a
-/// configured Spectra origin, so its Convex URL is the one to sync with.
+/// Resolve an offer without changing the live pairing. Cancelled or failed
+/// handshakes must leave the current sync destination intact.
 fn deployment_for_offer(journal: &Journal, offer: &PairingOffer) -> Result<String, String> {
-    if std::env::var_os("SPECTRA_CONVEX_URL").is_none() {
-        if let Some(offered) = offer.deployment_url.clone() {
-            let url = configured_deployment_url(Some(offered))?;
-            journal
-                .set_config("deployment_url", &url)
-                .map_err(|error| error.to_string())?;
+    resolve_pairing_deployment(
+        journal,
+        std::env::var("SPECTRA_CONVEX_URL").ok(),
+        offer.deployment_url.clone(),
+    )
+}
+
+fn resolve_pairing_deployment(
+    journal: &Journal,
+    launch: Option<String>,
+    offered: Option<String>,
+) -> Result<String, String> {
+    let stored = journal
+        .config("deployment_url")
+        .map_err(|error| error.to_string())?;
+    let url = resolve_deployment_url(launch, offered.or(stored))?;
+    guard_paired_deployment(journal, &url)?;
+    Ok(url)
+}
+
+fn guard_paired_deployment(journal: &Journal, proposed: &str) -> Result<(), String> {
+    if journal
+        .config("device_id")
+        .map_err(|error| error.to_string())?
+        .is_some()
+    {
+        let stored = journal
+            .config("deployment_url")
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "This computer's original Spectra connection could not be identified. Choose Disconnect this computer from the Spectra Bridge tray menu, then connect here. Your files will stay on this computer.".to_string())?;
+        if reqwest::Url::parse(&stored).ok() != reqwest::Url::parse(proposed).ok() {
+            return Err("This computer is connected to another Spectra. Choose Disconnect this computer from the Spectra Bridge tray menu, then connect here. Your files will stay on this computer.".into());
         }
     }
-    deployment_url(journal)
+    Ok(())
 }
 
 async fn run_replica_migration(
@@ -3616,9 +3667,9 @@ async fn sync_grant(
 }
 
 /// Pairs this computer for an offer from the Devices page. A computer already
-/// paired to the account resumes quietly; a new pairing (or one whose key
-/// Spectra no longer knows) first asks the person, in a native dialog showing
-/// the same code as the page.
+/// paired to the account resumes quietly. Switching accounts requires an
+/// explicit disconnect, so remembered folders cannot follow a different owner.
+/// A new pairing asks in a native dialog showing the same code as the page.
 async fn complete_pairing_offer(
     app: &tauri::AppHandle,
     offer: &PairingOffer,
@@ -3640,16 +3691,15 @@ async fn complete_pairing_offer(
             value
         }
     };
-    let existing = journal
-        .config("device_id")
-        .map_err(|error| error.to_string())?
-        .and_then(|device_id| {
-            HostPlatform
-                .read_credential(&device_id)
-                .ok()
-                .flatten()
-                .map(|credential| (device_id, credential))
-        });
+    let existing = match journal.config("device_id").map_err(|error| error.to_string())? {
+        Some(device_id) => {
+            let credential = HostPlatform.read_credential(&device_id)
+                .map_err(|_| "Bridge cannot read this computer's saved key right now. Try again when your system keyring is available.".to_string())?
+                .ok_or_else(|| "This computer's saved key is missing. Choose Disconnect this computer from the Spectra Bridge tray menu, then connect again. You will need to choose its files again.".to_string())?;
+            Some((device_id, credential))
+        }
+        None => None,
+    };
     let (device_id, browser_origin) = if let Some((_device_id, credential)) = existing {
         match resume_pairing(
             &deployment,
@@ -3662,14 +3712,7 @@ async fn complete_pairing_offer(
         {
             Ok(exchange) => (exchange.device_id, exchange.browser_origin),
             Err(error) if should_repair_pairing(&error.to_string()) => {
-                confirm_pairing_on_this_computer(app, &offer.short_code).await?;
-                let exchange = exchange_pairing(&deployment, offer, &device_name, &installation_id)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                HostPlatform
-                    .store_credential(&exchange.device_id, &exchange.device_credential)
-                    .map_err(|error| error.to_string())?;
-                (exchange.device_id, exchange.browser_origin)
+                return Err("This computer's current connection cannot be used with this account. Choose Disconnect this computer from the Spectra Bridge tray menu, then connect again. You will need to choose its files again.".into());
             }
             Err(error) => return Err(error.to_string()),
         }
@@ -3683,16 +3726,18 @@ async fn complete_pairing_offer(
             .map_err(|error| error.to_string())?;
         (exchange.device_id, exchange.browser_origin)
     };
+    let session_token = state.prepare_pairing_session(&browser_origin);
     journal
-        .set_config("device_id", &device_id)
+        .set_configs(&[
+            ("deployment_url", &deployment),
+            ("device_id", &device_id),
+            ("browser_origin", &browser_origin),
+            ("browser_session_token", &session_token),
+        ])
         .map_err(|error| error.to_string())?;
     state.set_device_id(device_id);
-    let session_token = state.complete_pairing(offer.challenge.clone(), browser_origin.clone());
-    journal
-        .set_config("browser_origin", &browser_origin)
-        .map_err(|error| error.to_string())?;
-    journal
-        .set_config("browser_session_token", &session_token)
+    state
+        .complete_pairing_with_session(offer.challenge.clone(), browser_origin, &session_token)
         .map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -3721,7 +3766,87 @@ fn should_repair_pairing(error: &str) -> bool {
 
 #[cfg(test)]
 mod pairing_tests {
-    use super::should_repair_pairing;
+    use super::{resolve_pairing_deployment, should_repair_pairing};
+    use spectra_bridge_core::journal::Journal;
+
+    #[test]
+    fn resolving_a_new_offer_does_not_retarget_the_current_journal() {
+        let journal = Journal::in_memory().unwrap();
+        journal
+            .set_config("deployment_url", "https://old.convex.cloud")
+            .unwrap();
+        assert_eq!(
+            resolve_pairing_deployment(&journal, None, Some("https://new.convex.cloud/".into()))
+                .unwrap(),
+            "https://new.convex.cloud"
+        );
+        assert_eq!(
+            journal.config("deployment_url").unwrap().as_deref(),
+            Some("https://old.convex.cloud")
+        );
+        assert!(
+            resolve_pairing_deployment(&journal, None, Some("file:///invalid".into())).is_err()
+        );
+        assert_eq!(
+            journal.config("deployment_url").unwrap().as_deref(),
+            Some("https://old.convex.cloud")
+        );
+    }
+
+    #[test]
+    fn a_paired_device_never_sends_its_key_to_another_deployment() {
+        let journal = Journal::in_memory().unwrap();
+        journal
+            .set_config("deployment_url", "https://old.convex.cloud")
+            .unwrap();
+        journal.set_config("device_id", "existing-device").unwrap();
+        let error =
+            resolve_pairing_deployment(&journal, None, Some("https://new.convex.cloud".into()))
+                .unwrap_err();
+        assert!(error.contains("Disconnect this computer"));
+        assert!(
+            resolve_pairing_deployment(&journal, Some("https://new.convex.cloud".into()), None)
+                .is_err()
+        );
+        assert_eq!(
+            resolve_pairing_deployment(&journal, None, Some("https://old.convex.cloud/".into()))
+                .unwrap(),
+            "https://old.convex.cloud"
+        );
+        assert_eq!(
+            journal.config("device_id").unwrap().as_deref(),
+            Some("existing-device")
+        );
+        journal.delete_config("deployment_url").unwrap();
+        let error =
+            resolve_pairing_deployment(&journal, None, Some("https://new.convex.cloud".into()))
+                .unwrap_err();
+        assert!(error.contains("Disconnect this computer"));
+    }
+
+    #[test]
+    fn a_fresh_offer_respects_a_nonblank_launch_override() {
+        let journal = Journal::in_memory().unwrap();
+        assert_eq!(
+            resolve_pairing_deployment(
+                &journal,
+                Some("http://127.0.0.1:3002".into()),
+                Some("https://offered.convex.cloud".into())
+            )
+            .unwrap(),
+            "http://127.0.0.1:3002"
+        );
+        assert_eq!(
+            resolve_pairing_deployment(
+                &journal,
+                Some(" ".into()),
+                Some("https://offered.convex.cloud".into())
+            )
+            .unwrap(),
+            "https://offered.convex.cloud"
+        );
+        assert_eq!(journal.config("deployment_url").unwrap(), None);
+    }
 
     #[test]
     fn only_invalid_credentials_trigger_device_repair() {
@@ -3757,12 +3882,10 @@ async fn select_mount_impl(
     let grant = grants
         .add_native_selection(label.clone(), &path)
         .map_err(|error| error.to_string())?;
-    journal
-        .set_config(
-            &format!("mount:{}", grant.id),
-            &serde_json::json!({ "label": label, "path": grant.device_root() }).to_string(),
-        )
-        .map_err(|error| error.to_string())?;
+    if let Err(error) = persist_folder_grant(journal, &grant) {
+        grants.remove(&grant.id);
+        return Err(error.to_string());
+    }
     // Persist and expose the grant before doing any network or payload work.
     // Selection must remain responsive even when Cloud is slow/offline; the
     // watcher owns the asynchronous scan and updates the durable status.
@@ -3802,11 +3925,40 @@ fn persist_file_grant(journal: &Journal, grant: &Grant) -> anyhow::Result<()> {
     )
 }
 
-fn file_grant_matches_pairing(journal: &Journal, config: &serde_json::Value) -> bool {
+fn persist_folder_grant(journal: &Journal, grant: &Grant) -> anyhow::Result<()> {
+    let device_id = journal
+        .config("device_id")?
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("Connect this computer before selecting a folder"))?;
+    journal.set_config(
+        &format!("mount:{}", grant.id),
+        &serde_json::json!({ "label": grant.label, "path": grant.device_root(), "deviceId": device_id }).to_string(),
+    )
+}
+
+fn bind_legacy_folder_grant(
+    journal: &Journal,
+    key: &str,
+    config: &mut serde_json::Value,
+) -> anyhow::Result<()> {
+    if key.starts_with("mount:") && config.get("deviceId").is_none() && config.is_object() {
+        if let Some(device_id) = journal.config("device_id")?.filter(|id| !id.is_empty()) {
+            config["deviceId"] = serde_json::Value::String(device_id);
+            journal.set_config(key, &config.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+fn grant_config_matches_pairing(journal: &Journal, config: &serde_json::Value) -> bool {
     // Older binaries cannot clear file-mount: keys when unpairing. Never
     // revive them for another pairing/account after an upgrade.
-    config.get("deviceId").and_then(|value| value.as_str())
-        .is_some_and(|id| !id.is_empty() && journal.config("device_id").ok().flatten().as_deref() == Some(id))
+    config
+        .get("deviceId")
+        .and_then(|value| value.as_str())
+        .is_some_and(|id| {
+            !id.is_empty() && journal.config("device_id").ok().flatten().as_deref() == Some(id)
+        })
 }
 
 async fn select_files_impl(
@@ -4362,10 +4514,13 @@ async fn run_sync_worker(
         if wake.is_shutdown() {
             break;
         }
-        if let Ok(Some(current_device_id)) = journal.config("device_id") {
-            if device_id.as_deref() != Some(current_device_id.as_str()) {
-                scheduler.set_device_id(Some(&current_device_id));
-                device_id = Some(current_device_id);
+        if let Ok(current_device_id) = journal.config("device_id") {
+            if device_id != current_device_id {
+                scheduler.set_device_id(current_device_id.as_deref());
+                device_id = current_device_id;
+                health = HealthReporter::default();
+                restored_grants_reconciled.clear();
+                configuration_dirty = true;
             }
         }
         let result = run_sync_iteration(
@@ -4435,10 +4590,21 @@ fn main() {
             std::fs::create_dir_all(&data_dir)?;
             let journal = Arc::new(Journal::open(&data_dir.join("bridge.sqlite"))?);
             let state = Arc::new(ServerState::unpaired());
-            let credential_ready = journal
-                .config("device_id")?
-                .and_then(|device_id| HostPlatform.read_credential(&device_id).ok().flatten())
-                .is_some();
+            let credential_ready = if let Some(device_id) = journal.config("device_id")? {
+                match HostPlatform.read_credential(&device_id) {
+                    Ok(Some(_)) => true,
+                    Ok(None) => {
+                        // A deleted OS key cannot authorize remembered folders.
+                        // Leave files intact and let Devices make a fresh pairing.
+                        unpair_this_computer(&GrantRegistry::default(), &journal)?;
+                        false
+                    }
+                    // An unavailable keyring may recover; preserve its settings.
+                    Err(_) => false,
+                }
+            } else {
+                false
+            };
             if credential_ready {
                 if let (Some(origin), Some(token)) = (
                     journal.config("browser_origin")?,
@@ -4447,15 +4613,21 @@ fn main() {
                     let _ = state.restore_pairing(origin, &token);
                 }
             }
-            if let Some(device_id) = journal.config("device_id")? {
-                state.set_device_id(device_id);
+            if credential_ready {
+                if let Some(device_id) = journal.config("device_id")? {
+                    state.set_device_id(device_id);
+                }
             }
             app.manage(state.clone());
             let grants = Arc::new(GrantRegistry::default());
             let mut persisted_mounts = journal.config_prefix("mount:")?;
             persisted_mounts.extend(journal.config_prefix("file-mount:")?);
             for (key, value) in persisted_mounts {
-                if let Ok(config) = serde_json::from_str::<serde_json::Value>(&value) {
+                if let Ok(mut config) = serde_json::from_str::<serde_json::Value>(&value) {
+                    bind_legacy_folder_grant(&journal, &key, &mut config)?;
+                    if !credential_ready || !grant_config_matches_pairing(&journal, &config) {
+                        continue;
+                    }
                     if let (Some(label), Some(path)) = (
                         config.get("label").and_then(|value| value.as_str()),
                         config.get("path").and_then(|value| value.as_str()),
@@ -4463,7 +4635,6 @@ fn main() {
                         let (scope, id) = key.split_once(':').expect("persisted grant prefix");
                         let id = id.to_owned();
                         if scope == "file-mount" {
-                            if !file_grant_matches_pairing(&journal, &config) { continue; }
                             let Some(name) =
                                 config.get("selectedFile").and_then(|value| value.as_str())
                             else {
@@ -4504,7 +4675,7 @@ fn main() {
                 active_mount_syncs: Arc::new(Mutex::new(HashSet::new())),
             });
             let active_mount_syncs = app.state::<BridgeRuntime>().active_mount_syncs.clone();
-            state.install_local_control(Arc::new(SpectraLocalControl {
+            let local_control = Arc::new(SpectraLocalControl {
                 app: app.handle().clone(),
                 state: state.clone(),
                 grants: grants.clone(),
@@ -4512,7 +4683,8 @@ fn main() {
                 wake: sync_wake.clone(),
                 active_mount_syncs: active_mount_syncs.clone(),
                 selection_gate: Arc::new(tokio::sync::Mutex::new(())),
-            }));
+            });
+            state.install_local_control(local_control.clone());
             for grant in restored_grants {
                 spawn_grant_watcher(
                     grant,
@@ -4538,14 +4710,14 @@ fn main() {
                     record_runtime_error(&server_journal, "Bridge server stopped", &error);
                 }
             });
-            // Bridge has no window: the tray, the folder picker and the
-            // pairing confirmation are its only native surfaces. Everything
-            // else happens on the Devices page in Spectra.
+            // Connection recovery must remain available without access to the
+            // previously paired account's Devices page.
             let open =
                 MenuItem::with_id(app, "open", "Open Devices in Spectra", true, None::<&str>)?;
             let pause = MenuItem::with_id(app, "pause", "Pause syncing", true, None::<&str>)?;
+            let disconnect = MenuItem::with_id(app, "disconnect", "Disconnect this computer", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Bridge", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &pause, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &pause, &disconnect, &quit])?;
             let tray_journal = journal.clone();
             let tray_wake = sync_wake.clone();
             TrayIconBuilder::with_id(TRAY_ID)
@@ -4565,6 +4737,22 @@ fn main() {
                         }
                         tray_wake.wake();
                         refresh_tray(app);
+                    }
+                    "disconnect" => {
+                        let control = local_control.clone();
+                        app.dialog()
+                            .message("Bridge will forget this connection and its selected files and folders. Your files stay on this computer. Choose them again after reconnecting.")
+                            .title("Disconnect this computer?")
+                            .buttons(MessageDialogButtons::OkCancelCustom("Disconnect".into(), "Keep connected".into()))
+                            .show(move |confirmed| {
+                                if confirmed {
+                                    tauri::async_runtime::spawn(async move {
+                                        if let Err(error) = control.unpair().await {
+                                            control.app.dialog().message(error).title("Could not disconnect").show(|_| {});
+                                        }
+                                    });
+                                }
+                            });
                     }
                     "quit" => app.exit(0),
                     _ => {}
@@ -4916,12 +5104,40 @@ mod devices_tests {
         assert_eq!(saved.len(), 1);
         let config: serde_json::Value = serde_json::from_str(&saved[0].1).unwrap();
         assert_eq!(config["selectedFile"], "Chosen.docx");
-        assert!(file_grant_matches_pairing(&journal, &config));
-        journal.set_config("device_id", "device-another-account").unwrap();
-        assert!(!file_grant_matches_pairing(&journal, &config));
+        assert!(grant_config_matches_pairing(&journal, &config));
+        journal
+            .set_config("device_id", "device-another-account")
+            .unwrap();
+        assert!(!grant_config_matches_pairing(&journal, &config));
         forget_mount_config(&journal, &grant.id).unwrap();
         assert!(journal.config_prefix("file-mount:").unwrap().is_empty());
         assert_eq!(std::fs::read(file).unwrap(), b"chosen");
+    }
+
+    #[test]
+    fn folder_permissions_stay_bound_to_the_pairing_including_after_upgrade() {
+        let journal = Journal::in_memory().unwrap();
+        let grants = GrantRegistry::default();
+        let grant = grants
+            .add_native_selection("Biology".into(), &temp_folder("bound-folder"))
+            .unwrap();
+        assert!(persist_folder_grant(&journal, &grant).is_err());
+        journal.set_config("device_id", "original").unwrap();
+        persist_folder_grant(&journal, &grant).unwrap();
+        let key = format!("mount:{}", grant.id);
+        let mut legacy = serde_json::json!({ "label": "Biology", "path": grant.device_root() });
+        bind_legacy_folder_grant(&journal, &key, &mut legacy).unwrap();
+        assert!(grant_config_matches_pairing(&journal, &legacy));
+        journal.set_config("device_id", "different").unwrap();
+        bind_legacy_folder_grant(&journal, &key, &mut legacy).unwrap();
+        assert!(
+            !grant_config_matches_pairing(&journal, &legacy),
+            "upgrade binding cannot move to a later account"
+        );
+        let mut unowned = serde_json::json!({ "label": "Unknown" });
+        journal.delete_config("device_id").unwrap();
+        bind_legacy_folder_grant(&journal, "mount:unknown", &mut unowned).unwrap();
+        assert!(!grant_config_matches_pairing(&journal, &unowned));
     }
 
     #[test]
@@ -4944,9 +5160,13 @@ mod devices_tests {
             .set_config("browser_session_token", "token")
             .unwrap();
         journal.set_config("installation_id", "install-1").unwrap();
+        journal.set_config("file-mount:unavailable", "{}").unwrap();
+        journal.set_config("mount:unrestored", "{}").unwrap();
         set_sync_paused(&journal, true).unwrap();
         unpair_this_computer(&grants, &journal).unwrap();
         assert!(grants.device_grants().is_empty());
+        assert!(journal.config_prefix("mount:").unwrap().is_empty());
+        assert!(journal.config_prefix("file-mount:").unwrap().is_empty());
         assert_eq!(
             journal.config(&format!("mount:{}", grant.id)).unwrap(),
             None

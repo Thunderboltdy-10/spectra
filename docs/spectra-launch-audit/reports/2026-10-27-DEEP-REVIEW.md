@@ -2,6 +2,8 @@
 
 Continuation of [the original user-flow audit](2026-10-27-USER-FLOW-AUDIT.md), after the owner's intervening repairs and additions. The original ledger describes an earlier baseline; do not treat its findings as independently revalidated here unless listed below.
 
+**Later functional repairs:** after the owner authorized complex non-frontend fixes, [the functional follow-up](2026-10-27-FUNCTIONAL-FIXES.md) repaired the document typing/navigation and quiz publication/submission paths, hardened native pairing, and partially addressed conflict comparison and agent evaluation. Read that report for current validation and remaining limitations; the findings below describe the earlier review baseline.
+
 Baseline commit: `12186235` — `Improve launch flows and administration`, created before this review, without a co-author. Branch: `launch-readiness-audit`. This is an execution ledger, not a launch certification.
 
 **Release assessment: blocked by DEEP-001 content corruption.** DEEP-006 also reproduces a publication delay beyond the existing retry window. The native identity-change concern in DEEP-002 still needs an isolated regression before Bridge can be called reliable across accounts. Passing automated tests do not close these live findings.

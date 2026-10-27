@@ -1355,7 +1355,7 @@ const FIELD_LABELS: Record<string, string> = {
   className: "Class",
 };
 
-function fieldValue(value: unknown) {
+function fieldValue(value: unknown, truncate = true) {
   if (value === undefined || value === null || value === "") return "nothing";
   if (typeof value === "number" && value > 1e12) return formatDate(value);
   if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) {
@@ -1366,20 +1366,20 @@ function fieldValue(value: unknown) {
     // ManageBac sends rich text as HTML; the reader compares the words.
     const words = value.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
     if (!words) return "nothing";
-    return words.length > 80 ? `${words.slice(0, 79)}…` : words;
+    return truncate && words.length > 80 ? `${words.slice(0, 79)}…` : words;
   }
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   return "a changed value";
 }
 
 /** The fields ManageBac changed, as before → after, leaving out bookkeeping. */
-function changedFields(before: Record<string, unknown>, after: Record<string, unknown>) {
+export function changedFields(before: Record<string, unknown>, after: Record<string, unknown>) {
   const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
   return [...keys]
     .filter((key) => key in FIELD_LABELS || !/(^_|id$|Id$|hash|Hash|At$|cursor|etag|version|raw)/.test(key))
     .filter((key) => [before[key], after[key]].every((value) => value === null || typeof value !== "object"))
     // Only what reads differently: the same words rewrapped in HTML are no change.
-    .filter((key) => fieldValue(before[key]) !== fieldValue(after[key]))
+    .filter((key) => fieldValue(before[key], false) !== fieldValue(after[key], false))
     .slice(0, 6)
     .map((key) => ({
       key,

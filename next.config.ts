@@ -13,9 +13,10 @@ const yjsEsmAbsolute = resolve(projectRoot, "node_modules/yjs/dist/yjs.mjs");
 
 const nextConfig: NextConfig = {
   // Local instances have different Convex URLs and must never share generated
-  // client bundles or Next's development-server lock.
+  // client bundles or Next's development-server lock. Keep them outside .next:
+  // a normal production build cleans that directory, including nested instances.
   ...(process.env.SPECTRA_LOCAL_INSTANCE
-    ? { distDir: `.next/instances/${process.env.SPECTRA_LOCAL_INSTANCE}` }
+    ? { distDir: `.next-local/${process.env.SPECTRA_LOCAL_INSTANCE}` }
     : {}),
   // Durable Office bodies are streamed through the Next proxy before the API
   // route applies its own 256 MiB bound. Keep the proxy cap aligned with that

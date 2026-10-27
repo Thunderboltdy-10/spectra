@@ -138,6 +138,9 @@ impl ServerState {
         *self.session_token.write().unwrap() = vec![];
         *self.device_id.write().unwrap() = None;
         self.cloud_seen_at.store(0, Ordering::Relaxed);
+        self.pending_pairing.write().unwrap().clear();
+        self.pairing_completion.write().unwrap().clear();
+        self.pairing_failure.write().unwrap().clear();
     }
     fn prune_expired_pairing(&self) {
         let now = unix_ms();
@@ -187,17 +190,31 @@ impl ServerState {
         *self.paired.read().unwrap()
     }
     pub fn complete_pairing(&self, challenge: String, origin: String) -> String {
-        let token = if self.is_paired() {
-            self.resume_session(&origin)
-                .unwrap_or_else(|| self.pair(origin))
-        } else {
-            self.pair(origin)
-        };
+        let token = self.prepare_pairing_session(&origin);
+        self.complete_pairing_with_session(challenge, origin, &token)
+            .expect("prepared pairing session is valid");
+        token
+    }
+    /// Preparing does not expose a session until its durable settings commit.
+    pub fn prepare_pairing_session(&self, origin: &str) -> String {
+        self.resume_session(origin).unwrap_or_else(|| {
+            let mut token = [0_u8; 32];
+            rand::rng().fill_bytes(&mut token);
+            base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, token)
+        })
+    }
+    pub fn complete_pairing_with_session(
+        &self,
+        challenge: String,
+        origin: String,
+        token: &str,
+    ) -> anyhow::Result<()> {
+        self.restore_pairing(origin, token)?;
         self.pairing_completion
             .write()
             .unwrap()
-            .insert(challenge, token.clone());
-        token
+            .insert(challenge, token.to_owned());
+        Ok(())
     }
     /// A pairing attempt ended without pairing; the page reads why once.
     pub fn fail_pairing(&self, challenge: String, reason: String) {
@@ -811,6 +828,42 @@ mod tests {
             state.take_pairing_completion(&"b".repeat(64)).as_deref(),
             Some(second.as_str())
         );
+    }
+    #[test]
+    fn preparing_a_session_does_not_publish_or_replace_a_pairing() {
+        let state = ServerState::unpaired();
+        let token = state.prepare_pairing_session(ORIGIN);
+        assert!(!state.is_paired());
+        assert!(!state.session_token_matches(&token));
+        state
+            .complete_pairing_with_session("committed".into(), ORIGIN.into(), &token)
+            .unwrap();
+        assert!(state.session_token_matches(&token));
+        let other = state.prepare_pairing_session("http://localhost:3160");
+        assert_ne!(token, other);
+        assert!(
+            state.session_token_matches(&token),
+            "a cancelled offer preserves the existing session"
+        );
+        assert_eq!(state.prepare_pairing_session(ORIGIN), token);
+        assert!(
+            state
+                .complete_pairing_with_session("invalid".into(), ORIGIN.into(), "invalid")
+                .is_err()
+        );
+        assert!(state.take_pairing_completion("invalid").is_none());
+        assert!(state.session_token_matches(&token));
+    }
+    #[test]
+    fn disconnect_revokes_even_an_unclaimed_pairing_completion() {
+        let state = ServerState::unpaired();
+        let token = state.complete_pairing("waiting".into(), ORIGIN.into());
+        state.set_device_id("old-device".into());
+        state.forget_pairing();
+        assert!(!state.session_token_matches(&token));
+        assert!(state.take_pairing_completion("waiting").is_none());
+        assert!(!state.is_paired());
+        assert!(state.local_status().device_id.is_none());
     }
     #[test]
     fn paired_session_can_resume_only_for_an_allowed_origin() {

@@ -190,6 +190,8 @@ Compile the mission and the creator's answers into first-class skills. A skill i
 
 Do not create one skill per answer. Create the smallest set of skills that covers the mission, each with a distinct trigger surface.
 
+Evaluation expectations must test correctness rather than preferred wording. Use {"kind":"judged","criteria":"observable requirements, including the correct outcome","externalTruth":false} for semantic requirements, explanations, paraphrases or mathematical notation. Use contains/excludes only when the exact literal token is itself required or forbidden; these checks are case-insensitive substrings, not semantic checks. Never put descriptive requirements such as "a clear explanation" into contains values. A numeric answer alone must not pass if it is mathematically wrong.
+
 Return JSON with exactly this shape:
 {
   "skills": [{

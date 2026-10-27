@@ -1,5 +1,5 @@
 import { Extension, Node, mergeAttributes, type CommandProps } from "@tiptap/core";
-import { TextSelection } from "@tiptap/pm/state";
+import { Selection, TextSelection } from "@tiptap/pm/state";
 
 /**
  * Document structure the page canvas needs.
@@ -272,9 +272,22 @@ export const ParagraphFrame = Extension.create({
     };
   },
   addKeyboardShortcuts() {
+    const boundary = (end: boolean, extend = false) => {
+      const { state, view } = this.editor;
+      const target = end ? Selection.atEnd(state.doc) : Selection.atStart(state.doc);
+      const selection = extend ? TextSelection.between(state.selection.$anchor, target.$head) : target;
+      // Keep native document navigation and the editing state in the same
+      // transaction, including an Enter pressed immediately afterward.
+      view.dispatch(state.tr.setSelection(selection).scrollIntoView());
+      return true;
+    };
     return {
       "Alt-Shift-ArrowUp": () => this.editor.commands.moveBlock(-1),
       "Alt-Shift-ArrowDown": () => this.editor.commands.moveBlock(1),
+      "Mod-Home": () => boundary(false),
+      "Mod-End": () => boundary(true),
+      "Mod-Shift-Home": () => boundary(false, true),
+      "Mod-Shift-End": () => boundary(true, true),
     };
   },
 });

@@ -123,6 +123,21 @@ export const StableBlockId = Extension.create({
         props: {
           decorations: (state) => {
             const decorations: Decoration[] = [];
+            // Chrome can leave the caret before the first inserted character
+            // when an active paragraph uses content-visibility containment.
+            // Keep only the selection endpoints rendered; offscreen blocks
+            // retain the long-document layout optimization.
+            const active = new Set(
+              [state.selection.$from, state.selection.$to]
+                .filter((position) => position.depth > 0)
+                .map((position) => position.before(1)),
+            );
+            for (const position of active) {
+              const node = state.doc.nodeAt(position);
+              if (node) decorations.push(Decoration.node(position, position + node.nodeSize, {
+                "data-editor-selection": "true",
+              }));
+            }
             state.doc.descendants((node, position) => {
               if (!isProtected(node)) return;
               decorations.push(

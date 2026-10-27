@@ -9,6 +9,7 @@ import { academicSelection, executeAcademicEditorOperations } from "../editor/do
 import { documentYjsAdapter, DOCUMENT_YJS_FRAGMENT } from "../work/models/yjs/document-adapter";
 import { documentBlocksFromJson } from "../lenses/document-projection";
 import { MAX_WORD_NOTE_ID } from "../lenses/docx-academic-schema";
+import { StableBlockId } from "../editor/stable-block-id";
 
 vi.mock("../components/artifact-embed-host", () => ({ ArtifactEmbedById: () => null }));
 const BlockAttrs = Extension.create({ name: "testBlockAttrs", addGlobalAttributes() { return [{ types: ["paragraph"], attributes: { blockId: { default: null }, textAlign: { default: "left" } } }]; } });
@@ -16,6 +17,18 @@ const cleanup: Array<() => void> = [];
 afterEach(() => cleanup.splice(0).forEach((run) => run()));
 
 describe("Academic ProseMirror commands", () => {
+  it("keeps the selection endpoints rendered without persisting layout attributes", () => {
+    const element = document.createElement("div"); document.body.appendChild(element);
+    const editor = new Editor({ element, extensions: [StarterKit, StableBlockId], content: "<p>First</p><p>Second</p><p>Third</p>" });
+    cleanup.push(() => { editor.destroy(); element.remove(); });
+    editor.commands.setTextSelection({ from: 2, to: 10 });
+    expect([...editor.view.dom.querySelectorAll("[data-editor-selection]")].map(node => node.textContent)).toEqual(["First", "Second"]);
+    editor.commands.setTextSelection(17);
+    expect([...editor.view.dom.querySelectorAll("[data-editor-selection]")].map(node => node.textContent)).toEqual(["Third"]);
+    expect(editor.getHTML()).not.toContain("data-editor-selection");
+    expect(JSON.stringify(editor.getJSON())).not.toContain("data-editor-selection");
+  });
+
   it.each(["footnote", "endnote"] as const)("inserts a %s at the range end with an unused Word-compatible ID", (type) => {
     const element = document.createElement("div"); document.body.appendChild(element);
     const editor = new Editor({ element, extensions: [StarterKit, BlockAttrs, Footnote, Endnote, SpectraNotes], content: {

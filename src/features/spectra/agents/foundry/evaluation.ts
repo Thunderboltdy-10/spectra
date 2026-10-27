@@ -590,8 +590,9 @@ export function hasExternalTruth(entry: SkillEvaluationCase): boolean {
 }
 
 /**
- * Generates the deterministic contract cases implied by a skill's own
- * contracts. These run without a model and form the cheapest evaluation layer.
+ * Output contracts describe requirements, rather than literal output tokens.
+ * Use the existing judge for these; explicitly authored token checks remain
+ * deterministic in gradeDeterministically.
  */
 export function contractCasesForSkill(skill: SpectraSkill): SkillEvaluationCase[] {
   const cases: SkillEvaluationCase[] = [];
@@ -602,8 +603,9 @@ export function contractCasesForSkill(skill: SpectraSkill): SkillEvaluationCase[
       layer: "contract",
       input: skill.examples[0]?.input ?? skill.purpose,
       expectation: {
-        kind: "contains",
-        values: skill.outputContract.mustInclude,
+        kind: "judged",
+        criteria: `The response satisfies every output requirement below. Judge meaning and correctness, accepting equivalent wording and mathematical notation. Merely repeating a requirement is insufficient.\n${skill.outputContract.mustInclude.map((value) => `- ${value}`).join("\n")}`,
+        externalTruth: false,
       },
       required: true,
     });
@@ -615,8 +617,9 @@ export function contractCasesForSkill(skill: SpectraSkill): SkillEvaluationCase[
       layer: "contract",
       input: skill.examples[0]?.input ?? skill.purpose,
       expectation: {
-        kind: "excludes",
-        values: skill.outputContract.mustNotInclude,
+        kind: "judged",
+        criteria: `The response avoids every prohibited output or behavior below. Judge meaning, including paraphrases, rather than literal substring absence.\n${skill.outputContract.mustNotInclude.map((value) => `- ${value}`).join("\n")}`,
+        externalTruth: false,
       },
       required: true,
     });

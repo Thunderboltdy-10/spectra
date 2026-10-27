@@ -567,15 +567,29 @@ async function persistAcceptedMessages(document, entries) {
         }
         const native = isNativeArtifactDocument(canonical);
         const beforeModel = native ? null : artifactModelState(canonical);
+        let publicationChanged = false;
         const prepared = prepareCanonicalAppend({
           document: canonical, stored: refreshed.stored, update,
           projection: doc => artifactProjection(doc, context.schemaVersion),
-          regions: (before, after) => native || isNativeArtifactDocument(canonical)
-            ? nativeChangedRegionIds(before ? JSON.parse(before) : null, after ? JSON.parse(after) : null)
-            : changedArtifactRegions(beforeModel, artifactModelState(canonical)),
+          regions: (before, after) => {
+            if (!native && !isNativeArtifactDocument(canonical)) {
+              const afterModel = artifactModelState(canonical);
+              const changed = changedArtifactRegions(beforeModel, afterModel);
+              publicationChanged = afterModel.metadata.some(([key, value]) => key === "typeKey" && value === "quiz") &&
+                changed.some(region => region === "quiz:published" || region === "artifact:structure");
+              return changed;
+            }
+            const previous = before ? JSON.parse(before) : null;
+            const next = after ? JSON.parse(after) : null;
+            publicationChanged = next?.typeKey === "quiz" &&
+              (previous?.content?.published === true) !== (next.content?.published === true);
+            return nativeChangedRegionIds(previous, next);
+          },
         });
         if (!prepared.regionIds.length && isNativeArtifactDocument(canonical)) prepared.regionIds = [NATIVE_PROJECTION_REGION];
-        const immediateProjection = context.actorKind === "ai" || group.some(entry => entry.nativeInitialization);
+        // Publish/unpublish is a server-visible gate. Commit its projection in
+        // this same append, rather than waiting for the 30-second checkpoint.
+        const immediateProjection = publicationChanged || context.actorKind === "ai" || group.some(entry => entry.nativeInitialization);
         const projectionJson = immediateProjection ? prepared.projectionJson : null;
         const { frontierHash, projectionJson: _projection, ...cas } = prepared;
         return {

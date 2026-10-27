@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DisconnectDialog,
+  changedFields,
   humanizeIntegrationError,
   integrationConnectionMessage,
   ManifestDialog,
@@ -11,6 +12,17 @@ import {
 } from "../pages/managebac-integration-shell";
 
 afterEach(cleanup);
+
+describe("ManageBac conflict comparison", () => {
+  it("keeps changes beyond the displayed preview and ignores HTML rewrapping", () => {
+    const prefix = "A description with a long unchanged beginning. ".repeat(3);
+    const fields = changedFields({ description: prefix + "old ending" }, { description: prefix + "new ending" });
+    expect(fields).toHaveLength(1);
+    expect(fields[0].key).toBe("description");
+    expect(fields[0].before).toHaveLength(80);
+    expect(changedFields({ description: "<p>The same words</p>" }, { description: "<div>The same words</div>" })).toEqual([]);
+  });
+});
 
 function settings(busy = false, onClose = vi.fn()) {
   render(

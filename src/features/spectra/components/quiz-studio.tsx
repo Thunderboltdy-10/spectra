@@ -2,6 +2,7 @@
 
 import { useMissingAssets } from "./use-missing-assets";
 import { currentTimeMs } from "@/lib/unique-token";
+import { readConvexError } from "../../../../shared/convex-error.mjs";
 import {
   AlertCircle,
   BarChart3,
@@ -1210,7 +1211,7 @@ export function QuizStudio({
         try {
           return await startSpectraQuizPractice({ artifactId, clientAttemptId });
         } catch (error) {
-          const publishing = error instanceof Error && error.message.includes("QUIZ_PRACTICE_NOT_PUBLISHED");
+          const publishing = readConvexError(error).code === "QUIZ_PRACTICE_NOT_PUBLISHED";
           if (!publishing || !latestQuizRef.current.published) throw error;
           if (tries >= 4) throw new Error("QUIZ_PRACTICE_STILL_PUBLISHING");
           await new Promise((resolve) => window.setTimeout(resolve, 1_000 + tries * 750));
@@ -1224,6 +1225,7 @@ export function QuizStudio({
         ...current.filter((item) => item.attemptId !== started.attemptId),
       ]);
     } catch (error) {
+      setView("preview");
       setPracticeError(
         quizPracticeErrorMessage(
           error,

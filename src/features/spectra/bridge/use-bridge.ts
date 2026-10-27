@@ -94,7 +94,9 @@ export function useBridgeHealth() {
     if (cached) setStatus({ ...cached, paired: false, cloudConnected: false });
     const unpair = () =>
       setStatus((previous) =>
-        previous ? { ...previous, paired: false, cloudConnected: false } : null,
+        previous && loadBridgeStatusCache()
+          ? { ...previous, paired: false, cloudConnected: false }
+          : null,
       );
     const schedule = () => {
       if (timer !== null) window.clearTimeout(timer);
@@ -179,11 +181,7 @@ export function useBridgeHealth() {
       clearBridgeSession();
       clearBridgeStatusCache();
       disableBridgeDiscovery();
-      setStatus((previous) =>
-        previous
-          ? { ...previous, paired: false, cloudConnected: false }
-          : null,
-      );
+      setStatus(null);
     },
     /** An explicit check now, which also resets the backoff. */
     refresh: () => checkRef.current(true),

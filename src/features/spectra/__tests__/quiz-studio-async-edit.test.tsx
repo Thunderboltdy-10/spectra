@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuizStudio } from "../components/quiz-studio";
+import { startSpectraQuizPractice } from "../data/api";
 import {
   StudioContractProvider,
   type StudioContract,
@@ -14,6 +15,8 @@ let finishUpload: ((value: { assetId: string }) => void) | undefined;
 vi.mock("../data/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../data/api")>()),
   getArtifactAssets: vi.fn(async () => ({ assets: [] })),
+  getSpectraQuizPracticeAttempts: vi.fn(async () => ({ attempts: [] })),
+  startSpectraQuizPractice: vi.fn(),
   uploadArtifactAsset: vi.fn(
     () =>
       new Promise<{ assetId: string }>((resolve) => {
@@ -70,8 +73,8 @@ const question = (id: string, prompt: string) => ({
 const initialQuiz = { questions: [question("q1", "One"), question("q2", "Two")] };
 
 type Harness = { content: { questions: Question[] }; setContent: (next: unknown) => void };
-function Host({ harness }: { harness: Harness }) {
-  const [content, setContent] = useState<unknown>(initialQuiz);
+function Host({ harness, published = false }: { harness: Harness; published?: boolean }) {
+  const [content, setContent] = useState<unknown>({ ...initialQuiz, published });
   harness.content = content as Harness["content"];
   harness.setContent = setContent;
   return (
@@ -82,6 +85,7 @@ function Host({ harness }: { harness: Harness }) {
 }
 
 beforeEach(() => {
+  vi.mocked(startSpectraQuizPractice).mockReset();
   class ResizeObserverStub {
     observe() {}
     unobserve() {}
@@ -95,6 +99,34 @@ afterEach(() => {
 });
 
 describe("quiz edits that finish after an upload", () => {
+  it("retries a worded publication refusal with the same attempt identity", async () => {
+    vi.mocked(startSpectraQuizPractice)
+      .mockRejectedValueOnce(Object.assign(new Error("This quiz is still publishing."), {
+        data: { code: "QUIZ_PRACTICE_NOT_PUBLISHED", message: "This quiz is still publishing." },
+      }))
+      .mockResolvedValueOnce({
+        attemptId: "attempt-1", artifactId: "quiz-1", contentHash: "saved",
+        status: "in_progress", questions: [], responses: {}, startedAt: Date.now(),
+      });
+    const harness = { setContent: () => {} } as unknown as Harness;
+    const view = render(<Host harness={harness} published />);
+    fireEvent.click(view.getByRole("button", { name: /^Attempt$/ }));
+    await waitFor(() => expect(startSpectraQuizPractice).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    expect(vi.mocked(startSpectraQuizPractice).mock.calls[0]).toEqual(
+      vi.mocked(startSpectraQuizPractice).mock.calls[1],
+    );
+    await waitFor(() => expect(view.getByText("Your attempt", { exact: true })).toBeTruthy());
+  });
+
+  it("shows a failed start on the surface reached from Attempt", async () => {
+    vi.mocked(startSpectraQuizPractice).mockRejectedValue(new Error("The practice service is unavailable."));
+    const harness = { setContent: () => {} } as unknown as Harness;
+    const view = render(<Host harness={harness} published />);
+    fireEvent.click(view.getByRole("button", { name: /^Attempt$/ }));
+    await waitFor(() => expect(view.getByText("The practice service is unavailable.")).toBeTruthy());
+    expect(startSpectraQuizPractice).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps a collaborator's edit made while a question image uploads", async () => {
     const harness = { setContent: () => {} } as unknown as Harness;
     render(<Host harness={harness} />);

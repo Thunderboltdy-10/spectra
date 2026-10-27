@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BRIDGE_DISCOVERY_STORAGE_KEY,
   BRIDGE_SESSION_STORAGE_KEY,
+  BRIDGE_STATUS_CACHE_KEY,
   bridgeDiscoveryDelay,
   bridgeDiscoveryEnabled,
   bridgeReachabilityCopy,
@@ -33,6 +34,37 @@ afterEach(() => {
 });
 
 describe("Bridge discovery gate (LV-012)", () => {
+  it("drops remembered local identity after Bridge refuses the browser session", async () => {
+    window.localStorage.setItem(BRIDGE_DISCOVERY_STORAGE_KEY, "enabled");
+    window.localStorage.setItem(BRIDGE_SESSION_STORAGE_KEY, "expired-session");
+    window.localStorage.setItem(BRIDGE_STATUS_CACHE_KEY, JSON.stringify({
+      version: "0.1.0", protocolVersion: "1.0", paired: true, cloudConnected: true,
+      deviceId: "old-device", deviceName: "Old computer", mounts: [{
+        id: "old-folder", label: "Old folder", state: "active", detail: "Up to date",
+      }],
+    }));
+    vi.stubGlobal("fetch", vi.fn(async (url) => String(url).endsWith("/v1/health")
+      ? Response.json({ version: "0.1.0", paired: true, protocolVersion: "1.0" })
+      : new Response("Expired session", { status: 401 })));
+    const { result } = renderHook(() => useBridgeHealth());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(window.localStorage.getItem(BRIDGE_STATUS_CACHE_KEY)).toBeNull();
+    expect(result.current.status).toBeNull();
+    expect(result.current.reachability).toBe("running");
+  });
+
+  it("preserves a remembered computer while Bridge is temporarily unreachable", async () => {
+    window.localStorage.setItem(BRIDGE_DISCOVERY_STORAGE_KEY, "enabled");
+    window.localStorage.setItem(BRIDGE_SESSION_STORAGE_KEY, "valid-session");
+    window.localStorage.setItem(BRIDGE_STATUS_CACHE_KEY, JSON.stringify({
+      version: "0.1.0", protocolVersion: "1.0", paired: true, cloudConnected: true,
+      deviceId: "remembered-device", deviceName: "My computer", mounts: [],
+    }));
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    const { result } = renderHook(() => useBridgeHealth());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current.status).toMatchObject({ deviceId: "remembered-device", paired: false });
+  });
   it("waits until discovery is enabled", async () => {
     const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
     vi.stubGlobal("fetch", fetchMock);

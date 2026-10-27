@@ -130,6 +130,16 @@
   color: var(--text-tertiary);
 }
 
+@media (max-width: 640px) {
+  .device-card-foot {
+    flex-wrap: wrap;
+  }
+
+  .device-card-foot > span {
+    flex-basis: 100%;
+  }
+}
+
 /* A folder: a tab in its ink above a body with its name, where it lives on
    the computer and how its sync is going. */
 .device-folders {

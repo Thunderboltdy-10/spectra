@@ -12,6 +12,7 @@ describe("withRouteErrorHandling", () => {
     ["CALENDAR_TASK_UNAVAILABLE: This task is no longer active.", 409],
     ["CALENDAR_TASK_PLAN_MISMATCH: This plan belongs to a different task.", 409],
     ["CALENDAR_SOURCE_LOCKED: Official school records cannot be removed here.", 409],
+    ["QUIZ_PRACTICE_NOT_PUBLISHED: This quiz is still publishing. Try again in a moment.", 409],
   ])("answers a coded, worded domain refusal %s as a client error", async (message, status) => {
     const response = await withRouteErrorHandling(async () => {
       throw new Error(message);

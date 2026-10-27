@@ -2,6 +2,8 @@
 
 Branch: `launch-readiness-audit`. Baseline: `5f7865c8` (`Improved landing page`, no co-author).
 
+**Follow-up:** the owner subsequently repaired and expanded the app. Read [the deeper review against baseline 12186235](2026-10-27-DEEP-REVIEW.md) for revalidated failures, fixes and current handoff evidence. This original ledger remains historical; its findings are not all independently revalidated by the follow-up.
+
 This is an execution ledger, not a launch certification. **Do not launch on the strength of the passing automated suite: FLOW-001 and FLOW-011 reproduce document content corruption.** Other unresolved sync, publication, access and onboarding failures are listed below. Routine screenshots were inspected in memory; retained screenshots are evidence for fixes and follow-up findings. Larger changes were deferred as requested. The subsequently requested individual/multi-file sync feature is implemented separately and described in [FILE-SELECTION-SYNC.md](2026-10-27-FILE-SELECTION-SYNC.md).
 
 ## Environments and precautions

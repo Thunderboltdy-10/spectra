@@ -82,13 +82,12 @@ async function openInvite(email: string) {
 }
 
 describe("School admin People", () => {
-  it("titles the page on one line and keeps the school context in a Side panel on Overview", async () => {
+  it("titles the page on one line and opens People from Overview", async () => {
     navigation.tab = "overview";
     render(<SchoolAdminShell />);
     expect(await screen.findByRole("heading", { level: 1, name: "School admin" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
-    expect(screen.getByRole("complementary", { name: "School context" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Member roles" }));
+    fireEvent.click(screen.getByRole("button", { name: /^People$/ }));
     expect(navigation.replace).toHaveBeenCalledWith(expect.stringContaining("tab=people"), { scroll: false });
   });
 
@@ -185,10 +184,10 @@ describe("School admin refresh", () => {
       return {};
     });
     render(<SchoolAdminShell />);
-    expect(await screen.findByText("membership")).toBeTruthy();
+    expect(await screen.findByText("Member")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => expect(auditLoads).toBe(2));
-    expect(screen.getByText("membership")).toBeTruthy();
+    expect(screen.getByText("Member")).toBeTruthy();
     expect(screen.queryByText("Loading audit events")).toBeNull();
   });
 });

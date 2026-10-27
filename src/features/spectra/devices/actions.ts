@@ -5,6 +5,7 @@
  */
 export const LOCAL_DEVICE_ACTIONS = [
   "add_folder",
+  "add_files",
   "retry_folder",
   "pause_folder",
   "resume_folder",

@@ -2337,6 +2337,8 @@ export default defineSchema({
     accountId: v.id("accounts"),
     deviceId: v.id("bridgeDevices"),
     rootLabel: v.string(),
+    // A basename only. Absolute paths remain on the device.
+    selectedFile: v.optional(v.string()),
     grantId: v.string(),
     rootKey: v.optional(v.string()),
     rootOrgNodeId: v.optional(v.id("orgNodes")),

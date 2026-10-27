@@ -341,11 +341,14 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
         };
       }
       case "app.devices.add-folder":
+      case "app.devices.add-files":
       case "app.devices.pause": {
         const paused = typeof params.paused === "boolean" ? params.paused : !loadBridgeStatusCache()?.paused;
         const outcome = await runLocalDeviceAction(
           commandId === "app.devices.add-folder"
             ? { action: "add_folder" }
+            : commandId === "app.devices.add-files"
+              ? { action: "add_files" }
             : { action: paused ? "pause_syncing" : "resume_syncing" },
         );
         return fromHandler(commandId, "mutate", outcome.message, outcome);

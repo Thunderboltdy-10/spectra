@@ -54,6 +54,16 @@ const nextHash = payloadHash("next");
 const bridgeCredential = "bridge-test-credential-000000000001";
 
 describe("reactive work metadata availability", () => {
+  it("cannot create a new file in a file-only grant while retaining the existing replica", async () => {
+    const t = setupTest();
+    const fixture = await seedWork(t);
+    await t.run(ctx => ctx.db.patch(fixture.mountId, { selectedFile: "Truth.docx", rootLabel: "Truth.docx" }));
+    const user = t.withIdentity(identity);
+    const args = { workId: fixture.workId, mountId: fixture.mountId, relativePath: "Truth.docx", payloadRef: String(fixture.basePayloadId), contentHash: baseHash, nativeFormat: "docx", fidelityMap: {} };
+    await expect(user.mutation(api.replicas.createLocalReplica, { ...args, relativePath: "Private.docx" })).rejects.toThrow("Choose a synced folder");
+    expect(await user.mutation(api.replicas.createLocalReplica, args)).toMatchObject({ state: "existing", replicaId: fixture.localId });
+    expect(await t.run(ctx => ctx.db.query("bridgeWriteRequests").collect())).toEqual([]);
+  });
   it("reports unavailable metadata after an open work is permanently deleted", async () => {
     const t = setupTest();
     const fixture = await seedWork(t);

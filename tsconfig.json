@@ -29,11 +29,14 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    "**/*.mts"
+    "**/*.mts",
+    ".next/instances/*/types/**/*.ts",
+    ".next/instances/*/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
     "ai-education-workspace-landing-page",
-    ".next/dev/types"
+    ".next/dev/types",
+    ".next/instances/*/dev/types"
   ]
 }

@@ -4,7 +4,7 @@ import { internalMutation, mutation } from "./orgNodeMutation";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
-import { createFolderNode, placeSourceNode, purgeSourceNodes, trashNode, findPrimaryNode, moveNode, renameNode, restoreTrashedNode } from "./orgTreeShared";
+import { createFolderNode, placeSourceNode, purgeSourceNodes, trashNode, findPrimaryNode, moveNode, renameNode, restoreTrashedNode, ensureGeneralNode } from "./orgTreeShared";
 import { z } from "zod";
 import {
   activeReplicaWriteTarget,
@@ -130,6 +130,7 @@ async function mountRootFor(
   actor: { accountId: Id<"accounts">; schoolId: Id<"schools"> },
   rootLabel: string,
   rootKey: string,
+  selectedFile?: string,
 ): Promise<{ rootNodeId: Id<"orgNodes">; earlier?: Doc<"bridgeMounts"> }> {
   const retiredDevices = await ctx.db.query("bridgeDevices")
     .withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "revoked"))
@@ -139,10 +140,15 @@ async function mountRootFor(
       .withIndex("by_device_root_key", (q) => q.eq("deviceId", retired._id).eq("rootKey", rootKey))
       .unique();
     const root = earlier?.rootOrgNodeId ? await ctx.db.get(earlier.rootOrgNodeId) : null;
-    if (root && root.accountId === actor.accountId) {
+    if (root && root.accountId === actor.accountId && earlier?.selectedFile === selectedFile) {
       if (root.deletedAt !== undefined) await restoreTrashedNode(ctx, root);
       return { rootNodeId: root._id, earlier: earlier! };
     }
+  }
+  if (selectedFile) {
+    // Files share General; each mount still grants only its selected basename.
+    const { node } = await ensureGeneralNode(ctx, actor.accountId, actor.schoolId);
+    return { rootNodeId: node._id };
   }
   const classNode = matchClass(rootLabel, await classWorkspaceNodes(ctx, actor.accountId));
   const rootNode = await createFolderNode(ctx, { accountId: actor.accountId, schoolId: actor.schoolId, name: rootLabel, parentId: classNode?._id ?? null });
@@ -241,31 +247,34 @@ async function failWriteForMissingWork(
 }
 
 export const registerMount = mutation({
-  args: { credential: v.string(), rootLabel: v.string(), grantId: v.string(), rootKey: v.string(), scanId: v.string(), fileCount: v.number(), doubleSyncRisk: v.boolean(), ownerLockPaths: v.array(v.string()) },
+  args: { credential: v.string(), rootLabel: v.string(), selectedFile: v.optional(v.string()), grantId: v.string(), rootKey: v.string(), scanId: v.string(), fileCount: v.number(), doubleSyncRisk: v.boolean(), ownerLockPaths: v.array(v.string()) },
   handler: async (ctx, args) => {
     const { device, actor } = await requireDevice(ctx, args.credential);
     const input = z.object({
-      rootLabel: z.string().trim().min(1).max(120),
+      rootLabel: z.string().min(1).max(255),
+      selectedFile: z.string().min(1).max(255).refine((name) => !/[\\/:\u0000]/.test(name) && name !== "." && name !== ".." && !name.startsWith("~$")).optional(),
       grantId: z.string().regex(/^grant_[a-f0-9]+$/),
       rootKey: z.string().regex(/^[a-f0-9]{64}$/),
       fileCount: z.number().int().min(0).max(10_000_000),
       doubleSyncRisk: z.boolean(),
       scanId: z.string().uuid(),
       ownerLockPaths: z.array(z.string().min(1).max(1024)).max(500),
-    }).parse(args);
+    }).parse({ ...args, rootLabel: args.selectedFile ? args.rootLabel : args.rootLabel.trim() });
+    if (input.selectedFile && (input.fileCount > 1 || input.rootLabel !== input.selectedFile)) throw new Error("BRIDGE_FILE_SELECTION_INVALID");
     const byRootKey = await ctx.db.query("bridgeMounts").withIndex("by_device_root_key", (q) => q.eq("deviceId", device._id).eq("rootKey", input.rootKey)).unique();
     const [activeMounts, detachedMounts] = await Promise.all([
       ctx.db.query("bridgeMounts").withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "active")).take(500),
       ctx.db.query("bridgeMounts").withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "detached")).take(500),
     ]);
-    const sameLabelLegacy = [...activeMounts, ...detachedMounts].filter((mount) => mount.rootLabel === input.rootLabel && !mount.rootKey);
+    const sameLabelLegacy = [...activeMounts, ...detachedMounts].filter((mount) => mount.rootLabel === input.rootLabel && !mount.rootKey && mount.selectedFile === input.selectedFile);
     const byGrant = await ctx.db.query("bridgeMounts").withIndex("by_device_grant", (q) => q.eq("deviceId", device._id).eq("grantId", input.grantId)).unique();
     const existing = byRootKey ?? byGrant ?? (sameLabelLegacy.length === 1 ? sameLabelLegacy[0] : null);
     const now = Date.now();
     if (existing) {
+      if (existing.selectedFile !== input.selectedFile) throw new Error("BRIDGE_SELECTION_SCOPE_CHANGED");
       const existingRoot = existing.rootOrgNodeId ? await ctx.db.get(existing.rootOrgNodeId) : null;
       if (existingRoot?.deletedAt !== undefined) await restoreTrashedNode(ctx, existingRoot);
-      if (existingRoot && existing.state !== "active" && existingRoot.parentId === null) {
+      if (!input.selectedFile && existingRoot && existing.state !== "active" && existingRoot.parentId === null) {
         // A folder coming back (a reinstall, a re-pair) settles into its class
         // if it was left at the top level.
         const classNode = matchClass(input.rootLabel, await classWorkspaceNodes(ctx, actor.accountId));
@@ -309,8 +318,8 @@ export const registerMount = mutation({
       }
       return existing._id;
     }
-    const { rootNodeId, earlier } = await mountRootFor(ctx, actor, input.rootLabel, input.rootKey);
-    const mountId = await ctx.db.insert("bridgeMounts", { accountId: actor.accountId, deviceId: device._id, rootLabel: input.rootLabel, grantId: input.grantId, rootKey: input.rootKey, rootOrgNodeId: rootNodeId, state: "active", fileCount: input.fileCount, doubleSyncRisk: input.doubleSyncRisk, lastScanAt: now, lastScanId: input.scanId, createdAt: now, updatedAt: now });
+    const { rootNodeId, earlier } = await mountRootFor(ctx, actor, input.rootLabel, input.rootKey, input.selectedFile);
+    const mountId = await ctx.db.insert("bridgeMounts", { accountId: actor.accountId, deviceId: device._id, rootLabel: input.rootLabel, selectedFile: input.selectedFile, grantId: input.grantId, rootKey: input.rootKey, rootOrgNodeId: rootNodeId, state: "active", fileCount: input.fileCount, doubleSyncRisk: input.doubleSyncRisk, lastScanAt: now, lastScanId: input.scanId, createdAt: now, updatedAt: now });
     if (earlier) {
       // The earlier files move to this mount, so the scan finds each unchanged
       // file's work by its path instead of bringing it in a second time.
@@ -459,6 +468,7 @@ async function discoverResourceForMount(
   mount: Doc<"bridgeMounts"> & { rootOrgNodeId: Id<"orgNodes"> },
   input: z.infer<typeof discoveredResourceSchema>,
 ) {
+    if (mount.selectedFile && input.relativePath !== mount.selectedFile) throw new Error("BRIDGE_FILE_SELECTION_PATH_NOT_ALLOWED");
     const isOfficeOwnerLock = input.relativePath.replaceAll("\\", "/").split("/").pop()?.startsWith("~$") ?? false;
     if (isOfficeOwnerLock) {
       // A previous Bridge version could have projected an Office owner-lock
@@ -1791,7 +1801,7 @@ export const detachGrant = mutation({
     if (mount) {
       const now = Date.now();
       const rootNode = mount.rootOrgNodeId ? await ctx.db.get(mount.rootOrgNodeId) : null;
-      if (rootNode && rootNode.accountId === actor.accountId && rootNode.deletedAt === undefined) {
+      if (!mount.selectedFile && rootNode && rootNode.accountId === actor.accountId && rootNode.deletedAt === undefined) {
         await trashNode(ctx, rootNode);
       }
       const [replicas, pending, claimed] = await Promise.all([
@@ -1912,6 +1922,13 @@ export const reportChanges = mutation({
         continue;
       }
       const change = parsed.data;
+      if (mount.selectedFile && (
+        (change.relativePath !== undefined && change.relativePath !== mount.selectedFile) ||
+        (change.previousRelativePath !== undefined && change.previousRelativePath !== mount.selectedFile)
+      )) {
+        results.push({ journalId, state: "rejected", errorCode: "file-selection-path-not-allowed" });
+        continue;
+      }
       if (change.op === "locked") {
         const replicas = await ctx.db.query("workReplicas")
           .withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", change.resourceId))

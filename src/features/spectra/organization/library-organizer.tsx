@@ -439,7 +439,9 @@ function LibraryOrganizerContent({
       ? path!.node
       : null;
   const shelfable = inFolder && !searching;
-  const shelf = shelfable && filter === "all" && view === "shelf";
+  // Shelf cards have no name field. Use the existing row editor during a
+  // rename, then return to the reader's chosen view without changing it.
+  const shelf = shelfable && filter === "all" && view === "shelf" && renamingId === null;
 
   const picking = useMemo<WorkPicking | undefined>(
     () =>
@@ -1207,6 +1209,7 @@ function LibraryOrganizerContent({
               label: "Sync a computer folder",
               run: () => void folderSync.sync(),
             }}
+            onSyncFiles={{ label: "Sync computer files", run: () => void folderSync.syncFiles() }}
           />
           )}
           {onToggleSelect && location.kind !== "trash" ? (

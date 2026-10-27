@@ -67,6 +67,12 @@ function SignUpCard({ redirectUrl }: { redirectUrl?: string }) {
             <SignedInContinue to={redirectUrl} />
             <SignInConnectionState />
             <SignUp
+              signInUrl={authHrefForRedirect("/sign-in", redirectUrl)}
+              appearance={{ elements: {
+                rootBox: { width: "100%" },
+                cardBox: { width: "100%" },
+                card: { width: "100%" },
+              } }}
               fallbackRedirectUrl={redirectUrl || "/workspace"}
               forceRedirectUrl={redirectUrl || "/workspace"}
             />

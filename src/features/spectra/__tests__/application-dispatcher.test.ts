@@ -283,10 +283,12 @@ describe("application command dispatcher", () => {
     expect(devicePairing().takeWanted()).toBe(false);
 
     await expect(dispatch("app.devices.add-folder", {})).resolves.toMatchObject({ status: "completed", message: "ran add_folder" });
+    await expect(dispatch("app.devices.add-files", {})).resolves.toMatchObject({ status: "completed", message: "ran add_files" });
     await dispatch("app.devices.pause", { paused: true });
     await dispatch("app.devices.pause", { paused: false });
     expect(runLocalDeviceAction.mock.calls.map(([request]) => request.action)).toEqual([
       "add_folder",
+      "add_files",
       "pause_syncing",
       "resume_syncing",
     ]);

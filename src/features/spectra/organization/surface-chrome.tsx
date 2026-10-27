@@ -1,7 +1,7 @@
 "use client";
 
 import { SearchField } from "@/components/ui/search-field";
-import { type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { Loader2, FolderPlus, Laptop, Plus, SlidersHorizontal, X, ArrowDownUp, Columns3, Upload, MoreHorizontal, CheckSquare } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import {
@@ -279,6 +279,7 @@ export function SurfaceNewMenu({
   onNewWork,
   onImport,
   onSyncFolder,
+  onSyncFiles,
   label = "New",
   align = "end",
 }: {
@@ -292,9 +293,11 @@ export function SurfaceNewMenu({
   onImport?: () => void;
   /** Syncing a folder from this computer through Bridge, and what the row says. */
   onSyncFolder?: { label: string; run: () => void };
+  onSyncFiles?: { label: string; run: () => void };
   label?: string;
   align?: "start" | "end";
 }) {
+  const folderTakesFocus = useRef(false);
 
   /* Hover-only title failed live honesty on Recent/quick; keep title/aria and
      also show the reason as visible muted status text beside the control. */
@@ -342,6 +345,12 @@ export function SurfaceNewMenu({
       </span>
       <DropdownMenuContent
         align={align}
+        onCloseAutoFocus={(event) => {
+          // The new folder's name field owns focus, even if creation finishes
+          // before the menu's closing animation does.
+          if (folderTakesFocus.current) event.preventDefault();
+          folderTakesFocus.current = false;
+        }}
         className="w-[240px]"
         /* New lists every work type; the last rows sit over the live dock.
            dropdown (60) loses to composer-dock (120), so Whiteboard was a
@@ -350,7 +359,10 @@ export function SurfaceNewMenu({
         collisionPadding={{ bottom: 16 }}
       >
         {onNewFolder ? (
-          <DropdownMenuItem onSelect={onNewFolder}>
+          <DropdownMenuItem onSelect={() => {
+            folderTakesFocus.current = true;
+            onNewFolder();
+          }}>
             <FolderPlus className="size-3.5 text-[var(--text-tertiary)]" />
             New folder
           </DropdownMenuItem>
@@ -377,10 +389,16 @@ export function SurfaceNewMenu({
             {onSyncFolder.label}
           </DropdownMenuItem>
         ) : null}
-        {onNewFolder || onNewWorkspace || onImport || onSyncFolder ? (
+        {onSyncFiles ? (
+          <DropdownMenuItem onSelect={onSyncFiles.run}>
+            <Laptop className="size-3.5 text-[var(--text-tertiary)]" />
+            {onSyncFiles.label}
+          </DropdownMenuItem>
+        ) : null}
+        {onNewFolder || onNewWorkspace || onImport || onSyncFolder || onSyncFiles ? (
           <DropdownMenuSeparator />
         ) : null}
-        {onNewFolder || onNewWorkspace || onImport || onSyncFolder ? (
+        {onNewFolder || onNewWorkspace || onImport || onSyncFolder || onSyncFiles ? (
           <DropdownMenuLabel>New work here</DropdownMenuLabel>
         ) : null}
         {blueprintChoices.map((choice) => (

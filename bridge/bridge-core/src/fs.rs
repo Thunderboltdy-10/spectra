@@ -34,6 +34,8 @@ pub struct Grant {
     pub id: String,
     pub label: String,
     root: PathBuf,
+    // A file selection grants only this name, never its containing directory.
+    selected_file: Option<PathBuf>,
 }
 impl Grant {
     pub fn device_root(&self) -> &Path {
@@ -42,6 +44,23 @@ impl Grant {
 
     pub fn is_available(&self) -> bool {
         self.root.is_dir()
+    }
+
+    pub fn selected_file(&self) -> Option<&Path> {
+        self.selected_file.as_deref()
+    }
+
+    pub fn selection_path(&self) -> PathBuf {
+        self.selected_file
+            .as_ref()
+            .map_or_else(|| self.root.clone(), |name| self.root.join(name))
+    }
+
+    pub fn permits_path(&self, path: &Path) -> bool {
+        match &self.selected_file {
+            Some(name) => path == self.root.join(name),
+            None => path.starts_with(&self.root),
+        }
     }
 }
 
@@ -69,12 +88,26 @@ impl GrantRegistry {
         selected_root: &Path,
     ) -> Result<Grant, FsError> {
         let root = selected_root.canonicalize()?;
+        if !root.is_dir() {
+            return Err(FsError::Other(anyhow::anyhow!("Choose a folder to sync")));
+        }
+        if self
+            .grants
+            .read()
+            .unwrap()
+            .values()
+            .any(|grant| grant.selected_file.is_some() && grant.selection_path().starts_with(&root))
+        {
+            return Err(FsError::Other(anyhow::anyhow!(
+                "Stop syncing the individual files in this folder before adding the whole folder."
+            )));
+        }
         if let Some(existing) = self
             .grants
             .read()
             .unwrap()
             .values()
-            .find(|grant| grant.root == root)
+            .find(|grant| grant.root == root && grant.selected_file.is_none())
             .cloned()
         {
             return Ok(existing);
@@ -83,11 +116,107 @@ impl GrantRegistry {
             id: format!("grant_{}", uuid::Uuid::new_v4().simple()),
             label,
             root,
+            selected_file: None,
         };
         self.grants
             .write()
             .unwrap()
             .insert(grant.id.clone(), grant.clone());
+        Ok(grant)
+    }
+
+    pub fn add_native_file_selection(&self, selected: &Path) -> Result<Grant, FsError> {
+        let selected = selected.canonicalize()?;
+        if !selected.is_file() {
+            return Err(FsError::Other(anyhow::anyhow!("Choose a file to sync")));
+        }
+        if self
+            .grants
+            .read()
+            .unwrap()
+            .values()
+            .any(|grant| grant.selected_file.is_none() && selected.starts_with(&grant.root))
+        {
+            return Err(FsError::Other(anyhow::anyhow!(
+                "This file is already syncing through a selected folder."
+            )));
+        }
+        let root = selected.parent().ok_or(FsError::GrantEscape)?;
+        let name = selected.file_name().ok_or(FsError::GrantEscape)?;
+        self.restore_file_grant(
+            format!("grant_{}", uuid::Uuid::new_v4().simple()),
+            name.to_string_lossy().into_owned(),
+            root,
+            Path::new(name),
+        )
+    }
+
+    pub fn add_native_file_selections(&self, paths: &[PathBuf]) -> Result<Vec<Grant>, FsError> {
+        if paths.len() > 100 {
+            return Err(FsError::Other(anyhow::anyhow!(
+                "Choose up to 100 files at a time."
+            )));
+        }
+        // Validate the entire native selection before creating any grants.
+        let mut selected = std::collections::BTreeSet::new();
+        for path in paths {
+            let path = path.canonicalize()?;
+            if !path.is_file()
+                || crate::watcher::is_office_lock_file(&path)
+                || crate::watcher::is_bridge_staging_file(&path)
+            {
+                return Err(FsError::Other(anyhow::anyhow!(
+                    "Choose regular files, without Office lock or temporary files."
+                )));
+            }
+            if self
+                .grants
+                .read()
+                .unwrap()
+                .values()
+                .any(|grant| grant.selected_file.is_none() && path.starts_with(&grant.root))
+            {
+                return Err(FsError::Other(anyhow::anyhow!(
+                    "A selected file is already syncing through a folder. Choose files outside that folder."
+                )));
+            }
+            selected.insert(path);
+        }
+        selected
+            .iter()
+            .map(|path| self.add_native_file_selection(path))
+            .collect()
+    }
+
+    pub fn restore_file_grant(
+        &self,
+        id: String,
+        label: String,
+        root: &Path,
+        name: &Path,
+    ) -> Result<Grant, FsError> {
+        if name.components().count() != 1
+            || !matches!(name.components().next(), Some(Component::Normal(_)))
+            || looks_like_windows_absolute(name)
+            || name.to_string_lossy().contains(['/', '\\'])
+        {
+            return Err(FsError::GrantEscape);
+        }
+        let root = root.canonicalize().unwrap_or_else(|_| root.to_owned());
+        let mut grants = self.grants.write().unwrap();
+        if let Some(existing) = grants
+            .values()
+            .find(|grant| grant.root == root && grant.selected_file.as_deref() == Some(name))
+        {
+            return Ok(existing.clone());
+        }
+        let grant = Grant {
+            id,
+            label,
+            root,
+            selected_file: Some(name.to_owned()),
+        };
+        grants.insert(grant.id.clone(), grant.clone());
         Ok(grant)
     }
 
@@ -103,7 +232,7 @@ impl GrantRegistry {
             .read()
             .unwrap()
             .values()
-            .find(|grant| grant.root == normalized_root)
+            .find(|grant| grant.root == normalized_root && grant.selected_file.is_none())
             .cloned()
         {
             return Ok(existing);
@@ -115,6 +244,7 @@ impl GrantRegistry {
             // provider mount is offline. Dropping it here makes the folder
             // disappear from Spectra and forces an unnecessary re-selection.
             root: normalized_root,
+            selected_file: None,
         };
         self.grants
             .write()
@@ -158,6 +288,13 @@ impl GrantRegistry {
         }
         let grants = self.grants.read().unwrap();
         let grant = grants.get(grant_id).ok_or(FsError::GrantNotFound)?;
+        if grant
+            .selected_file
+            .as_deref()
+            .is_some_and(|name| relative != name)
+        {
+            return Err(FsError::GrantEscape);
+        }
         let candidate = grant.root.join(relative);
         let canonical = if candidate.exists() {
             candidate.canonicalize()?
@@ -174,7 +311,7 @@ impl GrantRegistry {
             }
             canonical
         };
-        if !canonical.starts_with(&grant.root) {
+        if !grant.permits_path(&canonical) {
             return Err(FsError::GrantEscape);
         }
         Ok(canonical)
@@ -674,6 +811,163 @@ mod tests {
         fn enable_autostart(&self) -> anyhow::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn individual_selection_never_authorizes_siblings_and_survives_replacement() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("chosen.txt");
+        fs::write(&file, b"chosen").unwrap();
+        fs::write(dir.path().join("private.txt"), b"private").unwrap();
+        let grants = GrantRegistry::default();
+        let grant = grants.add_native_file_selection(&file).unwrap();
+        assert_eq!(
+            grants.resolve(&grant.id, Path::new("chosen.txt")).unwrap(),
+            file.canonicalize().unwrap()
+        );
+        for denied in [
+            "private.txt",
+            "new.txt",
+            "../chosen.txt",
+            "sub/chosen.txt",
+            "",
+        ] {
+            assert!(matches!(
+                grants.resolve(&grant.id, Path::new(denied)),
+                Err(FsError::GrantEscape)
+            ));
+        }
+        assert_eq!(
+            grants.add_native_file_selection(&file).unwrap().id,
+            grant.id
+        );
+        fs::remove_file(&file).unwrap();
+        assert!(grant.is_available());
+        assert!(grants.resolve(&grant.id, Path::new("chosen.txt")).is_ok());
+        fs::write(&file, b"replacement").unwrap();
+        assert!(grants.resolve(&grant.id, Path::new("chosen.txt")).is_ok());
+        assert!(
+            grants
+                .add_native_selection("Parent".into(), dir.path())
+                .is_err()
+        );
+        let restored = GrantRegistry::default()
+            .restore_file_grant(
+                grant.id.clone(),
+                grant.label.clone(),
+                dir.path(),
+                Path::new("chosen.txt"),
+            )
+            .unwrap();
+        assert_eq!(restored.id, grant.id);
+        assert!(!restored.permits_path(&dir.path().join("private.txt")));
+    }
+
+    #[test]
+    fn multiselect_is_deduplicated_bounded_and_validated_before_granting() {
+        let dir = tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        let b = dir.path().join("b.txt");
+        fs::write(&a, b"a").unwrap();
+        fs::write(&b, b"b").unwrap();
+        let grants = GrantRegistry::default();
+        assert!(
+            grants
+                .add_native_file_selections(&[a.clone(), dir.path().join("missing")])
+                .is_err()
+        );
+        assert!(grants.device_grants().is_empty());
+        assert!(
+            grants
+                .add_native_file_selections(&vec![a.clone(); 101])
+                .is_err()
+        );
+        let first = grants
+            .add_native_file_selections(&[a.clone(), b.clone(), a.clone()])
+            .unwrap();
+        assert_eq!(first.len(), 2);
+        assert_eq!(
+            grants
+                .add_native_file_selections(&[a.clone(), b])
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(grants.device_grants().len(), 2);
+        let folder_grants = GrantRegistry::default();
+        folder_grants
+            .add_native_selection("Folder".into(), dir.path())
+            .unwrap();
+        assert!(folder_grants.add_native_file_selections(&[a]).is_err());
+        assert_eq!(folder_grants.device_grants().len(), 1);
+    }
+
+    #[test]
+    fn persisted_file_scope_rejects_paths_and_keeps_missing_selection() {
+        let dir = tempdir().unwrap();
+        let grants = GrantRegistry::default();
+        for name in ["../x", "sub/x", "sub\\x", "C:\\x", ".", ""] {
+            assert!(
+                grants
+                    .restore_file_grant(
+                        "grant_a".into(),
+                        "Test".into(),
+                        dir.path(),
+                        Path::new(name)
+                    )
+                    .is_err()
+            );
+        }
+        let grant = grants
+            .restore_file_grant(
+                "grant_saved".into(),
+                "Missing.txt".into(),
+                dir.path(),
+                Path::new("Missing.txt"),
+            )
+            .unwrap();
+        assert_eq!(grant.id, "grant_saved");
+        assert!(grants.resolve(&grant.id, Path::new("Missing.txt")).is_ok());
+        assert!(grants.resolve(&grant.id, Path::new("other.txt")).is_err());
+    }
+
+    #[test]
+    fn isolated_file_write_uses_safe_replace_and_refuses_sibling_writes() {
+        let dir = tempdir().unwrap();
+        let chosen = dir.path().join("Chosen.txt");
+        let sibling = dir.path().join("Private.txt");
+        fs::write(&chosen, b"original").unwrap();
+        fs::write(&sibling, b"private").unwrap();
+        let grants = Arc::new(GrantRegistry::default());
+        let grant = grants.add_native_file_selection(&chosen).unwrap();
+        let writer = SafeWriter::new(
+            grants,
+            Arc::new(Journal::in_memory().unwrap()),
+            Arc::new(TestPlatform::default()),
+        );
+        let base = hex::encode(Sha256::digest(b"original"));
+        let target = hex::encode(Sha256::digest(b"updated"));
+        let write = |path, key| WriteRequest {
+            grant_id: &grant.id,
+            relative_path: path,
+            resource_id: "r",
+            base_revision: &base,
+            known_revision: &base,
+            bytes: b"updated",
+            expected_hash: &target,
+            idempotency_key: key,
+        };
+        assert!(matches!(
+            writer.write_with_readback(write(Path::new("Private.txt"), "denied")),
+            Err(FsError::GrantEscape)
+        ));
+        assert!(
+            writer
+                .write_with_readback(write(Path::new("Chosen.txt"), "selected"))
+                .is_ok()
+        );
+        assert_eq!(fs::read(chosen).unwrap(), b"updated");
+        assert_eq!(fs::read(sibling).unwrap(), b"private");
     }
 
     #[test]

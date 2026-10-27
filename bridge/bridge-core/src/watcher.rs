@@ -47,20 +47,39 @@ pub struct MountWatcher {
     _watcher: RecommendedWatcher,
     events: std::sync::mpsc::Receiver<notify::Result<Event>>,
     root: PathBuf,
+    selected_file: Option<PathBuf>,
     pub config: WatcherConfig,
 }
 
 impl MountWatcher {
     pub fn start(root: &Path, config: WatcherConfig) -> notify::Result<Self> {
+        Self::start_selection(root, None, config)
+    }
+
+    pub fn start_selection(
+        root: &Path,
+        selected_file: Option<&Path>,
+        config: WatcherConfig,
+    ) -> notify::Result<Self> {
         let (sender, events) = std::sync::mpsc::channel();
         let mut watcher = notify::recommended_watcher(move |event| {
             let _ = sender.send(event);
         })?;
-        watcher.watch(root, RecursiveMode::Recursive)?;
+        // Watch the parent for atomic replacements; only the selected file's
+        // events are admitted below. Never walk or read its siblings.
+        watcher.watch(
+            root,
+            if selected_file.is_some() {
+                RecursiveMode::NonRecursive
+            } else {
+                RecursiveMode::Recursive
+            },
+        )?;
         Ok(Self {
             _watcher: watcher,
             events,
             root: root.to_owned(),
+            selected_file: selected_file.map(Path::to_owned),
             config,
         })
     }
@@ -81,10 +100,46 @@ impl MountWatcher {
                 }),
             }
         }
-        let mut batch = classify_changed_paths(&self.root, paths);
+        let mut batch = classify_selected_changes(&self.root, self.selected_file.as_deref(), paths);
         batch.failures.extend(errors);
         batch
     }
+}
+
+pub fn classify_selected_changes(
+    root: &Path,
+    selected_file: Option<&Path>,
+    paths: impl IntoIterator<Item = PathBuf>,
+) -> ChangeBatch {
+    let selected = selected_file.map(|name| root.join(name));
+    if let Some(path) = &selected {
+        if std::fs::symlink_metadata(path)
+            .is_ok_and(|metadata| metadata.is_dir() || metadata.file_type().is_symlink())
+        {
+            return ChangeBatch {
+                existing_files: Vec::new(),
+                missing_paths: Vec::new(),
+                failures: vec![ScanFailure {
+                    relative_path: relative_key(root, path),
+                    reason: "The selected file was replaced by a directory or link.".into(),
+                }],
+            };
+        }
+    }
+    let mut batch = classify_changed_paths(
+        root,
+        paths.into_iter().filter(|path| {
+            selected.as_ref().is_none_or(|selected| {
+                path == selected
+                    || (is_office_lock_file(path) && office_lock_targets(path).contains(selected))
+            })
+        }),
+    );
+    if let Some(selected) = selected {
+        batch.existing_files.retain(|path| path == &selected);
+        batch.missing_paths.retain(|path| path == &selected);
+    }
+    batch
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -224,7 +279,49 @@ pub fn scan_page<P: Platform>(
 /// resulting resources to the cloud; repeating the filesystem walk for every
 /// cloud page would turn a 10k-file mount into quadratic local work.
 pub fn scan_mount<P: Platform>(platform: &P, root: &Path) -> anyhow::Result<ScanPage> {
-    let mut paths = WalkDir::new(root)
+    scan_selection(platform, root, None)
+}
+
+pub fn scan_selection<P: Platform>(
+    platform: &P,
+    root: &Path,
+    selected_file: Option<&Path>,
+) -> anyhow::Result<ScanPage> {
+    let selection = selected_file.map_or_else(|| root.to_owned(), |name| root.join(name));
+    if selected_file.is_some() {
+        let name = selected_file.unwrap();
+        anyhow::ensure!(
+            name.components().count() == 1
+                && matches!(
+                    name.components().next(),
+                    Some(std::path::Component::Normal(_))
+                )
+                && !name.to_string_lossy().contains(['/', '\\']),
+            "A file selection must be one file name."
+        );
+        // A deleted selection is an empty complete scan, so reconciliation
+        // marks it missing. A symlink replacement must not grant a sibling.
+        match std::fs::symlink_metadata(&selection) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(ScanPage {
+                    entries: Vec::new(),
+                    failures: Vec::new(),
+                    next_cursor: None,
+                    online_only: 0,
+                });
+            }
+            Err(error) => return Err(error.into()),
+            Ok(metadata) => anyhow::ensure!(
+                metadata.is_file() && !metadata.file_type().is_symlink(),
+                "The selected file was replaced by a directory or link."
+            ),
+        }
+        anyhow::ensure!(
+            selection.canonicalize()? == root.canonicalize()?.join(selected_file.unwrap()),
+            "Selected file escaped its grant"
+        );
+    }
+    let mut paths = WalkDir::new(&selection)
         .follow_links(false)
         .into_iter()
         .filter_map(|entry| match entry {
@@ -373,7 +470,7 @@ pub fn is_office_lock_file(path: &Path) -> bool {
         .is_some_and(|name| name.starts_with("~$"))
 }
 
-fn is_bridge_staging_file(path: &Path) -> bool {
+pub(crate) fn is_bridge_staging_file(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .and_then(|name| name.strip_prefix(".spectra-op_"))
@@ -772,6 +869,57 @@ mod tests {
         fn enable_autostart(&self) -> anyhow::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn isolated_scan_and_events_exclude_siblings_and_handle_atomic_saves() {
+        let dir = tempdir().unwrap();
+        let chosen = dir.path().join("Chosen.docx");
+        let sibling = dir.path().join("Private.docx");
+        std::fs::write(&chosen, b"chosen").unwrap();
+        std::fs::write(&sibling, b"private").unwrap();
+        let scan =
+            scan_selection(&TestPlatform, dir.path(), Some(Path::new("Chosen.docx"))).unwrap();
+        assert_eq!(scan.entries.len(), 1);
+        assert_eq!(scan.entries[0].relative_path, "Chosen.docx");
+        assert!(scan.failures.is_empty());
+        let batch = classify_selected_changes(
+            dir.path(),
+            Some(Path::new("Chosen.docx")),
+            vec![chosen.clone(), sibling.clone()],
+        );
+        assert_eq!(batch.existing_files, vec![chosen.clone()]);
+        std::fs::remove_file(&chosen).unwrap();
+        assert!(
+            scan_selection(&TestPlatform, dir.path(), Some(Path::new("Chosen.docx")))
+                .unwrap()
+                .entries
+                .is_empty()
+        );
+        std::fs::write(&chosen, b"replacement").unwrap();
+        assert_eq!(
+            scan_selection(&TestPlatform, dir.path(), Some(Path::new("Chosen.docx")))
+                .unwrap()
+                .entries
+                .len(),
+            1
+        );
+        assert!(
+            scan_selection(
+                &TestPlatform,
+                dir.path(),
+                Some(Path::new("../Private.docx"))
+            )
+            .is_err()
+        );
+        std::fs::remove_file(&chosen).unwrap();
+        std::fs::create_dir(&chosen).unwrap();
+        std::fs::write(chosen.join("not-authorized.txt"), b"private").unwrap();
+        assert!(scan_selection(&TestPlatform, dir.path(), Some(Path::new("Chosen.docx"))).is_err());
+        let replaced =
+            classify_selected_changes(dir.path(), Some(Path::new("Chosen.docx")), vec![chosen]);
+        assert!(replaced.existing_files.is_empty());
+        assert_eq!(replaced.failures.len(), 1);
     }
 
     #[test]

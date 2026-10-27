@@ -4,6 +4,7 @@ const bridge = vi.hoisted(() => ({
   status: null as { deviceId?: string; paused?: boolean } | null,
   calls: [] as string[],
   fail: false,
+  selected: 2,
 }));
 
 vi.mock("../../bridge/client", () => {
@@ -15,6 +16,7 @@ vi.mock("../../bridge/client", () => {
   return {
     loadBridgeStatusCache: () => bridge.status,
     selectBridgeFolder: call("select"),
+    selectBridgeFiles: async () => { bridge.calls.push("selectFiles"); return bridge.selected; },
     retryBridgeFolder: call("retry"),
     pauseBridgeFolder: call("pauseFolder"),
     removeBridgeFolder: call("remove"),
@@ -40,11 +42,22 @@ beforeEach(() => {
   bridge.status = { deviceId: "device-here", paused: false };
   bridge.calls = [];
   bridge.fail = false;
+  bridge.selected = 2;
   vi.stubGlobal("window", { localStorage: memoryStorage() });
 });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("device actions on this computer", () => {
+  it("reports selected files and treats picker cancellation as no change", async () => {
+    const changed = vi.fn();
+    const off = spectraBus.on("devices.changed", changed);
+    try {
+      await expect(runLocalDeviceAction({ action: "add_files" })).resolves.toMatchObject({ status: "completed", message: "2 selected files are syncing." });
+      bridge.selected = 0;
+      await expect(runLocalDeviceAction({ action: "add_files" })).resolves.toEqual({ status: "pending", message: "No files were selected." });
+      expect(changed).toHaveBeenCalledTimes(1);
+    } finally { off(); }
+  });
   it("runs each action through the local Bridge and tells Devices to refresh", async () => {
     const changed = vi.fn();
     const off = spectraBus.on("devices.changed", changed);

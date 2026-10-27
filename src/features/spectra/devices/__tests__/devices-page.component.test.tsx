@@ -133,6 +133,28 @@ afterEach(() => {
 });
 
 describe("Devices page", () => {
+  it("continues a Library file-selection request once after this computer connects", async () => {
+    window.history.replaceState(null, "", "/devices?connect=1&select=files");
+    h.local = bridge(false);
+    const view = render(<DevicesPage />);
+    await waitFor(() => expect(h.requestPairing).toHaveBeenCalled());
+    expect(h.runLocalDeviceAction).not.toHaveBeenCalled();
+    h.local = bridge(true);
+    view.rerender(<DevicesPage />);
+    await waitFor(() => expect(h.runLocalDeviceAction).toHaveBeenCalledWith({ action: "add_files" }));
+    view.rerender(<DevicesPage />);
+    expect(h.runLocalDeviceAction).toHaveBeenCalledTimes(1);
+    expect(window.location.search).toBe("");
+  });
+  it("offers native file selection and uses file-specific removal copy", async () => {
+    h.local = { ...bridge(true), status: status({ mounts: [{ ...status().mounts[0], label: "Essay.docx", selectionKind: "file", friendlyPath: "Documents › Essay.docx" }] }) };
+    render(<DevicesPage />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Add files" }).at(-1)!);
+    await waitFor(() => expect(h.runLocalDeviceAction).toHaveBeenCalledWith({ action: "add_files" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Essay.docx" }));
+    expect(screen.getByText("Stop using this file in Spectra?")).toBeTruthy();
+    expect(screen.getByText(/The file stays on this computer/)).toBeTruthy();
+  });
   it("shows one list of computers, this one marked, with its folder controls", async () => {
     render(<DevicesPage />);
     expect(screen.getByRole("heading", { name: "Your computers" })).toBeTruthy();
@@ -156,8 +178,8 @@ describe("Devices page", () => {
 
   it("says another computer's folders change on that computer", () => {
     render(<DevicesPage />);
-    expect(screen.getByRole("region", { name: "Folders on Desk PC" })).toBeTruthy();
-    expect(screen.getByText("Change these folders in Spectra on that computer.")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Files and folders on Desk PC" })).toBeTruthy();
+    expect(screen.getByText("Change what syncs in Spectra on that computer.")).toBeTruthy();
     const card = screen.getByRole("heading", { name: "Desk PC" }).closest("[data-device-row]") as HTMLElement;
     expect(within(card).queryByRole("button", { name: "Show logs" })).toBeNull();
   });
@@ -166,7 +188,9 @@ describe("Devices page", () => {
     h.local = bridge(false);
     h.cloud = { devices: [], mounts: [] };
     render(<DevicesPage />);
-    fireEvent.click(screen.getByRole("button", { name: "Connect this computer" }));
+    // A first-time browser leads with the download and an installed-Bridge
+    // shortcut. Both start the same native confirmation flow.
+    fireEvent.click(screen.getByRole("button", { name: "I already have it" }));
     expect(await screen.findByText("K7Q2")).toBeTruthy();
     expect(h.requestPairing).toHaveBeenCalledWith({ browserOrigin: "https://spectra.test" });
     pairingStatus = { paired: true, sessionToken: "token" };

@@ -32,7 +32,7 @@ use spectra_bridge_core::sync::{
 use spectra_bridge_core::watcher::{
     MountWatcher, ScanEntry, StabilityTracker, WatcherConfig, file_held_by_office,
     is_office_lock_file, is_online_only, office_lock_exists, office_lock_paths, relative_key,
-    reusable_hash, scan_mount, stable_file_snapshot,
+    reusable_hash, scan_selection, stable_file_snapshot,
 };
 use tauri::Manager;
 use tauri::menu::{Menu, MenuItem};
@@ -173,6 +173,7 @@ struct SpectraLocalControl {
     journal: Arc<Journal>,
     wake: PollWake,
     active_mount_syncs: ActiveMountSyncs,
+    selection_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// Everything the Devices page does on this computer arrives here through the
@@ -201,6 +202,9 @@ impl LocalBridgeControl for SpectraLocalControl {
     }
 
     async fn select_mount(&self) -> Result<(), String> {
+        let _selection = self.selection_gate.try_lock().map_err(|_| {
+            "Finish choosing files or a folder in the open picker first.".to_string()
+        })?;
         let result = select_mount_impl(
             &self.app,
             &self.grants,
@@ -210,6 +214,22 @@ impl LocalBridgeControl for SpectraLocalControl {
         )
         .await
         .map(|_| ());
+        refresh_tray(&self.app);
+        result
+    }
+
+    async fn select_files(&self) -> Result<usize, String> {
+        let _selection = self.selection_gate.try_lock().map_err(|_| {
+            "Finish choosing files or a folder in the open picker first.".to_string()
+        })?;
+        let result = select_files_impl(
+            &self.app,
+            &self.grants,
+            &self.journal,
+            &self.wake,
+            &self.active_mount_syncs,
+        )
+        .await;
         refresh_tray(&self.app);
         result
     }
@@ -463,6 +483,7 @@ fn control_snapshot(grants: &GrantRegistry, journal: &Journal) -> LocalControlSn
 fn forget_mount_config(journal: &Journal, grant_id: &str) -> Result<(), String> {
     for prefix in [
         "mount:",
+        "file-mount:",
         "mount_status:",
         "mount_double_sync:",
         "cloud_mount:",
@@ -1037,7 +1058,15 @@ fn mount_views(grants: &GrantRegistry, journal: &Journal) -> Vec<LocalMountStatu
                 base_detail.to_owned()
             };
             LocalMountStatus {
-                friendly_path: friendly_path(grant.device_root()),
+                friendly_path: friendly_path(&grant.selection_path()),
+                selection_kind: Some(
+                    if grant.selected_file().is_some() {
+                        "file"
+                    } else {
+                        "folder"
+                    }
+                    .into(),
+                ),
                 paused: flag(journal, &mount_paused_key(&grant.id)),
                 last_sync_at: read_ms(journal, &mount_synced_at_key(&grant.id)),
                 id: grant.id,
@@ -1187,7 +1216,7 @@ fn record_mount_repair_retry(journal: &Journal, grant_id: &str) -> Result<u64, S
 
 fn mount_root_key(grant: &Grant) -> String {
     let normalized = grant
-        .device_root()
+        .selection_path()
         .to_string_lossy()
         .trim_start_matches(r"\\?\")
         .replace('/', "\\")
@@ -1781,7 +1810,7 @@ async fn upload_discovered_resource(
     );
     let canonical = candidate.canonicalize()?;
     anyhow::ensure!(
-        canonical.starts_with(grant.device_root()),
+        grant.permits_path(&canonical),
         "payload path escaped its selected folder"
     );
     let mut snapshot = stable_file_snapshot(&canonical)?
@@ -1989,7 +2018,8 @@ fn scan_local_files(
     journal: &Journal,
     generation: u64,
 ) -> Result<LocalScan, String> {
-    let scan = scan_mount(&HostPlatform, grant.device_root()).map_err(|error| error.to_string())?;
+    let scan = scan_selection(&HostPlatform, grant.device_root(), grant.selected_file())
+        .map_err(|error| error.to_string())?;
     let mut local = LocalScan {
         complete: scan.failures.is_empty(),
         online_only: scan.online_only,
@@ -2268,7 +2298,11 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
     let generation = journal
         .next_generation(&grant.id)
         .map_err(|error| error.to_string())?;
-    let owner_lock_paths = office_lock_paths(grant.device_root(), 500);
+    let owner_lock_paths = if grant.selected_file().is_some() {
+        Vec::new()
+    } else {
+        office_lock_paths(grant.device_root(), 500)
+    };
     let scan_id = uuid::Uuid::new_v4().to_string();
     let LocalScan {
         files,
@@ -2312,6 +2346,7 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
         files.len(),
         double_sync_risk,
         &owner_lock_paths,
+        grant.selected_file().and_then(|name| name.to_str()),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -3265,9 +3300,12 @@ fn spawn_grant_watcher(
                 continue;
             }
             if watcher.is_none() && std::time::Instant::now() >= next_watcher_start {
-                watcher =
-                    MountWatcher::start(std::path::Path::new(grant.device_root()), config.clone())
-                        .ok();
+                watcher = MountWatcher::start_selection(
+                    grant.device_root(),
+                    grant.selected_file(),
+                    config.clone(),
+                )
+                .ok();
                 if watcher.is_none() {
                     watcher_start_attempts = watcher_start_attempts.saturating_add(1);
                     let delay_ms = bridge_mount_repair_delay_ms(
@@ -3360,6 +3398,15 @@ fn spawn_grant_watcher(
             let mut generation = None;
             let mut failed_paths: Vec<std::path::PathBuf> = Vec::new();
             for path in pending_files.clone() {
+                if grant.selected_file().is_some()
+                    && path
+                        .canonicalize()
+                        .is_ok_and(|canonical| !grant.permits_path(&canonical))
+                {
+                    pending_files.remove(&path);
+                    failed_paths.push(path);
+                    continue;
+                }
                 if !path.exists() {
                     pending_files.remove(&path);
                     pending_missing.entry(path).or_insert(observed_at);
@@ -3736,6 +3783,92 @@ async fn select_mount_impl(
     );
     wake.wake();
     Ok(Some((grant.id, label)))
+}
+
+fn persist_file_grant(journal: &Journal, grant: &Grant) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        grant.selected_file().is_some(),
+        "A file grant requires a selected file"
+    );
+    // Older binaries restore mount: keys only and must not see a parent grant.
+    journal.set_config(
+        &format!("file-mount:{}", grant.id),
+        &serde_json::json!({
+            "label": grant.label, "path": grant.device_root(), "selectedFile": grant.selected_file()
+        })
+        .to_string(),
+    )
+}
+
+async fn select_files_impl(
+    app: &tauri::AppHandle,
+    grants: &Arc<GrantRegistry>,
+    journal: &Arc<Journal>,
+    wake: &PollWake,
+    active_mount_syncs: &ActiveMountSyncs,
+) -> Result<usize, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog().file().pick_files(move |selection| {
+        let _ = tx.send(selection);
+    });
+    let Some(selection) = rx
+        .await
+        .map_err(|_| "File picker closed before returning a selection".to_string())?
+    else {
+        return Ok(0);
+    };
+    let paths = selection
+        .into_iter()
+        .map(|path| path.into_path().map_err(|error| error.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let existing = grants
+        .device_grants()
+        .into_iter()
+        .map(|grant| grant.id)
+        .collect::<HashSet<_>>();
+    let selected = grants
+        .add_native_file_selections(&paths)
+        .map_err(|error| error.to_string())?;
+    // Persist the whole selection before starting watchers. Failed persistence
+    // revokes only newly-created grants and leaves existing selections alone.
+    for grant in selected
+        .iter()
+        .filter(|grant| !existing.contains(&grant.id))
+    {
+        if let Err(error) = persist_file_grant(journal, grant) {
+            for added in selected
+                .iter()
+                .filter(|grant| !existing.contains(&grant.id))
+            {
+                grants.remove(&added.id);
+                let _ = journal.delete_config(&format!("file-mount:{}", added.id));
+            }
+            return Err(error.to_string());
+        }
+    }
+    for grant in &selected {
+        if existing.contains(&grant.id) {
+            retry_mount_impl(&grant.id, grants, journal, wake, active_mount_syncs).await?;
+        } else {
+            set_mount_status(
+                journal,
+                &grant.id,
+                "scanning",
+                "Reading selected file…",
+                0,
+                1,
+            )?;
+            spawn_grant_watcher(
+                grant.clone(),
+                grants.clone(),
+                journal.clone(),
+                wake.clone(),
+                active_mount_syncs.clone(),
+            );
+        }
+    }
+    wake.wake();
+    Ok(selected.len())
 }
 
 async fn retry_mount_impl(
@@ -4310,17 +4443,35 @@ fn main() {
             }
             app.manage(state.clone());
             let grants = Arc::new(GrantRegistry::default());
-            for (key, value) in journal.config_prefix("mount:")? {
+            let mut persisted_mounts = journal.config_prefix("mount:")?;
+            persisted_mounts.extend(journal.config_prefix("file-mount:")?);
+            for (key, value) in persisted_mounts {
                 if let Ok(config) = serde_json::from_str::<serde_json::Value>(&value) {
                     if let (Some(label), Some(path)) = (
                         config.get("label").and_then(|value| value.as_str()),
                         config.get("path").and_then(|value| value.as_str()),
                     ) {
-                        let _ = grants.restore_device_grant(
-                            key.trim_start_matches("mount:").to_owned(),
-                            label.to_owned(),
-                            std::path::Path::new(path),
-                        );
+                        let (scope, id) = key.split_once(':').expect("persisted grant prefix");
+                        let id = id.to_owned();
+                        if scope == "file-mount" {
+                            let Some(name) =
+                                config.get("selectedFile").and_then(|value| value.as_str())
+                            else {
+                                continue;
+                            };
+                            let _ = grants.restore_file_grant(
+                                id,
+                                label.to_owned(),
+                                std::path::Path::new(path),
+                                std::path::Path::new(name),
+                            );
+                        } else {
+                            let _ = grants.restore_device_grant(
+                                id,
+                                label.to_owned(),
+                                std::path::Path::new(path),
+                            );
+                        }
                     }
                 }
             }
@@ -4350,6 +4501,7 @@ fn main() {
                 journal: journal.clone(),
                 wake: sync_wake.clone(),
                 active_mount_syncs: active_mount_syncs.clone(),
+                selection_gate: Arc::new(tokio::sync::Mutex::new(())),
             }));
             for grant in restored_grants {
                 spawn_grant_watcher(
@@ -4441,6 +4593,7 @@ mod devices_tests {
         LocalMountStatus {
             id: format!("grant_{label}"),
             label: label.into(),
+            selection_kind: None,
             friendly_path: format!("Documents \u{203a} {label}"),
             state: state.into(),
             detail: String::new(),
@@ -4735,6 +4888,25 @@ mod devices_tests {
                 name: "Essay.docx".into()
             }]
         );
+    }
+
+    #[test]
+    fn file_grants_are_invisible_to_older_folder_restore_and_forgotten_on_removal() {
+        let journal = Journal::in_memory().unwrap();
+        let grants = GrantRegistry::default();
+        let dir = temp_folder("file-scope");
+        let file = dir.join("Chosen.docx");
+        std::fs::write(&file, b"chosen").unwrap();
+        let grant = grants.add_native_file_selection(&file).unwrap();
+        persist_file_grant(&journal, &grant).unwrap();
+        assert!(journal.config_prefix("mount:").unwrap().is_empty());
+        let saved = journal.config_prefix("file-mount:").unwrap();
+        assert_eq!(saved.len(), 1);
+        let config: serde_json::Value = serde_json::from_str(&saved[0].1).unwrap();
+        assert_eq!(config["selectedFile"], "Chosen.docx");
+        forget_mount_config(&journal, &grant.id).unwrap();
+        assert!(journal.config_prefix("file-mount:").unwrap().is_empty());
+        assert_eq!(std::fs::read(file).unwrap(), b"chosen");
     }
 
     #[test]

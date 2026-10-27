@@ -25,5 +25,12 @@ export function useFolderSync() {
     if (outcome.status === "failed") toast.error(outcome.message);
     else toast.success("The folder is syncing. Its files appear in your Library as they arrive.");
   }, [connected, router]);
-  return { connected, sync };
+  const syncFiles = useCallback(async () => {
+    if (!connected) return router.push(`${DEVICES_HREF}?connect=1&select=files`);
+    toast("Choose one or more files in the window that opened on your computer.");
+    const outcome = await runLocalDeviceAction({ action: "add_files" });
+    if (outcome.status === "failed") toast.error(outcome.message);
+    else if (outcome.status === "completed") toast.success(outcome.message);
+  }, [connected, router]);
+  return { connected, sync, syncFiles };
 }

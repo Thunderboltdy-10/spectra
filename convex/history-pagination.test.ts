@@ -173,8 +173,14 @@ describe("bounded history and exact retained detail", () => {
     await expect(list()).rejects.toThrow("AUTH_RESOURCE_FORBIDDEN");
     await expect(detail()).rejects.toThrow("AUTH_RESOURCE_FORBIDDEN");
     const grantId = await grantRead();
-    expect((await list()).versions).toHaveLength(1);
-    expect(await detail()).toMatchObject({ _id: versionId });
+    // A share authorizes the current work, not its author's private history.
+    expect(await list()).toEqual({ versions: [], continueCursor: null, isDone: true });
+    expect(await detail()).toBeNull();
+    expect((await owner.query(api.spectraArtifacts.listVersions, { artifactId: ids.artifactId })).versions).toHaveLength(1);
+    expect(await owner.query(api.spectraArtifacts.getVersion, { artifactId: ids.artifactId, versionId })).toMatchObject({ _id: versionId });
+    await t.run(ctx => ctx.db.patch(grantId, { level: "modify", capabilities: ["read", "modify"] }));
+    expect(await list()).toEqual({ versions: [], continueCursor: null, isDone: true });
+    expect(await detail()).toBeNull();
     const foreignArtifactId = await t.run(ctx => ctx.db.insert("spectraArtifacts", {
       ownerAccountId: ids.readerId, schoolId: ids.schoolId, blueprintKey: "document", title: "Other source", content: {}, textIndex: "", tags: [], status: "active", createdAt: ids.now, updatedAt: ids.now,
     }));
@@ -188,7 +194,7 @@ describe("bounded history and exact retained detail", () => {
     await expect(owner.query(api.spectraArtifacts.getVersion, { artifactId: ids.artifactId, versionId })).rejects.toThrow("AUTH_RESOURCE_FORBIDDEN");
   });
 
-  it("keeps quiz history hidden from read-only users and projects both timetable snapshots", async () => {
+  it("keeps history owner-only and projects both of the owner's timetable snapshots", async () => {
     const { t, ids, reader, owner, insertVersion, grantRead } = await fixture();
     await grantRead();
     const content = { timezone: "UTC", preferences: { secret: true }, layers: [
@@ -201,7 +207,8 @@ describe("bounded history and exact retained detail", () => {
     expect(await reader.query(api.spectraArtifacts.getVersion, { artifactId: ids.artifactId, versionId })).toBeNull();
     expect(await owner.query(api.spectraArtifacts.getVersion, { artifactId: ids.artifactId, versionId })).toMatchObject({ after: snapshot });
     await t.run(ctx => ctx.db.patch(ids.artifactId, { blueprintKey: "timetable" }));
-    const detail = await reader.query(api.spectraArtifacts.getVersion, { artifactId: ids.artifactId, versionId });
+    expect(await reader.query(api.spectraArtifacts.getVersion, { artifactId: ids.artifactId, versionId })).toBeNull();
+    const detail = await owner.query(api.spectraArtifacts.getVersion, { artifactId: ids.artifactId, versionId });
     for (const projected of [detail?.before, detail?.after]) {
       expect(projected).toMatchObject({ content: { timezone: "UTC", events: [{ id: "shared", layerId: "school" }] } });
       expect(JSON.stringify(projected)).not.toMatch(/preferences|privateNote|personal|overlay/);

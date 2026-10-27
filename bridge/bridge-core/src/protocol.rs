@@ -15,6 +15,8 @@ pub struct HealthResponse {
 pub struct LocalMountStatus {
     pub id: String,
     pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection_kind: Option<String>,
     /// The folder as a person names it: its parent and itself,
     /// "Documents › Biology". Built on this computer for the local page only.
     pub friendly_path: String,

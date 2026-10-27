@@ -58,7 +58,7 @@ describe("layering contract", () => {
 
   it("keeps global consent decisions above the composer dock", () => {
     const consentSource = readFileSync(COOKIE_CONSENT_PATH, "utf8");
-    expect(consentSource).toContain("bottom-4 z-toast");
+    expect(consentSource).toMatch(/className="[^"]*\bbottom-4\b[^"\n]*\bz-toast\b/);
     expect(consentSource).toContain('layer="toast"');
     expect(consentSource).toContain("<Dialog open={settingsOpen}");
     expect(consentSource).toContain("<DialogTrigger asChild>");

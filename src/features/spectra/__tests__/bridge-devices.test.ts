@@ -8,7 +8,7 @@ import {
 
 describe("Bridge on the Devices page", () => {
   it("keeps every Devices action a registered app command, with connecting asked first", () => {
-    for (const id of ["app.devices.open", "app.devices.pair", "app.devices.add-folder", "app.devices.pause"])
+    for (const id of ["app.devices.open", "app.devices.pair", "app.devices.add-folder", "app.devices.add-files", "app.devices.pause"])
       expect(appCommandById(id), id).toBeTruthy();
     expect(appCommandById("app.devices.pair")?.risk).toBe("confirm");
     for (const id of ["app.bridge.setup", "app.bridge.pair", "app.bridge.policy.change", "app.bridge.open-settings"])

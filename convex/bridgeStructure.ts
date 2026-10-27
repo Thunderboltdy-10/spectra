@@ -108,6 +108,7 @@ export async function enqueueStructureRequest(
   if (!mount || mount.state !== "active" || !device || device.state !== "active") return null;
   const policy = await computeEffectivePolicy(ctx, accountId, { account: String(accountId), mount: String(mount._id), item: String(workId) });
   let decision = decideStructureOperation(policy.structure, "spectra-to-disk");
+  if (mount.selectedFile && kind !== "delete") decision = "ignore";
   if (decision === "ask") {
     const remembered = await rememberedDecision(ctx, accountId, { nodeId, workId, mountId: mount._id }, "spectra-to-disk");
     if (remembered) decision = remembered.action;
@@ -131,7 +132,9 @@ export async function enqueueStructureRequest(
     state,
     explanation:
       state === "ignored"
-        ? "This policy keeps Spectra organization independent from the folder on disk."
+        ? mount.selectedFile
+          ? "This file was selected on its own. Its name and location on disk stay the same."
+          : "This policy keeps Spectra organization independent from the folder on disk."
         : kind === "delete"
           ? "Confirm moving 1 real file to the Recycle Bin. The Spectra item is already in Trash."
           : state === "approval-required"
@@ -167,6 +170,8 @@ export const request = mutation({
     if (!mount || mount.state !== "active" || !device || device.state !== "active") throw new Error("MOUNT_NOT_ACTIVE");
     const source = relativePath.parse(args.sourceRelativePath).replaceAll("\\", "/");
     const target = args.targetRelativePath === undefined ? undefined : relativePath.parse(args.targetRelativePath).replaceAll("\\", "/");
+    if (mount.selectedFile && (source !== mount.selectedFile || (target !== undefined && target !== mount.selectedFile)))
+      throw new Error("This file was selected on its own. Choose its folder to allow moving or renaming files on disk.");
     if ((args.kind === "move" || args.kind === "rename") && !target) throw new Error("STRUCTURE_TARGET_REQUIRED");
     const policy = await computeEffectivePolicy(ctx, actor.accountId, { account: String(actor.accountId), mount: String(mount._id), item: String(args.workId) });
     let decision = decideStructureOperation(policy.structure, "spectra-to-disk");

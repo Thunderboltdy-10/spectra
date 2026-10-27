@@ -33,6 +33,7 @@ const mountSchema = z
   .object({
     id: z.string(),
     label: z.string(),
+    selectionKind: z.enum(["file", "folder"]).optional(),
     state: z.string(),
     detail: z.string(),
     synced: z.number().optional().default(0),
@@ -532,6 +533,15 @@ export async function selectBridgeFolder() {
     method: "POST",
   }, BRIDGE_FOLDER_PICKER_TIMEOUT_MS);
   if (!response) throw new Error("Reconnect this device before selecting a folder.");
+}
+
+/** Native multi-select grants just the chosen files, without their folder. */
+export async function selectBridgeFiles() {
+  const response = await authorizedBridgeRequest("/v1/files/select", {
+    method: "POST",
+  }, BRIDGE_FOLDER_PICKER_TIMEOUT_MS);
+  if (!response) throw new Error("Reconnect this device before selecting files.");
+  return z.object({ selected: z.number().int().min(0).max(100) }).parse(await response.json()).selected;
 }
 
 export async function retryBridgeFolder(grantId: string) {

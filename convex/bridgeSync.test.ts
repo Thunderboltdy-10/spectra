@@ -8,9 +8,74 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { BRIDGE_CLAIM_REDRIVE_MS } from "../shared/replica-truth";
 import { syncRetryAt } from "../shared/sync-retry-policy";
 import { nativeOperationId, type NativeSaveReceipt } from "../shared/native-office-contract";
+import { enqueueStructureRequest } from "./bridgeStructure";
 
 const modules = import.meta.glob("./**/*.ts");
 const credential = "bridge-batch-test-credential-00000001";
+
+describe("individual file mounts", () => {
+  const selection = (overrides = {}) => ({
+    credential, rootLabel: "Chosen.docx", selectedFile: "Chosen.docx", grantId: "grant_f1", rootKey: "f".repeat(64),
+    scanId: crypto.randomUUID(), fileCount: 1, doubleSyncRisk: false, ownerLockPaths: [], ...overrides,
+  });
+  it("puts each file in General and removing one preserves General and other mounts", async () => {
+    const t = setupTest();
+    await seedBridge(t);
+    const args = selection();
+    const a = await t.mutation(api.bridgeSync.registerMount, args);
+    const b = await t.mutation(api.bridgeSync.registerMount, selection({ rootLabel: "Other.docx", selectedFile: "Other.docx", grantId: "grant_f2", rootKey: "e".repeat(64) }));
+    expect(await t.mutation(api.bridgeSync.registerMount, { ...args, scanId: crypto.randomUUID() })).toBe(a);
+    const first = await t.run(ctx => ctx.db.get(a));
+    const second = await t.run(ctx => ctx.db.get(b));
+    expect(first?.selectedFile).toBe("Chosen.docx");
+    expect(first?.rootOrgNodeId).toBe(second?.rootOrgNodeId);
+    const general = await t.run(ctx => ctx.db.get(first!.rootOrgNodeId!));
+    expect(general?.name).toBe("General");
+    await t.mutation(api.bridgeSync.detachGrant, { credential, grantId: "grant_f1" });
+    expect((await t.run(ctx => ctx.db.get(general!._id)))?.deletedAt).toBeUndefined();
+    expect((await t.run(ctx => ctx.db.get(b)))?.state).toBe("active");
+    expect((await t.run(ctx => ctx.db.get(a)))?.state).toBe("detached");
+  });
+  it("rejects sibling discovery, invalid basenames and attempts to widen a persisted grant", async () => {
+    const t = setupTest();
+    await seedBridge(t);
+    const args = selection();
+    const mountId = await t.mutation(api.bridgeSync.registerMount, args);
+    const resource = { localResourceId: "lr_" + "f".repeat(16), relativePath: "Private.docx", size: 12, contentHash: "a".repeat(64), nativeFormat: "docx" as const };
+    await expect(t.mutation(api.bridgeSync.discoverResourcesPage, { credential, mountId, resources: [resource] })).rejects.toThrow("BRIDGE_FILE_SELECTION_PATH_NOT_ALLOWED");
+    const good = await t.mutation(api.bridgeSync.discoverResourcesPage, { credential, mountId, resources: [{ ...resource, relativePath: "Chosen.docx" }] });
+    expect(good.registrations).toHaveLength(1);
+    expect(good.registrations[0]).toHaveProperty("replicaId");
+    const reported = await t.mutation(api.bridgeSync.reportChanges, { credential, mountId, changes: [{ journalId: "op_" + "c".repeat(32), resourceId: resource.localResourceId, op: "locked", relativePath: "Private.docx" }] });
+    expect(reported.results[0]).toMatchObject({ state: "rejected", errorCode: "file-selection-path-not-allowed" });
+    await expect(t.mutation(api.bridgeSync.registerMount, { ...args, selectedFile: undefined })).rejects.toThrow("BRIDGE_SELECTION_SCOPE_CHANGED");
+    for (const selectedFile of ["../private.docx", "sub/private.docx", "C:\\private.docx", "~$Chosen.docx"]) {
+      await expect(t.mutation(api.bridgeSync.registerMount, selection({ selectedFile, rootLabel: selectedFile }))).rejects.toThrow();
+    }
+    await expect(t.mutation(api.bridgeSync.registerMount, selection({ fileCount: 2 }))).rejects.toThrow("BRIDGE_FILE_SELECTION_INVALID");
+  });
+  it("keeps Library renames independent and preserves the work after re-pairing a retired device", async () => {
+    const t = setupTest();
+    const fixture = await seedBridge(t);
+    const args = selection();
+    const mountId = await t.mutation(api.bridgeSync.registerMount, args);
+    const resource = { localResourceId: "lr_" + "f".repeat(16), relativePath: "Chosen.docx", size: 12, contentHash: "a".repeat(64), nativeFormat: "docx" };
+    const original = (await t.mutation(api.bridgeSync.discoverResourcesPage, { credential, mountId, resources: [resource] })).registrations[0];
+    if (!("workId" in original) || !original.workId) throw new Error("Expected selected file work");
+    const workId = original.workId;
+    const requestId = await t.run(ctx => enqueueStructureRequest(ctx, fixture.accountId, workId, "rename", "Chosen.docx", "Renamed.docx"));
+    expect(await t.run(ctx => ctx.db.get(requestId!))).toMatchObject({ state: "ignored", explanation: "This file was selected on its own. Its name and location on disk stay the same." });
+    const newDeviceId = await t.run(async ctx => {
+      const { _id, _creationTime, ...old } = (await ctx.db.get(fixture.deviceId))!;
+      await ctx.db.patch(_id, { state: "revoked", credentialHash: "b".repeat(64) });
+      return ctx.db.insert("bridgeDevices", { ...old, name: "Re-paired Bridge" });
+    });
+    const newMountId = await t.mutation(api.bridgeSync.registerMount, { ...args, grantId: "grant_f3", scanId: crypto.randomUUID() });
+    const again = (await t.mutation(api.bridgeSync.discoverResourcesPage, { credential, mountId: newMountId, resources: [resource] })).registrations[0];
+    expect(again).toHaveProperty("workId", workId);
+    expect(await t.run(ctx => ctx.db.get(original.replicaId!))).toMatchObject({ mountId: newMountId, deviceId: newDeviceId });
+  });
+});
 
 async function seedUploadCandidates(
   t: ReturnType<typeof convexTest>, fixture: Awaited<ReturnType<typeof seedBridge>>, count: number,

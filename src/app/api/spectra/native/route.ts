@@ -15,6 +15,7 @@ type ActiveMount = {
   deviceId: Id<"bridgeDevices">;
   grantId: string;
   rootLabel: string;
+  selectedFile?: string;
 };
 
 const materializeSchema = z.object({

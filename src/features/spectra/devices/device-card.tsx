@@ -79,24 +79,32 @@ export function DeviceCard({
         {device.isThisComputer ? <span className="device-card-here">This computer</span> : null}
       </header>
 
-      <section aria-label={`Folders on ${device.name}`}>
+      <section aria-label={`Files and folders on ${device.name}`}>
         <ul className="device-folders">
           {device.folders.map((folder, index) => (
             <FolderTile key={folder.id} folder={folder} ink={FOLDER_INKS[index % FOLDER_INKS.length]} local={local} busy={busy} onAction={onAction} />
           ))}
           {local ? (
             <li>
-              <button type="button" className="device-folder-add" disabled={busy === "add_folder"} onClick={() => onAction({ action: "add_folder" })}>
+              <button type="button" className="device-folder-add" disabled={busy === "add_folder" || busy === "add_files"} onClick={() => onAction({ action: "add_folder" })}>
                 <Icon name="add" size={16} />
                 Add a folder
               </button>
             </li>
           ) : null}
+          {local ? (
+            <li>
+              <button type="button" className="device-folder-add" disabled={busy === "add_folder" || busy === "add_files"} onClick={() => onAction({ action: "add_files" })}>
+                <Icon name="document" size={16} />
+                Add files
+              </button>
+            </li>
+          ) : null}
         </ul>
-        {!device.folders.length && !local ? <p className="device-card-quiet">No folders yet.</p> : null}
+        {!device.folders.length && !local ? <p className="device-card-quiet">No files or folders yet.</p> : null}
         {!local ? (
           <p className="device-card-quiet">
-            {device.isThisComputer ? "Connect this computer to change its folders." : "Change these folders in Spectra on that computer."}
+            {device.isThisComputer ? "Connect this computer to change what syncs." : "Change what syncs in Spectra on that computer."}
           </p>
         ) : null}
       </section>
@@ -171,6 +179,7 @@ function FolderTile({
     <li className="device-folder" data-tone={folder.tone} data-paused={folder.paused || undefined} style={{ "--folder-ink": `var(${ink})` } as CSSProperties}>
       <span aria-hidden className="device-folder-tab" />
       <span className="device-folder-name" title={folder.path}>
+        {folder.kind === "file" ? <Icon name="document" size={14} className="mr-1 inline-block" /> : null}
         {folder.name}
       </span>
       {where ? <span className="device-folder-where">in {where}</span> : null}

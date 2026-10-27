@@ -57,6 +57,10 @@ pub trait LocalBridgeControl: Send + Sync {
     fn snapshot(&self) -> LocalControlSnapshot;
     /// Opens the native folder picker on this computer.
     async fn select_mount(&self) -> Result<(), String>;
+    /// Opens a native picker for one or several individual files.
+    async fn select_files(&self) -> Result<usize, String> {
+        Err("Update Spectra Bridge to sync individual files.".into())
+    }
     async fn retry_mount(&self, grant_id: &str) -> Result<(), String>;
     async fn remove_mount(&self, grant_id: &str) -> Result<(), String>;
     async fn set_mount_paused(&self, grant_id: &str, paused: bool) -> Result<(), String>;
@@ -278,6 +282,7 @@ pub fn router(state: Arc<ServerState>) -> Router {
     let protected = Router::new()
         .route("/v1/status", get(status))
         .route("/v1/mount/select", post(select_mount))
+        .route("/v1/files/select", post(select_files))
         .route("/v1/mount/retry", post(retry_mount))
         .route("/v1/mount/remove", post(remove_mount))
         .route("/v1/mount/pause", post(pause_mount))
@@ -298,9 +303,10 @@ pub fn router(state: Arc<ServerState>) -> Router {
         .layer(
             CorsLayer::new()
                 .allow_origin(AllowOrigin::predicate(move |origin, _| {
-                    origin.to_str().is_ok_and(|value|
+                    origin.to_str().is_ok_and(|value| {
                         cors_state.allowed_origins.read().unwrap().contains(value)
-                            || is_local_development_origin(value))
+                            || is_local_development_origin(value)
+                    })
                 }))
                 .allow_methods([http::Method::GET, http::Method::POST])
                 .allow_headers([http::header::AUTHORIZATION, http::header::CONTENT_TYPE]),
@@ -346,7 +352,21 @@ async fn status(State(state): State<Arc<ServerState>>) -> Json<LocalBridgeStatus
 }
 
 async fn select_mount(State(state): State<Arc<ServerState>>) -> Response {
-    act(&state, |control| async move { control.select_mount().await }).await
+    act(
+        &state,
+        |control| async move { control.select_mount().await },
+    )
+    .await
+}
+
+async fn select_files(State(state): State<Arc<ServerState>>) -> Response {
+    match state.control() {
+        Some(control) => match control.select_files().await {
+            Ok(selected) => Json(serde_json::json!({ "selected": selected })).into_response(),
+            Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
+        },
+        None => controls_not_ready(),
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -585,10 +605,20 @@ mod tests {
 
     #[test]
     fn development_origins_are_exact_loopback_hosts() {
-        for origin in ["http://localhost:3160", "http://127.0.0.1:3180", "https://localhost:3000"] {
+        for origin in [
+            "http://localhost:3160",
+            "http://127.0.0.1:3180",
+            "https://localhost:3000",
+        ] {
             assert!(is_local_development_origin(origin));
         }
-        for origin in ["http://localhost.evil.test:3160", "http://evil.test", "file:///etc/passwd", "http://localhost:3160/path", "http://user@localhost:3160"] {
+        for origin in [
+            "http://localhost.evil.test:3160",
+            "http://evil.test",
+            "file:///etc/passwd",
+            "http://localhost:3160/path",
+            "http://user@localhost:3160",
+        ] {
             assert!(!is_local_development_origin(origin));
         }
     }
@@ -636,6 +666,7 @@ mod tests {
                 mounts: vec![LocalMountStatus {
                     id: "grant_ab".into(),
                     label: "Biology".into(),
+                    selection_kind: None,
                     friendly_path: "Documents › Biology".into(),
                     state: "active".into(),
                     detail: "Up to date".into(),
@@ -654,6 +685,10 @@ mod tests {
         async fn select_mount(&self) -> Result<(), String> {
             self.calls.lock().unwrap().push("select".into());
             Ok(())
+        }
+        async fn select_files(&self) -> Result<usize, String> {
+            self.calls.lock().unwrap().push("select-files".into());
+            Ok(2)
         }
         async fn retry_mount(&self, grant_id: &str) -> Result<(), String> {
             self.calls.lock().unwrap().push(format!("retry:{grant_id}"));
@@ -834,6 +869,7 @@ mod tests {
         let client = reqwest::Client::new();
         for path in [
             "/v1/mount/select",
+            "/v1/files/select",
             "/v1/sync/pause",
             "/v1/logs/open",
             "/v1/file/open",
@@ -869,8 +905,14 @@ mod tests {
                 .send()
         };
         for (path, body) in [
-            ("/v1/mount/pause", serde_json::json!({ "grantId": "grant_ab", "paused": true })),
-            ("/v1/mount/retry", serde_json::json!({ "grantId": "grant_ab" })),
+            (
+                "/v1/mount/pause",
+                serde_json::json!({ "grantId": "grant_ab", "paused": true }),
+            ),
+            (
+                "/v1/mount/retry",
+                serde_json::json!({ "grantId": "grant_ab" }),
+            ),
             ("/v1/sync/pause", serde_json::json!({ "paused": false })),
             ("/v1/logs/open", serde_json::json!({})),
         ] {
@@ -887,7 +929,21 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(status.mounts.len(), 1);
-        assert_eq!(post("/v1/unpair", serde_json::json!({})).await.unwrap().status(), 204);
+        let selection = post("/v1/files/select", serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(selection.status(), 200);
+        assert_eq!(
+            selection.json::<serde_json::Value>().await.unwrap(),
+            serde_json::json!({"selected": 2})
+        );
+        assert_eq!(
+            post("/v1/unpair", serde_json::json!({}))
+                .await
+                .unwrap()
+                .status(),
+            204
+        );
         assert!(!state.is_paired());
         assert_eq!(
             post("/v1/sync/pause", serde_json::json!({ "paused": true }))
@@ -904,6 +960,7 @@ mod tests {
                 "retry:grant_ab",
                 "pause:false",
                 "logs",
+                "select-files",
                 "unpair"
             ]
         );

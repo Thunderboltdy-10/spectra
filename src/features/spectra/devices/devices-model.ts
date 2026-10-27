@@ -40,6 +40,7 @@ export type CloudDevice = {
 };
 
 export type CloudMount = {
+  selectedFile?: string;
   grantId: string;
   deviceId: string;
   rootLabel: string;
@@ -58,6 +59,7 @@ export type LocalBridge = {
 export type DeviceTone = "ok" | "busy" | "paused" | "attention" | "offline";
 
 export type FolderView = {
+  kind?: "file" | "folder";
   id: string;
   name: string;
   /** "Documents › Biology" on this computer; the folder's name elsewhere. */
@@ -132,7 +134,7 @@ export function problemSentence(code: string | undefined, folder?: string): stri
 
 function liveFolder(mount: BridgeMount, allPaused: boolean): FolderView {
   const path = mount.friendlyPath || mount.label;
-  const base = { id: mount.id, name: mount.label, path, actionable: true };
+  const base = { id: mount.id, name: mount.label, path, actionable: true, kind: mount.selectionKind ?? "folder" };
   const paused = allPaused || mount.paused;
   if (paused) return { ...base, tone: "paused", label: "Paused", paused: true };
   const progress = mount.total > 0 ? { synced: Math.min(mount.synced, mount.total), total: mount.total } : undefined;
@@ -156,6 +158,7 @@ function remoteFolder(mount: CloudMount, actionable: boolean, offlineLabel: stri
   const files = mount.fileCount > 0 ? `${mount.fileCount.toLocaleString()} file${mount.fileCount === 1 ? "" : "s"}` : undefined;
   return {
     id: mount.grantId,
+    kind: mount.selectedFile ? "file" : "folder",
     name: mount.rootLabel,
     path: mount.rootLabel,
     tone: mount.state === "active" ? "offline" : "attention",
@@ -219,7 +222,7 @@ function thisComputerView(local: LocalBridge, cloud: CloudDevice | undefined, mo
     ...common,
     tone: "ok",
     label: "Connected",
-    detail: folders.length ? "Everything is up to date." : "Add a folder to use its files in Spectra.",
+    detail: folders.length ? "Everything is up to date." : "Add files or a folder to use them in Spectra.",
   };
 }
 
@@ -263,7 +266,8 @@ export function devicesModel(input: {
 }): DevicesModel {
   const { local, cloud, now } = input;
   const devices = (cloud?.devices ?? []).filter((device) => device.state === "active");
-  const mounts = cloud?.mounts ?? [];
+  // A deliberate removal is not a broken connection needing a repair.
+  const mounts = (cloud?.mounts ?? []).filter((mount) => mount.state !== "detached");
   const localId = local.status?.deviceId ?? null;
   const cloudThis = localId ? devices.find((device) => device._id === localId) : undefined;
   const live = local.reachability === "connected" && Boolean(local.status?.paired);

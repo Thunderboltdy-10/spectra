@@ -63,6 +63,7 @@ const CONTEXT_BOOSTS: Record<string, Partial<Record<"settings" | "artifact" | "c
   "app.managebac.select-classes": { settings: 22 },
   "app.devices.pair": { settings: 30 },
   "app.devices.add-folder": { library: 14 },
+  "app.devices.add-files": { library: 14 },
 };
 
 const K_BAR_COMMAND_IDS = new Set([
@@ -94,6 +95,7 @@ const K_BAR_COMMAND_IDS = new Set([
   "app.devices.open",
   "app.devices.pair",
   "app.devices.add-folder",
+  "app.devices.add-files",
   "app.devices.pause",
   "app.settings.toggle-continuation",
   "app.settings.manage-account",

@@ -122,6 +122,8 @@ export const DEADLINES = {
   problemSet: deadline("due-maths", "maths", "Problem set 4: sequences and series", dayAt(DAYS.problemSet, 8, 0), "Questions 1 to 14, show your working."),
   essay: deadline("due-essay", "english", "Paper 2 practice essay", dayAt(DAYS.essay, 8, 0), "1,200 words, one of the three prompts."),
   /** The one Ms Gonzalez posts tonight, in the story. */
+  /** The one Mr Okafor posts on the page, in the School scene. */
+  labReport: deadline("due-lab", "biology", "Lab report: yeast respiration", dayAt(DAYS.sourceAnalysis, 16, 0), "Method, results table and a short evaluation. Use your data from the practical."),
   sourceAnalysis: deadline(
     "due-source",
     "history",
@@ -131,8 +133,8 @@ export const DEADLINES = {
   ),
 };
 
-function block(id: string, title: string, day: number, hour: number, minutes: number, toward: WireItem): WireItem {
-  const start = dayAt(day, hour);
+function block(id: string, title: string, day: number, hour: number, minutes: number, toward: WireItem, minute = 0): WireItem {
+  const start = dayAt(day, hour, minute);
   return {
     id,
     kind: "scheduled_work_block",
@@ -154,6 +156,9 @@ export const PLAN_BLOCKS = [
   block("plan-source-1", "Read the two sources", DAYS.tomorrow, 16, 60, DEADLINES.sourceAnalysis),
   block("plan-source-2", "Write the source analysis", schoolDay(2), 16, 75, DEADLINES.sourceAnalysis),
 ];
+
+/** The time Spectra finds for the lab report when Henry asks. */
+export const LAB_BLOCK = block("plan-lab", "Write up the yeast lab", DAYS.biologyTest, 17, 50, DEADLINES.labReport, 30);
 
 export const STUDY_BLOCK = block("plan-bio", "Revise cell respiration", DAYS.tomorrow, 17, 45, DEADLINES.biologyTest);
 

@@ -264,20 +264,10 @@ describe("one field engine", () => {
     }
   });
 
-  it("the landing prism renders on demand, only while it is on screen and the tab is visible", () => {
-    const prismCanvas = readFileSync(
-      "src/app/landing/prism3d/PrismCanvas.tsx",
-      "utf8",
-    );
-    expect(prismCanvas).toContain('frameloop="demand"');
-    expect(prismCanvas).not.toContain('frameloop="always"');
-    expect(prismCanvas).toContain("if (paused || reduced) return;");
-
-    const hero = readFileSync("src/app/landing/sections/hero.tsx", "utf8");
-    expect(hero).toContain('document.addEventListener("visibilitychange"');
-    expect(hero).toContain("paused={landed || hidden}");
-    // The flight is measured when the page moves, not on a loop of its own.
-    expect(hero).toContain('window.addEventListener("scroll", schedule');
+  it("the landing's light draws only while something changes, and not at all for reduced motion", () => {
+    const light = readFileSync("src/app/landing/spectra/light/light-field.tsx", "utf8");
+    expect(light).toContain("prefers-reduced-motion: reduce");
+    expect(light).not.toContain("setInterval");
   });
 
   it("the mark is the island's prism in both themes, and the live prism is the same body on a canvas", () => {

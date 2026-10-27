@@ -1,116 +1,136 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { Icon } from "@/components/icons";
-import { SpectraMark } from "@/components/spectra-mark";
-import { RevealLine } from "../reveal-line";
-import { prefersStill, useArrived, useSteps, useTyped } from "../use-motion";
-import { GROUP } from "../world";
+import { useCallback, useEffect, useRef } from "react";
+import { editorIn, findText, markText, replaceText, waitForEditor } from "../../kit/doc-hand";
+import { InlineStudio } from "../../kit/inline-studio";
+import { typeIntoIsland } from "../../kit/landing-island";
+import { Surface, usePresence, type Move } from "../../kit/presence";
+import { useWorld, useWorldEvent } from "../../kit/world-context";
+import type { CastId } from "../../world/story";
+import { WORKS } from "../../world/works";
+import { useScene } from "../director";
+import { dimAll, flash, shine } from "../light/light";
 
 /*
- * A group project, live. Leo's index cards become a slide; Leo selects the
- * chart, Ms Reyes asks where the numbers come from, and Spectra writes the
- * source in under it, so the question is answered before anyone has to.
- * Everyone is in the same slide at the same moment, each in their own colour.
+ * Henry's History IA in the real document studio, with Ms Gonzalez's comment
+ * on it. He asks for it to be tidied; his AI does it in the document, the way
+ * a collaborator's edits arrive: the vote count picked out, the setting in
+ * italics, the paragraph she commented on said better. Then she is in it too,
+ * from her own class, and sees her comment answered. Everyone is drawn by
+ * Spectra's own presence layer, named and coloured as the product names them.
  */
 
-const CARDS = ["Floods displaced 19.2 million in 2023", "Most moves stay inside a country", "Storms: Philippines, Bangladesh, China"];
-
-function Cursor({ name, hue, x, y, shown }: { name: string; hue: string; x: string; y: string; shown: boolean }) {
-  return (
-    <span className="sp-cursor" data-shown={shown || undefined} style={{ "--x": x, "--y": y, "--hue": hue } as CSSProperties} aria-hidden>
-      <svg width="16" height="18" viewBox="0 0 16 18">
-        <path d="M1 1 L1 15 L5 11 L8 17 L10.5 16 L7.6 10 L13 10 Z" />
-      </svg>
-      <span className="sp-cursor-name">{name}</span>
-    </span>
-  );
-}
+const QUESTION = "tidy up my IA and make the second source paragraph read better";
+const OLD = "Its value is that it was spoken by an opponent in the room, at the time, knowing the risk.";
+const NEW = "Its value lies in its origin: Wels spoke for the SPD in the Reichstag on 23 March 1933, minutes before the vote, knowing what opposing it could cost.";
 
 export function Together() {
-  const ref = useRef<HTMLElement>(null);
-  const on = useArrived(ref);
-  const [still, setStill] = useState(false);
-  useEffect(() => setStill(prefersStill()), []);
-  // cards → slide → bars → Leo selects → Ms Reyes asks → Spectra answers → resolved → the line
-  const step = useSteps(on, [0, 900, 1500, 2400, 3400, 4500, 7000, 7600], still);
-  const source = useTyped(GROUP.source, step >= 6, still, 24);
-  const top = Math.max(...GROUP.bars.map((bar) => bar.value));
+  const world = useWorld();
+  const sectionRef = useRef<HTMLElement>(null);
+  const studioRef = useRef<HTMLDivElement>(null);
+  const presence = usePresence("together");
+  const { move, leave } = presence;
+  const reads = useRef(0);
+  const tidying = useRef<((value: void) => void) | null>(null);
+
+  /** Points a collaborator at `text` in the document, as a selection the presence layer draws. */
+  const pointAt = useCallback(
+    (who: CastId, text: string, extra: Partial<Move> = {}) => {
+      const editor = editorIn(studioRef.current);
+      const range = editor ? findText(editor, text) : null;
+      if (!range?.blockId) return null;
+      move(who, {
+        path: `/blocks/${range.blockId}`,
+        primitive: "richtext",
+        act: { kind: "select", span: { anchor: { offset: range.offset }, head: { offset: range.offset + text.length } } },
+        ...extra,
+      });
+      return studioRef.current?.querySelector(`[data-block-id="${range.blockId}"], [data-id="${range.blockId}"]`) ?? studioRef.current;
+    },
+    [move],
+  );
+
+  // The AI starts on the document once it has read it, as its run says so.
+  useWorldEvent((event) => {
+    if (event.type === "run_started" && event.reply.key === "tidy") reads.current = 0;
+    if (event.type === "reading" && event.workId === WORKS.ia._id && ++reads.current === 2) tidying.current?.();
+  });
+
+  useEffect(() => {
+    const studio = studioRef.current;
+    if (!studio) return;
+    shine("together-doc", { el: studio, at: [0.5, 0.3], rx: 760, ry: 360, strength: 0.32, hues: [4.0, 5.2], flow: 0.5, ease: 1400 });
+    return () => dimAll("together");
+  }, []);
+
+  useScene(
+    sectionRef,
+    async ({ wait, skipped, signal }) => {
+      const editor = await waitForEditor(() => studioRef.current, signal).catch(() => null);
+      if (!editor) return;
+      const tidy = () => {
+        markText(editor, "444 votes to 94", "bold");
+        markText(editor, "Kroll Opera House", "italic");
+        if (findText(editor, OLD)) replaceText(editor, OLD, NEW);
+      };
+      if (skipped) {
+        tidy();
+        return;
+      }
+      await world.whenIdle();
+      world.pace = 0.35;
+      const read = new Promise<void>((resolve) => {
+        tidying.current = resolve;
+        window.setTimeout(resolve, 4000);
+      });
+      void typeIntoIsland(QUESTION, { fresh: true, perLetter: 10 });
+      await read;
+      tidying.current = null;
+
+      // Henry's AI, in the document.
+      const flashAt = (element: Element | null | undefined, hues: [number, number]) =>
+        element && flash({ el: element, rx: 260, ry: 120, strength: 0.6, hues, hold: 500 });
+      flashAt(pointAt("henryAi", "444 votes to 94", { note: "Bold" }), [4.6, 5.6]);
+      await wait(520);
+      markText(editor, "444 votes to 94", "bold");
+      await wait(380);
+      pointAt("henryAi", "Kroll Opera House", { note: "Italic" });
+      await wait(480);
+      markText(editor, "Kroll Opera House", "italic");
+      await wait(380);
+      flashAt(pointAt("henryAi", OLD, { note: "Rewording" }), [4.6, 6.2]);
+      await wait(700);
+      replaceText(editor, OLD, NEW);
+      pointAt("henryAi", NEW, { note: "Reworded" });
+      await wait(900);
+      leave("henryAi");
+
+      // Ms Gonzalez comes in from her class to see whether her comment was taken.
+      await wait(300);
+      flashAt(pointAt("gonzalez", "Its value lies in its origin", { note: "That's what I meant. Well done." }), [0.7, 1.6]);
+      shine("together-teacher", { el: studioRef.current, at: [0.72, 0.5], rx: 420, ry: 300, strength: 0.4, hues: [0.6, 1.8], flow: 0.6, ease: 900 });
+      await wait(2600);
+      leave("gonzalez");
+    },
+    2800,
+  );
 
   return (
-    <section ref={ref} className="sp-together" aria-label="Group work, live, with your teacher">
-      <div className="sp-together-line">
-        <RevealLine as="h2" on={step >= 8} text="Your group, your teacher and Spectra." className="sp-say" />
-        <RevealLine as="p" on={step >= 8} text="Same slide, same moment." className="sp-say sp-say--soft" delay={6} />
+    <section ref={sectionRef} className="sp-scene sp-together" aria-labelledby="sp-together-title">
+      <div className="sp-scene-copy" data-settle-to>
+        <h2 id="sp-together-title" className="sp-heading" data-light-text>
+          It works on your document with you, and so can your teacher.
+        </h2>
+        <p className="sp-lede">
+          Spectra edits the way you would, in your own file: a word in bold, a paragraph said better. Your teacher&rsquo;s class is
+          linked to yours, so she is one click from your draft, and you see each other working.
+        </p>
       </div>
-      <div className="sp-together-stage" data-beam>
-        <div className="sp-cards-fan" data-gathered={step >= 2 || undefined} aria-hidden>
-          {CARDS.map((card, index) => (
-            <span key={card} className="sp-index-card" style={{ "--i": index } as CSSProperties} data-shown={step >= 1 || undefined}>
-              <span className="sp-index-card-who">Leo&apos;s notes</span>
-              {card}
-            </span>
-          ))}
+      <Surface id="together" states={presence.states} className="sp-together-doc">
+        <div ref={studioRef} className="sp-together-studio">
+          <InlineStudio work={WORKS.ia} instanceKey="landing-together-ia" className="sp-studio" />
         </div>
-
-        <div className="sp-editor" data-shown={step >= 2 || undefined} aria-hidden>
-          <div className="sp-editor-bar">
-            <span className="sp-editor-file">
-              <Icon name="slides" size={15} />
-              {GROUP.deck}
-            </span>
-            <span className="sp-presence">
-              {GROUP.people.map((person) => (
-                <span key={person.name} style={{ "--hue": person.hue } as CSSProperties}>
-                  {person.name}
-                </span>
-              ))}
-              <span data-spectra>
-                <SpectraMark size={12} />
-                Spectra
-              </span>
-            </span>
-          </div>
-          <div className="sp-editor-body">
-            <div className="sp-editor-strip">
-              {[0, 1, 2, 3].map((index) => (
-                <span key={index} data-on={index === 1 || undefined}>
-                  <i />
-                  <i />
-                </span>
-              ))}
-            </div>
-            <div className="sp-slide-canvas">
-              <p className="sp-slide-canvas-title">Disasters move more people than conflict</p>
-              <p className="sp-slide-canvas-sub">New internal displacements caused by disasters, millions</p>
-              <div className="sp-chart" data-selected={(step >= 4 && step < 7) || undefined}>
-                {GROUP.bars.map((bar, index) => (
-                  <span key={bar.label} className="sp-bar" style={{ "--h": bar.value / top, "--i": index } as CSSProperties} data-grown={step >= 3 || undefined}>
-                    <span className="sp-bar-value">{bar.value}</span>
-                    <span className="sp-bar-fill" />
-                    <span className="sp-bar-label">{bar.label}</span>
-                  </span>
-                ))}
-                <span className="sp-chart-handles" />
-              </div>
-              <p className="sp-chart-source" data-shown={step >= 6 || undefined}>
-                {source}
-                {step >= 6 && source.length < GROUP.source.length ? <span className="sp-caret" data-spectral /> : null}
-              </p>
-              <div className="sp-pin" data-shown={step >= 5 || undefined} data-resolved={step >= 7 || undefined}>
-                <span className="sp-pin-dot">{step >= 7 ? <Icon name="check" size={12} /> : null}</span>
-                <span className="sp-pin-bubble">
-                  <span className="sp-pin-who">Ms Reyes</span>
-                  {GROUP.comment}
-                  <span className="sp-pin-state">{step >= 7 ? "Resolved by Spectra" : ""}</span>
-                </span>
-              </div>
-            </div>
-          </div>
-          <Cursor name="Leo" hue="var(--ink-green)" x={step >= 4 ? "44%" : "70%"} y={step >= 4 ? "70%" : "96%"} shown={step >= 2} />
-          <Cursor name="Ms Reyes" hue="var(--ink-orange)" x={step >= 5 ? "93%" : "98%"} y={step >= 5 ? "66%" : "16%"} shown={step >= 3} />
-        </div>
-      </div>
+      </Surface>
     </section>
   );
 }

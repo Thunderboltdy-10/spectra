@@ -24,7 +24,7 @@ export type Reply = {
   /** Works it made or changed, shown as the run's results. */
   touched?: Array<{ id: string; type: string; title: string; action: "created" | "edited" | "referenced" }>;
   /** The scene it belongs to, when the reply moves the story on. */
-  effect?: "planned" | "made" | "tidied";
+  effect?: "planned" | "planned-lab" | "made" | "tidied";
 };
 
 const has = (...words: RegExp[]) => (text: string) => words.some((word) => word.test(text));
@@ -75,6 +75,21 @@ export const MAKE_REPLY: Reply = {
   effect: "made",
 };
 
+const lab = DEADLINES.labReport;
+
+export const LAB_REPLY: Reply = {
+  key: "lab",
+  matches: has(/\blab\b/i, /\byeast\b/i),
+  title: "Planned the lab report",
+  steps: [
+    { label: "Read Mr Okafor's task" },
+    { label: "Checked your week" },
+    { label: "Planned 50 minutes" },
+  ],
+  text: `${dayName(DEADLINES.biologyTest.startAt!)[0]!.toUpperCase()}${dayName(DEADLINES.biologyTest.startAt!).slice(1)} at 17:30, after your test and the source analysis: 50 minutes to write it up, due ${dayName(lab.startAt!)}. Your results from the practical are in Biology SL.`,
+  effect: "planned-lab",
+};
+
 export const PLAN_REPLY: Reply = {
   key: "plan",
   matches: has(/\bplan\b/i, /\bwhen should\b/i, /\bschedule\b/i, /\btime for\b/i),
@@ -90,7 +105,7 @@ export const PLAN_REPLY: Reply = {
 
 export const TIDY_REPLY: Reply = {
   key: "tidy",
-  matches: has(/tidy/i, /format/i, /polish/i, /wording/i, /read better/i),
+  matches: has(/\btidy\b/i, /\bformat/i, /\bpolish\b/i, /\bwording\b/i, /\bread better\b/i),
   title: "Tidied the IA",
   steps: [
     { label: "Read History IA draft", work: WORKS.ia._id },
@@ -148,7 +163,7 @@ const PREVIEW: Reply = {
   text: `This is a preview of Spectra on Henry's example work, so here I can only answer a few things: what is due, revising for Thursday, planning, and questions about Spectra itself (ManageBac, your files, teachers, getting it for your school). In your own Spectra I answer from your own notes, files and classes.`,
 };
 
-const STORY_REPLIES = [TIDY_REPLY, MAKE_REPLY, PLAN_REPLY, WEEK_REPLY];
+const STORY_REPLIES = [TIDY_REPLY, LAB_REPLY, MAKE_REPLY, PLAN_REPLY, WEEK_REPLY];
 
 /** The reply for what someone typed: the story first, then questions about Spectra, then the honest preview. */
 export function replyFor(text: string): Reply {

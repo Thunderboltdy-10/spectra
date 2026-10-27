@@ -1,183 +1,124 @@
 "use client";
 
-import { motion, useScroll, useSpring, useTransform } from "framer-motion";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { Icon } from "@/components/icons";
-import { SpectraMark } from "@/components/spectra-mark";
-import { RevealLine } from "../reveal-line";
-import { prefersStill, useArrived, useSteps } from "../use-motion";
-import { BRIEF, WEEK } from "../world";
+import { useEffect, useRef, useState } from "react";
+import { ShowcaseTime } from "@/features/spectra/showcase/showcase-time";
+import { HomeDay } from "@/features/spectra/today/home-day";
+import { useNear } from "../../kit/build";
+import { useWorld } from "../../kit/world-context";
+import { DEADLINES } from "../../world/school";
+import { clock, dayName, STORY } from "../../world/story";
+import { useScene } from "../director";
+import { PEOPLE, useHands } from "../hands";
+import { dimAll, shine, travel } from "../light/light";
+import { Window } from "../window";
 
 /*
- * The morning. Spectra writes Maya a short letter before she is up: what
- * happened yesterday and four things worth doing today, each one ready to
- * act on. The sun rises over the scene as the reader scrolls toward it and
- * reaches seven o'clock as the letter unfolds; one of the four moves is taken
- * at once and flies into Tuesday, and another can be pressed.
+ * Seven the next morning, on Henry's real Home. Overnight Ms Gonzalez posted
+ * a task; Spectra read it, planned for it and wrote the morning brief, which
+ * is waiting at the top of Home under its little sky. Beside the window the
+ * sun comes up over the page, and the night's work is listed as it happened.
  */
 
-/** The school week; the weekend stays off the page. */
-const SCHOOL_WEEK = WEEK.slice(0, 5);
+const noop = () => undefined;
+
+const NIGHT = [
+  { at: STORY.night, text: "Ms Gonzalez posted the source analysis" },
+  { at: STORY.night + 5 * 60_000, text: "Read the source pack she attached" },
+  { at: STORY.night + 9 * 60_000, text: `Planned two hours before ${dayName(DEADLINES.sourceAnalysis.startAt!)}` },
+  { at: STORY.morning - 22 * 60_000, text: "Wrote Henry's morning" },
+];
 
 export function Morning() {
-  const ref = useRef<HTMLElement>(null);
-  const deskRef = useRef<HTMLDivElement>(null);
-  const on = useArrived(ref, "0px 0px -30% 0px");
-  const [still, setStill] = useState(false);
-  useEffect(() => setStill(prefersStill()), []);
-  // folded → top opens → bottom opens → moves → "Add task" pressed → it lands in Tuesday → the line
-  const step = useSteps(on, [200, 800, 1350, 2000, 3300, 3700, 4300], still);
-  const [made, setMade] = useState<"idle" | "making" | "made">("idle");
-  const [flight, setFlight] = useState<{ from: DOMRect; to: DOMRect } | null>(null);
-  const addRef = useRef<HTMLDivElement>(null);
-  const tuesdayRef = useRef<HTMLDivElement>(null);
+  const world = useWorld();
+  const sectionRef = useRef<HTMLElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const skyRef = useRef<HTMLDivElement>(null);
+  const homeRef = useRef<HTMLDivElement>(null);
+  const near = useNear(sectionRef);
+  const [shown, setShown] = useState(0);
+  const { layer, hand } = useHands();
 
-  // The pressed move leaves its row and lands in Tuesday.
+  // The night's work is done by the time anyone scrolls this far.
   useEffect(() => {
-    if (step < 6 || still) return;
-    const from = addRef.current?.getBoundingClientRect();
-    const to = tuesdayRef.current?.getBoundingClientRect();
-    const desk = deskRef.current?.getBoundingClientRect();
-    if (!from || !to || !desk) return;
-    setFlight({
-      from: new DOMRect(from.left - desk.left, from.top - desk.top, from.width, from.height),
-      to: new DOMRect(to.left - desk.left, to.top - desk.top, to.width, to.height),
-    });
-    const timer = window.setTimeout(() => setFlight(null), 900);
-    return () => window.clearTimeout(timer);
-  }, [step, still]);
+    if (near) world.catchUp();
+  }, [near, world]);
 
-  const { scrollYProgress } = useScroll({ target: ref, offset: ["start end", "center center"] });
-  const sun = useSpring(scrollYProgress, { stiffness: 80, damping: 22 });
-  const sunX = useTransform(sun, [0, 1], ["-34%", "0%"]);
-  const sunY = useTransform(sun, [0, 1], [150, 0]);
-  const skyGlow = useTransform(sun, [0, 1], [0.25, 1]);
-  const ribbonTurn = useTransform(sun, [0, 1], [-14, 0]);
+  useEffect(() => () => dimAll("morning"), []);
 
-  const added = step >= 7;
+  const sunUp = () => {
+    const sky = skyRef.current;
+    if (!sky) return;
+    shine("morning-sun", { el: sky, at: [0.52, 0.44], rx: 128, ry: 128, strength: 0.95, hues: [2.15, 1.05], flow: 0.4, disc: true, ease: 500 });
+    shine("morning-air", { el: sky, at: [0.4, 0.7], rx: 560, ry: 420, strength: 0.45, hues: [1.2, 2.6], flow: 0.5, ease: 1400 });
+  };
+
+  useScene(
+    sectionRef,
+    async ({ wait, skipped, signal }) => {
+      const sky = skyRef.current;
+      if (skipped || !sky) {
+        setShown(NIGHT.length);
+        sunUp();
+        return;
+      }
+      // The sun climbs from below the page's edge to its place over the night's log.
+      const box = sky.getBoundingClientRect();
+      const x = box.left + box.width * 0.52;
+      const y = box.top + window.scrollY + box.height * 0.44;
+      travel("morning-sun", [x + 120, y + 520], [x, y], { rx: 128, ry: 128, strength: 0.95, hues: [2.15, 1.05], flow: 0.4, disc: true, ease: 300, ms: 1500 });
+      shine("morning-air", { el: sky, at: [0.4, 0.7], rx: 560, ry: 420, strength: 0.45, hues: [1.2, 2.6], flow: 0.5, ease: 1800 });
+      for (let index = 0; index < NIGHT.length; index += 1) {
+        await wait(240);
+        setShown(index + 1);
+      }
+      // Henry opens how to do the first thing on his list.
+      await wait(300);
+      const how = homeRef.current?.querySelector<HTMLDetailsElement>(".morning-move-how");
+      if (!how) return;
+      const henry = hand(PEOPLE.henry, signal);
+      await henry.show(how.querySelector("summary"), [0.3, 0.5]);
+      await wait(120);
+      await henry.press();
+      how.open = true;
+      await wait(900);
+      await henry.hide();
+    },
+    2400,
+  );
+
   return (
-    <section ref={ref} className="sp-morning" aria-label="A letter each morning">
-      <motion.div className="sp-sky" style={{ opacity: skyGlow }} aria-hidden>
-        <div className="sp-sky-arc" />
-        <motion.div className="sp-sun" style={{ x: sunX, y: sunY }}>
-          <span />
-        </motion.div>
-      </motion.div>
+    <section ref={sectionRef} className="sp-scene sp-morning" aria-labelledby="sp-morning-title">
+      <div className="sp-scene-copy" data-settle-to>
+        <h2 id="sp-morning-title" className="sp-heading" data-light-text>
+          Wake up to a plan, not a pile.
+        </h2>
+        <p className="sp-lede">
+          Overnight, Spectra reads what school posted and writes your morning: what changed, and the few things worth doing
+          first, each one a press away.
+        </p>
+      </div>
 
-      <div ref={deskRef} className="sp-morning-desk">
-        <div className="sp-letter" data-step={step} data-beam>
-          <div className="sp-letter-panel" data-panel="top" data-open={step >= 2 || undefined}>
-            <div className="sp-letter-front">
-              <div className="sp-letter-head">
-                <SpectraMark size={18} />
-                <span>Spectra</span>
-                <span className="sp-letter-time">{BRIEF.wake}</span>
-              </div>
-              <p className="sp-letter-greeting">Good morning, Maya.</p>
-            </div>
-            <div className="sp-letter-back" />
-          </div>
-          <div className="sp-letter-panel" data-panel="middle">
-            <div className="sp-letter-front">
-              <p className="sp-letter-yesterday">{BRIEF.yesterday}</p>
-            </div>
-          </div>
-          <div className="sp-letter-panel" data-panel="bottom" data-open={step >= 3 || undefined}>
-            <div className="sp-letter-front">
-              <p className="sp-letter-label">Today</p>
-              <ul className="sp-moves">
-                {BRIEF.moves.map((move, index) => {
-                  const pressed = move.id === "add" && step >= 5;
-                  return (
-                    <li key={move.id} className="sp-move" data-shown={step >= 4 || undefined} style={{ "--i": index } as CSSProperties}>
-                      <div ref={move.id === "add" ? addRef : undefined} className="sp-move-body" data-gone={move.id === "add" && step >= 6 && !still ? true : undefined}>
-                        <span className="sp-move-title">{move.title}</span>
-                        <span className="sp-move-detail">{move.detail}</span>
-                      </div>
-                      {move.id === "add" ? (
-                        <span className="sp-move-act" data-pressed={pressed || undefined} data-done={added || undefined}>
-                          {added ? <Icon name="check" size={13} /> : null}
-                          {added ? "Added to Tuesday" : move.kind}
-                        </span>
-                      ) : move.id === "make" ? (
-                        <button
-                          type="button"
-                          className="sp-move-act"
-                          data-live
-                          data-done={made === "made" || undefined}
-                          onClick={() => {
-                            if (made !== "idle") return;
-                            setMade("making");
-                            window.setTimeout(() => setMade("made"), still ? 0 : 1400);
-                          }}
-                        >
-                          {made === "idle" ? move.kind : made === "making" ? <Icon name="working" size={13} animate /> : <Icon name="check" size={13} />}
-                          {made === "making" ? "Writing" : made === "made" ? "Ready" : null}
-                        </button>
-                      ) : (
-                        <span className="sp-move-act" data-quiet>
-                          {move.kind}
-                        </span>
-                      )}
-                      {move.id === "make" && made === "made" ? (
-                        <div className="sp-move-made">
-                          <Icon name="quiz" size={14} />
-                          <span>
-                            <strong>Esters: 10 questions</strong>
-                            <span>From Mr Okafor&apos;s slides and your notes. Takes about 8 minutes.</span>
-                          </span>
-                        </div>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-            <div className="sp-letter-back" />
-          </div>
+      <div ref={stageRef} className="sp-morning-stage">
+        <div ref={homeRef} className="sp-morning-window">
+          <Window at="home" width={1180} height={780} threads={["Revision for Thursday", "What's due this week", "IA source paragraph"]} label="Henry's Home at seven in the morning">
+            <ShowcaseTime.Provider value={STORY.morning}>
+              <div className="sp-home">{near ? <HomeDay onAllThreads={noop} /> : null}</div>
+            </ShowcaseTime.Provider>
+          </Window>
         </div>
-
-        <div className="sp-morning-side">
-          <div className="sp-morning-line">
-            <RevealLine as="h2" on={step >= 7} text="Your day, sorted before you wake up." className="sp-say" />
-          </div>
-          <motion.div className="sp-ribbon" style={{ rotateY: ribbonTurn }} aria-hidden>
-          {SCHOOL_WEEK.map((day, index) => (
-            <div key={day.day} ref={day.day === "Tue" ? tuesdayRef : undefined} className="sp-ribbon-day" style={{ "--i": index - 2, "--a": Math.abs(index - 2) } as CSSProperties} data-target={day.day === "Tue" || undefined}>
-              <span className="sp-ribbon-name">{day.day}</span>
-              {day.items.map((item) => (
-                <span key={item.title} className="sp-ribbon-item" style={{ "--item-ink": item.ink } as CSSProperties}>
-                  {item.title}
-                </span>
-              ))}
-              {day.day === "Tue" && added ? (
-                <span className="sp-ribbon-item" data-fresh style={{ "--item-ink": "var(--ink-blue)" } as CSSProperties}>
-                  <span className="sp-ribbon-time">17:00</span>
-                  Revise esters
-                </span>
-              ) : null}
-            </div>
-          ))}
-          </motion.div>
-        </div>
-
-        {flight ? (
-          <span
-            className="sp-flight"
-            aria-hidden
-            style={
-              {
-                left: flight.from.left,
-                top: flight.from.top,
-                width: flight.from.width,
-                "--dx": `${flight.to.left + flight.to.width / 2 - (flight.from.left + flight.from.width / 2)}px`,
-                "--dy": `${flight.to.top + flight.to.height * 0.7 - (flight.from.top + flight.from.height / 2)}px`,
-              } as CSSProperties
-            }
-          >
-            Revise esters
-          </span>
-        ) : null}
+        <aside className="sp-morning-night" aria-label="Overnight">
+          <div ref={skyRef} className="sp-morning-sky" aria-hidden />
+          <p className="sp-morning-night-head">While Henry slept</p>
+          <ol>
+            {NIGHT.map((entry, index) => (
+              <li key={entry.text} data-shown={index < shown || undefined}>
+                <time>{clock(entry.at)}</time>
+                <span>{entry.text}</span>
+              </li>
+            ))}
+          </ol>
+        </aside>
+        {layer}
       </div>
     </section>
   );

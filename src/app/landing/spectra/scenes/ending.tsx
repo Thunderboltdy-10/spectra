@@ -2,17 +2,17 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Icon, type IconName } from "@/components/icons";
-import { Backdrop } from "@/app/landing/spectra/backdrop";
-import { LivePrism } from "@/app/landing/spectra/prism";
-import { noteFor } from "@/app/landing/spectra/scenes/finale";
-import { Header } from "@/app/landing/spectra/spectra-page";
+import { Icon } from "@/components/icons";
+import { SpectraMark } from "@/components/spectra-mark";
+import { useNear } from "../../kit/build";
+import { dimAll, shine } from "../light/light";
 
 /*
- * The one place on the site where a visitor sends anything. A school asks
- * for a walkthrough; a student, who cannot bring Spectra in alone, gets a
- * note to pass to a teacher instead. The request goes to /api/contact, which
- * guards itself (a field only bots fill, a minimum time, rate limits).
+ * The end of the page, and the one place a visitor sends anything. A school
+ * asks for a walkthrough here; a student, who cannot bring Spectra in alone,
+ * gets a note to pass to a teacher instead, sent from their own email. The
+ * request goes to /api/contact, which guards itself (a field only bots fill,
+ * a minimum time, rate limits). Every colour of the page meets here.
  */
 
 type Role = "student" | "teacher" | "leader" | "it";
@@ -24,82 +24,88 @@ const ROLES: { id: Role; label: string }[] = [
   { id: "it", label: "IT" },
 ];
 
-const ROLE_NAMES: Record<Role, string> = {
-  student: "Student",
-  teacher: "Teacher",
-  leader: "School leader",
-  it: "IT",
-};
-
-const WHAT_HAPPENS: { glyph: IconName; title: string; text: string }[] = [
-  { glyph: "school", title: "A walkthrough with your classes", text: "We show Spectra on a school like yours, from Home to the morning letter." },
-  { glyph: "shield", title: "Answers for IT and safeguarding", text: "What Spectra can see, where data lives, and what you control." },
-  { glyph: "people", title: "Set up on ManageBac", text: "Classes, tasks and teachers arrive by themselves on day one." },
-];
-
 const PLACEHOLDER: Record<Exclude<Role, "student">, string> = {
   teacher: "Which classes you teach, and what you'd like to see",
   leader: "How many students, and what you'd like to know",
   it: "Anything you need to check before a pilot",
 };
 
+const WHAT_HAPPENS = [
+  { title: "A walkthrough on classes like yours", text: "Home, the morning brief, the editors and Bridge, with your subjects in them." },
+  { title: "Answers for IT and safeguarding", text: "What Spectra can see, where data lives, and what your school controls." },
+  { title: "Set up on ManageBac", text: "Classes, tasks and teachers arrive by themselves on the first day." },
+];
+
+export function noteFor(origin: string) {
+  return `Hi! I've been looking at Spectra. It keeps our classes, notes and files in one place, connects to ManageBac, and helps with revision and assignments. I think it could really help our class. Could you take a look? ${origin}`;
+}
+
 type Sending = { state: "idle" } | { state: "sending" } | { state: "sent"; email: string } | { state: "failed"; message: string };
 
-export function ContactClient() {
+export function Ending() {
+  const sectionRef = useRef<HTMLElement>(null);
+  const lineRef = useRef<HTMLHeadingElement>(null);
+  const arrived = useNear(sectionRef, "0px 0px -35% 0px");
   const [role, setRole] = useState<Role>("teacher");
+
+  // Every colour on the page gathers behind the last line.
+  useEffect(() => {
+    const line = lineRef.current;
+    if (!arrived || !line) return;
+    shine("ending-line", { el: line, at: [0.5, 0.55], rx: 760, ry: 260, strength: 0.62, hues: [0, 6.8], flow: 0.9, ease: 1600 });
+    return () => dimAll("ending");
+  }, [arrived]);
+
   return (
-    <div className="sp-page sp-contact-page">
-      <Backdrop />
-      <Header />
-      <main className="sp-contact">
-        <section className="sp-contact-statement">
-          <LivePrism width="clamp(120px, 12vw, 170px)" interactive label="Spectra's prism. Drag it to spin it." />
-          <h1 className="sp-contact-title">Tell us about your school.</h1>
-          <p className="sp-contact-lede">We&apos;ll show you Spectra with classes like yours and answer what your teachers and IT team will ask. There&apos;s no price list; every school starts with a conversation.</p>
-          <ul className="sp-contact-what">
+    <section ref={sectionRef} id="talk" className="sp-scene sp-ending" aria-labelledby="sp-ending-title">
+      <h2 ref={lineRef} id="sp-ending-title" className="sp-ending-line" data-light-text>
+        <span>ManageBac is where work is set.</span> <span>Spectra is where it gets done.</span>
+      </h2>
+
+      <div className="sp-talk">
+        <div className="sp-talk-copy">
+          <h3 className="sp-talk-title">Bring Spectra to your school.</h3>
+          <p className="sp-lede">
+            Every school starts with a conversation. We show Spectra on classes like yours and answer what your teachers and IT
+            team will ask.
+          </p>
+          <ul className="sp-talk-what">
             {WHAT_HAPPENS.map((item) => (
               <li key={item.title}>
-                <Icon name={item.glyph} size={18} />
-                <span>
-                  <strong>{item.title}</strong>
-                  {item.text}
-                </span>
+                <strong>{item.title}</strong>
+                <span>{item.text}</span>
               </li>
             ))}
           </ul>
-        </section>
+        </div>
 
-        <section className="sp-contact-sheet" aria-label="Contact Spectra">
-          <span className="sp-contact-tab">
-            <Icon name="mail" size={14} />
-            {role === "student" ? "A note for your teacher" : "Walkthrough"}
-          </span>
-          <div className="sp-contact-face">
-            <fieldset className="sp-contact-roles">
-              <legend>I&apos;m a</legend>
-              <div className="sp-contact-switch" role="radiogroup">
-                {ROLES.map((entry) => (
-                  <button key={entry.id} type="button" role="radio" aria-checked={role === entry.id} data-on={role === entry.id || undefined} onClick={() => setRole(entry.id)}>
-                    {entry.label}
-                  </button>
-                ))}
-              </div>
-            </fieldset>
-            {role === "student" ? <StudentNote /> : <Walkthrough role={role} />}
-          </div>
-        </section>
-      </main>
-      <footer className="sp-footer sp-contact-footer">
-        <Link href="/" className="sp-footer-brand">
+        <div className="sp-talk-sheet">
+          <fieldset className="sp-talk-roles">
+            <legend>I&rsquo;m a</legend>
+            <div className="sp-talk-switch" role="radiogroup" aria-label="I'm a">
+              {ROLES.map((entry) => (
+                <button key={entry.id} type="button" role="radio" aria-checked={role === entry.id} onClick={() => setRole(entry.id)}>
+                  {entry.label}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+          {role === "student" ? <StudentNote /> : <Walkthrough role={role} />}
+        </div>
+      </div>
+
+      <footer className="sp-footer">
+        <span className="sp-footer-brand">
+          <SpectraMark size={18} />
           Spectra
-        </Link>
+        </span>
         <nav aria-label="Legal">
           <Link href="/legal/privacy">Privacy</Link>
           <Link href="/legal/terms">Terms</Link>
           <Link href="/legal/cookies">Cookies</Link>
         </nav>
       </footer>
-    </div>
+    </section>
   );
 }
 
@@ -118,10 +124,13 @@ function StudentNote() {
     }
   };
   return (
-    <div className="sp-contact-student">
-      <p className="sp-contact-hint">Spectra comes to students through their school. Pass this to a teacher you trust; it goes from your own email, and Spectra sends nothing.</p>
-      <p className="sp-note-text">{text}</p>
-      <div className="sp-note-actions">
+    <div className="sp-talk-student">
+      <p className="sp-talk-hint">
+        Spectra comes to students through their school. Pass this to a teacher you trust: it goes from your own email, and
+        Spectra sends nothing.
+      </p>
+      <p className="sp-talk-note">{text}</p>
+      <div className="sp-talk-actions">
         <button type="button" className="landing-button" data-tone="primary" onClick={copy}>
           <Icon name={copied ? "check" : "copy"} size={15} />
           {copied ? "Copied" : "Copy the note"}
@@ -156,7 +165,7 @@ function Walkthrough({ role }: { role: Exclude<Role, "student"> }) {
           name: value("name"),
           email,
           school: value("school"),
-          role: ROLE_NAMES[role],
+          role: ROLES.find((entry) => entry.id === role)!.label,
           message: [`Uses ManageBac: ${managebac ? "yes" : "no"}`, note].filter(Boolean).join("\n\n"),
           website: value("website"),
           elapsedMs: Date.now() - opened.current,
@@ -164,31 +173,27 @@ function Walkthrough({ role }: { role: Exclude<Role, "student"> }) {
       });
       const result = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) {
-        setSending({ state: "failed", message: result.error ?? "The request did not go through. Please try again." });
+        setSending({ state: "failed", message: result.error ?? "The request didn't go through. Try again." });
         return;
       }
       setSending({ state: "sent", email });
     } catch {
-      setSending({ state: "failed", message: "The request did not go through. Check your connection and try again." });
+      setSending({ state: "failed", message: "The request didn't go through. Check your connection, then try again." });
     }
   };
 
   if (sending.state === "sent") {
     return (
-      <div className="sp-contact-sent" role="status">
-        <LivePrism width="64px" mode="done" turns={1} />
-        <p className="sp-contact-sent-title">Request sent.</p>
-        <p className="sp-contact-hint">We&apos;ll write back to {sending.email} to find a time that suits your school.</p>
-        <Link href="/" className="landing-button">
-          Back to Spectra
-        </Link>
+      <div className="sp-talk-sent" role="status">
+        <p className="sp-talk-sent-title">Request sent.</p>
+        <p className="sp-talk-hint">We&rsquo;ll write to {sending.email} to find a time that suits your school.</p>
       </div>
     );
   }
 
   return (
-    <form className="sp-contact-form" onSubmit={submit}>
-      <div className="sp-contact-row">
+    <form className="sp-talk-form" onSubmit={submit}>
+      <div className="sp-talk-row">
         <label className="sp-field">
           <span>Your name</span>
           <input name="name" autoComplete="name" required />
@@ -202,32 +207,32 @@ function Walkthrough({ role }: { role: Exclude<Role, "student"> }) {
         <span>School</span>
         <input name="school" autoComplete="organization" required />
       </label>
-      <button type="button" className="sp-contact-toggle" role="switch" aria-checked={managebac} onClick={() => setManagebac((current) => !current)}>
-        <span className="sp-contact-toggle-track" data-on={managebac || undefined}>
+      <button type="button" className="sp-talk-toggle" role="switch" aria-checked={managebac} onClick={() => setManagebac((current) => !current)}>
+        <span className="sp-talk-toggle-track" aria-hidden>
           <span />
         </span>
         Our school uses ManageBac
       </button>
       <label className="sp-field">
         <span>Anything we should know (optional)</span>
-        <textarea name="message" rows={4} placeholder={PLACEHOLDER[role]} />
+        <textarea name="message" rows={3} placeholder={PLACEHOLDER[role]} />
       </label>
       {/* Only bots fill this in. */}
-      <label className="sp-contact-trap" aria-hidden>
+      <label className="sp-talk-trap" aria-hidden>
         Website
         <input name="website" tabIndex={-1} autoComplete="off" />
       </label>
       {sending.state === "failed" ? (
-        <p className="sp-contact-error" role="alert">
+        <p className="sp-talk-error" role="alert">
           {sending.message}
         </p>
       ) : null}
-      <div className="sp-contact-submit">
+      <div className="sp-talk-submit">
         <button type="submit" className="landing-button" data-tone="primary" disabled={sending.state === "sending"}>
           {sending.state === "sending" ? <Icon name="working" size={15} animate /> : null}
           {sending.state === "sending" ? "Sending" : "Ask for a walkthrough"}
         </button>
-        <span className="sp-contact-fine">
+        <span className="sp-talk-fine">
           We use these details only to reply. <Link href="/legal/privacy">Privacy</Link>
         </span>
       </div>

@@ -15,7 +15,7 @@ import { ndjsonStream } from "@/features/spectra/showcase/showcase-transport";
 import { zonedDay } from "@/features/spectra/today/daily-brief";
 import { PAGE_BOARD, SUPERCHARGE } from "./board";
 import { replyFor, type Reply } from "./replies";
-import { DEADLINES, PLAN_BLOCKS, SCHOOL_CLASSES, ZONE, initialCalendar, morningBrief, schoolTask, type WireItem } from "./school";
+import { DEADLINES, LAB_BLOCK, PLAN_BLOCKS, SCHOOL_CLASSES, ZONE, initialCalendar, morningBrief, schoolTask, type WireItem } from "./school";
 import { STORY, TODAY } from "./story";
 import { ALL_WORKS, CLASSES, WORKS, type ClassKey } from "./works";
 
@@ -130,6 +130,8 @@ export class StoryWorld {
   ];
   /** Runs streaming now. */
   active = 0;
+  /** How fast the next run plays: a scene's run is quicker than a visitor's own question. */
+  pace = 1;
   private count = 0;
   private listeners = new Set<(event: WorldEvent) => void>();
   private queryListeners = new Set<() => void>();
@@ -174,16 +176,26 @@ export class StoryWorld {
     return `${prefix}-${this.count}`;
   }
 
-  /** Ms Gonzalez posts the source analysis: ManageBac has it, and the calendar syncs. */
-  postSourceAnalysis() {
-    if (this.calendar.some((item) => item.id === DEADLINES.sourceAnalysis.id)) return;
+  /** What a teacher has posted in ManageBac that Spectra has not synced yet. */
+  private posted: WireItem[] = [];
+
+  /** A teacher posts a task: ManageBac has it, the calendar sees it is behind and syncs it in. */
+  post(item: WireItem) {
+    if (this.calendar.some((entry) => entry.id === item.id) || this.posted.some((entry) => entry.id === item.id)) return;
+    this.posted.push(item);
     this.sourceStale = true;
     spectraBus.emit("calendar.changed", {});
   }
 
+  /** Ms Gonzalez posts the source analysis. */
+  postSourceAnalysis() {
+    this.post(DEADLINES.sourceAnalysis);
+  }
+
   private syncSchool() {
     this.sourceStale = false;
-    if (!this.calendar.some((item) => item.id === DEADLINES.sourceAnalysis.id)) this.calendar.push(DEADLINES.sourceAnalysis);
+    for (const item of this.posted) if (!this.calendar.some((entry) => entry.id === item.id)) this.calendar.push(item);
+    this.posted = [];
     this.emit({ type: "calendar" });
   }
 
@@ -196,8 +208,8 @@ export class StoryWorld {
     this.emit({ type: "calendar" });
   }
 
-  private plan() {
-    for (const block of PLAN_BLOCKS) if (!this.calendar.some((item) => item.id === block.id)) this.calendar.push(block);
+  private plan(blocks: WireItem[]) {
+    for (const block of blocks) if (!this.calendar.some((item) => item.id === block.id)) this.calendar.push(block);
     this.emit({ type: "calendar" });
   }
 
@@ -207,8 +219,7 @@ export class StoryWorld {
     const body = request.body ?? {};
     const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
     if (body.action !== "run" || !prompt) return json(409, { error: "This run has finished." });
-    const reply = replyFor(prompt);
-    const runId = this.id("run");
+    const reply = replyFor(prompt);    const runId = this.id("run");
     const threadId = typeof body.threadId === "string" && this.threads.has(body.threadId) ? body.threadId : this.id("thread");
     const started = Date.now();
     const cardView = (status: SpectraResultCard["status"]) => ({
@@ -254,14 +265,20 @@ export class StoryWorld {
       event: { type: "final", runId, summary: reply.text, card: cardView("completed") },
       // Saved before the island reads the thread back.
       before: () => {
-        if (reply.effect === "planned") this.plan();
+        if (reply.effect === "planned") this.plan(PLAN_BLOCKS);
+        if (reply.effect === "planned-lab") this.plan([LAB_BLOCK]);
         this.live.delete(runId);
         this.record({ runId, threadId, prompt, reply, started, card: cardView("completed") });
         this.active = Math.max(0, this.active - 1);
         this.emit({ type: "run_finished", reply, runId, threadId });
       },
     });
-    return ndjsonStream(events, request.signal);
+    const pace = this.pace;
+    this.pace = 1;
+    return ndjsonStream(
+      events.map((entry) => (entry.wait ? { ...entry, wait: Math.round(entry.wait * pace) } : entry)),
+      request.signal,
+    );
   }
 
   /** A run still working, as the island's tab for it. */

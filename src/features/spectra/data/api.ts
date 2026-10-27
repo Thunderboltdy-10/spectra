@@ -280,6 +280,10 @@ export type SpectraManageBacOverview = {
   };
 };
 
+/** A class is a workspace marked as one; a ManageBac class's starts marked. */
+export const workspaceIsClass = (workspace: { isClass?: boolean; starterKey?: string }) =>
+  workspace.isClass ?? workspace.starterKey === "managebac-class";
+
 export type SpectraWorkspace = {
   _id: string;
   title: string;
@@ -288,6 +292,9 @@ export type SpectraWorkspace = {
   color?: string;
   status: "active" | "archived";
   defaultView: "cards" | "library";
+  starterKey?: string;
+  /** Chosen by the student; absent, a ManageBac class's workspace is a class. */
+  isClass?: boolean;
   aiState?: "creating" | "updating" | "edited" | "failed";
   aiRunId?: string;
   aiStateExpiresAt?: number;
@@ -1964,6 +1971,8 @@ export type SpectraAgentRelease = {
 export type SpectraAgentEvalResult = {
   caseId: string;
   category: string;
+  /** The suite layer it tested (adversarial, mission_truth…); absent on legacy runs. */
+  layer?: string;
   required: boolean;
   score: number;
   passed: boolean;
@@ -1985,6 +1994,8 @@ export type SpectraAgentEvalRun = {
   passedCount: number;
   averageScore: number;
   results: SpectraAgentEvalResult[];
+  /** What the run could not establish (a layer it could not test, say). */
+  limitations?: Array<{ kind: string; layer?: string; detail: string }>;
   startedAt: number;
   completedAt?: number;
 };

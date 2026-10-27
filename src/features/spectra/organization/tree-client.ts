@@ -45,6 +45,8 @@ export type TreeNode = {
     kind: TreeNode["kind"];
     name: string;
     sourceId?: string;
+    /** A linked work's type, so its card draws as that work. */
+    typeKey?: string;
     available: boolean;
   };
   workspace?: {
@@ -54,6 +56,7 @@ export type TreeNode = {
     color?: string;
     status: "active" | "archived";
     starterKey?: string;
+    isClass?: boolean;
   };
   source?: {
     blueprintKey?: string;

@@ -2554,6 +2554,12 @@ function collaborationFailureMessage(error: unknown) {
   return humanizePublicFailure(error);
 }
 
+/** A slow or briefly missing live connection: the edit is on this device and only has to wait. */
+const TRANSIENT_COLLABORATION_FAILURE =
+  /COLLABORATION_(CONNECT_TIMEOUT|SYNC_TIMEOUT|NOT_SYNCHRONIZED|NOT_AVAILABLE|NOT_CONNECTED|CLOSED)|ARTIFACT_LIVE_MODEL_(UNAVAILABLE|UNINITIALIZED)/;
+/** Saving retries quietly this long before it says anything (users should practically never see it). */
+const QUIET_SAVE_WINDOW_MS = 45_000;
+
 export function ArtifactStudio({
   mode,
   artifact,
@@ -2949,6 +2955,20 @@ function ArtifactStudioEditor({
         ? String(artifact.updatedAt)
         : null,
   );
+  // A document or code body typed into before its room binds is rebuilt under the writer's
+  // hands, which reordered and dropped characters. Hold typing for the short
+  // bind; a socket that never arrives still leaves the draft editable.
+  const [roomBindTimedOut, setRoomBindTimedOut] = useState<string | null>(null);
+  useEffect(() => {
+    if (live.modelSnapshot.initialized) return;
+    const timer = window.setTimeout(() => setRoomBindTimedOut(artifact._id), 4_000);
+    return () => window.clearTimeout(timer);
+  }, [artifact._id, live.modelSnapshot.initialized]);
+  const bodyRoomBinding =
+    (artifact.blueprintKey === "document" || artifact.blueprintKey === "code") &&
+    !live.modelSnapshot.initialized &&
+    !live.initializationError &&
+    roomBindTimedOut !== artifact._id;
   const [localDraftsArtifactId, setLocalDraftsArtifactId] = useState<string | null>(null);
   const recoveryViewRef = useRef({ artifactId: artifact._id });
   if (recoveryViewRef.current.artifactId !== artifact._id)
@@ -3238,6 +3258,9 @@ function ArtifactStudioEditor({
   const [nativeCopyName, setNativeCopyName] = useState("");
   const [unsavedCloseOpen, setUnsavedCloseOpen] = useState(false);
   const [closeActionBusy, setCloseActionBusy] = useState(false);
+  // A save that met a slow connection tries again on its own; only a long outage shows a notice.
+  const [quietRetry, setQuietRetry] = useState(0);
+  const transientSinceRef = useRef<number | null>(null);
   const closeActionRef = useRef(false);
   const meta = workTypeMeta[artifact.blueprintKey];
   const Icon = meta.icon;
@@ -3608,24 +3631,15 @@ function ArtifactStudioEditor({
       // the start of every retry made it flicker on and off.
       try {
         if (!live.supported) throw new Error("ARTIFACT_LIVE_MODEL_UNAVAILABLE");
-        const hadPendingTransportUpdate = live.unsynchronizedChanges > 0;
+        // Writing the edit into the work never waits on the network: the
+        // room catches up on its own, and what it has not taken yet is kept
+        // on this device. Awaiting the room's acknowledgement here held every
+        // save behind a slow socket and surfaced it as an error.
         if (
-          live.state === "reconnecting" ||
-          live.state === "unsynchronized" ||
-          hadPendingTransportUpdate
-        ) {
-          if (!live.transport) throw new Error("COLLABORATION_NOT_AVAILABLE");
-          await live.transport.retry();
-          if (hadPendingTransportUpdate) {
-            setBaseline(snapshot);
-            setLiveConflict(null);
-            // A successful transport retry only persists the semantic Yjs
-            // update. Native Office files are a separate verified replica and
-            // still need to pass through the lens materializer below. Returning
-            // here left Sheets/Slides visibly edited in Spectra while never
-            // creating the Bridge write request.
-          }
-        }
+          (live.state === "reconnecting" || live.state === "unsynchronized") &&
+          live.transport
+        )
+          void live.transport.retry().catch(() => undefined);
         // Sheets plan cell writes against the room itself, and document/code
         // bodies are bound natively; every other body is replayed onto the
         // room's current value so a peer's unabsorbed edit is not reverted.
@@ -3713,9 +3727,18 @@ function ArtifactStudioEditor({
           await queueNativeMaterialization(snapshot);
         }
         setLiveConflict(null);
+        transientSinceRef.current = null;
+        setQuietRetry(0);
         return true;
       } catch (error) {
         localSyncKeysRef.current.delete(key);
+        if (TRANSIENT_COLLABORATION_FAILURE.test(String(error instanceof Error ? error.message : error))) {
+          transientSinceRef.current ??= Date.now();
+          if (Date.now() - transientSinceRef.current < QUIET_SAVE_WINDOW_MS) {
+            setQuietRetry((attempt) => attempt + 1);
+            return false;
+          }
+        }
         // Programmatic editor hydration can briefly report a changed value
         // while a newly opened native room is still bootstrapping. Only a
         // genuine human edit earns a persistent local-sync warning.
@@ -4242,6 +4265,9 @@ function ArtifactStudioEditor({
   // not arrived yet, the run may say "preparing", but no cursor is invented.
   // The real actor's canonical frame is the only source of visible action.
   const displayPresence = presencePreviewState.people;
+  // Someone else (a person or Spectra) is in this work: only then can a same-field collision be theirs.
+  const othersPresentRef = useRef(false);
+  othersPresentRef.current = displayPresence.some((person) => person.clientId !== live.transport?.clientId);
   // Existing-artifact edits may only become provisional through the live
   // actor's awareness frames. The Convex preview is a recovery ledger, not a
   // rendering source: using it during cursor/focus/menu beats lets a later
@@ -5011,7 +5037,9 @@ function ArtifactStudioEditor({
         setTagDraft(rebased.snapshot.tagDraft);
         setContent(rebased.snapshot.content);
         setBaseline(incomingSnapshot);
-        setRemoteConflict(rebased.conflicts.length ? incomingSnapshot : null);
+        // Alone in the work, a collision is this browser's own save coming
+        // back normalized: the local side is already kept, so say nothing.
+        setRemoteConflict(rebased.conflicts.length && othersPresentRef.current ? incomingSnapshot : null);
         // A successful remote-only merge remains an unsaved local draft. A
         // same-leaf collision is also preserved locally for explicit review.
         userHasEditedRef.current = true;
@@ -5200,7 +5228,7 @@ function ArtifactStudioEditor({
       return;
     const timer = window.setTimeout(
       () => void synchronizeDraft(currentSnapshotRef.current),
-      liveConflict ? 420 : 140,
+      quietRetry ? Math.min(4_000, 250 * 2 ** Math.min(quietRetry, 4)) : liveConflict ? 420 : 140,
     );
     return () => window.clearTimeout(timer);
   }, [
@@ -5210,6 +5238,7 @@ function ArtifactStudioEditor({
     live.modelSnapshot.initialized,
     localDraftEpoch,
     liveConflict,
+    quietRetry,
     readOnly,
     syncBusy,
     synchronizeDraft,
@@ -5303,12 +5332,15 @@ function ArtifactStudioEditor({
   }
 
   async function requestStudioClose() {
-    if (decideClose(dirty, live.unsynchronizedChanges) === "close") {
+    // An edit already in the work but not yet in the room is kept on this
+    // device, and the closed work keeps syncing it in the background
+    // (use-artifact-collaboration.ts), so it never holds the close.
+    if (decideClose(dirty) === "close") {
       onClose();
       return;
     }
-    // Closing saves. Only an edit that cannot reach the room within a moment
-    // asks what to do; a draft that is merely mid-save just closes.
+    // Closing saves. Only an edit that cannot even be written here asks what
+    // to do; a draft that is merely mid-save just closes.
     if (!readOnly && live.state !== "closed" && claimCloseAction(closeActionRef)) {
       setCloseActionBusy(true);
       try {
@@ -5328,9 +5360,9 @@ function ArtifactStudioEditor({
     const settled = (async () => {
       while (syncingRef.current) await new Promise((resolve) => window.setTimeout(resolve, 40));
       if (dirtyRef.current && !(await synchronizeDraft(currentSnapshotRef.current))) return false;
-      if (!live.transport) return !dirtyRef.current;
-      await live.transport.flush();
-      return true;
+      // Kept on this device is enough: the room takes it in the background.
+      await live.localPersistence?.persistNow();
+      return !dirtyRef.current;
     })().catch(() => false);
     const patience = new Promise<false>((resolve) => window.setTimeout(() => resolve(false), 4_000));
     return Promise.race([settled, patience]);
@@ -6517,6 +6549,7 @@ function ArtifactStudioEditor({
                       ? live.transport?.document
                       : undefined
                   }
+                  binding={bodyRoomBinding}
                   onLocalCollaborativeChange={
                     markLocalCollaborativeDocumentChange
                   }
@@ -6558,6 +6591,7 @@ function ArtifactStudioEditor({
                   title={title}
                   content={editorContent}
                   onChange={editorChange}
+                  onTitle={(next) => changeBase({ title: next })}
                   readOnly={readOnly}
                 />
               ) : null}
@@ -6589,6 +6623,7 @@ function ArtifactStudioEditor({
                       ? live.transport?.document
                       : undefined
                   }
+                  binding={bodyRoomBinding}
                   synchronizationReady={presentation.ready}
                   onActiveRegionChange={handleActiveRegionChange}
                 />

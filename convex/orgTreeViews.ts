@@ -6,6 +6,7 @@ import {
   artifactSummaryFor,
   isContainerKind,
   sharesWithWorkspace,
+  workspaceIsClass,
   type OrgNode,
 } from "./orgTreeShared";
 
@@ -48,6 +49,8 @@ export type OrgNodeView = {
     kind: OrgNode["kind"];
     name: string;
     sourceId?: string;
+    /** The work type a linked work is, so its card draws as that work. */
+    typeKey?: string;
     available: boolean;
   };
   /** Workspace nodes carry their own state so a row can render without a join. */
@@ -58,6 +61,8 @@ export type OrgNodeView = {
     color?: string;
     status: "active" | "archived";
     starterKey?: string;
+    /** Whether the workspace is a class, as chosen or from where it came. */
+    isClass: boolean;
   };
   /**
    * Enough of a work's or thread's own record to draw its row — type, activity,
@@ -175,6 +180,7 @@ export async function hydrateNodes(
           color: workspace.color,
           status: workspace.status,
           starterKey: workspace.starterKey,
+          isClass: workspaceIsClass(workspace),
         };
     }
     if (node.kind === "link" && node.sourceId) {
@@ -186,6 +192,7 @@ export async function hydrateNodes(
             kind: target.kind,
             name: target.name,
             sourceId: target.sourceId,
+            typeKey: target.typeKey,
             available: target.deletedAt === undefined,
           }
         : undefined;

@@ -261,6 +261,7 @@ export const update = mutation({
     icon: v.optional(v.string()),
     color: v.optional(v.string()),
     defaultView: v.optional(vDefaultView),
+    isClass: v.optional(v.boolean()),
     runId: v.optional(v.id("spectraAiRuns")),
     executionId: v.optional(v.string()),
   },
@@ -288,6 +289,7 @@ export const update = mutation({
       icon?: string;
       color?: string;
       defaultView?: "cards" | "library";
+      isClass?: boolean;
       updatedAt: number;
       lastActivityAt: number;
       aiState?: "edited";
@@ -311,6 +313,7 @@ export const update = mutation({
     if (args.icon !== undefined) patch.icon = args.icon.trim() || undefined;
     if (args.color !== undefined) patch.color = args.color.trim() || undefined;
     if (args.defaultView !== undefined) patch.defaultView = args.defaultView;
+    if (args.isClass !== undefined) patch.isClass = args.isClass;
     await ctx.db.patch(args.workspaceId, patch);
     if (patch.title !== undefined)
       await syncSourceNodes(

@@ -100,12 +100,24 @@ function quizPreview(content: Json, optionLabels: (question: Json) => string[]):
 }
 
 /** A list of tasks shows its first few; a single task shows when it is due, how far along it is, and its note. */
-function taskPreview(content: Json): WorkPreview | null {
-  const tasks = list(content.tasks).map(record);
-  const items = tasks
+function taskPreview(stored: Json): WorkPreview | null {
+  const tasks = list(stored.tasks).map(record);
+  // A single task keeps its one plan task beside its own fields; it is still one task, not a list of one.
+  const only = tasks.length === 1 ? tasks[0] : null;
+  const content: Json = only
+    ? {
+        ...stored,
+        status: typeof stored.status === "string" ? stored.status : only.status === "completed" ? "done" : only.status,
+        dueAt: stored.dueAt ?? only.dueAt,
+        description: text(stored.description) ? stored.description : only.description,
+        subtasks: Array.isArray(stored.subtasks) && stored.subtasks.length ? stored.subtasks : only.checklist,
+      }
+    : stored;
+  const items = (only ? [] : tasks)
     .map((task) => ({ title: text(task.title ?? task.taskTitle, 90), done: task.status === "done" || task.status === "completed" }))
     .filter((item) => item.title);
   if (items.length) return { kind: "tasks", items: items.slice(0, 4) };
+  if (only && typeof content.status !== "string") content.status = "todo";
   if (!text(content.taskTitle) && typeof content.status !== "string") return null;
   const steps = list(content.subtasks).map(record);
   const status = content.status === "done" || content.status === "doing" ? content.status : "todo";

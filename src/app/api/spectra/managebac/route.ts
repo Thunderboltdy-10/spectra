@@ -1742,6 +1742,31 @@ async function recheckSavedKey(actor: { schoolId: string; email?: string }) {
   return { outcome: "reopened" as const };
 }
 
+/**
+ * Asks ManageBac whether a key an administrator just typed is accepted, before
+ * it is stored. A refusal is answered at once, in the dialog, instead of
+ * saving a key that leaves the connection checking until a sync fails. Any
+ * other outcome (ManageBac slow or unreachable) saves the key as before and
+ * the first sync confirms it.
+ */
+async function keyRefusedByManageBac(baseUrl: string, token: string, email?: string) {
+  try {
+    const url = new URL("/v2p2/students", normalizeManageBacBaseUrl(baseUrl));
+    if (email) url.searchParams.set("q", email);
+    await assertPublicApiHost(url.origin);
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json", "auth-token": token },
+      redirect: "error",
+      cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
+    });
+    return response.status === 401 || response.status === 403;
+  } catch {
+    return false;
+  }
+}
+
 /** Errors after which no other kind can be read in this request either. */
 const STOPS_EVERY_JOB = new Set([
   "INTEGRATION_CREDENTIAL_REJECTED",
@@ -2313,6 +2338,13 @@ export async function POST(request: NextRequest) {
         throw new Error(
           "INTEGRATION_TOKEN_REQUIRED: Enter the school-wide API key.",
         );
+      const baseUrl = normalizeManageBacBaseUrl(
+        process.env.MANAGEBAC_BASE_URL?.trim() || "https://api.managebac.com",
+      );
+      if (typedToken.length >= 16 && (await keyRefusedByManageBac(baseUrl, typedToken, actor.email)))
+        throw new Error(
+          "INTEGRATION_KEY_REFUSED: ManageBac did not accept that API key. Check it is the school-wide key from ManageBac's API settings, then try again.",
+        );
       const secret =
         token.length >= 16
           ? await storeSchoolSecret({
@@ -2324,9 +2356,7 @@ export async function POST(request: NextRequest) {
             })
           : null;
       const result = await convexMutation("managebac:configure", {
-        baseUrl: normalizeManageBacBaseUrl(
-          process.env.MANAGEBAC_BASE_URL?.trim() || "https://api.managebac.com",
-        ),
+        baseUrl,
         authHeaderName: "auth-token",
         authScheme: "raw",
         credentialFingerprint: secret?.fingerprint,
@@ -2538,7 +2568,8 @@ export async function POST(request: NextRequest) {
         actor, context, secret.value, loginAttempt?.classesOnly ? "classes" : isSchoolSyncKind(body.kind) ? body.kind : undefined,
       );
       if (loginAttempt?.attemptAt !== undefined && !result.queued.length &&
-          result.jobs.every((job) => !job.errorCode && !job.suspended && object(job.completion).status === "completed")) {
+          result.jobs.every((job) => !job.errorCode && !job.suspended && ["completed", "awaiting_review"].includes(String(object(job.completion).status)))) {
+        // Older changes waiting for review stay in School; they do not hold setup back.
         await convexMutation("managebac:finishLoginSync", {
           attemptAt: loginAttempt.attemptAt,
           runIds: result.jobs.map((job) => job.syncRunId),

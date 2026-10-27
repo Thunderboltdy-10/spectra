@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "convex/react";
 import { cn } from "@/lib/utils";
+import { toast } from "@/components/ui/toast";
 import { api } from "../../../../convex/_generated/api";
 import {
   classIdentity,
@@ -23,24 +24,25 @@ import { PlaceRow, type WorkPicking } from "./library-note";
 import { relativeTime } from "./node-identity";
 import { groupByWhen } from "./shelf-model";
 import { ShelfNotes, useShelfStacks } from "./shelf-stacks";
-import { useTreeQuickView, type TreeNode } from "./tree-client";
+import { useShelfGather } from "./shelf-gather";
+import { treeFailureMessage, useTreeActions, useTreeQuickView, type TreeNode } from "./tree-client";
 import { useLoadOnApproach } from "./use-load-on-approach";
 
 /*
  * The top of the Library as a shelf rather than a list (LIBRARY.md, "The
- * shelf"): the student's classes as tiles in their own inks, every other
- * workspace beside them (their own, and the school's groups and drop-ins,
- * which are workspaces like any other), the next few tasks from every class,
- * the work touched lately as cards showing what they hold, and what is in no
- * workspace. The work keeps coming as the reader scrolls, newest first, by
- * when it was touched. Every place
- * keeps the colour School gives it, so a class is the same thing wherever it
- * shows, and a note wears the colour of the place it lives in. The plain
- * list is one press away, in the view switch, for anyone who wants every row.
+ * shelf"): every workspace as a book on the shelf, classes and the student's
+ * own alike (a class is a workspace marked as one), the next few tasks from
+ * every class, the work touched lately as cards showing what they hold, and
+ * what is in no workspace. The work keeps coming as the reader scrolls,
+ * newest first, by when it was touched. A class keeps the colour School
+ * gives it, so it is the same thing wherever it shows, and a note wears the
+ * colour of the place it lives in. A card or a loose thing let go on a
+ * workspace (or a loose folder) moves into it. The plain list is one press
+ * away, in the view switch, for anyone who wants every row.
  */
 
-/** How many workspaces show before the rest fold away. */
-const WORKSPACES_SHOWN = 6;
+/** How many workspaces show before the rest fold away: three rows of books. */
+const WORKSPACES_SHOWN = 9;
 /** How many loose things at the top show before the rest fold away. */
 const LOOSE_SHOWN = 4;
 /** How many tasks lead the shelf: the next few, not the term. */
@@ -48,27 +50,25 @@ const COMING_UP_SHOWN = 3;
 
 type Place = { node: TreeNode; identity: ClassIdentity; subject: boolean };
 
+/** Every workspace: subject classes first in School's order, then the rest as the student last used them. */
 function places(nodes: readonly TreeNode[], book: ClassBook) {
-  const classes: Place[] = [];
-  const workspaces: Place[] = [];
+  const subjects: Place[] = [];
+  const others: Place[] = [];
   for (const node of nodes) {
     if (node.kind !== "workspace" || node.workspace?.status === "archived")
       continue;
-    if (isClassWorkspace(node)) {
-      const identity = classWorkspaceIdentity(node, book);
-      classes.push({ node, identity, subject: identity.subject });
-    } else {
-      workspaces.push({
-        node,
-        identity: {
+    const isClass = isClassWorkspace(node);
+    const identity = isClass
+      ? classWorkspaceIdentity(node, book)
+      : {
           ...classIdentity({ providerClassId: node.nodeId, title: node.name }),
           ink: node.workspace?.color ?? "var(--ink-violet)",
-        },
-        subject: false,
-      });
-    }
+        };
+    const subject = isClass && identity.subject;
+    (subject ? subjects : others).push({ node, identity, subject });
   }
-  return { classes, workspaces };
+  others.sort((a, b) => (b.node.activityAt ?? 0) - (a.node.activityAt ?? 0));
+  return [...subjects, ...others];
 }
 
 const bar = "block animate-pulse rounded-full bg-[var(--bg-tertiary)]";
@@ -133,11 +133,21 @@ export function LibraryShelf({
   const comingUp = useComingUp(now);
   const [allWorkspaces, setAllWorkspaces] = useState(false);
   const [allLoose, setAllLoose] = useState(false);
-  const { classes, workspaces } = places(nodes, book);
-  const subjects = classes.filter((place) => place.subject);
-  // The student's own first, then the school's groups and drop-ins.
-  const otherPlaces = [...workspaces, ...classes.filter((place) => !place.subject)];
-  const shownPlaces = allWorkspaces ? otherPlaces : otherPlaces.slice(0, WORKSPACES_SHOWN);
+  const workspaces = places(nodes, book);
+  const shownPlaces = allWorkspaces ? workspaces : workspaces.slice(0, WORKSPACES_SHOWN);
+  const actions = useTreeActions();
+  const moveInto = (nodeId: string, placeId: string) => {
+    if (nodeId === placeId) return;
+    const place = nodes.find((node) => node.nodeId === placeId);
+    actions
+      .move([nodeId], placeId)
+      .then(() => toast.success(`Moved to ${place?.name ?? "the workspace"}.`))
+      .catch((error) => toast.error(treeFailureMessage(error, "That move did not go through.")));
+  };
+  const beginDrag = useShelfGather(
+    ({ nodeId, intoPlaceId }) => (intoPlaceId ? moveInto(nodeId, intoPlaceId) : undefined),
+    !picking,
+  );
   const loose = [
     ...nodes.filter((node) => node.kind === "folder"),
     ...nodes.filter(
@@ -155,33 +165,32 @@ export function LibraryShelf({
     return book.named(workspace) ?? workspaces.find((place) => place.node.name === workspace)?.identity ?? null;
   };
 
-  const tile = ({ node, identity }: Place, small: boolean) => (
+  const tile = ({ node, identity }: Place) => (
     <button
       key={node.nodeId}
       type="button"
       data-node-row={node.nodeId}
+      data-shelf-place={node.nodeId}
       data-life-launch
       onClick={() => onOpen(node)}
       onContextMenu={(event) => onMenu(event, node)}
       title={identity.code ?? undefined}
       style={inkStyle(identity)}
-      className={cn("school-tile", small && "school-tile--small")}
+      className="school-tile"
     >
       <span className="min-w-0 flex-1">
         <span className="school-tile-name">{node.name}</span>
       </span>
-      {small ? null : (
-        <span className="school-tile-foot">
-          <span>
-            {node.childCount
-              ? `${node.childCount} item${node.childCount === 1 ? "" : "s"}`
-              : "Empty"}
-          </span>
-          <span className="ml-auto text-[var(--text-tertiary)]">
-            {relativeTime(node.activityAt, now)}
-          </span>
+      <span className="school-tile-foot">
+        <span>
+          {node.childCount
+            ? `${node.childCount} item${node.childCount === 1 ? "" : "s"}`
+            : "Empty"}
         </span>
-      )}
+        <span className="ml-auto text-[var(--text-tertiary)]">
+          {relativeTime(node.activityAt, now)}
+        </span>
+      </span>
     </button>
   );
 
@@ -190,15 +199,35 @@ export function LibraryShelf({
   return (
     <div className="library-shelf">
       <div className="min-w-0">
-        {subjects.length ? (
-          <section aria-labelledby="shelf-classes">
-            <h2 id="shelf-classes" className="library-shelf-heading">
-              Classes{" "}
-              <span className="school-heading-count">{subjects.length}</span>
+        {workspaces.length || onNewWorkspace ? (
+          <section aria-labelledby="shelf-workspaces">
+            <h2 id="shelf-workspaces" className="library-shelf-heading">
+              Workspaces{" "}
+              <span className="school-heading-count">{workspaces.length}</span>
             </h2>
             <div className="school-tiles">
-              {subjects.map((place) => tile(place, false))}
+              {shownPlaces.map((place) => tile(place))}
+              {onNewWorkspace ? (
+                <button
+                  type="button"
+                  data-life-launch
+                  onClick={onNewWorkspace}
+                  className="library-shelf-new library-shelf-new--book"
+                >
+                  New workspace
+                </button>
+              ) : null}
             </div>
+            {workspaces.length > WORKSPACES_SHOWN ? (
+              <button
+                type="button"
+                className="today-link mt-3 inline-block"
+                aria-expanded={allWorkspaces}
+                onClick={() => setAllWorkspaces((open) => !open)}
+              >
+                {allWorkspaces ? "Show fewer" : `Show all ${workspaces.length}`}
+              </button>
+            ) : null}
           </section>
         ) : null}
 
@@ -230,47 +259,20 @@ export function LibraryShelf({
 
       </div>
 
-      <aside aria-label="Workspaces" className="library-shelf-side">
-        {otherPlaces.length || onNewWorkspace ? (
-          <section aria-labelledby="shelf-workspaces">
-            <h2 id="shelf-workspaces" className="library-shelf-heading">
-              Workspaces{" "}
-              <span className="school-heading-count">{otherPlaces.length}</span>
-            </h2>
-            <div className="school-tiles school-tiles--narrow">
-              {shownPlaces.map((place) => tile(place, true))}
-              {onNewWorkspace ? (
-                <button
-                  type="button"
-                  data-life-launch
-                  onClick={onNewWorkspace}
-                  className="library-shelf-new"
-                >
-                  New workspace
-                </button>
-              ) : null}
-            </div>
-            {otherPlaces.length > WORKSPACES_SHOWN ? (
-              <button
-                type="button"
-                className="today-link mt-3 inline-block"
-                aria-expanded={allWorkspaces}
-                onClick={() => setAllWorkspaces((open) => !open)}
-              >
-                {allWorkspaces ? "Show fewer" : `Show all ${otherPlaces.length}`}
-              </button>
-            ) : null}
-          </section>
-        ) : null}
-
-        {loose.length ? (
+      {loose.length ? (
+        <aside aria-label="Not in a workspace" className="library-shelf-side">
           <section aria-labelledby="shelf-loose">
             <h2 id="shelf-loose" className="library-shelf-heading">
               Not in a workspace
             </h2>
             <ul className="library-loose">
               {shownLoose.map((node) => (
-                <li key={node.nodeId}>
+                <li
+                  key={node.nodeId}
+                  data-shelf-drag={node.nodeId}
+                  data-shelf-place={node.kind === "folder" ? node.nodeId : undefined}
+                  onPointerDown={(event) => beginDrag(event, node.nodeId, false, true)}
+                >
                   <PlaceRow node={node} onOpen={onOpen} onMenu={onMenu} picking={picking} />
                 </li>
               ))}
@@ -286,8 +288,8 @@ export function LibraryShelf({
               </button>
             ) : null}
           </section>
-        ) : null}
-      </aside>
+        </aside>
+      ) : null}
 
       {/* The work touched lately runs the shelf's whole width, as many cards to a row as fit. */}
       <div className="library-shelf-wide">
@@ -302,6 +304,7 @@ export function LibraryShelf({
               onOpen={onOpen}
               onMenu={onMenu}
               picking={picking}
+              onMoveInto={moveInto}
             />
           </section>
         ))}

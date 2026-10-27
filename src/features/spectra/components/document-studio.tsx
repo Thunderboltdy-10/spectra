@@ -30,8 +30,16 @@ import type { Id } from "../../../../convex/_generated/dataModel";
 import { api } from "../../../../convex/_generated/api";
 import StarterKit from "@tiptap/starter-kit";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   AlertCircle,
   ChevronDown,
+  Highlighter,
   History,
   ListOrdered,
   Pencil,
@@ -47,6 +55,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import type * as Y from "yjs";
 import { toast } from "@/components/ui/toast";
 import { SpectraTiptapAutocomplete } from "../compute/autocomplete";
@@ -677,6 +686,7 @@ export function DocumentStudio({
   readOnly = false,
   nativeReadOnlyRegionIds = [],
   collaborationDocument,
+  binding = false,
   contentIsProvisional = false,
   onLocalCollaborativeChange,
   header,
@@ -691,6 +701,8 @@ export function DocumentStudio({
   readOnly?: boolean;
   nativeReadOnlyRegionIds?: string[];
   collaborationDocument?: Y.Doc;
+  /** The live room is still arriving: hold typing so it lands in the bound editor. */
+  binding?: boolean;
   contentIsProvisional?: boolean;
   onLocalCollaborativeChange?: (userInitiated?: boolean) => void;
   header: ReactNode;
@@ -893,6 +905,29 @@ export function DocumentStudio({
   >(null);
   const importRef = useRef<HTMLInputElement>(null);
   const studioRef = useRef<HTMLDivElement>(null);
+  /*
+   * What came over from the Word file but Spectra keeps as it is (a part it
+   * cannot edit yet) looks like the rest of the page. A right-click on it says
+   * so, and a file kept in sync with a computer can show every such part
+   * until asked to stop.
+   */
+  const [keptMenu, setKeptMenu] = useState<{ x: number; y: number } | null>(null);
+  const [showKept, setShowKept] = useState(false);
+  const syncedFile = strictNative || nativeReadOnlyRegionIds.length > 0;
+  useEffect(() => {
+    const root = studioRef.current;
+    if (!root) return;
+    const onContextMenu = (event: MouseEvent) => {
+      if (event.shiftKey || !(event.target instanceof Element)) return;
+      const kept = event.target.closest('.ProseMirror [data-native-read-only="true"]');
+      if (!kept || kept.matches("img")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setKeptMenu({ x: event.clientX, y: event.clientY });
+    };
+    root.addEventListener("contextmenu", onContextMenu, true);
+    return () => root.removeEventListener("contextmenu", onContextMenu, true);
+  }, []);
   const editorReadyForUserChanges = useRef(false);
   const lastDecorationKeyRef = useRef<string>("");
   const editorJsonKeyRef = useRef(JSON.stringify(initialContent));
@@ -1513,8 +1548,31 @@ export function DocumentStudio({
   useEffect(() => {
     // Read is a mode, not a permission: it puts the document down without
     // pretending the reader lost access to it.
-    editor?.setEditable(!readOnly && docMode !== "read");
-  }, [docMode, editor, readOnly]);
+    editor?.setEditable(!readOnly && !binding && docMode !== "read");
+  }, [binding, docMode, editor, readOnly]);
+
+  // Binding the room builds a new editor. A writer who clicked in while it
+  // arrived keeps their place: the caret moves into the bound editor.
+  const wantedFocusRef = useRef(false);
+  useEffect(() => {
+    if (!binding) return;
+    const root = studioRef.current;
+    const want = (event: Event) => {
+      if ((event.target as Element | null)?.closest?.(".ProseMirror")) wantedFocusRef.current = true;
+    };
+    root?.addEventListener("pointerdown", want, true);
+    return () => root?.removeEventListener("pointerdown", want, true);
+  }, [binding]);
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || binding || readOnly || !collaborationDocument || !wantedFocusRef.current) return;
+    const focus = () => {
+      wantedFocusRef.current = false;
+      if (!editor.isDestroyed) editor.commands.focus("end");
+    };
+    if (editor.isInitialized) focus();
+    else editor.once("create", focus);
+    return () => { editor.off("create", focus); };
+  }, [binding, collaborationDocument, editor, readOnly]);
 
   useEffect(() => {
     if (!editor || !editor.isInitialized) return;
@@ -1607,18 +1665,11 @@ export function DocumentStudio({
     // Native Y.XmlFragment collaboration is already bound directly to the
     // editor. Reapplying a projected JSON snapshot here would reset selection,
     // corrupt IME composition, and turn a remote delta into a full replace.
-    // Keep Word trailing inserts are the exception: adopt only the missing
-    // native nodes so protected OMML/tables are not rewritten through
-    // filterTransaction.
-    // Revisit canonical native content when a preview ends, even if its JSON
-    // is unchanged. The missing-ID check makes native adoption idempotent.
-    if (contentChanged || (collaborationDocument && nativeBinding.format === "docx" && !contentIsProvisional)) {
+    // Keep Word saves arrive the same way, through the room.
+    if (contentChanged)
       applyDocumentStudioProjection(editor, incomingEditorJson, {
         collaborative: Boolean(collaborationDocument),
-        native: nativeBinding.format === "docx",
-        provisional: contentIsProvisional,
       });
-    }
     const decorationKey = JSON.stringify(target);
     if (lastDecorationKeyRef.current === decorationKey) return;
     lastDecorationKeyRef.current = decorationKey;
@@ -3230,7 +3281,28 @@ export function DocumentStudio({
       data-orientation={pageSetup.orientation}
       data-margins={pageSetup.margins}
       data-columns={pageSetup.columns > 1 ? pageSetup.columns : undefined}
+      data-show-kept={(showKept && syncedFile) || undefined}
     >
+      {keptMenu ? createPortal(
+        <DropdownMenu open onOpenChange={(open) => !open && setKeptMenu(null)}>
+          <DropdownMenuTrigger asChild>
+            <span aria-hidden style={{ position: "fixed", left: keptMenu.x, top: keptMenu.y, width: 0, height: 0 }} />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" side="bottom" sideOffset={2} className="w-[260px]" layer="composer-dock">
+            <DropdownMenuLabel className="whitespace-normal font-normal leading-snug text-[var(--text-secondary)]">
+              Kept as it is in the original file. Spectra cannot edit this part yet, and saves it back unchanged.
+            </DropdownMenuLabel>
+            {syncedFile ? (
+              <DropdownMenuItem onSelect={() => setShowKept((shown) => !shown)}>
+                <Highlighter className="size-3.5 text-[var(--text-tertiary)]" />
+                {showKept ? "Stop highlighting kept parts" : "Highlight every kept part"}
+              </DropdownMenuItem>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>,
+        // The panel moves on a transform, which would carry a fixed anchor with it.
+        document.body,
+      ) : null}
       {!focusMode ? header : null}
       {/* One bar. Off-default activities (Page canvas, Focus) stay in the bar
           with the active treatment so the writer can see they left continuous. */}

@@ -29,7 +29,7 @@ const placeOf = (work: SpectraArtifact) => work.placements?.[0]?.workspaceTitle 
 
 export function HomeDay({ onAllThreads }: { onAllThreads: () => void }) {
   const today = useToday();
-  const { now, name, threads, works, agenda, agendaFailed } = today;
+  const { now, name, threads, works, agenda, agendaFailed, needsSchool } = today;
   const brief = useDailyBrief(today.now);
   const tabs = useRunTabs();
   const moving = useMemo(() => new Set(tabs.filter((tab) => isActiveRunStatus(tab.run.status)).map((tab) => tab.threadId)), [tabs]);
@@ -43,17 +43,30 @@ export function HomeDay({ onAllThreads }: { onAllThreads: () => void }) {
   );
 
   return (
-      <div className="today mx-auto grid max-w-[1480px] grid-cols-[minmax(0,1fr)_380px] gap-x-12 gap-y-14 px-6 pb-40 pt-4">
-        <header className="col-span-2 -mb-4 max-w-[760px]">
+      <div className="today mx-auto flex max-w-[1480px] flex-wrap gap-x-12 gap-y-14 px-4 pb-40 pt-4 sm:px-6">
+        <header className="-mb-4 max-w-[760px]">
           <h1 className="page-greeting">{now ? greeting(new Date(now).getHours(), name) : " "}</h1>
           <p className="page-greeting-line mt-3 min-h-[1.6em]">{now ? daySentence({ moving: moving.size, agenda, now }) : ""}</p>
         </header>
 
-        <TodayBrief brief={brief} agenda={agenda} />
+        {needsSchool ? (
+          <section aria-labelledby="today-join" className="today-join w-full max-w-[760px]">
+            <h2 id="today-join">Join your school to see your week</h2>
+            <p className="mt-2 text-ui leading-6 text-[var(--text-secondary)]">
+              You are signed in, but not part of a school in Spectra yet. Open the invitation your school sent you. If you do not have one,
+              ask a teacher or your school&apos;s Spectra administrator to invite you.
+            </p>
+            <Link href="/join" prefetch={false} className="today-link mt-4 inline-block">
+              Open my invitation
+            </Link>
+          </section>
+        ) : null}
 
-        {now ? <TodayWeek agenda={agenda} failed={agendaFailed} now={now} /> : <div className="col-span-2 h-[260px]" />}
+        {needsSchool ? null : <TodayBrief brief={brief} agenda={agenda} />}
 
-        <section aria-labelledby="today-works" className="min-w-0">
+        {needsSchool ? null : now ? <TodayWeek agenda={agenda} failed={agendaFailed} now={now} /> : <div className="h-[260px]" />}
+
+        <section aria-labelledby="today-works" className="today-works">
           <div className="today-section-head">
             <h2 id="today-works">Pick up where you left off</h2>
             <Link href="/library" prefetch={false} className="today-link">
@@ -63,7 +76,7 @@ export function HomeDay({ onAllThreads }: { onAllThreads: () => void }) {
           {works && !works.length ? (
             <p className="text-caption text-[var(--text-secondary)]">Documents, decks and quizzes you make or open appear here.</p>
           ) : (
-            <div className="work-desk grid grid-cols-[repeat(auto-fill,minmax(232px,1fr))] gap-x-4 gap-y-6">
+            <div className="work-desk grid grid-cols-[repeat(auto-fill,minmax(min(100%,232px),1fr))] gap-x-4 gap-y-6">
               {(works ?? Array.from({ length: 3 }, () => null)).map((work, index) =>
                 work ? (
                   <WorkCard
@@ -87,7 +100,7 @@ export function HomeDay({ onAllThreads }: { onAllThreads: () => void }) {
           )}
         </section>
 
-        <section aria-labelledby="today-threads" className="min-w-0">
+        <section aria-labelledby="today-threads" className="today-threads">
           <div className="today-section-head">
             <h2 id="today-threads">Threads</h2>
             <button type="button" onClick={onAllThreads} className="today-link">

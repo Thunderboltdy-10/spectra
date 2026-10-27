@@ -2300,7 +2300,14 @@ export const claimLoginSync = mutation({
   },
 });
 
-/** Only completed runs belonging to this account can finish its bootstrap. */
+/**
+ * A run that read everything without errors settles setup, even when older
+ * changes still wait for the student's review: those stay in School, and
+ * must not hold back choosing classes or the first brief.
+ */
+const SETTLED_RUN = new Set(["completed", "awaiting_review"]);
+
+/** Only settled runs belonging to this account can finish its bootstrap. */
 export const finishLoginSync = mutation({
   args: { attemptAt: v.number(), runIds: v.array(v.id("externalSyncRuns")) },
   handler: async (ctx, args) => {
@@ -2316,7 +2323,7 @@ export const finishLoginSync = mutation({
     const runs = await Promise.all(args.runIds.map((id) => ctx.db.get(id)));
     if ((!completed && !runs.some((run) => run?.syncKind === "classes")) || runs.some((run) =>
       !run || run.accountId !== actor.accountId || run.integrationId !== integration._id ||
-      run.createdAt < attempt.lastAttemptAt || run.status !== "completed"))
+      run.createdAt < attempt.lastAttemptAt || !SETTLED_RUN.has(run.status)))
       return { completed: false };
     if (!runs.length) {
       const preferences = await loadSyncPreferences(ctx, actor.accountId, integration._id);

@@ -36,6 +36,54 @@ const CLOSED_DURABILITY: LocalDurabilitySnapshot = {
 };
 const getClosedDurability = () => CLOSED_DURABILITY;
 
+/*
+ * Closing a work never waits on the network. An edit the room has not taken
+ * yet is already kept on this device; the closed work's session stays
+ * connected in the background until the room has it, then lets go. Opening
+ * the same work again ends that drain first, and the new session restores
+ * from what this device kept.
+ */
+const DRAIN_LIMIT_MS = 120_000;
+const draining = new Map<string, () => void>();
+
+function drainThenClose(
+  key: string,
+  transport: ArtifactCollaborationTransport,
+  persistence: BoundedYjsLocalPersistence,
+  release: () => void,
+) {
+  draining.get(key)?.();
+  let finished = false;
+  let stop = () => {};
+  let timer = 0;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    if (draining.get(key) === finish) draining.delete(key);
+    window.clearTimeout(timer);
+    stop();
+    release();
+    void persistence.destroy();
+    transport.destroy();
+  };
+  const settled = () => {
+    const sync = transport.getSyncSnapshot();
+    return (
+      sync.unsynchronizedChanges === 0 ||
+      sync.state === "permission_lost" ||
+      sync.state === "closed" ||
+      Boolean(sync.recoveryConflict)
+    );
+  };
+  if (settled()) return finish();
+  draining.set(key, finish);
+  stop = transport.subscribeSync(() => {
+    if (settled()) finish();
+  });
+  timer = window.setTimeout(finish, DRAIN_LIMIT_MS);
+  void persistence.persistNow();
+}
+
 export function artifactCollaborationPersistenceKey(
   artifactId: string,
   partitionKey: string,
@@ -74,6 +122,14 @@ export function useArtifactCollaboration(
     setTransport(null);
     setLocalPersistence(null);
     setInitializationError(undefined);
+    const persistenceKey = artifactCollaborationPersistenceKey(
+      artifactId,
+      partitionKey,
+      persistenceNamespace,
+      schemaVersion,
+    );
+    // The same work closed a moment ago may still be draining: hand over to this session.
+    draining.get(persistenceKey)?.();
     const next = createArtifactCollaborationTransport(
       artifactId,
       partitionKey,
@@ -81,12 +137,7 @@ export function useArtifactCollaboration(
       providerKind,
     );
     const persistence = new BoundedYjsLocalPersistence({
-      key: artifactCollaborationPersistenceKey(
-        artifactId,
-        partitionKey,
-        persistenceNamespace,
-        schemaVersion,
-      ),
+      key: persistenceKey,
       document: next.document,
       modelVersion: schemaVersion,
     });
@@ -130,11 +181,9 @@ export function useArtifactCollaboration(
       });
     return () => {
       cancelled = true;
-      unsubscribeRecovery();
-      persistence.destroy();
-      next.destroy();
       setTransport(null);
       setLocalPersistence(null);
+      drainThenClose(persistenceKey, next, persistence, unsubscribeRecovery);
     };
   }, [
     artifactId,

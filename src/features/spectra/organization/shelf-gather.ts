@@ -5,8 +5,9 @@ import { useRef } from "react";
 /*
  * Laying one card on another (LIBRARY.md, "Stacks"). The card itself follows
  * the hand, the card under it lifts to say it will take it, and letting go
- * there gathers the two. A work dragged out of a stack and let go on the open
- * shelf leaves the stack. Pointer events, like the rest of the organiser's
+ * there gathers the two. Let go on a workspace's tile, it moves into that
+ * workspace. A work dragged out of a stack and let go on the open shelf
+ * leaves the stack. Pointer events, like the rest of the organiser's
  * dragging (organizer-drag.ts), so every frame is ordinary DOM.
  */
 
@@ -16,6 +17,8 @@ export type GatherDrop = {
   nodeId: string;
   /** The card it was let go on; null for the open shelf. */
   ontoNodeId: string | null;
+  /** The workspace tile it was let go on, to move it there. */
+  intoPlaceId?: string;
   /** It was dragged out of a stack. */
   fromStack: boolean;
 };
@@ -24,10 +27,12 @@ export function useShelfGather(onDrop: (drop: GatherDrop) => void, enabled: bool
   const onDropRef = useRef(onDrop);
   onDropRef.current = onDrop;
 
-  return function beginGather(event: React.PointerEvent<HTMLElement>, nodeId: string, fromStack: boolean) {
+  /** `placesOnly`: a thing that does not stack (a folder, a loose row) only goes into workspaces. */
+  return function beginGather(event: React.PointerEvent<HTMLElement>, nodeId: string, fromStack: boolean, placesOnly = false) {
     if (!enabled || event.button !== 0 || event.pointerType === "touch") return;
     if ((event.target as HTMLElement).closest("[data-stack-menu]")) return;
-    const item = event.currentTarget.closest<HTMLElement>("[data-shelf-item]") ?? event.currentTarget;
+    const item = event.currentTarget.closest<HTMLElement>("[data-shelf-item],[data-shelf-drag]") ?? event.currentTarget;
+    const targets = placesOnly ? "[data-shelf-place]" : "[data-shelf-item],[data-shelf-place]";
     const start = { x: event.clientX, y: event.clientY };
     let dragging = false;
     let over: HTMLElement | null = null;
@@ -44,8 +49,8 @@ export function useShelfGather(onDrop: (drop: GatherDrop) => void, enabled: bool
       item.style.translate = `${dx}px ${dy}px`;
       const under = document
         .elementsFromPoint(moved.clientX, moved.clientY)
-        .map((element) => element.closest<HTMLElement>("[data-shelf-item]"))
-        .find((element) => element && element !== item) ?? null;
+        .map((element) => element.closest<HTMLElement>(targets))
+        .find((element) => element && element !== item && !item.contains(element)) ?? null;
       if (under !== over) {
         over?.removeAttribute("data-gather-over");
         under?.setAttribute("data-gather-over", "true");
@@ -71,6 +76,8 @@ export function useShelfGather(onDrop: (drop: GatherDrop) => void, enabled: bool
       window.addEventListener("click", swallow, { capture: true, once: true });
       window.setTimeout(() => window.removeEventListener("click", swallow, true), 0);
       if (cancelled) return;
+      const intoPlaceId = over?.dataset.shelfPlace;
+      if (intoPlaceId) return onDropRef.current({ nodeId, ontoNodeId: null, intoPlaceId, fromStack });
       const ontoNodeId = over?.dataset.shelfItem ?? null;
       if (ontoNodeId || fromStack) onDropRef.current({ nodeId, ontoNodeId, fromStack });
     };

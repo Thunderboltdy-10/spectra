@@ -59,6 +59,7 @@ import {
   planTimelineView,
   planToCsv,
   planToIcs,
+  taskToIcs,
   planViewTaskIds,
   reschedulePlanTask,
 } from "../plan/projections";
@@ -990,5 +991,28 @@ describe("§11H plan import and export", () => {
       /Official deadline from managebac:assignment:9\. Spectra does not move it/,
     );
     expect(ics).toMatch(/DUE:\d{8}T\d{6}Z/);
+  });
+
+  it("exports a lone task with its repeat, reminders, priority and own id (FLOW-024)", () => {
+    const ics = taskToIcs(
+      {
+        taskTitle: "Physics lab report",
+        dueAt: Date.UTC(2026, 10, 3, 15, 0),
+        allDay: false,
+        priority: "high",
+        estimateMinutes: 90,
+        reminders: [{ minutesBefore: 60, enabled: true }],
+        recurrence: { frequency: "weekly", interval: 2, weekdays: [2], exceptions: [] },
+      },
+      { uid: "work_abc", name: "New Task" },
+    );
+    expect(ics).toContain("X-WR-CALNAME:Physics lab report");
+    expect(ics).toContain("UID:work_abc@spectra");
+    expect(ics).toContain("PRIORITY:1");
+    expect(ics).toContain("RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=TU");
+    expect(ics).toContain("TRIGGER:-PT1H");
+    expect(ics).toContain("About 1.5 h of work.");
+    const day = taskToIcs({ taskTitle: "Read", dueAt: Date.UTC(2026, 10, 3, 22, 59), allDay: true, timezone: "UTC" }, { uid: "w2", name: "x" });
+    expect(day).toContain("DUE;VALUE=DATE:20261103");
   });
 });

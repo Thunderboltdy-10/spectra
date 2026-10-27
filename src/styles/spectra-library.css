@@ -827,6 +827,82 @@ html[data-shelf-gathering] {
   pointer-events: none;
 }
 
+/* A loose row or folder card on its way to a workspace. */
+[data-shelf-drag] {
+  position: relative;
+}
+
+[data-shelf-drag][data-gathering] {
+  z-index: 30;
+  pointer-events: none;
+}
+
+[data-shelf-drag][data-gathering] > * {
+  rotate: -1.5deg;
+  border-radius: 10px;
+  background: var(--card-paper);
+  box-shadow: 0 0 0 1px var(--card-border-soft);
+  filter: drop-shadow(0 14px 20px rgb(52 40 28 / 0.2));
+}
+
+/* A workspace taking it: the book opens a little toward the hand. */
+[data-shelf-place] {
+  position: relative;
+}
+
+.school-tile[data-gather-over] {
+  box-shadow:
+    0 0 0 2px var(--class-ink),
+    0 16px 30px -20px rgb(52 40 28 / 0.5);
+  transform: translateY(-3px) rotate(-0.6deg);
+}
+
+li[data-shelf-place][data-gather-over]::after {
+  content: "Move here";
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+li[data-shelf-place][data-gather-over] > * {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+li[data-shelf-place][data-gather-over]::after {
+  top: 50%;
+  bottom: auto;
+  translate: 0 -50%;
+}
+
+/* The tile it is over says so with its ring and lift; the label is for rows. */
+.school-tile[data-gather-over] .school-tile-foot::after {
+  content: "Move here";
+  margin-left: 8px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.school-tile[data-gather-over] .school-tile-foot > :last-child {
+  display: none;
+}
+
+.library-shelf-new--book {
+  min-height: 132px;
+  border-radius: 6px 14px 14px 6px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .work-stack-cover,
   .work-stack-folder-front {

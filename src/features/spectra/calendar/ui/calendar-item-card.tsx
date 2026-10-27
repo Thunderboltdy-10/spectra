@@ -114,7 +114,8 @@ function CalendarItemDetails({
   // Time given to a task, and a task of one's own, are checked off (and back on).
   const checkable = work || item.kind === "task";
   const completed = item.status === "completed";
-  const resizable = isReschedulable(item) && item.startAt !== undefined && item.endAt !== undefined;
+  // A moment (a task due then) moves but has no length to change.
+  const resizable = isReschedulable(item) && !due && !item.allDay && item.startAt !== undefined && item.endAt !== undefined;
   const resize = (minutes: number) =>
     void onCommit({
       action: "resizeWorkBlock",

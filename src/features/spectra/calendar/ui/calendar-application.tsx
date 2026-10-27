@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, LockKeyhole } from "@/components/icons/glyph-icons";
+import { ChevronLeft, ChevronRight, LockKeyhole, School } from "@/components/icons/glyph-icons";
+import Link from "next/link";
 import type { BarCommand } from "@/components/ui/adaptive-bar";
 import { IconButton } from "@/components/ui/icon-button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -17,7 +18,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ProductErrorState } from "../../components/product-state";
+import { ProductEmptyState, ProductErrorState } from "../../components/product-state";
 import { spectraBus } from "../../events";
 import { syncSpectraManageBac } from "../../data/api";
 import {
@@ -407,6 +408,7 @@ export function CalendarApplication() {
   const [continuation, setContinuation] = useState<CalendarContinuation | null>(null);
   const overviewRequestRef = useRef<AbortController | null>(null);
   const [error, setError] = useState("");
+  const [needsSchool, setNeedsSchool] = useState(false);
   const [opened, setOpened] = useState<OpenedCalendarItem | null>(null);
   const schoolTask = useOpenSchoolTask();
   const taskPeek = useTaskPeek();
@@ -493,6 +495,7 @@ export function CalendarApplication() {
         setContinuation(result.continuation);
       } catch (nextError) {
         if (request.signal.aborted || overviewRequestRef.current !== request) return;
+        setNeedsSchool(nextError instanceof Error && nextError.message.startsWith("AUTH_NO_SCHOOL"));
         setError(
           describeFailure(nextError, {
             fallback: "Check your connection, then try loading Calendar again.",
@@ -863,6 +866,11 @@ export function CalendarApplication() {
     dragRef.current = null;
     setGesturePreview(null);
     if (!payload) return;
+    // An all-day item stays all-day: let go anywhere on a day, it moves to that day.
+    if (payload.type === "block" && payload.item.allDay && payload.item.startAt !== undefined) {
+      moveToDay(payload.item, day);
+      return;
+    }
     const startAt = resolveDrop(event, day);
     if (payload.type === "plan") {
       void schedulePlan(payload.item, startAt, startAt + HOUR);
@@ -873,6 +881,24 @@ export function CalendarApplication() {
       (payload.item.endAt ?? startAt + HOUR) - (payload.item.startAt ?? startAt),
     );
     void commitWorkGesture(payload.item, startAt, startAt + duration);
+  }
+
+  /** An item let go on a day's all-day row keeps its time of day (or stays all-day) and moves to that day. */
+  function dropOnAllDay(event: React.DragEvent<HTMLDivElement>, day: Date) {
+    const payload = dragRef.current;
+    if (payload?.type !== "block" || payload.item.startAt === undefined) return;
+    event.preventDefault();
+    dragRef.current = null;
+    setGesturePreview(null);
+    moveToDay(payload.item, day);
+  }
+
+  function moveToDay(item: CalendarItem, day: Date) {
+    const was = new Date(item.startAt!);
+    const next = new Date(day);
+    next.setHours(was.getHours(), was.getMinutes(), 0, 0);
+    if (next.getTime() === item.startAt) return;
+    void commitWorkGesture(item, next.getTime(), next.getTime() + ((item.endAt ?? item.startAt!) - item.startAt!));
   }
 
   function previewDrop(event: React.DragEvent<HTMLDivElement>, day: Date) {
@@ -1193,7 +1219,20 @@ export function CalendarApplication() {
             </aside>
           ) : null}
 
-          {error ? (
+          {error && needsSchool ? (
+            <div className="p-4">
+              <ProductEmptyState
+                icon={School}
+                title="Join your school to see your calendar"
+                detail="You are signed in, but not part of a school in Spectra yet. Open the invitation your school sent you, or ask a teacher or your school's Spectra administrator to invite you."
+                action={
+                  <Button variant="primary" size="sm" asChild>
+                    <Link href="/join">Open my invitation</Link>
+                  </Button>
+                }
+              />
+            </div>
+          ) : error ? (
             <div className="p-4">
               <ProductErrorState
                 title="Calendar could not be loaded"
@@ -1219,6 +1258,7 @@ export function CalendarApplication() {
                   resizeGesture={Boolean(resizeGesture)}
                   onPreview={previewDrop}
                   onDrop={dropOnDay}
+                  onDropAllDay={dropOnAllDay}
                   onOpen={openItem}
                   onDetails={(item, from) => {
                     taskPeek.close();
@@ -1346,6 +1386,7 @@ function WeekGrid({
   resizeGesture,
   onPreview,
   onDrop,
+  onDropAllDay,
   onOpen,
   onDetails,
   onRest,
@@ -1366,6 +1407,7 @@ function WeekGrid({
   resizeGesture: boolean;
   onPreview: (event: React.DragEvent<HTMLDivElement>, day: Date) => void;
   onDrop: (event: React.DragEvent<HTMLDivElement>, day: Date) => void;
+  onDropAllDay: (event: React.DragEvent<HTMLDivElement>, day: Date) => void;
   onOpen: (item: CalendarItem, from: HTMLElement) => void;
   /** Its details and actions, on a right-click. */
   onDetails: (item: CalendarItem, from: HTMLElement) => void;
@@ -1418,7 +1460,13 @@ function WeekGrid({
             (item) => item.startAt !== undefined && zonedDayKey(item.startAt, timezone) === localDayKey(day.getTime()),
           );
           return (
-            <div key={`${day.toISOString()}-allday`} className="spectra-calendar-allday-cell" data-life-receive>
+            <div
+              key={`${day.toISOString()}-allday`}
+              className="spectra-calendar-allday-cell"
+              data-life-receive
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => onDropAllDay(event, day)}
+            >
               {items.map((item) => {
                 const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
                 return (
@@ -1435,6 +1483,9 @@ function WeekGrid({
                     onPointerEnter={(event) => onRest(item, event.currentTarget)}
                     onPointerLeave={() => onRest(item, null)}
                     {...mergeHandlers(merge(item))}
+                    draggable={isReschedulable(item) && !pendingItemIds.has(item.id)}
+                    onDragStart={() => onBlockDragStart(item, 0)}
+                    onDragEnd={onBlockDragEnd}
                     className="spectra-calendar-chip"
                     style={{ boxShadow: `inset 3px 0 0 ${layer.color}` }}
                   >
@@ -1662,7 +1713,7 @@ function TimedBlock({
         ["--block-ink" as string]: ink,
       }}
     >
-      {canMove ? (
+      {canMove && !due ? (
         <span
           role="presentation"
           onPointerDown={(event) => onResizeStart(event, "start")}
@@ -1675,7 +1726,7 @@ function TimedBlock({
         {item.sourceLocked && !short ? <LockKeyhole className="ml-1 inline size-2.5" /> : null}
       </span>
       <span className="spectra-calendar-block-title">{item.title}</span>
-      {canMove ? (
+      {canMove && !due ? (
         <span
           role="presentation"
           onPointerDown={(event) => onResizeStart(event, "end")}

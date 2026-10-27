@@ -5,17 +5,21 @@
  * and the week across the top is a dot for every task due, in the same inks.
  */
 
+/* Two columns only when the page itself has room for both (not the window:
+   with a task open beside it, the page is half as wide). */
 .school-columns {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   gap: 40px;
-  align-items: start;
+  align-items: flex-start;
 }
-
-@media (min-width: 1280px) {
-  .school-columns {
-    grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
-  }
+.school-columns > :first-child {
+  min-width: 0;
+  flex: 999 1 520px;
+}
+.school-columns > :last-child:not(:first-child) {
+  min-width: 0;
+  flex: 1 1 340px;
 }
 
 .school-heading {

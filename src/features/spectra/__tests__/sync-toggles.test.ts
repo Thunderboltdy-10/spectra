@@ -151,7 +151,7 @@ describe("sync toggles (P1.I4)", () => {
     ).toContain("not running");
     expect(
       pairingFailureMessage("Failed to fetch", { kind: "port-taken" }),
-    ).toContain("Something else is using");
+    ).toContain("answered in Bridge's place");
     expect(pairingFailureMessage("Failed to fetch")).not.toMatch(/Failed to fetch/i);
     expect(
       pairingFailureMessage("Failed to fetch", { kind: "not-running" }, false),

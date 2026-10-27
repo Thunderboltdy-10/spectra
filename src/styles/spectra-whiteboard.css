@@ -96,3 +96,91 @@
   border-inline: 0;
   border-radius: 0;
 }
+
+/* A board outside the studio (public links): every object at its own place
+   and size on the dotted paper, scaled to the column, with nothing to edit. */
+.board-view {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-surface, 14px);
+  background-color: var(--bg-primary);
+  background-image: radial-gradient(circle at center, var(--border-subtle) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.board-view-plane {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+.board-view-edges {
+  position: absolute;
+  overflow: visible;
+}
+
+.board-view-edges line {
+  stroke: var(--text-tertiary);
+  stroke-width: 2;
+}
+
+.board-view-edges text {
+  fill: var(--text-secondary);
+  font-size: 12px;
+  paint-order: stroke;
+  stroke: var(--bg-primary);
+  stroke-width: 4px;
+}
+
+.board-view-node {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 6px;
+  overflow: hidden;
+  padding: 12px 14px;
+  border-style: solid;
+  box-shadow: 0 7px 19px rgba(34, 48, 41, 0.08);
+  line-height: 1.3;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.board-view-node[data-type="text"],
+.board-view-node[data-type="group"] {
+  box-shadow: none;
+  padding: 0;
+}
+
+.board-view-node[data-type="shape"] {
+  text-align: center;
+}
+
+.board-view-node[data-type="frame"] {
+  box-shadow: none;
+  border-style: dashed;
+}
+
+.board-view-frame-title,
+.board-view-card-title {
+  font-weight: 650;
+}
+
+.board-view-placeholder {
+  color: var(--text-tertiary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.board-view-table {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.board-view-table td {
+  border: 1px solid var(--card-border);
+  padding: 4px 8px;
+}

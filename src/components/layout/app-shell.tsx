@@ -18,6 +18,7 @@ import { ProductOfflineBanner } from "@/features/spectra/bridge/product-offline-
 import { BridgeDiscoveryMount } from "@/features/spectra/bridge/bridge-discovery-mount";
 import { LivePulseMount } from "@/features/spectra/threads/live-pulse-mount";
 import { TourMount } from "@/features/spectra/onboarding/tour";
+import { SchoolSetupMount } from "@/features/spectra/school/school-setup-mount";
 import { FirstTipsMount } from "@/features/spectra/onboarding/first-tips";
 import { AppChoreographyMount } from "@/features/spectra/collaboration/app-choreography-host";
 import { spectraBus } from "@/features/spectra/events";
@@ -113,6 +114,7 @@ function AppShellContent({
           <ViewportReferencePicker />
         </div>
         <IslandHost />
+        <SchoolSetupMount />
         <TourMount />
         <FirstTipsMount />
       </main>

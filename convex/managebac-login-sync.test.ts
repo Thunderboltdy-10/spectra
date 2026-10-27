@@ -83,6 +83,15 @@ it("waits for explicit class confirmation, then completes its own sync before al
   expect(await student.mutation(api.managebac.claimLoginSync, {})).toMatchObject({ claimed: false, reason: "completed" });
 });
 
+it("lists classes for choosing when only older changes wait for review", async () => {
+  const { t, student, run } = await fixture();
+  const claim = await student.mutation(api.managebac.claimLoginSync, {});
+  const runId = await run();
+  await t.run((ctx) => ctx.db.patch(runId, { status: "awaiting_review", stage: "review_conflicts" }));
+  expect(await student.mutation(api.managebac.finishLoginSync, { attemptAt: claim.attemptAt!, runIds: [runId] })).toEqual({ completed: false, waitingForClasses: true });
+  expect(await student.query(api.managebac.onboardingStatus, {})).toMatchObject({ phase: "choose_classes" });
+});
+
 it("can finish when the reader deliberately turns every kind off", async () => {
   const { t, ids, student, run } = await fixture();
   const first = await student.mutation(api.managebac.claimLoginSync, {});

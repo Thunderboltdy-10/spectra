@@ -1923,6 +1923,9 @@ export default defineSchema({
     icon: v.optional(v.string()),
     color: v.optional(v.string()),
     starterKey: v.optional(v.string()),
+    // A class: the student's chosen kind for the workspace. Absent, a
+    // workspace made for a ManageBac class is one and any other is not.
+    isClass: v.optional(v.boolean()),
     sourceContext: v.optional(
       v.object({
         provider: v.string(),

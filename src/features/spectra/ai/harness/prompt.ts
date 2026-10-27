@@ -63,8 +63,8 @@ Respect the user's own work. When editing, change what was asked and keep everyt
 /** An item named by id, type and title only. */
 export type EnvironmentPointer = { id: string; type: string; title: string };
 
-/** A workspace the user can file work in. */
-export type EnvironmentPlace = { id: string; title: string };
+/** A workspace the user can file work in; `isClass` when it is one of their classes. */
+export type EnvironmentPlace = { id: string; title: string; isClass?: boolean };
 
 export type EnvironmentInput = {
   now: number;
@@ -139,9 +139,10 @@ export function environmentBlock(input: EnvironmentInput) {
   if (input.references?.length) lines.push(`Referenced with @: ${input.references.map(named).join("; ")}`);
   if (input.attachments?.length) lines.push(`Attached to this message: ${input.attachments.join(", ")}`);
   if (input.bridge) lines.push(`Spectra Bridge: ${input.bridge}`);
-  if (input.here) lines.push(`This conversation is filed in the workspace "${input.here.title}" (placeId ${input.here.id})`);
+  if (input.here)
+    lines.push(`This conversation is filed in the workspace "${input.here.title}" (placeId ${input.here.id})${input.here.isClass ? ", one of the user's classes" : ""}`);
   if (input.places?.length)
-    lines.push(`The user's workspaces (titles are the user's words): ${input.places.map((place) => `"${place.title}" (placeId ${place.id})`).join("; ")}`);
+    lines.push(`The user's workspaces (titles are the user's words; "class" marks one of their classes): ${input.places.map((place) => `"${place.title}" (placeId ${place.id}${place.isClass ? ", class" : ""})`).join("; ")}`);
   lines.push(`Permissions: ${input.permissions}`);
   if (input.agent)
     lines.push(

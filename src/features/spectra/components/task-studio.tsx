@@ -5,18 +5,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { CalendarCheck2, Lock } from "@/components/icons/glyph-icons";
 import { currentTimeMs } from "@/lib/unique-token";
-import { applySingleTask, normalizePlanContent, singleTaskView } from "../plan/model";
-import { planToIcs } from "../plan/projections";
+import { applySingleTask, singleTaskView } from "../plan/model";
+import { taskToIcs } from "../plan/projections";
 import type { WorkRegion } from "../anchors/locate";
 import { regionElement, useOpenAnchor, type AnchorLanding } from "../anchors/use-open-anchor";
 import { useStudioContract } from "./artifact-studio-shell";
 import { SpectraStoredText } from "./spectra-rich-content";
 import { ArtifactRichTextEditor } from "./artifact-studio";
-import { SheetMore } from "./sheet/sheet-more";
-import { TaskLinks } from "./task/task-links";
-import { optionsSummary, TaskOptions, type TaskOptionsValue, type TaskRecurrence, type TaskReminder } from "./task/task-options";
+import type { TaskOptionsValue, TaskRecurrence, TaskReminder } from "./task/task-options";
+import { TaskProperties } from "./task/task-properties";
 import { TaskSteps, type TaskStep } from "./task/task-steps";
-import { dateBlock, taskInputs, taskInstant, taskZone } from "./task/task-time";
+import { taskInputs, taskInstant, taskZone } from "./task/task-time";
 import { TaskWhen } from "./task/task-when";
 import { TaskElapsed } from "./task/task-elapsed";
 import { useReminderTime } from "./task/task-reminders";
@@ -25,13 +24,13 @@ import { SchoolTaskNotice } from "../school/school-task-details";
 export { dueDistance, taskInputs, taskInstant } from "./task/task-time";
 
 /*
- * A task (EDITORS.md, "Planner task"): one thing to do. What and when first,
- * with done beside them and how much of its time is gone; then what the
- * school asked, the student's notes, and a checklist when it needs one.
- * Repeating, reminders, priority, time and the work it is for wait folded at
- * the foot, with one line saying what is set. A new task is a title and one
- * press for its day. A task set in ManageBac is the same task, with a notice
- * of where it came from and what the school holds for it (grade, hand-in).
+ * A task (EDITORS.md, "Planner task"): one thing to do, laid out the way to-do
+ * apps do it. A round check beside the title marks it done; under them, its
+ * details one per line (due, priority, reminders, and repeating, time and the
+ * work it is for once wanted); then what the school asked, the checklist and
+ * the notes. A new task is a title and one press for its day. A task set in
+ * ManageBac is the same task, with a notice of where it came from and what
+ * the school holds for it (grade, hand-in).
  */
 
 type TaskContent = Record<string, unknown> & {
@@ -63,6 +62,7 @@ export function TaskStudio({
   title,
   content,
   onChange,
+  onTitle,
   readOnly,
 }: {
   /** The work, so opening it at a step or its notes lands there. */
@@ -73,6 +73,8 @@ export function TaskStudio({
   title: string;
   content: unknown;
   onChange: (content: unknown) => void;
+  /** The task's title is the work's name too, so tabs and the Library say it. */
+  onTitle?: (title: string) => void;
   readOnly: boolean;
 }) {
   const task = useMemo(() => singleTaskView(content) as TaskContent, [content]);
@@ -84,8 +86,6 @@ export function TaskStudio({
   const canEdit = studio.can("edit") && !readOnly;
   const timeZone = taskZone(task.timezone, task.allDay !== false);
   const [now, setNow] = useState(() => currentTimeMs());
-  // What most tasks never need stays folded until asked for.
-  const [moreOpen, setMoreOpen] = useState(false);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(currentTimeMs()), 60_000);
     return () => window.clearInterval(timer);
@@ -112,7 +112,6 @@ export function TaskStudio({
     dueTime: due === null ? "23:59" : taskInputs(due, timeZone).time,
     reminderTime,
   };
-  const summary = optionsSummary(options, timing);
 
   const patch = (next: Partial<TaskContent>) => {
     if (!canEdit) return;
@@ -126,10 +125,13 @@ export function TaskStudio({
 
   const exportIcs = () => {
     const name = (task.taskTitle || title || "task").replace(/[^a-z0-9-_]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
-    downloadDocumentText(`${name || "task"}.ics`, "text/calendar", planToIcs(normalizePlanContent(task), title));
+    downloadDocumentText(
+      `${name || "task"}.ics`,
+      "text/calendar",
+      taskToIcs({ ...task, timezone: timeZone }, { uid: artifactId ?? `task-${createdAt ?? currentTimeMs()}`, name: title }),
+    );
   };
 
-  const block = due === null ? null : dateBlock(due, timeZone);
   const late = due !== null && !done && due < now;
   const weekday = due === null ? null : new Date(`${taskInputs(due, timeZone).date}T12:00:00Z`).getUTCDay();
 
@@ -137,23 +139,26 @@ export function TaskStudio({
     <div className="spectra-task-studio" data-mode={mode}>
       <div className="spectra-editor-body spectra-composer-clearance">
         <article className="editor-sheet task-sheet" data-done={done || undefined} data-late={late || undefined}>
-          <header className="task-head">
-            <span className="task-stamp" aria-hidden data-empty={block ? undefined : ""}>
-              {block ? (
-                <>
-                  <span className="task-stamp-month">{block.month}</span>
-                  <span className="task-stamp-day">{block.day}</span>
-                </>
-              ) : (
-                <Icon name="task" size={22} />
-              )}
-            </span>
-            <div className="task-head-main">
-              {fromSchool ? (
-                <p className="task-kicker">
-                  <Lock className="size-3" /> Set by your school
-                </p>
-              ) : null}
+          <header className="task-top">
+            {fromSchool ? (
+              <p className="task-kicker">
+                <Lock className="size-3" /> Set by your school
+              </p>
+            ) : null}
+            <div className="task-top-line">
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={done}
+                aria-label={done ? "Mark as not done" : "Mark as done"}
+                title={done ? "Mark as not done" : "Mark as done"}
+                className="task-check"
+                data-life-done=""
+                disabled={!canEdit}
+                onClick={() => patch({ status: done ? "todo" : "done" })}
+              >
+                {done ? <Icon name="check" size={16} animate /> : null}
+              </button>
               <textarea
                 data-anchor-region="task:taskTitle"
                 className="task-title"
@@ -163,40 +168,47 @@ export function TaskStudio({
                 disabled={!canEdit || locked.has("taskTitle")}
                 placeholder="What do you need to do?"
                 aria-label="Title"
-                onChange={(event) => patch({ taskTitle: event.target.value.replace(/\n/g, " ").slice(0, 500) })}
+                onChange={(event) => {
+                  const next = event.target.value.replace(/\n/g, " ").slice(0, 500);
+                  patch({ taskTitle: next });
+                  if (canEdit && next.trim()) onTitle?.(next.trim().slice(0, 200));
+                }}
               />
-              <TaskWhen
-                due={due}
-                allDay={task.allDay !== false}
-                done={done}
-                now={now}
-                timeZone={timeZone}
-                reminderTime={reminderTime}
-                editable={canEdit && !locked.has("dueAt")}
-                canEdit={canEdit}
-                fromSchool={fromSchool}
-                target={target}
-                onDue={setDue}
-                onTarget={(date) =>
-                  patch({ personalOverlay: { ...task.personalOverlay, targetDueAt: date ? taskInstant(date, null, timeZone) : undefined } })
-                }
-              />
-              <TaskElapsed createdAt={createdAt} due={due} done={done} now={now} />
             </div>
-            <button
-              type="button"
-              role="checkbox"
-              aria-checked={done}
-              aria-label={done ? "Mark as not done" : "Mark as done"}
-              className="task-done"
-              data-life-done=""
-              disabled={!canEdit}
-              onClick={() => patch({ status: done ? "todo" : "done" })}
-            >
-              <span className="task-done-mark">{done ? <Icon name="check" size={14} animate /> : null}</span>
-              {done ? "Done" : "Mark done"}
-            </button>
           </header>
+
+          <TaskProperties
+            when={
+              <>
+                <TaskWhen
+                  due={due}
+                  allDay={task.allDay !== false}
+                  done={done}
+                  now={now}
+                  timeZone={timeZone}
+                  reminderTime={reminderTime}
+                  editable={canEdit && !locked.has("dueAt")}
+                  canEdit={canEdit}
+                  fromSchool={fromSchool}
+                  target={target}
+                  onDue={setDue}
+                  onTarget={(date) =>
+                    patch({ personalOverlay: { ...task.personalOverlay, targetDueAt: date ? taskInstant(date, null, timeZone) : undefined } })
+                  }
+                />
+                <TaskElapsed createdAt={createdAt} due={due} done={done} now={now} />
+              </>
+            }
+            options={options}
+            links={Array.isArray(task.linkedArtifactIds) ? task.linkedArtifactIds : []}
+            selfId={artifactId}
+            hasDue={due !== null}
+            dueWeekday={weekday}
+            timing={timing}
+            canEdit={canEdit}
+            onChange={(next) => patch(next)}
+            onLinks={(ids) => patch({ linkedArtifactIds: ids })}
+          />
 
           {fromSchool && task.description ? (
             <section className="sheet-section task-brief" aria-label="What the school asked" data-anchor-region="task:description">
@@ -208,6 +220,8 @@ export function TaskStudio({
           ) : null}
 
           {fromSchool && artifactId ? <SchoolTaskNotice artifactId={artifactId} /> : null}
+
+          <TaskSteps steps={steps} canEdit={canEdit} onChange={(next) => patch({ subtasks: next })} />
 
           <section className="sheet-section" aria-label={fromSchool ? "Your notes" : "Notes"} data-anchor-region={fromSchool ? undefined : "task:description"}>
             <header className="sheet-section-head">
@@ -231,22 +245,13 @@ export function TaskStudio({
             </div>
           </section>
 
-          <TaskSteps steps={steps} canEdit={canEdit} onChange={(next) => patch({ subtasks: next })} />
-
-          {canEdit || summary ? (
-            <SheetMore open={moreOpen} onOpenChange={setMoreOpen} summary={summary}>
-              <TaskOptions value={options} hasDue={due !== null} dueWeekday={weekday} timing={timing} canEdit={canEdit} onChange={(next) => patch(next)} />
-              <TaskLinks
-                ids={Array.isArray(task.linkedArtifactIds) ? task.linkedArtifactIds : []}
-                selfId={artifactId}
-                canEdit={canEdit}
-                onChange={(ids) => patch({ linkedArtifactIds: ids })}
-              />
-              <button type="button" className="sheet-chip task-export" onClick={exportIcs}>
+          {due !== null ? (
+            <footer className="task-foot">
+              <button type="button" className="task-export" onClick={exportIcs}>
                 <CalendarCheck2 className="size-3.5" />
-                Export to a calendar app
+                Add to my calendar app
               </button>
-            </SheetMore>
+            </footer>
           ) : null}
         </article>
       </div>

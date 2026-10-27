@@ -1272,6 +1272,8 @@ function LibraryOrganizerContent({
               onOpen={openNode}
               onMenu={(event, node) => {
                 event.preventDefault();
+                // Shelves show work from across the Library, not only this listing's rows.
+                noteNodes([node]);
                 setSelection((current) => selectRow(current, rows, node.nodeId, "replace"));
                 setMenu({ x: event.clientX, y: event.clientY, nodeIds: [node.nodeId] });
               }}
@@ -1288,6 +1290,8 @@ function LibraryOrganizerContent({
               onOpen={openNode}
               onMenu={(event, node) => {
                 event.preventDefault();
+                // Shelves show work from across the Library, not only this listing's rows.
+                noteNodes([node]);
                 setSelection((current) => selectRow(current, rows, node.nodeId, "replace"));
                 setMenu({ x: event.clientX, y: event.clientY, nodeIds: [node.nodeId] });
               }}
@@ -1306,6 +1310,7 @@ function LibraryOrganizerContent({
               onOpen={openNode}
               onMenu={(event, node) => {
                 event.preventDefault();
+                noteNodes([node]);
                 setMenu({ x: event.clientX, y: event.clientY, nodeIds: [node.nodeId] });
               }}
               onCreate={() => void createWorkAt("document", folderShelf.nodeId)}
@@ -1460,8 +1465,8 @@ function LibraryOrganizerContent({
                       now={now}
                       callbacks={rowCallbacks}
                       ink={
-                        node.workspace?.starterKey === "managebac-class"
-                          ? book.named(node.name)?.ink
+                        node.kind === "workspace"
+                          ? ((isClassWorkspace(node) ? book.named(node.name)?.ink : undefined) ?? node.workspace?.color)
                           : undefined
                       }
                       syncLabel={

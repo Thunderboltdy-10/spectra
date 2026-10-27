@@ -275,7 +275,7 @@ export const IslandComposer = forwardRef<
       data-island-composer
       onDragOver={(event) => event.dataTransfer.types.includes("Files") && event.preventDefault()}
       onDrop={onDrop}
-      className="relative box-border flex w-[min(600px,calc(100vw-32px))] flex-col rounded-surface border border-[var(--card-border)] bg-[var(--card-paper)] shadow-[var(--shadow-lg)]"
+      className="relative box-border flex w-[min(600px,calc(100vw-var(--spectra-rail-width,0px)-var(--spectra-lead-width,0px)-32px))] flex-col rounded-surface border border-[var(--card-border)] bg-[var(--card-paper)] shadow-[var(--shadow-lg)]"
     >
       {chips.length ? (
         <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">

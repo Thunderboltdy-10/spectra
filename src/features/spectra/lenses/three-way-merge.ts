@@ -1,3 +1,5 @@
+import { canonicalJsonValue } from "../../../../shared/canonical-json";
+
 export type MergeConflict<T> = {
   id: string;
   base?: T;
@@ -23,8 +25,11 @@ type MergeOptions<T> = {
   conflictResolution?: "ours" | "theirs";
 };
 
+// Key order is not content: a Yjs room and a native file serialize the same
+// object in different orders, and an order-sensitive check called every
+// untouched slide object an edit on both sides.
 const defaultEqual = <T>(left: T | undefined, right: T | undefined) =>
-  JSON.stringify(left) === JSON.stringify(right);
+  JSON.stringify(canonicalJsonValue(left)) === JSON.stringify(canonicalJsonValue(right));
 
 /**
  * Merge keyed regions against a persisted ancestor. Undefined represents a
@@ -65,7 +70,9 @@ export function mergeThreeWay<T>({
       if (resolved !== undefined) selected.set(regionId, resolved);
       continue;
     }
-    const winner = oursChanged ? oursValue : theirsChanged ? theirsValue : ancestor;
+    // Unchanged on both sides by `equal` may still differ in what it ignores
+    // (an Excel formula's cached result): the external file is the newer copy.
+    const winner = oursChanged ? oursValue : theirsChanged ? theirsValue : theirsValue ?? ancestor;
     if (winner !== undefined) selected.set(regionId, winner);
   }
 

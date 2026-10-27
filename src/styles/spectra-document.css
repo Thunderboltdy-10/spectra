@@ -374,9 +374,10 @@
   cursor: col-resize;
 }
 
-/* A read-only native region says so instead of quietly refusing keystrokes.
+/* A part of a synced file Spectra keeps as it is reads like the rest of the
+   page; a right-click explains it, and only when asked are they all marked.
    A picture needs no such mark: nobody types into one. */
-.spectra-document-studio .ProseMirror [data-native-read-only="true"]:not(img) {
+.spectra-document-studio[data-show-kept="true"] .ProseMirror [data-native-read-only="true"]:not(img) {
   border-left: 2px solid var(--warning);
   padding-left: 8px;
   background: color-mix(in oklab, var(--warning) 5%, transparent);

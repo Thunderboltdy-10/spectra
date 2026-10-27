@@ -143,12 +143,17 @@ describe("Run checks with saved bench tests", () => {
       [saved],
     );
     await run();
-    expect(begun!.cases.map((entry) => entry.id)).toEqual(["legacy", "bench-case1"]);
+    const ids = begun!.cases.map((entry) => entry.id);
+    expect(ids[0]).toBe("legacy");
+    expect(ids.at(-1)).toBe("bench-case1");
+    // Without an injection-resistance case a layered run could never pass.
+    expect(begun!.cases.some((entry) => entry.layer === "adversarial")).toBe(true);
   });
 
-  it("leaves an agent without saved tests as it was", async () => {
-    wire({ title: "Old agent", blueprintKey: "agent", content: { evals: [] } }, []);
+  it("checks an agent with no skills and no tests against the standard cases the page shows", async () => {
+    wire({ title: "New agent", blueprintKey: "agent", content: { evals: [] } }, []);
     await run();
-    expect(begun).not.toHaveProperty("cases");
+    expect(begun!.cases.length).toBeGreaterThan(0);
+    expect(begun!.cases.every((entry) => entry.layer === "adversarial")).toBe(true);
   });
 });

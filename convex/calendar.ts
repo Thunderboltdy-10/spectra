@@ -985,13 +985,17 @@ export const scheduleTask = mutation({
 
 /**
  * What the owner may move or resize on their Calendar: their own work blocks
- * and the personal events they added. Official and imported source events
- * stay where their source put them.
+ * and the items they added (events, tasks, milestones, reminders). Official
+ * and imported source items stay where their source put them.
  */
 function isReschedulable(item: Doc<"calendarItems">) {
   return (
     item.kind === "scheduled_work_block" ||
-    (item.kind === "personal_event" && !item.sourceLocked)
+    ((item.kind === "personal_event" ||
+      item.kind === "task" ||
+      item.kind === "milestone" ||
+      item.kind === "reminder") &&
+      !item.sourceLocked)
   );
 }
 
@@ -1015,7 +1019,9 @@ export const moveWorkBlock = mutation({
       throw new Error(
         "CALENDAR_GESTURE_CONFLICT: Re-resolve the block before moving it.",
       );
-    if (args.endAt <= args.startAt) throw new Error("CALENDAR_TIME_INVALID: End must be after start.");
+    // A task is due at a moment, so it may start and end together.
+    if (args.endAt < args.startAt || (args.endAt === args.startAt && item.kind !== "task"))
+      throw new Error("CALENDAR_TIME_INVALID: End must be after start.");
     await ctx.db.patch(item._id, {
       startAt: args.startAt,
       endAt: args.endAt,

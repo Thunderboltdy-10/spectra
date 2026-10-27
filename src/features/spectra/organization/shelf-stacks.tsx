@@ -71,6 +71,7 @@ export function ShelfNotes({
   onOpen,
   onMenu,
   picking,
+  onMoveInto,
 }: {
   items: readonly ShelfItem[];
   now: number;
@@ -81,12 +82,15 @@ export function ShelfNotes({
   onOpen: (node: TreeNode) => void;
   onMenu: (event: React.MouseEvent, node: TreeNode) => void;
   picking?: WorkPicking;
+  /** Moves a card into the workspace whose tile it was let go on. */
+  onMoveInto?: (nodeId: string, placeId: string) => void;
 }) {
   const gather = useMutation(api.workStacks.gather);
   const release = useMutation(api.workStacks.release);
-  const drop = async ({ nodeId, ontoNodeId, fromStack }: GatherDrop) => {
+  const drop = async ({ nodeId, ontoNodeId, intoPlaceId, fromStack }: GatherDrop) => {
     try {
-      if (ontoNodeId)
+      if (intoPlaceId) onMoveInto?.(nodeId, intoPlaceId);
+      else if (ontoNodeId)
         await gather({ nodeId: nodeId as Id<"orgNodes">, ontoNodeId: ontoNodeId as Id<"orgNodes"> });
       else if (fromStack) await release({ nodeId: nodeId as Id<"orgNodes"> });
     } catch (error) {
@@ -122,7 +126,16 @@ export function ShelfNotes({
                 }
               />
             ) : (
-              <div onPointerDown={stackable ? (event) => beginGather(event, item.node.nodeId, false) : undefined}>
+              <div
+                data-shelf-drag={stackable ? undefined : item.node.nodeId}
+                onPointerDown={
+                  stackable
+                    ? (event) => beginGather(event, item.node.nodeId, false)
+                    : onMoveInto
+                      ? (event) => beginGather(event, item.node.nodeId, false, true)
+                      : undefined
+                }
+              >
                 <LibraryNote
                   node={item.node}
                   place={placeOf(item.node)}

@@ -6,6 +6,7 @@ import type {
 } from "./projection-contracts";
 import { sheetFormatsEquivalent } from "./office-content";
 import { mergeThreeWay, type MergeConflict } from "./three-way-merge";
+import { canonicalJsonValue } from "../../../../shared/canonical-json";
 
 export type NativeConflictPreview = {
   regionId: string;
@@ -22,7 +23,7 @@ type ProjectionMerge<T> = {
 };
 
 const equal = (left: unknown, right: unknown) =>
-  JSON.stringify(left) === JSON.stringify(right);
+  JSON.stringify(canonicalJsonValue(left)) === JSON.stringify(canonicalJsonValue(right));
 
 function assertUnique<T>(values: readonly T[], id: (value: T) => string, label: string) {
   const seen = new Set<string>();
@@ -34,11 +35,17 @@ function assertUnique<T>(values: readonly T[], id: (value: T) => string, label: 
   }
 }
 
-function short(value: unknown) {
+function short(value: unknown): string {
   if (value === undefined) return "Deleted";
   if (value === null) return "Empty";
   if (typeof value === "string") return value.trim().slice(0, 160) || "Empty";
   if (typeof value === "number" || typeof value === "boolean") return String(value);
+  // A cell or a slide object reads as what a person sees in it, not as JSON.
+  const region = value as { ref?: unknown; formula?: unknown; value?: unknown; content?: { text?: unknown } | string; title?: unknown };
+  if (typeof region.ref === "string")
+    return `${region.ref} = ${typeof region.formula === "string" && region.formula ? `=${region.formula}` : short(region.value ?? null)}`;
+  if (typeof region.content === "string") return short(region.content);
+  if (typeof region.content?.text === "string") return short(region.content.text);
   const text = JSON.stringify(value);
   return (text ?? "Changed").slice(0, 160);
 }
@@ -96,6 +103,18 @@ function xlsxCellsEquivalent(
     left.formulaSupport === right.formulaSupport &&
     sheetFormatsEquivalent(left.format, right.format)
   );
+}
+
+/** What a merge treats as an edit. A formula's value is Excel's cache of its
+ * result, rewritten on every save and absent from Spectra's copy; only the
+ * formula and its format are authored. */
+function xlsxCellsSameForMerge(
+  left: XlsxSheetProjection["cells"][number] | undefined,
+  right: XlsxSheetProjection["cells"][number] | undefined,
+) {
+  if (!left || !right) return left === right;
+  if ((left.formula ?? "") !== (right.formula ?? "") || !sheetFormatsEquivalent(left.format, right.format)) return false;
+  return Boolean(left.formula) || equal(left.value, right.value);
 }
 
 function xlsxSheetMetadata(sheet: XlsxSheetProjection) {
@@ -170,6 +189,7 @@ function mergeSheet(
     ours: ours.cells,
     theirs: theirs.cells,
     id: (cell) => cellId(base.id, cell.ref),
+    equal: xlsxCellsSameForMerge,
     mergeOrder: false,
     conflictResolution: resolution === "spectra" ? "ours" : resolution === "external" ? "theirs" : undefined,
   });

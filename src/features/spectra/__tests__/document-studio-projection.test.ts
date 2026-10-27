@@ -36,7 +36,7 @@ describe("Document studio projection ownership", () => {
   it.each([false, true])("never authors an AI preview into a collaborative tree (native=%s)", async (native) => {
     const { room, editor, admitted } = await fixture();
     const state = Y.encodeStateVector(room);
-    applyDocumentStudioProjection(editor, after, { collaborative: true, native, provisional: true });
+    applyDocumentStudioProjection(editor, after, { collaborative: true });
     expect(Y.encodeStateVector(room)).toEqual(state);
     expect(editor.getJSON().content).toHaveLength(1);
     Y.applyUpdate(room, admitted);
@@ -49,17 +49,16 @@ describe("Document studio projection ownership", () => {
   });
   it("waits for the admitted delta when an ordinary canonical projection arrives first", async () => {
     const { room, editor, admitted } = await fixture();
-    applyDocumentStudioProjection(editor, after, { collaborative: true, native: false, provisional: false });
+    applyDocumentStudioProjection(editor, after, { collaborative: true });
     Y.applyUpdate(room, admitted);
     expect(editor.getJSON().content).toHaveLength(2);
     expect(editor.getJSON().content?.map((node) => node.attrs?.blockId)).toEqual(["saved", "appended"]);
   });
-  it("still adopts a missing canonical Word node once, preserving existing rich content", async () => {
+  it("never appends a stale Word projection's paragraphs after a native save (FLOW-011)", async () => {
     const { editor } = await fixture();
-    const original = editor.getJSON().content?.[0];
-    expect(applyDocumentStudioProjection(editor, after, { collaborative: true, native: true, provisional: false })).toBe(1);
-    expect(applyDocumentStudioProjection(editor, after, { collaborative: true, native: true, provisional: false })).toBe(0);
-    expect(editor.getJSON().content).toHaveLength(2);
-    expect(editor.getJSON().content?.[0]).toEqual(original);
+    // Word re-serialised the file: the room holds new ids, the record lags.
+    const stale = { type: "doc", content: [paragraph("old-1", "One."), paragraph("old-2", "Two."), paragraph("old-3", "Three.")] };
+    expect(applyDocumentStudioProjection(editor, stale, { collaborative: true })).toBe(0);
+    expect(editor.getJSON().content?.map((node) => node.attrs?.blockId)).toEqual(["saved"]);
   });
 });

@@ -28,7 +28,7 @@ export function SchoolLoginSync() {
         const result = await syncSpectraManageBacOnLogin();
         nextAttemptAt = result.nextAttemptAt;
         if (!stopped && !result.skipped) {
-          if (!result.queued.length && result.jobs.length && result.jobs.every((job) => !job.errorCode && !job.suspended && (job.completion as { status?: string } | undefined)?.status === "completed")) nextAttemptAt = undefined;
+          if (!result.queued.length && result.jobs.length && result.jobs.every((job) => !job.errorCode && !job.suspended && ["completed", "awaiting_review"].includes((job.completion as { status?: string } | undefined)?.status ?? ""))) nextAttemptAt = undefined;
         }
       } catch {
         nextAttemptAt = Date.now() + 5 * 60_000;

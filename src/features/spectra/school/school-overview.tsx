@@ -95,7 +95,11 @@ export function Overview({
             title={connection.problem.message}
             detail={connection.problem.fixHint}
             action={
-              connection.problem.fixBy === "student" ? (
+              connection.problem.code === "INTEGRATION_REVIEW_REQUIRED" ? (
+                <Button size="sm" variant="primary" asChild>
+                  <Link href="/managebac?tab=conflicts">Review changes</Link>
+                </Button>
+              ) : connection.problem.fixBy === "student" ? (
                 <Button size="sm" variant="primary" disabled={matching} onClick={() => void matchAccount()}>
                   {matching ? "Matching" : "Match my account"}
                 </Button>
@@ -180,7 +184,11 @@ export function Overview({
                     <span className="block text-ui font-medium text-[var(--text-primary)]">{kind.problem!.message}</span>
                     <span className="block text-caption text-[var(--text-secondary)]">{kind.problem!.fixHint}</span>
                   </span>
-                  {kind.problem!.fixBy === "student" || kind.problem!.fixBy === "spectra" ? (
+                  {kind.problem!.code === "INTEGRATION_REVIEW_REQUIRED" ? (
+                    <Button size="sm" variant="ghost" asChild>
+                      <Link href="/managebac?tab=conflicts">Review changes</Link>
+                    </Button>
+                  ) : kind.problem!.fixBy === "student" || kind.problem!.fixBy === "spectra" ? (
                     <Button size="sm" variant="ghost" disabled={syncing} onClick={() => void onSync(kind.kind)}>
                       Try again
                     </Button>

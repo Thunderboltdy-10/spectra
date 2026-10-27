@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronRight, Loader2, UserPlus } from "@/components/icons/glyph-icons";
+import { AlertCircle, ChevronRight, Loader2, UserPlus } from "@/components/icons/glyph-icons";
 import { Button } from "@/components/ui/button";
 import { LifeKey } from "@/components/ui/life-moments";
 import { SearchField } from "@/components/ui/search-field";
 import { SelectField } from "@/components/ui/select";
-import { toast } from "@/components/ui/toast";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { getAdministration } from "../api";
 import { formatRelative } from "../shared";
@@ -23,12 +22,29 @@ type Mutate = <T>(label: string, action: string, payload: Record<string, unknown
 
 const day = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" });
 
+/** A list read from the server: null until the first answer, kept through a failed refresh. */
+function useServerList<T>(read: () => Promise<T[]>, deps: readonly unknown[], failure: string) {
+  const [rows, setRows] = useState<T[] | null>(null);
+  const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setError("");
+    void read()
+      .then((result) => active && setRows(result))
+      .catch((cause) => active && setError(describeFailure(cause, { fallback: failure }).message));
+    return () => {
+      active = false;
+    };
+    // The caller names what the read depends on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [...deps, attempt]);
+  return { rows, error, retry: () => setAttempt((value) => value + 1) };
+}
+
 function useSchoolPeople(operatorSessionId: string | undefined, refreshKey: number) {
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
-  const [people, setPeople] = useState<Person[]>([]);
-  const [invitations, setInvitations] = useState<Invitation[]>([]);
-  const [loading, setLoading] = useState(true);
 
   /* The search asks the server once typing settles, and the list stays on
      screen while it does; invitations do not depend on it. */
@@ -36,27 +52,30 @@ function useSchoolPeople(operatorSessionId: string | undefined, refreshKey: numb
     const timer = window.setTimeout(() => setQuery(search.trim()), 250);
     return () => window.clearTimeout(timer);
   }, [search]);
-  useEffect(() => {
-    let active = true;
-    void getAdministration<{ people: Person[] }>("people", { operatorSessionId, search: query })
-      .then((result) => active && setPeople(result.people))
-      .catch((error) => active && toast.error(describeFailure(error, { fallback: "Could not read the school’s members." }).message))
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
-  }, [operatorSessionId, refreshKey, query]);
-  useEffect(() => {
-    let active = true;
-    void getAdministration<{ invitations: Invitation[] }>("invitations", { operatorSessionId })
-      .then((result) => active && setInvitations(result.invitations))
-      .catch((error) => active && toast.error(describeFailure(error, { fallback: "Could not read the invitations." }).message));
-    return () => {
-      active = false;
-    };
-  }, [operatorSessionId, refreshKey]);
+  const people = useServerList(
+    () => getAdministration<{ people: Person[] }>("people", { operatorSessionId, search: query }).then((result) => result.people),
+    [operatorSessionId, refreshKey, query],
+    "Couldn’t read the school’s members.",
+  );
+  const invitations = useServerList(
+    () => getAdministration<{ invitations: Invitation[] }>("invitations", { operatorSessionId }).then((result) => result.invitations),
+    [operatorSessionId, refreshKey],
+    "Couldn’t read the invitations.",
+  );
+  return { search, setSearch, query, people, invitations };
+}
 
-  return { search, setSearch, query, people, invitations, loading };
+/** A list that could not be read: what happened and the way to ask again, never "none". */
+function ReadFailure({ message, retry }: { message: string; retry: () => void }) {
+  return (
+    <p className="admin-people-quiet" role="alert">
+      <AlertCircle className="size-3.5 text-[var(--danger)]" aria-hidden />
+      {message}
+      <button type="button" className="admin-link" onClick={retry}>
+        Try again
+      </button>
+    </p>
+  );
 }
 
 export function PeopleSurface({
@@ -65,23 +84,27 @@ export function PeopleSurface({
   mutate,
   refreshKey,
   onRefresh,
+  readOnly = false,
 }: {
   operatorSessionId?: string;
   busy: string;
   mutate: Mutate;
   refreshKey: number;
   onRefresh: () => void;
+  /** An operator inspecting the school reads the lists and changes nothing. */
+  readOnly?: boolean;
 }) {
-  const { search, setSearch, query, people, invitations, loading } = useSchoolPeople(operatorSessionId, refreshKey);
+  const { search, setSearch, query, people, invitations } = useSchoolPeople(operatorSessionId, refreshKey);
   const [inviting, setInviting] = useState(false);
-  const waiting = invitations.filter((invite) => invite.status === "pending");
-  const earlier = invitations.filter((invite) => invite.status !== "pending");
+  const members = people.rows ?? [];
+  const waiting = (invitations.rows ?? []).filter((invite) => invite.status === "pending");
+  const earlier = (invitations.rows ?? []).filter((invite) => invite.status !== "pending");
 
   return (
     <div className="admin-people">
       <div className="admin-people-bar">
         <SearchField value={search} onChange={setSearch} label="Find someone in the school" placeholder="Find someone by name or email" className="w-[320px] max-w-full" />
-        <Button variant="primary" onClick={() => setInviting(true)}>
+        <Button variant="primary" disabled={readOnly} title={readOnly ? "You are inspecting this school, so nobody can be invited from here." : undefined} onClick={() => setInviting(true)}>
           <UserPlus className="size-4" />
           Invite people
         </Button>
@@ -89,18 +112,21 @@ export function PeopleSurface({
 
       <section className="admin-people-section" aria-labelledby="admin-members-title">
         <h2 id="admin-members-title">
-          Members <span>{loading ? "" : people.length}</span>
+          Members <span>{people.rows ? members.length : ""}</span>
         </h2>
-        {loading ? (
-          <p className="admin-people-quiet" role="status">
-            <Loader2 className="size-3.5 animate-spin" aria-hidden /> Reading the school’s members
-          </p>
-        ) : people.length === 0 ? (
+        {people.error ? <ReadFailure message={people.error} retry={people.retry} /> : null}
+        {!people.rows ? (
+          people.error ? null : (
+            <p className="admin-people-quiet" role="status">
+              <Loader2 className="size-3.5 animate-spin" aria-hidden /> Reading the school’s members
+            </p>
+          )
+        ) : members.length === 0 ? (
           <p className="admin-people-quiet">{query ? `No one matches “${query}”.` : "No one has joined yet. Invite people to bring them in."}</p>
         ) : (
           <ul className="admin-people-list">
-            {people.map((person) => (
-              <MemberLine key={person.membershipId} person={person} busy={busy === `member-${person.membershipId}`} mutate={mutate} />
+            {members.map((person) => (
+              <MemberLine key={person.membershipId} person={person} busy={readOnly || busy === `member-${person.membershipId}`} mutate={mutate} />
             ))}
           </ul>
         )}
@@ -108,9 +134,16 @@ export function PeopleSurface({
 
       <section className="admin-people-section" aria-labelledby="admin-waiting-title">
         <h2 id="admin-waiting-title">
-          Waiting to join <span>{waiting.length}</span>
+          Waiting to join <span>{invitations.rows ? waiting.length : ""}</span>
         </h2>
-        {waiting.length === 0 ? (
+        {invitations.error ? <ReadFailure message={invitations.error} retry={invitations.retry} /> : null}
+        {!invitations.rows ? (
+          invitations.error ? null : (
+            <p className="admin-people-quiet" role="status">
+              <Loader2 className="size-3.5 animate-spin" aria-hidden /> Reading the invitations
+            </p>
+          )
+        ) : waiting.length === 0 ? (
           <p className="admin-people-quiet">Everyone you invited has joined, or their invitation ended.</p>
         ) : (
           <ul className="admin-people-list">
@@ -126,7 +159,7 @@ export function PeopleSurface({
                 <Button
                   variant="ghost"
                   size="sm"
-                  disabled={busy === `invite-${invite.invitationId}`}
+                  disabled={readOnly || busy === `invite-${invite.invitationId}`}
                   onClick={() => void mutate(`invite-${invite.invitationId}`, "revokeInvitation", { invitationId: invite.invitationId }, "Invitation withdrawn.")}
                 >
                   Withdraw

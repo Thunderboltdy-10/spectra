@@ -64,7 +64,7 @@ export function FeedbackInbox() {
         }
       />
       {items === undefined ? null : items.length === 0 ? (
-        <p className="px-4 pb-4 text-caption text-[var(--text-secondary)]">
+        <p className="admin-ledger-empty">
           {view === "open" ? "Nothing waiting. New feedback lands here." : "Nothing resolved yet."}
         </p>
       ) : (

@@ -224,9 +224,9 @@ export function bridgeReachabilityCopy(kind: BridgeReachability): {
   }
   if (kind === "port-taken") {
     return {
-      label: "Connection blocked",
+      label: "Not recognised",
       detail:
-        "Something else is using the Spectra Bridge connection on this PC. Close the other app, then try again.",
+        "Something on this PC answered in Bridge's place, but not as Spectra Bridge. Restart Spectra Bridge from the system tray; if this stays, another app may be using its connection.",
     };
   }
   if (kind === "update-required") {
@@ -275,7 +275,7 @@ export function folderChipLabel(input: {
   if (input.reachability === "offline") return "Offline";
   if (input.reachability === "running" || input.reachability === "not-set-up")
     return "Not connected";
-  if (input.reachability === "port-taken") return "Connection blocked";
+  if (input.reachability === "port-taken") return "Not recognised";
   if (input.reachability === "update-required") return "Update required";
   if (input.discoveryFailed) return "Waiting for Spectra";
   if (input.state === "selected" || input.state === "active") return "Ready";
@@ -443,10 +443,11 @@ export async function bridgeStatus(
   signal?: AbortSignal,
 ): Promise<BridgeStatus | null> {
   try {
+    // Read before the request: a refused token is cleared by it, and the
+    // resume below needs it to ask Bridge for a fresh session.
+    const token = loadBridgeSession();
     let response = await authorizedBridgeRequest("/v1/status", { signal });
-    if (!response && typeof window !== "undefined") {
-      const token = loadBridgeSession();
-      if (!token) return null;
+    if (!response && token && typeof window !== "undefined") {
       const resume = await fetch(`${BRIDGE_URL}/v1/session/resume`, {
         method: "POST",
         signal: bridgeRequestSignal(signal),

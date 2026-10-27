@@ -372,7 +372,7 @@ function syncRecoveryMessage(run: SpectraManageBacSyncRun, includeSyncFallback =
     case "INTEGRATION_IDENTITY_INVALID":
       return "Resolve your school identity to continue.";
     case "INTEGRATION_CREDENTIAL_REJECTED":
-      return "Ask a school administrator to reconnect the read-only ManageBac connection.";
+      return "ManageBac refused the school's API key. A school administrator can enter a new key under Connection.";
     case "INTEGRATION_RATE_LIMITED":
       return "ManageBac asked us to wait. Try again in a little while.";
     case "INTEGRATION_SYNC_BUSY":
@@ -599,6 +599,11 @@ export function ManageBacIntegrationShell() {
   const [busy, setBusy] = useState("");
   const busyRef = useRef(false);
   const [tab, setTab] = useState<Tab>("overview");
+  // School links straight to what needs a decision (?tab=conflicts).
+  useEffect(() => {
+    const asked = new URLSearchParams(window.location.search).get("tab");
+    if (asked === "conflicts" || asked === "history") setTab(asked);
+  }, []);
   const [detailsTab, setDetailsTab] = useState<"details" | "activity">(
     "details",
   );
@@ -1164,8 +1169,12 @@ export function ManageBacIntegrationShell() {
           busy={busy === "configure"}
           connected={Boolean(integration)}
           envTokenAvailable={Boolean(data?.envTokenAvailable)}
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => {
+            setSettingsOpen(false);
+            setError("");
+          }}
           onSave={saveConfiguration}
+          error={error}
           onManifest={() => {
             setSettingsOpen(false);
             setManifestOpen(true);
@@ -1296,6 +1305,95 @@ function SyncTable({
   );
 }
 
+/** What each kind of conflict is, said to the person deciding it. */
+const CONFLICT_KIND: Record<string, string> = {
+  customization_overlap: "Changed in ManageBac and in Spectra",
+  source_changed: "Changed in ManageBac",
+  changed_due_date: "Due date moved in ManageBac",
+  source_removed: "Removed from ManageBac",
+  duplicate_projection: "Shows up twice",
+  ambiguous_relation: "Not sure where this belongs",
+};
+
+/** What each choice does, so it is made knowing its consequence. */
+const RESOLUTION: Record<
+  "rebase" | "keep_overlay" | "detach" | "archive_projection",
+  { label: string; detail: string }
+> = {
+  rebase: {
+    label: "Use ManageBac's",
+    detail: "Takes ManageBac's version of what changed. Your notes and work in Spectra stay.",
+  },
+  keep_overlay: {
+    label: "Keep mine",
+    detail: "Keeps your version of these fields. Later ManageBac changes to anything else still arrive.",
+  },
+  detach: {
+    label: "Stop syncing it",
+    detail: "Keeps it in Spectra as it is now, and ManageBac stops updating it.",
+  },
+  archive_projection: {
+    label: "Archive in Spectra",
+    detail: "Moves it out of the way in Spectra. Nothing is deleted.",
+  },
+};
+
+const FIELD_LABELS: Record<string, string> = {
+  title: "Title",
+  name: "Name",
+  dueAt: "Due date",
+  due_date: "Due date",
+  deadline: "Due date",
+  startAt: "Start",
+  endAt: "End",
+  description: "Description",
+  body: "Description",
+  points: "Points",
+  maxPoints: "Points",
+  type: "Type",
+  status: "Status",
+  className: "Class",
+};
+
+function fieldValue(value: unknown) {
+  if (value === undefined || value === null || value === "") return "nothing";
+  if (typeof value === "number" && value > 1e12) return formatDate(value);
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+    const at = Date.parse(value);
+    if (Number.isFinite(at)) return formatDate(at);
+  }
+  if (typeof value === "string") {
+    // ManageBac sends rich text as HTML; the reader compares the words.
+    const words = value.replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+    if (!words) return "nothing";
+    return words.length > 80 ? `${words.slice(0, 79)}…` : words;
+  }
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return "a changed value";
+}
+
+/** The fields ManageBac changed, as before → after, leaving out bookkeeping. */
+function changedFields(before: Record<string, unknown>, after: Record<string, unknown>) {
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  return [...keys]
+    .filter((key) => key in FIELD_LABELS || !/(^_|id$|Id$|hash|Hash|At$|cursor|etag|version|raw)/.test(key))
+    .filter((key) => [before[key], after[key]].every((value) => value === null || typeof value !== "object"))
+    // Only what reads differently: the same words rewrapped in HTML are no change.
+    .filter((key) => fieldValue(before[key]) !== fieldValue(after[key]))
+    .slice(0, 6)
+    .map((key) => ({
+      key,
+      label:
+        FIELD_LABELS[key] ??
+        key
+          .replace(/([a-z])([A-Z])/g, "$1 $2")
+          .replace(/_/g, " ")
+          .replace(/^./, (first) => first.toUpperCase()),
+      before: fieldValue(before[key]),
+      after: fieldValue(after[key]),
+    }));
+}
+
 function ConflictList({
   conflicts,
   busy,
@@ -1308,11 +1406,31 @@ function ConflictList({
     resolution: "rebase" | "keep_overlay" | "detach" | "archive_projection",
   ) => void;
 }) {
+  const offered = (["rebase", "keep_overlay", "detach", "archive_projection"] as const).filter((action) =>
+    conflicts.some((conflict) => conflict.suggestedActions.includes(action)),
+  );
   return (
     <div className="space-y-2 px-1">
+      {offered.length ? (
+        <ul className="space-y-0.5 px-3 pb-2 text-micro leading-4 text-[var(--text-tertiary)]">
+          {offered.map((action) => (
+            <li key={action}>
+              <span className="text-[var(--text-secondary)]">{RESOLUTION[action].label}:</span> {RESOLUTION[action].detail}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {conflicts.map((conflict) => {
         const oldSource = object(conflict.oldSource);
         const nextSource = object(conflict.newSource);
+        const overlay = object(conflict.overlay);
+        const name = text(nextSource.title ?? nextSource.name ?? oldSource.title ?? oldSource.name, "This item");
+        const fields = conflict.kind === "source_removed" ? [] : changedFields(oldSource, nextSource);
+        const yours = Object.keys(overlay).filter((key) => FIELD_LABELS[key]);
+        // Every choice the conflict offers, ManageBac's first.
+        const actions = (["rebase", "keep_overlay", "detach", "archive_projection"] as const).filter((action) =>
+          conflict.suggestedActions.includes(action),
+        );
         return (
           <article key={conflict._id} className="rounded-xl px-3 py-3 transition-colors hover:bg-[var(--bg-secondary)]">
             <LifeKey id={`conflict:${conflict._id}`} />
@@ -1321,65 +1439,53 @@ function ConflictList({
                 <AlertCircle size={12} />
               </span>
               <div className="min-w-0 flex-1">
-                <strong className="block text-micro font-medium">
-                  {conflict.kind.replaceAll("_", " ")}
-                </strong>
-                <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">
-                  {text(oldSource.title ?? oldSource.name, "The source record")}
-                  {nextSource.title || nextSource.name
-                    ? ` changed to “${text(nextSource.title ?? nextSource.name)}”.`
-                    : " was removed or changed while your overlay was based on an older version."}
-                </p>
-                <span className="mt-1 block text-micro text-[var(--text-tertiary)]">
-                  {conflict.projectionType.replaceAll("_", " ")} ·{" "}
+                <strong className="block text-micro font-medium">{name}</strong>
+                <span className="mt-0.5 block text-micro text-[var(--text-tertiary)]">
+                  {CONFLICT_KIND[conflict.kind] ?? conflict.kind.replaceAll("_", " ")}, {conflict.projectionType.replaceAll("_", " ")},{" "}
                   {formatDate(conflict.createdAt)}
                 </span>
-              </div>
-              <div className="flex shrink-0 items-center gap-1">
-                {conflict.suggestedActions.includes("detach") ||
-                conflict.suggestedActions.includes("archive_projection") ? (
-                  <>
-                    {conflict.suggestedActions.includes("detach") ? (
-                      <button
-                        type="button"
-                        disabled={Boolean(busy)}
-                        onClick={() => onResolve(conflict, "detach")}
-                        className="h-7 rounded-md border border-[var(--border-subtle)] px-2 text-micro hover:bg-[var(--bg-secondary)] disabled:opacity-50"
-                      >
-                        Keep in Spectra
-                      </button>
-                    ) : null}
-                    {conflict.suggestedActions.includes("archive_projection") ? (
-                      <button
-                        type="button"
-                        disabled={Boolean(busy)}
-                        onClick={() => onResolve(conflict, "archive_projection")}
-                        className="h-7 rounded-md bg-[var(--text-primary)] px-2.5 text-micro text-white hover:bg-[var(--text-primary)] disabled:opacity-50"
-                      >
-                        Archive in Spectra
-                      </button>
-                    ) : null}
-                  </>
+                {fields.length ? (
+                  <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-micro leading-4">
+                    {fields.map((field) => (
+                      <div key={field.key} className="contents">
+                        <dt className="text-[var(--text-tertiary)]">{field.label}</dt>
+                        <dd className="min-w-0 text-[var(--text-secondary)]">
+                          <span className="line-through decoration-[var(--text-tertiary)]">{field.before}</span>
+                          {" → "}
+                          <span className="text-[var(--text-primary)]">{field.after}</span>
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
                 ) : (
-                  <>
-                    <button
-                      type="button"
-                      disabled={Boolean(busy)}
-                      onClick={() => onResolve(conflict, "keep_overlay")}
-                      className="h-7 rounded-md border border-[var(--border-subtle)] px-2 text-micro hover:bg-[var(--bg-secondary)] disabled:opacity-50"
-                    >
-                      Keep mine
-                    </button>
-                    <button
-                      type="button"
-                      disabled={Boolean(busy)}
-                      onClick={() => onResolve(conflict, "rebase")}
-                      className="h-7 rounded-md bg-[var(--text-primary)] px-2.5 text-micro text-white hover:bg-[var(--text-primary)] disabled:opacity-50"
-                    >
-                      Rebase
-                    </button>
-                  </>
+                  <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">
+                    {conflict.kind === "source_removed"
+                      ? "ManageBac no longer has this. Spectra kept your copy until you decide."
+                      : text(overlay.reason, "ManageBac changed this while your version in Spectra was based on an older one.")}
+                  </p>
                 )}
+                {yours.length ? (
+                  <p className="mt-1.5 text-micro leading-4 text-[var(--text-secondary)]">
+                    You changed in Spectra: {yours.map((key) => FIELD_LABELS[key]!.toLowerCase()).join(", ")}.
+                  </p>
+                ) : null}
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  {actions.map((action, index) => (
+                    <button
+                      key={action}
+                      type="button"
+                      disabled={Boolean(busy)}
+                      onClick={() => onResolve(conflict, action)}
+                      className={
+                        index === 0
+                          ? "h-7 rounded-md bg-[var(--text-primary)] px-2.5 text-micro text-[var(--bg-primary)] disabled:opacity-50"
+                          : "h-7 rounded-md border border-[var(--border-subtle)] px-2 text-micro hover:bg-[var(--bg-secondary)] disabled:opacity-50"
+                      }
+                    >
+                      {RESOLUTION[action].label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </article>
@@ -1701,6 +1807,7 @@ export function SettingsDialog({
   onClose,
   onSave,
   onManifest,
+  error,
 }: {
   config: {
     baseUrl: string;
@@ -1713,6 +1820,8 @@ export function SettingsDialog({
   onClose: () => void;
   onSave: () => void;
   onManifest: () => void;
+  /** Why the last save did not go through, shown beside the key it is about. */
+  error?: string;
 }) {
   const input =
     "h-9 w-full rounded-control border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-micro outline-none focus:border-[#7aa999] focus:ring-2 focus:ring-[#dceee7]";
@@ -1782,6 +1891,8 @@ export function SettingsDialog({
                 }))
               }
               className={input}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? "managebac-key-error" : undefined}
               placeholder={
                 connected
                   ? "Enter a replacement key to rotate the credential"
@@ -1790,6 +1901,11 @@ export function SettingsDialog({
                     : "Stored encrypted; never returned to this browser"
               }
             />
+            {error ? (
+              <span id="managebac-key-error" role="alert" className="mt-1.5 block text-micro leading-4 text-[var(--danger)]">
+                {error}
+              </span>
+            ) : null}
           </label>
           <div className="rounded-control border border-[color-mix(in_oklab,var(--accent-mint)_18%,var(--bg-elevated))] bg-[color-mix(in_oklab,var(--accent-mint)_6%,var(--bg-primary))] p-3 text-micro leading-4 text-[var(--accent-mint)]">
             Sync cadence, how the school API token is sent, and conflict policy

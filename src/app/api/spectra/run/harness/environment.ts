@@ -177,7 +177,12 @@ export async function readPlaces(actorClerkId: string, hereId?: string) {
   if (!Array.isArray(workspaces)) return { places: [] as EnvironmentPlace[] };
   const places = rows(workspaces)
     .filter((workspace) => workspace.accessLevel === "modify")
-    .map((workspace) => ({ id: String(workspace._id), title: text(workspace.title).trim().slice(0, 120) || "Untitled" }));
+    .map((workspace) => ({
+      id: String(workspace._id),
+      title: text(workspace.title).trim().slice(0, 120) || "Untitled",
+      // A class is marked by the student, or by coming from one of their ManageBac classes.
+      ...((typeof workspace.isClass === "boolean" ? workspace.isClass : workspace.starterKey === "managebac-class") ? { isClass: true } : {}),
+    }));
   const here = hereId ? places.find((place) => place.id === hereId) : undefined;
   return { places, ...(here ? { here } : {}) };
 }

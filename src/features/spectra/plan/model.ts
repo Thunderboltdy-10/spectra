@@ -107,7 +107,9 @@ export function singleTaskView(content: unknown): Record<string, unknown> {
   const rest = stepsOf(row.tasks.slice(1));
   return {
     ...row,
-    taskTitle: typeof row.taskTitle === "string" && row.taskTitle ? row.taskTitle : task.title,
+    // A new task's plan names its one task "First task" (legacyPlannerTask) only
+    // to have a name; the task itself has none until it is written.
+    taskTitle: typeof row.taskTitle === "string" && row.taskTitle ? row.taskTitle : task.title === "First task" ? "" : task.title,
     description: typeof task.description === "string" && task.description ? task.description : row.description,
     status: TASK_STATUS[task.status as keyof typeof TASK_STATUS] ?? row.status ?? "todo",
     estimateMinutes: Number.isFinite(task.estimateMinutes) ? task.estimateMinutes : row.estimateMinutes,

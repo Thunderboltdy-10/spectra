@@ -382,6 +382,8 @@ function quizPracticeErrorMessage(error: unknown, fallback: string) {
   }
   if (message.includes("QUIZ_PRACTICE_ATTEMPT_LIMIT_REACHED"))
     return "You have reached this quiz’s configured practice-attempt limit.";
+  if (message.includes("QUIZ_PRACTICE_STILL_PUBLISHING"))
+    return "It is still publishing. Press Attempt again in a moment.";
   if (message.includes("QUIZ_PRACTICE_NOT_PUBLISHED"))
     return "This practice version is no longer available. The author may be preparing an updated draft.";
   if (message.includes("QUIZ_ATTEMPT_NOT_EDITABLE"))
@@ -1192,23 +1194,34 @@ export function QuizStudio({
       return;
     }
     if (!synchronizationReady) {
-      setPracticeError(
-        "The published version is still synchronizing. Practice will be available as soon as the live state is durable.",
-      );
+      setPracticeError("Still publishing. Attempt opens as soon as it is saved.");
       setView("preview");
       return;
     }
     setPracticeBusy(true);
     setPracticeError(undefined);
     try {
-      const attempt = await startSpectraQuizPractice({
-        artifactId,
-        clientAttemptId: crypto.randomUUID(),
-      });
-      hydratePracticeAttempt(attempt);
+      // The server learns of a publish a moment after this page does: while it
+      // has not, Attempt stays busy and asks again with the same attempt id.
+      const clientAttemptId = crypto.randomUUID();
+      const startWhenPublished = async (
+        tries: number,
+      ): Promise<Awaited<ReturnType<typeof startSpectraQuizPractice>>> => {
+        try {
+          return await startSpectraQuizPractice({ artifactId, clientAttemptId });
+        } catch (error) {
+          const publishing = error instanceof Error && error.message.includes("QUIZ_PRACTICE_NOT_PUBLISHED");
+          if (!publishing || !latestQuizRef.current.published) throw error;
+          if (tries >= 4) throw new Error("QUIZ_PRACTICE_STILL_PUBLISHING");
+          await new Promise((resolve) => window.setTimeout(resolve, 1_000 + tries * 750));
+          return startWhenPublished(tries + 1);
+        }
+      };
+      const started = await startWhenPublished(0);
+      hydratePracticeAttempt(started);
       setPracticeAttempts((current) => [
-        attempt,
-        ...current.filter((item) => item.attemptId !== attempt.attemptId),
+        started,
+        ...current.filter((item) => item.attemptId !== started.attemptId),
       ]);
     } catch (error) {
       setPracticeError(

@@ -584,3 +584,466 @@
   font-size: var(--text-caption);
   outline: none;
 }
+
+/*
+ * Administration, school and platform (pages/school-admin-shell.tsx,
+ * pages/superadmin-shell.tsx). The same desk as Home: headings in the
+ * display serif, counts set like the week's dates on one paper sheet,
+ * everything else a ledger of lines with hairlines between them. Links
+ * are underlined ink, as on Home; colour is kept for what needs a hand.
+ */
+.admin-page {
+  display: flex;
+  max-width: 1080px;
+  flex-direction: column;
+  gap: 44px;
+  padding: 8px 0 120px;
+}
+.admin-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 4px 16px;
+  margin-bottom: 14px;
+}
+.admin-head h2 {
+  font-family: var(--font-display);
+  font-size: 23px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.006em;
+  color: var(--text-primary);
+}
+.admin-head h2 span {
+  margin-left: 8px;
+  font-family: var(--font-sans);
+  font-size: var(--text-ui);
+  font-weight: 400;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.admin-head p {
+  grid-column: 1 / -1;
+  max-width: 64ch;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.admin-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.admin-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--text-secondary) 35%, transparent);
+  text-underline-offset: 4px;
+  outline: none;
+  transition: color var(--motion-fast) var(--ease-standard);
+}
+.admin-link:hover {
+  color: var(--text-primary);
+  text-decoration-color: currentColor;
+}
+.admin-link:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus-ring-color);
+}
+.admin-link:disabled,
+.admin-link[aria-disabled="true"] {
+  cursor: not-allowed;
+  color: var(--text-tertiary);
+  text-decoration: none;
+}
+.admin-link[data-tone="attention"] {
+  color: var(--danger);
+  text-decoration-color: color-mix(in oklab, var(--danger) 40%, transparent);
+}
+
+/* Counts on one sheet of paper, the way Home lays the week open. */
+.admin-sheet {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  overflow: hidden;
+  border-radius: 18px;
+  background: var(--card-paper);
+  box-shadow:
+    0 0 0 1px var(--card-border),
+    0 1px 2px rgb(52 40 28 / 0.05),
+    0 16px 34px -26px rgb(52 40 28 / 0.35);
+}
+.admin-tally {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 -1px -1px;
+  padding: 18px 20px 20px;
+  box-shadow: inset 1px 0 0 var(--card-border-soft), inset 0 -1px 0 var(--card-border-soft);
+}
+.admin-tally-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.admin-tally-value {
+  font-family: var(--font-display);
+  font-size: 38px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+.admin-tally-value[data-unknown] {
+  font-size: 20px;
+  line-height: 1.4;
+  color: var(--text-tertiary);
+}
+.admin-tally[data-tone="attention"] .admin-tally-value {
+  color: var(--brand-primary);
+}
+.admin-tally-detail {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text-tertiary);
+}
+.admin-tally .admin-link {
+  margin-top: auto;
+  padding-top: 6px;
+  align-self: flex-start;
+}
+
+/* What needs a hand: slips with ink along their edge, as Home's tasks. */
+.admin-needs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.admin-need {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px 12px 16px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--need-ink, var(--brand-primary)) 7%, var(--card-paper));
+  box-shadow: inset 3px 0 0 var(--need-ink, var(--brand-primary));
+}
+.admin-need[data-tone="danger"] {
+  --need-ink: var(--danger);
+}
+.admin-need[data-tone="quiet"] {
+  --need-ink: var(--text-tertiary);
+}
+.admin-need > div {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+.admin-need strong {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.admin-need span {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+/* A ledger: one line per thing, hairlines between. */
+.admin-ledger {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border-subtle);
+  list-style: none;
+}
+.admin-line {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+button.admin-line,
+a.admin-line {
+  width: 100%;
+  text-align: left;
+  outline: none;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+button.admin-line:hover,
+a.admin-line:hover {
+  background: color-mix(in oklab, var(--card-paper) 70%, transparent);
+}
+button.admin-line:focus-visible,
+a.admin-line:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus-ring-color);
+}
+.admin-line-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+.admin-line-main strong {
+  overflow: hidden;
+  font-size: var(--text-ui);
+  font-weight: 500;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.admin-line-main span {
+  overflow: hidden;
+  font-size: var(--text-caption);
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.admin-line-main p {
+  font-size: var(--text-caption);
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.admin-line-meta {
+  flex: none;
+  font-size: var(--text-caption);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.admin-line-meta[data-tone="attention"] {
+  color: var(--brand-primary);
+  font-weight: 500;
+}
+.admin-line-meta[data-tone="danger"] {
+  color: var(--danger);
+  font-weight: 500;
+}
+.admin-ledger-empty {
+  padding: 14px 2px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13.5px;
+  color: var(--text-tertiary);
+}
+
+/* Facts: a label and its value on one line. */
+.admin-facts {
+  display: grid;
+  margin: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.admin-facts > div {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.admin-facts dt {
+  font-size: var(--text-ui);
+  color: var(--text-secondary);
+}
+.admin-facts dd {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.admin-facts dd[data-tone="attention"] {
+  color: var(--danger);
+}
+
+.admin-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 40px 48px;
+}
+
+/* A footnote: what this page can and cannot see, said once and quietly. */
+.admin-footnote {
+  display: flex;
+  max-width: 72ch;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+.admin-footnote svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+/* A day-by-day chart with its scale and days written on it. */
+.admin-chart {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0 10px;
+}
+.admin-chart-scale {
+  display: flex;
+  height: 200px;
+  flex-direction: column;
+  justify-content: space-between;
+  margin-top: -6px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.admin-chart-bars {
+  display: flex;
+  height: 200px;
+  align-items: flex-end;
+  gap: 3px;
+  border-bottom: 1px solid var(--border-default);
+  background-image: linear-gradient(var(--border-subtle) 1px, transparent 1px);
+  background-size: 100% 50%;
+}
+.admin-chart-bar {
+  position: relative;
+  min-width: 4px;
+  flex: 1;
+  border-radius: 3px 3px 0 0;
+  background: color-mix(in oklab, var(--brand-primary) 62%, var(--card-paper));
+  outline: none;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+.admin-chart-bar:hover,
+.admin-chart-bar:focus-visible {
+  background: var(--brand-primary);
+}
+.admin-chart-days {
+  display: flex;
+  grid-column: 2;
+  justify-content: space-between;
+  padding-top: 6px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+.admin-chart-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-bottom: 18px;
+}
+.admin-chart-choice button {
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  outline: none;
+}
+.admin-chart-choice button:hover {
+  color: var(--text-primary);
+}
+.admin-chart-choice button[aria-pressed="true"] {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.admin-chart-choice button:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus-ring-color);
+}
+
+/* Settings as a form on paper: the label on the left, the field on the right. */
+.admin-form {
+  display: grid;
+  border-top: 1px solid var(--border-subtle);
+}
+.admin-form > label,
+.admin-form > div {
+  display: grid;
+  grid-template-columns: minmax(160px, 240px) minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.admin-form-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-ui);
+  color: var(--text-primary);
+}
+.admin-form-label small {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.admin-form input:not([type="checkbox"]),
+.admin-form textarea {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--control-radius, 8px);
+  background: color-mix(in oklab, var(--card-paper) 70%, var(--bg-primary));
+  font-size: var(--text-ui);
+  color: var(--text-primary);
+  outline: none;
+}
+.admin-form input:focus {
+  border-color: var(--brand-primary);
+}
+.admin-form input:disabled {
+  color: var(--text-tertiary);
+}
+
+/* The operator's banner over a school they have stepped into. */
+.admin-operator {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 20px;
+  border-bottom: 1px solid var(--card-border);
+  background: color-mix(in oklab, var(--card-paper) 90%, var(--brand-primary));
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.admin-operator strong {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.admin-operator > span {
+  min-width: 0;
+  flex: 1;
+}
+
+@media (max-width: 720px) {
+  .admin-form > label,
+  .admin-form > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .admin-tally-value {
+    font-size: 30px;
+  }
+  .admin-line {
+    flex-wrap: wrap;
+  }
+  .admin-line-main {
+    flex-basis: 100%;
+  }
+}

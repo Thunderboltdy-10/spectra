@@ -183,7 +183,11 @@ export function rankKBarCommand(command: Command<unknown>, context: KBarContext,
   if (command.visibility === "internal") return Number.NEGATIVE_INFINITY;
   if (!K_BAR_COMMAND_IDS.has(command.id) && !DOCUMENT_KBAR_COMMAND_IDS.has(command.id)) return Number.NEGATIVE_INFINITY;
   if (DOCUMENT_KBAR_COMMAND_IDS.has(command.id) && (context.activeArtifactType !== "document" || !context.activeArtifactId)) return Number.NEGATIVE_INFINITY;
-  const score = textScore(`${command.title} ${command.description} ${command.id}`, query);
+  // A command named for what was typed outranks one that only mentions it.
+  const score = Math.max(
+    textScore(command.title, query) + (query ? 15 : 0),
+    textScore(`${command.title} ${command.description} ${command.id}`, query),
+  );
   if (score < 0) return Number.NEGATIVE_INFINITY;
   const surface = surfaceFor(context.pathname);
   let result = score + (command.priority === "essential" ? 8 : command.priority === "advanced" ? -2 : 3);
@@ -238,8 +242,9 @@ function resultEntry(result: KBarSearchResult, command: Command<unknown>, query:
     description: result.subtitle ?? `Open ${result.kind} through the authorized Spectra path.`,
     params: result.params,
     contextLabel: result.kind[0]!.toUpperCase() + result.kind.slice(1),
-    // Ranked results keep their order; a title match still lifts a result above commands.
-    score: 100 + Math.max(0, textScore(result.title, query)) - (result.rank ?? 0) * 0.5,
+    // Ranked results keep their order. Only a title match lifts a result above
+    // commands: a loosely related work must not intercept "Analytics".
+    score: 40 + Math.max(0, textScore(result.title, query)) - (result.rank ?? 0) * 0.5,
   };
 }
 

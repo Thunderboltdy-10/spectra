@@ -539,6 +539,18 @@ function ChecksView({
 
   const cases = active?.results ?? [];
   const failed = cases.filter((entry) => !entry.passed);
+  // The run's verdict is the server's (agents.settleEvalRun); when it failed
+  // with no failing case, say which of its rules it missed.
+  const gateReason =
+    active?.status !== "failed"
+      ? ""
+      : active.averageScore < active.threshold
+        ? "The average is under the threshold, so the run failed."
+        : cases.some((entry) => entry.required && !entry.passed)
+          ? "A required check failed, so the run failed."
+          : cases.some((entry) => entry.layer) && !cases.some((entry) => entry.layer === "adversarial")
+            ? "It failed because none of its checks tried to talk the agent out of its instructions. Run the checks again: they now include those."
+            : "";
   const savedTests = suite.filter((entry) => isBenchEvaluationCase(entry.id)).length;
   const caseLabel = (caseId: string, category: string) => {
     if (isBenchEvaluationCase(caseId)) {
@@ -650,6 +662,7 @@ function ChecksView({
               {failed.length === 0
                 ? `Every check passed. Average score ${active.averageScore.toFixed(2)} against a ${active.threshold.toFixed(2)} threshold.`
                 : `${failed.length} of ${active.caseCount} check${active.caseCount === 1 ? "" : "s"} failed. Average score ${active.averageScore.toFixed(2)} against a ${active.threshold.toFixed(2)} threshold.`}
+              {gateReason ? ` ${gateReason}` : ""}
             </p>
             <ul className="foundry-skill-list">
               {shown.map((entry) => (
@@ -690,10 +703,18 @@ function ChecksView({
                   : `Show the ${cases.length - failed.length} that passed`}
               </button>
             )}
-            <p className="foundry-ledger-note">
-              Spectra also records how each answer was judged and what the run
-              could not establish. This screen does not read those yet.
-            </p>
+            {active.limitations?.length ? (
+              <>
+                <p className="foundry-ledger-note">What this run could not establish:</p>
+                <ul className="foundry-skill-list">
+                  {active.limitations.map((entry, index) => (
+                    <li key={`${entry.kind}-${index}`} className="foundry-skill">
+                      <p className="foundry-skill-purpose">{entry.detail}</p>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
           </>
         )}
       </section>

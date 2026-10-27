@@ -12,7 +12,13 @@ import { flash } from "./light/light";
  * corrects itself. A press lights the paper where it lands.
  */
 
-export type Person = { name: string; colour: string; hue: number; ai?: boolean; action?: string };
+export type Person = {
+  name: string;
+  colour: string;
+  hue: number;
+  ai?: boolean;
+  action?: string;
+};
 
 export const PEOPLE = {
   henry: { name: "Henry", colour: "#4f9fe6", hue: 4 },
@@ -39,7 +45,8 @@ const sleep = (ms: number, signal?: AbortSignal) =>
     });
   });
 
-const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const ease = (t: number) =>
+  t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
 export class Hand {
   readonly node: HTMLDivElement;
@@ -47,6 +54,7 @@ export class Hand {
   private flag: HTMLSpanElement;
   private note: HTMLSpanElement;
   private carried: HTMLElement | null = null;
+  private carriedScale = 1;
   private at: Point = [0, 0];
   private shown = false;
 
@@ -65,11 +73,14 @@ export class Hand {
         ? `<defs><linearGradient id="sp-hand-prism" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b6cf6"/><stop offset="0.5" stop-color="#4f9fe6"/><stop offset="1" stop-color="#40c48e"/></linearGradient></defs>`
         : ""
     }<path d="${person.ai ? PRISM : ARROW}" fill="${person.ai ? "url(#sp-hand-prism)" : "currentColor"}" stroke="#fff" stroke-width="0.9" stroke-linejoin="round"/></svg><span class="sp-hand-flag">${
-      person.ai ? `<svg viewBox="0 0 12 12" width="9" height="9" aria-hidden="true"><path d="M6 .6 7 4.3l3.6 1.1L7 6.5 6 10.2 5 6.5 1.4 5.4 5 4.3z" fill="currentColor"/></svg>` : ""
+      person.ai
+        ? `<svg viewBox="0 0 12 12" width="9" height="9" aria-hidden="true"><path d="M6 .6 7 4.3l3.6 1.1L7 6.5 6 10.2 5 6.5 1.4 5.4 5 4.3z" fill="currentColor"/></svg>`
+        : ""
     }<span class="sp-hand-name"></span><span class="sp-hand-note"></span></span>`;
     this.glyph = node.querySelector("path:last-of-type") as SVGPathElement;
     this.flag = node.querySelector(".sp-hand-flag") as HTMLSpanElement;
-    (node.querySelector(".sp-hand-name") as HTMLSpanElement).textContent = person.name;
+    (node.querySelector(".sp-hand-name") as HTMLSpanElement).textContent =
+      person.name;
     this.note = node.querySelector(".sp-hand-note") as HTMLSpanElement;
     layer.appendChild(node);
     this.node = node;
@@ -81,13 +92,17 @@ export class Hand {
     if (Array.isArray(target)) return target;
     const box = target.getBoundingClientRect();
     const stage = this.layer.getBoundingClientRect();
-    return [box.left - stage.left + box.width * aim[0], box.top - stage.top + box.height * aim[1]];
+    return [
+      box.left - stage.left + box.width * aim[0],
+      box.top - stage.top + box.height * aim[1],
+    ];
   }
 
   private place([x, y]: Point, tilt = 0) {
     this.at = [x, y];
     this.node.style.transform = `translate3d(${x}px, ${y}px, 0) rotate(${tilt}deg)`;
-    if (this.carried) this.carried.style.transform = `translate3d(${x - 24}px, ${y - 18}px, 0) rotate(${-2 + tilt * 0.4}deg)`;
+    if (this.carried)
+      this.carried.style.transform = `translate3d(${x - 24}px, ${y - 18}px, 0) rotate(${-2 + tilt * 0.4}deg) scale(${this.carriedScale})`;
   }
 
   say(note: string | null) {
@@ -105,7 +120,14 @@ export class Hand {
   }
 
   /** Moves along a gentle curve; a person overshoots a little and settles. */
-  async move(target: Target, { ms = 620, aim, overshoot = true }: { ms?: number; aim?: Point; overshoot?: boolean } = {}) {
+  async move(
+    target: Target,
+    {
+      ms = 620,
+      aim,
+      overshoot = true,
+    }: { ms?: number; aim?: Point; overshoot?: boolean } = {},
+  ) {
     if (!this.shown) return this.show(target, aim);
     const from = this.at;
     const to = this.pointOf(target, aim);
@@ -115,8 +137,14 @@ export class Hand {
     if (distance < 1) return;
     // Bend the path to one side, as a wrist does.
     const bend = Math.min(90, distance * 0.22) * (dx > 0 ? -1 : 1);
-    const control: Point = [from[0] + dx * 0.5 - (dy / distance) * bend, from[1] + dy * 0.5 + (dx / distance) * bend];
-    const past: Point = overshoot && distance > 80 ? [to[0] + (dx / distance) * 7, to[1] + (dy / distance) * 7] : to;
+    const control: Point = [
+      from[0] + dx * 0.5 - (dy / distance) * bend,
+      from[1] + dy * 0.5 + (dx / distance) * bend,
+    ];
+    const past: Point =
+      overshoot && distance > 80
+        ? [to[0] + (dx / distance) * 7, to[1] + (dy / distance) * 7]
+        : to;
     const duration = Math.max(260, Math.min(ms, 260 + distance * 0.9));
     await new Promise<void>((resolve) => {
       const start = performance.now();
@@ -124,9 +152,18 @@ export class Hand {
         if (this.signal?.aborted) return resolve();
         const t = Math.min(1, (now - start) / duration);
         const k = ease(t);
-        const x = (1 - k) * (1 - k) * from[0] + 2 * (1 - k) * k * control[0] + k * k * past[0];
-        const y = (1 - k) * (1 - k) * from[1] + 2 * (1 - k) * k * control[1] + k * k * past[1];
-        this.place([x, y], Math.max(-8, Math.min(8, dx * 0.02)) * Math.sin(Math.PI * t));
+        const x =
+          (1 - k) * (1 - k) * from[0] +
+          2 * (1 - k) * k * control[0] +
+          k * k * past[0];
+        const y =
+          (1 - k) * (1 - k) * from[1] +
+          2 * (1 - k) * k * control[1] +
+          k * k * past[1];
+        this.place(
+          [x, y],
+          Math.max(-8, Math.min(8, dx * 0.02)) * Math.sin(Math.PI * t),
+        );
         if (t < 1) requestAnimationFrame(step);
         else resolve();
       };
@@ -140,7 +177,10 @@ export class Hand {
         const step = (now: number) => {
           const t = Math.min(1, (now - start) / 140);
           const k = ease(t);
-          this.place([from2[0] + (to[0] - from2[0]) * k, from2[1] + (to[1] - from2[1]) * k]);
+          this.place([
+            from2[0] + (to[0] - from2[0]) * k,
+            from2[1] + (to[1] - from2[1]) * k,
+          ]);
           if (t < 1) requestAnimationFrame(step);
           else resolve();
         };
@@ -161,7 +201,9 @@ export class Hand {
         rx: 70,
         ry: 70,
         strength: 0.55,
-        hues: this.person.ai ? [0, 6] : [this.person.hue - 0.4, this.person.hue + 0.4],
+        hues: this.person.ai
+          ? [0, 6]
+          : [this.person.hue - 0.4, this.person.hue + 0.4],
         hold: 160,
       });
     }
@@ -175,13 +217,19 @@ export class Hand {
     await this.press();
   }
 
-  /** Picks up a copy of an element and carries it. The original stays put; the scene decides what happens to it. */
-  grab(element: HTMLElement) {
+  /**
+   * Picks up a copy of an element and carries it. The original stays put; the scene decides what happens to it.
+   * A copy of something inside a scaled window keeps the window's scale. `look` carries a stand-in instead.
+   */
+  grab(element: HTMLElement, look?: HTMLElement) {
     const box = element.getBoundingClientRect();
-    const copy = element.cloneNode(true) as HTMLElement;
+    const copy = look ?? (element.cloneNode(true) as HTMLElement);
+    const natural = look ? box.width : element.offsetWidth || box.width;
+    this.carriedScale = natural ? box.width / natural : 1;
     copy.classList.add("sp-carried");
-    copy.style.width = `${box.width}px`;
-    copy.style.height = `${box.height}px`;
+    copy.style.width = `${natural}px`;
+    copy.style.height = `${look ? box.height : element.offsetHeight || box.height}px`;
+    copy.style.transformOrigin = "0 0";
     copy.removeAttribute("id");
     this.layer.insertBefore(copy, this.node);
     this.carried = copy;
@@ -190,15 +238,42 @@ export class Hand {
     return copy;
   }
 
-  /** Lets go of what it carries; it shrinks into where it was dropped. */
-  async drop() {
+  /** Lets go of what it carries; it shrinks into where it was dropped, or, set down in its place, gives way to it. */
+  async drop({ settle = false }: { settle?: boolean } = {}) {
     const copy = this.carried;
     this.carried = null;
     this.glyph.setAttribute("d", this.person.ai ? PRISM : ARROW);
     if (!copy) return;
-    copy.dataset.dropped = "true";
-    await sleep(320, this.signal);
+    copy.dataset[settle ? "settled" : "dropped"] = "true";
+    await sleep(settle ? 220 : 320, this.signal);
     copy.remove();
+  }
+
+  /**
+   * Brings something from `from` (where Spectra made it: the island) to its place on the page and sets it down
+   * there: the hand carries it the way a person drags a card, and the real thing appears where it lands.
+   */
+  async bring(
+    target: HTMLElement,
+    from: Target,
+    { look, ms = 720 }: { look?: HTMLElement; ms?: number } = {},
+  ) {
+    target.dataset.brought = "coming";
+    if (this.shown) await this.move(from, { ms: 360, aim: [0.5, 0.3] });
+    else await this.show(from, [0.5, 0.3]);
+    await sleep(80, this.signal);
+    await this.press({ light: false });
+    this.grab(target, look);
+    // The hand holds the copy by its corner: it aims so the copy lands square on its place.
+    const box = target.getBoundingClientRect();
+    const stage = this.layer.getBoundingClientRect();
+    await this.move([box.left - stage.left + 24, box.top - stage.top + 18], {
+      ms,
+      overshoot: false,
+    });
+    await sleep(60, this.signal);
+    target.dataset.brought = "here";
+    await this.drop({ settle: true });
   }
 
   async hide() {

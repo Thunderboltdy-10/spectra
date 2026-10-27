@@ -3,7 +3,7 @@
  * here starts with .sp- or .landing-, so nothing leaks into the app.
  *
  * The page is paper. Its light is drawn by the light field (two fixed
- * canvases); this file places the app's real components on the paper and
+ * canvases, soft washes); this file places the app's real components on the paper and
  * gives the page its type. Motion animates transform, opacity and clip-path
  * only, and every arrival is written with `both`, so the reduced-motion
  * contract lands each element in its finished state.
@@ -99,7 +99,6 @@
   width: 100vw;
   height: 100vh;
   pointer-events: none;
-  image-rendering: pixelated;
 }
 
 .sp-light[data-layer="back"] {
@@ -289,6 +288,11 @@
   .sp-island[data-over-hero] {
     --spectra-lead-width: min(44vw, 620px);
   }
+
+  /* With the side open the hero has less room: the island centres on what is left. */
+  .sp-root[data-side] .sp-island[data-over-hero] {
+    --spectra-lead-width: 0px;
+  }
 }
 
 .sp-island:not([data-shown]) * {
@@ -392,6 +396,28 @@
   white-space: nowrap;
 }
 
+.landing-window-places li > a,
+.landing-window-threads li > a {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  height: 100%;
+  color: inherit;
+  text-decoration: none;
+}
+
+.landing-window-places li,
+.landing-window-threads li {
+  transition: background-color 0.15s ease;
+}
+
+.landing-window-places li:not([data-current]):hover,
+.landing-window-threads li:hover {
+  background: rgb(52 40 28 / 0.05);
+}
+
 .landing-window-places li[data-current] {
   background: var(--bg-primary);
   box-shadow:
@@ -424,7 +450,7 @@
   font-size: 12.5px;
 }
 
-.landing-window-threads li > span:last-child {
+.landing-window-threads li a > span:last-child {
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -1083,7 +1109,7 @@
   color: var(--text-primary);
 }
 
-.sp-ending-line span {
+.sp-ending-line .sp-written-line {
   display: block;
 }
 
@@ -1378,4 +1404,402 @@
   .sp-talk-row {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* ---- Written headings (kit/written.tsx) -------------------------------- */
+/* Spectra writing, as in a document: faint words resolve from a slight blur,
+   a soft spectral band crosses behind them once, and the prism caret rides
+   the end of the line. */
+
+.sp-written {
+  position: relative;
+  isolation: isolate;
+}
+
+.sp-w {
+  opacity: 0.16;
+  filter: blur(3px);
+  transition:
+    opacity 0.42s var(--sp-ease),
+    filter 0.42s var(--sp-ease);
+}
+
+.sp-w[data-on] {
+  opacity: 1;
+  filter: none;
+}
+
+.sp-written::after {
+  content: "";
+  position: absolute;
+  inset: -4% -2%;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 14px;
+  background: linear-gradient(
+    100deg,
+    transparent 36%,
+    color-mix(in oklab, #8b6cf6 17%, transparent) 44%,
+    color-mix(in oklab, #4f9fe6 22%, transparent) 50%,
+    color-mix(in oklab, #40c48e 17%, transparent) 56%,
+    transparent 64%
+  );
+  background-size: 300% 100%;
+  background-position: 100% 0;
+  opacity: 0;
+}
+
+.sp-written:not([data-state="waiting"])::after {
+  animation: sp-band-sweep 1.15s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes sp-band-sweep {
+  from {
+    background-position: 100% 0;
+    opacity: 1;
+  }
+  78% {
+    opacity: 1;
+  }
+  to {
+    background-position: 0% 0;
+    opacity: 0;
+  }
+}
+
+/* The prism caret: a spectrum rule with a little light about it. It takes no room in the line. */
+.sp-written-caret {
+  display: inline-block;
+  width: 3px;
+  height: 0.78em;
+  margin: 0 -3px 0 0.06em;
+  border-radius: 2px;
+  vertical-align: -0.04em;
+  background: linear-gradient(180deg, #8b6cf6, #4f9fe6 55%, #40c48e);
+  box-shadow: 0 0 14px 1px color-mix(in oklab, #4f9fe6 50%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-w {
+    opacity: 1;
+    filter: none;
+    transition: none;
+  }
+
+  .sp-written::after {
+    content: none;
+  }
+}
+
+/* ---- Threads: in Henry's window, or beside the page --------------------- */
+
+.sp-thread {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  background: var(--card-paper, var(--bg-primary));
+}
+
+.sp-thread-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 10px 12px 18px;
+  border-bottom: 1px solid var(--card-border-soft, var(--border-subtle));
+}
+
+.sp-thread-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.sp-thread-title {
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.35;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+}
+
+.sp-thread-caption {
+  margin: 1px 0 0;
+  overflow: hidden;
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-tertiary);
+}
+
+/* While it works, the caption carries the band, as a working run's words do in Spectra. */
+.sp-thread[data-working] .sp-thread-caption {
+  background: linear-gradient(100deg, var(--text-tertiary) 30%, #8b6cf6 44%, #4f9fe6 50%, #40c48e 56%, var(--text-tertiary) 70%);
+  background-size: 300% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: sp-caption-band 1.6s linear infinite;
+}
+
+@keyframes sp-caption-band {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+
+.sp-thread-action {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.sp-thread-action:hover {
+  background: var(--bg-hover, rgb(52 40 28 / 0.06));
+  color: var(--text-primary);
+}
+
+/* The conversation scrolls on its own; the wheel over it never moves the page. */
+.sp-thread-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.sp-thread-body *,
+.sp-island [data-island-thread] * {
+  overscroll-behavior: contain;
+}
+
+/* Beside the page: the page narrows for it, so it lies over nothing. */
+.sp-thread-side {
+  width: min(440px, 34vw);
+}
+
+.sp-main,
+.sp-header {
+  transition:
+    margin-right 0.45s var(--sp-ease),
+    width 0.45s var(--sp-ease),
+    left 0.45s var(--sp-ease);
+}
+
+.sp-root[data-side] .sp-main {
+  margin-right: var(--spectra-side-width, 0px);
+}
+
+/* Henry's window stops reaching past the page's edge while the side is open. */
+.sp-hero-stage {
+  transition: width 0.45s var(--sp-ease);
+}
+
+.sp-root[data-side] .sp-hero-stage {
+  width: 100%;
+}
+
+.sp-root[data-side] .sp-header {
+  left: calc((100% - var(--spectra-side-width, 0px)) / 2);
+  width: min(var(--sp-measure), calc(100% - var(--spectra-side-width, 0px) - 24px));
+}
+
+/* ---- Things Spectra brings in (hands.tsx, bring) ------------------------ */
+
+[data-brought="coming"] {
+  visibility: hidden;
+}
+
+/* Set down in its place, it lands with the band passing over it once. */
+[data-brought="here"] {
+  position: relative;
+}
+
+[data-brought="here"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(
+    100deg,
+    transparent 36%,
+    color-mix(in oklab, #8b6cf6 14%, transparent) 44%,
+    color-mix(in oklab, #4f9fe6 18%, transparent) 50%,
+    color-mix(in oklab, #40c48e 14%, transparent) 56%,
+    transparent 64%
+  );
+  background-size: 300% 100%;
+  animation: sp-band-sweep 0.9s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.sp-carried[data-settled] {
+  opacity: 0;
+  transition: opacity 0.22s ease;
+}
+
+/* What Spectra carries into the calendar: the event as the week draws it. */
+.sp-carried-event {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: color-mix(in oklab, #8b6cf6 16%, var(--bg-primary));
+  box-shadow:
+    inset 2px 0 #8b6cf6,
+    0 18px 30px -16px rgb(40 30 20 / 0.45);
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.sp-carried-event strong {
+  font-weight: 600;
+}
+
+.sp-carried-event span {
+  color: var(--text-secondary);
+}
+
+.sp-school[data-bringing] .sp-calendar button[title*="Write up the yeast lab"]:not([data-brought="here"]) {
+  visibility: hidden;
+}
+
+/* ---- Make: a place being made ------------------------------------------- */
+
+.sp-make-slot {
+  position: relative;
+  display: grid;
+  place-items: end start;
+  overflow: hidden;
+  padding: 16px;
+}
+
+.sp-make-card[data-making] .sp-make-slot {
+  background: color-mix(in oklab, var(--accent-cyan, #4f9fe6) 4%, var(--bg-primary));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, #4f9fe6 28%, rgb(52 40 28 / 0.1));
+}
+
+.sp-make-card[data-making] .sp-make-slot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    104deg,
+    transparent 20%,
+    color-mix(in oklab, #8b6cf6 12%, transparent) 40%,
+    color-mix(in oklab, #4f9fe6 16%, transparent) 50%,
+    color-mix(in oklab, #40c48e 12%, transparent) 60%,
+    transparent 80%
+  );
+  transform: translateX(-118%);
+  animation: sp-making 1.5s cubic-bezier(0.38, 0.02, 0.22, 1) infinite;
+}
+
+@keyframes sp-making {
+  12% {
+    opacity: 1;
+  }
+  to {
+    transform: translateX(118%);
+  }
+}
+
+.sp-make-slot-label {
+  position: relative;
+  z-index: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  animation: sp-rise 0.3s var(--sp-ease) both;
+}
+
+@keyframes sp-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* The window's rail, collapsed to its glyphs so the page keeps the room. The pointer opens it over the page. */
+.landing-window[data-rail="slim"] {
+  --landing-rail-w: 58px;
+}
+
+.landing-window[data-rail="slim"] .landing-window-rail {
+  position: relative;
+  z-index: 4;
+  width: var(--landing-rail-w);
+  overflow: hidden;
+  border-radius: 18px 0 0 18px;
+  background: var(--bg-desk);
+  transition:
+    width 0.24s cubic-bezier(0.2, 0.7, 0.2, 1),
+    box-shadow 0.24s ease;
+}
+
+.landing-window[data-rail="slim"] .landing-window-rail:hover {
+  width: 204px;
+  box-shadow: 24px 0 48px -30px rgb(52 40 28 / 0.38);
+}
+
+.landing-window[data-rail="slim"] .landing-window-brand > span,
+.landing-window[data-rail="slim"] .landing-window-places a > span,
+.landing-window[data-rail="slim"] .landing-window-account > span:last-child,
+.landing-window[data-rail="slim"] .landing-window-threads {
+  opacity: 0;
+  transition: opacity 0.16s ease;
+}
+
+.landing-window[data-rail="slim"] .landing-window-rail:hover .landing-window-brand > span,
+.landing-window[data-rail="slim"] .landing-window-rail:hover .landing-window-places a > span,
+.landing-window[data-rail="slim"] .landing-window-rail:hover .landing-window-account > span:last-child,
+.landing-window[data-rail="slim"] .landing-window-rail:hover .landing-window-threads {
+  opacity: 1;
+  transition-delay: 0.06s;
+}
+
+.landing-window[data-rail="slim"] .landing-window-places li,
+.landing-window[data-rail="slim"] .landing-window-account {
+  width: 188px;
+}
+
+.landing-window[data-rail="slim"] .landing-window-rail:not(:hover) .landing-window-places li[data-current] {
+  width: 42px;
+}
+
+/* With an answer beside it the hero gives its title less of the room, so Henry's window stays readable. */
+.sp-hero {
+  transition: grid-template-columns 0.45s var(--sp-ease);
+}
+
+.sp-hero-title {
+  transition: font-size 0.45s var(--sp-ease);
+}
+
+.sp-root[data-side] .sp-hero {
+  grid-template-columns: minmax(0, 380px) minmax(0, 1fr);
+}
+
+.sp-root[data-side] .sp-hero-title {
+  font-size: clamp(44px, 4.9vw, 74px);
 }

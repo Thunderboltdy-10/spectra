@@ -1,8 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { InteractionLayer } from "@/features/spectra/components/presence/interaction-layer";
-import type { ControlPrimitive, InteractionAct, InteractionState } from "@/features/spectra/collaboration/interaction-model";
+import type {
+  ControlPrimitive,
+  InteractionAct,
+  InteractionState,
+} from "@/features/spectra/collaboration/interaction-model";
 import { SURFACE_ATTRIBUTE } from "@/features/spectra/collaboration/interaction-geometry";
 import { CAST, type CastId } from "../world/story";
 
@@ -27,7 +38,9 @@ export type Move = {
 const REFRESH_MS = 8_000;
 
 export function usePresence(surface: string) {
-  const [states, setStates] = useState<Map<CastId, InteractionState>>(() => new Map());
+  const [states, setStates] = useState<Map<CastId, InteractionState>>(
+    () => new Map(),
+  );
   const statesRef = useRef(states);
   statesRef.current = states;
 
@@ -40,7 +53,13 @@ export function usePresence(surface: string) {
           actor: CAST[who],
           act: to.act ?? { kind: "hover" },
           lifecycle: "active",
-          target: { artifactId: surface, path: to.path, primitive: to.primitive, label: to.label, part: to.part },
+          target: {
+            artifactId: surface,
+            path: to.path,
+            primitive: to.primitive,
+            label: to.label,
+            part: to.part,
+          },
           note: to.note,
           at: Date.now(),
         });
@@ -65,7 +84,8 @@ export function usePresence(surface: string) {
     const timer = window.setInterval(() => {
       setStates((current) => {
         const next = new Map<CastId, InteractionState>();
-        for (const [who, state] of current) next.set(who, { ...state, at: Date.now() });
+        for (const [who, state] of current)
+          next.set(who, { ...state, at: Date.now() });
         return next;
       });
     }, REFRESH_MS);
@@ -89,7 +109,11 @@ export function Surface({
   children: ReactNode;
 }) {
   return (
-    <div {...{ [SURFACE_ATTRIBUTE]: id }} className={className} style={{ position: "relative" }}>
+    <div
+      {...{ [SURFACE_ATTRIBUTE]: id }}
+      className={className}
+      style={{ position: "relative" }}
+    >
       {children}
       <InteractionLayer states={states} anchor="static" />
     </div>

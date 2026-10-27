@@ -5,6 +5,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { useSpectraPreferences } from "../settings/preference-store";
+import { useShowcaseTime } from "../showcase/showcase-time";
 import { nextDay, zonedDay, zonedInstant, type BriefSuggestion } from "./daily-brief";
 
 /*
@@ -46,7 +47,9 @@ export function useDailyBrief(now: number | null): BriefState {
   const setup = useQuery(api.managebac.onboardingStatus, useAuthedArgs({}, "account"));
   const { dailyBriefTime: wakeTime } = preferences.notifications;
   // Until the reader's own preferences are in, the default must not ask for a brief they turned off.
-  const on = hydrated && preferences.notifications.dailyBrief && preferences.integrations.tourStatus === "done" && setup?.phase === "ready";
+  // A showcase (the landing page) has the brief its story holds, and asks for nothing.
+  const showcase = useShowcaseTime() !== null;
+  const on = showcase || (hydrated && preferences.notifications.dailyBrief && preferences.integrations.tourStatus === "done" && setup?.phase === "ready");
   const timeZone = useMemo(() => localZone(), []);
   const day = now ? zonedDay(now, timeZone) : null;
   const awake = Boolean(now && day && now >= zonedInstant(day, wakeTime, timeZone));
@@ -56,28 +59,29 @@ export function useDailyBrief(now: number | null): BriefState {
 
   // The schedule follows the reader's setting and their zone as Home last saw it.
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || showcase) return;
     void setSchedule({ enabled: on, wakeTime, timeZone, wakeAt: nextWake(Date.now(), wakeTime, timeZone) }).catch(
       () => undefined,
     );
-  }, [hydrated, on, setSchedule, timeZone, wakeTime]);
+  }, [hydrated, on, setSchedule, showcase, timeZone, wakeTime]);
 
   const missing = row === null || row?.state === "absent" || (row?.state === "failed" && Date.now() - row.claimedAt > RETRY_AFTER_MS);
   const firstSyncToday = Boolean(day && setup?.completedAt && zonedDay(setup.completedAt, timeZone) === day);
   const due = awake || firstSyncToday;
   useEffect(() => {
-    if (!on || !due || !missing || !day || asked.current === day) return;
+    if (!on || showcase || !due || !missing || !day || asked.current === day) return;
     asked.current = day;
     void fetch("/api/spectra/brief", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ timeZone }),
     }).catch(() => undefined);
-  }, [due, day, missing, on, timeZone]);
+  }, [due, day, missing, on, showcase, timeZone]);
 
   return useMemo((): BriefState => {
     if (!on) return { status: "off" };
     if (row === undefined || !day) return { status: "waiting" };
+    if (showcase && row?.state !== "ready") return { status: "off" };
     // Written before they wake, it is there as soon as they look.
     if (row?.state === "ready")
       return { status: "ready", day, wakeTime, recap: row.recap ?? "", suggestions: row.suggestions as BriefSuggestion[] };
@@ -93,5 +97,5 @@ export function useDailyBrief(now: number | null): BriefState {
       };
     if (!due) return { status: "waiting" };
     return row?.state === "failed" ? { status: "failed" } : { status: "writing", wakeTime };
-  }, [due, day, on, row, wakeTime]);
+  }, [due, day, on, row, showcase, wakeTime]);
 }

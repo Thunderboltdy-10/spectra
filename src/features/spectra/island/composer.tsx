@@ -100,7 +100,9 @@ export const IslandComposer = forwardRef<
     element: () => rootRef.current,
     prefill: (next, pointers) => {
       setText(next);
-      if (pointers?.length) setReferences((current) => [...current, ...pointers.filter((pointer) => !current.some((existing) => existing.id === pointer.id))]);
+      // An empty list clears the field's work too; a list adds to it.
+      if (pointers && !pointers.length) setReferences([]);
+      else if (pointers?.length) setReferences((current) => [...current, ...pointers.filter((pointer) => !current.some((existing) => existing.id === pointer.id))]);
       requestAnimationFrame(() => {
         const field = fieldRef.current;
         field?.focus({ preventScroll: true });

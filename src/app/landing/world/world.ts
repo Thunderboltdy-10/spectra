@@ -28,7 +28,7 @@ import { ALL_WORKS, CLASSES, WORKS, type ClassKey } from "./works";
  */
 
 export type WorldEvent =
-  | { type: "run_started"; reply: Reply; prompt: string }
+  | { type: "run_started"; reply: Reply; prompt: string; runId: string; threadId: string; quiet: boolean }
   | { type: "run_finished"; reply: Reply; runId: string; threadId: string }
   | { type: "reading"; workId: string | null }
   | { type: "calendar" };
@@ -132,6 +132,10 @@ export class StoryWorld {
   active = 0;
   /** How fast the next run plays: a scene's run is quicker than a visitor's own question. */
   pace = 1;
+  /** The next run is a scene's own: it stays a tab on the island while the scene shows what it did. */
+  quiet = false;
+  /** The next run starts a thread of its own (a new question, not a follow-up to the last one). */
+  fresh = false;
   private count = 0;
   private listeners = new Set<(event: WorldEvent) => void>();
   private queryListeners = new Set<() => void>();
@@ -219,8 +223,11 @@ export class StoryWorld {
     const body = request.body ?? {};
     const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
     if (body.action !== "run" || !prompt) return json(409, { error: "This run has finished." });
-    const reply = replyFor(prompt);    const runId = this.id("run");
-    const threadId = typeof body.threadId === "string" && this.threads.has(body.threadId) ? body.threadId : this.id("thread");
+    const reply = replyFor(prompt);
+    const runId = this.id("run");
+    const fresh = this.fresh;
+    this.fresh = false;
+    const threadId = !fresh && typeof body.threadId === "string" && this.threads.has(body.threadId) ? body.threadId : this.id("thread");
     const started = Date.now();
     const cardView = (status: SpectraResultCard["status"]) => ({
       id: `card-${runId}`,
@@ -236,7 +243,9 @@ export class StoryWorld {
       updatedAt: Date.now(),
     });
     this.active += 1;
-    this.emit({ type: "run_started", reply, prompt });
+    const quiet = this.quiet;
+    this.quiet = false;
+    this.emit({ type: "run_started", reply, prompt, runId, threadId, quiet });
 
     const events: Array<{ wait?: number; event: Record<string, unknown>; before?: () => void }> = [
       { event: { type: "run_created", runId, card: cardView("running") } },

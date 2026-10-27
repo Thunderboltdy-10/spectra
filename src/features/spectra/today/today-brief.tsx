@@ -6,6 +6,7 @@ import { WorkingMark } from "@/components/ui/skeleton";
 import { workTypeMeta, type PresentedWorkType } from "../artifacts/presentation";
 import { dueSentence, taskInstant } from "../components/task/task-time";
 import type { BriefSuggestion, BriefTaskDraft } from "./daily-brief";
+import { useShowcaseTime } from "../showcase/showcase-time";
 import { DaySky, dayPart } from "./day-sky";
 import type { TodayAgenda } from "./today-model";
 import { useBriefActions } from "./use-brief-actions";
@@ -58,6 +59,9 @@ export function TodayBrief({ brief, agenda }: { brief: BriefState; agenda: Today
 
 function ReadyBrief({ brief, agenda }: { brief: Extract<BriefState, { status: "ready" }>; agenda: TodayAgenda | null }) {
   const act = useBriefActions(brief.day, agenda);
+  // The part of the day is the sky's: the reader's clock, or the story's on a showcase.
+  const story = useShowcaseTime();
+  const hour = new Date(story ?? Date.now()).getHours();
   const [busy, setBusy] = useState<number | null>(null);
   const [all, setAll] = useState(false);
   // What is still to do comes first; what was done today sinks to the end, each keeping its place in the brief.
@@ -77,7 +81,7 @@ function ReadyBrief({ brief, agenda }: { brief: Extract<BriefState, { status: "r
       <div className="morning-dawn">
         <DaySky />
         <h2 id="morning-title" className="morning-title">
-          {brief.earlier ? "Yesterday's brief" : `Your ${dayPart(new Date().getHours())}`}
+          {brief.earlier ? "Yesterday's brief" : `Your ${dayPart(hour)}`}
         </h2>
         {brief.earlier ? <p className="morning-earlier">Today&apos;s is on its way.</p> : null}
       </div>

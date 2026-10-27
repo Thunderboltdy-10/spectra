@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { SpectraMark } from "@/components/spectra-mark";
@@ -7,12 +8,15 @@ import { SpectraMark } from "@/components/spectra-mark";
 /*
  * Spectra as it is on Henry's screen: the desk, the rail with its
  * destinations and his recent threads, and the page as a sheet of paper on
- * the desk. The page inside is whatever the story is showing, usually the
- * app's own component. It is a picture of the shell, not the shell: nothing
- * in the rail navigates away from the landing page.
+ * the desk. The rail is collapsed to its glyphs so the page has the room,
+ * and opens over the page (never pushing it) while the pointer is on it. The page inside is whatever the story is showing, usually the
+ * app's own component. It is a picture of the shell, not the shell: a
+ * destination, a thread or the account in the rail asks the visitor to sign
+ * in to their own.
  */
 
-export type RailPlace = "home" | "library" | "calendar" | "school" | "agents" | "devices";
+export type RailPlace =
+  "home" | "library" | "calendar" | "school" | "agents" | "devices";
 
 const PLACES: Array<{ key: RailPlace; label: string; glyph: IconName }> = [
   { key: "home", label: "Home", glyph: "home" },
@@ -27,7 +31,7 @@ export function AppWindow({
   at,
   threads = [],
   who = "Henry",
-  rail = "full",
+  rail = "slim",
   className,
   children,
   label,
@@ -38,7 +42,7 @@ export function AppWindow({
   threads?: string[];
   /** Whose Spectra it is, for the account line. */
   who?: string;
-  /** "slim" keeps only the glyphs, for narrower stages. */
+  /** "slim" keeps only the glyphs until the pointer opens it; "full" holds it open. */
   rail?: "full" | "slim";
   className?: string;
   children: ReactNode;
@@ -46,28 +50,44 @@ export function AppWindow({
   label: string;
 }) {
   return (
-    <figure className={className ? `landing-window ${className}` : "landing-window"} data-rail={rail} aria-label={label}>
+    <figure
+      className={className ? `landing-window ${className}` : "landing-window"}
+      data-rail={rail}
+      aria-label={label}
+    >
       <aside className="landing-window-rail" aria-hidden>
         <div className="landing-window-brand">
           <SpectraMark size={20} />
-          {rail === "full" ? <span>Spectra</span> : null}
+          <span>Spectra</span>
         </div>
         <ul className="landing-window-places">
           {PLACES.map((place) => (
             <li key={place.key} data-current={place.key === at || undefined}>
-              <Icon name={place.glyph} size={17} />
-              {rail === "full" ? <span>{place.label}</span> : null}
+              <Link
+                href="/sign-in"
+                tabIndex={-1}
+                title={`Sign in to open your ${place.label}`}
+              >
+                <Icon name={place.glyph} size={17} />
+                <span>{place.label}</span>
+              </Link>
             </li>
           ))}
         </ul>
-        {rail === "full" && threads.length ? (
+        {threads.length ? (
           <div className="landing-window-threads">
             <p>Threads</p>
             <ul>
               {threads.map((thread) => (
                 <li key={thread}>
-                  <span className="landing-window-thread-mark" />
-                  <span>{thread}</span>
+                  <Link
+                    href="/sign-in"
+                    tabIndex={-1}
+                    title="Sign in to see your threads"
+                  >
+                    <span className="landing-window-thread-mark" />
+                    <span>{thread}</span>
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -77,7 +97,7 @@ export function AppWindow({
           <span className="landing-window-face">
             <Icon name="identity" size={14} />
           </span>
-          {rail === "full" ? <span>{who}</span> : null}
+          <span>{who}</span>
         </div>
       </aside>
       <div className="landing-window-sheet">{children}</div>

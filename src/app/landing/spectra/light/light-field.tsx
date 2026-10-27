@@ -4,12 +4,12 @@ import { useEffect, useRef } from "react";
 import { frame, onLight, type Drawn } from "./light";
 
 /*
- * Draws the page's light as grain. Two layers share one picture: the back one
- * lies on the paper, under everything; the front one is cut to the headings
- * and blends lighten, so where light passes under a heading its ink takes the
- * colour while the paper around it stays paper. Both sleep when there is no
- * light. Without WebGL (or with less motion asked for) the page is plain paper,
- * which it always reads well on.
+ * Draws the page's light as soft washes of colour. Two layers share one
+ * picture: the back one lies on the paper, under everything; the front one is
+ * cut to the headings and blends lighten, so where light passes under a
+ * heading its ink takes the colour while the paper around it stays paper.
+ * Both sleep when there is no light. Without WebGL (or with less motion asked
+ * for) the page is plain paper, which it always reads well on.
  */
 
 const MAX_SOURCES = 12;
@@ -91,6 +91,7 @@ void main() {
   float total = 0.0;
   vec3 colour = vec3(0.0);
   float weight = 0.0;
+  float solid = 0.0;
   for (int s = 0; s < ${MAX_SOURCES}; s++) {
     if (s >= u_count) break;
     vec4 src = u_src[s];
@@ -107,6 +108,7 @@ void main() {
     float wisp = fbm(q * 0.009 + vec2(float(s) * 3.7, t * 0.18 * (0.4 + flow)));
     float body = fall * (disc ? 0.55 + 0.5 * wisp : 0.35 + 1.1 * wisp) * hue.z;
     total += body;
+    if (disc) solid = max(solid, fall * hue.z);
     float along = disc ? clamp(sqrt(r2) * 0.75 + wisp * 0.3, 0.0, 1.0) : fbm(q * 0.0035 + vec2(t * 0.06 * flow, float(s)));
     vec3 c = ramp(mix(hue.x, hue.y, disc ? along : clamp(along * 1.6 - 0.3, 0.0, 1.0)));
     colour += c * body;
@@ -115,23 +117,18 @@ void main() {
   if (weight <= 0.0001) { gl_FragColor = vec4(0.0); return; }
   colour /= weight;
 
-  // Grain: each speck of paper is lit or not, at a chance the light sets.
-  vec2 cell = floor(gl_FragCoord.xy);
-  float tick = floor(t * 9.0);
-  float speck = mix(hash(cell + 0.17), hash(cell + tick * 0.731), 0.35);
-  // The faint tail of a pool is cut, so light has a body and an edge instead of a dusting everywhere.
+  // The faint tail of a pool is cut, so light has a body instead of a haze everywhere.
   float density = smoothstep(0.05, 1.0, total);
-  float lit = step(speck, pow(density, 0.8) * 1.05);
   if (u_front == 1) {
-    // Ink takes the light deep, not pale, so a lit heading still reads: the
-    // colour is darkened and saturated, and the grain only roughens its edge.
+    // Ink takes the light deep, not pale, so a lit heading still reads.
     vec3 deep = clamp(mix(vec3(dot(colour, vec3(0.3, 0.55, 0.15))), colour, 1.35) * 0.66, 0.0, 1.0);
-    float a = smoothstep(0.04, 0.5, density) * mix(0.8, 1.0, lit);
+    float a = smoothstep(0.04, 0.5, density) * 0.9;
     gl_FragColor = vec4(deep * a, a);
     return;
   }
-  float wash = smoothstep(0.0, 1.0, density) * 0.22;
-  float alpha = clamp(lit * 0.86 + wash, 0.0, 1.0);
+  // Light lies on the paper as a soft wash, the way light falls through tinted glass; a body (the sun) is solid.
+  float wash = smoothstep(0.0, 1.0, density) * 0.3;
+  float alpha = clamp(max(wash, smoothstep(0.25, 0.9, solid) * 0.96), 0.0, 1.0);
   gl_FragColor = vec4(colour * alpha, alpha);
 }
 `;
@@ -222,11 +219,10 @@ export function LightField() {
     const started = last;
     const rects = new Float32Array(MAX_TEXT * 4);
 
-    // One canvas pixel is one grain: the light is drawn at half the page's
-    // resolution and shown with hard edges, which is both the look and cheap.
+    // Washes have no detail to lose: a third of the page's resolution, smoothed up, is enough and cheap.
     const size = () => {
-      const ratio = 0.5;
-      for (const target of [back, front]) {
+      // The ink layer is cut to the headings' boxes, so it keeps a finer edge.
+      for (const [target, ratio] of [[back, 0.34], [front, 0.6]] as const) {
         if (!target) continue;
         target.canvas.width = Math.round(window.innerWidth * ratio);
         target.canvas.height = Math.round(window.innerHeight * ratio);

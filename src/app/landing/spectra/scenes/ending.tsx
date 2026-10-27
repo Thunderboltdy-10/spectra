@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Icon } from "@/components/icons";
 import { SpectraMark } from "@/components/spectra-mark";
 import { useNear } from "../../kit/build";
+import { Written } from "../../kit/written";
 import { dimAll, shine } from "../light/light";
 
 /*
@@ -31,20 +32,33 @@ const PLACEHOLDER: Record<Exclude<Role, "student">, string> = {
 };
 
 const WHAT_HAPPENS = [
-  { title: "A walkthrough on classes like yours", text: "Home, the morning brief, the editors and Bridge, with your subjects in them." },
-  { title: "Answers for IT and safeguarding", text: "What Spectra can see, where data lives, and what your school controls." },
-  { title: "Set up on ManageBac", text: "Classes, tasks and teachers arrive by themselves on the first day." },
+  {
+    title: "A walkthrough on classes like yours",
+    text: "Home, the morning brief, the editors and Bridge, with your subjects in them.",
+  },
+  {
+    title: "Answers for IT and safeguarding",
+    text: "What Spectra can see, where data lives, and what your school controls.",
+  },
+  {
+    title: "Set up on ManageBac",
+    text: "Classes, tasks and teachers arrive by themselves on the first day.",
+  },
 ];
 
 export function noteFor(origin: string) {
   return `Hi! I've been looking at Spectra. It keeps our classes, notes and files in one place, connects to ManageBac, and helps with revision and assignments. I think it could really help our class. Could you take a look? ${origin}`;
 }
 
-type Sending = { state: "idle" } | { state: "sending" } | { state: "sent"; email: string } | { state: "failed"; message: string };
+type Sending =
+  | { state: "idle" }
+  | { state: "sending" }
+  | { state: "sent"; email: string }
+  | { state: "failed"; message: string };
 
 export function Ending() {
   const sectionRef = useRef<HTMLElement>(null);
-  const lineRef = useRef<HTMLHeadingElement>(null);
+  const lineRef = useRef<HTMLDivElement>(null);
   const arrived = useNear(sectionRef, "0px 0px -35% 0px");
   const [role, setRole] = useState<Role>("teacher");
 
@@ -52,22 +66,42 @@ export function Ending() {
   useEffect(() => {
     const line = lineRef.current;
     if (!arrived || !line) return;
-    shine("ending-line", { el: line, at: [0.5, 0.55], rx: 760, ry: 260, strength: 0.62, hues: [0, 6.8], flow: 0.9, ease: 1600 });
+    shine("ending-line", {
+      el: line,
+      at: [0.5, 0.55],
+      rx: 760,
+      ry: 260,
+      strength: 0.62,
+      hues: [0, 6.8],
+      flow: 0.9,
+      ease: 1600,
+    });
     return () => dimAll("ending");
   }, [arrived]);
 
   return (
-    <section ref={sectionRef} id="talk" className="sp-scene sp-ending" aria-labelledby="sp-ending-title">
-      <h2 ref={lineRef} id="sp-ending-title" className="sp-ending-line" data-light-text>
-        <span>ManageBac is where work is set.</span> <span>Spectra is where it gets done.</span>
-      </h2>
+    <section
+      ref={sectionRef}
+      id="talk"
+      className="sp-scene sp-ending"
+      aria-labelledby="sp-ending-title"
+    >
+      <div ref={lineRef}>
+        <Written
+          id="sp-ending-title"
+          className="sp-ending-line"
+          text={
+            "ManageBac is where work is set.\nSpectra is where it gets done."
+          }
+        />
+      </div>
 
       <div className="sp-talk">
         <div className="sp-talk-copy">
           <h3 className="sp-talk-title">Bring Spectra to your school.</h3>
           <p className="sp-lede">
-            Every school starts with a conversation. We show Spectra on classes like yours and answer what your teachers and IT
-            team will ask.
+            We show Spectra on classes like yours, and answer what your teachers
+            and IT team will ask.
           </p>
           <ul className="sp-talk-what">
             {WHAT_HAPPENS.map((item) => (
@@ -82,9 +116,19 @@ export function Ending() {
         <div className="sp-talk-sheet">
           <fieldset className="sp-talk-roles">
             <legend>I&rsquo;m a</legend>
-            <div className="sp-talk-switch" role="radiogroup" aria-label="I'm a">
+            <div
+              className="sp-talk-switch"
+              role="radiogroup"
+              aria-label="I'm a"
+            >
               {ROLES.map((entry) => (
-                <button key={entry.id} type="button" role="radio" aria-checked={role === entry.id} onClick={() => setRole(entry.id)}>
+                <button
+                  key={entry.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={role === entry.id}
+                  onClick={() => setRole(entry.id)}
+                >
                   {entry.label}
                 </button>
               ))}
@@ -126,16 +170,24 @@ function StudentNote() {
   return (
     <div className="sp-talk-student">
       <p className="sp-talk-hint">
-        Spectra comes to students through their school. Pass this to a teacher you trust: it goes from your own email, and
-        Spectra sends nothing.
+        Spectra comes to students through their school. Pass this to a teacher
+        you trust: it goes from your own email, and Spectra sends nothing.
       </p>
       <p className="sp-talk-note">{text}</p>
       <div className="sp-talk-actions">
-        <button type="button" className="landing-button" data-tone="primary" onClick={copy}>
+        <button
+          type="button"
+          className="landing-button"
+          data-tone="primary"
+          onClick={copy}
+        >
           <Icon name={copied ? "check" : "copy"} size={15} />
           {copied ? "Copied" : "Copy the note"}
         </button>
-        <a className="landing-button" href={`mailto:?subject=${encodeURIComponent("Could our class try Spectra?")}&body=${encodeURIComponent(text)}`}>
+        <a
+          className="landing-button"
+          href={`mailto:?subject=${encodeURIComponent("Could our class try Spectra?")}&body=${encodeURIComponent(text)}`}
+        >
           <Icon name="mail" size={15} />
           Open in email
         </a>
@@ -166,19 +218,30 @@ function Walkthrough({ role }: { role: Exclude<Role, "student"> }) {
           email,
           school: value("school"),
           role: ROLES.find((entry) => entry.id === role)!.label,
-          message: [`Uses ManageBac: ${managebac ? "yes" : "no"}`, note].filter(Boolean).join("\n\n"),
+          message: [`Uses ManageBac: ${managebac ? "yes" : "no"}`, note]
+            .filter(Boolean)
+            .join("\n\n"),
           website: value("website"),
           elapsedMs: Date.now() - opened.current,
         }),
       });
-      const result = (await response.json().catch(() => ({}))) as { error?: string };
+      const result = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
       if (!response.ok) {
-        setSending({ state: "failed", message: result.error ?? "The request didn't go through. Try again." });
+        setSending({
+          state: "failed",
+          message: result.error ?? "The request didn't go through. Try again.",
+        });
         return;
       }
       setSending({ state: "sent", email });
     } catch {
-      setSending({ state: "failed", message: "The request didn't go through. Check your connection, then try again." });
+      setSending({
+        state: "failed",
+        message:
+          "The request didn't go through. Check your connection, then try again.",
+      });
     }
   };
 
@@ -186,7 +249,10 @@ function Walkthrough({ role }: { role: Exclude<Role, "student"> }) {
     return (
       <div className="sp-talk-sent" role="status">
         <p className="sp-talk-sent-title">Request sent.</p>
-        <p className="sp-talk-hint">We&rsquo;ll write to {sending.email} to find a time that suits your school.</p>
+        <p className="sp-talk-hint">
+          We&rsquo;ll write to {sending.email} to find a time that suits your
+          school.
+        </p>
       </div>
     );
   }
@@ -207,7 +273,13 @@ function Walkthrough({ role }: { role: Exclude<Role, "student"> }) {
         <span>School</span>
         <input name="school" autoComplete="organization" required />
       </label>
-      <button type="button" className="sp-talk-toggle" role="switch" aria-checked={managebac} onClick={() => setManagebac((current) => !current)}>
+      <button
+        type="button"
+        className="sp-talk-toggle"
+        role="switch"
+        aria-checked={managebac}
+        onClick={() => setManagebac((current) => !current)}
+      >
         <span className="sp-talk-toggle-track" aria-hidden>
           <span />
         </span>
@@ -228,12 +300,20 @@ function Walkthrough({ role }: { role: Exclude<Role, "student"> }) {
         </p>
       ) : null}
       <div className="sp-talk-submit">
-        <button type="submit" className="landing-button" data-tone="primary" disabled={sending.state === "sending"}>
-          {sending.state === "sending" ? <Icon name="working" size={15} animate /> : null}
+        <button
+          type="submit"
+          className="landing-button"
+          data-tone="primary"
+          disabled={sending.state === "sending"}
+        >
+          {sending.state === "sending" ? (
+            <Icon name="working" size={15} animate />
+          ) : null}
           {sending.state === "sending" ? "Sending" : "Ask for a walkthrough"}
         </button>
         <span className="sp-talk-fine">
-          We use these details only to reply. <Link href="/legal/privacy">Privacy</Link>
+          We use these details only to reply.{" "}
+          <Link href="/legal/privacy">Privacy</Link>
         </span>
       </div>
     </form>

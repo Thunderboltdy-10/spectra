@@ -10,6 +10,7 @@ import { InlineStudio } from "../../kit/inline-studio";
 import { islandField, typeIntoIsland } from "../../kit/landing-island";
 import { useWorld, useWorldEvent } from "../../kit/world-context";
 import { WORKS, type StoryWork } from "../../world/works";
+import { Written } from "../../kit/written";
 import { useScene } from "../director";
 import { PEOPLE, useHands } from "../hands";
 import { dimAll, flash, shine } from "../light/light";
@@ -31,7 +32,14 @@ const HUES: Record<string, [number, number]> = {
   [WORKS.deck._id]: [0.4, 1.2],
 };
 
-const placeOf = (work: StoryWork) => work.placements?.[0]?.workspaceTitle ?? "Inbox";
+const MAKING: Record<string, string> = {
+  [WORKS.quiz._id]: "Writing a quiz",
+  [WORKS.cards._id]: "Writing flashcards",
+  [WORKS.deck._id]: "Making slides",
+};
+
+const placeOf = (work: StoryWork) =>
+  work.placements?.[0]?.workspaceTitle ?? "Inbox";
 
 export function Make() {
   const world = useWorld();
@@ -43,36 +51,53 @@ export function Make() {
   const previewOf = useWorkPreviews([WORKS.notes, ...MADE]);
   const book = useClassBook();
   const [made, setMade] = useState<ReadonlySet<string>>(() => new Set());
+  const [making, setMaking] = useState<ReadonlySet<string>>(() => new Set());
   const [active, setActive] = useState<string | null>(null);
   const running = useRef(false);
 
   const land = (id: string) => {
     setMade((was) => (was.has(id) ? was : new Set(was).add(id)));
     setActive((was) => was ?? id);
-    const card = cardRefs.current[id];
-    if (card) flash({ el: card, rx: 240, ry: 200, strength: 0.7, hues: HUES[id], hold: 700 });
   };
 
+  // While Spectra makes each one, its place on the desk shows it being made, as a card does in the app.
   useWorldEvent((event) => {
     if (!running.current) return;
-    if (event.type === "reading" && event.workId && HUES[event.workId]) land(event.workId);
-    if (event.type === "run_finished" && event.reply.key === "make") {
-      for (const work of MADE) land(work._id);
+    if (event.type === "reading" && event.workId && HUES[event.workId])
+      setMaking((was) => new Set(was).add(event.workId!));
+    if (event.type === "run_finished" && event.reply.key === "make")
       running.current = false;
-    }
   });
 
   // The scene's light: cool where the notes are, and the colours of what was made once it is there.
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
-    shine("make-notes", { el: stage, at: [0.12, 0.2], rx: 420, ry: 320, strength: 0.38, hues: [3.6, 4.6], flow: 0.5, ease: 1200 });
+    shine("make-notes", {
+      el: stage,
+      at: [0.12, 0.2],
+      rx: 420,
+      ry: 320,
+      strength: 0.38,
+      hues: [3.6, 4.6],
+      flow: 0.5,
+      ease: 1200,
+    });
     return () => dimAll("make");
   }, []);
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage || made.size < MADE.length) return;
-    shine("make-made", { el: stage, at: [0.7, 0.42], rx: 640, ry: 420, strength: 0.5, hues: [4.8, 7.2], flow: 0.8, ease: 1600 });
+    shine("make-made", {
+      el: stage,
+      at: [0.7, 0.42],
+      rx: 640,
+      ry: 420,
+      strength: 0.5,
+      hues: [4.8, 7.2],
+      flow: 0.8,
+      ease: 1600,
+    });
   }, [made]);
 
   useScene(
@@ -96,36 +121,67 @@ export function Make() {
       running.current = true;
       await world.whenIdle();
       world.pace = 0.32;
+      world.quiet = true;
       void typeIntoIsland(QUESTION, {
         fresh: true,
         perLetter: 12,
-        references: [{ id: WORKS.notes._id, type: WORKS.notes.blueprintKey, title: WORKS.notes.title }],
+        references: [
+          {
+            id: WORKS.notes._id,
+            type: WORKS.notes.blueprintKey,
+            title: WORKS.notes.title,
+          },
+        ],
       });
       await henry.hide();
-      // Once the three are in, he looks through them: each opens in its own editor as his hand passes.
+      // Spectra brings each one out of the island and sets it in its place.
       while (running.current && !signal.aborted) await wait(120);
-      await wait(400);
-      for (const work of [WORKS.quiz, WORKS.cards, WORKS.deck]) {
-        await henry.move(cardRefs.current[work._id], { aim: [0.5, 0.42] });
-        setActive(work._id);
-        await wait(work === WORKS.deck ? 500 : 1100);
+      const spectra = hand(PEOPLE.spectra, signal);
+      for (const work of MADE) {
+        const card = cardRefs.current[work._id];
+        if (card) card.dataset.brought = "coming";
+        land(work._id);
+        await wait(40);
+        if (!card || signal.aborted) continue;
+        await spectra.bring(card, islandField(), { ms: 540 });
+        flash({
+          el: card,
+          rx: 220,
+          ry: 180,
+          strength: 0.6,
+          hues: HUES[work._id],
+          hold: 520,
+        });
+        setMaking((was) => {
+          const next = new Set(was);
+          next.delete(work._id);
+          return next;
+        });
       }
-      await henry.hide();
+      await spectra.hide();
     },
     2600,
   );
 
-  const shown = active ? (MADE.find((work) => work._id === active) ?? null) : null;
+  const shown = active
+    ? (MADE.find((work) => work._id === active) ?? null)
+    : null;
 
   return (
-    <section ref={sectionRef} className="sp-scene sp-make" aria-labelledby="sp-make-title">
+    <section
+      ref={sectionRef}
+      className="sp-scene sp-make"
+      aria-labelledby="sp-make-title"
+    >
       <div className="sp-scene-copy" data-settle-to>
-        <h2 id="sp-make-title" className="sp-heading" data-light-text>
-          Make anything from what you already have.
-        </h2>
+        <Written
+          id="sp-make-title"
+          className="sp-heading"
+          text="Make anything from your notes."
+        />
         <p className="sp-lede">
-          Hand Spectra your notes and ask for something to revise from. It writes a quiz on the parts you know least, cards to
-          flip and slides to talk through, and files them in the class.
+          Hand Spectra your notes and get a quiz on what you know least, cards
+          to flip and slides, filed in the class.
         </p>
       </div>
 
@@ -136,7 +192,10 @@ export function Make() {
               type={WORKS.notes.blueprintKey}
               title={WORKS.notes.title}
               preview={previewOf(WORKS.notes)}
-              summary={meaningfulSummary(WORKS.notes.blueprintKey, WORKS.notes.summary)}
+              summary={meaningfulSummary(
+                WORKS.notes.blueprintKey,
+                WORKS.notes.summary,
+              )}
               place={placeOf(WORKS.notes)}
               ink={book.named(placeOf(WORKS.notes))?.ink}
               href="#"
@@ -151,6 +210,9 @@ export function Make() {
               }}
               className="sp-make-card"
               data-made={made.has(work._id) || undefined}
+              data-making={
+                (making.has(work._id) && !made.has(work._id)) || undefined
+              }
               data-active={active === work._id || undefined}
               onPointerEnter={() => made.has(work._id) && setActive(work._id)}
               onFocus={() => made.has(work._id) && setActive(work._id)}
@@ -167,7 +229,13 @@ export function Make() {
                   onOpen={() => openWorkInSide(work._id)}
                 />
               ) : (
-                <span className="sp-make-slot" aria-hidden />
+                <span className="sp-make-slot" aria-hidden>
+                  {making.has(work._id) ? (
+                    <span className="sp-make-slot-label">
+                      {MAKING[work._id]}
+                    </span>
+                  ) : null}
+                </span>
               )}
             </div>
           ))}
@@ -175,7 +243,12 @@ export function Make() {
 
         <div className="sp-make-studio" data-empty={!shown || undefined}>
           {shown ? (
-            <InlineStudio key={shown._id} work={shown} instanceKey={`landing-make-${shown._id}`} className="sp-studio" />
+            <InlineStudio
+              key={shown._id}
+              work={shown}
+              instanceKey={`landing-make-${shown._id}`}
+              className="sp-studio"
+            />
           ) : (
             <p className="sp-make-wait">What Spectra makes opens here.</p>
           )}

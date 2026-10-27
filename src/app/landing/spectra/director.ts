@@ -38,8 +38,12 @@ const lessMotion = () => typeof window !== "undefined" && window.matchMedia("(pr
 
 const KEYS = new Set(["ArrowDown", "ArrowUp", "PageDown", "PageUp", " ", "Home", "End"]);
 
+/** Places that scroll on their own (a thread, the side, the island's card): the wheel over them is theirs, held or not. */
+const OWN_SCROLL = ".sp-thread, .landing-side, [data-island-thread]";
+
 function block(event: Event) {
   if (!held) return;
+  if ((event.target as Element | null)?.closest?.(OWN_SCROLL)) return;
   if (event instanceof KeyboardEvent) {
     const target = event.target as HTMLElement | null;
     if (!KEYS.has(event.key) || target?.closest("input, textarea, [contenteditable='true'], select")) return;

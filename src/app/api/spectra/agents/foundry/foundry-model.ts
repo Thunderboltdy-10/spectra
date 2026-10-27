@@ -204,7 +204,7 @@ Return JSON with exactly this shape:
     "procedure": [{"order": 1, "action": "...", "verification": "how the agent knows this step worked", "tools": []}],
     "examples": [{"id": "ex-1", "input": "...", "output": "..."}],
     "failureModes": [{"id": "fm-1", "description": "what goes wrong", "detection": "how it is noticed", "recovery": "what to do instead"}],
-    "evaluationCases": [{"id": "ec-1", "layer": "contract|held_out|mission_truth|tool_sandbox|adversarial|regression", "input": "...", "expectation": {"kind": "contains", "values": ["..."]}, "required": true}]
+    "evaluationCases": [{"id": "ec-1", "layer": "contract|held_out|mission_truth|tool_sandbox|adversarial|regression", "input": "...", "expectation": {"kind": "judged", "criteria": "observable requirements and the correct outcome", "externalTruth": false}, "required": true}]
   }],
   "routingDescription": "when a request should go to this agent rather than ordinary Spectra",
   "routingExamples": ["a request this agent should handle", ...],

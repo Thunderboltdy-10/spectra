@@ -225,7 +225,9 @@ function CalendarItemDetails({
         detail={
           work
             ? "The scheduled time is removed from Calendar. The plan itself is kept and can be placed again."
-            : "This event is removed from your Calendar."
+            : item.kind === "task"
+              ? "This task is removed from your Calendar."
+              : "This event is removed from your Calendar."
         }
         confirmLabel="Remove"
         destructive

@@ -6,6 +6,7 @@ import aggregateTest from "@convex-dev/aggregate/test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { detectLimitations, verificationStrength, type EvaluationCaseResult } from "../src/features/spectra/agents/foundry/evaluation";
 
 const modules = import.meta.glob("./**/*.ts");
 afterEach(() => vi.useRealTimers());
@@ -101,6 +102,35 @@ const sign = (operation: string, subject: string, subjectId: string, payloadDige
     .digest("base64url");
   return { timestamp, nonce, signature };
 };
+
+it.each(["self", "literal", "human"] as const)("derives honest verification strength for %s evidence at signed settlement", async kind => {
+  vi.stubEnv("SPECTRA_SECRET_BRIDGE_KEY", BRIDGE_KEY);
+  vi.stubEnv("SPECTRA_AGENT_EVAL_BRIDGE_KEY", BRIDGE_KEY);
+  try {
+    const value = await fixture();
+    const { agentId, student } = await withAgent(value);
+    const cases: EvaluationCaseResult[] = (["contract", "mission_truth", "adversarial"] as const).map(layer => ({
+      caseId: layer, layer, required: true, passed: true, score: 1,
+      reason: "Fixture judgement", judgedBy: kind === "human" && layer === "mission_truth" ? "human" : "self",
+    }));
+    if (kind !== "self") cases.push({ caseId: "literal", layer: "regression", required: true, passed: true, score: 1, reason: "Exact expected value" });
+    const results = cases.map(entry => ({ ...entry, category: entry.layer, responseExcerpt: "Fixture answer", latencyMs: 1 }));
+    const begun = await student.mutation(api.agents.beginEvalRun, {
+      agentId, modelId: "fixture", provider: "fixture",
+      cases: cases.map(entry => ({ id: entry.caseId, prompt: "Fixture request", expected: "Fixture expectation", category: entry.layer, required: true })),
+    });
+    const digest = createHash("sha256").update(canonical({ results })).digest("base64url");
+    const result = await student.mutation(api.agents.settleEvalRun, {
+      evalRunId: begun.evalRunId, results, payloadDigest: digest,
+      ...sign("agent-eval-settle", "capped-student", begun.evalRunId, digest),
+    });
+    const expected = kind === "self" ? "weak" : kind === "literal" ? "moderate" : "strong";
+    expect(result.verificationStrength).toBe(expected);
+    expect(verificationStrength(cases, detectLimitations(cases, { hasRegressionBaseline: false }))).toBe(expected);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
 
 /** The settlement digest's sorted-key JSON (convex/agents.ts canonical). */
 function canonical(value: unknown): string {

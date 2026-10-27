@@ -240,7 +240,11 @@ function OverviewSurface({
       id: "managebac",
       tone: "danger",
       title: `ManageBac: ${connection.label.toLowerCase()}`,
-      detail: data.integration?.hasOpenConflicts
+      detail: data.integration?.status !== "connected"
+        ? ["revoked", "disconnected"].includes(data.integration?.status ?? "")
+          ? "Reconnect ManageBac with a valid school API key to resume updates."
+          : "Check the latest sync and connection so classes, tasks and deadlines stay up to date."
+        : data.integration?.hasOpenConflicts
         ? "Source updates overlap with changes in Spectra. Review them before choosing which to keep."
         : data.integration?.syncFreshness === "never"
           ? "The connection is set up, but no complete sync has finished yet. Check its progress."

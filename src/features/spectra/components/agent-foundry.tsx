@@ -23,6 +23,7 @@
 
 import { Loader2, RotateCcw, AlertTriangle, ChevronDown, Lock, X, FlaskConical, Gauge, Play, Square } from "@/components/icons/glyph-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { canonicalJsonValue } from "../../../../shared/canonical-json";
 import { StatusBadge, statusToneFor } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -638,7 +639,7 @@ function ChecksView({
                   <span className="foundry-release-notes">
                     {whenText(run.completedAt ?? run.startedAt)} ·{" "}
                     {run.modelId.split("/").pop()} ·{" "}
-                    {stale ? "an earlier draft" : "this draft"}
+                    {!currentHash ? "draft match not confirmed" : stale ? "an earlier draft" : "this draft"}
                   </span>
                   <button
                     type="button"
@@ -772,7 +773,15 @@ export function AgentFoundry({
   const [releases, setReleases] = useState<SpectraAgentRelease[]>([]);
   const [evalRuns, setEvalRuns] = useState<SpectraAgentEvalRun[]>([]);
   const [runsLoading, setRunsLoading] = useState(!readOnly);
-  const [currentHash, setCurrentHash] = useState("");
+  const [serverHash, setServerHash] = useState("");
+  const draftKey = useMemo(
+    () => JSON.stringify(canonicalJsonValue([artifactTitle, agent])),
+    [artifactTitle, agent],
+  );
+  const [checkedDraft, setCheckedDraft] = useState(draftKey);
+  // A history refresh can still read the previous saved head. Local edits must
+  // invalidate its match immediately, without querying on every keystroke.
+  const currentHash = draftKey === checkedDraft ? serverHash : "";
   const [showDismissed, setShowDismissed] = useState(false);
   const [showBrief, setShowBrief] = useState(false);
   const [ledgerOpen, setLedgerOpen] = useState(false);
@@ -830,7 +839,7 @@ export function AgentFoundry({
     const response = await getSpectraAgentEvalRuns(artifactId).catch(() => null);
     if (response) {
       setEvalRuns(response.runs);
-      setCurrentHash(response.currentContentHash);
+      setServerHash(response.currentContentHash);
     }
     setRunsLoading(false);
     return response !== null;
@@ -846,7 +855,7 @@ export function AgentFoundry({
         .then((response) => {
           if (!active) return;
           setEvalRuns(response.runs);
-          setCurrentHash(response.currentContentHash);
+          setServerHash(response.currentContentHash);
         })
         .catch(() => undefined)
         .finally(() => active && setRunsLoading(false));
@@ -873,7 +882,7 @@ export function AgentFoundry({
           void getSpectraAgentEvalRuns(artifactId)
             .then((response) => {
               setEvalRuns(response.runs);
-              setCurrentHash(response.currentContentHash);
+              setServerHash(response.currentContentHash);
             })
             .catch(() => undefined);
       }),
@@ -1409,6 +1418,7 @@ export function AgentFoundry({
   }, [brief.length, routingRequired, ungranted]);
 
   async function evaluate() {
+    const evaluatedDraft = draftKey;
     const result = await run(
       "evaluate",
       "The checks didn't finish. Nothing was released; run them again.",
@@ -1419,6 +1429,7 @@ export function AgentFoundry({
     // most useful thing on the screen.
     await reloadRuns();
     if (!result) return;
+    setCheckedDraft(evaluatedDraft);
     setNotice(
       result.status === "passed"
         ? `Passed ${result.passedCount} of ${result.caseCount} checks.`

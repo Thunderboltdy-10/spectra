@@ -1,12 +1,14 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod polling;
+mod pairing_work;
 
 use sha2::Digest;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use polling::{PollResult, PollScheduler, PollWake, WaitResult};
+use pairing_work::PairingWork;
 use spectra_bridge_core::fs::{
     FsError, Grant, GrantRegistry, SafeWriter, WriteRequest, resolve_write_target,
 };
@@ -47,7 +49,13 @@ struct BridgeRuntime {
     active_mount_syncs: ActiveMountSyncs,
 }
 
-type ActiveMountSyncs = Arc<Mutex<HashSet<String>>>;
+#[derive(Default)]
+struct MountSyncs {
+    mounts: Mutex<HashSet<String>>,
+    pairing: PairingWork,
+}
+
+type ActiveMountSyncs = Arc<MountSyncs>;
 
 /// A timed-out page is safely replayable because resource discovery resolves
 /// by stable device/resource identity. Split it once to let each half commit
@@ -127,6 +135,7 @@ struct ActiveMountSyncGuard {
 impl ActiveMountSyncGuard {
     fn acquire(active_mount_syncs: &ActiveMountSyncs, grant_id: &str) -> Option<Self> {
         let acquired = active_mount_syncs
+            .mounts
             .lock()
             .expect("mount sync gate is not poisoned")
             .insert(grant_id.to_owned());
@@ -139,7 +148,7 @@ impl ActiveMountSyncGuard {
 
 impl Drop for ActiveMountSyncGuard {
     fn drop(&mut self) {
-        match self.active_mount_syncs.lock() {
+        match self.active_mount_syncs.mounts.lock() {
             Ok(mut active_mount_syncs) => {
                 active_mount_syncs.remove(&self.grant_id);
             }
@@ -191,6 +200,7 @@ impl LocalBridgeControl for SpectraLocalControl {
             .map_err(|error| error.to_string())?;
         let result = complete_pairing_offer(&self.app, &offer, &self.state, &self.journal).await;
         if result.is_ok() {
+            self.active_mount_syncs.pairing.resume();
             self.wake.wake_configuration();
             refresh_tray(&self.app);
         }
@@ -293,7 +303,7 @@ impl LocalBridgeControl for SpectraLocalControl {
             .selection_gate
             .try_lock()
             .map_err(|_| "Finish the current connection or file selection first.".to_string())?;
-        unpair_this_computer(&self.grants, &self.journal)?;
+        unpair_this_computer(&self.grants, &self.journal, &self.active_mount_syncs.pairing)?;
         self.state.forget_pairing();
         self.wake.wake_configuration();
         refresh_tray(&self.app);
@@ -507,7 +517,11 @@ fn forget_mount_config(journal: &Journal, grant_id: &str) -> Result<(), String> 
 
 /// Unpairing forgets this computer's key, its folders and the browser
 /// session, and stops syncing. The files in the folders stay where they are.
-fn unpair_this_computer(grants: &GrantRegistry, journal: &Journal) -> Result<(), String> {
+fn unpair_this_computer(
+    grants: &GrantRegistry,
+    journal: &Journal,
+    pairing: &PairingWork,
+) -> Result<(), String> {
     if let Some(device_id) = journal
         .config("device_id")
         .map_err(|error| error.to_string())?
@@ -516,6 +530,7 @@ fn unpair_this_computer(grants: &GrantRegistry, journal: &Journal) -> Result<(),
             .delete_credential(&device_id)
             .map_err(|error| format!("Couldn't forget this computer's key: {error}"))?;
     }
+    pairing.retire();
     for grant in grants.device_grants() {
         grants.remove(&grant.id);
         forget_mount_config(journal, &grant.id)?;
@@ -2329,6 +2344,7 @@ fn mount_pass_status(pass: &MountPass, repair_delay_ms: Option<u64>) -> (String,
 }
 
 async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
+    let device_id = grant_device_id(journal, grant).map_err(|error| error.to_string())?;
     set_mount_status(
         journal,
         &grant.id,
@@ -2337,10 +2353,6 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
         0,
         0,
     )?;
-    let device_id = journal
-        .config("device_id")
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "Connect Spectra Bridge before adding a folder".to_string())?;
     let credential = HostPlatform
         .read_credential(&device_id)
         .map_err(|error| error.to_string())?
@@ -3291,7 +3303,12 @@ fn spawn_grant_watcher(
     wake: PollWake,
     active_mount_syncs: ActiveMountSyncs,
 ) {
-    tauri::async_runtime::spawn(async move {
+    // Capture before spawning: a queued old watcher must not acquire a lease
+    // from a later owner when the executor eventually starts it.
+    let Some(lease) = active_mount_syncs.pairing.lease() else {
+        return;
+    };
+    let watch = async move {
         let config = WatcherConfig::for_root(std::path::Path::new(grant.device_root()));
         // Keep startup in the same path as reconnects.  A watcher can be
         // created immediately for a newly selected folder, but that does not
@@ -3327,8 +3344,8 @@ fn spawn_grant_watcher(
                 let already_reported =
                     journal.config(&marker_key).ok().flatten().as_deref() == Some("unavailable");
                 if !already_reported {
-                    if let (Ok(url), Ok(Some(device_id))) =
-                        (deployment_url(&journal), journal.config("device_id"))
+                    if let (Ok(url), Ok(device_id)) =
+                        (deployment_url(&journal), grant_device_id(&journal, &grant))
                     {
                         if let Ok(Some(credential)) = HostPlatform.read_credential(&device_id) {
                             if set_mount_availability(&url, &credential, &grant.id, false)
@@ -3384,8 +3401,8 @@ fn spawn_grant_watcher(
                     let was_unavailable = journal.config(&marker_key).ok().flatten().as_deref()
                         == Some("unavailable");
                     if was_unavailable {
-                        if let (Ok(url), Ok(Some(device_id))) =
-                            (deployment_url(&journal), journal.config("device_id"))
+                        if let (Ok(url), Ok(device_id)) =
+                            (deployment_url(&journal), grant_device_id(&journal, &grant))
                         {
                             if let Ok(Some(credential)) = HostPlatform.read_credential(&device_id) {
                                 if set_mount_availability(&url, &credential, &grant.id, true)
@@ -3621,6 +3638,9 @@ fn spawn_grant_watcher(
                 wake.wake();
             }
         }
+    };
+    tauri::async_runtime::spawn(async move {
+        lease.run(watch).await;
     });
 }
 
@@ -3629,6 +3649,9 @@ async fn sync_grant(
     journal: &Journal,
     active_mount_syncs: &ActiveMountSyncs,
 ) -> Result<MountSyncOutcome, String> {
+    let Some(lease) = active_mount_syncs.pairing.lease() else {
+        return Ok(MountSyncOutcome::Paused);
+    };
     let Some(_active_mount_sync) = ActiveMountSyncGuard::acquire(active_mount_syncs, &grant.id)
     else {
         return Ok(MountSyncOutcome::AlreadyRunning);
@@ -3649,9 +3672,10 @@ async fn sync_grant(
         )?;
         return Ok(MountSyncOutcome::Completed);
     }
-    match run_sync(grant, journal).await {
-        Ok(()) => Ok(MountSyncOutcome::Completed),
-        Err(error) => {
+    match lease.run(run_sync(grant, journal)).await {
+        None => Ok(MountSyncOutcome::Paused),
+        Some(Ok(())) => Ok(MountSyncOutcome::Completed),
+        Some(Err(error)) => {
             record_runtime_error(journal, "Mount repair scan failed", &error);
             match schedule_mount_repair_retry(journal, &grant.id, &error, 0, 0) {
                 Ok(_) => Ok(MountSyncOutcome::RetryScheduled),
@@ -3961,6 +3985,28 @@ fn grant_config_matches_pairing(journal: &Journal, config: &serde_json::Value) -
         })
 }
 
+/// A watcher retains its original grant. It must never borrow the credential
+/// of a later pairing just because the journal's current device changed.
+fn grant_device_id(journal: &Journal, grant: &Grant) -> anyhow::Result<String> {
+    let prefix = if grant.selected_file().is_some() {
+        "file-mount"
+    } else {
+        "mount"
+    };
+    let binding = journal
+        .config(&format!("{prefix}:{}", grant.id))?
+        .ok_or_else(|| anyhow::anyhow!("This selection is no longer paired to this computer."))?;
+    let config: serde_json::Value = serde_json::from_str(&binding)?;
+    anyhow::ensure!(
+        grant_config_matches_pairing(journal, &config),
+        "This selection belongs to a different pairing."
+    );
+    Ok(config["deviceId"]
+        .as_str()
+        .expect("validated grant owner")
+        .to_owned())
+}
+
 async fn select_files_impl(
     app: &tauri::AppHandle,
     grants: &Arc<GrantRegistry>,
@@ -4039,12 +4085,15 @@ async fn retry_mount_impl(
     wake: &PollWake,
     active_mount_syncs: &ActiveMountSyncs,
 ) -> Result<(), String> {
+    let lease = active_mount_syncs.pairing.lease()
+        .ok_or_else(|| "Connect this computer before retrying synchronization.".to_string())?;
     let grant = grants
         .device_grants()
         .into_iter()
         .find(|grant| grant.id == grant_id)
         .ok_or_else(|| "Folder grant not found".to_string())?;
     let already_running = active_mount_syncs
+        .mounts
         .lock()
         .expect("mount sync gate is not poisoned")
         .contains(&grant.id);
@@ -4064,7 +4113,7 @@ async fn retry_mount_impl(
     let journal_for_scan = journal.clone();
     let active_mount_syncs_for_scan = active_mount_syncs.clone();
     let wake_for_scan = wake.clone();
-    tauri::async_runtime::spawn(async move {
+    let scan = async move {
         if let Err(error) = sync_grant(
             &grant_for_scan,
             &journal_for_scan,
@@ -4075,6 +4124,9 @@ async fn retry_mount_impl(
             record_runtime_error(&journal_for_scan, "Repair scan failed", &error);
         }
         wake_for_scan.wake();
+    };
+    tauri::async_runtime::spawn(async move {
+        lease.run(scan).await;
     });
     wake.wake();
     Ok(())
@@ -4288,7 +4340,7 @@ async fn run_sync_iteration(
                         .flatten()
                         .as_deref()
                         == Some(credential.as_str());
-                if still_current && unpair_this_computer(grants, journal).is_ok() {
+                if still_current && unpair_this_computer(grants, journal, &active_mount_syncs.pairing).is_ok() {
                     state.forget_pairing();
                 }
                 return PollResult::Unauthenticated;
@@ -4523,18 +4575,24 @@ async fn run_sync_worker(
                 configuration_dirty = true;
             }
         }
-        let result = run_sync_iteration(
-            &grants,
-            &journal,
-            &state,
-            &active_mount_syncs,
-            &mut restored_grants_reconciled,
-            &mut last_compaction,
-            &mut deployment,
-            &mut configuration_dirty,
-            &mut health,
-        )
-        .await;
+        let result = if let Some(lease) = active_mount_syncs.pairing.lease() {
+            lease
+                .run(run_sync_iteration(
+                    &grants,
+                    &journal,
+                    &state,
+                    &active_mount_syncs,
+                    &mut restored_grants_reconciled,
+                    &mut last_compaction,
+                    &mut deployment,
+                    &mut configuration_dirty,
+                    &mut health,
+                ))
+                .await
+                .unwrap_or(PollResult::Disconnected)
+        } else {
+            PollResult::Disconnected
+        };
         if result == PollResult::Disconnected || result == PollResult::Unauthenticated {
             restored_grants_reconciled.clear();
         }
@@ -4589,6 +4647,7 @@ fn main() {
             let data_dir = resolve_bridge_data_dir(isolated_runtime, app.path().app_data_dir()?)?;
             std::fs::create_dir_all(&data_dir)?;
             let journal = Arc::new(Journal::open(&data_dir.join("bridge.sqlite"))?);
+            let active_mount_syncs: ActiveMountSyncs = Arc::new(MountSyncs::default());
             let state = Arc::new(ServerState::unpaired());
             let credential_ready = if let Some(device_id) = journal.config("device_id")? {
                 match HostPlatform.read_credential(&device_id) {
@@ -4596,7 +4655,7 @@ fn main() {
                     Ok(None) => {
                         // A deleted OS key cannot authorize remembered folders.
                         // Leave files intact and let Devices make a fresh pairing.
-                        unpair_this_computer(&GrantRegistry::default(), &journal)?;
+                        unpair_this_computer(&GrantRegistry::default(), &journal, &active_mount_syncs.pairing)?;
                         false
                     }
                     // An unavailable keyring may recover; preserve its settings.
@@ -4672,7 +4731,7 @@ fn main() {
             app.manage(BridgeRuntime {
                 grants: grants.clone(),
                 journal: journal.clone(),
-                active_mount_syncs: Arc::new(Mutex::new(HashSet::new())),
+                active_mount_syncs: active_mount_syncs.clone(),
             });
             let active_mount_syncs = app.state::<BridgeRuntime>().active_mount_syncs.clone();
             let local_control = Arc::new(SpectraLocalControl {
@@ -4998,7 +5057,7 @@ mod devices_tests {
         let maths = grants
             .add_native_selection("Maths".into(), &temp_folder("Maths"))
             .unwrap();
-        let active: ActiveMountSyncs = Arc::new(Mutex::new(HashSet::new()));
+        let active: ActiveMountSyncs = Arc::new(MountSyncs::default());
 
         set_mount_paused(&grants, &journal, &biology.id, true).unwrap();
         assert!(folder_paused(&journal, &biology.id));
@@ -5009,7 +5068,7 @@ mod devices_tests {
             sync_grant(&biology, &journal, &active).await,
             Ok(MountSyncOutcome::Paused)
         ));
-        assert!(active.lock().unwrap().is_empty());
+        assert!(active.mounts.lock().unwrap().is_empty());
 
         // Pausing every folder holds the other one too.
         set_sync_paused(&journal, true).unwrap();
@@ -5105,11 +5164,14 @@ mod devices_tests {
         let config: serde_json::Value = serde_json::from_str(&saved[0].1).unwrap();
         assert_eq!(config["selectedFile"], "Chosen.docx");
         assert!(grant_config_matches_pairing(&journal, &config));
+        assert_eq!(grant_device_id(&journal, &grant).unwrap(), "device-original");
         journal
             .set_config("device_id", "device-another-account")
             .unwrap();
         assert!(!grant_config_matches_pairing(&journal, &config));
+        assert!(grant_device_id(&journal, &grant).is_err());
         forget_mount_config(&journal, &grant.id).unwrap();
+        assert!(grant_device_id(&journal, &grant).is_err());
         assert!(journal.config_prefix("file-mount:").unwrap().is_empty());
         assert_eq!(std::fs::read(file).unwrap(), b"chosen");
     }
@@ -5124,11 +5186,13 @@ mod devices_tests {
         assert!(persist_folder_grant(&journal, &grant).is_err());
         journal.set_config("device_id", "original").unwrap();
         persist_folder_grant(&journal, &grant).unwrap();
+        assert_eq!(grant_device_id(&journal, &grant).unwrap(), "original");
         let key = format!("mount:{}", grant.id);
         let mut legacy = serde_json::json!({ "label": "Biology", "path": grant.device_root() });
         bind_legacy_folder_grant(&journal, &key, &mut legacy).unwrap();
         assert!(grant_config_matches_pairing(&journal, &legacy));
         journal.set_config("device_id", "different").unwrap();
+        assert!(grant_device_id(&journal, &grant).is_err());
         bind_legacy_folder_grant(&journal, &key, &mut legacy).unwrap();
         assert!(
             !grant_config_matches_pairing(&journal, &legacy),
@@ -5163,7 +5227,7 @@ mod devices_tests {
         journal.set_config("file-mount:unavailable", "{}").unwrap();
         journal.set_config("mount:unrestored", "{}").unwrap();
         set_sync_paused(&journal, true).unwrap();
-        unpair_this_computer(&grants, &journal).unwrap();
+        unpair_this_computer(&grants, &journal, &PairingWork::default()).unwrap();
         assert!(grants.device_grants().is_empty());
         assert!(journal.config_prefix("mount:").unwrap().is_empty());
         assert!(journal.config_prefix("file-mount:").unwrap().is_empty());
@@ -5230,14 +5294,14 @@ mod devices_tests {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActiveMountSyncGuard, MountRepairRetry, clear_mount_repair_retry,
+        ActiveMountSyncGuard, MountRepairRetry, MountSyncs, clear_mount_repair_retry,
         configured_deployment_url, current_time_ms, mount_repair_retry_due, mount_repair_retry_key,
         resolve_bridge_data_dir, resolve_deployment_url, retain_current_mounts,
         schedule_mount_repair_retry,
     };
     use spectra_bridge_core::journal::Journal;
     use std::collections::HashSet;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     #[test]
     fn bridge_without_a_deployment_asks_to_pair_again() {
@@ -5304,7 +5368,7 @@ mod tests {
 
     #[test]
     fn active_mount_sync_gate_releases_when_scan_returns() {
-        let active = Arc::new(Mutex::new(HashSet::new()));
+        let active = Arc::new(MountSyncs::default());
         let guard = ActiveMountSyncGuard::acquire(&active, "grant-1");
         assert!(guard.is_some());
         assert!(!ActiveMountSyncGuard::acquire(&active, "grant-1").is_some());
@@ -5314,7 +5378,7 @@ mod tests {
 
     #[tokio::test]
     async fn active_mount_sync_gate_releases_when_scan_panics() {
-        let active = Arc::new(Mutex::new(HashSet::new()));
+        let active = Arc::new(MountSyncs::default());
         let task_active = active.clone();
         let task = tokio::spawn(async move {
             let _guard = ActiveMountSyncGuard::acquire(&task_active, "grant-1")
@@ -5322,6 +5386,23 @@ mod tests {
             panic!("simulated repair scan panic");
         });
         assert!(task.await.is_err());
+        assert!(ActiveMountSyncGuard::acquire(&active, "grant-1").is_some());
+    }
+
+    #[tokio::test]
+    async fn disconnect_cancels_a_pending_scan_and_releases_its_mount_gate() {
+        let active = Arc::new(MountSyncs::default());
+        let lease = active.pairing.lease().unwrap();
+        let task_active = active.clone();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(lease.run(async move {
+            let _guard = ActiveMountSyncGuard::acquire(&task_active, "grant-1").unwrap();
+            started.send(()).unwrap();
+            std::future::pending::<()>().await;
+        }));
+        ready.await.unwrap();
+        active.pairing.retire();
+        assert!(task.await.unwrap().is_none());
         assert!(ActiveMountSyncGuard::acquire(&active, "grant-1").is_some());
     }
 

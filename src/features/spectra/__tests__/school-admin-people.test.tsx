@@ -112,6 +112,14 @@ describe("School admin People", () => {
     expect(api.getAdministration.mock.calls.filter(([kind]) => kind === "feedbackEvidence")).toHaveLength(1);
   });
 
+  it("asks for reconnection after a withdrawn first key instead of suggesting a sync is progressing", async () => {
+    navigation.tab = "overview";
+    api.getAdministration.mockResolvedValue({ ...overview, integration: { status: "revoked", hasOpenConflicts: false, syncFreshness: "never" } });
+    render(<SchoolAdminShell />);
+    expect(await screen.findByText("Reconnect ManageBac with a valid school API key to resume updates.")).toBeTruthy();
+    expect(screen.queryByText(/The connection is set up/)).toBeNull();
+  });
+
   it("titles the page on one line and opens People from Overview", async () => {
     navigation.tab = "overview";
     render(<SchoolAdminShell />);

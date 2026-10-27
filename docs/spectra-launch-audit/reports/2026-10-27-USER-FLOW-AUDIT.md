@@ -2,6 +2,8 @@
 
 Branch: `launch-readiness-audit`. Baseline: `5f7865c8` (`Improved landing page`, no co-author).
 
+**Current status:** start with [REMAINING-IMPLEMENTATION](2026-10-27-REMAINING-IMPLEMENTATION.md) for the latest fixes, live acceptance, evidence and outstanding native/production requirements. This report preserves the original findings.
+
 **Follow-up:** the owner subsequently repaired and expanded the app. Read [the deeper review against baseline 12186235](2026-10-27-DEEP-REVIEW.md) for revalidated failures, fixes and current handoff evidence. This original ledger remains historical; its findings are not all independently revalidated by the follow-up.
 
 **Latest functional fixes:** [document/quiz reliability, native pairing guards and focused follow-ups](2026-10-27-FUNCTIONAL-FIXES.md). Use its validation and remaining-work notes when assessing the older corruption/publication findings below.

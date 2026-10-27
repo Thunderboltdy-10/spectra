@@ -388,8 +388,10 @@ export const settleEvalRun = mutation({
       results.flatMap((result) => (result.layer ? [result.layer] : [])),
     );
     const judged = results.filter((result) => result.judgedBy);
-    const hasDeterministic = [...layers].some((layer) =>
-      DETERMINISTIC_EVAL_LAYERS.has(layer),
+    const hasDeterministic = results.some(
+      (result) =>
+        Boolean(result.layer && DETERMINISTIC_EVAL_LAYERS.has(result.layer)) &&
+        !result.judgedBy,
     );
     const hasExternalTruth =
       layers.has("mission_truth") ||
@@ -401,13 +403,13 @@ export const settleEvalRun = mutation({
     const verificationStrength =
       results.length === 0
         ? "unverified"
-        : hasExternalTruth && hasDeterministic && hasAdversarial
-          ? "strong"
-          : (hasDeterministic || hasExternalTruth) && hasAdversarial
+        : selfJudgedOnly
+          ? hasDeterministic
             ? "moderate"
-            : selfJudgedOnly && !hasDeterministic
-              ? "weak"
-              : "moderate";
+            : "weak"
+          : hasExternalTruth && hasDeterministic && hasAdversarial
+            ? "strong"
+            : "moderate";
 
     const limitations = (args.limitations ?? []).slice(0, 40).map((entry) => ({
       kind: entry.kind.slice(0, 60),

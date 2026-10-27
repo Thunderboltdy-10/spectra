@@ -631,6 +631,8 @@ function SchoolsSurface({
   const [schools, setSchools] = useState<SchoolRow[]>([]);
   const [onboarding, setOnboarding] = useState<OnboardingSaga[]>([]);
   const [loading, setLoading] = useState(true);
+  const [directoryError, setDirectoryError] = useState("");
+  const [directoryRetry, setDirectoryRetry] = useState(0);
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [sessionSchool, setSessionSchool] = useState<SchoolRow | null>(null);
@@ -657,6 +659,7 @@ function SchoolsSurface({
   const [domains, setDomains] = useState("");
   const [initialAdminEmail, setInitialAdminEmail] = useState("");
   const [manualInvitationUrl, setManualInvitationUrl] = useState("");
+  const [invitationDelivered, setInvitationDelivered] = useState(false);
   const [label, setLabel] = useState("");
   const [reason, setReason] = useState("");
   const [mode, setMode] = useState("inspect");
@@ -667,7 +670,9 @@ function SchoolsSurface({
   const [cancelOnboardingReason, setCancelOnboardingReason] = useState("");
 
   useEffect(() => {
+    let current = true;
     setLoading(true);
+    setDirectoryError("");
     void Promise.all([
       getAdministration<{ schools: SchoolRow[] }>("schoolDirectory", {
         includeInactive: true,
@@ -676,14 +681,18 @@ function SchoolsSurface({
       getAdministration<{ sagas: OnboardingSaga[] }>("onboardingSagas"),
     ])
       .then(([schoolRows, sagaRows]) => {
+        if (!current) return;
         setSchools(schoolRows.schools);
         setOnboarding(sagaRows.sagas);
       })
-      .catch((error) =>
-        toast.error(error instanceof Error ? error.message : "Schools failed."),
-      )
-      .finally(() => setLoading(false));
-  }, [refreshKey, search]);
+      .catch((error: unknown) => {
+        if (current) setDirectoryError(describeFailure(error, {
+          fallback: "Check your connection, then try reading the schools again.",
+        }).message);
+      })
+      .finally(() => { if (current) setLoading(false); });
+    return () => { current = false; };
+  }, [refreshKey, search, directoryRetry]);
 
   async function createSchool(event: FormEvent) {
     event.preventDefault();
@@ -705,10 +714,13 @@ function SchoolsSurface({
       toast.success("School onboarding started.");
       if (result.manualInvitationUrl) {
         setManualInvitationUrl(result.manualInvitationUrl);
-        toast.warning(
-          result.delivery.reason ??
-            "Email delivery is unavailable. Deliver the secure invitation manually.",
-        );
+        setInvitationDelivered(result.delivery.status === "sent");
+        if (result.delivery.status !== "sent") {
+          toast.warning(
+            result.delivery.reason ??
+              "Email delivery is unavailable. Deliver the secure invitation manually.",
+          );
+        }
       }
       setCreateOpen(false);
       setName("");
@@ -870,12 +882,13 @@ function SchoolsSurface({
         <section>
           <AdminSectionHeader
             title="Schools"
-            count={loading ? undefined : schools.length}
-            detail={`${formatCompact(members)} ${members === 1 ? "person" : "people"} across them. Step into a school to see its admin pages as its administrators do; every visit has a reason, ends on its own and is recorded.`}
+            count={loading || directoryError ? undefined : schools.length}
+            detail={`${loading || directoryError ? "" : `${formatCompact(members)} ${members === 1 ? "person" : "people"} across them. `}Step into a school to see its admin pages as its administrators do; every visit has a reason, ends on its own and is recorded.`}
             action={<InlineLink onClick={() => setCreateOpen(true)}>Add school</InlineLink>}
           />
           <SearchField value={search} onChange={setSearch} label="Search schools" placeholder="Find a school by name or web address" className="mb-3 max-w-md" />
-          {loading ? (
+          {directoryError ? <ErrorPanel message={directoryError} retry={() => setDirectoryRetry(value => value + 1)} /> : null}
+          {loading && !schools.length ? (
             <LoadingPanel label="Reading schools" />
           ) : schools.length ? (
             <ul className="admin-ledger">
@@ -917,9 +930,9 @@ function SchoolsSurface({
                 </li>
               ))}
             </ul>
-          ) : (
+          ) : !loading && !directoryError ? (
             <p className="admin-ledger-empty">{search ? "No school matches that." : "No schools yet. Add the first one."}</p>
-          )}
+          ) : null}
         </section>
       </div>
 
@@ -986,7 +999,7 @@ function SchoolsSurface({
         open={Boolean(manualInvitationUrl)}
         onClose={() => setManualInvitationUrl("")}
         title="Deliver the initial admin invitation"
-        detail="SMTP did not accept the onboarding email. This link is single-use, email-bound, and expires automatically."
+        detail={`${invitationDelivered ? "The invitation email was accepted. You can also share this link with the administrator." : "The invitation email was not sent. Share this link with the administrator to continue."} This link is single-use, email-bound, and expires automatically.`}
         footer={
           <>
             <AdminButton onClick={() => setManualInvitationUrl("")}>

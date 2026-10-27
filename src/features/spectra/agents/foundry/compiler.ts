@@ -4,7 +4,7 @@
  *
  * Compilation runs as internal durable jobs that never appear as ordinary Live
  * Dock tabs. Their status surfaces inside Agent Foundry instead — "Analysing 3
- * sources", "Compiling 6 skills", "Running 12 checks", "Ready to publish".
+ * sources", "Compiling 6 skills", "Running 12 checks", "Build complete".
  */
 
 import {
@@ -215,7 +215,7 @@ export function failStage(
 export type CompilerJobView = Pick<CompilerJob, "status" | "stages">;
 
 export function compilerStatusLabel(job: CompilerJobView): string {
-  if (job.status === "completed") return "Ready to publish";
+  if (job.status === "completed") return "Build complete";
   if (job.status === "cancelled") return "Build cancelled";
   if (job.status === "failed") {
     const failed = job.stages.find((state) => state.status === "failed");

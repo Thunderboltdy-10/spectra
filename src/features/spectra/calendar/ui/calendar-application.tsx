@@ -844,7 +844,7 @@ export function CalendarApplication() {
     }
   }
 
-  function resolveDrop(event: React.DragEvent<HTMLDivElement>, day: Date) {
+  function resolveDrop(event: React.DragEvent<HTMLDivElement>, day: Date, grabOffsetMinutes: number) {
     const bounds = event.currentTarget.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height));
     const cursorMinutes = ratio * HOURS * 60;
@@ -852,7 +852,7 @@ export function CalendarApplication() {
       0,
       Math.min(
         HOURS * 60 - 15,
-        Math.round((cursorMinutes - (dragRef.current?.grabOffsetMinutes ?? 0)) / 15) * 15,
+        Math.round((cursorMinutes - grabOffsetMinutes) / 15) * 15,
       ),
     );
     const startAt = new Date(day);
@@ -871,7 +871,7 @@ export function CalendarApplication() {
       moveToDay(payload.item, day);
       return;
     }
-    const startAt = resolveDrop(event, day);
+    const startAt = resolveDrop(event, day, payload.grabOffsetMinutes);
     if (payload.type === "plan") {
       void schedulePlan(payload.item, startAt, startAt + HOUR);
       return;
@@ -905,7 +905,7 @@ export function CalendarApplication() {
     event.preventDefault();
     const payload = dragRef.current;
     if (!payload) return;
-    const startAt = resolveDrop(event, day);
+    const startAt = resolveDrop(event, day, payload.grabOffsetMinutes);
     const duration =
       payload.type === "plan"
         ? HOUR

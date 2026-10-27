@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex, RwLock, Weak};
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, Weak};
 
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -71,6 +71,21 @@ pub struct GrantRegistry {
 }
 
 impl GrantRegistry {
+    /// Keep permission valid through a synchronous filesystem mutation. Removal
+    /// waits for this short local section, never for a network request.
+    fn hold_grant(
+        &self,
+        grant_id: &str,
+        targets: &[&Path],
+    ) -> Result<RwLockReadGuard<'_, HashMap<String, Grant>>, FsError> {
+        let grants = self.grants.read().unwrap();
+        let grant = grants.get(grant_id).ok_or(FsError::GrantNotFound)?;
+        if targets.iter().any(|target| !grant.permits_path(target)) {
+            return Err(FsError::GrantEscape);
+        }
+        Ok(grants)
+    }
+
     fn write_lock(&self, target: &Path) -> Arc<Mutex<()>> {
         let mut locks = self.write_locks.lock().unwrap();
         locks.retain(|_, lock| lock.strong_count() > 0);
@@ -495,6 +510,7 @@ impl<P: Platform> SafeWriter<P> {
             {
                 return Err(FsError::StaleRevision);
             }
+            let _permission = self.grants.hold_grant(request.grant_id, &[&target])?;
             if target.exists() {
                 if office_lock_exists_with(self.platform.as_ref(), &target)
                     || self.platform.is_locked(&target)?
@@ -611,6 +627,7 @@ impl<P: Platform> SafeWriter<P> {
                 return Err(FsError::StaleRevision);
             }
         }
+        let _permission = self.grants.hold_grant(grant_id, &[&target])?;
         self.platform.recycle(&target)?;
         self.journal
             .transition(&op.op_id, OpState::Performed, None, None)?;
@@ -723,6 +740,7 @@ impl<P: Platform> SafeWriter<P> {
             return Ok(op.op_id);
         }
         let parent = target.parent().ok_or(FsError::GrantEscape)?;
+        let _permission = self.grants.hold_grant(grant_id, &[&source, &target])?;
         fs::create_dir_all(parent)?;
         if office_lock_exists_with(self.platform.as_ref(), &source)
             || self.platform.is_locked(&source)?
@@ -787,6 +805,8 @@ mod tests {
     #[derive(Default)]
     struct TestPlatform {
         locked: bool,
+        revoke_at_staging: Option<(Arc<GrantRegistry>, String)>,
+        held_at_readback: Option<Arc<GrantRegistry>>,
     }
     #[async_trait]
     impl Platform for TestPlatform {
@@ -809,6 +829,18 @@ mod tests {
             Ok(None)
         }
         fn enable_autostart(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn before_write(&self, _: &Path) -> std::io::Result<()> {
+            if let Some((grants, id)) = &self.revoke_at_staging {
+                grants.remove(id);
+            }
+            Ok(())
+        }
+        fn readback_ready(&self, _: &Path) -> std::io::Result<()> {
+            if let Some(grants) = &self.held_at_readback {
+                assert!(grants.grants.try_write().is_err(), "permission removal raced native readback");
+            }
             Ok(())
         }
     }
@@ -1065,6 +1097,39 @@ mod tests {
     }
 
     #[test]
+    fn revoked_staged_writes_stop_and_committing_writes_hold_permission_through_readback() {
+        for revoke in [true, false] {
+            let dir = tempdir().unwrap();
+            let target = dir.path().join("a.txt");
+            fs::write(&target, b"original").unwrap();
+            let grants = Arc::new(GrantRegistry::default());
+            let grant = grants.add_native_selection("Test".into(), dir.path()).unwrap();
+            let platform = TestPlatform {
+                revoke_at_staging: revoke.then(|| (grants.clone(), grant.id.clone())),
+                held_at_readback: (!revoke).then(|| grants.clone()),
+                ..TestPlatform::default()
+            };
+            let writer = SafeWriter::new(grants.clone(), Arc::new(Journal::in_memory().unwrap()), Arc::new(platform));
+            let base = hex::encode(Sha256::digest(b"original"));
+            let hash = hex::encode(Sha256::digest(b"new"));
+            let result = writer.write(WriteRequest {
+                grant_id: &grant.id, relative_path: Path::new("a.txt"),
+                resource_id: "r", base_revision: &base, known_revision: &base,
+                bytes: b"new", expected_hash: &hash, idempotency_key: "permission-boundary",
+            });
+            if revoke {
+                assert!(matches!(result, Err(FsError::GrantNotFound)));
+                assert_eq!(fs::read(&target).unwrap(), b"original");
+            } else {
+                result.unwrap();
+                assert_eq!(fs::read(&target).unwrap(), b"new");
+                assert!(grants.remove(&grant.id).is_some());
+            }
+            assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1, "staging file leaked");
+        }
+    }
+
+    #[test]
     fn stale_revision_and_lock_leave_original_untouched() {
         let dir = tempdir().unwrap();
         fs::write(dir.path().join("a.txt"), b"original").unwrap();
@@ -1095,7 +1160,7 @@ mod tests {
         let locked = SafeWriter::new(
             grants,
             Arc::new(Journal::in_memory().unwrap()),
-            Arc::new(TestPlatform { locked: true }),
+            Arc::new(TestPlatform { locked: true, ..TestPlatform::default() }),
         );
         assert!(matches!(
             locked.write(WriteRequest {

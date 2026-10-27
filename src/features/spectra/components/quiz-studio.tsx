@@ -12,7 +12,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Eye,
-  EyeOff,
   History,
   Import,
   List,
@@ -1667,18 +1666,6 @@ export function QuizStudio({
           disabled: quizImporting,
           onSelect: () => quizImportRef.current?.click(),
         },
-        ...(published
-          ? [
-              {
-                id: "unpublish",
-                label: "Unpublish",
-                icon: EyeOff,
-                priority: "advanced",
-                hint: "Stops new attempts; attempts already taken keep their own version",
-                onSelect: unpublishQuiz,
-              } as CommandBinding,
-            ]
-          : []),
       ]
     : [
         {
@@ -1764,14 +1751,24 @@ export function QuizStudio({
                 </strong>
                 {publishedAt ? ` on ${formatShortDate(publishedAt)}.` : "."}{" "}
                 Learners can attempt it now.
+                {" "}
+                <button
+                  type="button"
+                  className="underline underline-offset-2 disabled:opacity-50"
+                  disabled={!synchronizationReady}
+                  onClick={unpublishQuiz}
+                  title="Stops new attempts; attempts already taken keep their own version"
+                >
+                  Unpublish
+                </button>
               </>
             ) : publishedAt ? (
               <>
                 <strong className="font-semibold text-[var(--warning)]">
                   Edits are not published.
                 </strong>{" "}
-                Learners keep the version published on{" "}
-                {formatShortDate(publishedAt)} until you publish again.
+                New attempts are paused until you publish again. Attempts already
+                started keep their own version.
               </>
             ) : (
               <>

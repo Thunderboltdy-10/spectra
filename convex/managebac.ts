@@ -37,6 +37,7 @@ import {
   syncTargets, writeSyncState, settleStudentSyncState, schoolSetupForAccount, LOGIN_SYNC_SETUP_VERSION, type SyncPreferences, type SyncTargets, type SyncTrigger,
 } from "./schoolSyncShared";
 import { deleteStorageIfNoOtherBinding, storageHasOtherBinding } from "./durableStorageBindings";
+import { evaluateAccessForActor } from "./authorityShared";
 import {
   SCHOOL_FILE_MAX_BYTES, SCHOOL_FILE_TEXT_MAX_CHARS, SCHOOL_SYNC_KINDS, SCHOOL_SYNC_KIND_INFO, capabilitySyncKinds, joinsPageSync, recordSyncKind,
   type SchoolSyncKind,
@@ -4982,6 +4983,52 @@ export const resolveConflictProjections = internalMutation({
         previousNormalized: conflict.oldSource,
       });
     await settleProviderWork(ctx, owner, true);
+  },
+});
+
+/** One explicit review reads one recipient's saved copy, never a class fanout. */
+export const conflictComparison = query({
+  args: { conflictId: v.id("externalSyncConflicts") },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const conflict = await ctx.db.get(args.conflictId);
+    if (!conflict || conflict.schoolId !== actor.schoolId ||
+      (conflict.accountId !== actor.accountId && actor.schoolRole !== "school_admin"))
+      throw new Error("INTEGRATION_CONFLICT_FORBIDDEN: Conflict is unavailable.");
+    // Administration authorizes reviewing source changes, not opening another
+    // person's private work. Never project that person's content into this view.
+    if (conflict.accountId && conflict.accountId !== actor.accountId)
+      return { state: "private" as const };
+    const projections = await ctx.db.query("externalProjections")
+      .withIndex("by_account_record", q => q.eq("accountId", actor.accountId).eq("recordId", conflict.recordId))
+      .take(16);
+    const projection = projections.find(p => p.schoolId === actor.schoolId && p.integrationId === conflict.integrationId && p.projectionType === conflict.projectionType);
+    if (!projection) return { state: "missing" as const };
+    if (projection.projectionType === "workspace") {
+      const id = ctx.db.normalizeId("spectraWorkspaces", projection.projectionId);
+      if (!id) return { state: "missing" as const };
+      const access = await evaluateAccessForActor(ctx, actor, "workspace", id);
+      if (!access.allowed || !access.capabilities.includes("read")) return { state: "private" as const };
+      const workspace = await ctx.db.get(id);
+      return workspace ? { state: "available" as const, savedAt: workspace.updatedAt, fields: { title: workspace.title, description: workspace.description } } : { state: "missing" as const };
+    }
+    if (projection.projectionType === "timetable_event") {
+      const id = ctx.db.normalizeId("calendarItems", projection.projectionId);
+      const item = id ? await ctx.db.get(id) : null;
+      if (!item || item.ownerAccountId !== actor.accountId || item.schoolId !== actor.schoolId) return { state: "missing" as const };
+      return { state: "available" as const, savedAt: item.updatedAt, fields: { title: item.title, description: item.notes, startAt: item.startAt, endAt: item.endAt } };
+    }
+    const id = ctx.db.normalizeId("spectraArtifacts", projection.projectionId);
+    if (!id) return { state: "unmaterialized" as const };
+    const access = await evaluateAccessForActor(ctx, actor, "artifact", id);
+    if (!access.allowed || !access.capabilities.includes("read")) return { state: "private" as const };
+    const artifact = await ctx.db.get(id);
+    if (!artifact || artifact.schoolId !== actor.schoolId) return { state: "missing" as const };
+    const content = record(artifact.content);
+    return { state: "available" as const, savedAt: artifact.updatedAt, fields: {
+      title: artifact.title, description: content.description ?? artifact.summary,
+      dueAt: content.dueAt, startAt: content.startAt, endAt: content.endAt, status: content.status,
+    } };
   },
 });
 

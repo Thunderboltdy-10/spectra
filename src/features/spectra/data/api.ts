@@ -1264,6 +1264,19 @@ export async function getSpectraManageBacOverview() {
   );
 }
 
+export type SpectraManageBacComparison = {
+  state: "available" | "private" | "missing" | "unmaterialized";
+  fields?: Record<string, unknown>;
+  savedAt?: number;
+};
+
+export async function getSpectraManageBacComparison(conflictId: string) {
+  return readJson<SpectraManageBacComparison>(await requestSpectra(
+    `/api/spectra/managebac?action=conflictComparison&conflictId=${encodeURIComponent(conflictId)}`,
+    { cache: "no-store" },
+  ));
+}
+
 export async function configureSpectraManageBac(input: {
   baseUrl: string;
   token: string;

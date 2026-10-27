@@ -9,11 +9,35 @@ import {
   integrationConnectionMessage,
   ManifestDialog,
   SettingsDialog,
+  ConflictList,
 } from "../pages/managebac-integration-shell";
+import { getSpectraManageBacComparison } from "../data/api";
+
+vi.mock("../data/api", async importOriginal => ({
+  ...await importOriginal<typeof import("../data/api")>(),
+  getSpectraManageBacComparison: vi.fn(),
+}));
 
 afterEach(cleanup);
 
 describe("ManageBac conflict comparison", () => {
+  it("reveals complete source and saved local values only on expansion", async () => {
+    const prefix = "The same long beginning. ".repeat(10);
+    vi.mocked(getSpectraManageBacComparison).mockResolvedValue({ state: "available", savedAt: 1234, fields: { description: prefix + "local ending" } });
+    render(<ConflictList busy="" onResolve={vi.fn()} conflicts={[{
+      _id: "conflict-1", kind: "customization_overlap", projectionType: "planner_task", oldSource: { description: prefix + "before ending" },
+      newSource: { description: prefix + "after ending" }, suggestedActions: ["rebase", "keep_overlay"], affectedLinks: [], status: "open", createdAt: 1234,
+    }]} />);
+    expect(getSpectraManageBacComparison).not.toHaveBeenCalled();
+    const details = screen.getByText("Compare full versions").closest("details")!;
+    details.open = true;
+    fireEvent(details, new Event("toggle"));
+    expect(await screen.findByText(prefix + "local ending")).toBeTruthy();
+    expect(screen.getByText(prefix + "before ending")).toBeTruthy();
+    expect(screen.getByText(prefix + "after ending")).toBeTruthy();
+    expect(getSpectraManageBacComparison).toHaveBeenCalledExactlyOnceWith("conflict-1");
+  });
+
   it("keeps changes beyond the displayed preview and ignores HTML rewrapping", () => {
     const prefix = "A description with a long unchanged beginning. ".repeat(3);
     const fields = changedFields({ description: prefix + "old ending" }, { description: prefix + "new ending" });

@@ -170,6 +170,11 @@ export async function GET(request: NextRequest) {
       return ok({
         feedback: await convexQuery("administration:myFeedback", {}),
       });
+    if (action === "feedbackEvidence")
+      return ok(await convexQuery("administration:feedbackEvidence", {
+        operatorSessionId,
+        feedbackId: text(params.get("feedbackId"), 120),
+      }));
     if (action === "feedbackInbox")
       return ok({
         feedback: await convexMutation("administration:feedbackInbox", {

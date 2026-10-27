@@ -2,6 +2,8 @@
 
 Read this after [the deeper review](2026-10-27-DEEP-REVIEW.md). It updates that review's findings; the original reports remain historical evidence. Baseline: `ebc2d14a`, branch `launch-readiness-audit`. The owner expanded authorization to complex functional/native work while retaining the restriction on substantial UI work. No landing page changes.
 
+**Continued in [REMAINING-IMPLEMENTATION](2026-10-27-REMAINING-IMPLEMENTATION.md):** the owner subsequently authorized all remaining findings. That ledger supersedes the administration, full conflict reader, feedback evidence and quiz-withdrawal handoffs below, and records fresh native Office and newly created Sheets acceptance. The native installed-build limitation still applies.
+
 The earlier individual/multi-file selection feature is documented in [FILE-SELECTION-SYNC](2026-10-27-FILE-SELECTION-SYNC.md). The native ownership work below extends that protection to remembered folders as well.
 
 **This is not launch sign-off.** Document typing and quiz publication/submission have concrete fixes and new regressions. Native pairing has been hardened in source and compiled, but its installed-binary account/deployment handover still needs rehearsal. The administration, full conflict comparison and feedback attachment design handoffs remain open. Existing generated agent checks also need review/recompilation; their literal assertions were not silently rewritten.

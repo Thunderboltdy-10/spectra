@@ -3465,8 +3465,14 @@ export async function docxProjectionReadbackDigest(
           const format = (item.format ?? {}) as Record<string, unknown>;
           return item.kind === "text" &&
             Object.keys(item).every((key) => key === "kind" || key === "text" || key === "format") &&
-            Object.keys(format).length === Object.keys(requestedRunFormat).length &&
-            Object.entries(format).every(([key, value]) => value === requestedRunFormat[key]);
+            Object.entries(requestedRunFormat).every(([key, value]) => value === format[key]) &&
+            Object.entries(format).every(([key, value]) =>
+              value === requestedRunFormat[key] ||
+              // Word resolves the document's default font on a newly inserted
+              // plain paragraph. An omitted font/size inherits that default; it is
+              // not an authored font change. Explicit fonts and every other
+              // mark still have to match exactly.
+              ((key === "fontFamily" || key === "fontSizePoints") && requestedRunFormat[key] === undefined));
         },
       ) &&
       semanticInline

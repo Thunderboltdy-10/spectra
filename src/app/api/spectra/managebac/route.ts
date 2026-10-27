@@ -2218,6 +2218,10 @@ export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor({ fresh: true });
     const action = request.nextUrl.searchParams.get("action") ?? "overview";
+    if (action === "conflictComparison")
+      return ok(await convexQuery("managebac:conflictComparison", {
+        conflictId: request.nextUrl.searchParams.get("conflictId") ?? "",
+      }));
     if (action === "myClasses") {
       return ok({
         data: await convexQuery("managebac:listMyClassCandidates", {}),

@@ -27,6 +27,7 @@ import {
   disconnectSpectraManageBac,
   recheckSpectraManageBac,
   getSpectraManageBacOverview,
+  getSpectraManageBacComparison,
   importSpectraManageBacReference,
   replaceSpectraManageBacManifest,
   resolveSpectraManageBacConflict,
@@ -40,6 +41,7 @@ import {
   type SpectraManageBacOverview,
   type SpectraManageBacRecord,
   type SpectraManageBacSyncRun,
+  type SpectraManageBacComparison,
 } from "@/features/spectra/data/api";
 
 type Tab =
@@ -1347,6 +1349,7 @@ const FIELD_LABELS: Record<string, string> = {
   startAt: "Start",
   endAt: "End",
   description: "Description",
+  summary: "Summary",
   body: "Description",
   points: "Points",
   maxPoints: "Points",
@@ -1394,7 +1397,56 @@ export function changedFields(before: Record<string, unknown>, after: Record<str
     }));
 }
 
-function ConflictList({
+/** Full values are requested only when this one comparison is expanded. */
+function ConflictComparison({ conflict }: { conflict: SpectraManageBacConflict }) {
+  const [open, setOpen] = useState(false);
+  const [comparison, setComparison] = useState<SpectraManageBacComparison | null>(null);
+  const [failure, setFailure] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setFailure("");
+    void getSpectraManageBacComparison(conflict._id)
+      .then(result => { if (active) setComparison(result); })
+      .catch(() => { if (active) setFailure("Couldn’t read the saved Spectra copy. Try again."); });
+    return () => { active = false; };
+  }, [open, conflict._id, attempt]);
+  const before = object(conflict.oldSource);
+  const after = object(conflict.newSource);
+  const local = comparison?.fields ?? {};
+  const keys = [...new Set([...Object.keys(FIELD_LABELS).filter(key => key in before || key in after || key in local)])];
+  return (
+    <details className="mt-2 text-micro" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
+      <summary className="cursor-pointer text-[var(--text-secondary)]">Compare full versions</summary>
+      {open ? (
+        <div className="mt-3 space-y-3">
+          {failure ? <p role="alert">{failure} <button type="button" className="underline" onClick={() => setAttempt(value => value + 1)}>Try again</button></p> : null}
+          {!comparison && !failure ? <p role="status">Reading the saved Spectra copy…</p> : null}
+          {comparison?.state === "private" ? <p>The local copy belongs to another person and is private. Only the source versions are shown.</p> : null}
+          {comparison?.state === "missing" ? <p>No saved Spectra copy is available to compare.</p> : null}
+          {comparison?.state === "unmaterialized" ? <p>This source has not been imported as editable work in Spectra.</p> : null}
+          {comparison?.savedAt ? <p className="text-[var(--text-tertiary)]">Spectra copy saved {formatDate(comparison.savedAt)}. Unsaved editor changes are not included.</p> : null}
+          {keys.map(key => (
+            <section key={key} aria-label={`${FIELD_LABELS[key]} comparison`}>
+              <strong>{FIELD_LABELS[key]}</strong>
+              <dl className="mt-1 space-y-2">
+                {[["ManageBac before", before[key]], ["ManageBac now", after[key]], ...(comparison?.state === "available" ? [["Saved in Spectra", local[key]]] : [])].map(([label, value]) => (
+                  <div key={String(label)}>
+                    <dt className="text-[var(--text-tertiary)]">{String(label)}</dt>
+                    <dd className="whitespace-pre-wrap break-words leading-5">{fieldValue(value, false)}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          ))}
+        </div>
+      ) : null}
+    </details>
+  );
+}
+
+export function ConflictList({
   conflicts,
   busy,
   onResolve,
@@ -1469,6 +1521,7 @@ function ConflictList({
                     You changed in Spectra: {yours.map((key) => FIELD_LABELS[key]!.toLowerCase()).join(", ")}.
                   </p>
                 ) : null}
+                <ConflictComparison conflict={conflict} />
                 <div className="mt-2.5 flex flex-wrap gap-1.5">
                   {actions.map((action, index) => (
                     <button

@@ -82,6 +82,36 @@ async function openInvite(email: string) {
 }
 
 describe("School admin People", () => {
+  it("shows authoritative sync review and freshness instead of saying nothing needs attention", async () => {
+    navigation.tab = "overview";
+    api.getAdministration.mockResolvedValue({ ...overview, integration: { status: "connected", hasOpenConflicts: true, syncFreshness: "current" } });
+    render(<SchoolAdminShell />);
+    expect(await screen.findByText("ManageBac: needs review")).toBeTruthy();
+    expect(screen.queryByText(/Nothing needs you right now/)).toBeNull();
+    expect(screen.getByRole("link", { name: "Review ManageBac" }).getAttribute("href")).toBe("/managebac");
+    cleanup();
+    api.getAdministration.mockResolvedValue({ ...overview, integration: { status: "connected", hasOpenConflicts: false, syncFreshness: "stale" } });
+    render(<SchoolAdminShell />);
+    expect(await screen.findByText("ManageBac: updates overdue")).toBeTruthy();
+  });
+
+  it("loads attachment URLs only for the opened feedback report", async () => {
+    navigation.tab = "feedback";
+    api.getAdministration.mockImplementation(async (kind: string) => {
+      if (kind === "schoolOverview") return overview;
+      if (kind === "feedbackInbox") return { feedback: [{ feedbackId: "report-1", subject: "Broken page", message: "Please see my image", category: "issue", status: "new", createdAt: Date.now() }] };
+      if (kind === "feedbackEvidence") return { feedbackId: "report-1", pagePath: "/library", screenshotUrl: "https://evidence.example/screenshot.png", attachments: [{ name: "recording.mp4", mediaType: "video/mp4", url: "https://evidence.example/recording.mp4", bytes: 100 }] };
+      throw new Error(kind);
+    });
+    render(<SchoolAdminShell />);
+    const report = await screen.findByRole("button", { name: /Broken page/ });
+    expect(api.getAdministration.mock.calls.filter(([kind]) => kind === "feedbackEvidence")).toHaveLength(0);
+    fireEvent.click(report);
+    expect(await screen.findByRole("link", { name: "Open the reporter’s screenshot" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "recording.mp4" }).getAttribute("href")).toBe("https://evidence.example/recording.mp4");
+    expect(api.getAdministration.mock.calls.filter(([kind]) => kind === "feedbackEvidence")).toHaveLength(1);
+  });
+
   it("titles the page on one line and opens People from Overview", async () => {
     navigation.tab = "overview";
     render(<SchoolAdminShell />);

@@ -16,6 +16,7 @@ import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { PageBody, PageHeader } from "@/components/ui/page-header";
 import { LoadingRows } from "@/components/ui/page-state";
 import { LifeKey } from "@/components/ui/life-moments";
+import { FeedbackFilePreview } from "@/components/layout/feedback-file-preview";
 import { PanelTabs, type PanelTab } from "@/components/ui/side-panel";
 import {
   AdminButton,
@@ -151,7 +152,14 @@ function plain(value: string) {
 }
 
 /** The words for a ManageBac connection, and whether it wants a hand. */
-function connectionWords(status: string | undefined) {
+function connectionWords(integration: SchoolAdministrationOverview["integration"]) {
+  const status = integration?.status;
+  if (status === "connected" && integration?.hasOpenConflicts)
+    return { label: "Needs review", needs: true };
+  if (status === "connected" && integration?.syncFreshness === "stale")
+    return { label: "Updates overdue", needs: true };
+  if (status === "connected" && integration?.syncFreshness === "never")
+    return { label: "Waiting for first sync", needs: true };
   switch (status) {
     case "connected":
       return { label: "Connected", needs: false };
@@ -174,7 +182,7 @@ function connectionWords(status: string | undefined) {
 function schoolNeedsNothing(data: SchoolAdministrationOverview) {
   return (
     data.school.status === "active" &&
-    !connectionWords(data.integration?.status).needs &&
+    !connectionWords(data.integration).needs &&
     !data.metrics.feedbackNew &&
     !data.metrics.invitations &&
     Boolean(data.integration)
@@ -211,7 +219,7 @@ function OverviewSurface({
   onTab: (tab: Tab) => void;
 }) {
   const [allClasses, setAllClasses] = useState(false);
-  const connection = connectionWords(data.integration?.status);
+  const connection = connectionWords(data.integration);
   const totals = data.usage.totals;
   const aiTokens = (totals.model_input_tokens ?? 0) + (totals.model_output_tokens ?? 0);
   const classes = allClasses ? data.groupWorkspaces : data.groupWorkspaces.slice(0, 6);
@@ -232,8 +240,12 @@ function OverviewSurface({
       id: "managebac",
       tone: "danger",
       title: `ManageBac: ${connection.label.toLowerCase()}`,
-      detail: "Classes, tasks and deadlines stop updating until it is fixed.",
-      action: <ManageBacLink operator={operator}>Fix the connection</ManageBacLink>,
+      detail: data.integration?.hasOpenConflicts
+        ? "Source updates overlap with changes in Spectra. Review them before choosing which to keep."
+        : data.integration?.syncFreshness === "never"
+          ? "The connection is set up, but no complete sync has finished yet. Check its progress."
+          : "Check the latest sync and connection so classes, tasks and deadlines stay up to date.",
+      action: <ManageBacLink operator={operator}>Review ManageBac</ManageBacLink>,
     });
   if (data.metrics.feedbackNew)
     needs.push({
@@ -1025,7 +1037,7 @@ function AgentsSurface({ operatorSessionId, refreshKey }: { operatorSessionId?: 
 
 function ManageBacSurface({ overview, operator }: { overview: SchoolAdministrationOverview; operator: boolean }) {
   const integration = overview.integration;
-  const connection = connectionWords(integration?.status);
+  const connection = connectionWords(integration);
   const coverage = integration?.coverage;
   return (
     <div className="admin-page">
@@ -1139,6 +1151,44 @@ const FEEDBACK_STATUS: Record<string, string> = {
   closed: "Closed",
 };
 
+type FeedbackEvidenceData = {
+  feedbackId: string;
+  pagePath: string | null;
+  screenshotUrl: string | null;
+  attachments: Array<{ name: string; mediaType: string; bytes: number; url: string | null }>;
+};
+
+function FeedbackEvidence({ feedbackId, operatorSessionId }: { feedbackId: string; operatorSessionId?: string }) {
+  const evidence = useAdminRead(
+    () => getAdministration<FeedbackEvidenceData>("feedbackEvidence", { feedbackId, operatorSessionId }),
+    [feedbackId, operatorSessionId],
+    "Couldn’t load the files sent with this report. Try again.",
+  );
+  if (evidence.error) return <ErrorPanel message={evidence.error} retry={evidence.retry} />;
+  if (!evidence.data) return <LoadingPanel label="Reading attached evidence" />;
+  return (
+    <div className="space-y-3">
+      {evidence.data.pagePath ? <p className="admin-footnote">Sent from {evidence.data.pagePath}</p> : null}
+      {evidence.data.screenshotUrl ? (
+        <a href={evidence.data.screenshotUrl} target="_blank" rel="noreferrer" aria-label="Open the reporter’s screenshot">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={evidence.data.screenshotUrl} alt="The page as the reporter saw it" className="max-h-80 w-full rounded-control object-contain" />
+        </a>
+      ) : null}
+      {evidence.data.attachments.length ? (
+        <div className="feedback-inbox-files">
+          {evidence.data.attachments.map((file, index) => file.url ? (
+            <a key={index} href={file.url} target="_blank" rel="noreferrer" title={file.name}>
+              <FeedbackFilePreview name={file.name} mediaType={file.mediaType} url={file.url} />
+              <span className="truncate">{file.name}</span>
+            </a>
+          ) : <p key={index} className="admin-footnote">{file.name}: file no longer available.</p>)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function FeedbackSurface({ operatorSessionId, busy, mutate, refreshKey, readOnly }: SurfaceProps) {
   const read = useAdminRead(
     () => getAdministration<{ feedback: FeedbackItem[] }>("feedbackInbox", { operatorSessionId }),
@@ -1217,6 +1267,7 @@ function FeedbackSurface({ operatorSessionId, busy, mutate, refreshKey, readOnly
         {selected ? (
           <div className="space-y-4">
             <p className="whitespace-pre-wrap rounded-control bg-[var(--card-paper)] p-3 text-ui leading-6 shadow-[0_0_0_1px_var(--card-border-soft)]">{selected.message}</p>
+            <FeedbackEvidence key={selected.feedbackId} feedbackId={selected.feedbackId} operatorSessionId={operatorSessionId} />
             <SelectField
               label="Where it stands"
               value={status}

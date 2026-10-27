@@ -361,6 +361,13 @@ export const schoolOverview = mutation({
     ).length;
     const classWorkspaces = workspaces;
     const computedAt = Date.now();
+    // The overview only needs to know whether review is needed. Never load the
+    // school's complete conflict payloads to draw its connection status.
+    const openConflict = integration
+      ? await ctx.db.query("externalSyncConflicts")
+          .withIndex("by_integration_status", (q) => q.eq("integrationId", integration._id).eq("status", "open"))
+          .first()
+      : null;
     const directMetricState = { kind: "available" as const, updatedAt: computedAt };
     const counterMetricState = counters.length
       ? directMetricState
@@ -461,6 +468,12 @@ export const schoolOverview = mutation({
             status: integration.status,
             lastSyncAt: integration.lastSyncAt,
             nextSyncAt: integration.nextSyncAt,
+            hasOpenConflicts: Boolean(openConflict),
+            syncFreshness: !integration.lastSyncAt
+              ? "never" as const
+              : computedAt - integration.lastSyncAt > integration.freshnessSlaMinutes * 60_000
+                ? "stale" as const
+                : "current" as const,
             coverage: integration.capabilityCoverage,
           }
         : null,
@@ -1658,6 +1671,28 @@ export const feedbackInbox = mutation({
         };
       }),
     );
+  },
+});
+
+/** Resolve evidence only when one report is opened, after checking its school. */
+export const feedbackEvidence = query({
+  args: {
+    operatorSessionId: v.optional(v.id("operatorSchoolSessions")),
+    feedbackId: v.id("feedbackReports"),
+  },
+  handler: async (ctx, args) => {
+    const { school } = await schoolScope(ctx, args.operatorSessionId);
+    const report = await ctx.db.get(args.feedbackId);
+    if (!report || report.schoolId !== school._id)
+      throw new Error("FEEDBACK_NOT_FOUND: This feedback is not available in this school.");
+    const [screenshotUrl, attachments] = await Promise.all([
+      report.screenshotStorageId ? ctx.storage.getUrl(report.screenshotStorageId) : null,
+      Promise.all((report.attachments ?? []).map(async (file) => ({
+        name: file.name, mediaType: file.mediaType, bytes: file.bytes,
+        url: await ctx.storage.getUrl(file.storageId),
+      }))),
+    ]);
+    return { feedbackId: report._id, pagePath: report.pagePath ?? null, screenshotUrl, attachments };
   },
 });
 

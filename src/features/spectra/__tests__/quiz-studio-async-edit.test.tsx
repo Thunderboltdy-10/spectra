@@ -103,6 +103,16 @@ afterEach(() => {
 });
 
 describe("quiz edits that finish after an upload", () => {
+  it("offers Unpublish beside the published status without opening toolbar menus", async () => {
+    const harness = { setContent: () => {} } as unknown as Harness;
+    const view = render(<Host harness={harness} published />);
+    const unpublish = view.getByRole("button", { name: "Unpublish" });
+    expect(unpublish.closest('[role="status"]')).toBeTruthy();
+    fireEvent.click(unpublish);
+    await waitFor(() => expect(harness.content).toMatchObject({ published: false }));
+    expect(view.queryByRole("button", { name: "Unpublish" })).toBeNull();
+  });
+
   const attempt: SpectraQuizPracticeAttempt = {
     attemptId: "attempt-1", artifactId: "quiz-1", contentHash: "saved", status: "in_progress",
     questions: [{ id: "q1", prompt: "What is eight plus eight?", type: "short_answer", options: [], points: 1 }],

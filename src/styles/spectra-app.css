@@ -11248,18 +11248,6 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
   font-weight: 500 !important;
 }
 
-/* Saving belongs to the shared artifact rail; editor toolbars must not repeat
-   the same state a second time. */
-.presentation-studio [role="status"],
-.spectra-sheets-studio [role="status"],
-.code-studio [role="status"] {
-  display: none !important;
-}
-
-.spectra-quiz-studio [role="status"] {
-  display: none !important;
-}
-
 /* Numeric UI uses the same calm sans face as surrounding metadata. */
 .tabular-nums,
 .timetable-studio time {

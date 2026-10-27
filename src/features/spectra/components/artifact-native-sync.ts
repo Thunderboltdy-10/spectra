@@ -216,6 +216,7 @@ export function useArtifactNativeSync({
     if (!nativeOfficeDocument || nativeLensRefreshRef.current === artifactId)
       return;
     nativeLensRefreshRef.current = artifactId;
+    const contentWhenOpening = currentSnapshotRef.current.content;
     let cancelled = false;
     let completed = false;
     const endpoint = nativeWordDocument
@@ -267,6 +268,14 @@ export function useArtifactNativeSync({
             return;
           }
           const projection = result?.content ?? result?.projection;
+          // The first activation can return a full snapshot captured before a
+          // newer local/shared edit. Replaying it after autosave manufactures
+          // a competing draft, even when dirty and userHasEdited are now clear.
+          if (
+            projection !== undefined &&
+            !canonicalJsonEqual(contentWhenOpening, currentSnapshotRef.current.content)
+          )
+            return;
           if (projection !== undefined) {
             nativeProjectionOverrideRef.current = projection;
             setNativeLensProjection(projection);
@@ -292,6 +301,7 @@ export function useArtifactNativeSync({
     };
   }, [
     artifactId,
+    currentSnapshotRef,
     nativeOfficeApplication,
     nativeOfficeDocument,
     nativeWordDocument,

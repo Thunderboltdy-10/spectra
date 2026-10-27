@@ -3791,13 +3791,22 @@ fn persist_file_grant(journal: &Journal, grant: &Grant) -> anyhow::Result<()> {
         "A file grant requires a selected file"
     );
     // Older binaries restore mount: keys only and must not see a parent grant.
+    let device_id = journal.config("device_id")?.filter(|id| !id.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("Connect this computer before selecting files"))?;
     journal.set_config(
         &format!("file-mount:{}", grant.id),
         &serde_json::json!({
-            "label": grant.label, "path": grant.device_root(), "selectedFile": grant.selected_file()
+            "label": grant.label, "path": grant.device_root(), "selectedFile": grant.selected_file(), "deviceId": device_id
         })
         .to_string(),
     )
+}
+
+fn file_grant_matches_pairing(journal: &Journal, config: &serde_json::Value) -> bool {
+    // Older binaries cannot clear file-mount: keys when unpairing. Never
+    // revive them for another pairing/account after an upgrade.
+    config.get("deviceId").and_then(|value| value.as_str())
+        .is_some_and(|id| !id.is_empty() && journal.config("device_id").ok().flatten().as_deref() == Some(id))
 }
 
 async fn select_files_impl(
@@ -4454,6 +4463,7 @@ fn main() {
                         let (scope, id) = key.split_once(':').expect("persisted grant prefix");
                         let id = id.to_owned();
                         if scope == "file-mount" {
+                            if !file_grant_matches_pairing(&journal, &config) { continue; }
                             let Some(name) =
                                 config.get("selectedFile").and_then(|value| value.as_str())
                             else {
@@ -4898,12 +4908,17 @@ mod devices_tests {
         let file = dir.join("Chosen.docx");
         std::fs::write(&file, b"chosen").unwrap();
         let grant = grants.add_native_file_selection(&file).unwrap();
+        assert!(persist_file_grant(&journal, &grant).is_err());
+        journal.set_config("device_id", "device-original").unwrap();
         persist_file_grant(&journal, &grant).unwrap();
         assert!(journal.config_prefix("mount:").unwrap().is_empty());
         let saved = journal.config_prefix("file-mount:").unwrap();
         assert_eq!(saved.len(), 1);
         let config: serde_json::Value = serde_json::from_str(&saved[0].1).unwrap();
         assert_eq!(config["selectedFile"], "Chosen.docx");
+        assert!(file_grant_matches_pairing(&journal, &config));
+        journal.set_config("device_id", "device-another-account").unwrap();
+        assert!(!file_grant_matches_pairing(&journal, &config));
         forget_mount_config(&journal, &grant.id).unwrap();
         assert!(journal.config_prefix("file-mount:").unwrap().is_empty());
         assert_eq!(std::fs::read(file).unwrap(), b"chosen");

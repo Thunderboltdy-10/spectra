@@ -33,7 +33,9 @@ export type WorkPreview =
   | { kind: "code"; path: string; lines: string[] }
   | { kind: "slides"; count: number; titles: string[] }
   | { kind: "grid"; rows: string[][] }
-  | { kind: "board"; pages: number; nodes: WhiteboardNode[]; edges: WhiteboardEdge[] };
+  | { kind: "board"; pages: number; nodes: WhiteboardNode[]; edges: WhiteboardEdge[] }
+  /** A file's first page, drawn small (a PDF). */
+  | { kind: "page"; image: string; pages: number };
 
 export type TaskStatus = "todo" | "doing" | "done";
 
@@ -176,7 +178,14 @@ const GRID = { rows: 6, columns: 4 };
 function gridPreview(content: Json): WorkPreview | null {
   const sheets = list(content.sheets).map(record);
   const sheet = sheets.find((candidate) => candidate.id === content.activeSheetId && candidate.hidden !== true) ?? sheets.find((candidate) => candidate.hidden !== true);
-  const cells = record(sheet?.cells);
+  return cornerPreview(record(sheet?.cells), (cell) => {
+    const value = record(cell).value;
+    return typeof value === "number" ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : typeof value === "boolean" ? String(value).toUpperCase() : text(value, 40);
+  });
+}
+
+/** A sheet's top-left corner from cells keyed by address, each read to the words it shows. */
+export function cornerPreview(cells: Record<string, unknown>, shownOf: (cell: unknown) => string): WorkPreview | null {
   const rows = Array.from({ length: GRID.rows }, () => Array.from({ length: GRID.columns }, () => ""));
   let filled = false;
   for (const [address, cell] of Object.entries(cells)) {
@@ -185,8 +194,7 @@ function gridPreview(content: Json): WorkPreview | null {
     const column = match[1]!.charCodeAt(0) - 65;
     const row = Number(match[2]) - 1;
     if (column >= GRID.columns || row >= GRID.rows) continue;
-    const value = record(cell).value;
-    const shown = typeof value === "number" ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : typeof value === "boolean" ? String(value).toUpperCase() : text(value, 40);
+    const shown = shownOf(cell);
     if (shown) {
       rows[row]![column] = shown;
       filled = true;
@@ -284,7 +292,7 @@ export function previewExtent(preview: WorkPreview) {
   if (preview.kind === "cards") return plural(preview.count, "card");
   if (preview.kind === "questions") return plural(preview.count, "question");
   if (preview.kind === "slides") return plural(preview.count, "slide");
-  if (preview.kind === "board" && preview.pages > 1) return plural(preview.pages, "page");
+  if ((preview.kind === "board" || preview.kind === "page") && preview.pages > 1) return plural(preview.pages, "page");
   return null;
 }
 

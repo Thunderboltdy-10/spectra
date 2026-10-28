@@ -2,6 +2,7 @@ import { spectraBus } from "@/features/spectra/events";
 import type {
   SpectraArtifactCommentNotification,
   SpectraPlannerReminderNotification,
+  SpectraSchoolMessage,
   SpectraShareInvitation,
   SpectraTimetableReminderNotification,
 } from "@/features/spectra/data/api";
@@ -10,13 +11,15 @@ export const SHARE_INVITATIONS_HREF = "/library?collection=invitations";
 
 export type ShellNotification = {
   id: string;
-  kind: "comment" | "planner" | "timetable" | "share";
+  kind: "comment" | "planner" | "timetable" | "share" | "message";
   artifactId: string;
   href?: string;
   title: string;
   detail: string;
   createdAt: number;
   readAt?: number;
+  /** A message's own words, read in full when it is opened. */
+  message?: SpectraSchoolMessage;
 };
 
 /**
@@ -37,6 +40,7 @@ export function buildShellNotifications(
     planner: SpectraPlannerReminderNotification[];
     timetable: SpectraTimetableReminderNotification[];
     invitations: SpectraShareInvitation[];
+    messages?: SpectraSchoolMessage[];
   },
   locale?: string,
 ): ShellNotification[] {
@@ -82,6 +86,16 @@ export function buildShellNotifications(
       detail: `${item.level === "modify" ? "Can modify" : "Read-only"} access · Review invitation`,
       createdAt: item.createdAt,
       readAt: undefined,
+    })),
+    ...(sources.messages ?? []).map((item) => ({
+      id: item.deliveryId,
+      kind: "message" as const,
+      artifactId: item.announcementId,
+      title: item.title,
+      detail: item.author ? `From ${item.author}, ${item.from}` : `From ${item.from}`,
+      createdAt: item.createdAt,
+      readAt: item.readAt,
+      message: item,
     })),
   ].sort((a, b) => b.createdAt - a.createdAt);
 }

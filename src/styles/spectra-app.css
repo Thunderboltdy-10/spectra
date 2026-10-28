@@ -62,6 +62,10 @@ body {
    and the page is one sheet lifted off it, inset by a hair on three sides so
    its edge reads as paper, not as a pane. */
 .spectra-app-shell {
+  /* Holds the sheet's margin inside it: let through, the margin pushed the
+     whole desk down 8px past the window, so the page itself scrolled and the
+     sheet's edges shook instead of only its paper moving. */
+  display: flow-root;
   background: var(--bg-desk);
 }
 

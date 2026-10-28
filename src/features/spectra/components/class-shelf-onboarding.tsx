@@ -9,7 +9,6 @@ import {
 } from "@/components/ui/dialog";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { describeFailure } from "@/components/ui/truthful-state";
-import { Button } from "@/components/ui/button";
 import {
   ClassShelfPicker,
   classShelfLoadState,
@@ -20,6 +19,7 @@ import {
   type ClassShelfLoadState,
 } from "./class-shelf-picker";
 import { requestSpectra } from "../data/request";
+import { toast } from "@/components/ui/toast";
 
 async function manageBacPost(body: Record<string, unknown>) {
   const response = await requestSpectra("/api/spectra/managebac", {
@@ -40,9 +40,12 @@ async function manageBacPost(body: Record<string, unknown>) {
 export function ClassShelfOnboarding({
   open,
   onCompleted,
+  onDismiss,
 }: {
   open: boolean;
   onCompleted: () => void | Promise<void>;
+  /** Put away for now: nothing is saved, and School offers the choice again. */
+  onDismiss: () => void;
 }) {
   const { update } = useSpectraPreferences();
   const [state, setState] = useState<ClassShelfLoadState>({ kind: "loading" });
@@ -55,15 +58,12 @@ export function ClassShelfOnboarding({
   );
   const [submitting, setSubmitting] = useState(false);
   const [resolvingIdentity, setResolvingIdentity] = useState(false);
-  const [syncing, setSyncing] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const [syncError, setSyncError] = useState("");
   const inFlight = useRef(false);
 
   const load = useCallback(async () => {
     setState({ kind: "loading" });
     setSubmitError("");
-    setSyncError("");
     try {
       const result = await fetchMyClassCandidates();
       const next = classShelfLoadState(result);
@@ -115,22 +115,16 @@ export function ClassShelfOnboarding({
     }
   }
 
-  async function syncSelection() {
-    setSyncError("");
-    setSyncing(true);
-    try {
-      await manageBacPost({ action: "sync" });
-      return true;
-    } catch (error) {
-      setSyncError(
-        describeFailure(error, {
-          fallback: "Your classes were saved, but the first sync did not finish. Retry from School when the connection is ready.",
-        }).message,
-      );
-      return false;
-    } finally {
-      setSyncing(false);
-    }
+  /* The first sync runs after the dialog has gone: a slow or failed sync
+     never holds the page. A failure says so, with a retry, and School keeps
+     the same Sync now. */
+  function syncInBackground() {
+    void manageBacPost({ action: "sync" }).catch((error) =>
+      toast.error("Your classes are saved. The first sync didn't finish.", {
+        description: describeFailure(error, { fallback: "Try again now, or from School when the connection is ready." }).message,
+        action: { label: "Try again", onClick: () => syncInBackground() },
+      }),
+    );
   }
 
   async function finish(status: "chosen" | "skipped", recordIds: string[]) {
@@ -144,7 +138,6 @@ export function ClassShelfOnboarding({
     inFlight.current = true;
     setSubmitting(true);
     setSubmitError("");
-    setSyncError("");
     try {
       if (state.kind === "ready" || state.kind === "empty") {
         const result = await manageBacPost({
@@ -160,10 +153,7 @@ export function ClassShelfOnboarding({
         classShelvesStatus: status,
         classShelfRecordIds: recordIds,
       });
-      if (status === "chosen" && recordIds.length > 0) {
-        setSubmitting(false);
-        if (!(await syncSelection())) return;
-      }
+      if (status === "chosen" && recordIds.length > 0) syncInBackground();
       await onCompleted();
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
@@ -195,17 +185,22 @@ export function ClassShelfOnboarding({
     .map((item) => item.recordId);
 
   return (
-    <Dialog open={open}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        // Closing is "not now", never a lost choice: a save under way finishes first.
+        if (!next && !submitting) onDismiss();
+      }}
+    >
       <DialogContent
-        hideCloseButton
-        className="max-w-[min(560px,calc(100vw-32px))] gap-0 p-5 sm:p-6"
+        className="max-w-[min(720px,calc(100vw-32px))] gap-0 p-5 sm:p-6"
+        // A press beside the dialog is too easy to make by accident while choosing.
         onPointerDownOutside={(event) => event.preventDefault()}
-        onEscapeKeyDown={(event) => event.preventDefault()}
       >
         <DialogTitle>Choose this year&apos;s classes</DialogTitle>
-        <DialogDescription className="mt-1.5 text-caption">
-          Spectra files class work onto those shelves. Skip to start in General
-          and pick classes later from School.
+        <DialogDescription className="mt-1.5 max-w-xl text-caption">
+          Each class you pick becomes a workspace, and its tasks and work come
+          in from ManageBac. Close this to decide later in School, Sync.
         </DialogDescription>
         <div className="mt-5">
           <ClassShelfPicker
@@ -213,7 +208,7 @@ export function ClassShelfOnboarding({
             selectedIds={selectedIds}
             initialSelectedIds={initialSelectedIds}
             onSelectedIdsChange={setSelectedIds}
-            submitting={submitting || syncing}
+            submitting={submitting}
             submitError={submitError}
             submitDisabled={!canContinue}
             primaryLabel={
@@ -237,27 +232,6 @@ export function ClassShelfOnboarding({
             resolvingIdentity={resolvingIdentity}
             identityStatus={identityStatus}
           />
-          {syncing ? (
-            <p className="mt-3 text-center text-micro text-[var(--text-secondary)]" role="status">
-              Syncing the classes you chose…
-            </p>
-          ) : syncError ? (
-            <div className="mt-3 flex items-center justify-between gap-3 rounded-control border border-[color-mix(in_oklab,var(--danger)_25%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_6%,var(--bg-primary))] px-3 py-2 text-micro text-[var(--danger)]" role="alert">
-              <span>{syncError}</span>
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                onClick={() =>
-                  void syncSelection().then((ok) => {
-                    if (ok) void onCompleted();
-                  })
-                }
-              >
-                Retry sync
-              </Button>
-            </div>
-          ) : null}
         </div>
       </DialogContent>
     </Dialog>

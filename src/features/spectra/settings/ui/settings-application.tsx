@@ -398,7 +398,7 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
     { id: "reset", icon: "undo", label: "Restore defaults", labelPolicy: "never", onSelect: reset },
   ];
   return (
-    <main className="spectra-wave-y relative isolate min-h-0 flex-1 overflow-auto" data-spectra-app-surface="true">
+    <main className="spectra-wave-y relative isolate h-full min-h-0 flex-1 overflow-auto" data-spectra-app-surface="true">
       <PageBody>
         <PageHeader
           title="Settings"

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type InputHTMLAttributes, ty
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
-import { KeyRound, Plus, Save, Send } from "@/components/icons/glyph-icons";
+import { KeyRound, Plus, Save } from "@/components/icons/glyph-icons";
 import { toast } from "@/components/ui/toast";
 import {
   getAdministration,
@@ -41,6 +41,7 @@ import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
 import { auditActionWords, auditTargetWords } from "@/features/spectra/administration/audit-words";
 import { formatMeter, USAGE_METERS, UsageDayChart } from "@/features/spectra/administration/usage-chart";
 import { PeopleSurface } from "@/features/spectra/administration/people/people-surface";
+import { MessageDialog } from "@/features/spectra/administration/people/message-dialog";
 import type { Person } from "@/features/spectra/administration/people/people-model";
 
 /*
@@ -70,7 +71,7 @@ const tabs: Array<PanelTab & { id: Tab }> = [
   { id: "overview", label: "Overview", icon: "grid" },
   { id: "people", label: "People", icon: "people" },
   { id: "groups", label: "Groups", icon: "folderTree" },
-  { id: "communication", label: "Announcements", icon: "mail" },
+  { id: "communication", label: "Messages", icon: "mail" },
   { id: "usage", label: "Usage", icon: "analytics" },
   { id: "feedback", label: "Feedback", icon: "conversations" },
   { id: "integrations", label: "ManageBac", icon: "network" },
@@ -103,6 +104,8 @@ type Announcement = {
   read: number;
   failed: number;
   createdAt: number;
+  origin?: "school" | "platform";
+  recipientNames?: string[];
 };
 
 type FeedbackItem = {
@@ -643,7 +646,7 @@ function GroupsSurface({ operatorSessionId, busy, mutate, refreshKey, readOnly }
         <AdminSectionHeader
           title="Groups and classes"
           count={read.data ? groups.length : undefined}
-          detail="Send announcements to a class, a department or any group of people. Classes from ManageBac keep themselves up to date."
+          detail="Write to a class, a department or any group of people at once. Classes from ManageBac keep themselves up to date."
           action={
             <AdminButton tone="primary" disabled={readOnly} onClick={() => setOpen(true)}>
               <Plus size={13} />
@@ -692,7 +695,7 @@ function GroupsSurface({ operatorSessionId, busy, mutate, refreshKey, readOnly }
         open={open}
         onClose={() => setOpen(false)}
         title="New group"
-        detail="A group is who an announcement goes to. It does not change what anyone can do in Spectra."
+        detail="A group is who a message can go to. It does not change what anyone can do in Spectra."
         footer={
           <>
             <AdminButton onClick={() => setOpen(false)}>Cancel</AdminButton>
@@ -756,48 +759,45 @@ function GroupsSurface({ operatorSessionId, busy, mutate, refreshKey, readOnly }
   );
 }
 
-const AUDIENCE: Record<string, string> = { school: "Everyone at school", roles: "Some roles", groups: "Some groups" };
+const AUDIENCE: Record<string, string> = { school: "everyone at school", roles: "some roles", groups: "some groups", people: "some people" };
+
+/** Who a message went to, in words: the people by name when it went to a few. */
+function audienceWords(row: Announcement) {
+  if (row.origin === "platform") return row.targetKind === "roles" ? "the school’s admins" : row.targetKind === "people" ? (row.recipientNames?.[0] ?? "one person") : "everyone at school";
+  if (row.targetKind === "people" && row.recipientNames?.length) {
+    const more = row.audienceSnapshotCount - row.recipientNames.length;
+    return `${row.recipientNames.join(", ")}${more > 0 ? ` and ${more} more` : ""}`;
+  }
+  return `${AUDIENCE[row.targetKind] ?? row.targetKind} (${row.audienceSnapshotCount})`;
+}
 
 function CommunicationSurface({ operatorSessionId, busy, mutate, refreshKey, readOnly }: SurfaceProps) {
   const read = useAdminRead(
-    () =>
-      Promise.all([
-        getAdministration<{ announcements: Announcement[] }>("announcements", { operatorSessionId }),
-        getAdministration<{ groups: SchoolGroup[] }>("groups", { operatorSessionId }),
-      ]),
+    () => getAdministration<{ announcements: Announcement[] }>("announcements", { operatorSessionId }),
     [operatorSessionId, refreshKey],
-    "Couldn’t read the announcements. Check your connection, then try again.",
+    "Couldn’t read the messages. Check your connection, then try again.",
   );
   const [open, setOpen] = useState(false);
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [targetKind, setTargetKind] = useState("school");
-  const [targetIds, setTargetIds] = useState<string[]>([]);
-  const [sendNow, setSendNow] = useState(true);
-  const [scheduledAt, setScheduledAt] = useState("");
-  const rows = read.data?.[0].announcements ?? [];
-  const groups = read.data?.[1].groups ?? [];
-  const toggle = (id: string, checked: boolean) =>
-    setTargetIds((current) => (checked ? [...current, id] : current.filter((item) => item !== id)));
+  const rows = read.data?.announcements ?? [];
 
   return (
     <div className="admin-page">
       <section>
         <AdminSectionHeader
-          title="Announcements"
+          title="Messages"
           count={read.data ? rows.length : undefined}
-          detail="A message to the whole school, some roles or some groups. It lands in their Spectra inbox, and you can see how many have read it."
+          detail="Write to the whole school, some roles, some groups or chosen people. It lands in their Spectra notifications, and you can see how many have read it. Messages from Spectra to your school are listed here too."
           action={
             <AdminButton tone="primary" disabled={readOnly} onClick={() => setOpen(true)}>
               <Plus size={13} />
-              New announcement
+              New message
             </AdminButton>
           }
         />
         {read.error ? (
           <ErrorPanel message={read.error} retry={read.retry} />
         ) : !read.data ? (
-          <LoadingPanel label="Reading the announcements" />
+          <LoadingPanel label="Reading the messages" />
         ) : rows.length ? (
           <ul className="admin-ledger">
             {rows.map((row) => (
@@ -806,12 +806,13 @@ function CommunicationSurface({ operatorSessionId, busy, mutate, refreshKey, rea
                 <span className="admin-line-main">
                   <strong>{row.title}</strong>
                   <span>
+                    {row.origin === "platform" ? "From Spectra, " : ""}
                     {row.sentAt
-                      ? `Sent ${formatRelative(row.sentAt).toLowerCase()}`
+                      ? `sent ${formatRelative(row.sentAt).toLowerCase()}`
                       : row.scheduledAt
-                        ? `Goes out ${dayAndTime.format(row.scheduledAt)}`
-                        : plain(row.status)}
-                    , to {AUDIENCE[row.targetKind]?.toLowerCase() ?? row.targetKind} ({row.audienceSnapshotCount})
+                        ? `goes out ${dayAndTime.format(row.scheduledAt)}`
+                        : plain(row.status).toLowerCase()}
+                    , to {audienceWords(row)}
                   </span>
                 </span>
                 <span className="admin-line-meta" data-tone={row.failed ? "danger" : undefined}>
@@ -821,11 +822,11 @@ function CommunicationSurface({ operatorSessionId, busy, mutate, refreshKey, rea
                       ? "Cancelled"
                       : `${row.read} of ${row.audienceSnapshotCount} read${row.failed ? `, ${row.failed} not delivered` : ""}`}
                 </span>
-                {row.status === "scheduled" ? (
+                {row.status === "scheduled" && row.origin !== "platform" ? (
                   <InlineLink
                     disabled={readOnly || busy === `cancel-${row.announcementId}`}
                     onClick={() =>
-                      void mutate(`cancel-${row.announcementId}`, "cancelAnnouncement", { announcementId: row.announcementId }, "Announcement cancelled.")
+                      void mutate(`cancel-${row.announcementId}`, "cancelAnnouncement", { announcementId: row.announcementId }, "Message cancelled.")
                     }
                   >
                     Cancel
@@ -835,96 +836,10 @@ function CommunicationSurface({ operatorSessionId, busy, mutate, refreshKey, rea
             ))}
           </ul>
         ) : (
-          <p className="admin-ledger-empty">No announcements yet. Write one to reach the whole school at once.</p>
+          <p className="admin-ledger-empty">No messages yet. Write one to reach the whole school, a class or one person.</p>
         )}
       </section>
-      <AdminDialog
-        open={open}
-        onClose={() => setOpen(false)}
-        title="New announcement"
-        detail="Only the people you choose receive it."
-        footer={
-          <>
-            <AdminButton onClick={() => setOpen(false)}>Cancel</AdminButton>
-            <AdminButton
-              tone="primary"
-              disabled={!title.trim() || !body.trim() || (!sendNow && !scheduledAt) || busy === "announcement"}
-              onClick={() =>
-                void mutate(
-                  "announcement",
-                  "createAnnouncement",
-                  {
-                    title,
-                    body,
-                    targetKind,
-                    targetIds,
-                    sendNow,
-                    scheduledAt: sendNow ? undefined : new Date(scheduledAt).getTime(),
-                  },
-                  sendNow ? "Announcement sent." : "Announcement scheduled.",
-                ).then((done) => {
-                  if (!done) return;
-                  setOpen(false);
-                  setTitle("");
-                  setBody("");
-                  setTargetIds([]);
-                })
-              }
-            >
-              <Send size={12} />
-              {sendNow ? "Send now" : "Schedule"}
-            </AdminButton>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <TextField label="Title" value={title} onChange={setTitle} />
-          <TextAreaField label="Message" value={body} onChange={setBody} rows={6} />
-          <SelectField
-            label="Who receives it"
-            value={targetKind}
-            onChange={(value) => {
-              setTargetKind(value);
-              setTargetIds([]);
-            }}
-            options={[
-              { value: "school", label: "Everyone at school" },
-              { value: "roles", label: "Some roles" },
-              { value: "groups", label: "Some groups or classes" },
-            ]}
-          />
-          {targetKind === "roles" ? (
-            <div className="flex flex-wrap gap-4 text-ui">
-              {[
-                ["student", "Students"],
-                ["teacher", "Teachers"],
-                ["school_admin", "School admins"],
-              ].map(([role, label]) => (
-                <label key={role} className="flex items-center gap-2">
-                  <input type="checkbox" checked={targetIds.includes(role)} onChange={(event) => toggle(role, event.target.checked)} />
-                  {label}
-                </label>
-              ))}
-            </div>
-          ) : null}
-          {targetKind === "groups" ? (
-            <div className="max-h-44 overflow-y-auto rounded-control border border-[var(--border-default)] p-2">
-              {groups.map((group) => (
-                <label key={group.groupId} className="flex items-center gap-2 rounded-chip px-2 py-2 text-micro hover:bg-[var(--bg-secondary)]">
-                  <input type="checkbox" checked={targetIds.includes(group.groupId)} onChange={(event) => toggle(group.groupId, event.target.checked)} />
-                  <span className="flex-1">{group.name}</span>
-                  <span className="text-[var(--text-tertiary)]">{group.memberCount}</span>
-                </label>
-              ))}
-            </div>
-          ) : null}
-          <label className="flex items-center gap-2 text-ui">
-            <input type="checkbox" checked={sendNow} onChange={(event) => setSendNow(event.target.checked)} />
-            Send it now
-          </label>
-          {!sendNow ? <TextField label="When it goes out" value={scheduledAt} onChange={setScheduledAt} type="datetime-local" /> : null}
-        </div>
-      </AdminDialog>
+      <MessageDialog open={open} onClose={() => setOpen(false)} operatorSessionId={operatorSessionId} busy={busy} mutate={mutate} />
     </div>
   );
 }

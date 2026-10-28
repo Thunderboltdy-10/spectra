@@ -11,7 +11,7 @@ import { api } from "../../../../convex/_generated/api";
 import type { SchoolSyncKind } from "../../../../shared/school-sync";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { groupCurrentTasks, groupPastTasks, taskMatches, type SchoolPreferences } from "./school-model";
-import { TaskTicket, TicketsSkeleton } from "./school-tickets";
+import { TaskGroup, TaskTicket, TicketsSkeleton } from "./school-tickets";
 import { inkStyle, useClassBook } from "./use-class-book";
 
 /*
@@ -120,28 +120,32 @@ export function TasksSection({
       ) : (
         <>
           {current.map((group) => (
-            <section key={group.key} aria-label={group.label}>
-              <h3 className="school-heading" data-late={group.key === "late" || undefined}>
-                {group.label} <span className="school-heading-count">{group.tasks.length}</span>
-              </h3>
+            <TaskGroup key={group.key} label={group.label} count={group.tasks.length} late={group.key === "late"} open={query.trim() ? true : undefined}>
               <div className="school-tickets">{group.tasks.map(ticket)}</div>
-            </section>
+            </TaskGroup>
           ))}
           {past.map((group) => {
             const identity = book.of(group.key === group.className ? null : group.key, group.className);
             return (
-              <section key={group.key} aria-label={identity?.name ?? group.className} style={inkStyle(identity)}>
-                <h3 className="school-heading">
-                  <span aria-hidden className="school-class-dot self-center" />
-                  {identity?.name ?? group.className}
-                </h3>
+              <TaskGroup
+                key={group.key}
+                label={
+                  <>
+                    <span aria-hidden className="school-class-dot self-center" />
+                    {identity?.name ?? group.className}
+                  </>
+                }
+                name={identity?.name ?? group.className}
+                open={query.trim() ? true : undefined}
+                style={inkStyle(identity)}
+              >
                 {group.terms.map((term) => (
                   <div key={term.term} className="mb-3">
                     {group.terms.length > 1 || term.term !== "No term" ? <p className="mb-2 text-caption text-[var(--text-tertiary)]">{term.term}</p> : null}
                     <div className="school-tickets">{term.tasks.map(ticket)}</div>
                   </div>
                 ))}
-              </section>
+              </TaskGroup>
             );
           })}
         </>

@@ -23,6 +23,30 @@
   .library-shelf {
     grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
   }
+
+  /* The side never sets the row's height: the workspaces and what is coming
+     up do, and a long list of loose work scrolls inside that height. */
+  .library-shelf-side {
+    contain: size;
+    align-self: stretch;
+    min-height: 280px;
+  }
+
+  .library-shelf-side > section {
+    display: flex;
+    height: 100%;
+    flex-direction: column;
+  }
+
+  .library-shelf-side .library-loose {
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    margin-inline: -4px;
+    padding-inline: 4px;
+  }
 }
 
 .library-shelf-wide {

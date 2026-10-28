@@ -80,8 +80,10 @@ import {
   SurfaceNewMenu,
   SurfaceSearch,
   SurfaceSelectToggle,
+  SurfaceViewSwitch,
   type BlueprintChoiceKey,
 } from "./surface-chrome";
+import { LayoutGrid, Rows3 } from "@/components/icons/glyph-icons";
 import { Button } from "@/components/ui/button";
 import { beginCreation, sendInto } from "../life/use-life";
 import { ClassShelf, classWorkspaceIdentity, isClassWorkspace } from "./class-shelf";
@@ -243,6 +245,10 @@ export function ReplicaPresentationLoader({
 }
 
 const QUICK_LABELS = { recent: "Recent", favorites: "Favorites", shared: "Shared" } as const;
+const VIEW_CHOICES = [
+  { key: "shelf", label: "Shelf", icon: LayoutGrid },
+  { key: "list", label: "List", icon: Rows3 },
+] as const;
 
 /** What a quick view of the Library lists: never threads. */
 const PLACES_AND_WORK: TreeNode["kind"][] = ["folder", "workspace", "work"];
@@ -1148,7 +1154,7 @@ function LibraryOrganizerContent({
           {toolbarLead}
           <nav
             aria-label="Location"
-            className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto text-ui"
+            className="flex min-w-0 items-center gap-0.5 overflow-x-auto text-ui"
           >
             {searching ? (
               <span className="truncate text-[var(--text-secondary)]">
@@ -1166,6 +1172,19 @@ function LibraryOrganizerContent({
               />
             ) : null}
           </nav>
+          {/* Shelf or List sits beside where you are, one press away. */}
+          {shelfable ? (
+            <SurfaceViewSwitch
+              compact
+              view={shelf ? "shelf" : "list"}
+              onChange={(next) => {
+                setView(next);
+                // The shelf shows everything; asking for it lifts a type filter.
+                if (next === "shelf") setFilter("all");
+              }}
+              views={VIEW_CHOICES}
+            />
+          ) : null}
         </div>
 
         <div className="surface-bar-tools">
@@ -1218,8 +1237,6 @@ function LibraryOrganizerContent({
           {/* How the place is shown, narrowed and ordered: one menu, so the
               bar is where you are, search, New and Select. */}
           <SurfaceMoreMenu
-            view={shelfable ? (shelf ? "shelf" : "list") : undefined}
-            onViewChange={shelfable ? setView : undefined}
             filter={filter}
             onFilterChange={setFilter}
             sortKey={sortKey}

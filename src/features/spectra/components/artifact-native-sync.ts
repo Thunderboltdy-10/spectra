@@ -147,6 +147,11 @@ export function useArtifactNativeSync({
   const nativeLocalRevisionRef = useRef<string | undefined>(undefined);
   const pendingNativeProjectionRef = useRef<unknown>(undefined);
   const nativeProjectionOverrideRef = useRef<unknown>(undefined);
+  /** The shared content the override was laid over; once it moves, the shared copy speaks for itself. */
+  const nativeOverrideBaseRef = useRef<unknown>(undefined);
+  /** The editor content a waiting projection was read against; newer content outranks it. */
+  const stagedFromRef = useRef<unknown>(undefined);
+  const stagedProjectionRef = useRef<unknown>(undefined);
   const lastPromotedLiveKeyRef = useRef<string | undefined>(undefined);
   const lastFailedPromotionKeyRef = useRef<string | undefined>(undefined);
   const nativeMaterializationInFlightRef = useRef(new Set<string>());
@@ -182,6 +187,7 @@ export function useArtifactNativeSync({
       attribution = `Edited in ${nativeOfficeApplication}`,
     ) => {
       nativeProjectionOverrideRef.current = projection;
+      nativeOverrideBaseRef.current = live.liveValue.content;
       const nextValue = { ...live.liveValue, content: projection };
       await live.synchronize(nextValue);
       const snapshot = {
@@ -277,7 +283,10 @@ export function useArtifactNativeSync({
           )
             return;
           if (projection !== undefined) {
-            nativeProjectionOverrideRef.current = projection;
+            // Staged, not yet shown: holding it over the shared copy now would
+            // hide any edit that lands before it is applied.
+            stagedFromRef.current = currentSnapshotRef.current.content;
+            stagedProjectionRef.current = projection;
             setNativeLensProjection(projection);
             setNativeProjectionReady(true);
           }
@@ -456,14 +465,20 @@ export function useArtifactNativeSync({
   );
 
   useEffect(() => {
+    // The override only bridges the moment before the shared copy echoes the
+    // projection. Any change after that (the echo, normalised or not, or a
+    // newer edit) is the shared copy speaking; holding the override longer
+    // replays the projection over later work.
     if (
       nativeProjectionOverrideRef.current !== undefined &&
-      canonicalJsonEqual(
+      (canonicalJsonEqual(
         live.liveValue.content,
         nativeProjectionOverrideRef.current,
-      )
+      ) ||
+        !canonicalJsonEqual(live.liveValue.content, nativeOverrideBaseRef.current))
     ) {
       nativeProjectionOverrideRef.current = undefined;
+      nativeOverrideBaseRef.current = undefined;
     }
   }, [live.liveValue.content]);
 
@@ -474,12 +489,16 @@ export function useArtifactNativeSync({
     }) => {
       if (detail.artifactId !== artifactId || !detail.projection || dirty)
         return;
+      // This hook's own activation already staged it; applying it here too
+      // would write the same snapshot twice, the second time over newer work.
+      if (detail.projection === stagedProjectionRef.current) return;
       if (
         !live.modelSnapshot.initialized ||
         live.modelSnapshot.validity !== "valid" ||
         live.unsynchronizedChanges > 0
       ) {
         pendingNativeProjectionRef.current = detail.projection;
+        stagedFromRef.current = currentSnapshotRef.current.content;
         return;
       }
       void applyExternalProjection(
@@ -497,6 +516,7 @@ export function useArtifactNativeSync({
   }, [
     applyExternalProjection,
     artifactId,
+    currentSnapshotRef,
     dirty,
     live.modelSnapshot.initialized,
     live.modelSnapshot.validity,
@@ -515,6 +535,13 @@ export function useArtifactNativeSync({
       return;
     const projection = nativeLensProjection;
     setNativeLensProjection(undefined);
+    stagedProjectionRef.current = undefined;
+    // REM-010 checked the content when the response arrived; it may have
+    // waited here through an edit and autosave since. Newer work wins.
+    if (!canonicalJsonEqual(stagedFromRef.current, currentSnapshotRef.current.content)) {
+      setNativeProjectionReady(false);
+      return;
+    }
     void applyExternalProjection(
       projection,
       `Opened from ${nativeOfficeApplication}`,
@@ -528,6 +555,7 @@ export function useArtifactNativeSync({
     });
   }, [
     applyExternalProjection,
+    currentSnapshotRef,
     dirty,
     live.modelSnapshot.initialized,
     live.modelSnapshot.validity,
@@ -547,6 +575,7 @@ export function useArtifactNativeSync({
     )
       return;
     pendingNativeProjectionRef.current = undefined;
+    if (!canonicalJsonEqual(stagedFromRef.current, currentSnapshotRef.current.content)) return;
     void applyExternalProjection(
       projection,
       `Edited in ${nativeOfficeApplication}`,
@@ -560,6 +589,7 @@ export function useArtifactNativeSync({
     });
   }, [
     applyExternalProjection,
+    currentSnapshotRef,
     dirty,
     live.modelSnapshot.initialized,
     live.modelSnapshot.validity,

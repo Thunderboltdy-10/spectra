@@ -156,7 +156,7 @@ describe("Inspector and navigation contracts", () => {
     const rail = readFileSync("src/components/layout/rail.tsx", "utf8");
     expect(rail.match(/<aside/g)).toHaveLength(1);
     expect(rail).toContain("data-collapsed={collapsed}");
-    expect(rail).toContain("RAIL_DESTINATIONS.map");
+    expect(rail).toContain("destinationsFor(identity).map");
     expect(rail).toContain('spectraBus.on("shell.focusSidebarSearch", () => spectraBus.emit("threads.open", {}))');
     expect(rail).not.toContain("Search recent chats");
     const view = readFileSync("src/features/spectra/threads/threads-view.tsx", "utf8");

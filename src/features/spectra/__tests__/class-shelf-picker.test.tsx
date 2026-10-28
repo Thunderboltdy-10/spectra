@@ -2,12 +2,17 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ClassShelfPicker,
   classShelfLoadState,
   type ClassShelfCandidate,
 } from "../components/class-shelf-picker";
+
+vi.mock("../school/use-class-book", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../school/use-class-book")>()),
+  useClassBook: () => ({ loading: false, classes: [], named: () => null, idNamed: () => null, of: () => null }),
+}));
 
 const classes: ClassShelfCandidate[] = [
   {

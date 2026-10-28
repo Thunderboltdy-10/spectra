@@ -32,11 +32,14 @@ export function InvitePeopleDialog({
   operatorSessionId,
   onClose,
   onInvited,
+  again,
 }: {
   open: boolean;
   operatorSessionId?: string;
   onClose: () => void;
   onInvited: () => void;
+  /** Inviting someone again: their address and role, ready to send. */
+  again?: { email: string; role: SchoolRole } | null;
 }) {
   const [emails, setEmails] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
@@ -48,11 +51,13 @@ export function InvitePeopleDialog({
 
   useEffect(() => {
     if (!open) return;
-    setEmails([]);
+    setEmails(again ? [again.email] : []);
     setDraft("");
-    setRole("student");
+    setRole(again?.role ?? "student");
     setOutcomes(null);
     setHint("");
+    // `again` is read as the dialog opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   /** Takes the addresses out of the text; what is not one stays to be fixed. */

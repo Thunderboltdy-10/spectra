@@ -1069,10 +1069,18 @@ export const updateGroup = mutation({
   },
 });
 
+type AnnouncementTarget = "school" | "roles" | "groups" | "people";
+const vAnnouncementTarget = v.union(
+  v.literal("school"),
+  v.literal("roles"),
+  v.literal("groups"),
+  v.literal("people"),
+);
+
 async function announcementAudience(
   ctx: Ctx,
   schoolId: Id<"schools">,
-  targetKind: "school" | "roles" | "groups",
+  targetKind: AnnouncementTarget,
   targetIds: string[],
 ) {
   const memberships = await ctx.db
@@ -1083,6 +1091,17 @@ async function announcementAudience(
     .collect();
   if (targetKind === "school")
     return [...new Set(memberships.map((item) => item.accountId))];
+  if (targetKind === "people") {
+    // Only people still active at the school: a message never reaches someone who left.
+    const named = new Set(targetIds);
+    return [
+      ...new Set(
+        memberships
+          .filter((item) => named.has(item.accountId))
+          .map((item) => item.accountId),
+      ),
+    ];
+  }
   if (targetKind === "roles") {
     const roles = new Set(targetIds);
     return [
@@ -1114,11 +1133,7 @@ export const createAnnouncement = mutation({
     operatorSessionId: v.optional(v.id("operatorSchoolSessions")),
     title: v.string(),
     body: v.string(),
-    targetKind: v.union(
-      v.literal("school"),
-      v.literal("roles"),
-      v.literal("groups"),
-    ),
+    targetKind: vAnnouncementTarget,
     targetIds: v.array(v.string()),
     scheduledAt: v.optional(v.number()),
     sendNow: v.optional(v.boolean()),
@@ -1140,14 +1155,17 @@ export const createAnnouncement = mutation({
       .query("schoolAnnouncements")
       .withIndex("by_school_created", (q) => q.eq("schoolId", school._id))
       .order("desc")
-      .take(20);
-    if (
-      recent.filter(
-        (item) =>
-          item.createdByAccountId === actor.accountId &&
-          item.createdAt >= Date.now() - 60 * 60_000,
-      ).length >= 5
-    )
+      .take(60);
+    // Whole-school and group messages are few by nature; messages to named
+    // people are an admin's everyday correspondence and get more room.
+    const personal = args.targetKind === "people";
+    const lastHour = recent.filter(
+      (item) =>
+        item.createdByAccountId === actor.accountId &&
+        item.createdAt >= Date.now() - 60 * 60_000 &&
+        (item.targetKind === "people") === personal,
+    ).length;
+    if (lastHour >= (personal ? 30 : 5))
       throw new Error(
         "ANNOUNCEMENT_RATE_LIMIT: Wait before sending more school messages.",
       );
@@ -1221,11 +1239,7 @@ export const updateScheduledAnnouncement = mutation({
     announcementId: v.id("schoolAnnouncements"),
     title: v.string(),
     body: v.string(),
-    targetKind: v.union(
-      v.literal("school"),
-      v.literal("roles"),
-      v.literal("groups"),
-    ),
+    targetKind: vAnnouncementTarget,
     targetIds: v.array(v.string()),
     scheduledAt: v.number(),
     requestId: v.optional(v.string()),
@@ -1382,9 +1396,24 @@ export const announcements = query({
             q.eq("announcementId", announcement._id),
           )
           .collect();
+        // Messages to named people say who they went to.
+        const recipientNames =
+          announcement.targetKind === "people"
+            ? (
+                await Promise.all(
+                  announcement.targetIds.slice(0, 3).map((id) => {
+                    const accountId = ctx.db.normalizeId("accounts", id);
+                    return accountId ? ctx.db.get(accountId) : null;
+                  }),
+                )
+              ).map((account) => account?.name ?? "Someone")
+            : undefined;
         return {
           announcementId: announcement._id,
           title: announcement.title,
+          body: announcement.body,
+          origin: announcement.origin ?? "school",
+          recipientNames,
           targetKind: announcement.targetKind,
           targetIds: announcement.targetIds,
           audienceSnapshotCount: announcement.audienceSnapshotCount,
@@ -1437,45 +1466,79 @@ export const processScheduledAnnouncements = internalMutation({
   },
 });
 
+/** The messages that reached one person, newest first: from their school's admins, or from Spectra. */
+export async function loadAnnouncementNotifications(
+  ctx: QueryCtx,
+  accountId: Id<"accounts">,
+  args: { unreadOnly?: boolean; limit?: number },
+) {
+  const limit = Math.max(1, Math.min(args.limit ?? 100, 100));
+  const statuses = args.unreadOnly
+    ? (["delivered"] as const)
+    : (["delivered", "read"] as const);
+  const deliveries = (
+    await Promise.all(
+      statuses.map((status) =>
+        ctx.db
+          .query("schoolAnnouncementDeliveries")
+          .withIndex("by_account_status", (q) =>
+            q.eq("accountId", accountId).eq("status", status),
+          )
+          .order("desc")
+          .take(limit),
+      ),
+    )
+  ).flat();
+  const rows = await Promise.all(
+    deliveries
+      .sort((left, right) => right.createdAt - left.createdAt)
+      .slice(0, limit)
+      .map(async (delivery) => {
+        const announcement = await ctx.db.get(delivery.announcementId);
+        if (!announcement) return null;
+        const platform = announcement.origin === "platform";
+        const school = platform ? null : await ctx.db.get(announcement.schoolId);
+        const sender = platform ? null : await ctx.db.get(announcement.createdByAccountId);
+        return {
+          deliveryId: delivery._id,
+          announcementId: announcement._id,
+          title: announcement.title,
+          body: announcement.body,
+          status: delivery.status,
+          // Who it is from, as the reader knows them: their school (and the admin who wrote it), or Spectra.
+          from: platform ? "Spectra" : (school?.name ?? "Your school"),
+          author: platform ? undefined : sender?.name,
+          origin: platform ? ("platform" as const) : ("school" as const),
+          personal: announcement.targetKind === "people",
+          sentAt: announcement.sentAt,
+          createdAt: delivery.deliveredAt ?? delivery.createdAt,
+          readAt: delivery.readAt,
+        };
+      }),
+  );
+  return rows.filter((row) => row !== null);
+}
+
 export const myAnnouncements = query({
   args: { unreadOnly: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
     const actor = await resolveActorContext(ctx);
-    const statuses = args.unreadOnly
-      ? (["delivered"] as const)
-      : (["delivered", "read"] as const);
-    const deliveries = (
-      await Promise.all(
-        statuses.map((status) =>
-          ctx.db
-            .query("schoolAnnouncementDeliveries")
-            .withIndex("by_account_status", (q) =>
-              q.eq("accountId", actor.accountId).eq("status", status),
-            )
-            .order("desc")
-            .take(100),
-        ),
-      )
-    ).flat();
-    return Promise.all(
-      deliveries
-        .sort((left, right) => right.createdAt - left.createdAt)
-        .slice(0, 100)
-        .map(async (delivery) => {
-          const announcement = await ctx.db.get(delivery.announcementId);
-          return announcement
-            ? {
-                deliveryId: delivery._id,
-                announcementId: announcement._id,
-                title: announcement.title,
-                body: announcement.body,
-                status: delivery.status,
-                sentAt: announcement.sentAt,
-                readAt: delivery.readAt,
-              }
-            : null;
-        }),
-    ).then((rows) => rows.filter(Boolean));
+    return loadAnnouncementNotifications(ctx, actor.accountId, args);
+  },
+});
+
+/** Several messages read at once, as "Mark all read" does. */
+export const markAnnouncementsRead = mutation({
+  args: { deliveryIds: v.array(v.id("schoolAnnouncementDeliveries")) },
+  handler: async (ctx, args) => {
+    const actor = await resolveActorContext(ctx);
+    const now = Date.now();
+    for (const deliveryId of args.deliveryIds.slice(0, 200)) {
+      const delivery = await ctx.db.get(deliveryId);
+      if (!delivery || delivery.accountId !== actor.accountId || delivery.readAt) continue;
+      await ctx.db.patch(delivery._id, { status: "read", readAt: now, updatedAt: now });
+    }
+    return { readAt: now };
   },
 });
 
@@ -2387,6 +2450,301 @@ export const platformSecurityLog = mutation({
         createdAt: session.createdAt,
         expiresAt: session.expiresAt,
         revokedAt: session.revokedAt,
+      })),
+    };
+  },
+});
+
+/*
+ * Messages from Spectra itself (the platform's operator). One message lands
+ * in each school it goes to as that school's own announcement, marked as from
+ * Spectra, so it reaches people where school messages already do and each
+ * school's admins can see what was sent to their school.
+ */
+const PLATFORM_MESSAGE_SCHOOLS = 500;
+
+export const sendPlatformMessage = mutation({
+  args: {
+    title: v.string(),
+    body: v.string(),
+    audience: v.union(
+      v.literal("everyone"),
+      v.literal("admins"),
+      v.literal("person"),
+    ),
+    /** The schools it goes to; none named means every active school. */
+    schoolIds: v.optional(v.array(v.id("schools"))),
+    /** For one person: their email. */
+    email: v.optional(v.string()),
+    requestId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await platformOperator(ctx);
+    const title = clean(args.title, 240);
+    const body = args.body.trim().slice(0, 30_000);
+    if (title.length < 2 || body.length < 2)
+      throw new Error("ANNOUNCEMENT_CONTENT_REQUIRED: Add a title and message.");
+    const now = Date.now();
+    const lastHour = await ctx.db
+      .query("auditEvents")
+      .withIndex("by_action_created", (q) =>
+        q.eq("action", "platform.message.sent").gte("createdAt", now - 60 * 60_000),
+      )
+      .take(20);
+    if (lastHour.length >= 20)
+      throw new Error("ANNOUNCEMENT_RATE_LIMIT: Wait before sending more messages.");
+
+    const named = args.schoolIds?.length ? new Set<string>(args.schoolIds) : null;
+    let targets: Array<{ schoolId: Id<"schools">; accountIds: Id<"accounts">[] }> = [];
+    if (args.audience === "person") {
+      const email = clean(args.email ?? "", 320).toLowerCase();
+      const account = email
+        ? await ctx.db
+            .query("accounts")
+            .withIndex("by_email", (q) => q.eq("email", email))
+            .first()
+        : null;
+      const memberships = account
+        ? await ctx.db
+            .query("schoolMemberships")
+            .withIndex("by_account_status", (q) =>
+              q.eq("accountId", account._id).eq("status", "active"),
+            )
+            .collect()
+        : [];
+      targets = memberships
+        .filter((membership) => !named || named.has(membership.schoolId))
+        // One copy is enough: the person reads it once, from whichever school they are in.
+        .slice(0, 1)
+        .map((membership) => ({ schoolId: membership.schoolId, accountIds: [membership.accountId] }));
+      if (!targets.length)
+        throw new Error(
+          "ANNOUNCEMENT_AUDIENCE_EMPTY: No one with that email is active at a school in Spectra.",
+        );
+    } else {
+      const schools = named
+        ? (await Promise.all([...named].map((id) => ctx.db.get(id as Id<"schools">)))).filter(
+            (school): school is Doc<"schools"> => school?.status === "active",
+          )
+        : await ctx.db
+            .query("schools")
+            .withIndex("by_status", (q) => q.eq("status", "active"))
+            .take(PLATFORM_MESSAGE_SCHOOLS);
+      for (const school of schools.slice(0, PLATFORM_MESSAGE_SCHOOLS)) {
+        const accountIds = await announcementAudience(
+          ctx,
+          school._id,
+          args.audience === "admins" ? "roles" : "school",
+          args.audience === "admins" ? ["school_admin"] : [],
+        );
+        if (accountIds.length) targets.push({ schoolId: school._id, accountIds });
+      }
+      if (!targets.length)
+        throw new Error(
+          "ANNOUNCEMENT_AUDIENCE_EMPTY: Those schools have no active members to receive it.",
+        );
+    }
+
+    const platformMessageKey = `platform:${now}:${actor.accountId}`;
+    let recipients = 0;
+    for (const target of targets) {
+      const announcementId = await ctx.db.insert("schoolAnnouncements", {
+        schoolId: target.schoolId,
+        title,
+        body,
+        targetKind: args.audience === "person" ? "people" : args.audience === "admins" ? "roles" : "school",
+        targetIds:
+          args.audience === "person"
+            ? target.accountIds
+            : args.audience === "admins"
+              ? ["school_admin"]
+              : [],
+        origin: "platform",
+        platformMessageKey,
+        audienceSnapshotCount: target.accountIds.length,
+        status: "sent",
+        sentAt: now,
+        createdByAccountId: actor.accountId,
+        updatedByAccountId: actor.accountId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      for (const accountId of target.accountIds)
+        await ctx.db.insert("schoolAnnouncementDeliveries", {
+          schoolId: target.schoolId,
+          announcementId,
+          accountId,
+          status: "delivered",
+          deliveredAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+      recipients += target.accountIds.length;
+      // The school's own record shows that Spectra wrote to its people.
+      await writeAuditEvent(ctx, {
+        actorAccountId: actor.accountId,
+        schoolId: target.schoolId,
+        action: "announcement.sent",
+        targetType: "announcement",
+        targetId: announcementId,
+        metadata: { audienceCount: target.accountIds.length, origin: "platform" },
+        requestId: args.requestId,
+        retentionClass: "operational",
+      });
+    }
+    await writeAuditEvent(ctx, {
+      actorAccountId: actor.accountId,
+      action: "platform.message.sent",
+      targetType: "platform_message",
+      targetId: platformMessageKey,
+      metadata: { audience: args.audience, schools: targets.length, recipients },
+      requestId: args.requestId,
+      retentionClass: "operational",
+    });
+    return { schools: targets.length, recipients, sentAt: now };
+  },
+});
+
+/** What Spectra has sent, newest first: each message once, with how many it reached and how many read it. */
+export const platformMessages = query({
+  args: {},
+  handler: async (ctx) => {
+    await platformOperator(ctx);
+    const events = await ctx.db
+      .query("auditEvents")
+      .withIndex("by_action_created", (q) => q.eq("action", "platform.message.sent"))
+      .order("desc")
+      .take(50);
+    return Promise.all(
+      events.map(async (event) => {
+        const copies = await ctx.db
+          .query("schoolAnnouncements")
+          .withIndex("by_platform_message", (q) => q.eq("platformMessageKey", event.targetId))
+          .collect();
+        let read = 0;
+        for (const copy of copies)
+          read += (
+            await ctx.db
+              .query("schoolAnnouncementDeliveries")
+              .withIndex("by_announcement", (q) => q.eq("announcementId", copy._id).eq("status", "read"))
+              .collect()
+          ).length;
+        const metadata = (event.metadata ?? {}) as { audience?: string };
+        const schools = await Promise.all(copies.slice(0, 3).map((copy) => ctx.db.get(copy.schoolId)));
+        return {
+          key: event.targetId,
+          title: copies[0]?.title ?? "Message",
+          body: copies[0]?.body ?? "",
+          audience: metadata.audience ?? "everyone",
+          schools: copies.length,
+          schoolNames: schools.map((school) => school?.name ?? "A school"),
+          recipients: copies.reduce((sum, copy) => sum + copy.audienceSnapshotCount, 0),
+          read,
+          sentAt: event.createdAt,
+        };
+      }),
+    );
+  },
+});
+
+/*
+ * One school as the operator oversees it: who runs it, who is in it, who is
+ * still waiting to join, and what its admins have done lately. It counts and
+ * names; it never opens anyone's work.
+ */
+/** The audit actions that are an admin running the school (audit-words.ts names them). */
+const ADMIN_ACTIONS = [
+  "membership.changed",
+  "membership.invitation.created",
+  "membership.invitation.revoked",
+  "announcement.",
+  "school.group.",
+  "school.profile.",
+  "school.updated",
+  "school.export.",
+  "school.lifecycle.",
+  "school.request.",
+  "integration.managebac.disconnected",
+  "integration.managebac.manifest_replaced",
+  "integration.managebac.period_map.",
+  "feedback.responded",
+  "feedback.status.",
+  "secret.",
+  "limits.policy.",
+];
+
+export const schoolDetail = query({
+  args: { schoolId: v.id("schools") },
+  handler: async (ctx, args) => {
+    await platformOperator(ctx);
+    const school = await ctx.db.get(args.schoolId);
+    if (!school) throw new Error("SCHOOL_NOT_FOUND: This school is unavailable.");
+    const rows = await schoolMemberRows(ctx, school._id);
+    const roles = { student: 0, teacher: 0, school_admin: 0 };
+    let suspended = 0;
+    const now = Date.now();
+    const monthAgo = now - 30 * 24 * 60 * 60_000;
+    let activeThisMonth = 0;
+    for (const { membership, account } of rows) {
+      if (membership.status === "active") {
+        roles[membership.role] += 1;
+        if ((account?.lastSeenAt ?? 0) >= monthAgo) activeThisMonth += 1;
+      } else if (membership.status === "suspended") suspended += 1;
+    }
+    const admins = rows
+      .filter(({ membership }) => membership.role === "school_admin" && membership.status !== "ended")
+      .map(({ membership, account }) => ({
+        accountId: membership.accountId,
+        name: account?.name ?? "Unavailable account",
+        email: account?.email ?? "",
+        status: membership.status,
+        lastSeenAt: account?.lastSeenAt,
+      }));
+    const pending = await ctx.db
+      .query("membershipInvitations")
+      .withIndex("by_school_status", (q) => q.eq("schoolId", school._id).eq("status", "pending"))
+      .take(500);
+    const events = await ctx.db
+      .query("auditEvents")
+      .withIndex("by_school_created", (q) => q.eq("schoolId", school._id))
+      .order("desc")
+      .take(600);
+    // What its admins did as admins: changes to the school, not the pages
+    // they read or their own work (an admin is also a teacher or a student).
+    const adminIds = new Set<string>(admins.map((admin) => admin.accountId));
+    const actions = events.filter(
+      (event) =>
+        ADMIN_ACTIONS.some((prefix) => event.action.startsWith(prefix)) &&
+        // A message from Spectra is the platform's doing, even when its operator is also an admin here.
+        (event.metadata as { origin?: string } | undefined)?.origin !== "platform" &&
+        (adminIds.has(event.actorAccountId) || Boolean(event.operatorSessionId)),
+    );
+    const names = new Map<string, string>(
+      rows.map(({ membership, account }) => [membership.accountId, account?.name ?? "Someone"]),
+    );
+    const messages = await ctx.db
+      .query("schoolAnnouncements")
+      .withIndex("by_school_created", (q) => q.eq("schoolId", school._id).gte("createdAt", monthAgo))
+      .take(200);
+    return {
+      schoolId: school._id,
+      name: school.name,
+      status: school.status,
+      people: { ...roles, suspended, activeThisMonth },
+      admins,
+      invitations: {
+        pending: pending.filter((invite) => invite.expiresAt > now).length,
+        expired: pending.filter((invite) => invite.expiresAt <= now).length,
+        adminsInvited: pending.filter((invite) => invite.role === "school_admin" && invite.expiresAt > now).length,
+      },
+      messagesThisMonth: messages.filter((message) => message.origin !== "platform" && message.status === "sent").length,
+      recentActions: actions.slice(0, 25).map((event) => ({
+        eventId: event._id,
+        action: event.action,
+        actor: event.operatorSessionId ? "Spectra" : (names.get(event.actorAccountId) ?? "Someone"),
+        targetType: event.targetType,
+        metadata: event.metadata,
+        createdAt: event.createdAt,
       })),
     };
   },

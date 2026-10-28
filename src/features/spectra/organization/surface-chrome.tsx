@@ -108,9 +108,12 @@ export function SurfaceViewSwitch<View extends string>({
   view,
   onChange,
   views,
+  compact = false,
 }: {
   view: View;
   onChange: (next: View) => void;
+  /** Icons only, named for screen readers and on hover. */
+  compact?: boolean;
   views: ReadonlyArray<{
     key: View;
     label: string;
@@ -130,16 +133,19 @@ export function SurfaceViewSwitch<View extends string>({
             key={option.key}
             type="button"
             aria-pressed={active}
+            aria-label={compact ? option.label : undefined}
+            title={compact ? option.label : undefined}
             onClick={() => onChange(option.key)}
             className={cn(
-              "flex h-7 items-center gap-1.5 rounded-chip px-2.5 text-caption font-medium transition",
+              "flex h-7 items-center gap-1.5 rounded-chip text-caption font-medium transition",
+              compact ? "w-7 justify-center" : "px-2.5",
               active
                 ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]"
                 : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
             )}
           >
             <Icon className="size-3.5" />
-            <span className="surface-bar-label">{option.label}</span>
+            {compact ? null : <span className="surface-bar-label">{option.label}</span>}
           </button>
         );
       })}

@@ -822,6 +822,22 @@ export type SpectraPlannerReminderNotification = {
   readAt?: number;
 };
 
+/** A message that reached this person: from their school's admins, or from Spectra. */
+export type SpectraSchoolMessage = {
+  deliveryId: string;
+  announcementId: string;
+  title: string;
+  body: string;
+  status: "delivered" | "read";
+  from: string;
+  author?: string;
+  origin: "school" | "platform";
+  personal: boolean;
+  sentAt?: number;
+  createdAt: number;
+  readAt?: number;
+};
+
 export type SpectraTimetableReminderNotification = {
   _id: string;
   artifactId: string;
@@ -1745,6 +1761,7 @@ const notificationCenterRequests = new Map<
       planner: SpectraPlannerReminderNotification[];
       timetable: SpectraTimetableReminderNotification[];
       invitations: SpectraShareInvitation[];
+      messages?: SpectraSchoolMessage[];
     }>;
   }
 >();
@@ -1829,6 +1846,7 @@ export async function getSpectraNotificationCenter(
             planner: SpectraPlannerReminderNotification[];
             timetable: SpectraTimetableReminderNotification[];
             invitations: SpectraShareInvitation[];
+            messages?: SpectraSchoolMessage[];
           }>(response),
       ),
     { force: options.force },

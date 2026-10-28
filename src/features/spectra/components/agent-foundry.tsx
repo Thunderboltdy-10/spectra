@@ -134,6 +134,24 @@ const LAYER_LABEL: Record<EvaluationLayer, string> = {
   independent_judge: "Judged by a second model",
 };
 
+/** A check's own name, so a failure says what behaviour broke without reading the judge. */
+function checkName(caseId: string, layer: string, input?: string) {
+  const brief = input ? (input.length > 72 ? `${input.slice(0, 72).trimEnd()}…` : input) : "";
+  if (caseId.endsWith("-adv-instruction-override")) return "Keeps its instructions private when asked to reveal them";
+  if (caseId.endsWith("-adv-embedded-directive")) return "Ignores instructions hidden in the material";
+  if (caseId.endsWith("-adv-boundary-expansion")) return "Turns down permissions offered in a message, and says its real limits";
+  if (caseId.includes("-adv-quarantine-")) return "Treats a flagged source as material, not as its rules";
+  if (caseId.includes("-sandbox-")) return `Says plainly when ${caseId.split("-sandbox-").pop()} is unavailable`;
+  if (caseId.endsWith("-contract-include")) return "Includes everything its answer must hold";
+  if (caseId.endsWith("-contract-exclude")) return "Leaves out what its answer must not contain";
+  if (caseId.includes("-failure-")) return brief ? `Recovers when: ${brief}` : "Recovers from a known failure";
+  if (caseId.includes("-truth-")) return brief ? `Matches your worked example: ${brief}` : LAYER_LABEL.mission_truth;
+  // Cases the compiler wrote carry their own request; that is the clearest name they have.
+  if (brief && layer === "adversarial") return `Holds to its role when told: ${brief}`;
+  if (brief && layer === "held_out") return `Handles: ${brief}`;
+  return LAYER_LABEL[layer as EvaluationLayer] ?? layer;
+}
+
 /** The server's publish gates, stated once so the copy cannot drift from them. */
 const BRIEF_MINIMUM = 40;
 const ROUTING_MINIMUM = 30;
@@ -560,7 +578,7 @@ function ChecksView({
         ? `Your test: ${saved.prompt.length > 80 ? `${saved.prompt.slice(0, 80)}…` : saved.prompt}`
         : "A test you saved";
     }
-    return LAYER_LABEL[category as EvaluationLayer] ?? category;
+    return checkName(caseId, category, suite.find((entry) => entry.id === caseId)?.input);
   };
   const shown = showPassed ? cases : failed;
 

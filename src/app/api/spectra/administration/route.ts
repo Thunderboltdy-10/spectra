@@ -69,6 +69,8 @@ const PLATFORM_READS = new Set([
   "platformOverview",
   "platformSecurityLog",
   "schoolDirectory",
+  "schoolDetail",
+  "platformMessages",
   "onboardingSagas",
   "platformRequests",
   "lifecycleJobs",
@@ -77,6 +79,7 @@ const PLATFORM_READS = new Set([
 
 const PLATFORM_WRITES = new Set([
   "createSchool",
+  "sendPlatformMessage",
   "startOperatorSession",
   "createIncident",
   "updateIncident",
@@ -223,6 +226,16 @@ export async function GET(request: NextRequest) {
           includeInactive: boolean(params.get("includeInactive")),
           search: optionalText(params.get("search"), 200),
         }),
+      });
+    if (action === "schoolDetail")
+      return ok(
+        await convexQuery("administration:schoolDetail", {
+          schoolId: text(params.get("schoolId"), 180),
+        }),
+      );
+    if (action === "platformMessages")
+      return ok({
+        messages: await convexQuery("administration:platformMessages", {}),
       });
     if (action === "onboardingSagas")
       return ok({
@@ -417,6 +430,12 @@ export async function POST(request: NextRequest) {
           deliveryId: text(body.deliveryId, 180),
         }),
       );
+    if (action === "markAnnouncementsRead")
+      return ok(
+        await convexMutation("administration:markAnnouncementsRead", {
+          deliveryIds: strings(body.deliveryIds, 200),
+        }),
+      );
     if (action === "submitFeedback")
       return ok(
         await convexMutation("administration:submitFeedback", {
@@ -483,6 +502,17 @@ export async function POST(request: NextRequest) {
                     bodyObject(body.accessibilityDefaults).largerText,
                   ),
                 },
+          requestId,
+        }),
+      );
+    if (action === "sendPlatformMessage")
+      return ok(
+        await convexMutation("administration:sendPlatformMessage", {
+          title: text(body.title, 240),
+          body: text(body.body, 30_000),
+          audience: text(body.audience, 20),
+          schoolIds: strings(body.schoolIds, 500),
+          email: optionalText(body.email, 320),
           requestId,
         }),
       );

@@ -326,6 +326,18 @@
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
+/* Members and the roles they are shown by, on one line while it fits. */
+.admin-people-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 8px;
+}
+.admin-people-head h2 {
+  margin: 0;
+}
 .admin-people-quiet {
   display: flex;
   align-items: center;

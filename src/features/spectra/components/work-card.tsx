@@ -207,6 +207,10 @@ function PreviewFace({ type, title, preview, summary, live }: { type: PresentedW
       return <PreviewGrid rows={preview.rows} />;
     case "board":
       return <PageThumbnail nodes={preview.nodes} edges={preview.edges} className="work-preview-board" />;
+    case "page":
+      // A data address drawn once from the file; the image optimizer has nothing to add.
+      // eslint-disable-next-line @next/next/no-img-element
+      return <img src={preview.image} alt="" className="work-preview-page" />;
     case "task":
       return <TaskFace task={preview} />;
     case "exchange":

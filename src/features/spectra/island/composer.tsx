@@ -328,7 +328,7 @@ export const IslandComposer = forwardRef<
         />
         <input ref={fileRef} type="file" multiple hidden onChange={(event) => void addFiles(event.target.files).then(() => (event.target.value = ""))} />
         <IconButton
-          icon={<Icon name="attach" size={19} />}
+          icon={<Icon name="attach" size={21} />}
           label="Attach files"
           onClick={() => fileRef.current?.click()}
           disabled={attachments.length >= MAX_ATTACHMENTS}

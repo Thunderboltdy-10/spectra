@@ -202,7 +202,13 @@ export default defineSchema({
       v.literal("school"),
       v.literal("roles"),
       v.literal("groups"),
+      // Named people, by account id: a message to one person or a few.
+      v.literal("people"),
     ),
+    /** Who it is from: the school's admins (unset), or Spectra itself, sent by the platform's operator. */
+    origin: v.optional(v.union(v.literal("school"), v.literal("platform"))),
+    /** One platform message lands in each school it went to; this ties those copies together. */
+    platformMessageKey: v.optional(v.string()),
     targetIds: v.array(v.string()),
     audienceSnapshotCount: v.number(),
     status: v.union(
@@ -222,7 +228,8 @@ export default defineSchema({
   })
     .index("by_school_status", ["schoolId", "status"])
     .index("by_status_scheduled", ["status", "scheduledAt"])
-    .index("by_school_created", ["schoolId", "createdAt"]),
+    .index("by_school_created", ["schoolId", "createdAt"])
+    .index("by_platform_message", ["platformMessageKey", "createdAt"]),
 
   schoolAnnouncementDeliveries: defineTable({
     schoolId: v.id("schools"),

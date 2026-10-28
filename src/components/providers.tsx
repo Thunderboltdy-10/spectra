@@ -52,7 +52,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <CookieConsentManager />
         <Toaster
           theme="system"
-          position="top-right"
+          position="bottom-right"
+          offset={{ bottom: 28, right: 28 }}
+          closeButton
           richColors
           visibleToasts={3}
           expand

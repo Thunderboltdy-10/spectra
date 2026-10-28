@@ -114,6 +114,8 @@ export function previewSource(node: TreeNode): PreviewSource {
     // Without its source there is nothing to read; a file's face needs no read.
     blueprintKey: sourceId ? workType(node) : "resource",
     updatedAt: node.source?.updatedAt ?? node.updatedAt,
+    // A file's name says what it is, and so whether its card can draw it.
+    title: sourceId ? node.name : undefined,
   };
 }
 

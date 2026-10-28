@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "@/components/icons";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { setToastSink, type ToastTone } from "@/components/ui/toast";
+import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import type { SpectraRunPointer } from "../ai/use-spectra-run";
 import { postSpectra } from "../data/api";
@@ -25,7 +25,7 @@ import { forgetThread, placeThread, useArrangement } from "./arrange";
 import { arrangeTabs, dropTab, islandStatus, statusLight, stepTab, type IslandSide, type IslandTab } from "./island-model";
 import { IslandRail, RAIL_DONE, RailGhost, useRailSeat, type RailHandlers } from "./island-rail";
 import { boxOf, morphShape } from "./shape-morph";
-import { IslandNotice, NOTICE_COLOUR, type IslandNoticeData, type NoticeTone } from "./notice";
+import { NOTICE_COLOUR } from "./notice";
 import { QuestionCard } from "./question-card";
 import { answerQuestion, pendingQuestions, type QuestionAnswer } from "./questions";
 import { refreshRunTabs, useRunTabs } from "./run-tabs";
@@ -36,7 +36,6 @@ import { useFlip, useTabDrag } from "./use-tab-drag";
 import { threadHref } from "../chat/home-routes";
 import { firstTipMoment } from "../onboarding/first-tips";
 
-const TOAST_TONE: Record<ToastTone, NoticeTone> = { success: "done", error: "problem", warning: "needs", info: "info" };
 
 /*
  * The island (docs/design/ISLAND.md): where the user talks to Spectra, on
@@ -85,13 +84,6 @@ function stageHalf() {
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 const within = (promise: Promise<unknown>, ms: number) => Promise.race([promise, new Promise((resolve) => window.setTimeout(resolve, ms))]);
 
-function isEditable(target: EventTarget | null) {
-  const element = target as HTMLElement | null;
-  if (!element?.closest) return false;
-  if (element.closest("[data-island]")) return false;
-  return Boolean(element.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']"));
-}
-
 function menuOpen() {
   return Boolean(document.querySelector("[role='menu'][data-state='open'], [role='listbox'][data-state='open']"));
 }
@@ -119,7 +111,6 @@ export function Island() {
   const targetRef = useRef(target);
   const shownRef = useRef(shown);
   const generation = useRef(0);
-  const [faded, setFaded] = useState(false);
 
   const frameRef = useRef<HTMLDivElement>(null);
   const bandRef = useRef<HTMLDivElement>(null);
@@ -272,7 +263,10 @@ export function Island() {
 
   /* ------------------------------------------------------------ notices */
 
-  const [notice, setNotice] = useState<IslandNoticeData | null>(null);
+  // A finished or stopped thread's toast opens its view here; the view is set up further down.
+  const openRunRef = useRef<(runId: string) => void>(() => {});
+  const openRun = useCallback((runId: string) => openRunRef.current(runId), []);
+
   const [announcement, setAnnouncement] = useState("");
   const lastStates = useRef(new Map<string, string>());
   useEffect(() => {
@@ -289,37 +283,23 @@ export function Island() {
         setAnnouncement(`${ready}.`);
         // A reply landing in the thread on screen is its own news; work it made elsewhere is still called out.
         const watched = tab.threadId === focusThread && !tab.source.card?.provenance?.artifactTitles?.length;
-        if (!watched) setNotice({ key: `run:${tab.runId}:done`, runId: tab.runId, text: ready, tone: "done" });
+        if (!watched) toast.success(ready, { id: `run:${tab.runId}:done`, action: { label: "Open", onClick: () => openRun(tab.runId) } });
         radiateFromIsland(STATUS_COLOURS.done, 14, 24);
       } else if (tab.state === "failed_terminal" || tab.state === "paused") {
-        setNotice({ key: `run:${tab.runId}:problem`, runId: tab.runId, text: `${tab.title} stopped with a problem`, tone: "problem" });
+        toast.error(`${tab.title} stopped with a problem`, { id: `run:${tab.runId}:problem`, action: { label: "Open", onClick: () => openRun(tab.runId) } });
         setAnnouncement(`${tab.title} stopped with a problem.`);
         radiateFromIsland(STATUS_COLOURS.problem, 8, 14);
       }
     }
     lastStates.current = next;
-  }, [allTabs, focusThread, radiateFromIsland]);
-
-  // The app's own words reach the user here too, in the colour of what happened.
-  useEffect(
-    () =>
-      setToastSink({
-        show: ({ id, tone, message, description, action, duration, onDismiss }) => {
-          const noticeTone = TOAST_TONE[tone];
-          setNotice({ key: `toast:${id}`, toastId: id, text: message, detail: description, tone: noticeTone, action, duration, onGone: onDismiss });
-          if (typeof message === "string") setAnnouncement(message);
-          if (noticeTone !== "info") radiateFromIsland(NOTICE_COLOUR[noticeTone], 8, 14);
-        },
-        dismiss: (id) => setNotice((current) => (current?.toastId !== undefined && (id === undefined || current.toastId === id) ? null : current)),
-      }),
-    [radiateFromIsland],
-  );
+  }, [allTabs, focusThread, openRun, radiateFromIsland]);
 
   // Notifications reach the user here (SHELL.md): the island lights in their colour and the words form from it.
   useEffect(
     () =>
       spectraBus.on("island.notify", ({ id, title, detail, tone }) => {
-        setNotice({ key: `notification:${id}`, notificationId: id, text: title, detail, tone });
+        const say = tone === "problem" ? toast.error : tone === "needs" ? toast.warning : toast.info;
+        say(title, { id: `notification:${id}`, description: detail, action: { label: "Open", onClick: () => spectraBus.emit("notifications.choose", { id }) } });
         setAnnouncement(title);
         radiateFromIsland(NOTICE_COLOUR[tone], 10, 18);
       }),
@@ -454,6 +434,12 @@ export function Island() {
     },
     [markSeen],
   );
+  useEffect(() => {
+    openRunRef.current = (runId) => {
+      setReaching(true);
+      void go(targetRef.current ?? "composer").then(() => openView(runId, true));
+    };
+  }, [go, openView]);
 
   const viewOffset = useMemo(() => {
     if (!viewTab) return 0;
@@ -571,7 +557,6 @@ export function Island() {
   const onEnter = () => {
     pointerInside.current = true;
     setReaching(true);
-    setFaded(false);
     window.clearTimeout(closeTimer.current);
   };
   const onLeave = () => {
@@ -714,12 +699,6 @@ export function Island() {
         closeView();
         return;
       }
-      // Typing in an editor fades the empty island away, so it never sits over the words;
-      // a hand near its place brings it back.
-      if (!mod && event.key.length === 1 && isEditable(event.target) && !composerRef.current?.hasContent()) setFaded(true);
-    };
-    const onPointer = (event: PointerEvent) => {
-      if (event.clientY > window.innerHeight - 140 && Math.abs(event.clientX - stageCentre()) < 220) setFaded(false);
     };
     // A press anywhere off the island puts the open card away, whether it was
     // chosen or only shown on hover.
@@ -730,11 +709,9 @@ export function Island() {
       closeView();
     };
     window.addEventListener("keydown", onKey);
-    window.addEventListener("pointermove", onPointer, { passive: true });
     window.addEventListener("pointerdown", onDown, true);
     return () => {
       window.removeEventListener("keydown", onKey);
-      window.removeEventListener("pointermove", onPointer);
       window.removeEventListener("pointerdown", onDown, true);
     };
   }, [closeView, compose, view]);
@@ -841,10 +818,7 @@ export function Island() {
       data-island-status={status ?? undefined}
       onPointerEnter={onEnter}
       onPointerLeave={onLeave}
-      onFocus={() => {
-        setReaching(true);
-        setFaded(false);
-      }}
+      onFocus={() => setReaching(true)}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null) && !pointerInside.current) scheduleClose();
       }}
@@ -852,7 +826,6 @@ export function Island() {
         // The island floats at the bottom centre of the stage: between the rail and the Side, gliding as they change.
         "pointer-events-none fixed bottom-0 left-[calc(var(--spectra-rail-width,0px)+var(--spectra-lead-width,0px))] right-[calc(var(--spectra-side-width,0px)+8px)] z-composer-dock flex flex-col items-center gap-2",
         "transition-[opacity,left,right] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)]",
-        faded && "opacity-0 [&_*]:!pointer-events-none",
       )}
     >
       <div aria-live="polite" className="sr-only">
@@ -902,23 +875,6 @@ export function Island() {
             onMinimise={closeView}
           />
         </div>
-      ) : null}
-
-      {notice && !question ? (
-        <IslandNotice
-          key={notice.key}
-          notice={notice}
-          onOpen={() => {
-            setNotice(null);
-            if (notice.notificationId) spectraBus.emit("notifications.choose", { id: notice.notificationId });
-            else if (notice.runId) {
-              const runId = notice.runId;
-              setReaching(true);
-              void go(targetRef.current ?? "composer").then(() => openView(runId, true));
-            }
-          }}
-          onDismiss={() => setNotice((current) => (current?.key === notice.key ? null : current))}
-        />
       ) : null}
 
       {switcher ? (

@@ -47,10 +47,12 @@ import {
 } from "@/features/spectra/administration/shared";
 import { auditActionWords } from "@/features/spectra/administration/audit-words";
 import { formatMeter, USAGE_METERS, UsageDayChart } from "@/features/spectra/administration/usage-chart";
+import { PlatformMessagesSurface, SchoolDetailDialog, type PlatformDraft } from "@/features/spectra/administration/platform-messages";
 
 type Tab =
   | "overview"
   | "schools"
+  | "messages"
   | "operations"
   | "usage"
   | "requests"
@@ -60,6 +62,7 @@ type Tab =
 const tabs: Array<PanelTab & { id: Tab }> = [
   { id: "overview", label: "Overview", icon: "grid" },
   { id: "schools", label: "Schools", icon: "school" },
+  { id: "messages", label: "Messages", icon: "mail" },
   { id: "operations", label: "Operations", icon: "server" },
   { id: "usage", label: "Usage", icon: "billing" },
   { id: "requests", label: "Feedback & requests", icon: "help" },
@@ -458,6 +461,7 @@ export function SuperadminShell() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [draft, setDraft] = useState<PlatformDraft | null>(null);
   const range = useMemo(() => dateRange(), []);
 
   const load = useCallback(async () => {
@@ -536,7 +540,7 @@ export function SuperadminShell() {
           tabs={tabs}
           value={tab}
           onChange={(id) => setTab(id as Tab)}
-          primaryCount={5}
+          primaryCount={6}
           className="mb-8 mt-4"
         />
         {tab === "overview" ? (
@@ -547,6 +551,11 @@ export function SuperadminShell() {
             overview={overview}
             refreshKey={refreshKey}
             onRefresh={() => setRefreshKey((value) => value + 1)}
+            draft={draft}
+            onDraft={(next) => {
+              setDraft(next);
+              if (next) setTab("messages");
+            }}
           />
         )}
       </PageBody>
@@ -559,14 +568,27 @@ function PlatformTab({
   overview,
   refreshKey,
   onRefresh,
+  draft,
+  onDraft,
 }: {
   tab: Exclude<Tab, "overview">;
   overview: PlatformAdministrationOverview;
   refreshKey: number;
   onRefresh: () => void;
+  /** A message already addressed, as a school's "Message its admins" leaves it. */
+  draft: PlatformDraft | null;
+  onDraft: (draft: PlatformDraft | null) => void;
 }) {
   if (tab === "schools")
-    return <SchoolsSurface refreshKey={refreshKey} onRefresh={onRefresh} />;
+    return (
+      <SchoolsSurface
+        refreshKey={refreshKey}
+        onRefresh={onRefresh}
+        onMessageAdmins={(school) => onDraft({ audience: "admins", schoolIds: [school.schoolId], schoolName: school.name })}
+      />
+    );
+  if (tab === "messages")
+    return <PlatformMessagesSurface refreshKey={refreshKey} draft={draft} onDraftUsed={() => onDraft(null)} />;
   if (tab === "operations")
     return (
       <OperationsSurface
@@ -623,10 +645,13 @@ const LIMIT_WORDS: Record<SchoolRow["limitEnforcement"], string> = {
 function SchoolsSurface({
   refreshKey,
   onRefresh,
+  onMessageAdmins,
 }: {
   refreshKey: number;
   onRefresh: () => void;
+  onMessageAdmins: (school: { schoolId: string; name: string }) => void;
 }) {
+  const [detailSchool, setDetailSchool] = useState<SchoolRow | null>(null);
   const router = useRouter();
   const [schools, setSchools] = useState<SchoolRow[]>([]);
   const [onboarding, setOnboarding] = useState<OnboardingSaga[]>([]);
@@ -883,7 +908,7 @@ function SchoolsSurface({
           <AdminSectionHeader
             title="Schools"
             count={loading || directoryError ? undefined : schools.length}
-            detail={`${loading || directoryError ? "" : `${formatCompact(members)} ${members === 1 ? "person" : "people"} across them. `}Step into a school to see its admin pages as its administrators do; every visit has a reason, ends on its own and is recorded.`}
+            detail={`${loading || directoryError ? "" : `${formatCompact(members)} ${members === 1 ? "person" : "people"} across them. `}Details shows who runs a school and what its admins changed. Step into a school to see its admin pages as its administrators do; every visit has a reason, ends on its own and is recorded.`}
             action={<InlineLink onClick={() => setCreateOpen(true)}>Add school</InlineLink>}
           />
           <SearchField value={search} onChange={setSearch} label="Search schools" placeholder="Find a school by name or web address" className="mb-3 max-w-md" />
@@ -907,6 +932,7 @@ function SchoolsSurface({
                       {school.status === "suspended" ? "Paused" : "Archived"}
                     </span>
                   ) : null}
+                  <InlineLink onClick={() => setDetailSchool(school)}>Details</InlineLink>
                   <InlineLink
                     onClick={() => {
                       setLimitSchool(school);
@@ -1295,6 +1321,21 @@ function SchoolsSurface({
           rows={4}
         />
       </AdminDialog>
+
+      <SchoolDetailDialog
+        school={detailSchool}
+        onClose={() => setDetailSchool(null)}
+        onMessageAdmins={(school) => {
+          setDetailSchool(null);
+          onMessageAdmins(school);
+        }}
+        onStepIn={() => {
+          if (!detailSchool) return;
+          setSessionSchool(detailSchool);
+          setLabel(`Support for ${detailSchool.name}`);
+          setDetailSchool(null);
+        }}
+      />
 
       <AdminDialog
         open={Boolean(sessionSchool)}

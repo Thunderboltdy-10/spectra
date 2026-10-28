@@ -1528,6 +1528,14 @@ async function payloadHasRemainingRefs(
   budget: SweepDocumentBudget,
 ) {
   const probes = [
+    // Newer writers already maintain compact payload ownership. A positive
+    // match avoids reopening a replica's large Office projection on every
+    // sweep. Missing legacy ownership still goes through the full probes.
+    () =>
+      ctx.db
+        .query("collaborationPayloadOwners")
+        .withIndex("by_payload", (q) => q.eq("payloadRef", payloadRef))
+        .take(budget.cap(1)),
     () =>
       ctx.db
         .query("workReplicas")

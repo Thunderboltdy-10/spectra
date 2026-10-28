@@ -6,6 +6,9 @@ import aggregateTest from "@convex-dev/aggregate/test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
+import { sweepReplicaTruth } from "./replicas";
+import { observeDatabase } from "../scripts/perf-read-ledger";
 import {
   encodeArtifactContentForStorage,
   sheetCellEntries,
@@ -330,6 +333,32 @@ async function seedWork(t: ReturnType<typeof convexTest>) {
 }
 
 describe("replica truth machine", () => {
+  it("uses compact ownership for retained payloads and still checks legacy replica references", async () => {
+    const t = setupTest();
+    const f = await seedWork(t);
+    const ownerId = await t.run(async ctx => {
+      await ctx.db.patch(f.basePayloadId, { verifiedAt: Date.now() - 25 * 60 * 60_000 });
+      await ctx.db.patch(f.cloudId, { projectionBaseContent: { body: "x".repeat(100_000) } });
+      return ctx.db.insert("collaborationPayloadOwners", {
+        payloadRef: String(f.basePayloadId), ownerId: String(f.cloudId), ownerTable: "workReplicas",
+      });
+    });
+    const handler = Reflect.get(sweepReplicaTruth, "_handler") as (ctx: MutationCtx, args: object) => Promise<{ releasedPayloads: number }>;
+    const measure = () => t.run(async ctx => {
+      const observed = observeDatabase(ctx.db);
+      const result = await handler({ ...ctx, db: observed.db }, {});
+      return { result, bytes: observed.snapshot().serializedDocumentBytes };
+    });
+    const compact = await measure();
+    expect(compact.result.releasedPayloads).toBe(0);
+    expect(compact.bytes).toBeLessThan(10_000);
+    await t.run(ctx => ctx.db.delete(ownerId));
+    const legacy = await measure();
+    expect(legacy.result.releasedPayloads).toBe(0);
+    expect(legacy.bytes - compact.bytes).toBeGreaterThan(100_000);
+    expect((await t.run(ctx => ctx.db.get(f.basePayloadId)))?.state).toBe("active");
+  });
+
   it("does not reactivate an original package over a durable authored head", async () => {
     const t = setupTest();
     const fixture = await seedWork(t);

@@ -4,7 +4,7 @@ import { v, type ObjectType } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import {
-  evaluateAccessForActor,
+  evaluateAccessForActorWithLoadedResource,
   evaluateArtifactAccessForActor,
   loadArtifactAuthority,
 } from "./authorityShared";
@@ -480,7 +480,10 @@ export const recoverNativeSnapshot = internalMutation({
         ? ("agent" as const)
         : ("artifact" as const);
     const [decision, policy, snapshots, updates] = await Promise.all([
-      evaluateAccessForActor(ctx, actor, resourceType, artifact._id),
+      evaluateAccessForActorWithLoadedResource(ctx, actor, resourceType, artifact._id, {
+        resource: artifact, ownerAccountId: artifact.ownerAccountId,
+        schoolId: artifact.schoolId, lifecycle: artifact.status,
+      }),
       ctx.db
         .query("resourcePolicies")
         .withIndex("by_resource", (q) =>
@@ -701,7 +704,10 @@ export const bootstrapNative = internalMutation({
         ? ("agent" as const)
         : ("artifact" as const);
     const [decision, policy, existingUpdate] = await Promise.all([
-      evaluateAccessForActor(ctx, actor, resourceType, artifact._id),
+      evaluateAccessForActorWithLoadedResource(ctx, actor, resourceType, artifact._id, {
+        resource: artifact, ownerAccountId: artifact.ownerAccountId,
+        schoolId: artifact.schoolId, lifecycle: artifact.status,
+      }),
       ctx.db
         .query("resourcePolicies")
         .withIndex("by_resource", (q) =>
@@ -923,11 +929,15 @@ export async function appendRoomUpdate(
       artifact.blueprintKey === "agent"
         ? ("agent" as const)
         : ("artifact" as const);
-    const decision = providerContext ? null : await evaluateAccessForActor(
+    const decision = providerContext ? null : await evaluateAccessForActorWithLoadedResource(
       ctx,
       actor,
       resourceType,
       artifact._id,
+      {
+        resource: artifact, ownerAccountId: artifact.ownerAccountId,
+        schoolId: artifact.schoolId, lifecycle: artifact.status,
+      },
     );
     const policy = await ctx.db
       .query("resourcePolicies")
@@ -1239,6 +1249,7 @@ export async function appendRoomUpdate(
       finalSnapshot,
       { contentHash: snapshotIntegrityHash },
     );
+    const openedChangeGroup = !changeGroup;
     if (!changeGroup) {
       const changeGroupId = await ctx.db.insert("changeGroups", {
         artifactId: artifact._id,
@@ -1383,7 +1394,9 @@ export async function appendRoomUpdate(
           source: "ai",
           summary: `Spectra updated ${regionIds.length} ${regionIds.length === 1 ? "region" : "regions"}`,
         });
-      else if (changeSource === "human")
+      // One check follows this editing session until it becomes idle. Queuing
+      // a new job per append reread the same snapshots for obsolete checks.
+      else if (changeSource === "human" && openedChangeGroup)
         await ctx.scheduler.runAfter(
           HUMAN_CHANGE_IDLE_MS,
           internal.changeGroups.commitIdle,
@@ -1442,11 +1455,15 @@ export const checkpoint = internalMutation({
       artifact.blueprintKey === "agent"
         ? ("agent" as const)
         : ("artifact" as const);
-    const decision = await evaluateAccessForActor(
+    const decision = await evaluateAccessForActorWithLoadedResource(
       ctx,
       actor,
       resourceType,
       artifact._id,
+      {
+        resource: artifact, ownerAccountId: artifact.ownerAccountId,
+        schoolId: artifact.schoolId, lifecycle: artifact.status,
+      },
     );
     const policy = await ctx.db
       .query("resourcePolicies")
@@ -1574,6 +1591,12 @@ export const checkpoint = internalMutation({
           });
         }),
     );
+    // Completing a delayed projection wakes its idle history now, without
+    // waiting for the recovery check's backoff or delaying the saved version.
+    for (const group of openGroups) {
+      if (group.source === "human" && now - group.lastActivityAt >= HUMAN_CHANGE_IDLE_MS)
+        await commitChangeGroup(ctx, group._id);
+    }
     return { sequence: throughSequence, duplicate: false };
   },
 });

@@ -10,7 +10,7 @@ import { mutation } from "./orgNodeMutation";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
-import { createManagebacVisibilityReader } from "./managebacVisibility";
+import { createManagebacQueryVisibilityReader, createManagebacVisibilityReader } from "./managebacVisibility";
 import { ensurePlannerProjection, purgeSyncKindPage, submissionFiles } from "./managebac";
 import { deleteStorageIfNoOtherBinding, storageHasOtherBinding } from "./durableStorageBindings";
 import { vSchoolSyncKind, vSchoolSyncMode } from "./schoolSyncSchema";
@@ -430,7 +430,7 @@ export const classes = query({
     const actor = await requireStudent(ctx);
     const integration = await managebacFor(ctx, actor);
     if (!integration) return { classes: [] };
-    const reader = createManagebacVisibilityReader(ctx, actor);
+    const reader = createManagebacQueryVisibilityReader(ctx, actor);
     const [rows, selections, prefs] = await Promise.all([
       readableOfKind(ctx, actor, integration._id, "classes", reader.canReadRecord),
       ctx.db.query("managebacClassSelections")
@@ -478,7 +478,7 @@ export const tasks = query({
     const actor = await requireStudent(ctx);
     const integration = await managebacFor(ctx, actor);
     if (!integration) return { tasks: [] };
-    const reader = createManagebacVisibilityReader(ctx, actor);
+    const reader = createManagebacQueryVisibilityReader(ctx, actor);
     const kinds: SchoolSyncKind[] = args.view === "current" ? ["current_tasks"] : args.view === "past" ? ["past_tasks"] : ["current_tasks", "past_tasks"];
     const [titles, ...lists] = await Promise.all([
       classTitles(ctx, actor, integration._id),

@@ -33,6 +33,7 @@ vi.mock("../data/idle-surface", () => ({ subscribeIdleSurfaceRefresh: () => () =
 const tree = vi.hoisted(() => ({
   useRealActions: false,
   mutation: vi.fn(),
+  children: vi.fn(),
   folder: [] as TreeNode[],
   search: [] as TreeNode[],
   searchStatus: "Exhausted" as "Exhausted" | "CanLoadMore" | "LoadingFirstPage",
@@ -64,7 +65,10 @@ vi.mock("../organization/tree-client", async (importOriginal) => {
   return {
     ...actual,
     useTreeActions: () => tree.useRealActions ? actual.useTreeActions() : tree.actions,
-    useTreeChildren: () => page(tree.folder),
+    useTreeChildren: (parentId: string | null, options: object) => {
+      tree.children(parentId, options);
+      return page(tree.folder);
+    },
     useTreeContainers: () => page([]),
     useTreeSearch: () => ({ ...page(tree.search), status: tree.searchStatus }),
     useTreeQuickView: () => page([]),
@@ -145,6 +149,21 @@ afterEach(() => {
 });
 
 describe("LibraryOrganizer", () => {
+  it("skips the hidden folder listing on the shelf and resumes it for the list", () => {
+    window.localStorage.setItem("spectra.library.view", "shelf");
+    render(<LibraryOrganizer initialNodeId="folder-1" onOpenWork={vi.fn()} onOpenThread={vi.fn()} />);
+    expect(tree.children).toHaveBeenLastCalledWith("folder-1", expect.objectContaining({ enabled: false }));
+    fireEvent.click(screen.getByRole("button", { name: "List" }));
+    expect(tree.children).toHaveBeenLastCalledWith("folder-1", expect.objectContaining({ enabled: true }));
+    expect(screen.getByText("Essay draft")).toBeTruthy();
+  });
+
+  it("keeps the root shelf's listing subscribed", () => {
+    window.localStorage.setItem("spectra.library.view", "shelf");
+    renderOrganizer();
+    expect(tree.children).toHaveBeenLastCalledWith(null, expect.objectContaining({ enabled: true }));
+  });
+
   it("keeps focus in a newly created folder's name after the New menu closes", async () => {
     window.localStorage.setItem("spectra.library.view", "shelf");
     tree.folder = [];

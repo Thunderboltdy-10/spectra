@@ -154,6 +154,7 @@ import { useJoinLateArrival } from "../collaboration/presentation-lane";
 import { targetAttrs } from "../collaboration/target-attributes";
 import type { AdmittedUpdateDescriptor, CollaborationPresence } from "../collaboration/types";
 import { useArtifactLiveModel } from "../collaboration/use-artifact-live-model";
+import { useLocalOnlyCollaboration } from "../collaboration/local-only";
 import { usePresencePreview } from "../collaboration/scoped-hooks";
 import { useInteractionPresence } from "../collaboration/use-interaction-presence";
 import { contextSourceRegistry } from "../context";
@@ -2958,13 +2959,15 @@ function ArtifactStudioEditor({
   // A document or code body typed into before its room binds is rebuilt under the writer's
   // hands, which reordered and dropped characters. Hold typing for the short
   // bind; a socket that never arrives still leaves the draft editable.
+  const localOnlyCollaboration = useLocalOnlyCollaboration();
   const [roomBindTimedOut, setRoomBindTimedOut] = useState<string | null>(null);
   useEffect(() => {
-    if (live.modelSnapshot.initialized) return;
+    if (localOnlyCollaboration || live.modelSnapshot.initialized) return;
     const timer = window.setTimeout(() => setRoomBindTimedOut(artifact._id), 4_000);
     return () => window.clearTimeout(timer);
-  }, [artifact._id, live.modelSnapshot.initialized]);
+  }, [artifact._id, live.modelSnapshot.initialized, localOnlyCollaboration]);
   const bodyRoomBinding =
+    !localOnlyCollaboration &&
     (artifact.blueprintKey === "document" || artifact.blueprintKey === "code") &&
     !live.modelSnapshot.initialized &&
     !live.initializationError &&
@@ -5708,6 +5711,7 @@ function ArtifactStudioEditor({
     [
       artifact.updatedAt,
       dirty,
+      historyIsMine,
       live.recovery.state,
       nativeConflict,
       nativeMaterialization,

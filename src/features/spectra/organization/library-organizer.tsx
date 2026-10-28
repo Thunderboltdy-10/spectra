@@ -393,8 +393,12 @@ function LibraryOrganizerContent({
   const currentParentRef = useRef(currentParentId);
   currentParentRef.current = currentParentId;
 
+  // Folder/class shelves own their paginated reads. Keep the hidden list
+  // unsubscribed; the root shelf still uses this query for its places.
+  const nestedShelf = inFolder && currentParentId !== null && !searching &&
+    filter === "all" && view === "shelf" && renamingId === null;
   const children = useTreeChildren(currentParentId, {
-    enabled: inFolder && !searching,
+    enabled: inFolder && !searching && !nestedShelf,
     sortKey,
     direction: sortDirection,
     typeFilter: filter,

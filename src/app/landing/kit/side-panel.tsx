@@ -1,8 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArtifactStudio } from "@/features/spectra/components/artifact-studio";
+import dynamic from "next/dynamic";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { SpectraArtifact } from "@/features/spectra/data/api";
+
+const ArtifactStudio = dynamic(
+  () => import("@/features/spectra/components/artifact-studio").then((module) => module.ArtifactStudio),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="landing-studio-ghost" role="status" aria-label="Opening">
+        <Skeleton bar className="h-8 w-full" />
+        <Skeleton bar className="h-5 w-2/3" />
+        <Skeleton bar className="h-4 w-full" />
+      </div>
+    ),
+  },
+);
 
 /*
  * The side, as in Spectra: a work opened from the page (a card, a citation,

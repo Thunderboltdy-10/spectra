@@ -1584,13 +1584,13 @@ async function enforceActivePolicyVersions() {
             partitionKey: group.partitionKey,
           });
           const nowSeconds = Math.floor(Date.now() / 1000);
+          // Independent connection leases share only concurrent checks for
+          // the same actor and room; revocation deadlines stay unchanged.
+          await Promise.all(group.connections.map(connection =>
+            refreshAuthorization(connection.context).catch(() => undefined)));
           for (const connection of group.connections) {
             const context = connection.context;
-            let actorRevoked = context.authorizationRevoked === true;
-            try { await refreshAuthorization(context); }
-            catch (error) {
-              if (String(error).includes("COLLABORATION_ACCESS_REVOKED")) actorRevoked = true;
-            }
+            const actorRevoked = context.authorizationRevoked === true;
             if (!activeConnections.has(connection)) continue;
             const stale =
               actorRevoked ||

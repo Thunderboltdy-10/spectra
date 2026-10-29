@@ -85,6 +85,8 @@ export type SchoolAdministrationOverview = {
     status: string;
     lastSyncAt?: number;
     nextSyncAt?: number;
+    hasOpenConflicts: boolean;
+    syncFreshness: "never" | "stale" | "current";
     coverage?: {
       discovered: number;
       verifiedReadable: number;

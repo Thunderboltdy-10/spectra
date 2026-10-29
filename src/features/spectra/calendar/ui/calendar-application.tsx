@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, LockKeyhole } from "@/components/icons/glyph-icons";
+import { ChevronLeft, ChevronRight, LockKeyhole, School } from "@/components/icons/glyph-icons";
+import Link from "next/link";
 import type { BarCommand } from "@/components/ui/adaptive-bar";
 import { IconButton } from "@/components/ui/icon-button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -17,7 +18,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ProductErrorState } from "../../components/product-state";
+import { ProductEmptyState, ProductErrorState } from "../../components/product-state";
 import { spectraBus } from "../../events";
 import { syncSpectraManageBac } from "../../data/api";
 import {
@@ -37,6 +38,7 @@ import {
 } from "../domain/local-days";
 import { requestSpectra } from "../../data/request";
 import { layoutTimedLanes, type TimedLane } from "../domain/timed-lanes";
+import { useClassBook } from "../../school/use-class-book";
 import { useDeadlineClasses, type DeadlineClass } from "../../school/use-deadline-classes";
 import { planWorkId } from "./calendar-plans";
 import { TaskPeek } from "./task-peek";
@@ -397,8 +399,10 @@ type ResizeGesture = {
   endAt: number;
 };
 
-export function CalendarApplication() {
-  const initialStart = startOfLocalWeek(Date.now());
+/** `startAt` opens the calendar on that day instead of this week's Monday (the landing page shows the days ahead). */
+/** `still`: a picture of the calendar (the landing page), where a wheel always scrolls the page around it. */
+export function CalendarApplication({ startAt, still = false }: { startAt?: number; still?: boolean } = {}) {
+  const initialStart = startAt ?? startOfLocalWeek(Date.now());
   const [daySpan, setDaySpanState] = useState(7);
   const [days, setDays] = useState(() => daysAround(initialStart));
   const [focusedStart, setFocusedStart] = useState(initialStart);
@@ -407,6 +411,7 @@ export function CalendarApplication() {
   const [continuation, setContinuation] = useState<CalendarContinuation | null>(null);
   const overviewRequestRef = useRef<AbortController | null>(null);
   const [error, setError] = useState("");
+  const [needsSchool, setNeedsSchool] = useState(false);
   const [opened, setOpened] = useState<OpenedCalendarItem | null>(null);
   const schoolTask = useOpenSchoolTask();
   const taskPeek = useTaskPeek();
@@ -493,6 +498,7 @@ export function CalendarApplication() {
         setContinuation(result.continuation);
       } catch (nextError) {
         if (request.signal.aborted || overviewRequestRef.current !== request) return;
+        setNeedsSchool(nextError instanceof Error && nextError.message.startsWith("AUTH_NO_SCHOOL"));
         setError(
           describeFailure(nextError, {
             fallback: "Check your connection, then try loading Calendar again.",
@@ -526,6 +532,9 @@ export function CalendarApplication() {
       cancelled = true;
     };
   }, []);
+
+  // A run that finished may have planned work onto the calendar.
+  useEffect(() => spectraBus.on("calendar.changed", () => void loadRef.current("merge")), []);
 
   useEffect(() => {
     if (overview?.sourceState.kind !== "stale" || staleSyncRef.current) return;
@@ -618,8 +627,10 @@ export function CalendarApplication() {
       ),
     [overview?.items, visibleLayers],
   );
-  // A deadline, and time given to one, wears its class's ink.
+  // A deadline, and time given to one, wears its class's ink; so does a lesson.
   const classOf = useDeadlineClasses();
+  const book = useClassBook();
+  const lessonInkOf = useCallback((item: CalendarItem) => (item.classId ? book.of(item.classId, item.title)?.ink : undefined), [book]);
   const schoolClassOf = useMemo(() => {
     const byId = new Map((overview?.items ?? []).map((item) => [item.id, item]));
     return (item: CalendarItem) => {
@@ -838,7 +849,7 @@ export function CalendarApplication() {
     }
   }
 
-  function resolveDrop(event: React.DragEvent<HTMLDivElement>, day: Date) {
+  function resolveDrop(event: React.DragEvent<HTMLDivElement>, day: Date, grabOffsetMinutes: number) {
     const bounds = event.currentTarget.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height));
     const cursorMinutes = ratio * HOURS * 60;
@@ -846,7 +857,7 @@ export function CalendarApplication() {
       0,
       Math.min(
         HOURS * 60 - 15,
-        Math.round((cursorMinutes - (dragRef.current?.grabOffsetMinutes ?? 0)) / 15) * 15,
+        Math.round((cursorMinutes - grabOffsetMinutes) / 15) * 15,
       ),
     );
     const startAt = new Date(day);
@@ -860,7 +871,12 @@ export function CalendarApplication() {
     dragRef.current = null;
     setGesturePreview(null);
     if (!payload) return;
-    const startAt = resolveDrop(event, day);
+    // An all-day item stays all-day: let go anywhere on a day, it moves to that day.
+    if (payload.type === "block" && payload.item.allDay && payload.item.startAt !== undefined) {
+      moveToDay(payload.item, day);
+      return;
+    }
+    const startAt = resolveDrop(event, day, payload.grabOffsetMinutes);
     if (payload.type === "plan") {
       void schedulePlan(payload.item, startAt, startAt + HOUR);
       return;
@@ -872,11 +888,29 @@ export function CalendarApplication() {
     void commitWorkGesture(payload.item, startAt, startAt + duration);
   }
 
+  /** An item let go on a day's all-day row keeps its time of day (or stays all-day) and moves to that day. */
+  function dropOnAllDay(event: React.DragEvent<HTMLDivElement>, day: Date) {
+    const payload = dragRef.current;
+    if (payload?.type !== "block" || payload.item.startAt === undefined) return;
+    event.preventDefault();
+    dragRef.current = null;
+    setGesturePreview(null);
+    moveToDay(payload.item, day);
+  }
+
+  function moveToDay(item: CalendarItem, day: Date) {
+    const was = new Date(item.startAt!);
+    const next = new Date(day);
+    next.setHours(was.getHours(), was.getMinutes(), 0, 0);
+    if (next.getTime() === item.startAt) return;
+    void commitWorkGesture(item, next.getTime(), next.getTime() + ((item.endAt ?? item.startAt!) - item.startAt!));
+  }
+
   function previewDrop(event: React.DragEvent<HTMLDivElement>, day: Date) {
     event.preventDefault();
     const payload = dragRef.current;
     if (!payload) return;
-    const startAt = resolveDrop(event, day);
+    const startAt = resolveDrop(event, day, payload.grabOffsetMinutes);
     const duration =
       payload.type === "plan"
         ? HOUR
@@ -1090,7 +1124,7 @@ export function CalendarApplication() {
 
   useEffect(() => {
     const scroller = scrollerRef.current;
-    if (!scroller) return;
+    if (!scroller || still) return;
     const onWheel = (event: WheelEvent) => {
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
@@ -1102,7 +1136,7 @@ export function CalendarApplication() {
     };
     scroller.addEventListener("wheel", onWheel, { passive: false });
     return () => scroller.removeEventListener("wheel", onWheel);
-  }, [changeDaySpan, error, overview]);
+  }, [changeDaySpan, error, overview, still]);
 
   const commands: BarCommand[] = [
     { id: "add", icon: "add", label: "Add", pinned: true, onSelect: () => setComposerOpen(true) },
@@ -1190,7 +1224,20 @@ export function CalendarApplication() {
             </aside>
           ) : null}
 
-          {error ? (
+          {error && needsSchool ? (
+            <div className="p-4">
+              <ProductEmptyState
+                icon={School}
+                title="Join your school to see your calendar"
+                detail="You are signed in, but not part of a school in Spectra yet. Open the invitation your school sent you, or ask a teacher or your school's Spectra administrator to invite you."
+                action={
+                  <Button variant="primary" size="sm" asChild>
+                    <Link href="/join">Open my invitation</Link>
+                  </Button>
+                }
+              />
+            </div>
+          ) : error ? (
             <div className="p-4">
               <ProductErrorState
                 title="Calendar could not be loaded"
@@ -1216,6 +1263,7 @@ export function CalendarApplication() {
                   resizeGesture={Boolean(resizeGesture)}
                   onPreview={previewDrop}
                   onDrop={dropOnDay}
+                  onDropAllDay={dropOnAllDay}
                   onOpen={openItem}
                   onDetails={(item, from) => {
                     taskPeek.close();
@@ -1225,6 +1273,7 @@ export function CalendarApplication() {
                   merge={mergeTarget}
                   planOf={planOfDeadline}
                   schoolClassOf={schoolClassOf}
+                  lessonInkOf={lessonInkOf}
                   onPlanDragStart={beginPlanDrag}
                   onBlockDragStart={(item, offset) => {
                     dragRef.current = { type: "block", item, grabOffsetMinutes: offset };
@@ -1343,12 +1392,14 @@ function WeekGrid({
   resizeGesture,
   onPreview,
   onDrop,
+  onDropAllDay,
   onOpen,
   onDetails,
   onRest,
   merge,
   planOf,
   schoolClassOf,
+  lessonInkOf,
   onPlanDragStart,
   onBlockDragStart,
   onBlockDragEnd,
@@ -1363,6 +1414,7 @@ function WeekGrid({
   resizeGesture: boolean;
   onPreview: (event: React.DragEvent<HTMLDivElement>, day: Date) => void;
   onDrop: (event: React.DragEvent<HTMLDivElement>, day: Date) => void;
+  onDropAllDay: (event: React.DragEvent<HTMLDivElement>, day: Date) => void;
   onOpen: (item: CalendarItem, from: HTMLElement) => void;
   /** Its details and actions, on a right-click. */
   onDetails: (item: CalendarItem, from: HTMLElement) => void;
@@ -1373,6 +1425,7 @@ function WeekGrid({
   /** The plan a deadline's task has, which dragging the deadline places. */
   planOf: (item: CalendarItem) => CalendarItem | undefined;
   schoolClassOf: (item: CalendarItem) => DeadlineClass | null;
+  lessonInkOf: (item: CalendarItem) => string | undefined;
   onPlanDragStart: (plan: CalendarItem) => void;
   onBlockDragStart: (item: CalendarItem, grabOffsetMinutes: number) => void;
   onBlockDragEnd: () => void;
@@ -1415,7 +1468,13 @@ function WeekGrid({
             (item) => item.startAt !== undefined && zonedDayKey(item.startAt, timezone) === localDayKey(day.getTime()),
           );
           return (
-            <div key={`${day.toISOString()}-allday`} className="spectra-calendar-allday-cell" data-life-receive>
+            <div
+              key={`${day.toISOString()}-allday`}
+              className="spectra-calendar-allday-cell"
+              data-life-receive
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => onDropAllDay(event, day)}
+            >
               {items.map((item) => {
                 const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
                 return (
@@ -1432,6 +1491,9 @@ function WeekGrid({
                     onPointerEnter={(event) => onRest(item, event.currentTarget)}
                     onPointerLeave={() => onRest(item, null)}
                     {...mergeHandlers(merge(item))}
+                    draggable={isReschedulable(item) && !pendingItemIds.has(item.id)}
+                    onDragStart={() => onBlockDragStart(item, 0)}
+                    onDragEnd={onBlockDragEnd}
                     className="spectra-calendar-chip"
                     style={{ boxShadow: `inset 3px 0 0 ${layer.color}` }}
                   >
@@ -1504,6 +1566,7 @@ function WeekGrid({
                     key={item.id}
                     item={item}
                     schoolClass={schoolClassOf(item)}
+                    lessonInk={lessonInkOf(item)}
                     lane={lanes.get(item.id) ?? { lane: 0, lanes: 1 }}
                     timezone={timezone}
                     previewing={gesturePreview?.itemId === item.id}
@@ -1567,6 +1630,7 @@ function timedBlockDuration(item: CalendarItem) {
 function TimedBlock({
   item,
   schoolClass,
+  lessonInk,
   lane,
   timezone,
   previewing,
@@ -1584,6 +1648,8 @@ function TimedBlock({
   item: CalendarItem;
   /** The class a deadline, or time given to it, belongs to, when School knows it. */
   schoolClass: DeadlineClass | null;
+  /** The ink of the class a lesson is for. */
+  lessonInk?: string;
   lane: TimedLane;
   timezone: string;
   previewing: boolean;
@@ -1613,7 +1679,7 @@ function TimedBlock({
   const height = Math.max(24, (duration / HOUR) * HOUR_PX);
   // Blocks sharing time sit side by side, so each one stays clickable.
   const laneWidth = 100 / lane.lanes;
-  const ink = schoolClass?.identity?.ink ?? layer.color;
+  const ink = schoolClass?.identity?.ink ?? lessonInk ?? layer.color;
   /* A deadline is a moment, so it is a pin: when it is due and what, on one
      line in its class's ink. A short block keeps its title on one line too. */
   const due = isDeadline(item);
@@ -1659,7 +1725,7 @@ function TimedBlock({
         ["--block-ink" as string]: ink,
       }}
     >
-      {canMove ? (
+      {canMove && !due ? (
         <span
           role="presentation"
           onPointerDown={(event) => onResizeStart(event, "start")}
@@ -1672,7 +1738,7 @@ function TimedBlock({
         {item.sourceLocked && !short ? <LockKeyhole className="ml-1 inline size-2.5" /> : null}
       </span>
       <span className="spectra-calendar-block-title">{item.title}</span>
-      {canMove ? (
+      {canMove && !due ? (
         <span
           role="presentation"
           onPointerDown={(event) => onResizeStart(event, "end")}

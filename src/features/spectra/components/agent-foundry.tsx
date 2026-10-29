@@ -23,6 +23,7 @@
 
 import { Loader2, RotateCcw, AlertTriangle, ChevronDown, Lock, X, FlaskConical, Gauge, Play, Square } from "@/components/icons/glyph-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { canonicalJsonValue } from "../../../../shared/canonical-json";
 import { StatusBadge, statusToneFor } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -132,6 +133,24 @@ const LAYER_LABEL: Record<EvaluationLayer, string> = {
   regression: "Has not lost old behaviour",
   independent_judge: "Judged by a second model",
 };
+
+/** A check's own name, so a failure says what behaviour broke without reading the judge. */
+function checkName(caseId: string, layer: string, input?: string) {
+  const brief = input ? (input.length > 72 ? `${input.slice(0, 72).trimEnd()}…` : input) : "";
+  if (caseId.endsWith("-adv-instruction-override")) return "Keeps its instructions private when asked to reveal them";
+  if (caseId.endsWith("-adv-embedded-directive")) return "Ignores instructions hidden in the material";
+  if (caseId.endsWith("-adv-boundary-expansion")) return "Turns down permissions offered in a message, and says its real limits";
+  if (caseId.includes("-adv-quarantine-")) return "Treats a flagged source as material, not as its rules";
+  if (caseId.includes("-sandbox-")) return `Says plainly when ${caseId.split("-sandbox-").pop()} is unavailable`;
+  if (caseId.endsWith("-contract-include")) return "Includes everything its answer must hold";
+  if (caseId.endsWith("-contract-exclude")) return "Leaves out what its answer must not contain";
+  if (caseId.includes("-failure-")) return brief ? `Recovers when: ${brief}` : "Recovers from a known failure";
+  if (caseId.includes("-truth-")) return brief ? `Matches your worked example: ${brief}` : LAYER_LABEL.mission_truth;
+  // Cases the compiler wrote carry their own request; that is the clearest name they have.
+  if (brief && layer === "adversarial") return `Holds to its role when told: ${brief}`;
+  if (brief && layer === "held_out") return `Handles: ${brief}`;
+  return LAYER_LABEL[layer as EvaluationLayer] ?? layer;
+}
 
 /** The server's publish gates, stated once so the copy cannot drift from them. */
 const BRIEF_MINIMUM = 40;
@@ -539,6 +558,18 @@ function ChecksView({
 
   const cases = active?.results ?? [];
   const failed = cases.filter((entry) => !entry.passed);
+  // The run's verdict is the server's (agents.settleEvalRun); when it failed
+  // with no failing case, say which of its rules it missed.
+  const gateReason =
+    active?.status !== "failed"
+      ? ""
+      : active.averageScore < active.threshold
+        ? "The average is under the threshold, so the run failed."
+        : cases.some((entry) => entry.required && !entry.passed)
+          ? "A required check failed, so the run failed."
+          : cases.some((entry) => entry.layer) && !cases.some((entry) => entry.layer === "adversarial")
+            ? "It failed because none of its checks tried to talk the agent out of its instructions. Run the checks again: they now include those."
+            : "";
   const savedTests = suite.filter((entry) => isBenchEvaluationCase(entry.id)).length;
   const caseLabel = (caseId: string, category: string) => {
     if (isBenchEvaluationCase(caseId)) {
@@ -547,7 +578,7 @@ function ChecksView({
         ? `Your test: ${saved.prompt.length > 80 ? `${saved.prompt.slice(0, 80)}…` : saved.prompt}`
         : "A test you saved";
     }
-    return LAYER_LABEL[category as EvaluationLayer] ?? category;
+    return checkName(caseId, category, suite.find((entry) => entry.id === caseId)?.input);
   };
   const shown = showPassed ? cases : failed;
 
@@ -626,7 +657,7 @@ function ChecksView({
                   <span className="foundry-release-notes">
                     {whenText(run.completedAt ?? run.startedAt)} ·{" "}
                     {run.modelId.split("/").pop()} ·{" "}
-                    {stale ? "an earlier draft" : "this draft"}
+                    {!currentHash ? "draft match not confirmed" : stale ? "an earlier draft" : "this draft"}
                   </span>
                   <button
                     type="button"
@@ -650,6 +681,7 @@ function ChecksView({
               {failed.length === 0
                 ? `Every check passed. Average score ${active.averageScore.toFixed(2)} against a ${active.threshold.toFixed(2)} threshold.`
                 : `${failed.length} of ${active.caseCount} check${active.caseCount === 1 ? "" : "s"} failed. Average score ${active.averageScore.toFixed(2)} against a ${active.threshold.toFixed(2)} threshold.`}
+              {gateReason ? ` ${gateReason}` : ""}
             </p>
             <ul className="foundry-skill-list">
               {shown.map((entry) => (
@@ -690,10 +722,18 @@ function ChecksView({
                   : `Show the ${cases.length - failed.length} that passed`}
               </button>
             )}
-            <p className="foundry-ledger-note">
-              Spectra also records how each answer was judged and what the run
-              could not establish. This screen does not read those yet.
-            </p>
+            {active.limitations?.length ? (
+              <>
+                <p className="foundry-ledger-note">What this run could not establish:</p>
+                <ul className="foundry-skill-list">
+                  {active.limitations.map((entry, index) => (
+                    <li key={`${entry.kind}-${index}`} className="foundry-skill">
+                      <p className="foundry-skill-purpose">{entry.detail}</p>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
           </>
         )}
       </section>
@@ -751,7 +791,15 @@ export function AgentFoundry({
   const [releases, setReleases] = useState<SpectraAgentRelease[]>([]);
   const [evalRuns, setEvalRuns] = useState<SpectraAgentEvalRun[]>([]);
   const [runsLoading, setRunsLoading] = useState(!readOnly);
-  const [currentHash, setCurrentHash] = useState("");
+  const [serverHash, setServerHash] = useState("");
+  const draftKey = useMemo(
+    () => JSON.stringify(canonicalJsonValue([artifactTitle, agent])),
+    [artifactTitle, agent],
+  );
+  const [checkedDraft, setCheckedDraft] = useState(draftKey);
+  // A history refresh can still read the previous saved head. Local edits must
+  // invalidate its match immediately, without querying on every keystroke.
+  const currentHash = draftKey === checkedDraft ? serverHash : "";
   const [showDismissed, setShowDismissed] = useState(false);
   const [showBrief, setShowBrief] = useState(false);
   const [ledgerOpen, setLedgerOpen] = useState(false);
@@ -809,7 +857,7 @@ export function AgentFoundry({
     const response = await getSpectraAgentEvalRuns(artifactId).catch(() => null);
     if (response) {
       setEvalRuns(response.runs);
-      setCurrentHash(response.currentContentHash);
+      setServerHash(response.currentContentHash);
     }
     setRunsLoading(false);
     return response !== null;
@@ -825,7 +873,7 @@ export function AgentFoundry({
         .then((response) => {
           if (!active) return;
           setEvalRuns(response.runs);
-          setCurrentHash(response.currentContentHash);
+          setServerHash(response.currentContentHash);
         })
         .catch(() => undefined)
         .finally(() => active && setRunsLoading(false));
@@ -852,7 +900,7 @@ export function AgentFoundry({
           void getSpectraAgentEvalRuns(artifactId)
             .then((response) => {
               setEvalRuns(response.runs);
-              setCurrentHash(response.currentContentHash);
+              setServerHash(response.currentContentHash);
             })
             .catch(() => undefined);
       }),
@@ -1388,6 +1436,7 @@ export function AgentFoundry({
   }, [brief.length, routingRequired, ungranted]);
 
   async function evaluate() {
+    const evaluatedDraft = draftKey;
     const result = await run(
       "evaluate",
       "The checks didn't finish. Nothing was released; run them again.",
@@ -1398,6 +1447,7 @@ export function AgentFoundry({
     // most useful thing on the screen.
     await reloadRuns();
     if (!result) return;
+    setCheckedDraft(evaluatedDraft);
     setNotice(
       result.status === "passed"
         ? `Passed ${result.passedCount} of ${result.caseCount} checks.`

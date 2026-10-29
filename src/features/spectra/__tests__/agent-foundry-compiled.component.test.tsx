@@ -2,14 +2,15 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createSkill, normalizeFoundryContent, type AgentFoundryContent } from "../agents/foundry";
+import { createSkill, normalizeFoundryContent, projectFoundryToLegacy, type AgentFoundryContent } from "../agents/foundry";
 
-const mocks = vi.hoisted(() => ({ job: vi.fn() }));
+const mocks = vi.hoisted(() => ({ job: vi.fn(), runs: vi.fn(), evaluate: vi.fn() }));
 vi.mock("convex/react", () => ({ useMutation: () => vi.fn(async () => ({})), useQuery: () => undefined }));
 vi.mock("../data/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../data/api")>()),
   getSpectraAgentReleases: vi.fn(async () => ({ releases: [] })),
-  getSpectraAgentEvalRuns: vi.fn(async () => ({ runs: [], currentContentHash: "hash" })),
+  getSpectraAgentEvalRuns: mocks.runs,
+  evaluateSpectraAgent: mocks.evaluate,
   getSpectraAgentAnalytics: vi.fn(async () => ({ analytics: null })),
   getSpectraFoundryCompilerJob: mocks.job,
 }));
@@ -37,9 +38,9 @@ const drafted = [
 ];
 
 function initial(): AgentFoundryContent {
-  return normalizeFoundryContent({
+  return projectFoundryToLegacy(normalizeFoundryContent({
     foundry: { foundationEstablished: true, mission: { objective: "Give students precise essay feedback." } },
-  });
+  }));
 }
 
 const held: { content?: AgentFoundryContent } = {};
@@ -71,6 +72,8 @@ beforeEach(() => {
   }
   vi.stubGlobal("ResizeObserver", ResizeObserverStub);
   mocks.job.mockResolvedValue({ job: null });
+  mocks.runs.mockResolvedValue({ runs: [], currentContentHash: "hash" });
+  mocks.evaluate.mockResolvedValue({ status: "passed", passedCount: 1, caseCount: 1 });
 });
 
 afterEach(() => {
@@ -80,6 +83,27 @@ afterEach(() => {
 });
 
 describe("the agent studio when Spectra compiles the agent", () => {
+  it("invalidates a run's draft match on an edit, even if a refresh still reads the older saved head", async () => {
+    mocks.runs.mockResolvedValue({
+      currentContentHash: "hash",
+      runs: [{ _id: "run-1", status: "passed", contentHash: "hash", startedAt: 1, completedAt: 2, modelId: "model", caseCount: 1, passedCount: 1, averageScore: 1, threshold: 0.8, results: [] }],
+    });
+    render(<Host />);
+    fireEvent.click(screen.getByRole("tab", { name: /^Checks$/ }));
+    expect(await screen.findByText(/this draft/)).toBeTruthy();
+    mocks.job.mockResolvedValue({ job: {
+      jobId: "job", runId: "build", status: "completed", stages: [], startedAt: 1, updatedAt: 2, stale: false,
+      result: { skills: drafted, routing: { description: "New routing", examples: [], negativeExamples: [] }, releaseNotes: "New skills." },
+    } });
+    act(() => spectraBus.emit("agent.compiled", { agentId: "agent_1" }));
+    expect(await screen.findByText(/draft match not confirmed/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Refresh runs$/ }));
+    await waitFor(() => expect(mocks.runs).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/this draft/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Run checks$/ }));
+    expect(await screen.findByText(/this draft/)).toBeTruthy();
+  });
+
   it("shows the drafted skills for approval, applies the compiled routing, and drops a skill once approved", async () => {
     render(<Host />);
     await waitFor(() => expect(mocks.job).toHaveBeenCalledTimes(1));

@@ -1309,6 +1309,7 @@ export async function POST(request: NextRequest) {
         icon: optionalString(body.icon),
         color: optionalString(body.color),
         defaultView: optionalString(body.defaultView),
+        ...(typeof body.isClass === "boolean" ? { isClass: body.isClass } : {}),
       });
       return ok(result);
     }

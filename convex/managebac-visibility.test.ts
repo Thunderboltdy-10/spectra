@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import type { Doc, Id } from "./_generated/dataModel";
-import { canReadManagebacRecord, createManagebacVisibilityReader, getReadableManagebacSourceRecord } from "./managebacVisibility";
+import { canReadManagebacRecord, createManagebacQueryVisibilityReader, createManagebacVisibilityReader, getReadableManagebacSourceRecord } from "./managebacVisibility";
+import { observeDatabase } from "../scripts/perf-read-ledger";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -63,6 +64,29 @@ async function fixture() {
 }
 
 describe("current single-record ManageBac visibility", () => {
+  it("reuses a query's loaded source without dropping current authority checks", async () => {
+    const f = await fixture();
+    await f.t.run(async ctx => {
+      await ctx.db.patch(f.recordId, { normalized: { title: "Reading", body: "x".repeat(100_000) } });
+    });
+    const measure = (reuse: boolean) => f.t.run(async ctx => {
+      const source = (await ctx.db.get(f.recordId))!;
+      const observed = observeDatabase(ctx.db);
+      const reader = (reuse ? createManagebacQueryVisibilityReader : createManagebacVisibilityReader)(
+        { ...ctx, db: observed.db }, f.actor);
+      return { allowed: await reader.canReadRecord(source), bytes: observed.snapshot().serializedDocumentBytes };
+    });
+    const old = await measure(false);
+    const current = await measure(true);
+    expect(old.allowed).toBe(true);
+    expect(current.allowed).toBe(true);
+    expect(old.bytes - current.bytes).toBeGreaterThan(100_000);
+    await f.t.run(ctx => ctx.db.patch(f.selectionId, { selected: false }));
+    expect((await measure(true)).allowed).toBe(false);
+    await f.t.run(ctx => ctx.db.patch(f.mappingId, { status: "revoked" }));
+    expect((await measure(true)).allowed).toBe(false);
+  });
+
   it("admits inherited class material and exact imported provenance", async () => {
     const f = await fixture();
     expect(await f.read()).toBe(true);

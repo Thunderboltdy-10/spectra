@@ -599,6 +599,35 @@ function icsText(value: string) {
   return value.replaceAll(/([,;\\])/g, "\\$1").replaceAll(/\r?\n/g, "\\n");
 }
 
+function icsDay(timestamp: number, timeZone?: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(timestamp));
+  return parts.replaceAll("-", "");
+}
+
+function icsMinutes(minutes: number) {
+  return minutes % 60 ? `PT${minutes}M` : `PT${minutes / 60}H`;
+}
+
+/** Calendar alarms for minutes-before reminders; a day-only task's alarms are fixed instants. */
+function icsAlarms(dueAt: number, reminders: ReadonlyArray<{ minutesBefore: number; enabled?: boolean }>, allDay: boolean, summary: string) {
+  return reminders
+    .filter((reminder) => reminder.enabled !== false && reminder.minutesBefore >= 0)
+    .flatMap((reminder) => [
+      "BEGIN:VALARM",
+      "ACTION:DISPLAY",
+      `DESCRIPTION:${icsText(summary)}`,
+      allDay
+        ? `TRIGGER;VALUE=DATE-TIME:${icsDate(dueAt - reminder.minutesBefore * 60_000)}`
+        : `TRIGGER:-${icsMinutes(reminder.minutesBefore)}`,
+      "END:VALARM",
+    ]);
+}
+
+function icsEstimate(minutes: number | null | undefined) {
+  if (!minutes || minutes <= 0) return "";
+  return minutes < 60 ? `About ${minutes} min of work.` : `About ${Math.round((minutes / 60) * 10) / 10} h of work.`;
+}
+
 /**
  * Exports the plan as calendar to-dos. Official deadlines are marked in the
  * description rather than rewritten, so a round trip cannot turn a school
@@ -609,18 +638,20 @@ export function planToIcs(plan: PlanContent, name: string) {
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
     "PRODID:-//Spectra//Plan//EN",
-    `X-WR-CALNAME:${icsText(plan.title ?? name)}`,
+    `X-WR-CALNAME:${icsText(plan.title || name)}`,
   ];
   for (const task of [...plan.tasks].sort(byOrder)) {
     lines.push(
       "BEGIN:VTODO",
       `UID:${task.id}@spectra`,
+      `DTSTAMP:${icsDate(Date.now())}`,
       `SUMMARY:${icsText(task.title)}`,
       `STATUS:${task.status === "done" ? "COMPLETED" : task.status === "doing" ? "IN-PROCESS" : "NEEDS-ACTION"}`,
     );
     if (task.dueAt !== undefined) lines.push(`DUE:${icsDate(task.dueAt)}`);
     const description = [
       task.description,
+      icsEstimate(task.estimateMinutes),
       task.officialDeadlineRef
         ? `Official deadline from ${task.officialDeadlineRef}. Spectra does not move it.`
         : "",
@@ -628,9 +659,75 @@ export function planToIcs(plan: PlanContent, name: string) {
       .filter(Boolean)
       .join("\n");
     if (description) lines.push(`DESCRIPTION:${icsText(description)}`);
+    if (task.dueAt !== undefined) lines.push(...icsAlarms(task.dueAt, task.reminders, false, task.title));
     lines.push("END:VTODO");
   }
   lines.push("END:VCALENDAR");
+  return lines.join("\r\n");
+}
+
+export type IcsTask = {
+  taskTitle?: string;
+  description?: string;
+  dueAt?: number | null;
+  allDay?: boolean;
+  status?: string;
+  priority?: "low" | "medium" | "high";
+  estimateMinutes?: number | null;
+  reminders?: ReadonlyArray<{ minutesBefore: number; enabled?: boolean }>;
+  recurrence?: { frequency: string; interval: number; weekdays: number[]; exceptions: number[]; untilAt?: number };
+  timezone?: string;
+};
+
+const ICS_WEEKDAYS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
+const ICS_PRIORITY = { high: 1, medium: 5, low: 9 } as const;
+
+/**
+ * One task as a calendar to-do: its day (a date when it has no time), how it
+ * repeats, its reminders and priority. `uid` is the work's id, so two tasks
+ * never land on one calendar entry.
+ */
+export function taskToIcs(task: IcsTask, options: { uid: string; name: string }) {
+  const summary = task.taskTitle?.trim() || options.name;
+  const allDay = task.allDay !== false;
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Spectra//Task//EN",
+    `X-WR-CALNAME:${icsText(summary)}`,
+    "BEGIN:VTODO",
+    `UID:${options.uid}@spectra`,
+    `DTSTAMP:${icsDate(Date.now())}`,
+    `SUMMARY:${icsText(summary)}`,
+    `STATUS:${task.status === "done" ? "COMPLETED" : task.status === "doing" ? "IN-PROCESS" : "NEEDS-ACTION"}`,
+  ];
+  if (task.priority) lines.push(`PRIORITY:${ICS_PRIORITY[task.priority]}`);
+  const due = typeof task.dueAt === "number" ? task.dueAt : null;
+  if (due !== null) {
+    if (allDay) {
+      const day = icsDay(due, task.timezone);
+      lines.push(`DTSTART;VALUE=DATE:${day}`, `DUE;VALUE=DATE:${day}`);
+    } else {
+      lines.push(`DTSTART:${icsDate(due)}`, `DUE:${icsDate(due)}`);
+    }
+    const repeat = task.recurrence;
+    if (repeat && repeat.frequency !== "none") {
+      const rule = [`FREQ=${repeat.frequency.toUpperCase()}`];
+      if (repeat.interval > 1) rule.push(`INTERVAL=${repeat.interval}`);
+      if (repeat.frequency === "weekly" && repeat.weekdays.length) {
+        rule.push(`BYDAY=${repeat.weekdays.map((day) => ICS_WEEKDAYS[day]).filter(Boolean).join(",")}`);
+      }
+      if (repeat.untilAt) rule.push(`UNTIL=${icsDate(repeat.untilAt)}`);
+      lines.push(`RRULE:${rule.join(";")}`);
+      for (const skipped of repeat.exceptions) {
+        lines.push(allDay ? `EXDATE;VALUE=DATE:${icsDay(skipped, task.timezone)}` : `EXDATE:${icsDate(skipped)}`);
+      }
+    }
+  }
+  const description = [task.description, icsEstimate(task.estimateMinutes)].filter(Boolean).join("\n");
+  if (description) lines.push(`DESCRIPTION:${icsText(description)}`);
+  if (due !== null) lines.push(...icsAlarms(due, task.reminders ?? [], allDay, summary));
+  lines.push("END:VTODO", "END:VCALENDAR");
   return lines.join("\r\n");
 }
 

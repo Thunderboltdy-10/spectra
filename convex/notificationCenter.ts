@@ -5,6 +5,7 @@ import { loadArtifactCommentNotifications } from "./artifactComments";
 import { getAuthenticatedActor } from "./identityShared";
 import { loadPlannerReminderNotifications } from "./plannerReminders";
 import { loadTimetableReminderNotifications } from "./timetableReminders";
+import { loadAnnouncementNotifications } from "./administration";
 
 export const listMine = query({
   args: {
@@ -17,12 +18,13 @@ export const listMine = query({
       throw new Error(
         "AUTH_NO_SCHOOL: An active school membership is required.",
       );
-    const [comments, planner, timetable, invitations] = await Promise.all([
+    const [comments, planner, timetable, invitations, messages] = await Promise.all([
       loadArtifactCommentNotifications(ctx, actor, args),
       loadPlannerReminderNotifications(ctx, actor, args),
       loadTimetableReminderNotifications(ctx, actor, args),
       loadIncomingShareInvitations(ctx, actor),
+      loadAnnouncementNotifications(ctx, actor.accountId, args),
     ]);
-    return { comments, planner, timetable, invitations };
+    return { comments, planner, timetable, invitations, messages };
   },
 });

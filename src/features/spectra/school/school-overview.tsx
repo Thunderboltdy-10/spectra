@@ -5,11 +5,12 @@ import Link from "next/link";
 import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ProblemState } from "@/components/ui/page-state";
-import type { SchoolSyncKind } from "../../../../shared/school-sync";
+import { SCHOOL_SYNC_KIND_INFO, type SchoolSyncKind } from "../../../../shared/school-sync";
 import { resolveSpectraManageBacIdentity } from "../data/api";
 import { ClassTile, useDueByClass } from "./school-classes";
-import { ago, groupCurrentTasks, sentenceOf, type SchoolSyncStatus } from "./school-model";
-import { TaskTicket, TicketsSkeleton, WeekStrip, WeekStripSkeleton } from "./school-tickets";
+import { SearchField } from "@/components/ui/search-field";
+import { ago, groupCurrentTasks, sentenceOf, taskMatches, type SchoolSyncStatus } from "./school-model";
+import { TaskGroup, TaskTicket, TicketsSkeleton, WeekStrip, WeekStripSkeleton } from "./school-tickets";
 import { useClassBook } from "./use-class-book";
 
 /*
@@ -50,7 +51,9 @@ export function Overview({
   const book = useClassBook();
   const { tasks, counts } = useDueByClass();
   const [matching, setMatching] = useState(false);
-  const groups = useMemo(() => groupCurrentTasks(tasks ?? [], now), [now, tasks]);
+  const [query, setQuery] = useState("");
+  const searching = Boolean(query.trim());
+  const groups = useMemo(() => groupCurrentTasks((tasks ?? []).filter((task) => taskMatches(task, query)), now), [now, query, tasks]);
   const subjects = book.classes.filter((cls) => !cls.archived && book.of(cls.providerClassId, cls.title)?.subject);
 
   if (status === undefined)
@@ -71,7 +74,12 @@ export function Overview({
         detail={connection.problem ? `${connection.problem.message} ${connection.problem.fixHint}` : "Your school connects ManageBac once; then your tasks and classes come in here."}
       />
     );
-  const problems = status.kinds.filter((kind) => kind.problem && kind.available && (kind.state === "failed" || kind.state === "blocked"));
+  const failing = status.kinds.filter((kind) => kind.problem && kind.available && (kind.state === "failed" || kind.state === "blocked"));
+  // The same problem on several kinds is one problem: said once, naming what it holds up.
+  const problems = [...Map.groupBy(failing, (kind) => `${kind.problem!.code}|${kind.problem!.message}`).values()].map((kinds) => ({
+    first: kinds[0]!,
+    names: kinds.map((kind) => SCHOOL_SYNC_KIND_INFO[kind.kind].label),
+  }));
 
   async function matchAccount() {
     setMatching(true);
@@ -95,7 +103,11 @@ export function Overview({
             title={connection.problem.message}
             detail={connection.problem.fixHint}
             action={
-              connection.problem.fixBy === "student" ? (
+              connection.problem.code === "INTEGRATION_REVIEW_REQUIRED" ? (
+                <Button size="sm" variant="primary" asChild>
+                  <Link href="/managebac?tab=conflicts">Review changes</Link>
+                </Button>
+              ) : connection.problem.fixBy === "student" ? (
                 <Button size="sm" variant="primary" disabled={matching} onClick={() => void matchAccount()}>
                   {matching ? "Matching" : "Match my account"}
                 </Button>
@@ -104,18 +116,22 @@ export function Overview({
           />
         ) : null}
         <WeekStrip tasks={tasks ?? []} book={book} now={now} />
+        {tasks?.length ? (
+          <div className="school-find">
+            <SearchField value={query} onChange={setQuery} label="Find a task" className="w-full sm:max-w-72" />
+          </div>
+        ) : null}
         {tasks === undefined ? (
           <TicketsSkeleton />
+        ) : !groups.length && searching ? (
+          <EmptyState compact icon="search" title="No tasks match" detail="Try fewer words, or search every task in Tasks." action={<Button size="sm" onClick={() => setQuery("")}>Clear search</Button>} />
         ) : !groups.length ? (
           <EmptyState compact icon="task" title="Nothing due" detail="New tasks from ManageBac show up here. Past work is in Tasks." action={<Button size="sm" onClick={onOpenTasks}>Open Tasks</Button>} />
         ) : (
           groups.map((group) => {
-            const shown = group.key === "later" ? group.tasks.slice(0, LATER_SHOWN) : group.tasks;
+            const shown = group.key === "later" && !searching ? group.tasks.slice(0, LATER_SHOWN) : group.tasks;
             return (
-              <section key={group.key} aria-label={group.label}>
-                <h3 className="school-heading" data-late={group.key === "late" || undefined}>
-                  {group.label} <span className="school-heading-count">{group.tasks.length}</span>
-                </h3>
+              <TaskGroup key={group.key} label={group.label} count={group.tasks.length} late={group.key === "late"} open={searching || undefined}>
                 <div className="school-tickets">
                   {shown.map((task) => (
                     <TaskTicket
@@ -133,7 +149,7 @@ export function Overview({
                     {group.tasks.length - shown.length} more in Tasks
                   </button>
                 ) : null}
-              </section>
+              </TaskGroup>
             );
           })
         )}
@@ -173,14 +189,21 @@ export function Overview({
           </h3>
           {problems.length ? (
             <ul className="space-y-3">
-              {problems.map((kind) => (
+              {problems.map(({ first: kind, names }) => (
                 <li key={kind.kind} className="flex min-w-0 items-start gap-2.5">
                   <Icon name="problem" size={16} accent="var(--danger)" className="mt-0.5" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-ui font-medium text-[var(--text-primary)]">{kind.problem!.message}</span>
-                    <span className="block text-caption text-[var(--text-secondary)]">{kind.problem!.fixHint}</span>
+                    <span className="block text-caption text-[var(--text-secondary)]">
+                      {names.length > 1 ? `In ${new Intl.ListFormat("en", { type: "conjunction" }).format(names.map((name, index) => (index ? name.toLowerCase() : name)))}. ` : ""}
+                      {kind.problem!.fixHint}
+                    </span>
                   </span>
-                  {kind.problem!.fixBy === "student" || kind.problem!.fixBy === "spectra" ? (
+                  {kind.problem!.code === "INTEGRATION_REVIEW_REQUIRED" ? (
+                    <Button size="sm" variant="ghost" asChild>
+                      <Link href="/managebac?tab=conflicts">Review changes</Link>
+                    </Button>
+                  ) : kind.problem!.fixBy === "student" || kind.problem!.fixBy === "spectra" ? (
                     <Button size="sm" variant="ghost" disabled={syncing} onClick={() => void onSync(kind.kind)}>
                       Try again
                     </Button>

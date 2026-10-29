@@ -12,6 +12,7 @@ import {
   benchPair,
   benchPromptKey,
   buildEvaluationSuite,
+  contractCasesForSkill,
   compareBenchOutputs,
   createSkill,
   describeComparison,
@@ -71,6 +72,30 @@ function agent() {
     },
   });
 }
+
+describe("Generated output-contract checks", () => {
+  it("judges descriptive requirements while preserving explicit literal checks", () => {
+    const arithmetic = skill("math", "Calculate", "Calculate and explain", {
+      outputContract: {
+        shape: "An explained calculation",
+        mustInclude: ["The calculated answer", "A clear explanation of the calculation"],
+        mustNotInclude: ["An incorrect result"],
+      },
+    });
+    const cases = contractCasesForSkill(arithmetic);
+    expect(cases).toHaveLength(2);
+    for (const entry of cases) {
+      expect(entry.expectation).toMatchObject({ kind: "judged", externalTruth: false });
+      expect(gradeDeterministically(entry.expectation, "18 + 24 = 42, because 18 + 20 + 4 = 42.")).toBeNull();
+      expect(gradeDeterministically(entry.expectation, "18 + 24 = 7.")).toBeNull();
+    }
+    expect(cases[0].expectation).toMatchObject({ criteria: expect.stringContaining("A clear explanation of the calculation") });
+    expect(cases[1].expectation).toMatchObject({ criteria: expect.stringContaining("An incorrect result") });
+    expect(gradeDeterministically({ kind: "contains", values: ["42"] }, "The answer is 41.")).toMatchObject({ passed: false });
+    expect(gradeDeterministically({ kind: "contains", values: ["42"] }, "The answer is 42.")).toMatchObject({ passed: true });
+    expect(gradeDeterministically({ kind: "excludes", values: ["secret-token"] }, "secret-token")).toMatchObject({ passed: false });
+  });
+});
 
 const savedCase: BenchCase = {
   id: "c1",

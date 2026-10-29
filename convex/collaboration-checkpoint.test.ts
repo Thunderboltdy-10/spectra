@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import * as Y from "yjs";
 import schema from "./schema";
@@ -115,6 +115,55 @@ async function seedRoom(t: ReturnType<typeof convexTest>) {
 }
 
 describe("P5.I2 checkpoint projection and compaction", () => {
+  it("queues one idle check for a burst and commits a stalled group as soon as its checkpoint arrives", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = convexTest(schema, modules);
+      const seed = await seedRoom(t);
+      let baseHash = "initial-state-vector";
+      for (let i = 1; i <= 12; i++) {
+        const update = yjsUpdate(`edit ${i}`);
+        await t.mutation(internal.collaborationGatewayStore.append, {
+          accountId: seed.accountId, artifactId: seed.artifactId,
+          actorKind: "human", partitionKey: "root", clientId: "burst-client",
+          policyVersion: 0, idempotencyKey: `burst:${i}`,
+          update: arrayBufferCopy(update.update), expectedRoomId: seed.roomId,
+          expectedNextSequence: i, baseStateVectorHash: baseHash,
+          stateVectorHash: update.hash, regionIds: ["intro"],
+        });
+        baseHash = update.hash;
+      }
+      const jobs = await t.run(ctx => ctx.db.system.query("_scheduled_functions").collect());
+      expect(jobs.filter(job => /changeGroups(?:\.js)?:commitIdle$/.test(job.name))).toHaveLength(1);
+      const group = (await t.run(ctx => ctx.db.query("changeGroups").collect()))[0]!;
+      const lastActivityAt = Date.now() - 86_400_000;
+      await t.run(ctx => ctx.db.patch(group._id, { lastActivityAt }));
+      expect(await t.mutation(internal.changeGroups.commitIdle, {
+        groupId: group._id, expectedLastActivityAt: lastActivityAt,
+      })).toMatchObject({ status: "pending_projection" });
+      const retries = await t.run(ctx => ctx.db.system.query("_scheduled_functions").collect());
+      expect(retries.some(job => /changeGroups(?:\.js)?:commitIdle$/.test(job.name) &&
+        job.scheduledTime === Date.now() + 60_000)).toBe(true);
+
+      const projection = projectionWithTitle("Latest typed work");
+      await t.mutation(internal.collaborationGatewayStore.checkpoint, {
+        accountId: seed.accountId, artifactId: seed.artifactId, partitionKey: "root",
+        clientId: "burst-client", policyVersion: 0, roomId: seed.roomId,
+        expectedNextSequence: 13, stateVectorHash: baseHash,
+        projectionJson: projection.json, projectionHash: projection.hash, throughSequence: 12,
+      });
+      const after = await t.run(async ctx => ({
+        group: await ctx.db.get(group._id), artifact: await ctx.db.get(seed.artifactId),
+        versions: await ctx.db.query("spectraArtifactVersions").collect(),
+      }));
+      expect(after.group?.status).toBe("committed");
+      expect(after.artifact?.title).toBe("Latest typed work");
+      expect(after.versions).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("stores a large sheet projection in bounded chunks at checkpoint", async () => {
     const t = convexTest(schema, modules);
     const seed = await seedRoom(t);

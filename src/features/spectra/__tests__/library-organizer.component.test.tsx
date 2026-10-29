@@ -33,6 +33,7 @@ vi.mock("../data/idle-surface", () => ({ subscribeIdleSurfaceRefresh: () => () =
 const tree = vi.hoisted(() => ({
   useRealActions: false,
   mutation: vi.fn(),
+  children: vi.fn(),
   folder: [] as TreeNode[],
   search: [] as TreeNode[],
   searchStatus: "Exhausted" as "Exhausted" | "CanLoadMore" | "LoadingFirstPage",
@@ -64,7 +65,10 @@ vi.mock("../organization/tree-client", async (importOriginal) => {
   return {
     ...actual,
     useTreeActions: () => tree.useRealActions ? actual.useTreeActions() : tree.actions,
-    useTreeChildren: () => page(tree.folder),
+    useTreeChildren: (parentId: string | null, options: object) => {
+      tree.children(parentId, options);
+      return page(tree.folder);
+    },
     useTreeContainers: () => page([]),
     useTreeSearch: () => ({ ...page(tree.search), status: tree.searchStatus }),
     useTreeQuickView: () => page([]),
@@ -145,6 +149,53 @@ afterEach(() => {
 });
 
 describe("LibraryOrganizer", () => {
+  it("skips the hidden folder listing on the shelf and resumes it for the list", () => {
+    window.localStorage.setItem("spectra.library.view", "shelf");
+    render(<LibraryOrganizer initialNodeId="folder-1" onOpenWork={vi.fn()} onOpenThread={vi.fn()} />);
+    expect(tree.children).toHaveBeenLastCalledWith("folder-1", expect.objectContaining({ enabled: false }));
+    fireEvent.click(screen.getByRole("button", { name: "List" }));
+    expect(tree.children).toHaveBeenLastCalledWith("folder-1", expect.objectContaining({ enabled: true }));
+    expect(screen.getByText("Essay draft")).toBeTruthy();
+  });
+
+  it("keeps the root shelf's listing subscribed", () => {
+    window.localStorage.setItem("spectra.library.view", "shelf");
+    renderOrganizer();
+    expect(tree.children).toHaveBeenLastCalledWith(null, expect.objectContaining({ enabled: true }));
+  });
+
+  it("keeps focus in a newly created folder's name after the New menu closes", async () => {
+    window.localStorage.setItem("spectra.library.view", "shelf");
+    tree.folder = [];
+    tree.actions.createFolder.mockImplementation(async () => {
+      tree.folder = [node("new-folder", "New folder", { kind: "folder", isContainer: true, sourceId: undefined, source: undefined })];
+      return { nodeId: "new-folder" };
+    });
+    renderOrganizer();
+    fireEvent.keyDown(screen.getByRole("button", { name: "New" }), { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New folder" }));
+    const name = await screen.findByRole("textbox", { name: "Name" });
+    await waitFor(() => expect(document.activeElement).toBe(name));
+    fireEvent.change(name, { target: { value: "Named on creation" } });
+    fireEvent.keyDown(name, { key: "Enter" });
+    await waitFor(() => expect(tree.actions.rename).toHaveBeenCalledWith("new-folder", "Named on creation"));
+    expect(window.localStorage.getItem("spectra.library.view")).toBe("shelf");
+  });
+
+  it("lets a folder on the shelf be renamed and returns to the shelf afterward", async () => {
+    window.localStorage.setItem("spectra.library.view", "shelf");
+    tree.folder = [node("folder-1", "Audit folder", { kind: "folder", isContainer: true, sourceId: undefined, source: undefined })];
+    renderOrganizer();
+    fireEvent.contextMenu(await screen.findByText("Audit folder"));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Rename/ }));
+    const name = await screen.findByRole("textbox", { name: "Name" });
+    fireEvent.change(name, { target: { value: "Renamed folder" } });
+    fireEvent.keyDown(name, { key: "Enter" });
+    await waitFor(() => expect(tree.actions.rename).toHaveBeenCalledWith("folder-1", "Renamed folder"));
+    expect(screen.queryByRole("grid", { name: "Library items" })).toBeNull();
+    expect(window.localStorage.getItem("spectra.library.view")).toBe("shelf");
+  });
+
   it("keeps every place in the list's quick access pane", async () => {
     renderOrganizer();
     const places = screen.getByRole("navigation", { name: "Quick access" });

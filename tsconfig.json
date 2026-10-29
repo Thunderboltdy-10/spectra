@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2017",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -19,7 +23,9 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": [
+        "./src/*"
+      ]
     }
   },
   "include": [
@@ -29,11 +35,16 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    "**/*.mts"
+    "**/*.mts",
+    ".next-local/*/types/**/*.ts",
+    ".next-local/*/dev/types/**/*.ts",
+    ".next-local/8/types/**/*.ts",
+    ".next-local/8/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
     "ai-education-workspace-landing-page",
-    ".next/dev/types"
+    ".next/dev/types",
+    ".next-local/*/dev/types"
   ]
 }

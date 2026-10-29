@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  CometTrail,
   CursorTravel,
   easeOutExpo,
   travelDuration,
@@ -104,25 +103,5 @@ describe("CursorTravel", () => {
     }
     const done = travel.sample(16 + 400);
     expect(travel.fadeOpacity(done)).toBe(1);
-  });
-});
-
-describe("CometTrail", () => {
-  it("accrues points only while active and decays them by age", () => {
-    const trail = new CometTrail(5, 200);
-    trail.push(0, 0, 0, true);
-    trail.push(40, 0, 50, true);
-    trail.push(90, 0, 100, true);
-    expect(trail.sample(120)).toHaveLength(3);
-    expect(trail.sample(400)).toHaveLength(0);
-    trail.push(120, 0, 420, false);
-    expect(trail.sample(430)).toHaveLength(0);
-  });
-
-  it("ignores jitter under the minimum spacing", () => {
-    const trail = new CometTrail(5, 260);
-    trail.push(0, 0, 0, true);
-    trail.push(2, 1, 16, true);
-    expect(trail.sample(20)).toHaveLength(1);
   });
 });

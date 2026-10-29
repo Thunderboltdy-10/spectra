@@ -412,7 +412,7 @@ export const start = mutation({
     if (artifact.blueprintKey !== "quiz" || artifact.status !== "active")
       throw new Error("QUIZ_PRACTICE_UNAVAILABLE");
     if (record(artifact.content).published !== true)
-      throw new Error("QUIZ_PRACTICE_NOT_PUBLISHED");
+      throw new Error("QUIZ_PRACTICE_NOT_PUBLISHED: This quiz is still publishing. Try again in a moment.");
     const clientAttemptId = args.clientAttemptId.trim().slice(0, 180);
     if (clientAttemptId.length < 8) throw new Error("QUIZ_ATTEMPT_ID_INVALID");
     const existing = await ctx.db

@@ -117,7 +117,7 @@ async function seed(t: ReturnType<typeof convexTest>, origin: string) {
       category: "Classes",
       name: "My class memberships",
       recordType: "class",
-      path: "/v2p2/students/{student_id}/memberships?archived=true",
+      path: "/v2p2/students/{student_id}/memberships",
       personalIdParameter: "student_id",
       pagination: "page",
       normalization: {
@@ -414,21 +414,24 @@ describe("ManageBac route provider fixture", () => {
         }),
       );
 
-    const identityResponse = await post({ action: "resolveIdentity" });
-    expect(identityResponse.status).toBe(200);
-    expect((await identityResponse.json()).identity.result.status).toBe("verified");
-
     // "Sync now" runs one job per kind that isn't Off, starting from today:
     // past tasks and handed-in files wait until they are synced on their own.
-    // With no class chosen yet, only the class list is read.
-    const syncResponse = await post({ action: "sync" });
+    // First login matches the student and lists classes, waiting for their choice.
+    const syncResponse = await post({ action: "syncOnLogin" });
     expect(syncResponse.status).toBe(200);
     const syncBody = (await syncResponse.json()) as {
       jobs: Array<{ kind: string; summaries?: Array<{ name: string; skipped?: string }>; errorCode?: string }>;
       queued: string[];
     };
+    const mapping = await t.run((ctx) => ctx.db.query("externalIdentityMappings").first());
+    expect(mapping?.status).toBe("verified");
+    const beforeRepeat = fixture.requests.length;
+    const repeat = await post({ action: "syncOnLogin" });
+    expect(repeat.status).toBe(200);
+    expect(await repeat.json()).toMatchObject({ skipped: true });
+    expect(fixture.requests).toHaveLength(beforeRepeat);
     expect(syncBody.jobs.map((job) => job.kind)).toEqual([
-      "classes", "current_tasks", "grades",
+      "classes",
     ]);
     // ManageBac's API can't read a task's files and links, so that kind never runs.
     expect(syncBody.jobs.filter((job) => job.errorCode)).toEqual([]);
@@ -448,15 +451,19 @@ describe("ManageBac route provider fixture", () => {
     };
     // Another student's membership row was dropped.
     expect(catalogue.classes.map((item) => item.providerClassId).sort()).toEqual(["101", "202"]);
+    expect(catalogue.selectionRevision).toBe(0);
+    expect(fixture.requests.some((request) => request.path === "/v2p2/classes/202/tasks")).toBe(false);
     const selectedClass = catalogue.classes.find(
       (item: { providerClassId?: string }) => item.providerClassId === "101",
     );
     expect(selectedClass).toBeDefined();
+    fixture.requests.length = 0;
     const selectionResponse = await post({
       action: "selectClasses",
       recordIds: [selectedClass!.recordId],
       expectedRevision: catalogue.selectionRevision,
       retention: "keep_in_spectra",
+      onboarding: true,
     });
     expect(selectionResponse.status).toBe(200);
     const selectionBody = await selectionResponse.json();
@@ -477,8 +484,10 @@ describe("ManageBac route provider fixture", () => {
       "Reload the class list",
     );
 
-    const selectedSyncResponse = await post({ action: "sync" });
+    const selectedSyncResponse = await post({ action: "syncOnLogin" });
     expect(selectedSyncResponse.status).toBe(200);
+    expect((await selectedSyncResponse.json()).jobs.map((job: { kind: string }) => job.kind)).toEqual(["classes", "current_tasks", "grades"]);
+    expect(await query("managebac:onboardingStatus", {})).toMatchObject({ phase: "ready" });
     expect(fixture.requests.some((request) => request.path.includes("/submissions/"))).toBe(false);
     const dropboxSyncResponse = await post({ action: "sync", kind: "dropbox_files" });
     expect(dropboxSyncResponse.status).toBe(200);

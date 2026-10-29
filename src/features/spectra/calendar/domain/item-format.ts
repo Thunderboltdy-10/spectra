@@ -25,12 +25,17 @@ export function layerFor(item: CalendarItem): CalendarLayerKey {
   return "tasks";
 }
 
-/** The owner's own work blocks and personal events move and resize; official
-    and imported source events do not (the server enforces the same rule). */
+/** The owner's own work blocks and the items they added (events, tasks,
+    milestones, reminders) move; official and imported source items do not
+    (the server enforces the same rule). */
 export function isReschedulable(item: CalendarItem) {
   return (
     item.kind === "scheduled_work_block" ||
-    (item.kind === "personal_event" && !item.sourceLocked)
+    ((item.kind === "personal_event" ||
+      item.kind === "task" ||
+      item.kind === "milestone" ||
+      item.kind === "reminder") &&
+      !item.sourceLocked)
   );
 }
 

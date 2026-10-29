@@ -1,5 +1,7 @@
 "use client";
 
+import { useState, type CSSProperties, type ReactNode } from "react";
+import { Icon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import type { ClassIdentity } from "../../../../shared/class-identity";
 import { dateLabel, daysFrom, startOfDay, type SchoolTask } from "./school-model";
@@ -156,5 +158,45 @@ export function TicketsSkeleton({ count = 4, label = "Loading tasks" }: { count?
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * One group of tickets under a heading that folds it away. Late work starts
+ * folded: it is there, counted, but it does not push the week down. A search
+ * opens every group, so what matches is never hidden.
+ */
+export function TaskGroup({
+  label,
+  name,
+  count,
+  late = false,
+  open: forced,
+  style,
+  children,
+}: {
+  label: ReactNode;
+  /** The group's name for screen readers, when `label` is more than words. */
+  name?: string;
+  count?: number;
+  late?: boolean;
+  /** Set while searching: every group shows what it holds. */
+  open?: boolean;
+  style?: CSSProperties;
+  children: ReactNode;
+}) {
+  const [chosen, setChosen] = useState(!late);
+  const open = forced ?? chosen;
+  return (
+    <section aria-label={name ?? (typeof label === "string" ? label : undefined)} style={style} data-folded={!open || undefined}>
+      <h3 className="school-heading" data-late={late || undefined}>
+        <button type="button" className="school-heading-toggle" aria-expanded={open} disabled={forced !== undefined} onClick={() => setChosen(!open)}>
+          <Icon name="chevronDown" size={14} className="school-heading-chevron" />
+          {label}
+          {count !== undefined ? <span className="school-heading-count">{count}</span> : null}
+        </button>
+      </h3>
+      {open ? children : null}
+    </section>
   );
 }

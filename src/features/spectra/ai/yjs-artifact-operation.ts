@@ -27,16 +27,18 @@ import {
   type ArtifactRegionSnapshot,
   type ArtifactYjsMutationPlan,
 } from "@/features/spectra/collaboration/artifact-yjs-model";
+import { buildArtifactLivePreviewBeats } from "@/features/spectra/collaboration/interaction-choreography";
 import {
-  artifactLivePreviewPatches,
-  lineAnchorForRewrite,
-  shouldStageAiPreviewContent,
-  valueAtPath,
-} from "@/features/spectra/collaboration/artifact-live-preview";
-import {
-  buildArtifactLivePreviewBeats,
-  type AiStreamBeat,
-} from "@/features/spectra/collaboration/interaction-choreography";
+  beatsDuration,
+  MAX_KEPT_PERFORMANCES,
+  MAX_PERFORMANCE_BYTES,
+  PERFORMANCE_FIELD,
+  performancePatches,
+  performanceSeed,
+  readPerformances,
+  tempoForBacklog,
+  type AiPerformance,
+} from "@/features/spectra/collaboration/performance";
 import {
   ARTIFACT_TYPE_KEYS,
   type ArtifactTypeKey,
@@ -45,14 +47,7 @@ import { validateArtifactContent } from "@/features/spectra/artifacts/registry";
 import { applyAiArtifactContentPolicy, validateAiArtifactWriteContent } from "@/features/spectra/operations/artifact-write-content";
 import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
 import { refreshGeneratedArtifactSummary } from "@/features/spectra/operations/hollow-content";
-import {
-  aiInteractionFrame,
-  aiSettleFrame,
-} from "@/features/spectra/ai/ai-interaction-frames";
-import type {
-  ActorIdentity as FabricActor,
-  InteractionAct,
-} from "@/features/spectra/collaboration/interaction-model";
+import type { ActorIdentity as FabricActor } from "@/features/spectra/collaboration/interaction-model";
 import {
   NATIVE_WORK_LIVE_META_MAP,
   planNativeArtifactYjsMutation,
@@ -60,7 +55,6 @@ import {
 } from "@/features/spectra/work/models/yjs/native-artifact-model";
 import { workYjsAdapter } from "@/features/spectra/work/models/yjs/registry";
 import { workYjsOrigins } from "@/features/spectra/work/models/yjs/origins";
-import { encodeArtifactContentForStorage } from "../../../../shared/sheet-cells";
 import { boundedRegionClaims, claimAcquireAction } from "../../../../shared/region-claim-policy";
 import { CloudflareRealtimeProvider } from "@/features/spectra/realtime/providers";
 import { realtimeProviderForWorkType } from "@/features/spectra/realtime/providers/provider-factory";
@@ -362,64 +356,8 @@ async function createAiRealtimeProvider(params: {
   return providerBox.current;
 }
 
-/**
- * A live-preview beat already describes the native gesture being performed.
- * Preserve that choreography instead of re-deriving every frame solely from
- * its value delta: menu-opening and pointer beats intentionally carry the
- * unchanged value, while the eventual menu selection carries the mutation.
- */
-function actForStreamBeat(input: {
-  beat: AiStreamBeat;
-  previousBeat?: AiStreamBeat;
-  before: unknown;
-  after: unknown;
-}): InteractionAct | undefined {
-  const { beat, previousBeat, before, after } = input;
-  if (beat.menu?.open) {
-    if (!previousBeat?.menu?.open) return { kind: "menuOpen" };
-    // The committed menu beat both moves the highlight and changes the native
-    // value. Treat the value transition as the selection; otherwise the actor
-    // appears to navigate and then silently changes the control before close.
-    if (!Object.is(before, after))
-      return {
-        kind: "menuSelect",
-        option: beat.menu.highlighted ?? String(after ?? ""),
-      };
-    if (previousBeat.menu.highlighted !== beat.menu.highlighted)
-      return {
-        kind: "menuNavigate",
-        option: beat.menu.highlighted ?? "",
-      };
-    return { kind: "menuOpen" };
-  }
-  if (beat.menu === null && previousBeat?.menu?.open)
-    return { kind: "menuClose" };
-
-  switch (beat.interaction?.kind) {
-    case "pointer":
-      return { kind: "hover" };
-    case "focus":
-      return { kind: "focus" };
-    case "toggle":
-      return !Object.is(before, after)
-        ? { kind: "toggle", value: Boolean(after) }
-        : { kind: "press" };
-    case "dragging":
-      return beat.gesturePhase === "release"
-        ? { kind: "dragRelease" }
-        : beat.gesturePhase === "move"
-          ? { kind: "dragMove" }
-          : { kind: "dragStart" };
-    case "resizing":
-      return beat.gesturePhase === "release"
-        ? { kind: "resizeRelease" }
-        : beat.gesturePhase === "move"
-          ? { kind: "resizeMove" }
-          : { kind: "resizeStart" };
-    default:
-      return undefined;
-  }
-}
+/** When each run's hand is next free on an artifact, so its edits play in turn. */
+const performanceClock = new Map<string, number>();
 
 type RegionClaim = {
   claimId: string;
@@ -937,8 +875,8 @@ async function synchronizeMutation(params: {
   plan: ArtifactYjsMutationPlan;
   desired: ArtifactLiveValue;
   streamBase?: ArtifactLiveValue;
-  streamValues?: readonly ArtifactLiveValue[];
-  streamBeats?: readonly AiStreamBeat[];
+  /** What the edit is about, so the hand reaches for the right control first. */
+  choreography?: { target: string; region?: string };
   getConnectionError: () => Error | null;
   signal?: AbortSignal;
   onConflict?: (conflict: {
@@ -965,7 +903,6 @@ async function synchronizeMutation(params: {
     plan: ArtifactYjsMutationPlan;
     desired: ArtifactLiveValue;
     streamBase: ArtifactLiveValue;
-    streamBeats: readonly AiStreamBeat[];
     baseSnapshot: ArtifactRegionSnapshot;
     proposedSnapshot: ArtifactRegionSnapshot;
   } | undefined>;
@@ -983,7 +920,6 @@ async function synchronizeMutation(params: {
   let plan = params.plan;
   let desired = params.desired;
   let streamBase = params.streamBase;
-  let streamBeats = params.streamBeats;
   let baseSnapshot = params.baseSnapshot;
   let proposedSnapshot = params.proposedSnapshot;
   if (plan.regions.length === 0) return { changedRegionIds: [] as string[] };
@@ -1049,7 +985,6 @@ async function synchronizeMutation(params: {
     plan = rebased.plan;
     desired = rebased.desired;
     streamBase = rebased.streamBase;
-    streamBeats = rebased.streamBeats;
     baseSnapshot = rebased.baseSnapshot;
     proposedSnapshot = rebased.proposedSnapshot;
   }
@@ -1057,6 +992,9 @@ async function synchronizeMutation(params: {
     return { changedRegionIds: [] as string[] };
   }
   const authoredFrontier = durableFrontierHash(params.document);
+  // Every AI write holds its regions, alone or not: the room append checks
+  // them and takes the run's attribution from them.
+  const heldRegions = [...boundedRegionClaims(plan.regions)];
   const claims = await acquirePlanClaims({
     artifactId: params.session.artifact._id,
     clientId: params.session.clientId,
@@ -1076,14 +1014,10 @@ async function synchronizeMutation(params: {
     plan = afterClaimWait.plan;
     desired = afterClaimWait.desired;
     streamBase = afterClaimWait.streamBase;
-    streamBeats = afterClaimWait.streamBeats;
     baseSnapshot = afterClaimWait.baseSnapshot;
     proposedSnapshot = afterClaimWait.proposedSnapshot;
   }
   logPhase("claims-acquired", { regionCount: plan.regions.length });
-  /** Last control the AI touched, so the settle frame lands on it. */
-  let lastFramePath: string | undefined;
-  let settleSequence = 0;
   let renewing = true;
   const renewal = setInterval(() => {
     if (!renewing) return;
@@ -1118,366 +1052,69 @@ async function synchronizeMutation(params: {
     delete idlePresence.interactionState;
     params.provider.setAwarenessField("user", idlePresence);
   };
+  let publishedPerformanceId: string | undefined;
   try {
-    const rawBeats: AiStreamBeat[] =
-      streamBeats && streamBeats.length > 0
-        ? [...streamBeats]
-        : (params.streamValues ?? []).map((value) => ({
-            delayMs: 560,
-            value,
-            previewGesture: "typing" as const,
-            cursorMode: "typing" as const,
-          }));
-    // Choreography is evidence of the native operation, but it must never
-    // become the critical path for durability. Keep every structural,
-    // pointer, menu, and spatial beat; sample only redundant typing prefixes.
-    // A detailed two-question quiz previously emitted hundreds of speculative
-    // frames and spent over a minute awaiting preview-ledger writes before the
-    // single real Yjs transaction was even attempted.
-    const maxChoreographyBeats = claimActorKind === "human" ? 0 : 48;
-    let beats = rawBeats;
-    if (rawBeats.length > maxChoreographyBeats) {
-      const required = new Set<number>();
-      rawBeats.forEach((beat, index) => {
-        if (
-          index === 0 ||
-          index === rawBeats.length - 1 ||
-          beat.previewGesture !== "typing" ||
-          beat.menu !== undefined ||
-          beat.gesturePhase !== undefined
-        )
-          required.add(index);
-      });
-      const selectEvenly = (indices: number[], count: number) => {
-        if (count <= 0 || indices.length === 0) return [];
-        if (indices.length <= count) return indices;
-        if (count <= 1) return [indices.at(-1)!];
-        return Array.from(
-          { length: count },
-          (_, slot) =>
-            indices[Math.round((slot * (indices.length - 1)) / (count - 1))]!,
-        );
-      };
-      let selected = [...required].sort((left, right) => left - right);
-      if (selected.length > maxChoreographyBeats) {
-        selected = selectEvenly(selected, maxChoreographyBeats);
-      } else {
-        const remaining = maxChoreographyBeats - selected.length;
-        const optional = rawBeats
-          .map((_, index) => index)
-          .filter((index) => !required.has(index));
-        selected.push(...selectEvenly(optional, remaining));
-      }
-      beats = [...new Set(selected)]
-        .sort((left, right) => left - right)
-        .map((index) => rawBeats[index]!);
-    }
-    logPhase("choreography-planned", {
-      rawBeatCount: rawBeats.length,
-      beatCount: beats.length,
-    });
-    let previousStream = streamBase;
-    for (const [sequence, beat] of beats.entries()) {
-      settleSequence = sequence + 1;
-      const aborted = abortError(params.signal);
-      if (aborted) throw aborted;
-      if (!streamBase) continue;
-      const streamValue = beat.value;
-      // Cumulative from the pre-edit baseline so peers can reconstruct the full
-      // speculative document. Focus/highlight use the delta against the prior
-      // frame so only the live edit lights up.
-      const previewPatches = artifactLivePreviewPatches(
-        streamBase,
-        streamValue,
-      );
-      const priorStream = previousStream ?? streamBase;
-      const deltaPatches = artifactLivePreviewPatches(priorStream, streamValue);
-      previousStream = streamValue;
-      const focusPatch =
-        (beat.focusPath
-          ? previewPatches.find((patch) => patch.path === beat.focusPath)
-          : undefined) ??
-        deltaPatches[0] ??
-        previewPatches[0];
-      const focusPath = beat.focusPath ?? focusPatch?.path ?? "/";
-      const blockMatch = focusPath.match(
-        /\/(?:content\/)?blocks\/(?:id:)?([^/]+)/i,
-      );
-      let blockId = blockMatch ? decodeURIComponent(blockMatch[1]!) : undefined;
-      if (blockId && /^\d+$/.test(blockId)) {
-        const blocks = (
-          streamValue.content as
-            { blocks?: Array<{ id?: unknown }> } | undefined
-        )?.blocks;
-        const indexed = Array.isArray(blocks)
-          ? blocks[Number(blockId)]
-          : undefined;
-        blockId =
-          indexed && typeof indexed.id === "string" ? indexed.id : undefined;
-      }
-      const matchedRegion =
-        (blockId
-          ? plan.regions.find(
-              (region) =>
-                region.regionId === blockId ||
-                region.regionId.endsWith(`:${blockId}`) ||
-                region.regionId.includes(blockId),
-            )
-          : undefined) ??
-        plan.regions.find((region) =>
-          focusPath.includes(region.regionId.replace(/^.*:/, "")),
-        ) ??
-        plan.regions[0];
-      const activeRegionId = matchedRegion?.regionId;
-      // Gesture-only beats deliberately have no diff patch. They still point
-      // at a real current value; treating that as `undefined` makes an
-      // unchanged dropdown look like a newly created control.
-      const focusValue =
-        focusPatch !== undefined
-          ? focusPatch.value
-          : valueAtPath(streamValue, focusPath);
-      const finalAtPath = valueAtPath(
-        beats[beats.length - 1]?.value ?? streamValue,
-        focusPath,
-      );
-      const beforeAtPath = valueAtPath(streamBase, focusPath);
-      const caretAnchor =
-        typeof beat.caretOffset === "number"
-          ? {
-              offsetInLine: beat.caretOffset,
-              lineIndex:
-                typeof beat.lineIndex === "number" ? beat.lineIndex : 0,
-            }
-          : typeof focusValue === "string" &&
-              typeof beforeAtPath === "string" &&
-              typeof finalAtPath === "string"
-            ? lineAnchorForRewrite(beforeAtPath, finalAtPath, focusValue)
-            : {
-                offsetInLine:
-                  typeof focusValue === "string" ? focusValue.length : 0,
-                lineIndex:
-                  typeof beat.lineIndex === "number" ? beat.lineIndex : 0,
-              };
-      const caretOffset = caretAnchor.offsetInLine;
-      const lineIndex = caretAnchor.lineIndex;
-      const selectionEnd =
-        typeof beat.selectionEnd === "number" ? beat.selectionEnd : undefined;
-      const livePresence = params.provider.awareness?.getLocalState()?.user;
-      const livePresenceRecord =
-        livePresence && typeof livePresence === "object"
-          ? (livePresence as Record<string, unknown>)
-          : {};
-      const previewGesture =
-        beat.previewGesture ??
-        (beat.menu?.open ? ("selecting" as const) : ("typing" as const));
-      const selectingLine =
-        previewGesture === "selecting" &&
-        typeof selectionEnd === "number" &&
-        selectionEnd > 0;
-      // Protocol v2 frame. The act is derived from the values themselves, so
-      // presence can only claim an edit that genuinely happened between beats.
-      const contentRelativeFramePath = focusPath.startsWith("/content/")
-        ? focusPath.slice("/content".length)
-        : focusPath;
-      // Document mutations are diffed by array index, but the rendered editor
-      // exposes stable block ids. Presence geometry must use the stable
-      // identity while speculation keeps its index-based JSON pointer. If the
-      // actor publishes `/blocks/1/text`, the patch can stream correctly yet
-      // the cursor has no DOM target — producing the exact split-brain
-      // experience where blue ink appears without a body or caret.
-      const framePath =
-        blockId && blockMatch
-          ? contentRelativeFramePath.replace(
-              /^\/blocks\/(?:id:)?[^/]+/i,
-              `/blocks/id:${encodeURIComponent(blockId)}`,
-            )
-          : contentRelativeFramePath;
-      lastFramePath = framePath;
-      const beatAct = actForStreamBeat({
-        beat,
-        previousBeat: beats[sequence - 1],
-        before: valueAtPath(priorStream, focusPath),
-        after: focusValue,
-      });
-      const interactionState = aiInteractionFrame({
-        artifactId: params.session.artifact._id,
-        typeKey: fabricTypeKey,
-        actor: fabricActor,
-        path: framePath,
-        ...(activeRegionId ? { regionId: activeRegionId } : {}),
-        before: valueAtPath(priorStream, focusPath),
-        after: focusValue,
-        ...(beatAct ? { act: beatAct } : {}),
-        ...(beat.focusPart ? { part: beat.focusPart } : {}),
-        ...(selectingLine ? { selectionEnd } : {}),
-        ...(beat.menu === null
-          ? { menu: null }
-          : beat.menu?.open && beat.menu.label
-            ? {
-                menu: {
-                  label: beat.menu.label,
-                  options: (beat.menu.options ?? []).map((option) =>
-                    typeof option === "string"
-                      ? { value: option, label: option }
-                      : option,
-                  ),
-                  ...(beat.menu.highlighted
-                    ? { highlighted: beat.menu.highlighted }
-                    : {}),
-                },
-              }
-            : {}),
-        sequence,
-        patches: previewPatches.map((patch) => ({
-          path: patch.path,
-          value: patch.value,
-        })),
-        ...(activeRegionId ? { heldRegionIds: [activeRegionId] } : {}),
-      });
-      params.provider.setAwarenessField("user", {
-        ...livePresenceRecord,
-        interactionState,
-        ...(activeRegionId
-          ? {
-              activeRegionId,
-              activeRegionIds: [activeRegionId],
-            }
-          : {}),
-        ...(previewPatches.length ? { previewPatches } : {}),
-        previewSequence: sequence,
-        previewPhase: "streaming",
-        previewGesture,
-        ...(beat.interaction !== undefined
-          ? { interaction: beat.interaction }
-          : {}),
-        ...(beat.menu !== undefined ? { menu: beat.menu } : { menu: null }),
-        ...(blockId && (typeof focusValue === "string" || selectingLine)
-          ? {
-              selection: selectingLine
-                ? {
-                    kind: "text" as const,
-                    collapsed: false,
-                    ranges: [
-                      {
-                        blockId,
-                        startOffset: 0,
-                        endOffset: selectionEnd,
-                        lineIndex,
-                      },
-                    ],
-                  }
-                : {
-                    kind: "text" as const,
-                    collapsed: true,
-                    ranges: [
-                      {
-                        blockId,
-                        startOffset: caretOffset,
-                        endOffset: caretOffset,
-                        lineIndex,
-                      },
-                    ],
-                  },
-            }
-          : { selection: null }),
-        cursor: {
-          x: 0.5,
-          y: 0.42,
-          updatedAt: Date.now(),
-          mode:
-            beat.cursorMode ??
-            (selectingLine || beat.menu?.open ? "selecting" : "typing"),
-          anchor: blockId
-            ? {
-                kind: "block" as const,
-                id: blockId,
-                charOffset: selectingLine ? 0 : caretOffset,
-                lineIndex,
-              }
-            : {
-                kind: "path" as const,
-                id: focusPath,
-                charOffset: selectingLine ? 0 : caretOffset,
-                lineIndex,
-              },
-        },
-      });
-      await new Promise<void>((resolve) =>
-        setTimeout(resolve, Math.min(36, Math.max(0, beat.delayMs))),
-      );
-      if (
-        (sequence === 0 ||
-          sequence % 2 === 0 ||
-          sequence === beats.length - 1) &&
-        (deltaPatches.length > 0 ||
-          previewPatches.length > 0 ||
-          Boolean(beat.focusPath))
-      ) {
-        const focusPaths = [
-          ...new Set(
-            (deltaPatches.length ? deltaPatches : previewPatches).map(
-              (patch) =>
-                patch.path.startsWith("/content/")
-                  ? patch.path.slice("/content".length)
-                  : patch.path,
-            ),
-          ),
-        ].slice(0, 16);
-        const stagedPaths = (
-          focusPaths.length
-            ? focusPaths
-            : beat.focusPath
-              ? [
-                  beat.focusPath.startsWith("/content/")
-                    ? beat.focusPath.slice("/content".length)
-                    : beat.focusPath,
-                ]
-              : []
-        ).map((path) =>
-          normalizeStagedDocumentPath(path, streamValue, lineIndex),
-        );
-        // Always keep a line-scoped pointer so settle ink lands on the bullet,
-        // not the whole list container.
-        if (
-          blockId &&
-          Number.isFinite(lineIndex) &&
-          !stagedPaths.some((path) => path.includes("/lines/"))
-        ) {
-          stagedPaths.push(`/blocks/${blockId}/lines/${Math.floor(lineIndex)}`);
+    // One performance per edit. Viewers expand it locally into the hand's
+    // gestures; the durable write never waits for the animation.
+    if (claimActorKind === "ai" && streamBase) {
+      const { before, after } = performancePatches(streamBase, desired);
+      publishedPerformanceId = `${params.operationId}:${params.executionId}`;
+      if (after.length) {
+        const clockKey = `${params.session.artifact._id}:${params.runId}`;
+        const now = Date.now();
+        const startAt = Math.max(now + 60, performanceClock.get(clockKey) ?? 0);
+        const tempo = tempoForBacklog(startAt - now);
+        const seed = performanceSeed(params.operationId);
+        const beats = buildArtifactLivePreviewBeats(streamBase, desired, params.choreography, { seed, tempo });
+        const estimateMs = beatsDuration(beats);
+        const performance: AiPerformance = {
+          v: 1,
+          id: publishedPerformanceId,
+          runId: params.runId,
+          operationId: params.operationId,
+          artifactId: params.session.artifact._id,
+          typeKey: fabricTypeKey,
+          actor: fabricActor,
+          regionIds: plan.regions.map((region) => region.regionId),
+          startAt,
+          estimateMs,
+          seed,
+          tempo,
+          ...(params.choreography ? { choreography: params.choreography } : {}),
+          before,
+          after,
+        };
+        if (JSON.stringify(performance).length <= MAX_PERFORMANCE_BYTES) {
+          performanceClock.set(clockKey, startAt + estimateMs + 420);
+          if (performanceClock.size > 200) performanceClock.delete(performanceClock.keys().next().value!);
+          const current = params.provider.awareness?.getLocalState()?.user;
+          const record = current && typeof current === "object" ? (current as Record<string, unknown>) : {};
+          const kept = readPerformances(record).filter((entry) => entry.startAt + entry.estimateMs > now);
+          params.provider.setAwarenessField("user", {
+            ...record,
+            [PERFORMANCE_FIELD]: [...kept, performance].slice(-MAX_KEPT_PERFORMANCES),
+          });
         }
-        if (
-          (sequence === 0 || sequence === beats.length - 1) &&
-          stagedPaths.length > 0
-        ) {
-          // Keep the durable preview ledger ordered with the awareness body.
-          // Fire-and-forget writes could arrive after a later frame (or even
-          // after settle), making the thread announce "updating" once the
-          // visible gesture had already completed.
-          await convexMutation("spectraArtifacts:stageAiPatch", {
-            artifactId: params.session.artifact._id,
-            runId: params.runId,
-            executionId: params.executionId,
-            title: streamValue.title,
-            ...(streamValue.summary !== undefined
-              ? { summary: streamValue.summary }
-              : {}),
-            ...(shouldStageAiPreviewContent(
-              params.session.artifact.blueprintKey,
-            )
-              ? {
-                  content: encodeArtifactContentForStorage(
-                    params.session.artifact.blueprintKey,
-                    streamValue.content,
-                  ),
-                }
-              : {}),
-            tags: streamValue.tags,
-            changedPaths: stagedPaths,
-          }).catch(() => undefined);
-        }
+        logPhase("performance-published", { beatCount: beats.length, estimateMs, tempo });
+      }
+      // The thread's "updating" ledger: which places this edit touches. It
+      // moves the artifact's updatedAt, so it lands before the head below is
+      // read, or the commit would see its own marker as a newer write.
+      const stagedPaths = [...new Set(after.map((patch) =>
+        normalizeStagedDocumentPath(patch.path.startsWith("/content/") ? patch.path.slice("/content".length) : patch.path, desired, 0),
+      ))].slice(0, 32);
+      if (stagedPaths.length) {
+        await convexMutation("spectraArtifacts:stageAiPatch", {
+          artifactId: params.session.artifact._id,
+          runId: params.runId,
+          executionId: params.executionId,
+          title: desired.title,
+          ...(desired.summary !== undefined ? { summary: desired.summary } : {}),
+          tags: desired.tags,
+          changedPaths: stagedPaths,
+        }).catch(() => undefined);
       }
     }
-    logPhase("choreography-complete", { beatCount: beats.length });
     let preparedResult: Awaited<ReturnType<typeof prepareCanonicalAiUpdate>> | undefined;
     let preparation: Promise<Awaited<ReturnType<typeof prepareCanonicalAiUpdate>>> | undefined;
     let finalHead = params.nativeHead;
@@ -1502,6 +1139,23 @@ async function synchronizeMutation(params: {
       preparation = prepareCanonicalAiUpdate({ head: finalHead, bridge: params.canonicalBridge,
         authoredFrontier, desired: normalizedDesired, clientId: params.session.clientId, operationId: params.operationId });
       preparedResult = await preparation;
+      // An Office file's readback can touch more than the AI asked for (Excel
+      // clears a formula's cached result). The append must hold every region
+      // it writes, so the commit claims what the readback added.
+      const holds = (regionId: string) => heldRegions.some((region) =>
+        region.regionId === "artifact:structure" || region.overlapDomains.includes("artifact:structure") ||
+        region.regionId === regionId || region.overlapDomains.includes(regionId));
+      const extra = (preparedResult.prepared.append.regionIds ?? []).filter((regionId) => !holds(regionId));
+      if (extra.length) {
+        const added = await acquirePlanClaims({
+          artifactId: params.session.artifact._id, clientId: params.session.clientId, runId: params.runId,
+          operationId: params.operationId, claimActorKind, baseStateVectorHash: stateVectorHash(params.document),
+          plan: { regions: extra.map((regionId) => ({ regionId, overlapDomains: [regionId] })), apply: () => undefined },
+          signal: params.signal, onConflict: params.onConflict, onConflictResolved: params.onConflictResolved,
+        });
+        claims.push(...added);
+        heldRegions.push(...extra.map((regionId) => ({ regionId, overlapDomains: [regionId] })));
+      }
       return preparedResult.prepared;
     };
     let admitted = await params.beforeCommit?.({
@@ -1567,37 +1221,6 @@ async function synchronizeMutation(params: {
     logPhase("provider-acknowledged");
     await releaseClaims(claims, params.session.clientId, "apply");
     logPhase("claims-released");
-    // Brief post-edit pause so peers can see the finished caret — then clear
-    // streaming chrome. Do not keep previewPhase="streaming" or the owner UI
-    // stays stuck in "updating" with a permanent AI badge.
-    const holdPresence = params.provider.awareness?.getLocalState()?.user;
-    if (holdPresence && typeof holdPresence === "object") {
-      const held = { ...(holdPresence as Record<string, unknown>) };
-      delete held.previewPatches;
-      delete held.previewPhase;
-      delete held.previewGesture;
-      // Settle on the control that was just edited. Speculation is dropped here
-      // because the value is durable now: peers stop previewing and read Yjs.
-      const settledPath = lastFramePath ?? "/";
-      params.provider.setAwarenessField("user", {
-        ...held,
-        interactionState: aiSettleFrame({
-          artifactId: params.session.artifact._id,
-          typeKey: fabricTypeKey,
-          actor: fabricActor,
-          path: settledPath,
-          ...(plan.regions[0]?.regionId
-            ? { regionId: plan.regions[0].regionId }
-            : {}),
-          before: undefined,
-          after: undefined,
-          sequence: settleSequence,
-        }),
-      });
-      if (claimActorKind !== "human") {
-        await new Promise<void>((resolve) => setTimeout(resolve, 420));
-      }
-    }
     return {
       changedRegionIds: plan.regions.map((region) => region.regionId),
       ...(acceptedFrontier ? { acceptedFrontier } : {}),
@@ -1606,6 +1229,16 @@ async function synchronizeMutation(params: {
     logPhase("failed", {
       error: error instanceof Error ? error.message : String(error),
     });
+    // Viewers already playing this edit let go of it rather than finish it.
+    if (publishedPerformanceId) {
+      const current = params.provider.awareness?.getLocalState()?.user;
+      const record = current && typeof current === "object" ? (current as Record<string, unknown>) : {};
+      params.provider.setAwarenessField("user", {
+        ...record,
+        [PERFORMANCE_FIELD]: readPerformances(record).map((entry) =>
+          entry.id === publishedPerformanceId ? { ...entry, withdrawn: true as const } : entry),
+      });
+    }
     await releaseClaims(claims, params.session.clientId, "cancel");
     throw error;
   } finally {
@@ -2027,12 +1660,6 @@ async function applyAiArtifactMutationAttempt(params: {
     const changedRegionIds = refreshedPlan.regions.map(
       (region) => region.regionId,
     );
-    const streamBeats = buildArtifactLivePreviewBeats(
-      refreshed,
-      refreshedValue,
-      choreographyForOperations(typeKey, params.operations),
-    );
-    await yieldForCollaboration();
     const baseSnapshot = snapshotArtifactRegions(typeKey, refreshed, changedRegionIds);
     await yieldForCollaboration();
     const proposedSnapshot = snapshotArtifactRegions(typeKey, refreshedValue, changedRegionIds);
@@ -2048,7 +1675,7 @@ async function applyAiArtifactMutationAttempt(params: {
       plan: refreshedPlan,
       desired: refreshedValue,
       streamBase: refreshed,
-      streamBeats,
+      choreography: choreographyForOperations(typeKey, params.operations),
       getConnectionError: () => connectionError,
       signal: params.signal,
       onConflict: params.onConflict,
@@ -2071,11 +1698,6 @@ async function applyAiArtifactMutationAttempt(params: {
             plan: refreshedPlan,
             desired: normalizedDesired,
             streamBase: liveBase,
-            streamBeats: buildArtifactLivePreviewBeats(
-              liveBase,
-              normalizedDesired,
-              choreographyForOperations(typeKey, params.operations),
-            ),
             baseSnapshot: snapshotArtifactRegions(typeKey, liveBase, [
               "artifact:structure",
             ]),
@@ -2095,11 +1717,6 @@ async function applyAiArtifactMutationAttempt(params: {
           plan: livePlan,
           desired: liveDesired,
           streamBase: liveBase,
-          streamBeats: buildArtifactLivePreviewBeats(
-            liveBase,
-            liveDesired,
-            choreographyForOperations(typeKey, params.operations),
-          ),
           baseSnapshot: snapshotArtifactRegions(
             typeKey,
             liveBase,

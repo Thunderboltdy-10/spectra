@@ -5,8 +5,9 @@ import { LoaderCircle, Check, GraduationCap } from "@/components/icons/glyph-ico
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { ProductEmptyState } from "./product-state";
-import { cn } from "@/lib/utils";
 import { requestSpectra } from "../data/request";
+import { classIdentity } from "../../../../shared/class-identity";
+import { inkStyle, useClassBook } from "../school/use-class-book";
 
 export type ClassShelfCandidate = {
   recordId: string;
@@ -156,11 +157,20 @@ export function ClassShelfPicker({
   const deselectedCount = [...initiallySelected].filter(
     (recordId) => !selected.has(recordId),
   ).length;
+  const book = useClassBook();
+  // Each class in the ink it will wear as a workspace, subjects first, as School's own choice shows them.
   const visible = useMemo(() => {
     const classes = state.kind === "ready" ? state.classes : [];
     const needle = query.trim().toLowerCase();
-    return classes.filter((item) => matchesQuery(item, needle));
-  }, [query, state]);
+    return classes
+      .filter((item) => matchesQuery(item, needle))
+      .map((item) => {
+        const known = book.classes.find((cls) => cls.recordId === item.recordId);
+        const identity = known ? book.of(known.providerClassId, known.title)! : classIdentity({ providerClassId: item.recordId, title: item.title });
+        return { ...item, identity };
+      })
+      .sort((a, b) => Number(b.identity.subject) - Number(a.identity.subject) || a.identity.name.localeCompare(b.identity.name));
+  }, [book, query, state]);
 
   useEffect(() => {
     setActiveIndex((current) =>
@@ -288,20 +298,17 @@ export function ClassShelfPicker({
             role="listbox"
             aria-multiselectable="true"
             aria-label="Classes"
-            className="mt-2 max-h-[min(52vh,420px)] space-y-1 overflow-y-auto"
+            className="school-choice mt-2 max-h-[min(52vh,420px)] overflow-y-auto p-0.5"
             onKeyDown={onListKeyDown}
           >
             {visible.length === 0 ? (
-              <li className="px-3 py-8 text-center text-caption text-[var(--text-secondary)]">
+              <li className="col-span-full px-3 py-8 text-center text-caption text-[var(--text-secondary)]">
                 No classes match that search.
               </li>
             ) : (
               visible.map((item, index) => {
                 const checked = selected.has(item.recordId);
-                const active = index === activeIndex;
-                const meta = [item.program, item.grade]
-                  .filter(Boolean)
-                  .join(" / ");
+                const meta = [item.program, item.grade].filter(Boolean).join(" / ");
                 return (
                   <li key={item.recordId} role="none">
                     <button
@@ -310,38 +317,20 @@ export function ClassShelfPicker({
                       aria-selected={checked}
                       data-class-control="true"
                       data-class-title={item.title}
-                      className={cn(
-                        "flex w-full items-center gap-3 rounded-control px-3 py-2.5 text-left",
-                        active
-                          ? "bg-[var(--bg-hover)]"
-                          : "hover:bg-[var(--bg-secondary)]",
-                      )}
+                      data-active={index === activeIndex || undefined}
+                      title={meta || undefined}
+                      style={inkStyle(item.identity)}
+                      className="school-choice-item"
                       onClick={() => {
                         setActiveIndex(index);
                         toggle(item.recordId);
                       }}
                       onMouseEnter={() => setActiveIndex(index)}
                     >
-                      <span
-                        className={cn(
-                          "grid size-5 shrink-0 place-items-center rounded-control border",
-                          checked
-                            ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]"
-                            : "border-[var(--border-default)] bg-[var(--bg-primary)]",
-                        )}
-                      >
+                      <span aria-hidden className="school-choice-box">
                         {checked ? <Check className="size-3" strokeWidth={2.5} /> : null}
                       </span>
-                      <span className="min-w-0 flex-1">
-                        <strong className="block truncate text-caption font-medium text-[var(--text-primary)]">
-                          {item.title}
-                        </strong>
-                        {meta ? (
-                          <span className="block truncate text-micro text-[var(--text-secondary)]">
-                            {meta}
-                          </span>
-                        ) : null}
-                      </span>
+                      <span className="min-w-0 flex-1 truncate">{item.identity.name}</span>
                     </button>
                   </li>
                 );

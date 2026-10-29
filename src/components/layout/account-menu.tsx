@@ -156,7 +156,7 @@ export function AccountMenu({
         {identity?.account.platformOperator ? (
           <DropdownMenuItem onSelect={() => router.push("/superadmin")}>
             <MenuGlyph name="locked" />
-            Super Admin
+            Platform
           </DropdownMenuItem>
         ) : null}
         <DropdownMenuSeparator />

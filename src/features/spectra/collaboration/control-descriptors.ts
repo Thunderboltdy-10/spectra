@@ -81,14 +81,14 @@ const DESCRIPTORS: Record<ArtifactTypeKey, readonly ControlRule[]> = {
     {
       pattern: "/blocks/*",
       primitive: "richtext",
-      label: "Text",
+      label: "the text",
       identified: true,
       parts: ["grip"],
     },
     {
       pattern: "/blocks/*/text",
       primitive: "richtext",
-      label: "Text",
+      label: "the text",
       identified: true,
     },
     {

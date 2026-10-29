@@ -24,6 +24,8 @@ import {
 } from "@/features/spectra/ai/yjs-artifact-operation";
 import { catalogCommandForApplicationCommand } from "@/features/spectra/commands/ai-reach";
 import { materializeAiChangedPaths } from "@/features/spectra/components/ai-region-path";
+import { decomposeArtifactContent } from "@/features/spectra/collaboration/artifact-yjs-model";
+import { describeSheetsCellRegion, isArtifactTypeKey } from "@/features/spectra/artifacts/registry";
 import { assertCreateContentNotHollow } from "@/features/spectra/operations/hollow-content";
 import type { ModelOperation } from "@/features/spectra/operations/schema";
 import { encodeArtifactContentForStorage } from "../../../../../../shared/sheet-cells";
@@ -1082,6 +1084,26 @@ export type EffectContext = {
 type Affected = Array<{ type: string; id: string }>;
 
 /** Show the AI's step on the artifact while it changes. Never fails a write. */
+/** Where an edit actually landed, so only that lights up afterwards. Null when
+ * the change was structural or a region cannot be placed: then the whole work. */
+function regionPaths(blueprintKey: string, content: unknown, regionIds: readonly string[]) {
+  if (!regionIds.length || regionIds.includes("artifact:structure") || !isArtifactTypeKey(blueprintKey)) return null;
+  try {
+    const { descriptors } = decomposeArtifactContent(blueprintKey, content);
+    const paths: string[] = [];
+    for (const regionId of regionIds) {
+      if (regionId.startsWith("metadata:")) continue;
+      const path = descriptors.get(regionId)?.path ??
+        (blueprintKey === "sheets" ? describeSheetsCellRegion(content, regionId)?.path : undefined);
+      if (!path) return null;
+      paths.push("/" + path.map((segment) => String(segment).replaceAll("~", "~0").replaceAll("/", "~1")).join("/"));
+    }
+    return paths;
+  } catch {
+    return null;
+  }
+}
+
 async function markArtifactEffect(
   actorClerkId: string,
   runId: string,
@@ -1228,10 +1250,22 @@ export async function executeOperation(
     });
     output = mutationResult as Record<string, unknown>;
     const changedPaths =
-      input.content !== null ? materializeAiChangedPaths(["/"], input.content ?? {}, input.blueprintKey) : [];
-    // Durable Convex content can lag the Yjs acknowledgement. Commit the live
-    // document so reads and collaborators never see an older copy.
-    const live = await readLiveArtifactValue({ artifactId: input.artifactId, timeoutMs: 5_000 }).catch(() => null);
+      input.content !== null
+        ? materializeAiChangedPaths(
+            regionPaths(input.blueprintKey, input.content, mutationResult.changedRegionIds ?? []) ?? ["/"],
+            input.content ?? {},
+            input.blueprintKey,
+          )
+        : [];
+    // An admitted edit is already durable in Convex: the admission wrote the
+    // exact delta and its receipt. Only a room-authored edit (no admission) can
+    // leave Convex behind the Yjs acknowledgement; commit the live document
+    // then, so reads never see an older copy.
+    const admitted = Boolean((mutationResult as { acceptedFrontier?: unknown; duplicate?: boolean }).acceptedFrontier ||
+      (mutationResult as { duplicate?: boolean }).duplicate);
+    const live = admitted
+      ? null
+      : await readLiveArtifactValue({ artifactId: input.artifactId, timeoutMs: 5_000 }).catch(() => null);
     if (live)
       await mutate("spectraArtifacts:stageAiPatch", {
         actorClerkId,

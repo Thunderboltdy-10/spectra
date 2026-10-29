@@ -459,8 +459,13 @@ pub async fn register_mount(
     file_count: usize,
     double_sync_risk: bool,
     owner_lock_paths: &[String],
+    selected_file: Option<&str>,
 ) -> anyhow::Result<String> {
-    mutation(deployment_url, "bridgeSync:registerMount", serde_json::json!({ "credential": credential, "rootLabel": root_label, "grantId": grant_id, "rootKey": root_key, "scanId": scan_id, "fileCount": file_count, "doubleSyncRisk": double_sync_risk, "ownerLockPaths": owner_lock_paths })).await
+    let mut args = serde_json::json!({ "credential": credential, "rootLabel": root_label, "grantId": grant_id, "rootKey": root_key, "scanId": scan_id, "fileCount": file_count, "doubleSyncRisk": double_sync_risk, "ownerLockPaths": owner_lock_paths });
+    if let Some(name) = selected_file {
+        args["selectedFile"] = name.into();
+    }
+    mutation(deployment_url, "bridgeSync:registerMount", args).await
 }
 
 pub async fn discover_resources_page(
@@ -939,8 +944,12 @@ pub async fn report_health(
     credential: &str,
     report: &DeviceHealthReport,
 ) -> anyhow::Result<()> {
-    let _: serde_json::Value =
-        mutation(deployment_url, "bridge:reportHealth", health_args(credential, report)).await?;
+    let _: serde_json::Value = mutation(
+        deployment_url,
+        "bridge:reportHealth",
+        health_args(credential, report),
+    )
+    .await?;
     Ok(())
 }
 

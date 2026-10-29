@@ -332,10 +332,13 @@ function RenameField({
   useEffect(() => {
     const input = ref.current;
     if (!input) return;
-    input.focus();
-    /* Select the stem, not the whole name: renaming usually means changing a
-       word, and a full selection makes the reader retype what they kept. */
-    input.setSelectionRange(0, initial.length);
+    // Let the menu return focus before moving it into the name field. Moving
+    // it sooner lets the closing menu blur and commit the untouched name.
+    const frame = requestAnimationFrame(() => {
+      input.focus();
+      input.setSelectionRange(0, initial.length);
+    });
+    return () => cancelAnimationFrame(frame);
   }, [initial]);
 
   return (

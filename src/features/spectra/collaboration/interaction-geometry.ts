@@ -103,6 +103,16 @@ export function toSurfaceBox(frame: SurfaceFrame, rect: DOMRect): SurfaceBox {
  * Target -> element
  * ------------------------------------------------------------------ */
 
+/** A block segment's id as the page writes it: paths carry it encoded (Word ids hold colons). */
+function blockIdOf(segment: string) {
+  const raw = segment.startsWith("id:") ? segment.slice(3) : segment;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 /**
  * Candidate selectors for a target, in descending order of trust.
  *
@@ -123,10 +133,7 @@ function candidateSelectors(target: SemanticTarget): string[] {
 
   // Documents address blocks by stable id, which survives reflow and reorder.
   if (segments[0] === "blocks" && segments[1]) {
-    const raw = segments[1].startsWith("id:")
-      ? segments[1].slice(3)
-      : segments[1];
-    selectors.push(`[data-block-id="${cssEscape(raw)}"]`);
+    selectors.push(`[data-block-id="${cssEscape(blockIdOf(segments[1]))}"]`);
   }
 
   // Sheets address cells A1-style.
@@ -187,11 +194,7 @@ export function resolveTargetElement(
       (segments[0] === "blocks" && length >= 2
         ? queryVisible(
             root,
-            `[data-block-id="${cssEscape(
-              segments[1]!.startsWith("id:")
-                ? segments[1]!.slice(3)
-                : segments[1]!,
-            )}"]`,
+            `[data-block-id="${cssEscape(blockIdOf(segments[1]!))}"]`,
           )
         : null);
     if (found) return { element: found, precision: "container" };
@@ -286,7 +289,8 @@ function textNodesUnder(element: HTMLElement): Text[] {
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
   let current = walker.nextNode();
   while (current) {
-    nodes.push(current as Text);
+    // Words a collaborator has not written yet are in the room but hidden.
+    if (!current.parentElement?.closest("[data-spectra-unwritten]")) nodes.push(current as Text);
     current = walker.nextNode();
   }
   return nodes;

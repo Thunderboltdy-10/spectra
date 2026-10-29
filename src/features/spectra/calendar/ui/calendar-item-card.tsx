@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { LockKeyhole } from "@/components/icons/glyph-icons";
 import { Icon } from "@/components/icons";
 import { IconButton } from "@/components/ui/icon-button";
@@ -45,13 +46,20 @@ export function CalendarItemCard({
   const anchor = opened?.anchor;
   return (
     <Popover open={Boolean(opened)} onOpenChange={(open) => (open ? undefined : onClose())}>
-      <PopoverAnchor asChild>
-        <div
-          aria-hidden
-          className="pointer-events-none fixed"
-          style={anchor ? { left: anchor.left, top: anchor.top, width: anchor.width, height: anchor.height } : { left: 0, top: 0 }}
-        />
-      </PopoverAnchor>
+      {/* The anchor holds the block's place on the screen, so it lives on the page itself: inside a
+          scaled or moving window "fixed" would be measured from that window instead. */}
+      {anchor
+        ? createPortal(
+            <PopoverAnchor asChild>
+              <div
+                aria-hidden
+                className="pointer-events-none fixed"
+                style={{ left: anchor.left, top: anchor.top, width: anchor.width, height: anchor.height }}
+              />
+            </PopoverAnchor>,
+            document.body,
+          )
+        : null}
       {opened ? (
         <PopoverContent
           side="right"
@@ -114,7 +122,8 @@ function CalendarItemDetails({
   // Time given to a task, and a task of one's own, are checked off (and back on).
   const checkable = work || item.kind === "task";
   const completed = item.status === "completed";
-  const resizable = isReschedulable(item) && item.startAt !== undefined && item.endAt !== undefined;
+  // A moment (a task due then) moves but has no length to change.
+  const resizable = isReschedulable(item) && !due && !item.allDay && item.startAt !== undefined && item.endAt !== undefined;
   const resize = (minutes: number) =>
     void onCommit({
       action: "resizeWorkBlock",
@@ -224,7 +233,9 @@ function CalendarItemDetails({
         detail={
           work
             ? "The scheduled time is removed from Calendar. The plan itself is kept and can be placed again."
-            : "This event is removed from your Calendar."
+            : item.kind === "task"
+              ? "This task is removed from your Calendar."
+              : "This event is removed from your Calendar."
         }
         confirmLabel="Remove"
         destructive

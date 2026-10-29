@@ -7,12 +7,14 @@
 
 .today-section-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 16px;
+  gap: 4px 16px;
   margin-bottom: 18px;
 }
 
-.today-section-head h2 {
+.today-section-head h2,
+.today-join h2 {
   font-family: var(--font-display);
   font-size: 23px;
   font-weight: 500;
@@ -24,6 +26,7 @@
 .today-link {
   margin-left: auto;
   border-radius: 6px;
+  white-space: nowrap;
   font-size: 13px;
   font-weight: 500;
   color: var(--text-secondary);
@@ -94,13 +97,32 @@
   color: color-mix(in oklab, var(--danger) 80%, var(--text-primary));
 }
 
+/* Home's page: the greeting, brief and week across the whole page; what to
+   pick up and the threads side by side only while both have room (the page,
+   not the window, decides: the Threads rail or a side panel narrows it). */
+.today > * {
+  min-width: 0;
+  flex: 1 1 100%;
+}
+.today > .today-works {
+  flex: 999 1 520px;
+}
+.today > .today-threads {
+  flex: 1 1 340px;
+}
+
 /* The week: a desk calendar laid open. Today is the wide first page; the
-   days after it are narrower leaves, the weekend a shade quieter. */
+   days after it are narrower leaves, the weekend a shade quieter. Too narrow
+   for all seven, the leaves keep their width and the week slides sideways. */
 .today-week {
   display: grid;
-  grid-template-columns: minmax(0, 1.9fr) repeat(6, minmax(0, 1fr));
+  grid-template-columns: minmax(196px, 1.9fr) repeat(6, minmax(104px, 1fr));
   min-height: 196px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
   border-radius: 18px;
   background: var(--card-paper);
   box-shadow:
@@ -123,6 +145,7 @@
   flex-direction: column;
   gap: 12px;
   padding: 16px 14px 18px;
+  scroll-snap-align: start;
 }
 
 .today-day + .today-day {
@@ -140,10 +163,12 @@
     var(--card-paper);
 }
 
+/* The day's name sits beside its date, or under it when the leaf is narrow. */
 .today-day-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
-  gap: 8px;
+  gap: 2px 8px;
 }
 
 .today-day-date {
@@ -218,6 +243,7 @@
   overflow: hidden;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
   font-size: 13px;
   font-weight: 500;
   line-height: 1.3;
@@ -284,13 +310,26 @@
 }
 
 .day-sky-art {
-  width: 64px;
-  height: 40px;
+  width: 132px;
+  height: 76px;
   overflow: visible;
+  filter: drop-shadow(0 10px 18px rgb(40 46 90 / 0.14));
+}
+
+.day-sky-air,
+.day-sky-hills {
+  transition: fill 1.2s ease;
 }
 
 .day-sky-place {
   transition: transform 1.2s var(--ease-standard);
+}
+
+.day-sky-glow {
+  transition:
+    cx 1.2s var(--ease-standard),
+    cy 1.2s var(--ease-standard),
+    opacity 1.2s ease;
 }
 
 .day-sky-rise {
@@ -303,12 +342,21 @@
 }
 
 .day-sky-sun {
-  fill: var(--hue-orange);
+  fill: #ffd25a;
+  stroke: #ffab3d;
+  stroke-width: 1.4;
+}
+
+.day-sky-shine {
+  fill: none;
+  stroke: #fff6cf;
+  stroke-width: 1.6;
+  stroke-linecap: round;
 }
 
 .day-sky-rays {
   fill: none;
-  stroke: var(--hue-yellow);
+  stroke: #ffbf48;
   stroke-width: 2.2;
   stroke-linecap: round;
   transform: rotate(calc(var(--lean-x) * 18deg));
@@ -317,22 +365,24 @@
 }
 
 .day-sky-moon {
-  fill: color-mix(in oklab, var(--hue-yellow) 85%, var(--ink-orange));
-  stroke: color-mix(in oklab, var(--ink-blue) 35%, transparent);
-  stroke-width: 0.8;
+  fill: #f6edcf;
+  filter: drop-shadow(0 0 3px rgb(246 237 207 / 0.7));
   transform: rotate(calc(-20deg + var(--lean-x) * 14deg));
   transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.day-sky-horizon {
-  fill: none;
-  stroke: color-mix(in oklab, var(--ink-orange) 55%, var(--text-tertiary));
-  stroke-width: 2;
-  stroke-linecap: round;
+.day-sky-stars {
+  fill: #fff;
+  transition: opacity 1.2s ease;
 }
 
-.day-sky[data-body="moon"] .day-sky-horizon {
-  stroke: color-mix(in oklab, var(--ink-blue) 45%, var(--text-tertiary));
+.day-sky-stars circle {
+  animation: day-sky-twinkle 3.2s ease-in-out infinite;
+}
+
+.day-sky-edge {
+  fill: none;
+  stroke: rgb(20 19 24 / 0.08);
 }
 
 .day-sky-date {
@@ -352,7 +402,7 @@
 }
 
 .morning-time {
-  margin-top: 6px;
+  margin-top: 12px;
   font-family: var(--font-display);
   font-size: 40px;
   font-weight: 500;
@@ -582,6 +632,12 @@
   }
 }
 
+@keyframes day-sky-twinkle {
+  50% {
+    opacity: 0.35;
+  }
+}
+
 @keyframes day-sky-rays {
   from {
     opacity: 0;
@@ -610,6 +666,7 @@
   .day-sky-place,
   .day-sky-body,
   .day-sky-moon,
+  .day-sky-stars circle,
   .morning-body {
     animation: none !important;
   }

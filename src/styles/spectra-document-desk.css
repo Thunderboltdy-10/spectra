@@ -125,7 +125,7 @@
    laid out or painted until they scroll near, keeping the size they last had.
    Flowing only, since the page views measure every block to place breaks;
    pictures and floats are left whole, as containment would clip them. */
-.spectra-document-studio[data-layout="continuous"] .ProseMirror > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre, .tableWrapper):not(:has(img, [data-float])) {
+.spectra-document-studio[data-layout="continuous"] .ProseMirror > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre, .tableWrapper):not([data-editor-selection]):not(:has(img, [data-float])) {
   content-visibility: auto;
   contain-intrinsic-size: auto 1.6em;
 }

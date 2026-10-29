@@ -280,6 +280,10 @@ export type SpectraManageBacOverview = {
   };
 };
 
+/** A class is a workspace marked as one; a ManageBac class's starts marked. */
+export const workspaceIsClass = (workspace: { isClass?: boolean; starterKey?: string }) =>
+  workspace.isClass ?? workspace.starterKey === "managebac-class";
+
 export type SpectraWorkspace = {
   _id: string;
   title: string;
@@ -288,6 +292,9 @@ export type SpectraWorkspace = {
   color?: string;
   status: "active" | "archived";
   defaultView: "cards" | "library";
+  starterKey?: string;
+  /** Chosen by the student; absent, a ManageBac class's workspace is a class. */
+  isClass?: boolean;
   aiState?: "creating" | "updating" | "edited" | "failed";
   aiRunId?: string;
   aiStateExpiresAt?: number;
@@ -815,6 +822,22 @@ export type SpectraPlannerReminderNotification = {
   readAt?: number;
 };
 
+/** A message that reached this person: from their school's admins, or from Spectra. */
+export type SpectraSchoolMessage = {
+  deliveryId: string;
+  announcementId: string;
+  title: string;
+  body: string;
+  status: "delivered" | "read";
+  from: string;
+  author?: string;
+  origin: "school" | "platform";
+  personal: boolean;
+  sentAt?: number;
+  createdAt: number;
+  readAt?: number;
+};
+
 export type SpectraTimetableReminderNotification = {
   _id: string;
   artifactId: string;
@@ -1257,6 +1280,19 @@ export async function getSpectraManageBacOverview() {
   );
 }
 
+export type SpectraManageBacComparison = {
+  state: "available" | "private" | "missing" | "unmaterialized";
+  fields?: Record<string, unknown>;
+  savedAt?: number;
+};
+
+export async function getSpectraManageBacComparison(conflictId: string) {
+  return readJson<SpectraManageBacComparison>(await requestSpectra(
+    `/api/spectra/managebac?action=conflictComparison&conflictId=${encodeURIComponent(conflictId)}`,
+    { cache: "no-store" },
+  ));
+}
+
 export async function configureSpectraManageBac(input: {
   baseUrl: string;
   token: string;
@@ -1292,10 +1328,13 @@ export async function importSpectraManageBacReference(input: {
 }
 
 export async function resolveSpectraManageBacIdentity() {
-  return postManageBac<Record<string, unknown>>({
+  const result = await postManageBac<{ identity: { result: { status: string } }; classes?: { jobs: SpectraSchoolSyncJob[]; queued: SchoolSyncKind[] } }>({
     action: "resolveIdentity",
     syncClasses: true,
   });
+  if (result.identity?.result?.status !== "verified")
+    throw new Error("Spectra couldn't uniquely match your verified email to a ManageBac student. Ask your school to check the email on your ManageBac account.");
+  return result;
 }
 
 /** One job of a student's "Sync now": one kind of School data. */
@@ -1320,6 +1359,10 @@ export async function syncSpectraManageBac(kind?: SchoolSyncKind) {
     action: "sync",
     ...(kind ? { kind } : {}),
   });
+}
+
+export async function syncSpectraManageBacOnLogin() {
+  return postManageBac<{ jobs: SpectraSchoolSyncJob[]; queued: SchoolSyncKind[]; skipped?: boolean; reason?: string; nextAttemptAt?: number }>({ action: "syncOnLogin" });
 }
 
 /** Requests one school reconciliation may take to finish a large school's pass. */
@@ -1718,6 +1761,7 @@ const notificationCenterRequests = new Map<
       planner: SpectraPlannerReminderNotification[];
       timetable: SpectraTimetableReminderNotification[];
       invitations: SpectraShareInvitation[];
+      messages?: SpectraSchoolMessage[];
     }>;
   }
 >();
@@ -1802,6 +1846,7 @@ export async function getSpectraNotificationCenter(
             planner: SpectraPlannerReminderNotification[];
             timetable: SpectraTimetableReminderNotification[];
             invitations: SpectraShareInvitation[];
+            messages?: SpectraSchoolMessage[];
           }>(response),
       ),
     { force: options.force },
@@ -1957,6 +2002,8 @@ export type SpectraAgentRelease = {
 export type SpectraAgentEvalResult = {
   caseId: string;
   category: string;
+  /** The suite layer it tested (adversarial, mission_truth…); absent on legacy runs. */
+  layer?: string;
   required: boolean;
   score: number;
   passed: boolean;
@@ -1978,6 +2025,8 @@ export type SpectraAgentEvalRun = {
   passedCount: number;
   averageScore: number;
   results: SpectraAgentEvalResult[];
+  /** What the run could not establish (a layer it could not test, say). */
+  limitations?: Array<{ kind: string; layer?: string; detail: string }>;
   startedAt: number;
   completedAt?: number;
 };

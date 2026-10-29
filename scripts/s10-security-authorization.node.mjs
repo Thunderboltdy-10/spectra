@@ -3,6 +3,44 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createCollaborationAuthorizationGuard } from "./collaboration-persist.mjs";
 
+test("concurrent peers share one authority request only for the same actor, room and policy", async () => {
+  let calls = 0;
+  let reply;
+  const pending = new Promise(resolve => { reply = resolve; });
+  const guard = createCollaborationAuthorizationGuard({ authorize: async () => { calls++; return pending; } });
+  const first = { accountId: "alice", artifactId: "essay", partitionKey: "root", policyVersion: 1 };
+  try {
+    const requests = [guard.refresh(first), guard.refresh({ ...first }), guard.refresh({ ...first, accountId: "bob" }),
+      guard.refresh({ ...first, artifactId: "notes" }), guard.refresh({ ...first, policyVersion: 2 })];
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls, 4);
+    reply({ allowed: true, canModify: true });
+    await Promise.all(requests);
+    await guard.refresh(first);
+    assert.equal(calls, 5); // Settled responses never become an authority cache.
+  } finally { guard.dispose(); }
+});
+
+test("a timed-out shared request allows a fresh authority check to recover", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000 });
+  let calls = 0;
+  const guard = createCollaborationAuthorizationGuard({
+    authorize: () => ++calls === 1 ? new Promise(() => {}) : Promise.resolve({ allowed: true, canModify: true }),
+  });
+  const context = { accountId: "alice", artifactId: "essay", partitionKey: "root", policyVersion: 1, authorizationCheckedAt: 1_000 };
+  guard.watch({ context });
+  try {
+    const pending = guard.refresh(context);
+    await Promise.resolve();
+    t.mock.timers.tick(5_000);
+    await pending;
+    assert.equal(context.authorizationCheckedAt, 1_000);
+    await guard.refresh(context);
+    assert.equal(calls, 2);
+    assert.equal(context.authorizationCheckedAt, 6_000);
+  } finally { guard.dispose(); }
+});
+
 function fixture(authorize = async () => ({ allowed: true, canModify: true })) {
   let time = 1_000;
   const calls = [];

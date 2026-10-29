@@ -12,6 +12,7 @@ import {
   requestBridgeUpdate,
   retryBridgeFolder,
   selectBridgeFolder,
+  selectBridgeFiles,
 } from "../bridge/client";
 import { humanizePublicFailure } from "../bridge/humanize";
 import { spectraBus } from "../events";
@@ -22,10 +23,11 @@ export { FOLDER_ACTIONS, LOCAL_DEVICE_ACTIONS, isLocalDeviceAction, type LocalDe
 
 const DONE: Record<LocalDeviceAction, string> = {
   add_folder: "The folder picker is open on this computer.",
+  add_files: "The file picker is open on this computer.",
   retry_folder: "Retrying the folder.",
   pause_folder: "Paused the folder.",
   resume_folder: "Resumed the folder.",
-  remove_folder: "Removed the folder. Its files stay on this computer.",
+  remove_folder: "Stopped syncing the folder. Files stay on this computer.",
   pause_syncing: "Paused syncing on this computer.",
   resume_syncing: "Resumed syncing on this computer.",
   show_logs: "Opened Bridge's logs on this computer.",
@@ -46,8 +48,15 @@ export async function runLocalDeviceAction(request: LocalDeviceRequest): Promise
   if (FOLDER_ACTIONS.has(request.action) && !grantId)
     return { status: "failed", message: "Say which folder." };
   try {
-    let message = DONE[request.action];
+    const noun = loadBridgeStatusCache()?.mounts?.find((mount) => mount.id === grantId)?.selectionKind === "file" ? "file" : "folder";
+    let message = DONE[request.action].replaceAll("folder", noun);
     switch (request.action) {
+      case "add_files": {
+        const selected = await selectBridgeFiles();
+        if (!selected) return { status: "pending", message: "No files were selected." };
+        message = selected === 1 ? "The selected file is syncing." : `${selected} selected files are syncing.`;
+        break;
+      }
       case "add_folder":
         await selectBridgeFolder();
         message = "Added the folder you chose.";

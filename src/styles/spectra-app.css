@@ -62,6 +62,10 @@ body {
    and the page is one sheet lifted off it, inset by a hair on three sides so
    its edge reads as paper, not as a pane. */
 .spectra-app-shell {
+  /* Holds the sheet's margin inside it: let through, the margin pushed the
+     whole desk down 8px past the window, so the page itself scrolled and the
+     sheet's edges shook instead of only its paper moving. */
+  display: flow-root;
   background: var(--bg-desk);
 }
 
@@ -4748,9 +4752,9 @@ button:not(:disabled),
 }
 
 .spectra-ai-spark {
-  width: 12px;
-  height: 12px;
-  margin: -6px 0 0 -6px;
+  width: 15px;
+  height: 15px;
+  margin: -7.5px 0 0 -7.5px;
   border-radius: 999px;
   background: conic-gradient(#8b6cf6, #4f9fe6, #40c48e, #f6be40, #f05468, #8b6cf6);
   box-shadow:
@@ -8863,6 +8867,17 @@ button[data-spectra-context-trigger="true"]::after {
 
 .spectra-artifact-header {
   flex-shrink: 0;
+  container: work-header / inline-size;
+}
+
+/* In a narrow pane the title keeps its room: the AI's place stays on the
+   flag beside its hand, and the status says itself through its glyph and
+   tooltip. */
+@container work-header (max-width: 52rem) {
+  .spectra-presence-place,
+  .spectra-status-words {
+    display: none;
+  }
 }
 
 .spectra-artifact-main {
@@ -11248,18 +11263,6 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
   font-weight: 500 !important;
 }
 
-/* Saving belongs to the shared artifact rail; editor toolbars must not repeat
-   the same state a second time. */
-.presentation-studio [role="status"],
-.spectra-sheets-studio [role="status"],
-.code-studio [role="status"] {
-  display: none !important;
-}
-
-.spectra-quiz-studio [role="status"] {
-  display: none !important;
-}
-
 /* Numeric UI uses the same calm sans face as surrounding metadata. */
 .tabular-nums,
 .timetable-studio time {
@@ -11362,7 +11365,9 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
   position: sticky;
   top: 0;
   left: 0;
-  z-index: calc(var(--z-dropdown) + 4);
+  /* Under every popover, menu and dialog: a collaborator's body never covers
+     what the viewer has opened. */
+  z-index: calc(var(--z-dropdown) - 1);
   height: 0;
   pointer-events: none;
   contain: layout style;
@@ -11504,8 +11509,8 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
 /* --- caret -------------------------------------------------------- */
 
 .spectra-presence-caret {
-  width: 2px;
-  border-radius: 1px;
+  width: 2.5px;
+  border-radius: 1.25px;
   background: var(--presence-color);
   /* A caret is a live position, so it settles rather than fading in. */
   transition:
@@ -11517,10 +11522,10 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
 .spectra-presence-caret::before {
   content: "";
   position: absolute;
-  left: -1px;
-  top: -3px;
-  width: 4px;
-  height: 4px;
+  left: -1.25px;
+  top: -4px;
+  width: 5px;
+  height: 5px;
   border-radius: 1px;
   background: var(--presence-color);
 }
@@ -11581,19 +11586,9 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
   left: 0;
   top: 0;
   color: var(--presence-color);
-  /* The travel engine writes translate + tilt as one transform each frame. */
+  /* The travel engine writes the position as one transform each frame. */
   will-change: transform;
   transform-origin: 4px 3px;
-}
-
-.spectra-presence-trail {
-  position: absolute;
-  width: 5px;
-  height: 5px;
-  margin: -2px 0 0 -2px;
-  border-radius: var(--radius-pill);
-  background: var(--presence-color);
-  pointer-events: none;
 }
 
 /* The provisional tint: a field holding a not-yet-durable value. It emerges
@@ -11634,24 +11629,37 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
 
 .spectra-presence-glyph {
   position: absolute;
-  left: -3px;
-  top: -2px;
+  left: -4px;
+  top: -3px;
   display: block;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   filter: drop-shadow(0 1px 1.5px rgba(26, 20, 14, 0.16));
+}
+
+/* The I-beam of a pointer over text, on its way to the word it will click. */
+.spectra-presence-beam {
+  position: absolute;
+  left: -4px;
+  display: block;
+  filter: drop-shadow(0 1px 1px rgba(26, 20, 14, 0.14));
+}
+
+.spectra-presence-cursor[data-mode="text"] .spectra-presence-flag {
+  left: 9px;
+  top: 12px;
 }
 
 .spectra-presence-flag {
   position: absolute;
-  left: 14px;
-  top: 16px;
+  left: 17px;
+  top: 19px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   max-width: 260px;
-  height: 17px;
-  padding: 0 6px;
+  height: 19px;
+  padding: 0 7px;
   /* Square top-left corner reads as attached to the cursor tip. */
   border-radius: 2px var(--control-radius) var(--control-radius)
     var(--control-radius);
@@ -11686,17 +11694,9 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
 .spectra-presence-cursor[data-mode="caret"] .spectra-presence-flag,
 .spectra-presence-cursor[data-mode="selection"] .spectra-presence-flag {
   left: -1px;
-  top: -19px;
+  top: -22px;
   border-radius: var(--control-radius) var(--control-radius)
     var(--control-radius) 2px;
-}
-
-/* AI keeps its owner's colour and is distinguished by one sparkle and a
-   fine top highlight, not by a different hue or a glow. */
-.spectra-presence-flag[data-ai="true"] {
-  box-shadow:
-    0 1px 2px rgba(26, 20, 14, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
 .spectra-presence-flag-name {
@@ -11716,11 +11716,6 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
   text-overflow: ellipsis;
   font-weight: 500;
   opacity: 0.86;
-}
-
-.spectra-presence-spark {
-  flex: none;
-  animation: spectra-presence-spark 2.4s var(--ease-standard) infinite;
 }
 
 /* --- off-surface marker ------------------------------------------ */
@@ -11897,25 +11892,6 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
   100% {
     transform: translateX(100%);
     opacity: 0;
-  }
-}
-
-@keyframes spectra-presence-spark {
-  0%,
-  68%,
-  100% {
-    opacity: 0.9;
-    transform: none;
-  }
-  78% {
-    opacity: 1;
-    transform: scale(1.22) rotate(14deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .spectra-presence-trail {
-    display: none;
   }
 }
 
@@ -12862,6 +12838,8 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
 
 .spectra-status-words {
   min-width: 0;
+  /* The title beside it comes first: long file names give way. */
+  max-width: 9rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -13643,36 +13621,6 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
     opacity: 1;
     filter: none;
   }
-}
-
-/* Spectra's presence in a work (MOTION.md): a small prism caret with a short
-   trail of light. Its caret is a spectrum rule capped by a prism; its ink and
-   its trail are the spectrum, not a person's colour. */
-.spectra-presence-actor[data-ai="true"] .spectra-presence-caret {
-  background: linear-gradient(180deg, #8b6cf6, #4f9fe6, #40c48e);
-}
-.spectra-presence-actor[data-ai="true"] .spectra-presence-caret::before {
-  left: -3px;
-  top: -7px;
-  width: 8px;
-  height: 7px;
-  border-radius: 0;
-  clip-path: polygon(50% 0, 100% 100%, 0 100%);
-  background: conic-gradient(from 180deg, #8b6cf6, #4f9fe6, #40c48e, #f6be40, #f05468, #8b6cf6);
-}
-.spectra-presence-actor[data-ai="true"] .spectra-presence-ink::before {
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    color-mix(in oklab, #8b6cf6 12%, transparent) 30%,
-    color-mix(in oklab, #4f9fe6 16%, transparent) 55%,
-    color-mix(in oklab, #40c48e 10%, transparent) 75%,
-    transparent 92%
-  );
-}
-.spectra-presence-actor[data-ai="true"] .spectra-presence-trail {
-  background: conic-gradient(#8b6cf6, #4f9fe6, #40c48e, #f6be40, #f05468, #8b6cf6);
-  box-shadow: 0 0 6px color-mix(in oklab, #8b6cf6 40%, transparent);
 }
 
 /* A planner task: spectra-task.css. */
@@ -14458,4 +14406,15 @@ span.number-field {
 .number-field-steps svg {
   width: 15px;
   height: 15px;
+}
+
+/* A collaborator's words while they are still writing them
+   (editor/ai-speculation-decoration.ts): what they have not typed yet is
+   hidden, what is still on their screen is drawn in place. */
+.spectra-artifact-main .spectra-ai-unwritten {
+  display: none;
+}
+
+.spectra-artifact-main .spectra-ai-written {
+  white-space: pre-wrap;
 }

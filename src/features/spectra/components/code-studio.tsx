@@ -421,6 +421,7 @@ export function CodeStudio({
   aiChangedPaths = [],
   readOnly: readOnlyProp,
   collaborationDocument,
+  binding = false,
   synchronizationReady,
   onActiveRegionChange,
 }: {
@@ -432,6 +433,8 @@ export function CodeStudio({
   aiChangedPaths?: string[];
   readOnly: boolean;
   collaborationDocument?: Y.Doc;
+  /** The live room is still arriving; the editor is rebuilt once it binds. */
+  binding?: boolean;
   synchronizationReady: boolean;
   onActiveRegionChange?: (regionId: string) => void;
 }) {
@@ -2898,7 +2901,7 @@ export function CodeStudio({
                         key={`${activeFile.id}:${collaborationDocument?.clientID ?? "local"}`}
                         value={activeFile.source}
                         height="100%"
-                        editable={!readOnly}
+                        editable={!readOnly && !binding}
                         extensions={[
                           languageExtension(activeFile),
                           editorTheme,

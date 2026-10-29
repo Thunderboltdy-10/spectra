@@ -178,7 +178,7 @@ export const reportHealth = mutation({
       paused: args.paused,
       folders: z.number().int().min(0).max(10_000).parse(args.folders),
       problem: z.string().regex(/^[a-z][a-z-]{0,59}$/).optional().parse(args.problem),
-      problemFolder: z.string().trim().min(1).max(200).optional().parse(args.problemFolder),
+      problemFolder: z.string().trim().min(1).max(255).optional().parse(args.problemFolder),
       lastSyncAt: z.number().int().min(0).max(now + 60_000).optional().parse(args.lastSyncAt),
       reportedAt: now,
     };

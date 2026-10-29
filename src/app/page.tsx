@@ -8,9 +8,9 @@ import { hasClerkServerConfig } from "@/lib/clerk-config";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Spectra: connected learning work",
+  title: "Spectra: all your schoolwork, in one place",
   description:
-    "One place where documents, sources, plans and conversations stay aware of one another, so students, teachers and AI can work on the same thing at the same time.",
+    "Classes, notes, files and deadlines live together in Spectra, with an AI that knows all of it and works right beside you.",
 };
 
 function toQueryString(searchParams: Record<string, string | string[] | undefined>) {

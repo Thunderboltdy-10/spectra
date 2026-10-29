@@ -21,7 +21,7 @@ export default function CookiePolicyPage() {
 
       <LegalSection title="Analytics cookies">
         <p>
-          Used for optional product analytics. Disabled by default unless you choose Accept all or enable Analytics in
+          Used for optional product analytics. Disabled by default unless you choose Allow all or enable Analytics in
           Configure settings.
         </p>
       </LegalSection>

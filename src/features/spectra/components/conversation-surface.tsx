@@ -220,6 +220,7 @@ const LIVE_OPTICS: Record<SpectraLiveExchange["status"], PrismOptics> = {
   streaming: "working",
   waiting: "waiting",
   failed: "failed",
+  stopped: "dormant",
 };
 
 /** Spectra beside its reply: the live prism, turning while it works, leaning toward a near pointer and turning when pressed. */
@@ -2409,10 +2410,11 @@ export function ConversationSurface({
                       steps={liveExchange.steps}
                       caption={liveExchange.caption}
                       answers={liveExchange.answers}
-                      active={liveExchange.status !== "failed" && liveExchange.status !== "waiting"}
+                      active={liveExchange.status !== "failed" && liveExchange.status !== "waiting" && liveExchange.status !== "stopped"}
                       hasOutput={
                         Boolean(liveExchange.content) ||
-                        liveExchange.status === "failed"
+                        liveExchange.status === "failed" ||
+                        liveExchange.status === "stopped"
                       }
                       persistKey={liveExchange.runId ?? liveExchange.id}
                       startedAt={liveExchange.startedAt}

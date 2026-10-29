@@ -80,8 +80,10 @@ import {
   SurfaceNewMenu,
   SurfaceSearch,
   SurfaceSelectToggle,
+  SurfaceViewSwitch,
   type BlueprintChoiceKey,
 } from "./surface-chrome";
+import { LayoutGrid, Rows3 } from "@/components/icons/glyph-icons";
 import { Button } from "@/components/ui/button";
 import { beginCreation, sendInto } from "../life/use-life";
 import { ClassShelf, classWorkspaceIdentity, isClassWorkspace } from "./class-shelf";
@@ -243,6 +245,10 @@ export function ReplicaPresentationLoader({
 }
 
 const QUICK_LABELS = { recent: "Recent", favorites: "Favorites", shared: "Shared" } as const;
+const VIEW_CHOICES = [
+  { key: "shelf", label: "Shelf", icon: LayoutGrid },
+  { key: "list", label: "List", icon: Rows3 },
+] as const;
 
 /** What a quick view of the Library lists: never threads. */
 const PLACES_AND_WORK: TreeNode["kind"][] = ["folder", "workspace", "work"];
@@ -387,8 +393,12 @@ function LibraryOrganizerContent({
   const currentParentRef = useRef(currentParentId);
   currentParentRef.current = currentParentId;
 
+  // Folder/class shelves own their paginated reads. Keep the hidden list
+  // unsubscribed; the root shelf still uses this query for its places.
+  const nestedShelf = inFolder && currentParentId !== null && !searching &&
+    filter === "all" && view === "shelf" && renamingId === null;
   const children = useTreeChildren(currentParentId, {
-    enabled: inFolder && !searching,
+    enabled: inFolder && !searching && !nestedShelf,
     sortKey,
     direction: sortDirection,
     typeFilter: filter,
@@ -439,7 +449,9 @@ function LibraryOrganizerContent({
       ? path!.node
       : null;
   const shelfable = inFolder && !searching;
-  const shelf = shelfable && filter === "all" && view === "shelf";
+  // Shelf cards have no name field. Use the existing row editor during a
+  // rename, then return to the reader's chosen view without changing it.
+  const shelf = shelfable && filter === "all" && view === "shelf" && renamingId === null;
 
   const picking = useMemo<WorkPicking | undefined>(
     () =>
@@ -1146,7 +1158,7 @@ function LibraryOrganizerContent({
           {toolbarLead}
           <nav
             aria-label="Location"
-            className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto text-ui"
+            className="flex min-w-0 items-center gap-0.5 overflow-x-auto text-ui"
           >
             {searching ? (
               <span className="truncate text-[var(--text-secondary)]">
@@ -1164,6 +1176,19 @@ function LibraryOrganizerContent({
               />
             ) : null}
           </nav>
+          {/* Shelf or List sits beside where you are, one press away. */}
+          {shelfable ? (
+            <SurfaceViewSwitch
+              compact
+              view={shelf ? "shelf" : "list"}
+              onChange={(next) => {
+                setView(next);
+                // The shelf shows everything; asking for it lifts a type filter.
+                if (next === "shelf") setFilter("all");
+              }}
+              views={VIEW_CHOICES}
+            />
+          ) : null}
         </div>
 
         <div className="surface-bar-tools">
@@ -1207,6 +1232,7 @@ function LibraryOrganizerContent({
               label: "Sync a computer folder",
               run: () => void folderSync.sync(),
             }}
+            onSyncFiles={{ label: "Sync computer files", run: () => void folderSync.syncFiles() }}
           />
           )}
           {onToggleSelect && location.kind !== "trash" ? (
@@ -1215,8 +1241,6 @@ function LibraryOrganizerContent({
           {/* How the place is shown, narrowed and ordered: one menu, so the
               bar is where you are, search, New and Select. */}
           <SurfaceMoreMenu
-            view={shelfable ? (shelf ? "shelf" : "list") : undefined}
-            onViewChange={shelfable ? setView : undefined}
             filter={filter}
             onFilterChange={setFilter}
             sortKey={sortKey}
@@ -1269,6 +1293,8 @@ function LibraryOrganizerContent({
               onOpen={openNode}
               onMenu={(event, node) => {
                 event.preventDefault();
+                // Shelves show work from across the Library, not only this listing's rows.
+                noteNodes([node]);
                 setSelection((current) => selectRow(current, rows, node.nodeId, "replace"));
                 setMenu({ x: event.clientX, y: event.clientY, nodeIds: [node.nodeId] });
               }}
@@ -1285,6 +1311,8 @@ function LibraryOrganizerContent({
               onOpen={openNode}
               onMenu={(event, node) => {
                 event.preventDefault();
+                // Shelves show work from across the Library, not only this listing's rows.
+                noteNodes([node]);
                 setSelection((current) => selectRow(current, rows, node.nodeId, "replace"));
                 setMenu({ x: event.clientX, y: event.clientY, nodeIds: [node.nodeId] });
               }}
@@ -1303,6 +1331,7 @@ function LibraryOrganizerContent({
               onOpen={openNode}
               onMenu={(event, node) => {
                 event.preventDefault();
+                noteNodes([node]);
                 setMenu({ x: event.clientX, y: event.clientY, nodeIds: [node.nodeId] });
               }}
               onCreate={() => void createWorkAt("document", folderShelf.nodeId)}
@@ -1457,8 +1486,8 @@ function LibraryOrganizerContent({
                       now={now}
                       callbacks={rowCallbacks}
                       ink={
-                        node.workspace?.starterKey === "managebac-class"
-                          ? book.named(node.name)?.ink
+                        node.kind === "workspace"
+                          ? ((isClassWorkspace(node) ? book.named(node.name)?.ink : undefined) ?? node.workspace?.color)
                           : undefined
                       }
                       syncLabel={

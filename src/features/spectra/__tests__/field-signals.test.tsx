@@ -11,7 +11,6 @@ import {
 import { SpectraMark } from "@/components/spectra-mark";
 import { PrismLoader } from "@/components/spectra-prism-optic";
 import { MARK_POSE, PRISM_PALETTES, prismSvg } from "../life/prism";
-import { choosePrismClaim } from "@/app/landing/prism/prism-slot";
 import { ArtifactCard } from "../components/artifact-card";
 import type { InteractionState } from "../collaboration/interaction-model";
 
@@ -92,45 +91,6 @@ describe("fieldStateFor", () => {
   it("falls back to active for everything else", () => {
     expect(fieldStateFor(interactionState("active", "hover"))).toBe("active");
     expect(fieldStateFor(interactionState("settled", "select"))).toBe("active");
-  });
-});
-
-describe("landing prism claims", () => {
-  it("prefers an on-screen claim over a higher-priority off-screen scene", () => {
-    const visible = { width: 100, height: 100 };
-    expect(
-      choosePrismClaim(
-        [
-          {
-            id: 1,
-            priority: 1,
-            rect: {
-              left: 20,
-              right: 120,
-              top: 20,
-              bottom: 120,
-              width: 100,
-              height: 100,
-            },
-            value: "hero",
-          },
-          {
-            id: 2,
-            priority: 99,
-            rect: {
-              left: 20,
-              right: 120,
-              top: 2000,
-              bottom: 2100,
-              width: 100,
-              height: 100,
-            },
-            value: "reveal",
-          },
-        ],
-        visible,
-      ),
-    ).toBe("hero");
   });
 });
 
@@ -289,12 +249,6 @@ describe("one field engine", () => {
     );
     expect(surfaceField).toContain("export function EnvironmentField");
     expect(surfaceField).toContain('from "./grain-renderer"');
-    const landingField = readFileSync(
-      "src/app/landing/field/landing-field.tsx",
-      "utf8",
-    );
-    expect(landingField).toContain("<EnvironmentField");
-    expect(landingField).not.toContain("GrainField");
   });
 
   it("no field file owns a continuous JavaScript loop", () => {
@@ -310,24 +264,10 @@ describe("one field engine", () => {
     }
   });
 
-  it("the landing prism renders on the shared demand clock and wakes after visibility returns", () => {
-    const prismCanvas = readFileSync(
-      "src/app/landing/prism3d/PrismCanvas.tsx",
-      "utf8",
-    );
-    expect(prismCanvas).toContain('frameloop="demand"');
-    expect(prismCanvas).not.toContain('frameloop="always"');
-    expect(prismCanvas).toContain("return onStoryFrame(() => invalidate())");
-
-    const storyCanvas = readFileSync(
-      "src/app/landing/story/story-canvas.tsx",
-      "utf8",
-    );
-    expect(storyCanvas).toContain(
-      'document.addEventListener("visibilitychange"',
-    );
-    expect(storyCanvas).toContain("if (!document.hidden) wake()");
-    expect(storyCanvas).toContain("window.cancelAnimationFrame(raf)");
+  it("the landing's light draws only while something changes, and not at all for reduced motion", () => {
+    const light = readFileSync("src/app/landing/spectra/light/light-field.tsx", "utf8");
+    expect(light).toContain("prefers-reduced-motion: reduce");
+    expect(light).not.toContain("setInterval");
   });
 
   it("the mark is the island's prism in both themes, and the live prism is the same body on a canvas", () => {
@@ -408,7 +348,7 @@ describe("DS-4 brand violet contrast", () => {
 
     const landingCss = readFileSync("src/styles/spectra-landing.css", "utf8");
     const landingPrimary = landingCss.match(
-      /\.landing-btn\[data-tone="primary"\]\s*\{[^}]*\}/,
+      /\.landing-button\[data-tone="primary"\]\s*\{[^}]*\}/,
     )![0];
     expect(landingPrimary).toContain("color: var(--text-inverse)");
 

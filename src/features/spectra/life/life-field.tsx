@@ -165,7 +165,17 @@ export function LifeField() {
     };
     const sweep = () => {
       for (const [element, { formed, rect }] of ghosts) {
-        if (element.isConnected && element.matches(GHOST)) continue;
+        if (element.isConnected && element.matches(GHOST)) {
+          // A ghost is drawn where its placeholder was. Once the placeholder
+          // scrolls or shifts away it fades, and is drawn again where the
+          // placeholder now is if that is still in view, so no bars are left
+          // standing over whatever slid under them.
+          const now = element.getBoundingClientRect();
+          if (Math.abs(now.top - rect.top) < 4 && Math.abs(now.left - rect.left) < 4) continue;
+          ghosts.delete(element);
+          formed.release();
+          continue;
+        }
         ghosts.delete(element);
         // The ghost hands over: its lines flow into the content that took its place.
         const content = element.isConnected ? (element as HTMLElement) : replacementOf(rect);
@@ -185,8 +195,13 @@ export function LifeField() {
     ghostObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-life-ghost"] });
     scan();
     document.documentElement.dataset.life = "on";
+    const rescan = () => {
+      if (ghosts.size && !scanFrame) scanFrame = requestAnimationFrame(scan);
+    };
 
     window.addEventListener("resize", resize);
+    window.addEventListener("resize", rescan);
+    document.addEventListener("scroll", rescan, { passive: true, capture: true });
     window.addEventListener("pointermove", move, { passive: true });
     window.addEventListener("pointerdown", down, { passive: true });
     window.addEventListener("dragover", dragOver, { passive: true });
@@ -205,6 +220,8 @@ export function LifeField() {
       cancelAnimationFrame(frame);
       themeObserver.disconnect();
       window.removeEventListener("resize", resize);
+      window.removeEventListener("resize", rescan);
+      document.removeEventListener("scroll", rescan, { capture: true });
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerdown", down);
       document.documentElement.removeEventListener("pointerleave", leave);

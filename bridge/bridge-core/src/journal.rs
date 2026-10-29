@@ -575,6 +575,20 @@ impl Journal {
         Ok(())
     }
 
+    /// Commit related settings together, before publishing a new pairing.
+    pub fn set_configs(&self, values: &[(&str, &str)]) -> anyhow::Result<()> {
+        let mut connection = self.connection.lock().unwrap();
+        let tx = connection.transaction()?;
+        for (key, value) in values {
+            tx.execute(
+                "INSERT OR REPLACE INTO config(key,value) VALUES(?,?)",
+                params![key, value],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// The collision-resolved destination is part of a move's durable intent.
     pub fn reserve_structure_target(
         &self,
@@ -627,6 +641,22 @@ impl Journal {
              )",
             params![op_id, direction, payload, unix_ms(), op_id, direction],
         )?;
+        Ok(())
+    }
+
+    /// Pending deliveries belong to the connection that authorized them. Keep
+    /// operation history, but never replay its queue under a later pairing.
+    pub fn retire_pairing_work(&self) -> anyhow::Result<()> {
+        let mut connection = self.connection.lock().unwrap();
+        let tx = connection.transaction()?;
+        tx.execute(
+            "UPDATE ops SET state='failed', error_code='device-unpaired', updated_at=?
+             WHERE state <> 'verified' AND op_id IN (SELECT op_id FROM queue)",
+            [unix_ms()],
+        )?;
+        tx.execute("DELETE FROM queue", [])?;
+        tx.execute("DELETE FROM native_ack_queue", [])?;
+        tx.commit()?;
         Ok(())
     }
     pub fn due_queue(&self, limit: usize) -> anyhow::Result<Vec<QueueItem>> {
@@ -845,6 +875,47 @@ fn unix_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disconnect_retires_deferred_deliveries_without_deleting_operation_history() {
+        let journal = Journal::in_memory().unwrap();
+        let op = journal.begin_intent("old-connection", "write", None, None, None).unwrap();
+        journal.enqueue(&op.op_id, "outbound-change", "{}").unwrap();
+        let queued = journal.due_queue(10).unwrap().remove(0);
+        journal.retry_queue(queued.id, Duration::from_secs(60)).unwrap();
+        journal.enqueue_native_ack("old-request", None, None, "verified", None, None).unwrap();
+        journal.retire_pairing_work().unwrap();
+        assert!(journal.due_native_acks(10).unwrap().is_empty());
+        let connection = journal.connection.lock().unwrap();
+        assert_eq!(connection.query_row("SELECT COUNT(*) FROM queue", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(connection.query_row("SELECT error_code FROM ops WHERE op_id=?", [&op.op_id], |row| row.get::<_, String>(0)).unwrap(), "device-unpaired");
+    }
+
+    #[test]
+    fn pairing_settings_commit_together_or_keep_the_old_pairing() {
+        let journal = Journal::in_memory().unwrap();
+        journal
+            .set_configs(&[("device_id", "old"), ("deployment_url", "https://old.test")])
+            .unwrap();
+        journal.connection.lock().unwrap().execute_batch(
+            "CREATE TRIGGER reject_pairing BEFORE INSERT ON config WHEN NEW.key='browser_session_token' BEGIN SELECT RAISE(ABORT, 'disk failure'); END;"
+        ).unwrap();
+        assert!(
+            journal
+                .set_configs(&[
+                    ("device_id", "new"),
+                    ("deployment_url", "https://new.test"),
+                    ("browser_session_token", "new-token")
+                ])
+                .is_err()
+        );
+        assert_eq!(journal.config("device_id").unwrap().as_deref(), Some("old"));
+        assert_eq!(
+            journal.config("deployment_url").unwrap().as_deref(),
+            Some("https://old.test")
+        );
+        assert_eq!(journal.config("browser_session_token").unwrap(), None);
+    }
 
     #[test]
     fn intent_is_durable_and_idempotency_reuses_the_same_op() {

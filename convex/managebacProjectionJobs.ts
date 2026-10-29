@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { settleStudentSyncState } from "./schoolSyncShared";
 import { makeFunctionReference } from "convex/server";
 import { type MutationCtx, type QueryCtx } from "./_generated/server";
 import { internalQuery } from "./functions";
@@ -193,6 +194,7 @@ export async function settleProviderWork(ctx: MutationCtx, owner: WorkOwner, com
       stage: outcome.status === "awaiting_review" ? "review_conflicts" : "complete",
       counts: { ...run.counts, conflicts: outcome.conflicts }, completedAt: now, updatedAt: now,
     });
+    await settleStudentSyncState(ctx, run, outcome.status, now);
     // Sync completion already reported the connection before this staged
     // work drained; a failure recorded since then must not stay "connected".
     if (outcome.status === "partial") {

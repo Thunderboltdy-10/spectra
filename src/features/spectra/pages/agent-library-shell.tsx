@@ -187,6 +187,7 @@ export function AgentLibraryShell({
   /** The scope whose first read has started; a scope torn down starts over. */
   const firstLoad = useRef<string | null>(null);
   currentScope.current = catalogKey;
+  const catalogFailed = agentCatalog.status === "error" && agentCatalog.items.length === 0;
   const loading = !agentCatalog.unavailable && (publicLoading || ((agentCatalog.status === "idle" || agentCatalog.status === "loading") && artifacts.length === 0));
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -695,7 +696,21 @@ export function AgentLibraryShell({
             <LoadingRows label="Loading agents" count={6} className="mt-8" />
           ) : (
             <>
-              <CatalogProgress catalog={agentCatalog} label="agents" />
+              {catalogFailed ? (
+                // Never "make your first agent" when the agents simply did not arrive.
+                <ProblemState
+                  compact
+                  title="Your agents couldn't load"
+                  detail="They are still there. Try again in a moment."
+                  action={
+                    <Button variant="secondary" size="sm" onClick={() => void refreshCatalog(true)}>
+                      Try again
+                    </Button>
+                  }
+                />
+              ) : (
+                <CatalogProgress catalog={agentCatalog} label="agents" />
+              )}
               {!agentCatalog.isDone && agentCatalog.items.length > 0 ? <p role="status" className="text-micro text-[var(--text-secondary)]">More agents and filter choices are loading.</p> : null}
               {publicError ? (
                 <ProblemState
@@ -709,7 +724,7 @@ export function AgentLibraryShell({
                   }
                 />
               ) : null}
-              {!publicError && !discover.length && !installed.length && !yours.length && !shared.length && !search && subject === "all" && capability === "all" ? (
+              {catalogFailed ? null : !publicError && !discover.length && !installed.length && !yours.length && !shared.length && !search && subject === "all" && capability === "all" ? (
                 <AgentStarters busy={busyKey === "create"} onStart={(starter) => void createAgent(starter)} />
               ) : !publicError && !discover.length && !installed.length && !yours.length && !shared.length ? (
                 <EmptyState

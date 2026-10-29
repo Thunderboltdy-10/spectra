@@ -202,7 +202,13 @@ export default defineSchema({
       v.literal("school"),
       v.literal("roles"),
       v.literal("groups"),
+      // Named people, by account id: a message to one person or a few.
+      v.literal("people"),
     ),
+    /** Who it is from: the school's admins (unset), or Spectra itself, sent by the platform's operator. */
+    origin: v.optional(v.union(v.literal("school"), v.literal("platform"))),
+    /** One platform message lands in each school it went to; this ties those copies together. */
+    platformMessageKey: v.optional(v.string()),
     targetIds: v.array(v.string()),
     audienceSnapshotCount: v.number(),
     status: v.union(
@@ -222,7 +228,8 @@ export default defineSchema({
   })
     .index("by_school_status", ["schoolId", "status"])
     .index("by_status_scheduled", ["status", "scheduledAt"])
-    .index("by_school_created", ["schoolId", "createdAt"]),
+    .index("by_school_created", ["schoolId", "createdAt"])
+    .index("by_platform_message", ["platformMessageKey", "createdAt"]),
 
   schoolAnnouncementDeliveries: defineTable({
     schoolId: v.id("schools"),
@@ -299,6 +306,22 @@ export default defineSchema({
     .index("by_reporter_created", ["reporterAccountId", "createdAt"])
     .index("by_status_created", ["status", "createdAt"])
     .index("by_created", ["createdAt"]),
+
+  // Walkthrough requests from the landing page's close, one per email
+  // address, read by the platform team in the superadmin's Requests.
+  landingRequests: defineTable({
+    email: v.string(),
+    name: v.string(),
+    school: v.string(),
+    role: v.string(),
+    message: v.string(),
+    usesManageBac: v.boolean(),
+    status: v.union(v.literal("new"), v.literal("answered"), v.literal("closed")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_email", ["email"])
+    .index("by_status_created", ["status", "createdAt"]),
 
   schoolRequests: defineTable({
     schoolId: v.optional(v.id("schools")),
@@ -1181,6 +1204,18 @@ export default defineSchema({
     // School export pages through one school's rows instead of every tenant's.
     .index("by_school", ["schoolId", "updatedAt"]),
 
+  schoolSyncBootstraps: defineTable({
+    accountId: v.id("accounts"),
+    integrationId: v.id("schoolIntegrations"),
+    setupVersion: v.optional(v.number()),
+    attemptCount: v.number(),
+    lastAttemptAt: v.number(),
+    nextAttemptAt: v.number(),
+    completedAt: v.optional(v.number()),
+    classesListedAt: v.optional(v.number()),
+    classSelectionConfirmedAt: v.optional(v.number()),
+  }).index("by_account_integration", ["accountId", "integrationId"]),
+
   externalSyncRuns: defineTable({
     integrationId: v.id("schoolIntegrations"),
     schoolId: v.id("schools"),
@@ -1254,6 +1289,7 @@ export default defineSchema({
     .index("by_status_next_attempt", ["status", "nextAttemptAt"])
     .index("by_integration_created", ["integrationId", "createdAt"])
     .index("by_account_created", ["accountId", "createdAt"])
+    .index("by_account_integration_kind_created", ["accountId", "integrationId", "kind", "createdAt"])
     .index("by_integration_account_status", [
       "integrationId",
       "accountId",
@@ -1910,6 +1946,9 @@ export default defineSchema({
     icon: v.optional(v.string()),
     color: v.optional(v.string()),
     starterKey: v.optional(v.string()),
+    // A class: the student's chosen kind for the workspace. Absent, a
+    // workspace made for a ManageBac class is one and any other is not.
+    isClass: v.optional(v.boolean()),
     sourceContext: v.optional(
       v.object({
         provider: v.string(),
@@ -2324,6 +2363,8 @@ export default defineSchema({
     accountId: v.id("accounts"),
     deviceId: v.id("bridgeDevices"),
     rootLabel: v.string(),
+    // A basename only. Absolute paths remain on the device.
+    selectedFile: v.optional(v.string()),
     grantId: v.string(),
     rootKey: v.optional(v.string()),
     rootOrgNodeId: v.optional(v.id("orgNodes")),
@@ -4206,6 +4247,8 @@ export default defineSchema({
     sourceUpdatedAt: v.number(),
     indexedAt: v.number(),
     chunkCount: v.number(),
+    /** What the item is about, in words: its most central passages, nearest the centroid. */
+    about: v.optional(v.string()),
     embeddingVersion: v.optional(v.string()),
     embeddingState: v.union(v.literal("complete"), v.literal("pending"), v.literal("disabled")),
     centroid: v.optional(v.array(v.float64())),
@@ -4490,7 +4533,10 @@ export default defineSchema({
     /** When the generated title was written. It is written once, never replaced. */
     titleGeneratedAt: v.optional(v.number()),
     summaryShort: v.optional(v.string()),
+    /** Running notes on everything before `summaryThrough`, so a thread keeps its whole past. */
     summaryLong: v.optional(v.string()),
+    /** createdAt of the last message folded into summaryLong. */
+    summaryThrough: v.optional(v.number()),
     origin: v.union(
       v.literal("chat"),
       v.literal("workspace"),

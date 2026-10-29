@@ -9,6 +9,8 @@ const isPublicRoute = createRouteMatcher([
   "/legal(.*)",
   "/sign-in(.*)",
   "/sign-up(.*)",
+  // Invitation instructions must be readable before someone has an account.
+  "/request-access",
   "/public(.*)",
   // Bridge installers download before anyone signs in on that computer.
   "/bridge/download(.*)",

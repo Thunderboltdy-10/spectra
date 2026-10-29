@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "@/components/icons";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { setToastSink, type ToastTone } from "@/components/ui/toast";
+import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import type { SpectraRunPointer } from "../ai/use-spectra-run";
 import { postSpectra } from "../data/api";
@@ -25,7 +25,7 @@ import { forgetThread, placeThread, useArrangement } from "./arrange";
 import { arrangeTabs, dropTab, islandStatus, statusLight, stepTab, type IslandSide, type IslandTab } from "./island-model";
 import { IslandRail, RAIL_DONE, RailGhost, useRailSeat, type RailHandlers } from "./island-rail";
 import { boxOf, morphShape } from "./shape-morph";
-import { IslandNotice, NOTICE_COLOUR, type IslandNoticeData, type NoticeTone } from "./notice";
+import { NOTICE_COLOUR } from "./notice";
 import { QuestionCard } from "./question-card";
 import { answerQuestion, pendingQuestions, type QuestionAnswer } from "./questions";
 import { refreshRunTabs, useRunTabs } from "./run-tabs";
@@ -36,7 +36,6 @@ import { useFlip, useTabDrag } from "./use-tab-drag";
 import { threadHref } from "../chat/home-routes";
 import { firstTipMoment } from "../onboarding/first-tips";
 
-const TOAST_TONE: Record<ToastTone, NoticeTone> = { success: "done", error: "problem", warning: "needs", info: "info" };
 
 /*
  * The island (docs/design/ISLAND.md): where the user talks to Spectra, on
@@ -49,11 +48,18 @@ const TOAST_TONE: Record<ToastTone, NoticeTone> = { success: "done", error: "pro
 type Shape = "composer";
 type ReplyTo = { runId: string; threadId: string; title: string } | "new" | null;
 
-const CLOSE_DELAY = 450;
-/** A hand resting on a tab this long means to look; passing over it does not. */
-const VIEW_DELAY = 420;
+/** Leaving the island: it settles back quickly, so it never lingers over the page. */
+const CLOSE_DELAY = 220;
+/** A hand resting still on a tab this long means to look; passing over it does not. */
+const VIEW_DELAY = 560;
 /** Moving from one open card's tab to the next. */
-const VIEW_SWITCH_DELAY = 140;
+const VIEW_SWITCH_DELAY = 160;
+/** A card only shown on hover goes this soon after the hand leaves its tab and the card. */
+const PEEK_CLOSE_DELAY = 140;
+/** After a press elsewhere on the island (new thread, stop, send), tabs under the hand stay quiet this long. */
+const PRESS_QUIET_MS = 900;
+/** Movement within this many pixels still counts as resting. */
+const REST_SLOP = 5;
 const ARRIVAL_MS = 1600;
 
 const PLACEHOLDER_TITLE = 36;
@@ -85,13 +91,6 @@ function stageHalf() {
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 const within = (promise: Promise<unknown>, ms: number) => Promise.race([promise, new Promise((resolve) => window.setTimeout(resolve, ms))]);
 
-function isEditable(target: EventTarget | null) {
-  const element = target as HTMLElement | null;
-  if (!element?.closest) return false;
-  if (element.closest("[data-island]")) return false;
-  return Boolean(element.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']"));
-}
-
 function menuOpen() {
   return Boolean(document.querySelector("[role='menu'][data-state='open'], [role='listbox'][data-state='open']"));
 }
@@ -119,7 +118,6 @@ export function Island() {
   const targetRef = useRef(target);
   const shownRef = useRef(shown);
   const generation = useRef(0);
-  const [faded, setFaded] = useState(false);
 
   const frameRef = useRef<HTMLDivElement>(null);
   const bandRef = useRef<HTMLDivElement>(null);
@@ -132,6 +130,9 @@ export function Island() {
   const arrivingUntil = useRef(0);
   const closeTimer = useRef(0);
   const viewTimer = useRef(0);
+  const peekTimer = useRef(0);
+  const quietUntil = useRef(0);
+  const restAnchor = useRef<{ x: number; y: number } | null>(null);
   const pointerInside = useRef(false);
   const focusOnShow = useRef(false);
 
@@ -272,7 +273,10 @@ export function Island() {
 
   /* ------------------------------------------------------------ notices */
 
-  const [notice, setNotice] = useState<IslandNoticeData | null>(null);
+  // A finished or stopped thread's toast opens its view here; the view is set up further down.
+  const openRunRef = useRef<(runId: string) => void>(() => {});
+  const openRun = useCallback((runId: string) => openRunRef.current(runId), []);
+
   const [announcement, setAnnouncement] = useState("");
   const lastStates = useRef(new Map<string, string>());
   useEffect(() => {
@@ -289,37 +293,23 @@ export function Island() {
         setAnnouncement(`${ready}.`);
         // A reply landing in the thread on screen is its own news; work it made elsewhere is still called out.
         const watched = tab.threadId === focusThread && !tab.source.card?.provenance?.artifactTitles?.length;
-        if (!watched) setNotice({ key: `run:${tab.runId}:done`, runId: tab.runId, text: ready, tone: "done" });
+        if (!watched && !madeOnScreen(tab)) toast.success(ready, { id: `run:${tab.runId}:done`, action: { label: "Open", onClick: () => openRun(tab.runId) } });
         radiateFromIsland(STATUS_COLOURS.done, 14, 24);
       } else if (tab.state === "failed_terminal" || tab.state === "paused") {
-        setNotice({ key: `run:${tab.runId}:problem`, runId: tab.runId, text: `${tab.title} stopped with a problem`, tone: "problem" });
+        toast.error(`${tab.title} stopped with a problem`, { id: `run:${tab.runId}:problem`, action: { label: "Open", onClick: () => openRun(tab.runId) } });
         setAnnouncement(`${tab.title} stopped with a problem.`);
         radiateFromIsland(STATUS_COLOURS.problem, 8, 14);
       }
     }
     lastStates.current = next;
-  }, [allTabs, focusThread, radiateFromIsland]);
-
-  // The app's own words reach the user here too, in the colour of what happened.
-  useEffect(
-    () =>
-      setToastSink({
-        show: ({ id, tone, message, description, action, duration, onDismiss }) => {
-          const noticeTone = TOAST_TONE[tone];
-          setNotice({ key: `toast:${id}`, toastId: id, text: message, detail: description, tone: noticeTone, action, duration, onGone: onDismiss });
-          if (typeof message === "string") setAnnouncement(message);
-          if (noticeTone !== "info") radiateFromIsland(NOTICE_COLOUR[noticeTone], 8, 14);
-        },
-        dismiss: (id) => setNotice((current) => (current?.toastId !== undefined && (id === undefined || current.toastId === id) ? null : current)),
-      }),
-    [radiateFromIsland],
-  );
+  }, [allTabs, focusThread, openRun, radiateFromIsland]);
 
   // Notifications reach the user here (SHELL.md): the island lights in their colour and the words form from it.
   useEffect(
     () =>
       spectraBus.on("island.notify", ({ id, title, detail, tone }) => {
-        setNotice({ key: `notification:${id}`, notificationId: id, text: title, detail, tone });
+        const say = tone === "problem" ? toast.error : tone === "needs" ? toast.warning : toast.info;
+        say(title, { id: `notification:${id}`, description: detail, action: { label: "Open", onClick: () => spectraBus.emit("notifications.choose", { id }) } });
         setAnnouncement(title);
         radiateFromIsland(NOTICE_COLOUR[tone], 10, 18);
       }),
@@ -454,6 +444,12 @@ export function Island() {
     },
     [markSeen],
   );
+  useEffect(() => {
+    openRunRef.current = (runId) => {
+      setReaching(true);
+      void go(targetRef.current ?? "composer").then(() => openView(runId, true));
+    };
+  }, [go, openView]);
 
   const viewOffset = useMemo(() => {
     if (!viewTab) return 0;
@@ -571,12 +567,12 @@ export function Island() {
   const onEnter = () => {
     pointerInside.current = true;
     setReaching(true);
-    setFaded(false);
     window.clearTimeout(closeTimer.current);
   };
   const onLeave = () => {
     pointerInside.current = false;
     window.clearTimeout(viewTimer.current);
+    setView((current) => (current && !current.pinned ? null : current));
     scheduleClose();
   };
 
@@ -603,15 +599,6 @@ export function Island() {
 
   /* ------------------------------------------------------------ sending */
 
-  // The run a new conversation started takes the card as soon as it has a tab.
-  const peekNext = useRef(false);
-  const activeRunId = engine?.activeRunId ?? null;
-  useEffect(() => {
-    if (!peekNext.current || !activeRunId || !allTabs.some((tab) => tab.runId === activeRunId)) return;
-    peekNext.current = false;
-    openView(activeRunId, true);
-  }, [activeRunId, allTabs, openView]);
-
   const send = useCallback(
     (message: ComposerSend) => {
       if (!engine) return;
@@ -633,11 +620,8 @@ export function Island() {
         const trip = life.travel({ strokes }, { absorb: home }, { colour: "spectrum" });
         void within(trip.arrived, 1600).then(receive);
       }
-      // A new conversation has nowhere on the page to show yet: its card opens over its tab, so what was sent is seen
-      // working. A page that binds a thread (chat) shows it itself.
-      const unseen = !focus && !slot?.bindsThread;
-      peekNext.current = unseen;
-      if (unseen) setReaching(true);
+      // Sending never opens a card over the page: the new thread's tab stands on the rail, working, to open when wanted.
+      quietUntil.current = performance.now() + PRESS_QUIET_MS;
       const options = {
         ...(slot?.bindsThread ? {} : { threadId: focus?.threadId ?? null }),
         ...(message.references.length ? { references: message.references } : {}),
@@ -664,8 +648,11 @@ export function Island() {
       window.setTimeout(() => {
         void go("composer", { focus: true }).then(() => {
           // Sent at once, the words go as the student's own message, from the thread now in focus.
-          if (sendNow && prefill?.text)
+          if (sendNow && prefill?.text) {
+            // Words typed into the field on the way (a demonstration types them) go with it.
+            if (composerRef.current?.hasContent()) composerRef.current.prefill("", []);
             return latestSend.current({ text: prefill.text, references: prefill.references ?? [], attachments: [], wordsRect: null, lineCount: 1 });
+          }
           // Work handed over without words (picked work to ask about) comes in as references, under an empty field.
           if (prefill?.text || prefill?.references?.length) composerRef.current?.prefill(prefill.text ?? "", prefill.references);
         });
@@ -711,12 +698,6 @@ export function Island() {
         closeView();
         return;
       }
-      // Typing in an editor fades the empty island away, so it never sits over the words;
-      // a hand near its place brings it back.
-      if (!mod && event.key.length === 1 && isEditable(event.target) && !composerRef.current?.hasContent()) setFaded(true);
-    };
-    const onPointer = (event: PointerEvent) => {
-      if (event.clientY > window.innerHeight - 140 && Math.abs(event.clientX - stageCentre()) < 220) setFaded(false);
     };
     // A press anywhere off the island puts the open card away, whether it was
     // chosen or only shown on hover.
@@ -727,11 +708,9 @@ export function Island() {
       closeView();
     };
     window.addEventListener("keydown", onKey);
-    window.addEventListener("pointermove", onPointer, { passive: true });
     window.addEventListener("pointerdown", onDown, true);
     return () => {
       window.removeEventListener("keydown", onKey);
-      window.removeEventListener("pointermove", onPointer);
       window.removeEventListener("pointerdown", onDown, true);
     };
   }, [closeView, compose, view]);
@@ -813,12 +792,40 @@ export function Island() {
     void go("composer", { focus: true }).then(() => composerRef.current?.focus());
   };
 
+  /** A card only shown on hover goes once the hand is off both its tab and the card. */
+  const schedulePeekClose = () => {
+    window.clearTimeout(peekTimer.current);
+    peekTimer.current = window.setTimeout(() => {
+      setView((current) => (current && !current.pinned ? null : current));
+    }, PEEK_CLOSE_DELAY);
+  };
+  const keepPeek = () => window.clearTimeout(peekTimer.current);
+
+  /** Opens a tab's card once the hand has rested on it, not when it only passes over. */
+  const armView = (tab: IslandTab) => {
+    window.clearTimeout(viewTimer.current);
+    // A thread already on screen (this page's, or the Side's) needs no card over it; nor does a hand just back from a press.
+    if (tabDrag.dragging || onScreen(tab.threadId) || performance.now() < quietUntil.current) return;
+    viewTimer.current = window.setTimeout(() => openView(tab.runId, false), view ? VIEW_SWITCH_DELAY : VIEW_DELAY);
+  };
+
   const railHandlers: RailHandlers = {
-    onHover: (tab) => {
+    onHover: (tab, point) => {
+      keepPeek();
+      restAnchor.current = point;
+      armView(tab);
+    },
+    onMove: (tab, point) => {
+      const anchor = restAnchor.current;
+      if (anchor && Math.hypot(point.x - anchor.x, point.y - anchor.y) <= REST_SLOP) return;
+      // Still moving: the wait starts again where the hand is now.
+      restAnchor.current = point;
+      if (!view || view.runId !== tab.runId) armView(tab);
+    },
+    onLeave: () => {
       window.clearTimeout(viewTimer.current);
-      // A thread already on screen (this page's, or the Side's) needs no card over it.
-      if (tabDrag.dragging || onScreen(tab.threadId)) return;
-      viewTimer.current = window.setTimeout(() => openView(tab.runId, false), view ? VIEW_SWITCH_DELAY : VIEW_DELAY);
+      restAnchor.current = null;
+      if (view && !view.pinned) schedulePeekClose();
     },
     onPress: (tab) => {
       if (tabDrag.consumeClick()) return;
@@ -838,10 +845,14 @@ export function Island() {
       data-island-status={status ?? undefined}
       onPointerEnter={onEnter}
       onPointerLeave={onLeave}
-      onFocus={() => {
-        setReaching(true);
-        setFaded(false);
+      onPointerDownCapture={(event) => {
+        // A press anywhere on the island but a tab (new thread, stop, the field) keeps the tabs under the hand from opening.
+        if (!(event.target as Element).closest("[data-island-tab]")) {
+          quietUntil.current = performance.now() + PRESS_QUIET_MS;
+          window.clearTimeout(viewTimer.current);
+        }
       }}
+      onFocus={() => setReaching(true)}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null) && !pointerInside.current) scheduleClose();
       }}
@@ -849,7 +860,6 @@ export function Island() {
         // The island floats at the bottom centre of the stage: between the rail and the Side, gliding as they change.
         "pointer-events-none fixed bottom-0 left-[calc(var(--spectra-rail-width,0px)+var(--spectra-lead-width,0px))] right-[calc(var(--spectra-side-width,0px)+8px)] z-composer-dock flex flex-col items-center gap-2",
         "transition-[opacity,left,right] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)]",
-        faded && "opacity-0 [&_*]:!pointer-events-none",
       )}
     >
       <div aria-live="polite" className="sr-only">
@@ -876,7 +886,7 @@ export function Island() {
       ) : null}
 
       {viewTab ? (
-        <div className="pointer-events-auto">
+        <div className="pointer-events-auto" onPointerEnter={keepPeek} onPointerLeave={() => view && !view.pinned && schedulePeekClose()}>
           <ThreadView
             ref={viewRef}
             tab={viewTab}
@@ -899,23 +909,6 @@ export function Island() {
             onMinimise={closeView}
           />
         </div>
-      ) : null}
-
-      {notice && !question ? (
-        <IslandNotice
-          key={notice.key}
-          notice={notice}
-          onOpen={() => {
-            setNotice(null);
-            if (notice.notificationId) spectraBus.emit("notifications.choose", { id: notice.notificationId });
-            else if (notice.runId) {
-              const runId = notice.runId;
-              setReaching(true);
-              void go(targetRef.current ?? "composer").then(() => openView(runId, true));
-            }
-          }}
-          onDismiss={() => setNotice((current) => (current?.key === notice.key ? null : current))}
-        />
       ) : null}
 
       {switcher ? (
@@ -1043,6 +1036,13 @@ function MenuGlyph({ name }: { name: IconName }) {
       <Icon name={name} size={16} />
     </span>
   );
+}
+
+/** Everything the run made is open in front of the user already: there is nothing to go and open. */
+function madeOnScreen(tab: IslandTab) {
+  const ids = tab.source.card?.provenance?.artifactIds ?? [];
+  return ids.length > 0 && ids.every((id) =>
+    document.querySelector(`.spectra-artifact-studio[data-artifact-id="${CSS.escape(id)}"]`));
 }
 
 /** What a finished run made, by name: the work it wrote, or else its thread. A thread keeps its first title while later asks make other things. */

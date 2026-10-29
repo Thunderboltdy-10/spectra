@@ -51,6 +51,11 @@ async function readHere(request: OfficePreviewRequest) {
   }
 }
 
+/** Reads bytes already in hand, in a worker where one can run. */
+export function readOfficeBytes(request: OfficePreviewRequest, signal: AbortSignal) {
+  return typeof Worker === "undefined" ? readHere(request) : readInWorker(request, signal);
+}
+
 /** Fetches the file at `url` and reads it for showing. `bytes` is its size when the caller already knows it. */
 export async function loadOfficePreview(
   { kind, url, bytes }: { kind: OfficeViewKind; url: string; bytes?: number },
@@ -71,6 +76,5 @@ export async function loadOfficePreview(
   const body = await response.arrayBuffer();
   const actual = officeSizeRefusal(kind, body.byteLength);
   if (actual) throw new OfficePreviewRefusal(actual, "too-large");
-  const request = { kind, bytes: body };
-  return typeof Worker === "undefined" ? readHere(request) : readInWorker(request, signal);
+  return readOfficeBytes({ kind, bytes: body }, signal);
 }

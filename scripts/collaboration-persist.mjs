@@ -69,6 +69,25 @@ export function createCollaborationAuthorizationGuard({
 }) {
   const states = new WeakMap();
   const watched = new Map();
+  const authorizations = new Map();
+  function sharedAuthorization(context) {
+    const key = context.accountId && context.artifactId
+      ? JSON.stringify([context.accountId, context.artifactId, context.partitionKey, context.policyVersion])
+      : context;
+    const existing = authorizations.get(key);
+    if (existing) return existing;
+    let timer;
+    const request = Promise.race([
+      Promise.resolve().then(() => authorize(context)),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(unavailable()), timeoutMs); }),
+    ]);
+    authorizations.set(key, request);
+    void request.finally(() => {
+      clearTimeout(timer);
+      if (authorizations.get(key) === request) authorizations.delete(key);
+    }).catch(() => undefined);
+    return request;
+  }
   const stateFor = context => {
     if (!states.has(context)) states.set(context, { closed: false, inFlight: null });
     return states.get(context);
@@ -114,13 +133,9 @@ export function createCollaborationAuthorizationGuard({
     }
     const state = stateFor(context);
     if (state.inFlight) return state.inFlight;
-    let timer;
     const request = (async () => {
       try {
-        const result = await Promise.race([
-          Promise.resolve().then(() => authorize(context)),
-          new Promise((_, reject) => { timer = setTimeout(() => reject(unavailable()), timeoutMs); }),
-        ]);
+        const result = await sharedAuthorization(context);
         assertOpen(context); // A late response cannot resurrect an expired/closed subscriber.
         if (connected(context) && !fresh(context)) { close(context); throw unavailable(); }
         if (!result?.allowed) {
@@ -139,7 +154,7 @@ export function createCollaborationAuthorizationGuard({
         if (transient && !state.closed && fresh(context)) return context;
         if (transient) close(context);
         throw error;
-      } finally { clearTimeout(timer); }
+      }
     })();
     state.inFlight = request;
     void request.finally(() => { if (state.inFlight === request) state.inFlight = null; }).catch(() => undefined);

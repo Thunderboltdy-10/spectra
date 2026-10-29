@@ -195,6 +195,30 @@ describe("DOCX preservation lens", () => {
     )).toThrow("did not yet have persisted native anchors");
   });
 
+  it("verifies an appended plain paragraph with Word's inherited document font", async () => {
+    const document = Document.create();
+    document.addParagraph("Existing native paragraph.");
+    const opened = await docxLens.open(await document.save());
+    const update = docxProjectionFromContent({
+      ...opened.projection, nativeProjectionComplete: true,
+      blocks: [...opened.projection.blocks, { id: "new-plain-block", type: "paragraph", text: "Appended in Spectra." }],
+    }, opened.projection);
+    const output = await docxLens.mutate(opened.preservedCarry, { kind: "ai-edit", operations: update.operations });
+    const readback = await docxLens.open(output);
+    expect(readback.projection.blocks.at(-1)?.inlineContent).toEqual([{ kind: "text", text: "Appended in Spectra.", format: { fontFamily: "Calibri", fontSizePoints: 11 } }]);
+    const expected = await docxProjectionSemanticDigest(update.projection);
+    expect(await docxProjectionReadbackDigest(readback.projection, update.projection)).toBe(expected);
+    const wrongText = structuredClone(readback.projection);
+    wrongText.blocks.at(-1)!.text = "Lost text";
+    expect(await docxProjectionReadbackDigest(wrongText, update.projection)).not.toBe(expected);
+    const wrongMark = structuredClone(readback.projection);
+    wrongMark.blocks.at(-1)!.inlineContent![0] = { kind: "text", text: "Appended in Spectra.", format: { bold: true, fontFamily: "Times New Roman" } };
+    expect(await docxProjectionReadbackDigest(wrongMark, update.projection)).not.toBe(expected);
+    const explicitFont = structuredClone(update.projection);
+    explicitFont.blocks.at(-1)!.attrs = { format: { fontFamily: "Arial" } };
+    expect(await docxProjectionReadbackDigest(readback.projection, explicitFont)).not.toBe(await docxProjectionSemanticDigest(explicitFont));
+  });
+
   it("appends beside shared native wrappers without requesting a redundant reorder", async () => {
     const source = await fixture("bibliography-source.docx");
     const opened = await docxLens.open(source);

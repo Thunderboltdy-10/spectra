@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/ui/field";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
 /**
@@ -114,6 +115,8 @@ export function WorkspaceEditDialog({
   onTitleChange,
   description,
   onDescriptionChange,
+  isClass,
+  onIsClassChange,
   busy,
   onCancel,
   onSave,
@@ -125,6 +128,9 @@ export function WorkspaceEditDialog({
   onTitleChange: (value: string) => void;
   description: string;
   onDescriptionChange: (value: string) => void;
+  /** A class shows its tasks and tells Spectra the work in it is for that class. */
+  isClass: boolean;
+  onIsClassChange: (value: boolean) => void;
   busy: boolean;
   onCancel: () => void;
   onSave: () => void;
@@ -181,6 +187,15 @@ export function WorkspaceEditDialog({
             />
           </Field>
         </div>
+        <label className="mt-4 flex cursor-pointer items-start gap-3">
+          <span className="min-w-0 flex-1">
+            <span className="block text-caption font-semibold text-[var(--text-primary)]">A class</span>
+            <span className="mt-0.5 block text-micro text-[var(--text-secondary)]">
+              Its work is for one subject. Spectra reads it that way, and a class from School shows its tasks here.
+            </span>
+          </span>
+          <Switch checked={isClass} onCheckedChange={onIsClassChange} className="mt-0.5" />
+        </label>
         <DialogFooter className="mt-4">
           <Button variant="secondary" size="md" onClick={onCancel}>
             Cancel

@@ -843,6 +843,11 @@ export function isGeneralWorkspace(workspace: Doc<"spectraWorkspaces">) {
   return workspace.starterKey === GENERAL_STARTER_KEY;
 }
 
+/** A class is a workspace like any other, marked as one; a ManageBac class's starts marked. */
+export function workspaceIsClass(workspace: Pick<Doc<"spectraWorkspaces">, "isClass" | "starterKey">) {
+  return workspace.isClass ?? workspace.starterKey === "managebac-class";
+}
+
 /** The tree node for a workspace, created at the Library root if missing. */
 export async function ensureWorkspaceNode(
   ctx: OrgWriteCtx,

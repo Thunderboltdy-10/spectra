@@ -126,11 +126,15 @@ describe("local stack instance configuration", () => {
       SPECTRA_CONNECTOR_BRIDGE_KEY: "m".repeat(32),
       SPECTRA_SECRET_BRIDGE_KEY: "s".repeat(32),
       SPECTRA_APP_URL: "http://127.0.0.1:3000",
+      SPECTRA_EMBEDDING_MODEL: "openai/text-embedding-3-small",
+      SPECTRA_EMBEDDING_PROVIDER: "OpenAI",
       CLERK_SECRET_NOT_FOR_CONVEX: "never",
     };
 
     expect(validateRequiredEnv(env)).toEqual([]);
     expect(convexEnvFrom(env)).toMatchObject({
+      SPECTRA_EMBEDDING_MODEL: "openai/text-embedding-3-small",
+      SPECTRA_EMBEDDING_PROVIDER: "OpenAI",
       CLERK_JWT_ISSUER_DOMAIN: "https://issuer.example",
       OPENROUTER_API_KEY: "router-key",
       SPECTRA_APP_URL: "http://127.0.0.1:3000",

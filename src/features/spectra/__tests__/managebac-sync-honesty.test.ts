@@ -20,7 +20,7 @@ describe("ManageBac sync UX honesty", () => {
     expect(shell).toContain("Syncing…");
     expect(shell).toContain("Retry sync");
     expect(shell).toContain("Resolve identity");
-    expect(shell).toContain("Keep in Spectra");
+    expect(shell).toContain('label: "Keep mine"');
     expect(shell).toContain("Archive in Spectra");
     expect(shell).toContain("Checking your school account");
     expect(shell).toContain("Some school data was saved. Retry to fill the gaps.");

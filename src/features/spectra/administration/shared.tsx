@@ -1,7 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ArrowUpRight, AlertCircle, CheckCircle2, X, type GlyphIcon } from "@/components/icons/glyph-icons";
+import Link from "next/link";
+import { AlertCircle, LockKeyhole, X, type GlyphIcon } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import type { CapabilityState } from "@/features/spectra/core/capability-truth";
 import { CapabilityTruthBadge } from "@/features/spectra/integrations/status/capability-truth";
@@ -54,88 +55,80 @@ export function AdminCard({
 
 export function AdminSectionHeader({
   title,
+  count,
   detail,
   action,
 }: {
   title: string;
+  /** A count set quietly after the title. */
+  count?: number | string;
   detail?: string;
   action?: ReactNode;
 }) {
   return (
-    <header className="flex min-h-14 items-start justify-between gap-4 px-4 pb-2 pt-4">
-      <div>
-        <h2 className="font-display text-subhead font-medium tracking-[-.01em] text-[var(--text-primary)]">
-          {title}
-        </h2>
-        {detail ? (
-          <p className="mt-0.5 text-caption text-[var(--text-secondary)]">
-            {detail}
-          </p>
-        ) : null}
-      </div>
-      {action}
+    <header className="admin-head">
+      <h2>
+        {title}
+        {count !== undefined ? <span>{count}</span> : null}
+      </h2>
+      {action ? <div className="admin-head-actions">{action}</div> : null}
+      {detail ? <p>{detail}</p> : null}
     </header>
   );
 }
 
+/** Counts laid on one sheet of paper, as Home lays the week open. */
+export function TallySheet({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn("admin-sheet", className)}>{children}</div>;
+}
+
+/**
+ * One count on a TallySheet: the number large in the display serif, what it
+ * counts above it, a line of detail under it and, when there is one, the
+ * place to act on it as an underlined link. A count the meters could not
+ * supply says so instead of printing a number.
+ */
 export function MetricCard({
   icon: Icon,
   label,
   value,
   detail,
-  tone = "green",
   action,
   state,
   source,
+  attention,
 }: {
-  icon: GlyphIcon;
+  icon?: GlyphIcon;
   label: string;
   value: string;
-  detail: string;
+  detail?: string;
+  /** Kept for callers that still pass it; the ink is the same for every count. */
   tone?: "green" | "violet" | "orange" | "blue";
   action?: ReactNode;
   state?: CapabilityState;
   source?: string;
+  /** This count is waiting on someone. */
+  attention?: boolean;
 }) {
-  const toneClass = {
-    green: "text-[var(--accent-mint)]",
-    violet: "text-[var(--accent-violet)]",
-    orange: "text-[var(--accent-orange)]",
-    blue: "text-[var(--accent-cyan)]",
-  }[tone];
+  const reading = readingFromCapability(state, value);
   return (
     <section
-      className="group min-w-0 rounded-card px-4 py-3 transition-colors hover:bg-[var(--bg-secondary)]"
-      title={source ? `Source: ${userFacingMetricSource(source)}` : undefined}
+      className="admin-tally"
+      data-tone={attention ? "attention" : undefined}
+      title={source ? `Counted from: ${userFacingMetricSource(source)}` : undefined}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2 text-[var(--text-secondary)]">
-            <Icon size={16} className={toneClass} strokeWidth={1.8} />
-            <p className="text-caption">{label}</p>
-            {state && state.kind !== "available" ? (
-              <CapabilityTruthBadge state={state} className="min-h-5 px-2 text-micro" />
-            ) : null}
-          </div>
-          {/* S8: the value is rendered through `MetricValue`, so a capability
-              that could not supply a number cannot print one. `/admin` → Usage
-              stamping `Collaboration 0 B` as complete is the defect this
-              closes at the component level. */}
-          <MetricValue
-            reading={readingFromCapability(state, value)}
-            className="mt-2 flex"
-            valueClassName="min-w-0 leading-none"
-          />
-          <p className="mt-2 text-caption text-[var(--text-secondary)]">
-            {detail}
-          </p>
-        </div>
-      </div>
-      {action ? (
-        <div className="mt-3 [&>button]:min-h-7 [&>button]:w-auto [&>button]:border-0 [&>button]:bg-transparent [&>button]:px-0 [&>button]:text-[var(--brand-primary)]">
-          {action}
-        </div>
-      ) : null}
+      <p className="admin-tally-label">
+        {Icon ? <Icon size={14} strokeWidth={1.8} aria-hidden /> : null}
+        {label}
+        {state && state.kind !== "available" ? (
+          <CapabilityTruthBadge state={state} className="min-h-5 px-2 text-micro" />
+        ) : null}
+      </p>
+      {/* The value goes through `MetricValue`, so a capability that could
+          not supply a number cannot print one. */}
+      <MetricValue reading={reading} className="flex" valueClassName="admin-tally-value min-w-0" />
+      {detail ? <p className="admin-tally-detail">{detail}</p> : null}
+      {action}
     </section>
   );
 }
@@ -340,31 +333,42 @@ export function ErrorPanel({
   return <ProductErrorState title="This didn’t load" detail={message} action={<AdminButton onClick={retry}>Try again</AdminButton>} />;
 }
 
+/** An underlined ink link, as Home's section links. */
 export function InlineLink({
   children,
   onClick,
+  href,
+  disabled,
+  title,
+  tone,
 }: {
   children: ReactNode;
   onClick?: () => void;
+  href?: string;
+  disabled?: boolean;
+  title?: string;
+  tone?: "attention";
 }) {
+  if (href && !disabled)
+    return (
+      <Link href={href} className="admin-link" data-tone={tone} title={title}>
+        {children}
+      </Link>
+    );
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex items-center gap-1 text-ui font-medium text-[var(--brand-primary)] hover:underline"
-    >
+    <button type="button" onClick={onClick} disabled={disabled} title={title} className="admin-link" data-tone={tone}>
       {children}
-      <ArrowUpRight size={11} />
     </button>
   );
 }
 
+/** What a page can and cannot see, said once, quietly, at its foot. */
 export function PrivacyNotice({ children }: { children: ReactNode }) {
   return (
-    <div className="flex items-start gap-2 rounded-control border border-[color-mix(in_oklab,var(--success)_18%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--success)_7%,var(--bg-secondary))] px-3 py-2.5 text-micro leading-4 [color:color-mix(in_oklab,var(--success)_78%,var(--text-primary))]">
-      <CheckCircle2 size={13} className="mt-0.5 shrink-0" />
+    <p className="admin-footnote">
+      <LockKeyhole size={13} aria-hidden />
       <span>{children}</span>
-    </div>
+    </p>
   );
 }
 

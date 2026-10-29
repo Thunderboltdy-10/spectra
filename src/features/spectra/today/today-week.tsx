@@ -80,7 +80,7 @@ export function TodayWeek({ agenda, failed, now }: { agenda: TodayAgenda | null;
   const undated = plans.toDo.length + plans.own.length;
 
   return (
-    <section aria-labelledby="today-week" className="col-span-2">
+    <section aria-labelledby="today-week">
       <div className="today-section-head">
         <h2 id="today-week">This week</h2>
         <span className="ml-auto flex items-baseline gap-5">

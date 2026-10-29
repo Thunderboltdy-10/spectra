@@ -249,7 +249,8 @@ function usePlannerWorks(nodes: readonly TreeNode[]) {
 }
 
 /** Whether a folder is a class's workspace, for the organizer to choose the shelf. */
-export const isClassWorkspace = (node: TreeNode | null | undefined) => node?.kind === "workspace" && node.workspace?.starterKey === "managebac-class";
+export const isClassWorkspace = (node: TreeNode | null | undefined) =>
+  node?.kind === "workspace" && (node.workspace?.isClass ?? node.workspace?.starterKey === "managebac-class");
 
 /** The identity a class workspace is drawn in: School's, or one from its own name when School does not list it. */
 export const classWorkspaceIdentity = (node: TreeNode, book: ClassBook) =>

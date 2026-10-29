@@ -5,11 +5,57 @@ import * as Y from "yjs";
 import {createCollaborationGatewayBridgeClient} from "./collaboration-gateway-bridge-client.mjs";
 import {planMergedUpdatePersist} from "./collaboration-durable-capacity.mjs";
 import {samePersistenceBatch} from "./collaboration-persist.mjs";
-import {createCanonicalRoom, prepareCanonicalAppend, mergeCanonicalIntoLive, nativeOverlap} from "./collaboration-canonical-room.mjs";
+import {createCanonicalRoom, prepareCanonicalAppend, mergeCanonicalIntoLive, nativeOverlap, stateVectorHash} from "./collaboration-canonical-room.mjs";
 import {MAX_DURABLE_UPDATE_BYTES} from "./collaboration-update-envelope.mjs";
+import {artifactProjection} from "./collaboration-artifact-projection.mjs";
 import {initializeNativeArtifactDocument, isNativeArtifactDocument, nativeArtifactProjection, nativeChangedRegionIds} from "./collaboration-native-projection.mjs";
 
 afterEach(() => vi.unstubAllGlobals());
+
+it.each([true, false].flatMap(native => [[false, true], [true, false], [true, true], [false, false]].map(([published, nextPublished]) => [native, published, nextPublished])))(
+  "projects quiz publication (native %s) %s → %s in the existing append only when the gate changes",
+  async (native, published, nextPublished) => {
+    const doc = new Y.Doc();
+    if (native) initializeNativeArtifactDocument(doc, { title: "Quiz", typeKey: "quiz", schemaVersion: 4, tags: [], content: { published, questions: [] } });
+    else {
+      const metadata = doc.getMap("spectra:artifact-meta");
+      for (const [key, value] of Object.entries({ initialized: true, title: "Quiz", typeKey: "quiz", schemaVersion: 4, tags: [], rootTemplate: JSON.stringify({ published: { $spectraRegion: "quiz:published" }, questions: [] }) })) metadata.set(key, value);
+      doc.getMap("spectra:artifact-regions").set("quiz:published", JSON.stringify({ value: published }));
+    }
+    const initial = Y.encodeStateAsUpdate(doc), vector = Y.encodeStateVector(doc);
+    const before = nativeArtifactProjection(doc, 4);
+    if (native) {
+      doc.getMap("spectra:work-v2").set("published", nextPublished);
+      doc.getMap("spectra:work-v2").set("publishedAt", 123);
+    } else doc.getMap("spectra:artifact-regions").set("quiz:published", JSON.stringify({ value: nextPublished }));
+    const after = nativeArtifactProjection(doc, 4), delta = Y.encodeStateAsUpdate(doc, vector);
+    const room = createCanonicalRoom({ expectedRoomId: "room", load: async () => ({ roomId: "room", nextSequence: 2, updates: [{ sequence: 1, update: initial }] }) });
+    const append = vi.fn(async prepare => {
+      const prepared = await prepare();
+      expect(prepared.payload.projectionJson === null).toBe(published === nextPublished);
+      if (prepared.payload.projectionJson) expect(JSON.parse(prepared.payload.projectionJson).content.published).toBe(nextPublished);
+      return { ...prepared, result: { sequence: 2, duplicate: false } };
+    });
+    const source = readFileSync("scripts/collaboration-gateway.mjs", "utf8");
+    const modelCode = source.slice(source.indexOf("function artifactModelState("), source.indexOf("function extractYjsUpdate("));
+    const model = new Function("META_MAP", "REGION_MAP", `${modelCode}; return {artifactModelState, changedArtifactRegions};`)("spectra:artifact-meta", "spectra:artifact-regions");
+    const deps = { ...model, Y, createHash, samePersistenceBatch, isNativeArtifactDocument, nativeChangedRegionIds, nativeOverlap,
+      NATIVE_PROJECTION_REGION: "$spectra:native-projection", planMergedUpdatePersist, MAX_DURABLE_UPDATE_BYTES,
+      canonicalRoom: () => room, prepareCanonicalAppend, mergeCanonicalIntoLive, appendWithRetry: append,
+      artifactProjection,
+      documentPersistenceQueues: new WeakMap(), unappliedDocumentMessages: new WeakSet(), openDocuments: new Map(),
+      documentDurableAnchors: new WeakMap(), documentFrontierHash: () => null, durableHeadKey: () => "quiz:root", sendGatewayState: vi.fn(),
+      documentStateVectorHash: stateVectorHash,
+      checkpointScheduler: () => ({ note: vi.fn() }) };
+    const code = source.slice(source.indexOf("async function persistAcceptedMessages("), source.indexOf("function schedulePersistence("));
+    const persist = new Function(...Object.keys(deps), `${code}; return persistAcceptedMessages;`)(...Object.values(deps));
+    const context = { artifactId: "quiz", partitionKey: "root", accountId: "owner", clientId: "human", actorKind: "human", schemaVersion: 4, policyVersion: 0 };
+    try {
+      await persist(doc, [{ context, documentUpdate: delta, nativeProjectionBefore: before, nativeProjectionAfter: after, messageId: "publish" }]);
+      expect(append).toHaveBeenCalledOnce();
+    } finally { await room.dispose(); doc.destroy(); }
+  },
+);
 
 it("does not acknowledge semantically unchanged Yjs structs before their durable append", async () => {
   const source=readFileSync("scripts/collaboration-gateway.mjs","utf8");

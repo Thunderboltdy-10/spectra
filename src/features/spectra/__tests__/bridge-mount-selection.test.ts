@@ -46,6 +46,13 @@ const status = {
 };
 
 describe("Spectra Bridge folder targeting", () => {
+  it("does not offer an individual file as a folder for saving new work", () => {
+    const file = { ...mounts[0], _id: "file-mount", grantId: "file-grant", selectedFile: "Essay.docx" };
+    const local = { ...status, mounts: [...status.mounts, { ...status.mounts[0], id: "file-grant", selectionKind: "file" as const }] };
+    expect(mountsForConnectedDevice([...mounts, file], local, true)).toEqual([mounts[0]]);
+    expect(mountsForConnectedDevice([{ ...mounts[0], selectedFile: "Essay.docx" }], status, true)).toEqual([]);
+    expect(resolveRequestedMount([file], file._id, file.deviceId)).toBeNull();
+  });
   it("offers only active grants on the connected paired device", () => {
     expect(mountsForConnectedDevice(mounts, status, true)).toEqual([
       mounts[0],

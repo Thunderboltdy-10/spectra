@@ -561,23 +561,24 @@ export async function runAgentChecks(input: { userId: string; agentId: string; t
   const legacyEvals = Array.isArray(record(draft.content).evals)
     ? (record(draft.content).evals as unknown[])
     : [];
+  // The same suite the Checks page shows: every agent gets the standard
+  // injection-resistance cases even before it has a skill, so a run of the
+  // creator's saved tests can pass (a layered run without them cannot).
+  const compiled = buildEvaluationSuite({
+    agentId: input.agentId,
+    mission: foundry.mission,
+    skills: foundry.skills,
+    bindings: foundry.evidenceBindings,
+  });
+  const adversarial = compiled.filter((entry) => entry.layer === "adversarial");
   const suite: unknown[] =
-    foundry.skills.length > 0
-      ? withBenchCases(
-          buildEvaluationSuite({
-            agentId: input.agentId,
-            mission: foundry.mission,
-            skills: foundry.skills,
-            bindings: foundry.evidenceBindings,
-          }),
-          saved,
-        )
-      : saved.length > 0
-        ? [
-            ...legacyEvals.slice(0, Math.max(0, 50 - saved.length)),
-            ...saved,
-          ]
-        : [];
+    foundry.skills.length > 0 || legacyEvals.length === 0
+      ? withBenchCases(compiled, saved)
+      : [
+          ...legacyEvals.slice(0, Math.max(0, 50 - saved.length - adversarial.length)),
+          ...adversarial,
+          ...saved,
+        ];
 
   const begun = await convexMutation<
     {

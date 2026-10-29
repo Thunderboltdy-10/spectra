@@ -768,6 +768,35 @@ export const backfillSummaries = internalMutation({
   },
 });
 
+/**
+ * What an agent is told about the work open on screen or pointed at: the
+ * work's own summary and what it is about in words (from its index), never its
+ * content. Items the caller cannot read are left out.
+ */
+export const describeForAgent = query({
+  args: { artifactIds: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    const described: Array<{ id: string; summary?: string; about?: string }> = [];
+    for (const raw of args.artifactIds.slice(0, 12)) {
+      const artifactId = ctx.db.normalizeId("spectraArtifacts", raw);
+      if (!artifactId) continue;
+      const readable = await requireArtifactCapability(ctx, artifactId).catch(() => null);
+      if (!readable || readable.artifact.blueprintKey === "thread_reference") continue;
+      const item = await ctx.db
+        .query("semanticItems")
+        .withIndex("by_item", (q) => q.eq("itemKind", "artifact").eq("itemId", raw))
+        .unique();
+      const summary = readable.artifact.summary?.replace(/\s+/g, " ").trim().slice(0, 220);
+      described.push({
+        id: raw,
+        ...(summary ? { summary } : {}),
+        ...(item?.about ? { about: item.about } : {}),
+      });
+    }
+    return described;
+  },
+});
+
 export const get = query({
   args: {
     artifactId: v.id("spectraArtifacts"),

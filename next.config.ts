@@ -12,6 +12,12 @@ const yjsEsmRelative = "./node_modules/yjs/dist/yjs.mjs";
 const yjsEsmAbsolute = resolve(projectRoot, "node_modules/yjs/dist/yjs.mjs");
 
 const nextConfig: NextConfig = {
+  // Local instances have different Convex URLs and must never share generated
+  // client bundles or Next's development-server lock. Keep them outside .next:
+  // a normal production build cleans that directory, including nested instances.
+  ...(process.env.SPECTRA_LOCAL_INSTANCE
+    ? { distDir: `.next-local/${process.env.SPECTRA_LOCAL_INSTANCE}` }
+    : {}),
   // Durable Office bodies are streamed through the Next proxy before the API
   // route applies its own 256 MiB bound. Keep the proxy cap aligned with that
   // route limit so large saved versions are not silently truncated at 10 MiB.
@@ -21,7 +27,10 @@ const nextConfig: NextConfig = {
   // Browser evidence is taken against the development server, but framework
   // diagnostics are not part of Spectra's product chrome.
   devIndicators: false,
-  transpilePackages: ["@lobehub/icons", "@lobehub/ui", "es-toolkit"],
+  // Packages that import yjs are bundled so they share the one aliased copy;
+  // left external, Node loads a second Yjs and its instanceof checks fail.
+  transpilePackages: ["@lobehub/icons", "@lobehub/ui", "es-toolkit", "y-prosemirror", "@tiptap/y-tiptap",
+    "y-protocols", "@hocuspocus/provider", "@hocuspocus/common"],
   serverExternalPackages: ["pdfjs-dist", "@napi-rs/canvas", "esbuild"],
   turbopack: {
     root: projectRoot,

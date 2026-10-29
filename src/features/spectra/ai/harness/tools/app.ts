@@ -185,6 +185,7 @@ export const DEVICES_TOOL_ACTIONS = [
   "status",
   "pair",
   "add_folder",
+  "add_files",
   "retry_folder",
   "pause_folder",
   "remove_folder",
@@ -201,6 +202,7 @@ const DEVICES_LABELS: Record<DevicesAction, [string, string]> = {
   status: ["Checking your devices", "Checked your devices"],
   pair: ["Connecting this computer", "Started connecting this computer"],
   add_folder: ["Opening the folder picker", "Opened the folder picker"],
+  add_files: ["Opening the file picker", "Opened the file picker"],
   retry_folder: ["Retrying the folder", "Asked to retry the folder"],
   pause_folder: ["Changing the folder's syncing", "Asked to change the folder's syncing"],
   remove_folder: ["Removing the folder", "Asked to remove the folder"],
@@ -768,7 +770,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "devices",
       description:
-        "The user's computers connected through Spectra Bridge. status: read each computer's state, folders (grantId), last sync and any problem, with deviceIds. pair: connect the computer the user has Spectra open on; Spectra offers the download if Bridge is missing and the user confirms a code on the computer. add_folder opens the folder picker on that computer. retry_folder {grantId}, pause_folder {grantId, paused (false resumes)}, remove_folder {grantId} (files stay). pause_syncing {paused (false resumes)} for every folder. show_logs opens Bridge's log file. update installs a ready Bridge update. remove_device {deviceId} unpairs a computer; its files stay. Actions on a computer run there through the user's open Spectra; pass deviceId to aim at one computer. pair, remove_folder and remove_device ask first.",
+        "The user's computers connected through Spectra Bridge. status: read each computer's state, folders (grantId), last sync and any problem, with deviceIds. pair: connect the computer the user has Spectra open on; Spectra offers the download if Bridge is missing and the user confirms a code on the computer. add_folder opens the folder picker on that computer. add_files opens its native picker for one or more individual files without syncing their parent folder. retry_folder {grantId}, pause_folder {grantId, paused (false resumes)}, remove_folder {grantId} (files stay). pause_syncing {paused (false resumes)} for every folder. show_logs opens Bridge's log file. update installs a ready Bridge update. remove_device {deviceId} unpairs a computer; its files stay. Actions on a computer run there through the user's open Spectra; pass deviceId to aim at one computer. pair, remove_folder and remove_device ask first.",
       parameters: {
         type: "object",
         properties: {

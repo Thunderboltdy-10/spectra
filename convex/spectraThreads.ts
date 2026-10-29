@@ -1235,6 +1235,58 @@ export const getSummary = query({
   },
 });
 
+/**
+ * What a run needs of its thread's past: the running notes and every message
+ * after them (newest `limit`), as role and text only.
+ */
+export const agentHistory = query({
+  args: { threadId: v.id("spectraThreads"), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const { thread } = await requireOwnedThread(ctx, args.threadId);
+    const limit = Math.max(1, Math.min(Math.round(args.limit ?? 80), 120));
+    const through = thread.summaryThrough ?? 0;
+    const page = await ctx.db
+      .query("spectraMessages")
+      .withIndex("by_thread_created", (q) => q.eq("threadId", args.threadId).gt("createdAt", through))
+      .order("desc")
+      .take(limit + 1);
+    return {
+      notes: thread.summaryLong,
+      through,
+      /** Older unfolded messages exist beyond this page. */
+      more: page.length > limit,
+      messages: page
+        .slice(0, limit)
+        .reverse()
+        .map((message) => ({ role: message.role, content: message.content, runId: message.runId, createdAt: message.createdAt })),
+    };
+  },
+});
+
+const THREAD_NOTES_CHARS = 16_000;
+
+/** A run folds the thread's oldest messages into its running notes. Notes only move forward. */
+export const recordThreadNotes = mutation({
+  args: {
+    threadId: v.id("spectraThreads"),
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+    notes: v.string(),
+    through: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const { thread } = await requireOwnedThread(ctx, args.threadId);
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.threadId !== args.threadId || run.executionId !== args.executionId)
+      throw new Error("These notes belong to an older run attempt.");
+    const notes = args.notes.trim().slice(0, THREAD_NOTES_CHARS);
+    if (!notes || args.through <= (thread.summaryThrough ?? 0)) return { recorded: false };
+    // Not a change the user made: the thread keeps its place in their lists.
+    await ctx.db.patch(args.threadId, { summaryLong: notes, summaryThrough: args.through });
+    return { recorded: true };
+  },
+});
+
 /** The thread's name as it changes, or null once it is gone: the chat header follows it live. */
 export const liveName = query({
   args: { threadId: v.id("spectraThreads") },

@@ -39,7 +39,7 @@ async function currentAuthority(ctx: Ctx, actor: Actor) {
  * Do not reuse this reader after writing membership, integration or selection
  * state in the same mutation; use a fresh wrapper/reader for the later check.
  */
-function visibilityReader(ctx: Ctx, actor: Actor, removal: boolean) {
+function visibilityReader(ctx: Ctx, actor: Actor, removal: boolean, reuseLoadedSource = false) {
   let authority: ReturnType<typeof currentAuthority> | undefined;
   const memberships = new Map<string, Promise<boolean>>();
   const selections = new Map<string, Promise<boolean>>();
@@ -49,7 +49,7 @@ function visibilityReader(ctx: Ctx, actor: Actor, removal: boolean) {
     if (!current) return false;
     const { currentActor, integration } = current;
     // Source snapshots are never memoized: callers may hold an earlier row.
-    const source = await ctx.db.get(record._id);
+    const source = reuseLoadedSource ? record : await ctx.db.get(record._id);
     if (!source || source.schoolId !== currentActor.schoolId || source.integrationId !== integration._id ||
         (removal ? !source.tombstone : !sourceAvailable(source))) return false;
 
@@ -126,6 +126,12 @@ function visibilityReader(ctx: Ctx, actor: Actor, removal: boolean) {
 
 export function createManagebacVisibilityReader(ctx: Ctx, actor: Actor) {
   return visibilityReader(ctx, actor, false);
+}
+
+/** For rows loaded by this query's own database read. Mutations and callers
+ * holding earlier snapshots must use the default reader, which reloads them. */
+export function createManagebacQueryVisibilityReader(ctx: QueryCtx, actor: Actor) {
+  return visibilityReader(ctx, actor, false, true);
 }
 
 /** A removal notice carries no withdrawn source body, but still requires the

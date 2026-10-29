@@ -567,15 +567,29 @@ async function persistAcceptedMessages(document, entries) {
         }
         const native = isNativeArtifactDocument(canonical);
         const beforeModel = native ? null : artifactModelState(canonical);
+        let publicationChanged = false;
         const prepared = prepareCanonicalAppend({
           document: canonical, stored: refreshed.stored, update,
           projection: doc => artifactProjection(doc, context.schemaVersion),
-          regions: (before, after) => native || isNativeArtifactDocument(canonical)
-            ? nativeChangedRegionIds(before ? JSON.parse(before) : null, after ? JSON.parse(after) : null)
-            : changedArtifactRegions(beforeModel, artifactModelState(canonical)),
+          regions: (before, after) => {
+            if (!native && !isNativeArtifactDocument(canonical)) {
+              const afterModel = artifactModelState(canonical);
+              const changed = changedArtifactRegions(beforeModel, afterModel);
+              publicationChanged = afterModel.metadata.some(([key, value]) => key === "typeKey" && value === "quiz") &&
+                changed.some(region => region === "quiz:published" || region === "artifact:structure");
+              return changed;
+            }
+            const previous = before ? JSON.parse(before) : null;
+            const next = after ? JSON.parse(after) : null;
+            publicationChanged = next?.typeKey === "quiz" &&
+              (previous?.content?.published === true) !== (next.content?.published === true);
+            return nativeChangedRegionIds(previous, next);
+          },
         });
         if (!prepared.regionIds.length && isNativeArtifactDocument(canonical)) prepared.regionIds = [NATIVE_PROJECTION_REGION];
-        const immediateProjection = context.actorKind === "ai" || group.some(entry => entry.nativeInitialization);
+        // Publish/unpublish is a server-visible gate. Commit its projection in
+        // this same append, rather than waiting for the 30-second checkpoint.
+        const immediateProjection = publicationChanged || context.actorKind === "ai" || group.some(entry => entry.nativeInitialization);
         const projectionJson = immediateProjection ? prepared.projectionJson : null;
         const { frontierHash, projectionJson: _projection, ...cas } = prepared;
         return {
@@ -742,6 +756,28 @@ function boundedPresence(value, max = 4_000) {
   } catch {
     return undefined;
   }
+}
+
+/** An AI's edit performances, under the identity its token proves. Viewers
+ * expand each into the hand locally, so dropping them leaves the edit to
+ * land with no one seen making it. */
+function aiPerformances(value, context) {
+  if (context.actorKind !== "ai" || !Array.isArray(value)) return undefined;
+  const actor = {
+    clientId: context.clientId,
+    kind: "ai",
+    name: `${context.displayName}'s AI`,
+    accountId: context.accountId,
+    ownerAccountId: context.accountId,
+    ownerName: context.displayName,
+  };
+  const kept = value
+    .slice(-6)
+    .filter((entry) => entry && typeof entry === "object" && !Array.isArray(entry) &&
+      entry.v === 1 && entry.artifactId === context.artifactId &&
+      boundedPresence(entry, 240_000) !== undefined)
+    .map((entry) => ({ ...entry, actor }));
+  return kept.length ? kept : undefined;
 }
 
 function interactionPresence(value, context, actorKind) {
@@ -1182,6 +1218,7 @@ const server = new Server({
         context,
         actorKind,
       );
+      const performances = aiPerformances(supplied.performances, context);
       const activeRegionIds = Array.isArray(supplied.activeRegionIds)
         ? supplied.activeRegionIds
             .filter((regionId) => typeof regionId === "string")
@@ -1234,6 +1271,7 @@ const server = new Server({
           // legacy cursor/preview fields, visually separating the "fake human"
           // performance from the real mutation.
           ...(interactionState ? { interactionState } : {}),
+          ...(performances ? { performances } : {}),
           ...(boundedPresence(supplied.cursor) !== undefined
             ? { cursor: boundedPresence(supplied.cursor) }
             : {}),
@@ -1570,13 +1608,13 @@ async function enforceActivePolicyVersions() {
             partitionKey: group.partitionKey,
           });
           const nowSeconds = Math.floor(Date.now() / 1000);
+          // Independent connection leases share only concurrent checks for
+          // the same actor and room; revocation deadlines stay unchanged.
+          await Promise.all(group.connections.map(connection =>
+            refreshAuthorization(connection.context).catch(() => undefined)));
           for (const connection of group.connections) {
             const context = connection.context;
-            let actorRevoked = context.authorizationRevoked === true;
-            try { await refreshAuthorization(context); }
-            catch (error) {
-              if (String(error).includes("COLLABORATION_ACCESS_REVOKED")) actorRevoked = true;
-            }
+            const actorRevoked = context.authorizationRevoked === true;
             if (!activeConnections.has(connection)) continue;
             const stale =
               actorRevoked ||

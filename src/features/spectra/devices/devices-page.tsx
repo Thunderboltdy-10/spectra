@@ -33,7 +33,7 @@ import { PairingPanel, THIS_COMPUTER_LIFE_KEY } from "./pairing-panel";
 import { devicePairing } from "./pairing";
 import { firstTipMoment } from "../onboarding/first-tips";
 
-const BAR_PLAN: readonly CollapseStep[] = [{ hideLabel: "pause" }, { toMenu: "pause" }, { hideLabel: "add" }];
+const BAR_PLAN: readonly CollapseStep[] = [{ hideLabel: "pause" }, { toMenu: "pause" }, { hideLabel: "add" }, { hideLabel: "add-files" }];
 
 /** A Convex or Bridge failure as one plain sentence, without its code. */
 function failureSentence(error: unknown): string {
@@ -43,7 +43,7 @@ function failureSentence(error: unknown): string {
 
 type Confirm =
   | { kind: "remove-device"; device: DeviceView }
-  | { kind: "remove-folder"; grantId: string; name: string }
+  | { kind: "remove-folder"; grantId: string; name: string; selection: "file" | "folder" }
   | { kind: "native-writes"; choice: NativeWrites };
 
 /*
@@ -74,6 +74,7 @@ export function DevicesPage() {
   const [justPaired, setJustPaired] = useState(false);
   const [wantTick, setWantTick] = useState(0);
   const connectParam = useRef(false);
+  const selectFilesParam = useRef(false);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
@@ -107,6 +108,7 @@ export function DevicesPage() {
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("connect") === "1") {
       connectParam.current = true;
+      selectFilesParam.current = new URLSearchParams(window.location.search).get("select") === "files";
       window.history.replaceState(window.history.state, "", DEVICES_HREF);
     }
     return pairing.subscribe(() => setWantTick((tick) => tick + 1));
@@ -134,11 +136,20 @@ export function DevicesPage() {
 
   const refresh = local.refresh;
   useEffect(() => spectraBus.on("devices.changed", () => void refresh()), [refresh]);
+  useEffect(() => {
+    if (!here?.live || !selectFilesParam.current) return;
+    selectFilesParam.current = false;
+    setBusy("add_files");
+    void runLocalDeviceAction({ action: "add_files" }).then((outcome) => {
+      setBusy(null);
+      setNotice(outcome.message);
+    });
+  }, [here?.live]);
 
   async function act(request: LocalDeviceRequest) {
     if (request.action === "remove_folder" && request.grantId) {
       const folder = here?.folders.find((entry) => entry.id === request.grantId);
-      setConfirm({ kind: "remove-folder", grantId: request.grantId, name: folder?.path ?? "this folder" });
+      setConfirm({ kind: "remove-folder", grantId: request.grantId, name: folder?.path ?? "this selection", selection: folder?.kind ?? "folder" });
       return;
     }
     setBusy(request.grantId ? `${request.action}:${request.grantId}` : request.action);
@@ -193,10 +204,12 @@ export function DevicesPage() {
   }
 
   const connecting = pairingState.phase !== "idle" && pairingState.phase !== "paired";
+  const selecting = busy === "add_folder" || busy === "add_files";
   const commands: BarCommand[] = [
     ...(here?.live
       ? [
-          { id: "add", icon: "add", label: "Add folder", disabled: busy === "add_folder", onSelect: () => void act({ action: "add_folder" }) },
+          { id: "add", icon: "add", label: "Add folder", disabled: selecting, onSelect: () => void act({ action: "add_folder" }) },
+          { id: "add-files", icon: "document", label: "Add files", disabled: selecting, onSelect: () => void act({ action: "add_files" }) },
           {
             id: "pause",
             icon: here.paused ? "play" : "pause",
@@ -247,7 +260,7 @@ export function DevicesPage() {
             commands={commands}
             plan={BAR_PLAN}
             barLabel="Devices commands"
-            description="Use files from your computers in Spectra. Bridge keeps the folders you choose in sync."
+            description="Use files from your computers in Spectra. Choose individual files or whole folders to keep in sync."
           />
           <p role="status" aria-live="polite" className="mb-4 mt-3 min-h-5 text-caption text-[var(--text-secondary)]">
             {notice}
@@ -268,7 +281,7 @@ export function DevicesPage() {
                 <div className="device-connect" data-step="download">
                   <p className="text-ui font-medium text-[var(--text-primary)]">Get Spectra Bridge</p>
                   <p className="max-w-xl text-ui leading-6 text-[var(--text-secondary)]">
-                    Bridge keeps the folders you choose on this computer in sync with Spectra. Download and open it, and this computer connects by itself.
+                    Bridge keeps the files and folders you choose on this computer in sync with Spectra. Download and open it, and this computer connects by itself.
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
                     <Button asChild variant="primary" size="sm">
@@ -316,7 +329,7 @@ export function DevicesPage() {
           confirm?.kind === "native-writes"
             ? "Let Spectra write to desktop files?"
             : confirm?.kind === "remove-folder"
-              ? "Stop using this folder in Spectra?"
+              ? `Stop using this ${confirm.selection} in Spectra?`
               : confirm?.device.isThisComputer
                 ? "Remove this device?"
                 : `Remove ${confirm?.device.name ?? "this device"}?`
@@ -327,7 +340,7 @@ export function DevicesPage() {
               ? "Spectra saves your changes back to the files on your computers. This applies to every device."
               : "Spectra may save changes back to the files on your computers, and Spectra AI asks first. This applies to every device."
             : confirm?.kind === "remove-folder"
-              ? `${confirm.name} stops syncing. Its files stay on this computer.`
+              ? `${confirm.name} stops syncing. ${confirm.selection === "file" ? "The file stays" : "Its files stay"} on this computer.`
               : "It stops syncing and Spectra forgets it. Its files stay on the computer; you can connect it again later."
         }
         confirmLabel={confirm?.kind === "native-writes" ? "Allow writes" : confirm?.kind === "remove-folder" ? "Stop using it" : "Remove"}

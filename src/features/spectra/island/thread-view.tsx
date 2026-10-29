@@ -111,7 +111,7 @@ export const ThreadView = forwardRef<
       }}
       style={{ transform: `translateX(${offset}px)` }}
       className={cn(
-        "box-border flex max-h-[70vh] w-[min(600px,calc(100vw-32px))] flex-col overflow-hidden rounded-surface border border-[var(--card-border)] bg-[var(--card-paper)] shadow-[var(--shadow-lg)]",
+        "box-border flex max-h-[70vh] w-[min(600px,calc(100vw-var(--spectra-rail-width,0px)-var(--spectra-lead-width,0px)-32px))] flex-col overflow-hidden rounded-surface border border-[var(--card-border)] bg-[var(--card-paper)] shadow-[var(--shadow-lg)]",
         "transition-[opacity,transform] duration-200 ease-[var(--ease-standard)]",
         visible ? "opacity-100 delay-[110ms]" : "pointer-events-none opacity-0",
       )}

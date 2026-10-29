@@ -1858,7 +1858,10 @@ export const SheetsStudio = memo(function SheetsStudio({
 
   const updateViewport = useCallback(() => {
     const element = gridRef.current;
-    if (!element) return;
+    // A hidden or not-yet-laid-out grid has no scroll geometry. Treating its
+    // zero-sized edges as the end of the sheet keeps extending it on every
+    // render; ResizeObserver will measure it when it becomes visible.
+    if (!element || element.clientWidth <= 0 || element.clientHeight <= 0) return;
     // Offsets, not division: a column the user widened makes the window past it
     // narrower, and dividing by a nominal 122px would render the wrong range.
     const rowStart = Math.max(

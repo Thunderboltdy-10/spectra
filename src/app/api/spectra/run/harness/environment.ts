@@ -1,5 +1,6 @@
 import { DEFAULT_PERMISSION_PREFS, readPermissionPrefs, type PermissionPrefs } from "@/features/spectra/ai/harness/permissions";
 import type { EnvironmentInput, EnvironmentPlace, EnvironmentPointer } from "@/features/spectra/ai/harness/prompt";
+import { notesMessage } from "@/features/spectra/ai/harness/compaction";
 import type { HarnessContentPart, HarnessMessage } from "@/features/spectra/ai/harness/types";
 import type { PreparedAttachment, RunPointers } from "./contract";
 import { rows } from "./effects";
@@ -7,11 +8,12 @@ import { query } from "./io";
 
 /*
  * What Spectra knows at the start of a run: who the user is, where they are,
- * what is open and what they pointed at (ids, types and titles only), their
- * Bridge and permission choices, a short index of what they asked Spectra to
- * remember, and this thread's earlier turns. Nothing about the content on
- * screen is injected: the model searches and reads. Every read is best
- * effort and they all run in parallel: missing context never fails a run.
+ * what is open and what they pointed at (titles, summaries and what each is
+ * about, never content), their Bridge and permission choices, a short index
+ * of what they asked Spectra to remember, and this thread's past: its running
+ * notes and recent turns. Nothing about the content on screen is injected:
+ * the model searches and reads. Every read is best effort and they all run
+ * in parallel: missing context never fails a run.
  */
 
 const HISTORY_MESSAGES = 80;
@@ -99,23 +101,35 @@ export async function readPermissions(actorClerkId: string): Promise<PermissionP
 }
 
 /** This thread's earlier turns, oldest first. Never another thread's. */
-export async function readThreadHistory(actorClerkId: string, threadId: string | undefined, runId: string) {
-  if (!threadId) return [];
-  const page = await query<unknown & object, { messages?: unknown }>("spectraThreads:listMessages", {
+export type ThreadHistory = {
+  /** What the model replays: the thread's notes, then its recent messages. */
+  messages: HarnessMessage[];
+  notes?: string;
+  /** The messages after the notes, oldest first, for folding once the run is done. */
+  unfolded: Array<HarnessMessage & { createdAt: number }>;
+};
+
+export const EMPTY_HISTORY: ThreadHistory = { messages: [], unfolded: [] };
+
+export async function readThreadHistory(actorClerkId: string, threadId: string | undefined, runId: string): Promise<ThreadHistory> {
+  if (!threadId) return EMPTY_HISTORY;
+  const page = await query<unknown & object, { notes?: unknown; messages?: unknown } | null>("spectraThreads:agentHistory", {
     actorClerkId,
     threadId,
     limit: HISTORY_MESSAGES,
-  }).catch(() => ({ messages: [] }));
-  const history: HarnessMessage[] = [];
-  for (const message of rows(page.messages)) {
+  }).catch(() => null);
+  const unfolded: ThreadHistory["unfolded"] = [];
+  for (const message of rows(page?.messages)) {
     if (String(message.runId ?? "") === runId) continue;
     const role = message.role === "assistant" ? "assistant" : message.role === "user" ? "user" : null;
     const content = text(message.content).trim();
     if (!role || !content) continue;
     const clipped = content.length > HISTORY_MESSAGE_CHARS ? `${content.slice(0, HISTORY_MESSAGE_CHARS)}…` : content;
-    history.push(role === "assistant" ? { role, content: clipped } : { role, content: clipped });
+    unfolded.push({ role, content: clipped, createdAt: typeof message.createdAt === "number" ? message.createdAt : 0 });
   }
-  return history;
+  const notes = text(page?.notes).trim() || undefined;
+  const replay = unfolded.map(({ role, content }) => ({ role, content }) as HarnessMessage);
+  return { messages: notes ? [notesMessage(notes), ...replay] : replay, unfolded, ...(notes ? { notes } : {}) };
 }
 
 /** Attachments as model content parts: images and PDFs natively, the rest as text. */
@@ -177,7 +191,12 @@ export async function readPlaces(actorClerkId: string, hereId?: string) {
   if (!Array.isArray(workspaces)) return { places: [] as EnvironmentPlace[] };
   const places = rows(workspaces)
     .filter((workspace) => workspace.accessLevel === "modify")
-    .map((workspace) => ({ id: String(workspace._id), title: text(workspace.title).trim().slice(0, 120) || "Untitled" }));
+    .map((workspace) => ({
+      id: String(workspace._id),
+      title: text(workspace.title).trim().slice(0, 120) || "Untitled",
+      // A class is marked by the student, or by coming from one of their ManageBac classes.
+      ...((typeof workspace.isClass === "boolean" ? workspace.isClass : workspace.starterKey === "managebac-class") ? { isClass: true } : {}),
+    }));
   const here = hereId ? places.find((place) => place.id === hereId) : undefined;
   return { places, ...(here ? { here } : {}) };
 }
@@ -191,16 +210,41 @@ export type EnvironmentRequest = RunPointers & {
   now?: number;
 };
 
+/**
+ * A line about each pointed-at work: its summary and what it is about in
+ * words, from its index. Never its content: the model reads what it needs.
+ */
+async function describePointers(actorClerkId: string, items: EnvironmentPointer[]) {
+  if (!items.length) return items;
+  const described = await query<unknown & object, Array<{ id: string; summary?: string; about?: string }> | null>(
+    "spectraArtifacts:describeForAgent",
+    { actorClerkId, artifactIds: [...new Set(items.map((item) => item.id))] },
+  ).catch(() => null);
+  if (!Array.isArray(described)) return items;
+  const byId = new Map(described.map((entry) => [entry.id, entry]));
+  return items.map((item) => {
+    const entry = byId.get(item.id);
+    return entry
+      ? { ...item, ...(entry.summary ? { summary: entry.summary } : {}), ...(entry.about ? { about: entry.about } : {}) }
+      : item;
+  });
+}
+
 export async function buildEnvironment(request: EnvironmentRequest): Promise<Omit<EnvironmentInput, "permissions" | "timeZone">> {
   const now = request.now ?? Date.now();
-  const [me, memory, bridge, places] = await Promise.all([
+  const pointed = [...(request.open ?? []), ...(request.references ?? [])];
+  const [me, memory, bridge, places, described] = await Promise.all([
     query<unknown & object, { name?: string; schoolRole?: string } | null>("identity:me", {
       actorClerkId: request.actorClerkId,
     }).catch(() => null),
     readMemoryIndex(request.actorClerkId),
     readBridgeStatus(request.actorClerkId, now),
     readPlaces(request.actorClerkId, request.workspaceId),
+    describePointers(request.actorClerkId, pointed),
   ]);
+  const describedById = new Map(described.map((item) => [item.id, item]));
+  const withDescription = (items: EnvironmentPointer[] | undefined) =>
+    (items ?? []).map((item) => describedById.get(item.id) ?? item);
   const first = request.open?.[0];
   const page =
     text(request.currentView).trim().slice(0, 200) ||
@@ -209,9 +253,9 @@ export async function buildEnvironment(request: EnvironmentRequest): Promise<Omi
     now,
     ...(me ? { user: { ...(me.name ? { name: me.name } : {}), ...(me.schoolRole ? { role: me.schoolRole } : {}) } } : {}),
     page,
-    ...(request.open?.length ? { open: request.open } : {}),
+    ...(request.open?.length ? { open: withDescription(request.open) } : {}),
     ...(request.selection ? { selection: request.selection } : {}),
-    ...(request.references?.length ? { references: request.references } : {}),
+    ...(request.references?.length ? { references: withDescription(request.references) } : {}),
     ...(bridge ? { bridge } : {}),
     ...(places.places.length ? { places: places.places } : {}),
     ...(places.here ? { here: places.here } : {}),

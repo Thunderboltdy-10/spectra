@@ -9,6 +9,7 @@ import { workTypeMeta } from "../artifacts/presentation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { PublishedCodeRuntime } from "../components/published-code-runtime";
+import { BoardView } from "../whiteboard/board-view";
 import { sheetCellEntries } from "../../../../shared/sheet-cells";
 import { requestSpectra } from "../data/request";
 
@@ -152,7 +153,6 @@ function ArtifactContent({ artifact }: { artifact: PublicArtifact }) {
   const sheets = rows(content.sheets);
   const files = rows(content.files);
   const events = rows(content.events);
-  const nodes = rows(content.nodes);
   const subtasks = rows(content.subtasks);
 
   return (
@@ -407,26 +407,7 @@ function ArtifactContent({ artifact }: { artifact: PublicArtifact }) {
             ))}
           </div>
         ) : null}
-        {artifact.blueprintKey === "whiteboard" ? (
-          <div className="relative min-h-[420px] overflow-hidden rounded-surface border border-[var(--border-default)] bg-[radial-gradient(circle_at_center,var(--border-subtle)_1px,transparent_1px)] [background-size:20px_20px]">
-            {nodes.slice(0, 80).map((node, index) => (
-              <div
-                key={String(node.id ?? index)}
-                className="absolute rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 text-micro shadow-sm"
-                style={{
-                  left: `${Math.max(2, Math.min(82, Number(node.x ?? 0) / 12))}%`,
-                  top: `${Math.max(2, Math.min(82, Number(node.y ?? 0) / 8))}%`,
-                  width: `${Math.max(80, Math.min(220, Number(node.width ?? 120)))}px`,
-                }}
-              >
-                {text(
-                  record(node.content).text,
-                  text(node.content, text(node.type, "Node")),
-                )}
-              </div>
-            ))}
-          </div>
-        ) : null}
+        {artifact.blueprintKey === "whiteboard" ? <BoardView content={artifact.content} /> : null}
         {artifact.blueprintKey === "agent" ? (
           <div className="rounded-surface border border-[var(--border-default)] bg-[var(--bg-primary)] p-5">
             <span className="text-micro font-semibold text-[var(--brand-primary)]">

@@ -42,12 +42,23 @@ export function canonicalArtifactWriteContent(type: ArtifactTypeKey, content: un
   }
 }
 
+/**
+ * The native file binding is never the writer's to set: a Word or Excel save
+ * can re-bind the file while the AI is still working from an older read, and
+ * the write keeps the binding the work has now.
+ */
+function withSystemBinding(content: unknown, before: unknown) {
+  if (!content || typeof content !== "object" || !before || typeof before !== "object") return content;
+  const binding = (before as Record<string, unknown>).nativeBinding;
+  return binding === undefined ? content : { ...(content as Record<string, unknown>), nativeBinding: binding };
+}
+
 export function resolveArtifactWriteInput(type: ArtifactTypeKey, before: unknown, input: Record<string, unknown>, prompt: string) {
   const resolvedContent = input.documentOperations
     ? applyDocumentAcademicOperations(before, input.documentOperations)
     : input.contentPatch
       ? applyResolvedContentPatch(before, input.contentPatch as Parameters<typeof applyResolvedContentPatch>[1])
-      : input.content ?? before;
+      : withSystemBinding(input.content, before) ?? before;
   return {
     resolvedContent,
     content: canonicalArtifactWriteContent(type, normalizeAiArtifactWriteContent(type, resolvedContent, prompt)),

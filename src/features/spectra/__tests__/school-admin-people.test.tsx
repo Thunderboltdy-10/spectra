@@ -82,13 +82,50 @@ async function openInvite(email: string) {
 }
 
 describe("School admin People", () => {
-  it("titles the page on one line and keeps the school context in a Side panel on Overview", async () => {
+  it("shows authoritative sync review and freshness instead of saying nothing needs attention", async () => {
+    navigation.tab = "overview";
+    api.getAdministration.mockResolvedValue({ ...overview, integration: { status: "connected", hasOpenConflicts: true, syncFreshness: "current" } });
+    render(<SchoolAdminShell />);
+    expect(await screen.findByText("ManageBac: needs review")).toBeTruthy();
+    expect(screen.queryByText(/Nothing needs you right now/)).toBeNull();
+    expect(screen.getByRole("link", { name: "Review ManageBac" }).getAttribute("href")).toBe("/managebac");
+    cleanup();
+    api.getAdministration.mockResolvedValue({ ...overview, integration: { status: "connected", hasOpenConflicts: false, syncFreshness: "stale" } });
+    render(<SchoolAdminShell />);
+    expect(await screen.findByText("ManageBac: updates overdue")).toBeTruthy();
+  });
+
+  it("loads attachment URLs only for the opened feedback report", async () => {
+    navigation.tab = "feedback";
+    api.getAdministration.mockImplementation(async (kind: string) => {
+      if (kind === "schoolOverview") return overview;
+      if (kind === "feedbackInbox") return { feedback: [{ feedbackId: "report-1", subject: "Broken page", message: "Please see my image", category: "issue", status: "new", createdAt: Date.now() }] };
+      if (kind === "feedbackEvidence") return { feedbackId: "report-1", pagePath: "/library", screenshotUrl: "https://evidence.example/screenshot.png", attachments: [{ name: "recording.mp4", mediaType: "video/mp4", url: "https://evidence.example/recording.mp4", bytes: 100 }] };
+      throw new Error(kind);
+    });
+    render(<SchoolAdminShell />);
+    const report = await screen.findByRole("button", { name: /Broken page/ });
+    expect(api.getAdministration.mock.calls.filter(([kind]) => kind === "feedbackEvidence")).toHaveLength(0);
+    fireEvent.click(report);
+    expect(await screen.findByRole("link", { name: "Open the reporter’s screenshot" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "recording.mp4" }).getAttribute("href")).toBe("https://evidence.example/recording.mp4");
+    expect(api.getAdministration.mock.calls.filter(([kind]) => kind === "feedbackEvidence")).toHaveLength(1);
+  });
+
+  it("asks for reconnection after a withdrawn first key instead of suggesting a sync is progressing", async () => {
+    navigation.tab = "overview";
+    api.getAdministration.mockResolvedValue({ ...overview, integration: { status: "revoked", hasOpenConflicts: false, syncFreshness: "never" } });
+    render(<SchoolAdminShell />);
+    expect(await screen.findByText("Reconnect ManageBac with a valid school API key to resume updates.")).toBeTruthy();
+    expect(screen.queryByText(/The connection is set up/)).toBeNull();
+  });
+
+  it("titles the page on one line and opens People from Overview", async () => {
     navigation.tab = "overview";
     render(<SchoolAdminShell />);
     expect(await screen.findByRole("heading", { level: 1, name: "School admin" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
-    expect(screen.getByRole("complementary", { name: "School context" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Member roles" }));
+    fireEvent.click(screen.getByRole("button", { name: /^People$/ }));
     expect(navigation.replace).toHaveBeenCalledWith(expect.stringContaining("tab=people"), { scroll: false });
   });
 
@@ -185,10 +222,10 @@ describe("School admin refresh", () => {
       return {};
     });
     render(<SchoolAdminShell />);
-    expect(await screen.findByText("membership")).toBeTruthy();
+    expect(await screen.findByText("Member")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => expect(auditLoads).toBe(2));
-    expect(screen.getByText("membership")).toBeTruthy();
+    expect(screen.getByText("Member")).toBeTruthy();
     expect(screen.queryByText("Loading audit events")).toBeNull();
   });
 });

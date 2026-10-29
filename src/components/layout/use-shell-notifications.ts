@@ -8,13 +8,15 @@ import {
   markSpectraTimetableReminderNotificationsRead,
   type SpectraArtifactCommentNotification,
   type SpectraPlannerReminderNotification,
+  type SpectraSchoolMessage,
   type SpectraShareInvitation,
   type SpectraTimetableReminderNotification,
 } from "@/features/spectra/data/api";
 import { spectraBus } from "@/features/spectra/events";
+import { mutateAdministration } from "@/features/spectra/administration/api";
 import { buildShellNotifications, type ShellNotification } from "./shell-notifications";
 
-const TONE: Record<ShellNotification["kind"], "needs" | "info"> = { share: "info", comment: "info", planner: "needs", timetable: "needs" };
+const TONE: Record<ShellNotification["kind"], "needs" | "info"> = { share: "info", comment: "info", planner: "needs", timetable: "needs", message: "info" };
 
 /**
  * The account's notifications: shares, comments, planner and timetable
@@ -27,6 +29,7 @@ export function useShellNotifications() {
   const [planner, setPlanner] = useState<SpectraPlannerReminderNotification[]>([]);
   const [timetable, setTimetable] = useState<SpectraTimetableReminderNotification[]>([]);
   const [invitations, setInvitations] = useState<SpectraShareInvitation[]>([]);
+  const [messages, setMessages] = useState<SpectraSchoolMessage[]>([]);
   // What the user already knew of; anything new after the first load reaches them through the island.
   const known = useRef<Set<string> | null>(null);
 
@@ -38,6 +41,7 @@ export function useShellNotifications() {
       setPlanner(center.planner);
       setTimetable(center.timetable);
       setInvitations(center.invitations);
+      setMessages(center.messages ?? []);
       const fresh = buildShellNotifications(center);
       const before = known.current;
       if (before) {
@@ -75,8 +79,8 @@ export function useShellNotifications() {
   }, [refresh]);
 
   const items = useMemo(
-    () => buildShellNotifications({ comments, planner, timetable, invitations }),
-    [comments, invitations, planner, timetable],
+    () => buildShellNotifications({ comments, planner, timetable, invitations, messages }),
+    [comments, invitations, messages, planner, timetable],
   );
   // Pending share invitations are outstanding actions, not clearable unread
   // notifications: they stay listed with their Review link but never count.
@@ -85,18 +89,21 @@ export function useShellNotifications() {
   const markAllRead = useCallback(async () => {
     const unread = <T extends { _id: string; readAt?: number }>(rows: T[]) => rows.filter((item) => !item.readAt).map((item) => item._id);
     const [commentIds, plannerIds, timetableIds] = [unread(comments), unread(planner), unread(timetable)];
+    const messageIds = messages.filter((item) => !item.readAt).map((item) => item.deliveryId);
     await Promise.all([
+      messageIds.length ? mutateAdministration("markAnnouncementsRead", { deliveryIds: messageIds }) : Promise.resolve(),
       commentIds.length ? markSpectraArtifactCommentNotificationsRead(commentIds) : Promise.resolve(),
       plannerIds.length ? markSpectraPlannerReminderNotificationsRead(plannerIds) : Promise.resolve(),
       timetableIds.length ? markSpectraTimetableReminderNotificationsRead(timetableIds) : Promise.resolve(),
     ]);
     await refresh();
-  }, [comments, planner, refresh, timetable]);
+  }, [comments, messages, planner, refresh, timetable]);
 
   const markRead = useCallback(
     async (item: ShellNotification) => {
       if (item.readAt || item.kind === "share") return;
-      if (item.kind === "comment") await markSpectraArtifactCommentNotificationsRead([item.id]);
+      if (item.kind === "message") await mutateAdministration("markAnnouncementRead", { deliveryId: item.id });
+      else if (item.kind === "comment") await markSpectraArtifactCommentNotificationsRead([item.id]);
       else if (item.kind === "planner") await markSpectraPlannerReminderNotificationsRead([item.id]);
       else await markSpectraTimetableReminderNotificationsRead([item.id]);
       await refresh();

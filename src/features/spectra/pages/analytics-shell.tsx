@@ -141,7 +141,7 @@ export function AnalyticsShell() {
     { id: "refresh", icon: "retry", label: loading ? "Refreshing…" : "Refresh analytics", labelPolicy: "never", disabled: loading, onSelect: () => void refresh() },
   ];
   return (
-    <main className="spectra-wave-y relative isolate min-h-0 flex-1 overflow-y-auto" data-spectra-app-surface="true">
+    <main className="spectra-wave-y relative isolate h-full min-h-0 flex-1 overflow-y-auto" data-spectra-app-surface="true">
       <PageBody>
         <PageHeader
           title="Analytics"

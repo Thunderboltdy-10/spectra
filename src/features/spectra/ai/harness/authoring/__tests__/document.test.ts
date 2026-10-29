@@ -109,9 +109,61 @@ describe("document Markdown", () => {
     const ids = (nodes: Array<{ attrs?: Record<string, unknown> }>) => nodes.map((node) => node.attrs?.blockId);
     const before = ids(content.tiptap.content);
     const after = ids(next.tiptap.content);
-    expect(after.filter((id) => before.includes(id))).toHaveLength(before.length - 1);
+    // The rewritten block is still the same block: every id stays put.
+    expect(after).toEqual(before);
     expect(next.tiptap.content.at(-1)!.content![0]!.marks).toEqual([{ type: "textStyle", attrs: { color: "var(--danger)" } }]);
     expect(documentReadback(next, content)).toContain("Split water molecules");
+  });
+
+  it("keeps a rewritten block's id between unchanged neighbours, not a new block's", () => {
+    const lines = (...paragraphs: string[]) => paragraphs.join("\n\n");
+    const content = documentFromMarkdown(lines("One.", "Two.", "Three."), undefined, sequentialIdFactory());
+    const [one, two, three] = content.tiptap.content.map((node) => node.attrs?.blockId);
+    const rewritten = documentFromMarkdown(lines("One.", "Two, reworded.", "Three."), content, sequentialIdFactory());
+    expect(rewritten.tiptap.content.map((node) => node.attrs?.blockId)).toEqual([one, two, three]);
+    // An inserted block next to an untouched one is new; the old one keeps its id.
+    const inserted = documentFromMarkdown(lines("One.", "New line.", "Two.", "Three."), content, sequentialIdFactory());
+    const insertedIds = inserted.tiptap.content.map((node) => node.attrs?.blockId);
+    expect(insertedIds[0]).toBe(one);
+    expect(insertedIds.slice(2)).toEqual([two, three]);
+    expect([one, two, three]).not.toContain(insertedIds[1]);
+  });
+
+  it("keeps a rewritten paragraph's own font on its new words", () => {
+    const font = { type: "textStyle", attrs: { fontFamily: "Times New Roman" } };
+    const content = {
+      tiptap: {
+        type: "doc",
+        content: [
+          { type: "paragraph", attrs: { blockId: "p1" }, content: [{ type: "text", text: "Old words.", marks: [font] }] },
+          { type: "paragraph", attrs: { blockId: "p2" }, content: [{ type: "text", text: "Kept.", marks: [font] }] },
+        ],
+      },
+      blocks: [],
+    };
+    const next = documentFromMarkdown(["New **bold** words.", "Kept."].join("\n\n"), content, sequentialIdFactory());
+    const rewritten = next.tiptap.content[0]!;
+    expect(rewritten.attrs?.blockId).toBe("p1");
+    expect(rewritten.content!.every((text) => text.marks?.some((mark) => mark.type === "textStyle"))).toBe(true);
+    expect(rewritten.content!.find((text) => text.text === "bold")!.marks!.map((mark) => mark.type).sort()).toEqual(["bold", "textStyle"]);
+  });
+
+  it("keeps blank lines through an edit elsewhere", () => {
+    const content = {
+      tiptap: {
+        type: "doc",
+        content: [
+          { type: "paragraph", attrs: { blockId: "p1" }, content: [{ type: "text", text: "One." }] },
+          { type: "paragraph", attrs: { blockId: "gap" } },
+          { type: "paragraph", attrs: { blockId: "p2" }, content: [{ type: "text", text: "Two." }] },
+        ],
+      },
+      blocks: [],
+    };
+    const markdown = documentToMarkdown(content);
+    expect(markdown).toContain("<!-- keep:gap blank line -->");
+    const next = documentFromMarkdown(markdown.replace("Two.", "Two, edited."), content, sequentialIdFactory());
+    expect(next.tiptap.content.map((node) => node.attrs?.blockId)).toEqual(["p1", "gap", "p2"]);
   });
 
   it("keeps nodes Markdown cannot express behind a marker", () => {

@@ -2,6 +2,7 @@
 
 import { useMissingAssets } from "./use-missing-assets";
 import { currentTimeMs } from "@/lib/unique-token";
+import { readConvexError } from "../../../../shared/convex-error.mjs";
 import {
   AlertCircle,
   BarChart3,
@@ -11,7 +12,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Eye,
-  EyeOff,
   History,
   Import,
   List,
@@ -382,6 +382,8 @@ function quizPracticeErrorMessage(error: unknown, fallback: string) {
   }
   if (message.includes("QUIZ_PRACTICE_ATTEMPT_LIMIT_REACHED"))
     return "You have reached this quiz’s configured practice-attempt limit.";
+  if (message.includes("QUIZ_PRACTICE_STILL_PUBLISHING"))
+    return "It is still publishing. Press Attempt again in a moment.";
   if (message.includes("QUIZ_PRACTICE_NOT_PUBLISHED"))
     return "This practice version is no longer available. The author may be preparing an updated draft.";
   if (message.includes("QUIZ_ATTEMPT_NOT_EDITABLE"))
@@ -473,12 +475,17 @@ export function QuizStudio({
   const [inspectAttempt, setInspectAttempt] = useState(false);
   const [practiceAttempt, setPracticeAttempt] =
     useState<SpectraQuizPracticeAttempt>();
+  const practiceQuestionTypes = useMemo(
+    () => new Map((practiceAttempt?.questions ?? []).map(({ id, type }) => [id, type])),
+    [practiceAttempt?.questions],
+  );
   const [practiceAttempts, setPracticeAttempts] = useState<
     SpectraQuizPracticeAttempt[]
   >([]);
   const [practiceLoading, setPracticeLoading] = useState(true);
   const [practiceBusy, setPracticeBusy] = useState(false);
   const [practiceSyncing, setPracticeSyncing] = useState<string[]>([]);
+  const practiceWrites = useRef(new Map<ReturnType<typeof saveSpectraQuizPracticeResponse>, string>());
   const [practiceError, setPracticeError] = useState<string>();
   const [practiceFeedback, setPracticeFeedback] = useState<
     Record<string, NonNullable<SpectraQuizPracticeAttempt["results"]>[number]>
@@ -1192,25 +1199,37 @@ export function QuizStudio({
       return;
     }
     if (!synchronizationReady) {
-      setPracticeError(
-        "The published version is still synchronizing. Practice will be available as soon as the live state is durable.",
-      );
+      setPracticeError("Still publishing. Attempt opens as soon as it is saved.");
       setView("preview");
       return;
     }
     setPracticeBusy(true);
     setPracticeError(undefined);
     try {
-      const attempt = await startSpectraQuizPractice({
-        artifactId,
-        clientAttemptId: crypto.randomUUID(),
-      });
-      hydratePracticeAttempt(attempt);
+      // The server learns of a publish a moment after this page does: while it
+      // has not, Attempt stays busy and asks again with the same attempt id.
+      const clientAttemptId = crypto.randomUUID();
+      const startWhenPublished = async (
+        tries: number,
+      ): Promise<Awaited<ReturnType<typeof startSpectraQuizPractice>>> => {
+        try {
+          return await startSpectraQuizPractice({ artifactId, clientAttemptId });
+        } catch (error) {
+          const publishing = readConvexError(error).code === "QUIZ_PRACTICE_NOT_PUBLISHED";
+          if (!publishing || !latestQuizRef.current.published) throw error;
+          if (tries >= 4) throw new Error("QUIZ_PRACTICE_STILL_PUBLISHING");
+          await new Promise((resolve) => window.setTimeout(resolve, 1_000 + tries * 750));
+          return startWhenPublished(tries + 1);
+        }
+      };
+      const started = await startWhenPublished(0);
+      hydratePracticeAttempt(started);
       setPracticeAttempts((current) => [
-        attempt,
-        ...current.filter((item) => item.attemptId !== attempt.attemptId),
+        started,
+        ...current.filter((item) => item.attemptId !== started.attemptId),
       ]);
     } catch (error) {
+      setView("preview");
       setPracticeError(
         quizPracticeErrorMessage(
           error,
@@ -1222,18 +1241,34 @@ export function QuizStudio({
     }
   }
 
+  function practiceAnswerValue(questionId: string, value: string) {
+    const type = practiceQuestionTypes.get(questionId);
+    return ["select_all", "ordering", "matching"].includes(type ?? "") ? answerValueArray(value) : value;
+  }
+
   async function synchronizePracticeAnswer(questionId: string, value: string) {
     setAnswers((current) => ({ ...current, [questionId]: value }));
     if (!practiceAttempt || practiceAttempt.status !== "in_progress") return;
     setPracticeSyncing((current) => [...new Set([...current, questionId])]);
-    setPracticeError(undefined);
+    let writing: ReturnType<typeof saveSpectraQuizPracticeResponse> | undefined;
     try {
-      const synchronized = await saveSpectraQuizPracticeResponse({
-        attemptId: practiceAttempt.attemptId,
-        questionId,
-        response: value.startsWith("[") ? answerValueArray(value) : value,
-        clientMutationId: crypto.randomUUID(),
-      });
+      const save = () => {
+        setPracticeError(undefined);
+        return saveSpectraQuizPracticeResponse({
+          attemptId: practiceAttempt.attemptId,
+          questionId,
+          response: practiceAnswerValue(questionId, value),
+          clientMutationId: crypto.randomUUID(),
+        });
+      };
+      // One learner can blur, revise and blur again before the first save
+      // arrives. Preserve that order so an older request cannot win on reload.
+      const earlier = [...practiceWrites.current]
+        .filter(([, id]) => id === questionId)
+        .map(([pending]) => pending);
+      writing = earlier.length ? Promise.allSettled(earlier).then(save) : save();
+      practiceWrites.current.set(writing, questionId);
+      const synchronized = await writing;
       if (synchronized.result)
         setPracticeFeedback((current) => ({
           ...current,
@@ -1242,14 +1277,12 @@ export function QuizStudio({
       if (synchronized.timeRemainingMs !== undefined)
         anchorPracticeClock(synchronized.timeRemainingMs);
       setPracticeAttempt((current) =>
-        current
+        current?.attemptId === practiceAttempt.attemptId
           ? {
               ...current,
               responses: {
                 ...current.responses,
-                [questionId]: value.startsWith("[")
-                  ? answerValueArray(value)
-                  : value,
+                [questionId]: practiceAnswerValue(questionId, value),
               },
             }
           : current,
@@ -1262,9 +1295,10 @@ export function QuizStudio({
         )} Reconnect before submitting.`,
       );
     } finally {
-      setPracticeSyncing((current) =>
-        current.filter((id) => id !== questionId),
-      );
+      if (writing) practiceWrites.current.delete(writing);
+      if (![...practiceWrites.current.values()].includes(questionId)) {
+        setPracticeSyncing((current) => current.filter((id) => id !== questionId));
+      }
     }
   }
 
@@ -1273,18 +1307,22 @@ export function QuizStudio({
     setPracticeBusy(true);
     setPracticeError(undefined);
     try {
+      // Blurring the answer can start a save during the Submit click. Keep
+      // that click and flush the latest answers after earlier saves settle.
+      await Promise.allSettled([...practiceWrites.current.keys()]);
       for (const [questionId, value] of Object.entries(answers)) {
         try {
           await saveSpectraQuizPracticeResponse({
             attemptId: practiceAttempt.attemptId,
             questionId,
-            response: value.startsWith("[") ? answerValueArray(value) : value,
+            response: practiceAnswerValue(questionId, value),
             clientMutationId: crypto.randomUUID(),
           });
-        } catch {
-          // Each answer was already saved as it was written; this pass is a
-          // final flush. A rejected save — most often a clock that has just run
-          // out — must not stand between the learner and their submission.
+        } catch (error) {
+          // An expired or already submitted attempt is finalized by the
+          // authoritative submit endpoint. Other failures must preserve the
+          // draft rather than silently submit older saved answers.
+          if (!["QUIZ_ATTEMPT_TIME_ELAPSED", "QUIZ_ATTEMPT_NOT_EDITABLE"].includes(readConvexError(error).code ?? "")) throw error;
         }
       }
       const submittedAttempt = await submitSpectraQuizPractice({
@@ -1628,18 +1666,6 @@ export function QuizStudio({
           disabled: quizImporting,
           onSelect: () => quizImportRef.current?.click(),
         },
-        ...(published
-          ? [
-              {
-                id: "unpublish",
-                label: "Unpublish",
-                icon: EyeOff,
-                priority: "advanced",
-                hint: "Stops new attempts; attempts already taken keep their own version",
-                onSelect: unpublishQuiz,
-              } as CommandBinding,
-            ]
-          : []),
       ]
     : [
         {
@@ -1725,14 +1751,24 @@ export function QuizStudio({
                 </strong>
                 {publishedAt ? ` on ${formatShortDate(publishedAt)}.` : "."}{" "}
                 Learners can attempt it now.
+                {" "}
+                <button
+                  type="button"
+                  className="underline underline-offset-2 disabled:opacity-50"
+                  disabled={!synchronizationReady}
+                  onClick={unpublishQuiz}
+                  title="Stops new attempts; attempts already taken keep their own version"
+                >
+                  Unpublish
+                </button>
               </>
             ) : publishedAt ? (
               <>
                 <strong className="font-semibold text-[var(--warning)]">
                   Edits are not published.
                 </strong>{" "}
-                Learners keep the version published on{" "}
-                {formatShortDate(publishedAt)} until you publish again.
+                New attempts are paused until you publish again. Attempts already
+                started keep their own version.
               </>
             ) : (
               <>
@@ -2100,7 +2136,7 @@ export function QuizStudio({
                         question.options.map((option, optionIndex) => (
                           <button
                             type="button"
-                            disabled={submitted}
+                            disabled={submitted || practiceBusy}
                             onClick={() =>
                               void synchronizePracticeAnswer(
                                 question.id,
@@ -2126,7 +2162,7 @@ export function QuizStudio({
                           return (
                             <button
                               type="button"
-                              disabled={submitted}
+                              disabled={submitted || practiceBusy}
                               onClick={() => {
                                 const current = answerArray(question.id);
                                 void synchronizePracticeAnswer(
@@ -2177,7 +2213,7 @@ export function QuizStudio({
                               <div className="flex gap-1">
                                 <button
                                   type="button"
-                                  disabled={submitted || optionIndex === 0}
+                                  disabled={submitted || practiceBusy || optionIndex === 0}
                                   onClick={() => {
                                     const next = [...order];
                                     [next[optionIndex - 1], next[optionIndex]] =
@@ -2197,7 +2233,7 @@ export function QuizStudio({
                                 <button
                                   type="button"
                                   disabled={
-                                    submitted ||
+                                    submitted || practiceBusy ||
                                     optionIndex === order.length - 1
                                   }
                                   onClick={() => {
@@ -2249,7 +2285,7 @@ export function QuizStudio({
                                 <SelectField
                                   ariaLabel={`Match for ${pair.left || "untitled prompt"}`}
                                   size="sm"
-                                  disabled={submitted}
+                                  disabled={submitted || practiceBusy}
                                   placeholder="Choose a match"
                                   value={selected ?? ""}
                                   onChange={(value) => {
@@ -2280,7 +2316,7 @@ export function QuizStudio({
                         </div>
                       ) : question.type === "long_response" ? (
                         <textarea
-                          disabled={submitted}
+                          disabled={submitted || practiceBusy}
                           value={answers[question.id] ?? ""}
                           onChange={(event) =>
                             setAnswers((current) => ({
@@ -2300,7 +2336,7 @@ export function QuizStudio({
                       ) : (
                         <input
                           type={question.type === "numeric" ? "number" : "text"}
-                          disabled={submitted}
+                          disabled={submitted || practiceBusy}
                           value={answers[question.id] ?? ""}
                           onChange={(event) =>
                             setAnswers((current) => ({
@@ -2420,9 +2456,7 @@ export function QuizStudio({
                   </span>
                 ) : practiceAttempt?.status === "in_progress" ? (
                   Object.entries(answers).some(([questionId, value]) => {
-                    const current = value.startsWith("[")
-                      ? answerValueArray(value)
-                      : value;
+                    const current = practiceAnswerValue(questionId, value);
                     const saved = practiceAttempt.responses[questionId] ?? "";
                     return JSON.stringify(current) !== JSON.stringify(saved);
                   }) ? (
@@ -2466,7 +2500,6 @@ export function QuizStudio({
                       type="button"
                       disabled={
                         practiceBusy ||
-                        practiceSyncing.length > 0 ||
                         (Boolean(practiceAttempt) && !canSubmitQuiz)
                       }
                       className="h-9 shrink-0 whitespace-nowrap rounded-control bg-[var(--text-primary)] px-3 text-caption font-medium text-[var(--bg-primary)] disabled:opacity-45"

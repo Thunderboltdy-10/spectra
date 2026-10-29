@@ -16,8 +16,29 @@ import {
   type SchoolSyncMode,
 } from "../shared/school-sync";
 import type { vSchoolSyncKind, vSchoolSyncTrigger } from "./schoolSyncSchema";
+import { getActorForAccountId } from "./identityShared";
 
 type Ctx = QueryCtx | MutationCtx;
+export const LOGIN_SYNC_SETUP_VERSION = 3;
+
+/** The same durable gate drives onboarding and the first morning brief. */
+export async function schoolSetupForAccount(ctx: Ctx, accountId: Id<"accounts">) {
+  const actor = await getActorForAccountId(ctx, accountId);
+  const preferences = await ctx.db.query("accountPreferences").withIndex("by_account_scope_key", (q) => q.eq("accountId", accountId).eq("scope", "account").eq("scopeKey", "account")).unique();
+  const tourComplete = preferences?.values?.integrations?.tourStatus === "done";
+  const base = { accountId, tourComplete, schoolAdmin: actor?.schoolRole === "school_admin", completedAt: null as number | null, integrationId: null as Id<"schoolIntegrations"> | null };
+  if (!actor) return { ...base, phase: "no_school" as const };
+  const integration = await ctx.db.query("schoolIntegrations").withIndex("by_school_provider", (q) => q.eq("schoolId", actor.schoolId).eq("provider", "managebac")).unique();
+  if (!integration || !["connected", "degraded"].includes(integration.status)) return { ...base, phase: "awaiting_connection" as const };
+  const attempt = await ctx.db.query("schoolSyncBootstraps").withIndex("by_account_integration", (q) => q.eq("accountId", accountId).eq("integrationId", integration._id)).unique();
+  const current = attempt?.setupVersion === LOGIN_SYNC_SETUP_VERSION;
+  const connected = { ...base, integrationId: integration._id };
+  if (current && attempt.classSelectionConfirmedAt !== undefined && attempt.completedAt !== undefined)
+    return { ...connected, phase: "ready" as const, completedAt: attempt.completedAt };
+  if (current && attempt.classSelectionConfirmedAt !== undefined) return { ...connected, phase: "syncing" as const };
+  if (current && attempt.classesListedAt !== undefined) return { ...connected, phase: "choose_classes" as const };
+  return { ...connected, phase: "loading_classes" as const };
+}
 export type SyncTrigger = Infer<typeof vSchoolSyncTrigger>;
 
 // The validator and the shared list name the same kinds.
@@ -118,6 +139,32 @@ export async function writeSyncState(ctx: MutationCtx, scope: StateScope, patch:
     await ctx.scheduler.runAt(Math.max(now, dueAt), internal.executionScheduler.dispatchManageBacSync, {
       integrationId: scope.integrationId, scheduledFor: dueAt,
     });
+}
+
+/** Applying staged changes is still running; partial results are never successful syncs. */
+export async function settleStudentSyncState(
+  ctx: MutationCtx,
+  run: Doc<"externalSyncRuns">,
+  status: "running" | "completed" | "partial" | "awaiting_review",
+  now: number,
+) {
+  if (!run.accountId || !run.syncKind) return;
+  const scope = { accountId: run.accountId, schoolId: run.schoolId, integrationId: run.integrationId, kind: run.syncKind };
+  const current = await syncStateFor(ctx, scope.accountId, scope.integrationId, scope.kind);
+  // A newer sync may have taken over while this run's projections drained.
+  if (current?.lastSyncRunId !== run._id) return;
+  const preferences = await loadSyncPreferences(ctx, run.accountId, run.integrationId);
+  const dueAt = status === "running" ? now + 5 * 60_000
+    : status === "completed" ? nextAutoRunAt(preferences, run.syncKind, now, now)
+    : status === "partial" && preferences.hasAuto(run.syncKind) ? now + 5 * 60_000 : undefined;
+  await writeSyncState(ctx, scope, {
+    state: status === "running" ? "running" : status === "completed" ? "idle" : "failed",
+    ...(status === "completed" ? { lastSuccessAt: now } : {}),
+    dueAt,
+    dueTrigger: dueAt === undefined ? undefined : "schedule",
+    errorCode: status === "partial" ? "INTEGRATION_SYNC_PARTIAL" : status === "awaiting_review" ? "INTEGRATION_REVIEW_REQUIRED" : undefined,
+    errorSummary: status === "partial" ? "Some data could not be synced." : status === "awaiting_review" ? "Some changes need review." : undefined,
+  });
 }
 
 /** When Auto should next run this kind, or undefined when nothing of it is Auto. */

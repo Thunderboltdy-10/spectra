@@ -202,11 +202,11 @@ describe("harness tools", () => {
     expect(resumed.state.messages.find((message) => message.role === "tool")).toMatchObject({ content: "The user answered: Unit 2" });
   });
 
-  it("creates a whole deck with its theme and notes in one call and reads every slide back", async () => {
+  it("creates a deck with its theme and notes and reads every slide back", async () => {
     const { tools, run, backend } = setup();
     const create = tools.find((tool) => tool.name === "create_artifact")!;
-    expect(create.description).toMatch(/whole, in this one call/);
-    expect(create.description).toMatch(/every slide and the speaker notes/);
+    expect(create.description).toMatch(/Something short goes in whole/);
+    expect(create.description).toMatch(/built in steps/);
     const slides = Array.from({ length: 12 }, (_, index) => ({
       title: `Stage ${index + 1} of the cell cycle`,
       body: `- What happens in stage ${index + 1}\n- Why it matters`,

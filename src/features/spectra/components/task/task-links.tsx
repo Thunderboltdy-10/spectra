@@ -18,14 +18,23 @@ import { useTreeQuickView, useTreeSearch, type TreeNode } from "../../organizati
 
 const LINKS_MAX = 30;
 
-export function TaskLinks({ ids, selfId, canEdit, onChange }: { ids: string[]; selfId?: string; canEdit: boolean; onChange: (ids: string[]) => void }) {
-  const [picking, setPicking] = useState(false);
+export function TaskLinks({
+  ids,
+  selfId,
+  canEdit,
+  onChange,
+  bare,
+}: {
+  ids: string[];
+  selfId?: string;
+  canEdit: boolean;
+  onChange: (ids: string[]) => void;
+  /** Just the list, for a property row that already names it. */
+  bare?: boolean;
+}) {
+  const [picking, setPicking] = useState(bare && canEdit && !ids.length);
   if (!ids.length && !canEdit) return null;
-  return (
-    <section className="sheet-section" aria-label="Linked work">
-      <header className="sheet-section-head">
-        <h3>Linked work</h3>
-      </header>
+  const list = (
       <ul className="task-links">
         {ids.map((id) => (
           <LinkedWork key={id} workId={id} canEdit={canEdit} onRemove={() => onChange(ids.filter((candidate) => candidate !== id))} />
@@ -49,6 +58,14 @@ export function TaskLinks({ ids, selfId, canEdit, onChange }: { ids: string[]; s
           </li>
         ) : null}
       </ul>
+  );
+  if (bare) return list;
+  return (
+    <section className="sheet-section" aria-label="Linked work">
+      <header className="sheet-section-head">
+        <h3>Linked work</h3>
+      </header>
+      {list}
     </section>
   );
 }

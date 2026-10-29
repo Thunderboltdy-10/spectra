@@ -86,7 +86,7 @@ const CODE_MESSAGES: Array<{ test: RegExp; message: (app: string) => string }> =
   {
     test: /COLLABORATION_CONNECT_TIMEOUT|COLLABORATION_SYNC_TIMEOUT|COLLABORATION_NOT_SYNCHRONIZED|COLLABORATION_NOT_AVAILABLE|ARTIFACT_LIVE_MODEL_UNAVAILABLE|ARTIFACT_LIVE_MODEL_UNINITIALIZED/i,
     message: () =>
-      "This edit is still safely held on this device. Spectra will synchronize it when the live connection catches up.",
+      "Saving is taking longer than usual. Your edits are kept on this device and save on their own once Spectra reconnects.",
   },
   {
     test: /COLLABORATION_ACCESS_LOST|COLLABORATION_READ_ONLY/i,

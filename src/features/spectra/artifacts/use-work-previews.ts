@@ -3,7 +3,9 @@
 import { useEffect, useState, type RefObject } from "react";
 import { getSpectraArtifact, getSpectraThreadMessages } from "../data/api";
 import type { PresentedWorkType } from "./presentation";
-import { threadPreview, workPreview, type WorkPreview } from "./work-preview";
+import { cornerPreview, threadPreview, workPreview, type WorkPreview } from "./work-preview";
+import { fileViewKind } from "../files/file-kind";
+import { readOfficeBytes } from "../files/office-preview-client";
 
 /*
  * Previews for cards. Catalogs carry no content, so each card's work is read
@@ -13,12 +15,22 @@ import { threadPreview, workPreview, type WorkPreview } from "./work-preview";
  * once.
  */
 
-export type PreviewSource = { _id: string; blueprintKey: PresentedWorkType; updatedAt: number };
+export type PreviewSource = { _id: string; blueprintKey: PresentedWorkType; updatedAt: number; title?: string };
 
 const cache = new Map<string, WorkPreview | null>();
 const keyOf = (work: PreviewSource) => `${work._id}:${work.updatedAt}`;
-/** Files are their bytes; a preview of them is their kind, which needs no read. */
-const readable = (work: PreviewSource) => work.blueprintKey !== "resource";
+/** The files a card draws from their own bytes: a PDF's first page, a sheet's corner, a deck's slides. */
+function fileFace(work: PreviewSource) {
+  if (work.blueprintKey !== "resource" || !work.title) return null;
+  const kind = fileViewKind(undefined, work.title);
+  return kind === "pdf" || kind === "sheet" || kind === "slides" ? kind : null;
+}
+/** Other files are named by their kind, which needs no read. */
+const readable = (work: PreviewSource) => work.blueprintKey !== "resource" || fileFace(work) !== null;
+/** Larger files keep the name of their kind: a card is not worth reading that much. */
+const FILE_FACE_LIMIT = 12_000_000;
+/** The width a PDF's first page is drawn at, about twice a card's. */
+const PAGE_WIDTH = 480;
 /** How many of a thread's latest messages it takes to find its last exchange. */
 const THREAD_TAIL = 6;
 
@@ -27,8 +39,47 @@ async function previewFor(work: PreviewSource, signal: AbortSignal) {
     const { messages } = await getSpectraThreadMessages(work._id, undefined, THREAD_TAIL);
     return threadPreview(messages);
   }
+  const face = fileFace(work);
+  if (face) return filePreview(work._id, face, signal);
   const { artifact } = await getSpectraArtifact(work._id, { signal });
   return workPreview(work.blueprintKey, artifact.content);
+}
+
+/** A file's face from its kept copy; nothing when there is no copy or it is too big. */
+async function filePreview(workId: string, face: "pdf" | "sheet" | "slides", signal: AbortSignal): Promise<WorkPreview | null> {
+  const response = await fetch(`/api/spectra/native?artifactId=${encodeURIComponent(workId)}`, { signal });
+  if (!response.ok || Number(response.headers.get("content-length")) > FILE_FACE_LIMIT) {
+    void response.body?.cancel();
+    return null;
+  }
+  const bytes = await response.arrayBuffer();
+  if (bytes.byteLength > FILE_FACE_LIMIT) return null;
+  if (face === "pdf") return pdfFace(bytes);
+  const read = await readOfficeBytes({ kind: face, bytes }, signal);
+  if (read.kind === "slides") return workPreview("presentation", read.deck);
+  if (read.kind !== "sheet") return null;
+  const sheet = read.sheets.find((candidate) => candidate.id === read.activeSheetId) ?? read.sheets[0];
+  return sheet ? cornerPreview(sheet.cells, (cell) => (cell as { text?: string }).text?.slice(0, 40) ?? "") : null;
+}
+
+/** A PDF's first page, drawn once at card size and kept as a picture. */
+async function pdfFace(bytes: ArrayBuffer): Promise<WorkPreview | null> {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const task = pdfjs.getDocument({ data: new Uint8Array(bytes), useWorkerFetch: false, disableFontFace: true });
+  try {
+    const pdf = await task.promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: PAGE_WIDTH / Math.max(1, page.getViewport({ scale: 1 }).width) });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    await page.render({ canvas, canvasContext: context, viewport }).promise;
+    return { kind: "page", image: canvas.toDataURL("image/webp", 0.82), pages: pdf.numPages };
+  } finally {
+    await task.destroy();
+  }
 }
 
 const PARALLEL_READS = 4;

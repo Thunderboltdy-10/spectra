@@ -11,7 +11,8 @@ import { outlineFigure, rowsFigure, type Figure, type Point } from "../life/figu
  *
  * Things in a work behave as physical things made of the field:
  * - something new forms out of the field where it was made: from your
- *   pointer or caret, or from a collaborator's (or Spectra's) cursor; what
+ *   pointer, or from a collaborator's (or Spectra's) cursor; your own typing
+ *   and what arrives with no one making it (a save, a sync) never animate; what
  *   Spectra writes without a cursor is crossed once by the skeleton's band
  *   as it lands, the way loaded content settles;
  * - a deletion unforms where the thing was;
@@ -215,7 +216,13 @@ export function useEditorFieldMoments(rootRef: RefObject<HTMLElement | null>, { 
       const box = selection.getRangeAt(0).getBoundingClientRect();
       return box.width || box.height ? [box.x, box.y + box.height / 2] : null;
     };
-    const recentLocal = () => (performance.now() - localAt < LOCAL_WINDOW_MS ? (localPoint ?? caretPoint()) : null);
+    // Yours by timing alone: a caret on a fresh empty line has no box, and that Enter is still yours.
+    const isLocal = () => performance.now() - localAt < LOCAL_WINDOW_MS;
+    const recentLocal = (): Point | null => {
+      if (!isLocal()) return null;
+      const box = root.getBoundingClientRect();
+      return localPoint ?? caretPoint() ?? [box.x + box.width / 2, box.y + 40];
+    };
 
     /* Last places of what is on screen, so a deletion can unform where it was. */
     const lastPlace = new WeakMap<Element, { rect: Rect; radius: number }>();
@@ -263,11 +270,13 @@ export function useEditorFieldMoments(rootRef: RefObject<HTMLElement | null>, { 
       const figure = contentFigure(element, isText(element));
       if (!figure.strokes.length) return;
       const source = sourceFor(rect);
+      // Nobody made it here: a save coming back, a sync or a re-render. It simply is there.
+      if (source.kind === "self") return;
       if (source.kind === "prism") {
         markArrival(element);
       } else {
         life.form(figure, {
-          from: source.kind === "self" ? [rect.x, rect.y] : source.point,
+          from: source.point,
           // Yours and a person's are ink; Spectra's is its light.
           colour: source.kind === "peer" && source.ai ? "spectrum" : inkOf(),
         });
@@ -429,7 +438,7 @@ export function useEditorFieldMoments(rootRef: RefObject<HTMLElement | null>, { 
         const plan = planBatch({
           added: batch.added.filter((element) => element.isConnected && inContent(element)),
           removed: batch.removed,
-          local: recentLocal() !== null,
+          local: isLocal(),
           isText,
         });
         for (const element of plan.unforms) unformThere(element);

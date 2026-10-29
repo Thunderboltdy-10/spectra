@@ -224,6 +224,30 @@ export const applyChunks = internalMutation({
   },
 });
 
+/**
+ * The item's embedding in words: the passages nearest its centroid, so an
+ * agent told only a title knows what the work is about without reading it.
+ * Without vectors, the first passages stand in. Computed once per index.
+ */
+function aboutInWords(chunks: Doc<"semanticChunks">[], center: number[] | undefined, version: string | null | undefined) {
+  if (!chunks.length) return undefined;
+  const norm = (vector: number[]) => Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0)) || 1;
+  const centerNorm = center ? norm(center) : 1;
+  const scored = chunks.map((chunk, index) => {
+    const vector = chunk.embedding && chunk.embeddingVersion === version ? chunk.embedding : undefined;
+    const score = center && vector
+      ? vector.reduce((sum, value, at) => sum + value * (center[at] ?? 0), 0) / (norm(vector) * centerNorm)
+      : -index;
+    return { chunk, score };
+  }).sort((left, right) => right.score - left.score);
+  const labels = [...new Set(scored.map(({ chunk }) => chunk.label?.replace(/\s+/g, " ").trim()).filter((label): label is string => Boolean(label)))]
+    .slice(0, 4);
+  const lead = scored[0]!.chunk.text.replace(/\s+/g, " ").trim();
+  const sentence = (lead.match(/^.{20,180}?[.!?](?=\s|$)/)?.[0] ?? lead.slice(0, 160)).trim();
+  const words = [labels.length ? labels.join("; ") : "", sentence].filter(Boolean).join(" — ");
+  return words ? words.slice(0, 260) : undefined;
+}
+
 export const finalizeItem = internalMutation({
   args: { queueId: v.id("semanticIndexQueue"), leaseOwner: v.string(), kind: vKind, itemId: v.string(), title: v.string(),
     subtype: v.optional(v.string()), scope: vScope, lineageIds: v.array(v.string()), sourceUpdatedAt: v.number(),
@@ -240,16 +264,22 @@ export const finalizeItem = internalMutation({
       .take(MAX_STORED_CHUNKS);
     const version = embeddingVersion();
     const vectors: number[][] = [];
+    const kept: Doc<"semanticChunks">[] = [];
     for (const chunk of chunks) {
       if (!keep.has(chunk.chunkKey)) await ctx.db.delete(chunk._id);
-      else if (chunk.embedding && chunk.embeddingVersion === version) vectors.push(chunk.embedding);
+      else {
+        kept.push(chunk);
+        if (chunk.embedding && chunk.embeddingVersion === version) vectors.push(chunk.embedding);
+      }
     }
     const complete = args.embeddingState === "complete" && vectors.length === args.keepKeys.length;
     const itemCentroid = version && vectors.length ? centroid(vectors) : undefined;
+    // Owner-only passages (quiz answers) never describe the work to anyone.
+    const about = aboutInWords(kept.filter((chunk) => !chunk.ownerOnly), itemCentroid, version);
     const fields = { schoolId: args.scope.schoolId, ownerAccountId: args.scope.ownerAccountId, title: args.title.slice(0, 300),
       subtype: args.subtype, contentDigest: args.contentDigest, lineageIds: args.lineageIds, sourceUpdatedAt: args.sourceUpdatedAt,
       workspaceId: args.workspaceId, timeAt: args.timeAt, mirrors: args.mirrors,
-      indexedAt: now, chunkCount: args.keepKeys.length, embeddingVersion: itemCentroid ? version! : undefined,
+      indexedAt: now, chunkCount: args.keepKeys.length, ...(about ? { about } : {}), embeddingVersion: itemCentroid ? version! : undefined,
       embeddingState: args.embeddingState === "disabled" ? "disabled" as const : complete ? "complete" as const : "pending" as const,
       centroid: itemCentroid, ...vectorKeysFor(itemCentroid ? version! : undefined, args.kind, args.itemId, args.scope) };
     const item = await ctx.db.query("semanticItems").withIndex("by_item", (q) => q.eq("itemKind", args.kind).eq("itemId", args.itemId)).unique();

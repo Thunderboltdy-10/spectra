@@ -47,10 +47,12 @@ describe("buildArtifactLivePreviewBeats", () => {
     };
     const beats = buildArtifactLivePreviewBeats(before, after);
     expect(beats[0]?.interaction?.kind).toBe("pointer");
-    expect(beats.some((beat) => typeof beat.selectionEnd === "number")).toBe(
-      true,
-    );
-    expect(beats.some((beat) => beat.previewGesture === "erasing")).toBe(false);
+    // The changed words go first: selected, or backspaced when short.
+    expect(
+      beats.some(
+        (beat) => typeof beat.selectionEnd === "number" || beat.previewGesture === "erasing",
+      ),
+    ).toBe(true);
     expect(beats.some((beat) => beat.previewGesture === "typing")).toBe(true);
     expect(
       beats.some(
@@ -65,10 +67,9 @@ describe("buildArtifactLivePreviewBeats", () => {
         beat.previewGesture === "typing" &&
         typeof beat.caretOffset === "number",
     );
-    expect(typingBeats.length).toBeGreaterThanOrEqual(10);
-    expect(
-      typingBeats.filter((beat) => beat.delayMs >= 112).length,
-    ).toBeGreaterThanOrEqual(10);
+    expect(typingBeats.length).toBeGreaterThanOrEqual(4);
+    // A human rhythm: no two typing gaps need be equal, none is a fixed tick.
+    expect(new Set(typingBeats.map((beat) => beat.delayMs)).size).toBeGreaterThan(typingBeats.length / 2);
     expect(beats.at(-1)?.value).toEqual(after);
   });
 
@@ -114,7 +115,9 @@ describe("buildArtifactLivePreviewBeats", () => {
         (beat) =>
           typeof beat.selectionEnd === "number" &&
           beat.lineIndex === 2 &&
-          beat.selectionEnd === "Rewrite this bullet only.".length,
+          // Only the changed word, not the whole bullet.
+          beat.selectionStart === "Rewrite this bullet ".length &&
+          beat.selectionEnd === "Rewrite this bullet only".length,
       ),
     ).toBe(true);
   });
@@ -255,6 +258,28 @@ describe("buildArtifactLivePreviewBeats", () => {
         .slice(0, createSlideIndex)
         .every((beat) => beat.focusPath !== "/slides/1"),
     ).toBe(true);
+  });
+
+  it("makes new sheet cells one at a time, each typed before the next", () => {
+    const sheet = (cells: Record<string, unknown>) => ({
+      title: "Book",
+      tags: [],
+      content: { sheets: [{ id: "s1", name: "Audit", cells }] },
+    });
+    const before = sheet({ A1: { value: 31 }, A2: { value: 29 } });
+    const after = sheet({ A1: { value: 31 }, A2: { value: 29 }, B1: { value: "First" }, A3: { formula: "=SUM(A1:A2)", value: 60 } });
+    const beats = buildArtifactLivePreviewBeats(before, after, undefined, { seed: 3 });
+    const cells = (index: number) => (beats[index]!.value.content as { sheets: Array<{ cells: Record<string, { value?: unknown; formula?: string }> }> }).sheets[0]!.cells;
+    const firstA3 = beats.findIndex((_, index) => "A3" in cells(index));
+    const typedB1 = beats.findIndex((_, index) => cells(index).B1?.value === "First");
+    // B1 is clicked, made empty, then typed; A3 does not exist until B1 is done.
+    expect(beats[0]!.focusPath).toBe("/sheets/0/cells/B1");
+    expect(cells(1).B1?.value).toBe("");
+    expect(typedB1).toBeGreaterThan(1);
+    expect(firstA3).toBeGreaterThan(typedB1);
+    expect(beats.some((beat, index) => index > firstA3 && beat.focusPath === "/content/sheets/0/cells/A3/formula")).toBe(true);
+    expect(cells(firstA3).A3?.value).toBeUndefined();
+    expect(beats.at(-1)!.value).toEqual(after);
   });
 
   it("prepends an IR pointer beat when the capability names a target", () => {

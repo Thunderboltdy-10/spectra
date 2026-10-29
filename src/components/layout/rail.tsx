@@ -10,7 +10,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { getAdministration, type AdministrationIdentity } from "@/features/spectra/administration/api";
 import { formatRelativeTime } from "@/features/spectra/components/spectra-view-model";
 import { useWorkspaceCatalog } from "@/features/spectra/data/use-catalog-pages";
-import { getSpectraThreads, type SpectraThread } from "@/features/spectra/data/api";
+import { getSpectraThreads, type SpectraSchoolMessage, type SpectraThread } from "@/features/spectra/data/api";
 import { threadClick } from "@/features/spectra/components/side-open";
 import { spectraBus } from "@/features/spectra/events";
 import { useSpectraRouter } from "@/features/spectra/hooks/use-spectra-router";
@@ -23,6 +23,7 @@ import { threadName } from "@/features/spectra/threads/threads-model";
 import { cn } from "@/lib/utils";
 import { AccountMenu } from "./account-menu";
 import { FeedbackButton } from "./feedback-button";
+import { MessageLetter } from "./message-letter";
 import { reviewShareInvitations, type ShellNotification } from "./shell-notifications";
 import { useShellNotifications } from "./use-shell-notifications";
 import { WorkingMark } from "@/components/ui/skeleton";
@@ -44,7 +45,7 @@ const PINNED_LIMIT = 6;
 const THREAD_LIMIT = 8;
 
 export type RailDestination = {
-  key: "home" | "library" | "calendar" | "school" | "agents" | "devices";
+  key: "home" | "library" | "calendar" | "school" | "agents" | "devices" | "admin" | "platform";
   href: string;
   label: string;
   glyph: IconName;
@@ -61,7 +62,19 @@ export const RAIL_DESTINATIONS: RailDestination[] = [
   { key: "school", href: "/school", label: "School", glyph: "school", routes: ["/school", "/managebac"] },
   { key: "agents", href: "/agents", label: "Agents", glyph: "agents", routes: ["/agents"] },
   { key: "devices", href: "/devices", label: "Devices", glyph: "devices", routes: ["/devices"] },
+  // Shown only to those who hold them: a school's administrators, and the platform's operator.
+  { key: "admin", href: "/admin", label: "School admin", glyph: "shield", routes: ["/admin"] },
+  { key: "platform", href: "/superadmin", label: "Platform", glyph: "globe", routes: ["/superadmin"] },
 ];
+
+/** The destinations this person can open: the admin pages only for those who hold them. */
+function destinationsFor(identity: AdministrationIdentity | null) {
+  return RAIL_DESTINATIONS.filter(
+    (destination) =>
+      (destination.key !== "admin" || identity?.membership?.role === "school_admin") &&
+      (destination.key !== "platform" || identity?.account.platformOperator === true),
+  );
+}
 
 /** Which destination is current. Threads have their own section below the destinations. */
 export function activeRailDestination(pathname: string): RailDestination["key"] | null {
@@ -148,9 +161,11 @@ export function Rail() {
 
   const notifications = useShellNotifications();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [reading, setReading] = useState<SpectraSchoolMessage | null>(null);
   const openNotification = useCallback(
     (item: ShellNotification) => {
-      if (item.kind === "share") reviewShareInvitations(router);
+      if (item.kind === "message") setReading(item.message ?? null);
+      else if (item.kind === "share") reviewShareInvitations(router);
       else router.push(item.href ?? `/library/${encodeURIComponent(item.artifactId)}`);
       void notifications.markRead(item);
     },
@@ -238,7 +253,7 @@ export function Rail() {
             data-visible={marker.visible || undefined}
             style={{ height: marker.height, transform: `translateY(${marker.top}px)` }}
           />
-          {RAIL_DESTINATIONS.map((destination) => {
+          {destinationsFor(identity).map((destination) => {
             const current = active === destination.key;
             const itemClass = cn(
               "relative flex h-9 w-full items-center gap-2.5 rounded-control text-ui font-medium outline-none transition-colors duration-[var(--motion-fast)]",
@@ -304,12 +319,14 @@ export function Rail() {
           onMarkAllRead={() => void notifications.markAllRead()}
           onChoose={(item) => {
             setNotificationsOpen(false);
-            if (item.kind === "share") reviewShareInvitations(router);
+            if (item.kind === "message") setReading(item.message ?? null);
+            else if (item.kind === "share") reviewShareInvitations(router);
             void notifications.markRead(item);
           }}
           onClose={() => setNotificationsOpen(false)}
         />
       ) : null}
+      <MessageLetter message={reading} onClose={() => setReading(null)} />
     </>
   );
 }
@@ -523,7 +540,7 @@ function NotificationsPanel({
           <strong data-panel-title className="text-caption">
             Notifications
           </strong>
-          <p className="text-micro text-[var(--text-tertiary)]">Shares, comments, tasks and reminders</p>
+          <p className="text-micro text-[var(--text-tertiary)]">Messages, shares, comments and reminders</p>
         </div>
         <button
           type="button"
@@ -537,21 +554,34 @@ function NotificationsPanel({
         <IconButton icon="close" label="Close" size="compact" shortcut="Esc" onClick={onClose} />
       </header>
       <div className="spectra-thin-scrollbar max-h-[420px] overflow-y-auto p-1.5">
-        {items.slice(0, 30).map((item) => (
-          <Link
-            key={`${item.kind}:${item.id}`}
-            href={item.href ?? `/library/${encodeURIComponent(item.artifactId)}`}
-            prefetch={false}
-            onClick={() => onChoose(item)}
-            className="flex gap-2.5 rounded-control px-2.5 py-2 hover:bg-[var(--bg-hover)]"
-          >
-            <span className="min-w-0 flex-1">
-              <strong className="block truncate text-micro font-semibold">{item.title}</strong>
-              <span className="mt-0.5 line-clamp-2 block text-micro leading-3.5 text-[var(--text-secondary)]">{item.detail}</span>
-            </span>
-            {!item.readAt && item.kind !== "share" ? <i className="mt-1 size-1.5 shrink-0 rounded-full bg-[var(--brand-primary)]" /> : null}
-          </Link>
-        ))}
+        {items.slice(0, 30).map((item) => {
+          const face = (
+            <>
+              <span className="min-w-0 flex-1">
+                <strong className="block truncate text-micro font-semibold">{item.title}</strong>
+                <span className="mt-0.5 line-clamp-2 block text-micro leading-3.5 text-[var(--text-secondary)]">{item.detail}</span>
+              </span>
+              {!item.readAt && item.kind !== "share" ? <i className="mt-1 size-1.5 shrink-0 rounded-full bg-[var(--brand-primary)]" /> : null}
+            </>
+          );
+          const row = "flex w-full gap-2.5 rounded-control px-2.5 py-2 text-left hover:bg-[var(--bg-hover)]";
+          // A message opens where it is read, not on a page of its own.
+          return item.kind === "message" ? (
+            <button key={`${item.kind}:${item.id}`} type="button" onClick={() => onChoose(item)} className={row}>
+              {face}
+            </button>
+          ) : (
+            <Link
+              key={`${item.kind}:${item.id}`}
+              href={item.href ?? `/library/${encodeURIComponent(item.artifactId)}`}
+              prefetch={false}
+              onClick={() => onChoose(item)}
+              className={row}
+            >
+              {face}
+            </Link>
+          );
+        })}
         {!items.length && !loading ? <p className="px-4 py-8 text-center text-micro text-[var(--text-tertiary)]">You are all caught up.</p> : null}
       </div>
     </section>

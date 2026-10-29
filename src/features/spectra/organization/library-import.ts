@@ -257,9 +257,15 @@ export function documentContentFromImportedHtml(html: string) {
   };
 }
 
-export function documentContentFromImportedPlainText(text: string) {
+/**
+ * Plain text as paragraphs. A blank line always ends one; with `lines` (a
+ * .txt file) every line is its own, as the writer typed it, while Markdown
+ * and PDF text wrap their lines and join them.
+ */
+export function documentContentFromImportedPlainText(text: string, options?: { lines?: boolean }) {
   const blocks = text
-    .split(/\n{2,}/)
+    .replace(/\r\n?/g, "\n")
+    .split(options?.lines ? /\n+/ : /\n{2,}/)
     .map((part) => part.replace(/\s+/g, " ").trim())
     .filter(Boolean)
     .map((part, index) => ({
@@ -354,13 +360,10 @@ export async function projectLibraryImportContent(
   if (name.endsWith(".html") || name.endsWith(".htm")) {
     return documentContentFromImportedHtml(await file.text());
   }
-  if (
-    name.endsWith(".txt") ||
-    name.endsWith(".md") ||
-    name.endsWith(".markdown")
-  ) {
+  if (name.endsWith(".txt"))
+    return documentContentFromImportedPlainText(await file.text(), { lines: true });
+  if (name.endsWith(".md") || name.endsWith(".markdown"))
     return documentContentFromImportedPlainText(await file.text());
-  }
   return undefined;
 }
 

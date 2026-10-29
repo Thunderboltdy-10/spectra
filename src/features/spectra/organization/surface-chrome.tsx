@@ -1,7 +1,7 @@
 "use client";
 
 import { SearchField } from "@/components/ui/search-field";
-import { type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { Loader2, FolderPlus, Laptop, Plus, SlidersHorizontal, X, ArrowDownUp, Columns3, Upload, MoreHorizontal, CheckSquare } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 import {
@@ -108,9 +108,12 @@ export function SurfaceViewSwitch<View extends string>({
   view,
   onChange,
   views,
+  compact = false,
 }: {
   view: View;
   onChange: (next: View) => void;
+  /** Icons only, named for screen readers and on hover. */
+  compact?: boolean;
   views: ReadonlyArray<{
     key: View;
     label: string;
@@ -130,16 +133,19 @@ export function SurfaceViewSwitch<View extends string>({
             key={option.key}
             type="button"
             aria-pressed={active}
+            aria-label={compact ? option.label : undefined}
+            title={compact ? option.label : undefined}
             onClick={() => onChange(option.key)}
             className={cn(
-              "flex h-7 items-center gap-1.5 rounded-chip px-2.5 text-caption font-medium transition",
+              "flex h-7 items-center gap-1.5 rounded-chip text-caption font-medium transition",
+              compact ? "w-7 justify-center" : "px-2.5",
               active
                 ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]"
                 : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
             )}
           >
             <Icon className="size-3.5" />
-            <span className="surface-bar-label">{option.label}</span>
+            {compact ? null : <span className="surface-bar-label">{option.label}</span>}
           </button>
         );
       })}
@@ -279,6 +285,7 @@ export function SurfaceNewMenu({
   onNewWork,
   onImport,
   onSyncFolder,
+  onSyncFiles,
   label = "New",
   align = "end",
 }: {
@@ -292,9 +299,11 @@ export function SurfaceNewMenu({
   onImport?: () => void;
   /** Syncing a folder from this computer through Bridge, and what the row says. */
   onSyncFolder?: { label: string; run: () => void };
+  onSyncFiles?: { label: string; run: () => void };
   label?: string;
   align?: "start" | "end";
 }) {
+  const folderTakesFocus = useRef(false);
 
   /* Hover-only title failed live honesty on Recent/quick; keep title/aria and
      also show the reason as visible muted status text beside the control. */
@@ -342,6 +351,12 @@ export function SurfaceNewMenu({
       </span>
       <DropdownMenuContent
         align={align}
+        onCloseAutoFocus={(event) => {
+          // The new folder's name field owns focus, even if creation finishes
+          // before the menu's closing animation does.
+          if (folderTakesFocus.current) event.preventDefault();
+          folderTakesFocus.current = false;
+        }}
         className="w-[240px]"
         /* New lists every work type; the last rows sit over the live dock.
            dropdown (60) loses to composer-dock (120), so Whiteboard was a
@@ -350,7 +365,10 @@ export function SurfaceNewMenu({
         collisionPadding={{ bottom: 16 }}
       >
         {onNewFolder ? (
-          <DropdownMenuItem onSelect={onNewFolder}>
+          <DropdownMenuItem onSelect={() => {
+            folderTakesFocus.current = true;
+            onNewFolder();
+          }}>
             <FolderPlus className="size-3.5 text-[var(--text-tertiary)]" />
             New folder
           </DropdownMenuItem>
@@ -377,10 +395,16 @@ export function SurfaceNewMenu({
             {onSyncFolder.label}
           </DropdownMenuItem>
         ) : null}
-        {onNewFolder || onNewWorkspace || onImport || onSyncFolder ? (
+        {onSyncFiles ? (
+          <DropdownMenuItem onSelect={onSyncFiles.run}>
+            <Laptop className="size-3.5 text-[var(--text-tertiary)]" />
+            {onSyncFiles.label}
+          </DropdownMenuItem>
+        ) : null}
+        {onNewFolder || onNewWorkspace || onImport || onSyncFolder || onSyncFiles ? (
           <DropdownMenuSeparator />
         ) : null}
-        {onNewFolder || onNewWorkspace || onImport || onSyncFolder ? (
+        {onNewFolder || onNewWorkspace || onImport || onSyncFolder || onSyncFiles ? (
           <DropdownMenuLabel>New work here</DropdownMenuLabel>
         ) : null}
         {blueprintChoices.map((choice) => (

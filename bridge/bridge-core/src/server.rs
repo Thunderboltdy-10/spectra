@@ -17,6 +17,17 @@ use subtle::ConstantTimeEq;
 use crate::protocol::{HealthResponse, LocalBridgeStatus, LocalControlSnapshot, PairingOffer};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
+/// Development instances use different ports. Discovery and a pairing offer
+/// may reach the local process; file controls still require confirmed pairing
+/// and the exact pinned browser origin in `authenticate`.
+fn is_local_development_origin(value: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(value) else { return false; };
+    matches!(url.scheme(), "http" | "https")
+        && matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))
+        && url.username().is_empty() && url.password().is_none()
+        && url.path() == "/" && url.query().is_none() && url.fragment().is_none()
+}
+
 /*
  * The local control API. Spectra's Devices page drives the Bridge through it:
  * pairing, status, folders, pausing, logs, updates and unpairing. The Bridge
@@ -46,6 +57,10 @@ pub trait LocalBridgeControl: Send + Sync {
     fn snapshot(&self) -> LocalControlSnapshot;
     /// Opens the native folder picker on this computer.
     async fn select_mount(&self) -> Result<(), String>;
+    /// Opens a native picker for one or several individual files.
+    async fn select_files(&self) -> Result<usize, String> {
+        Err("Update Spectra Bridge to sync individual files.".into())
+    }
     async fn retry_mount(&self, grant_id: &str) -> Result<(), String>;
     async fn remove_mount(&self, grant_id: &str) -> Result<(), String>;
     async fn set_mount_paused(&self, grant_id: &str, paused: bool) -> Result<(), String>;
@@ -123,6 +138,9 @@ impl ServerState {
         *self.session_token.write().unwrap() = vec![];
         *self.device_id.write().unwrap() = None;
         self.cloud_seen_at.store(0, Ordering::Relaxed);
+        self.pending_pairing.write().unwrap().clear();
+        self.pairing_completion.write().unwrap().clear();
+        self.pairing_failure.write().unwrap().clear();
     }
     fn prune_expired_pairing(&self) {
         let now = unix_ms();
@@ -146,7 +164,7 @@ impl ServerState {
             self.allowed_origins
                 .read()
                 .unwrap()
-                .contains(&offer.browser_origin),
+                .contains(&offer.browser_origin) || is_local_development_origin(&offer.browser_origin),
             "origin is not configured for Spectra"
         );
         self.prune_expired_pairing();
@@ -172,17 +190,31 @@ impl ServerState {
         *self.paired.read().unwrap()
     }
     pub fn complete_pairing(&self, challenge: String, origin: String) -> String {
-        let token = if self.is_paired() {
-            self.resume_session(&origin)
-                .unwrap_or_else(|| self.pair(origin))
-        } else {
-            self.pair(origin)
-        };
+        let token = self.prepare_pairing_session(&origin);
+        self.complete_pairing_with_session(challenge, origin, &token)
+            .expect("prepared pairing session is valid");
+        token
+    }
+    /// Preparing does not expose a session until its durable settings commit.
+    pub fn prepare_pairing_session(&self, origin: &str) -> String {
+        self.resume_session(origin).unwrap_or_else(|| {
+            let mut token = [0_u8; 32];
+            rand::rng().fill_bytes(&mut token);
+            base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, token)
+        })
+    }
+    pub fn complete_pairing_with_session(
+        &self,
+        challenge: String,
+        origin: String,
+        token: &str,
+    ) -> anyhow::Result<()> {
+        self.restore_pairing(origin, token)?;
         self.pairing_completion
             .write()
             .unwrap()
-            .insert(challenge, token.clone());
-        token
+            .insert(challenge, token.to_owned());
+        Ok(())
     }
     /// A pairing attempt ended without pairing; the page reads why once.
     pub fn fail_pairing(&self, challenge: String, reason: String) {
@@ -267,6 +299,7 @@ pub fn router(state: Arc<ServerState>) -> Router {
     let protected = Router::new()
         .route("/v1/status", get(status))
         .route("/v1/mount/select", post(select_mount))
+        .route("/v1/files/select", post(select_files))
         .route("/v1/mount/retry", post(retry_mount))
         .route("/v1/mount/remove", post(remove_mount))
         .route("/v1/mount/pause", post(pause_mount))
@@ -276,13 +309,7 @@ pub fn router(state: Arc<ServerState>) -> Router {
         .route("/v1/file/reveal", post(reveal_file))
         .route("/v1/unpair", post(unpair))
         .route_layer(middleware::from_fn_with_state(state.clone(), authenticate));
-    let origins = state
-        .allowed_origins
-        .read()
-        .unwrap()
-        .iter()
-        .filter_map(|value| value.parse().ok())
-        .collect::<Vec<_>>();
+    let cors_state = state.clone();
     Router::new()
         .route("/v1/health", get(health))
         .route("/v1/pair", post(pair_offer))
@@ -292,7 +319,12 @@ pub fn router(state: Arc<ServerState>) -> Router {
         .merge(protected)
         .layer(
             CorsLayer::new()
-                .allow_origin(AllowOrigin::list(origins))
+                .allow_origin(AllowOrigin::predicate(move |origin, _| {
+                    origin.to_str().is_ok_and(|value| {
+                        cors_state.allowed_origins.read().unwrap().contains(value)
+                            || is_local_development_origin(value)
+                    })
+                }))
                 .allow_methods([http::Method::GET, http::Method::POST])
                 .allow_headers([http::header::AUTHORIZATION, http::header::CONTENT_TYPE]),
         )
@@ -337,7 +369,21 @@ async fn status(State(state): State<Arc<ServerState>>) -> Json<LocalBridgeStatus
 }
 
 async fn select_mount(State(state): State<Arc<ServerState>>) -> Response {
-    act(&state, |control| async move { control.select_mount().await }).await
+    act(
+        &state,
+        |control| async move { control.select_mount().await },
+    )
+    .await
+}
+
+async fn select_files(State(state): State<Arc<ServerState>>) -> Response {
+    match state.control() {
+        Some(control) => match control.select_files().await {
+            Ok(selected) => Json(serde_json::json!({ "selected": selected })).into_response(),
+            Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
+        },
+        None => controls_not_ready(),
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -574,6 +620,42 @@ mod tests {
 
     const ORIGIN: &str = "http://localhost:3000";
 
+    #[test]
+    fn development_origins_are_exact_loopback_hosts() {
+        for origin in [
+            "http://localhost:3160",
+            "http://127.0.0.1:3180",
+            "https://localhost:3000",
+        ] {
+            assert!(is_local_development_origin(origin));
+        }
+        for origin in [
+            "http://localhost.evil.test:3160",
+            "http://evil.test",
+            "file:///etc/passwd",
+            "http://localhost:3160/path",
+            "http://user@localhost:3160",
+        ] {
+            assert!(!is_local_development_origin(origin));
+        }
+    }
+
+    #[tokio::test]
+    async fn fresh_local_instance_can_discover_but_cannot_read_files_before_pairing() {
+        let state = Arc::new(ServerState::unpaired());
+        let base = spawn(state.clone()).await;
+        let client = reqwest::Client::new();
+        let origin = "http://localhost:3160";
+        let health = client.get(format!("{base}/v1/health")).header("origin", origin).send().await.unwrap();
+        assert_eq!(health.headers().get("access-control-allow-origin").unwrap(), origin);
+        let status = client.get(format!("{base}/v1/status")).header("origin", origin).send().await.unwrap();
+        assert_eq!(status.status(), 401);
+        let token = state.pair(origin.into());
+        let status = client.get(format!("{base}/v1/status")).header("origin", origin).bearer_auth(token).send().await.unwrap();
+        assert_eq!(status.headers().get("access-control-allow-origin").unwrap(), origin);
+        assert_ne!(status.status(), 401);
+    }
+
     #[derive(Default)]
     struct FakeControl {
         calls: Mutex<Vec<String>>,
@@ -601,6 +683,7 @@ mod tests {
                 mounts: vec![LocalMountStatus {
                     id: "grant_ab".into(),
                     label: "Biology".into(),
+                    selection_kind: None,
                     friendly_path: "Documents › Biology".into(),
                     state: "active".into(),
                     detail: "Up to date".into(),
@@ -619,6 +702,10 @@ mod tests {
         async fn select_mount(&self) -> Result<(), String> {
             self.calls.lock().unwrap().push("select".into());
             Ok(())
+        }
+        async fn select_files(&self) -> Result<usize, String> {
+            self.calls.lock().unwrap().push("select-files".into());
+            Ok(2)
         }
         async fn retry_mount(&self, grant_id: &str) -> Result<(), String> {
             self.calls.lock().unwrap().push(format!("retry:{grant_id}"));
@@ -743,6 +830,42 @@ mod tests {
         );
     }
     #[test]
+    fn preparing_a_session_does_not_publish_or_replace_a_pairing() {
+        let state = ServerState::unpaired();
+        let token = state.prepare_pairing_session(ORIGIN);
+        assert!(!state.is_paired());
+        assert!(!state.session_token_matches(&token));
+        state
+            .complete_pairing_with_session("committed".into(), ORIGIN.into(), &token)
+            .unwrap();
+        assert!(state.session_token_matches(&token));
+        let other = state.prepare_pairing_session("http://localhost:3160");
+        assert_ne!(token, other);
+        assert!(
+            state.session_token_matches(&token),
+            "a cancelled offer preserves the existing session"
+        );
+        assert_eq!(state.prepare_pairing_session(ORIGIN), token);
+        assert!(
+            state
+                .complete_pairing_with_session("invalid".into(), ORIGIN.into(), "invalid")
+                .is_err()
+        );
+        assert!(state.take_pairing_completion("invalid").is_none());
+        assert!(state.session_token_matches(&token));
+    }
+    #[test]
+    fn disconnect_revokes_even_an_unclaimed_pairing_completion() {
+        let state = ServerState::unpaired();
+        let token = state.complete_pairing("waiting".into(), ORIGIN.into());
+        state.set_device_id("old-device".into());
+        state.forget_pairing();
+        assert!(!state.session_token_matches(&token));
+        assert!(state.take_pairing_completion("waiting").is_none());
+        assert!(!state.is_paired());
+        assert!(state.local_status().device_id.is_none());
+    }
+    #[test]
     fn paired_session_can_resume_only_for_an_allowed_origin() {
         let state = ServerState::unpaired();
         let token = state.pair(ORIGIN.into());
@@ -799,6 +922,7 @@ mod tests {
         let client = reqwest::Client::new();
         for path in [
             "/v1/mount/select",
+            "/v1/files/select",
             "/v1/sync/pause",
             "/v1/logs/open",
             "/v1/file/open",
@@ -834,8 +958,14 @@ mod tests {
                 .send()
         };
         for (path, body) in [
-            ("/v1/mount/pause", serde_json::json!({ "grantId": "grant_ab", "paused": true })),
-            ("/v1/mount/retry", serde_json::json!({ "grantId": "grant_ab" })),
+            (
+                "/v1/mount/pause",
+                serde_json::json!({ "grantId": "grant_ab", "paused": true }),
+            ),
+            (
+                "/v1/mount/retry",
+                serde_json::json!({ "grantId": "grant_ab" }),
+            ),
             ("/v1/sync/pause", serde_json::json!({ "paused": false })),
             ("/v1/logs/open", serde_json::json!({})),
         ] {
@@ -852,7 +982,21 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(status.mounts.len(), 1);
-        assert_eq!(post("/v1/unpair", serde_json::json!({})).await.unwrap().status(), 204);
+        let selection = post("/v1/files/select", serde_json::json!({}))
+            .await
+            .unwrap();
+        assert_eq!(selection.status(), 200);
+        assert_eq!(
+            selection.json::<serde_json::Value>().await.unwrap(),
+            serde_json::json!({"selected": 2})
+        );
+        assert_eq!(
+            post("/v1/unpair", serde_json::json!({}))
+                .await
+                .unwrap()
+                .status(),
+            204
+        );
         assert!(!state.is_paired());
         assert_eq!(
             post("/v1/sync/pause", serde_json::json!({ "paused": true }))
@@ -869,6 +1013,7 @@ mod tests {
                 "retry:grant_ab",
                 "pause:false",
                 "logs",
+                "select-files",
                 "unpair"
             ]
         );

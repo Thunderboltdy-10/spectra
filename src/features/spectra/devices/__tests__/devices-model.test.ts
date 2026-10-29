@@ -71,6 +71,12 @@ const cloud: CloudOverview = {
 const connected = (s: BridgeStatus): LocalBridge => ({ reachability: "connected", status: s });
 
 describe("devices model", () => {
+  it("does not present deliberately detached files or folders as connection failures", () => {
+    const detached: CloudOverview = { ...cloud, mounts: [...cloud.mounts, { grantId: "removed", deviceId: "device-here", rootLabel: "Removed.docx", selectedFile: "Removed.docx", state: "detached", fileCount: 1 }] };
+    const view = devicesModel({ local: connected(status()), cloud: detached, now: NOW }).thisComputer;
+    expect(view?.folders.some((folder) => folder.id === "removed")).toBe(false);
+    expect(view?.tone).toBe("ok");
+  });
   it("shows no row for this computer until it is paired, so the page offers to connect it", () => {
     const model = devicesModel({ local: { reachability: "not-set-up", status: null }, cloud, now: NOW });
     expect(model.thisComputer).toBeNull();

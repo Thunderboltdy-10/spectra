@@ -25,7 +25,6 @@ import {
   ProductEmptyState,
   ProductErrorState,
 } from "@/features/spectra/components/product-state";
-import { ClassShelfOnboarding } from "../components/class-shelf-onboarding";
 import Link from "next/link";
 import { useSpectraContextStore, type SpectraOpenObject } from "@/stores/spectra-context-store";
 import { useSpectraRun } from "../ai/use-spectra-run";
@@ -98,6 +97,7 @@ import {
   importSpectraManageBacResource,
   rememberSpectraMemory,
   correctSpectraMemory,
+  workspaceIsClass,
 } from "../data/api";
 import { LIBRARY_TAB_LABEL, parseWorkspaceHubTabs } from "../components/workspace-tab-state";
 import { previewText } from "../components/preview-text";
@@ -132,6 +132,7 @@ import type { ArtifactTypeKey } from "../artifacts/types";
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { openSpectraPackage } from "../lenses/spectra-package";
 import {
+  LIBRARY_IMPORT_ACCEPT,
   classifyLibraryImport,
   importLibraryResourceFile,
   isOfficeNativeImportFile,
@@ -942,6 +943,7 @@ export function SpectraShell({
   const [workspaceEditTitle, setWorkspaceEditTitle] = useState("");
   const [workspaceEditDescription, setWorkspaceEditDescription] = useState("");
   const [workspaceEditIcon, setWorkspaceEditIcon] = useState("Sparkles");
+  const [workspaceEditClass, setWorkspaceEditClass] = useState(false);
   const [hubTabs, setHubTabs] = useState<WorkspaceHubTab[]>(() => [
     { id: "workspace-home-default", label: LIBRARY_TAB_LABEL },
   ]);
@@ -1833,8 +1835,20 @@ export function SpectraShell({
       },
     );
     const removeImport = spectraBus.handle("library.import", ({ kind }) => {
-      if (kind === "file") importInputRef.current?.click();
-      else workspaceImportInputRef.current?.click();
+      // The click must happen in this same task, while the command's key or
+      // press still counts as the user's own gesture, or no picker opens.
+      const input = kind === "file" ? importInputRef.current : workspaceImportInputRef.current;
+      if (!input)
+        return {
+          status: "failed",
+          message: "Importing is not available on this page. Open Library and try again.",
+        } satisfies SpectraCommandOutcome;
+      input.value = "";
+      input.click();
+      return {
+        status: "completed",
+        message: kind === "file" ? "Choose a file to import." : "Choose a workspace file to import.",
+      } satisfies SpectraCommandOutcome;
     });
     return () => {
       removeSettings();
@@ -2528,7 +2542,7 @@ export function SpectraShell({
 
   useEffect(() => {
     const exchange = runEngine.liveExchange;
-    if (!exchange?.runId || exchange.status !== "failed") return;
+    if (!exchange?.runId || (exchange.status !== "failed" && exchange.status !== "stopped")) return;
     const runId = exchange.runId;
     const clearChrome = (artifact: SpectraArtifact): SpectraArtifact => {
         if (
@@ -3768,9 +3782,14 @@ export function SpectraShell({
         return;
       }
       const detail = result.report.skipped
-        ? `${result.report.placed} placed; ${result.report.skipped} unavailable reference${result.report.skipped === 1 ? "" : "s"} skipped.`
-        : `${result.report.placed} work reference${result.report.placed === 1 ? "" : "s"} placed.`;
-      toast.success(`Workspace imported. ${detail}`);
+        ? `${result.report.placed} placed; ${result.report.skipped} you cannot open were skipped.`
+        : `${result.report.placed} work${result.report.placed === 1 ? "" : "s"} placed.`;
+      toast.success(`Workspace imported. ${detail}`, {
+        description: [
+          "Each piece links to the same work in Spectra, not a copy: edits show in both places.",
+          ...result.report.warnings,
+        ].join(" "),
+      });
       setSelection(null);
         const refreshed = await loadOverview(result.workspaceId, true);
       const imported = refreshed?.workspaces.find(
@@ -3812,13 +3831,24 @@ export function SpectraShell({
         }.spectra-workspace.json`,
         blob,
       );
-      const warningCount =
-        result.report.warnings.length + result.report.unsupported.length;
-      toast.success(
-        warningCount
-          ? `Workspace exported with ${warningCount} fidelity note${warningCount === 1 ? "" : "s"}.`
-          : "Workspace exported.",
-      );
+      // The file is the workspace's layout: which work sits where, linked
+      // back to the work in Spectra. Say so, and say what it left out.
+      const notes = [
+        ...result.report.warnings,
+        ...result.report.unsupported.map((kind) =>
+          kind === "thread"
+            ? "Threads are not included."
+            : kind === "link"
+              ? "References to work filed elsewhere are not included."
+              : `${kind} items are not included.`,
+        ),
+      ];
+      toast.success("Workspace layout exported.", {
+        description: [
+          "The file lists each work and its folder, and links back to it in Spectra. It holds no copies of the work.",
+          ...notes,
+        ].join(" "),
+      });
     } catch (error) {
       toast.error(
         describeFailure(error, { fallback: "Could not export workspace." })
@@ -3834,6 +3864,7 @@ export function SpectraShell({
     setWorkspaceEditTitle(workspaceHeader.title);
     setWorkspaceEditDescription(workspaceHeader.description ?? "");
     setWorkspaceEditIcon(workspaceHeader.icon ?? "Sparkles");
+    setWorkspaceEditClass(workspaceIsClass(workspaceHeader));
     setWorkspaceEditOpen(true);
   }
 
@@ -3847,6 +3878,7 @@ export function SpectraShell({
         title: workspaceEditTitle.trim(),
         description: workspaceEditDescription.trim(),
         icon: workspaceEditIcon,
+        ...(workspaceEditClass !== workspaceIsClass(workspaceHeader) ? { isClass: workspaceEditClass } : {}),
       });
       setWorkspaceEditOpen(false);
       await loadOverview(workspaceHeader._id, true);
@@ -3903,12 +3935,6 @@ export function SpectraShell({
   const surfaceFailure =
     overviewLoadState.status === "error" ? overviewLoadState : null;
   const needsSchool = overview?.needsSchool === true;
-  const showClassOnboarding =
-    overviewLoadState.status === "ready" &&
-    !needsSchool &&
-    preferences.integrations.classShelvesStatus === "pending" &&
-    atRoot &&
-    !studio.activeArtifact;
 
   // The island is this page's composer: it writes into the thread in focus,
   // and threads open here, in the thread panel, instead of the Side.
@@ -3947,9 +3973,18 @@ export function SpectraShell({
 
   return (
     <div className="spectra-wave-y relative flex h-full min-h-0">
-      <ClassShelfOnboarding
-        open={showClassOnboarding}
-        onCompleted={() => void loadOverview(selectedWorkspaceId, true)}
+      {/* The command bar's "Import a file" lands at the top of the Library. */}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept={LIBRARY_IMPORT_ACCEPT}
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void importLibraryFile(file);
+        }}
       />
       <input
         ref={workspaceImportInputRef}
@@ -4039,6 +4074,8 @@ export function SpectraShell({
             onTitleChange={setWorkspaceEditTitle}
             description={workspaceEditDescription}
             onDescriptionChange={setWorkspaceEditDescription}
+            isClass={workspaceEditClass}
+            onIsClassChange={setWorkspaceEditClass}
             busy={busyKey === `workspace:update:${workspaceHeader?._id}`}
             onCancel={() => setWorkspaceEditOpen(false)}
             onSave={() => void updateWorkspaceMetadata()}
@@ -4237,7 +4274,8 @@ export function SpectraShell({
                           runs={workspaceRuns}
                           optimisticActive={Boolean(
                             runEngine.liveExchange &&
-                            runEngine.liveExchange.status !== "failed",
+                            runEngine.liveExchange.status !== "failed" &&
+                            runEngine.liveExchange.status !== "stopped",
                           )}
                           optimisticRunId={runEngine.liveExchange?.runId}
                           onEditWorkspace={openWorkspaceEdit}

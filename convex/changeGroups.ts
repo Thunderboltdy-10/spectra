@@ -650,14 +650,27 @@ export const commitIdle = internalMutation({
     const group = await ctx.db.get(args.groupId);
     if (
       !group ||
-      group.status !== "open" ||
-      group.lastActivityAt !== args.expectedLastActivityAt
+      group.status !== "open"
     )
       return { status: "superseded" as const };
-    if (Date.now() - group.lastActivityAt < HUMAN_CHANGE_IDLE_MS - 500)
+    const remaining = HUMAN_CHANGE_IDLE_MS - (Date.now() - group.lastActivityAt);
+    if (remaining > 0) {
+      // Continued typing moves the deadline without scheduling on every edit.
+      await ctx.scheduler.runAfter(remaining, internal.changeGroups.commitIdle, {
+        groupId: group._id,
+        expectedLastActivityAt: group.lastActivityAt,
+      });
       return { status: "not_idle" as const };
+    }
     const result = await commitChangeGroup(ctx, group._id);
-    if (result.status === "pending_projection") await ctx.scheduler.runAfter(5_000, internal.changeGroups.commitIdle, args);
+    if (result.status === "pending_projection") {
+      // A disconnected room can leave a durable head awaiting projection for
+      // days. Back off these recovery checks; a catching-up checkpoint below
+      // commits idle groups immediately when their projection arrives.
+      const retryMs = Math.min(60_000, Math.max(5_000,
+        Date.now() - group.lastActivityAt - HUMAN_CHANGE_IDLE_MS));
+      await ctx.scheduler.runAfter(retryMs, internal.changeGroups.commitIdle, args);
+    }
     return result;
   },
 });

@@ -360,15 +360,21 @@ function rangeText(target: CellRange) {
 /** A grid of displayed values, with the formulas that produced them. */
 export function sheetRangeText(content: unknown, options: { sheet?: string; range?: string; maxRows?: number; maxColumns?: number } = {}) {
   const book = normalizeSheetsContent(content);
-  const sheet = findSheet(book, options.sheet, "read");
+  // A guessed name ("Sheet1") on a one-sheet workbook means that sheet.
+  const guessed = options.sheet && book.sheets.length === 1 && book.sheets[0]!.name.toLowerCase() !== options.sheet.trim().toLowerCase();
+  const sheet = findSheet(book, guessed ? undefined : options.sheet, "read");
   const used = usedRange(sheet);
   if (!used && !options.range) return `Sheet "${sheet.name}" is empty.`;
   const target = options.range ? range(options.range, "read") : used!;
   const maxRows = options.maxRows ?? 40;
   const maxColumns = options.maxColumns ?? 12;
   const calc = sheetsCalculation(book);
-  const endRow = Math.min(target.end.row, target.start.row + maxRows - 1);
-  const endColumn = Math.min(target.end.column, target.start.column + maxColumns - 1);
+  // Past the used range, one empty row and column show where the data ends.
+  const shownEnd = used
+    ? { row: Math.min(target.end.row, Math.max(target.start.row, used.end.row + 1)), column: Math.min(target.end.column, Math.max(target.start.column, used.end.column + 1)) }
+    : target.end;
+  const endRow = Math.min(shownEnd.row, target.start.row + maxRows - 1);
+  const endColumn = Math.min(shownEnd.column, target.start.column + maxColumns - 1);
   const header = ["", ...Array.from({ length: endColumn - target.start.column + 1 }, (_, index) => columnName(target.start.column + index))];
   const lines = [header.join(" | ")];
   const formulas: string[] = [];
@@ -383,8 +389,9 @@ export function sheetRangeText(content: unknown, options: { sheet?: string; rang
     }
     lines.push(cells.join(" | "));
   }
-  const clipped = endRow < target.end.row || endColumn < target.end.column;
+  const clipped = endRow < shownEnd.row || endColumn < shownEnd.column;
   return [
+    ...(guessed ? [`The only sheet is "${sheet.name}"; read that instead of "${options.sheet}".`] : []),
     `Sheet "${sheet.name}", ${rangeText(target)}${used ? ` (used range ${rangeText(used)})` : ""}:`,
     ...lines,
     ...(clipped ? [`… more rows or columns; read a narrower range to see them.`] : []),

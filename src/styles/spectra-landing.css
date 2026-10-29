@@ -1,1285 +1,3532 @@
-/* The page itself. The frame inside it is fixed, so the document's height comes
-   entirely from the scroll spacer; this element owns the background and stops
-   the horizontal overflow a scaled canvas could otherwise cause mid-transform. */
-.landing-root {
+/*
+ * The Spectra page (src/app/landing/spectra). Landing-only: every selector
+ * here starts with .sp- or .landing-, so nothing leaks into the app.
+ *
+ * The page is paper. Its light is drawn by the light field (two fixed
+ * canvases, soft washes); this file places the app's real components on the paper and
+ * gives the page its type. Motion animates transform, opacity and clip-path
+ * only, and every arrival is written with `both`, so the reduced-motion
+ * contract lands each element in its finished state.
+ */
+
+.sp-root {
+  --sp-paper: #f7f5f0;
+  --sp-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --sp-ease-in-out: cubic-bezier(0.6, 0, 0.25, 1);
+  --sp-gutter: clamp(20px, 4.4vw, 64px);
+  --sp-measure: 1320px;
+  overflow: clip;
   position: relative;
-  min-height: 100dvh;
+  min-height: 100vh;
   overflow-x: clip;
+  background: var(--sp-paper);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.sp-main {
+  position: relative;
+  z-index: 1;
+}
+
+.sp-main > section {
+  position: relative;
+}
+
+/* ---- Buttons ----------------------------------------------------------- */
+
+.landing-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
   background: var(--bg-primary);
   color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    transform 0.2s ease;
 }
 
-/* The one persistent affordance: a way out of a thirty-screen page for a
-   visitor who decided in the first three. Opacity and offset are written from
-   the story frame, so it retires as the product's own furniture arrives and
-   returns if the visitor scrolls back up. */
-.landing-rail {
+.landing-button:hover {
+  border-color: var(--text-tertiary);
+}
+
+.landing-button:active {
+  transform: translateY(1px) scale(0.99);
+}
+
+.landing-button[data-tone="primary"] {
+  border-color: var(--text-primary);
+  background: var(--text-primary);
+  color: var(--text-inverse);
+}
+
+.landing-button[data-tone="primary"]:hover {
+  background: color-mix(in oklab, var(--text-primary) 86%, var(--bg-primary));
+}
+
+.landing-button[data-size="compact"] {
+  min-height: 36px;
+  padding: 0 15px;
+  font-size: 13.5px;
+}
+
+.landing-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.sp-root :is(a, button, input, textarea):focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 3px;
+}
+
+/* ---- The light --------------------------------------------------------- */
+
+.sp-light {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100vh;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.sp-light[data-layer="back"] {
+  z-index: 0;
+}
+
+/* Over everything but the island and the side: it colours headings' ink only. */
+.sp-light[data-layer="front"] {
+  z-index: 60;
+  mix-blend-mode: lighten;
+}
+
+/* ---- Header ------------------------------------------------------------ */
+
+.sp-header {
   position: fixed;
-  inset: 0 0 auto;
-  z-index: 80;
+  top: 14px;
+  left: 50%;
+  z-index: 110;
   display: flex;
+  width: min(var(--sp-measure), calc(100% - 24px));
+  height: 56px;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
-  height: 64px;
-  padding: 0 clamp(16px, 3vw, 40px);
-  will-change: transform, opacity;
+  padding: 0 10px 0 18px;
+  border-radius: 999px;
+  transform: translateX(-50%);
+  transition:
+    background-color 0.35s ease,
+    box-shadow 0.35s ease;
 }
 
-.landing-rail[data-live="false"] {
-  pointer-events: none;
+.sp-header[data-away] {
+  background: color-mix(in oklab, var(--bg-elevated) 94%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--border-default) 70%, transparent),
+    0 14px 34px -22px rgb(40 30 20 / 0.35);
+  backdrop-filter: blur(18px) saturate(1.3);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
 }
 
-.landing-rail-brand {
+.sp-header-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+
+.sp-header-actions {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--text-primary);
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: -0.015em;
 }
 
-.landing-rail-actions {
+.sp-header-link {
+  padding: 8px 12px;
+  color: var(--text-secondary);
+  font-size: 14.5px;
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.sp-header-link:hover {
+  color: var(--text-primary);
+}
+
+/* ---- Hands ------------------------------------------------------------- */
+
+.sp-hands {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.sp-hand {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: var(--hand);
+  opacity: 0;
+  transition: opacity 0.22s ease;
+  will-change: transform;
+  transform-origin: 4px 3px;
+}
+
+.sp-hand[data-shown] {
+  opacity: 1;
+}
+
+.sp-hand-glyph {
+  position: absolute;
+  left: -3px;
+  top: -2px;
+  display: block;
+  filter: drop-shadow(0 1px 1.5px rgb(26 20 14 / 0.2));
+  transition: transform 0.12s ease;
+}
+
+.sp-hand[data-pressed] .sp-hand-glyph {
+  transform: scale(0.84) translate(1px, 1px);
+}
+
+.sp-hand-flag {
+  position: absolute;
+  left: 14px;
+  top: 17px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 19px;
+  padding: 0 7px;
+  border-radius: 2px 7px 7px 7px;
+  background: var(--hand);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgb(26 20 14 / 0.18);
+}
+
+.sp-hand[data-ai="true"] .sp-hand-flag {
+  background: linear-gradient(100deg, #8b6cf6, #4f9fe6 60%, #40c48e);
+}
+
+.sp-hand-note:empty {
+  display: none;
+}
+
+.sp-hand-note {
+  padding-left: 6px;
+  border-left: 1px solid rgb(255 255 255 / 0.45);
+  font-weight: 500;
+}
+
+/* What a hand carries: a copy of what it picked up, lifted a little. */
+.sp-carried {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 39;
+  margin: 0;
+  pointer-events: none;
+  box-shadow: 0 22px 40px -18px rgb(40 30 20 / 0.45);
+  transition:
+    opacity 0.3s ease,
+    scale 0.3s var(--sp-ease);
+}
+
+.sp-carried[data-dropped] {
+  opacity: 0;
+  scale: 0.6;
+}
+
+/* ---- The island, docked where it lives in Spectra --------------------- */
+
+.sp-scaled {
+  position: relative;
+  width: 100%;
+}
+
+.sp-scaled-inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+.landing-window {
+  --landing-rail-w: 204px;
+  display: grid;
+  grid-template-columns: var(--landing-rail-w) minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  border-radius: 18px;
+  background: var(--bg-desk);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  text-align: left;
+  box-shadow:
+    0 0 0 1px rgb(52 40 28 / 0.08),
+    0 2px 4px rgb(52 40 28 / 0.04),
+    0 30px 70px -34px rgb(52 40 28 / 0.38),
+    0 70px 140px -70px rgb(52 40 28 / 0.3);
+}
+
+.landing-window-rail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 6px 8px 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.landing-window-brand {
   display: flex;
   align-items: center;
-  gap: 12px;
-}
-
-.landing-rail-link {
-  padding: 8px 4px;
-  color: var(--text-secondary);
-  font-size: 13px;
+  gap: 9px;
+  height: 46px;
+  padding-left: 8px;
+  font-family: var(--font-display);
+  font-size: 16.5px;
   font-weight: 600;
-  transition: color var(--motion-base) var(--ease-standard);
-}
-
-.landing-rail-link:hover {
   color: var(--text-primary);
 }
 
-/* The fixed viewport frame holds the scroll spacer and the transformed canvas.
-   The camera writes one transform per frame; nothing else in the tree moves. */
-.landing-frame {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  pointer-events: none;
-  background: var(--bg-primary);
-}
-
-/* The tall work surface. Positioned at the viewport centre with origin at its
-   own top-left, so scale(z) translate3d(-W/2px, -camYpx, 0) maps canvas point
-   (x,y) to (Fw/2 + z(x-W/2), Fh/2 + z(y-camY)). Canvas centre lands exactly on
-   frame centre; no JS viewport read needed in the transform. */
-.landing-canvas {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform-origin: 0 0;
-  will-change: transform;
-  pointer-events: auto;
-}
-
-/* Text that an actor writes. The visible characters are driven straight from
-   the story clock into the DOM, so a headline can be authored at sixty frames
-   a second without React touching the tree. The trailing characters carry the
-   product's own shimmer while the caret is live. Once a line is finished it
-   stays finished; scrubbing backwards past its start removes it as a block
-   rather than un-typing it. */
-.spectra-authored {
-  --authored-ink: transparent;
-}
-
-/* Before an actor has written it, a line contributes nothing: `display: contents`
-   removes the box entirely, so an unwritten paragraph cannot open a flex gap
-   where its text will eventually go. The reading copy stays in the tree. */
-.spectra-authored[data-empty="true"] {
-  display: contents;
-}
-
-.spectra-authored[data-empty="true"] > [aria-hidden="true"] {
-  display: none;
-}
-
-/* The page's actual words, for anything reading rather than watching: present
-   from the first byte, in the right order, never announced character by
-   character. The visible copy beside it is marked `aria-hidden`. */
-.spectra-authored-read {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
+.landing-window-places {
+  display: grid;
+  gap: 1px;
+  margin: 0;
   padding: 0;
-  border: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  clip-path: inset(50%);
+  list-style: none;
 }
 
-/* The last few characters are the live edge: they carry the shimmer while the
-   actor is still writing, and settle the moment they stop. Borrows the product's
-   own tail-shimmer grammar. */
-.spectra-authored[data-writing="true"] .spectra-authored-edge {
-  position: relative;
-}
-
-.spectra-authored[data-writing="true"] .spectra-authored-edge::after {
-  content: "";
-  display: inline-block;
-  width: 0.5em;
-  height: 1.05em;
-  margin-left: 3px;
-  vertical-align: text-bottom;
-  border-radius: 2px;
-  background: linear-gradient(
-    100deg,
-    color-mix(in oklab, var(--authored-ink) 55%, transparent),
-    color-mix(in oklab, var(--authored-ink) 70%, transparent)
-  );
-  animation: spectra-tail-shimmer 1.15s var(--ease-standard) infinite;
-}
-
-html[data-spectra-motion="reduced"]
-  .spectra-authored[data-writing="true"]
-  .spectra-authored-edge::after,
-html[data-spectra-motion="none"]
-  .spectra-authored[data-writing="true"]
-  .spectra-authored-edge::after {
-  content: none;
-}
-
-/* A block that only exists once the story has reached it. Objects on the landing
-   are placed by actors, so this never fades anything up out of nothing: it gates
-   whether the object is on the canvas at all, and the object's own entrance
-   grammar (a drag, an expansion, an emission) does the rest. */
-.spectra-staged[data-present="false"] {
-  display: none;
-}
-
-/* The landing environment field spans the viewport rather than a bounded
-   surface, and is fixed so it never travels with the camera: the room the page
-   is being built in does not move when the page does. */
-.landing-field {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-}
-
-/* Influences that the story clock drives directly, rather than ones that change
-   on a state transition. Position and size both travel in `transform` so a
-   viewport-sized layer never repaints; the CSS transition is removed because
-   the damping already happens in the clock. */
-.landing-field .spectra-field-wake[data-drive="frame"] {
-  left: 0;
-  top: 0;
-  transition: none;
-  transform: translate3d(var(--wake-tx, 0), var(--wake-ty, 0), 0)
-    scale(var(--wake-scale, 1));
-}
-
-/* --- the channel -------------------------------------------------- */
-/* The canvas is clipped by a box that spends the whole page filling the
-   viewport, and only at the very end contracts into the panel it was always
-   inside. Because the canvas is centred *within* this box, narrowing the box
-   is what carries the page into place: there is no second animation. */
-.landing-channel {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  border: 1px solid transparent;
-  border-radius: 0;
-  contain: layout paint;
-}
-
-.landing-channel[data-open="true"] {
-  border-color: var(--card-border);
-  border-radius: var(--radius-lg);
-  background: var(--bg-primary);
-  box-shadow: var(--shadow-soft);
-}
-
-/* Proof of height. The thumb is the honest ratio of viewport to surface, so
-   when it appears the visitor can read how much page they walked through. */
-.landing-channel-bar {
-  position: absolute;
-  top: 6px;
-  bottom: 6px;
-  right: 3px;
-  width: 3px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in oklab, var(--text-primary) 6%, transparent);
-  opacity: var(--bar-opacity, 0);
-  transition: opacity var(--motion-slow) var(--ease-standard);
-  pointer-events: none;
-}
-
-.landing-channel-thumb {
-  position: absolute;
-  left: 0;
-  width: 100%;
-  border-radius: var(--radius-pill);
-  background: color-mix(in oklab, var(--text-primary) 26%, transparent);
-  height: var(--thumb-h, 20%);
-  transform: translate3d(0, var(--thumb-y, 0), 0);
-}
-
-/* ================================================================== *
- * LANDING SCENES — the shared grammar of the authored page.
- *
- * Thirteen scenes, one vocabulary. A scene is a rectangle on the tall
- * surface; a plate is how a real product surface is mounted onto it; a
- * carried object is one an actor physically brought in. Nothing here
- * restyles a product component — plates hold them, they do not replace
- * them.
- * ================================================================== */
-
-.landing-scene {
-  position: absolute;
-  left: 0;
-  box-sizing: border-box;
-}
-
-/* Editorial column. Capped in characters rather than pixels because the
-   measure is what makes it readable, not the width. */
-.landing-lede {
+.landing-window-places li,
+.landing-window-threads li,
+.landing-window-account {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 22px;
-}
-
-/* The author's own voice beside an actor's work: standing text that is already
-   there when the scene arrives. It carries a hairline on its leading edge rather
-   than a card, because it is a margin note on the surface, not an object on it. */
-.landing-caption {
-  display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 10px;
-  padding-left: 18px;
-  border-left: 1px solid var(--border-subtle);
+  min-width: 0;
+  height: 31px;
+  padding: 0 10px;
+  border-radius: 8px;
+  white-space: nowrap;
 }
 
-.landing-caption-title {
-  font-size: 25px;
-  line-height: 1.16;
-  letter-spacing: -0.021em;
+.landing-window-places li > a,
+.landing-window-threads li > a {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  height: 100%;
+  color: inherit;
+  text-decoration: none;
+}
+
+.landing-window-places li,
+.landing-window-threads li {
+  transition: background-color 0.15s ease;
+}
+
+.landing-window-places li:not([data-current]):hover,
+.landing-window-threads li:hover {
+  background: rgb(52 40 28 / 0.05);
+}
+
+.landing-window-places li[data-current] {
+  background: var(--bg-primary);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 1px 2px rgb(52 40 28 / 0.06);
+  color: var(--text-primary);
+}
+
+.landing-window-threads {
+  min-height: 0;
+  margin-top: 18px;
+  overflow: hidden;
+}
+
+.landing-window-threads p {
+  margin: 0;
+  padding: 0 10px 4px;
+  font-size: 11.5px;
   font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.landing-window-threads ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.landing-window-threads li {
+  font-size: 12.5px;
+}
+
+.landing-window-threads li a > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.landing-window-thread-mark {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 5px;
+  border-radius: 50%;
+  background: var(--bg-tertiary);
+}
+
+.landing-window-account {
+  height: 42px;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+}
+
+.landing-window-face {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bg-primary);
+  box-shadow: 0 0 0 1px var(--border-subtle);
+}
+
+.landing-window-sheet {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  margin: 8px 8px 8px 0;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--bg-primary);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 1px 2px rgb(52 40 28 / 0.05),
+    0 12px 32px -18px rgb(52 40 28 / 0.18);
+}
+
+/* Home inside the window: the app's own page, held still. */
+/* ---- Type -------------------------------------------------------------- */
+
+.sp-heading {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(38px, 4.6vw, 70px);
+  font-weight: 450;
+  line-height: 1.02;
+  letter-spacing: -0.03em;
   color: var(--text-primary);
   text-wrap: balance;
 }
 
-.landing-caption-note {
-  font-size: 15px;
-  line-height: 1.62;
-  letter-spacing: -0.004em;
-  color: var(--text-secondary);
-  max-width: 34ch;
-}
-
-/* --- objects that arrive ------------------------------------------ */
-
-.landing-carried {
-  will-change: transform;
-}
-
-.landing-carried[data-present="false"] {
-  visibility: hidden;
-}
-
-/* While an actor is holding it, the object carries their ink at its edge:
-   the same relationship the presence layer draws, at object scale. */
-.landing-carried[data-carrying="true"] {
-  filter: drop-shadow(
-    0 18px 34px
-      color-mix(in oklab, var(--carry-ink, transparent) 22%, transparent)
-  );
-}
-
-/* A block that develops rather than arrives. The default reading is an edge
-   growing downward, which is what a document emerging from the glass does;
-   children that mean something else by `--grow` simply use it differently. */
-.landing-grown {
-  clip-path: inset(0 0 calc((1 - var(--grow, 1)) * 100%) 0);
-}
-
-.landing-grown[data-present="false"] {
-  visibility: hidden;
-}
-
-/* Ingestion. A surface stops being a surface as it crosses the concealed input
-   face: the box compresses toward the contact point, the content's hierarchy
-   gives way before the border does, and what remains is energy the prism is
-   already holding. */
-.landing-ingest {
-  will-change: transform, opacity;
-}
-
-.landing-ingest[data-present="false"] {
-  visibility: hidden;
-}
-
-.landing-ingest > * {
-  opacity: calc(1 - var(--ingest, 0) * 0.7);
-  transition: opacity 180ms var(--ease-standard);
-}
-
-/* The output document that develops from the glass. */
-.landing-output {
-  transform: translateZ(0);
-}
-
-/* A box a person pulls open. The handle is a real annotated part, so the
-   presence layer's resize frame lands on it rather than near it; it only shows
-   itself while a hand is actually on it. */
-.landing-sized {
-  position: relative;
-}
-
-.landing-handle {
-  position: absolute;
-  right: -4px;
-  bottom: -4px;
-  width: 11px;
-  height: 11px;
-  border: 1px solid var(--border-strong);
-  border-radius: 3px;
-  background: var(--card-paper);
-  opacity: 0;
-  transition: opacity var(--motion-base) var(--ease-standard);
-  pointer-events: none;
-}
-
-.landing-sized[data-resizing="true"] .landing-handle {
-  opacity: 1;
-}
-
-/* A region of a live document that somebody is currently influencing.
-   Two of these can be lit at once, several blocks apart, which is the whole
-   claim of the scene: one field, two people, no merge dialog. */
-.landing-region {
-  position: relative;
-  border-radius: var(--radius-input);
-  transition:
-    background-color var(--motion-slow) var(--ease-standard),
-    box-shadow var(--motion-slow) var(--ease-standard);
-}
-
-.landing-region[data-live="true"] {
-  background: color-mix(
-    in oklab,
-    var(--region-ink, transparent) 7%,
-    transparent
-  );
-  box-shadow: inset 2px 0 0 var(--region-ink, transparent);
-}
-
-/* The margin ledger: who touched which block, and why. Sits in the gutter of
-   the document rather than on top of it, so it never covers the sentence it is
-   describing. */
-.landing-ledger {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  height: 20px;
-  padding-right: 2px;
-  color: var(--text-tertiary);
-  font-size: 11px;
-  line-height: 1.3;
-  white-space: nowrap;
-  opacity: 0;
-  transform: translate3d(-6px, 0, 0);
-  transition:
-    opacity var(--motion-base) var(--ease-standard),
-    transform var(--motion-base) var(--ease-out-expo);
-}
-
-.landing-ledger[data-live="true"] {
-  opacity: 1;
-  transform: translate3d(0, 0, 0);
-}
-
-/* The Live Dock, mounted on the canvas.
-   The dock is designed to sit at the bottom of a workspace, where its tab strip
-   scrolls horizontally under the whole window. Inside a plate it gets the same
-   breathing room and nothing else: no restyling of the component itself. */
-.landing-dock-host {
-  padding: 12px 12px 4px;
-}
-
-.landing-dock-host .spectra-run-tab-strip {
-  overflow-x: visible;
-  padding-bottom: 4px;
-}
-
-/* The workbench inside its plate. The split tree is a window's worth of
-   furniture: it needs a box with a height, and nothing else from us. */
-.landing-workbench {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  min-height: 0;
-  min-width: 0;
-}
-
-.landing-pane {
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.landing-pane > * {
-  height: 100%;
-}
-
-/* The week.
-   A calendar grid drawn to the product's own calendar layer colours. Items are
-   positioned absolutely inside their day column, which is how a real week view
-   works and the only way an overlap can read as an overlap. */
-
-.landing-week {
-  display: flex;
-  gap: 10px;
-  height: 100%;
-  padding: 14px 16px 16px;
-  overflow: hidden;
-}
-
-.landing-week-hours {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  padding-top: 26px;
-  color: var(--text-tertiary);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
-.landing-week-hours span {
-  display: block;
-  transform: translateY(-6px);
-}
-
-.landing-week-grid {
-  display: grid;
-  flex: 1 1 auto;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 8px;
-  min-width: 0;
-}
-
-.landing-week-day {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.landing-week-name {
-  padding-bottom: 8px;
-  color: var(--text-tertiary);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.landing-week-column {
-  position: relative;
-  border-left: 1px solid var(--border-subtle);
-}
-
-.landing-week-rule {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: color-mix(in oklab, var(--text-primary) 4%, transparent);
-}
-
-.landing-week-item {
-  position: absolute;
-  left: 3px;
-  right: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 1px;
-  overflow: hidden;
-  padding: 4px 7px;
-  border-left: 2px solid var(--item-ink);
-  border-radius: var(--radius-input);
-  background: color-mix(in oklab, var(--item-ink) 11%, var(--card-paper));
-  transition:
-    opacity var(--motion-slow) var(--ease-standard),
-    transform 620ms var(--ease-out-expo),
-    top 620ms var(--ease-out-expo);
-}
-
-.landing-week-item[data-kind="official_deadline"] {
-  left: 0;
-  border-left: 0;
-  border-top: 2px solid var(--item-ink);
-  border-radius: 0 0 var(--radius-input) var(--radius-input);
-  background: color-mix(in oklab, var(--item-ink) 15%, var(--card-paper));
-}
-
-.landing-week-item[data-locked="true"] {
-  background-image: repeating-linear-gradient(
-    -45deg,
-    transparent 0 5px,
-    color-mix(in oklab, var(--item-ink) 9%, transparent) 5px 10px
-  );
-}
-
-.landing-week-title {
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.landing-week-note {
-  overflow: hidden;
-  color: var(--text-tertiary);
-  font-size: 11px;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The Foundry interview.
-   Questions stack, answers replace their waiting bar in place. Nothing here
-   reorders once it has landed, because a transcript that reshuffles is not a
-   transcript. */
-
-.landing-interview {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow: hidden;
-  padding: 16px 18px;
-  gap: 14px;
-}
-
-.landing-question {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding-left: 13px;
-  border-left: 2px solid var(--border-default);
-  transition:
-    border-color var(--motion-slow) var(--ease-standard),
-    opacity var(--motion-slow) var(--ease-standard);
-}
-
-.landing-question[data-answered="false"] {
-  border-left-color: color-mix(in oklab, var(--brand-primary) 52%, transparent);
-}
-
-.landing-question[data-answered="true"] {
-  opacity: 0.86;
-}
-
-.landing-question-facet {
-  color: var(--text-tertiary);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.landing-question-prompt {
-  color: var(--text-primary);
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1.4;
-}
-
-.landing-question-detail {
-  color: var(--text-tertiary);
-  font-size: 13px;
-  line-height: 1.45;
-}
-
-.landing-question-answer {
-  color: var(--text-secondary);
-  font-size: 14px;
+.sp-lede {
+  max-width: 44ch;
+  margin: 18px 0 0;
+  font-size: clamp(16.5px, 1.3vw, 19px);
   line-height: 1.5;
-}
-
-.landing-question-by {
-  margin-right: 8px;
-  color: var(--text-tertiary);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.landing-question-waiting {
-  width: 128px;
-  height: 9px;
-  border-radius: var(--radius-pill);
-  background: linear-gradient(
-    90deg,
-    color-mix(in oklab, var(--brand-primary) 22%, transparent) 0%,
-    color-mix(in oklab, var(--brand-primary) 9%, transparent) 55%,
-    color-mix(in oklab, var(--brand-primary) 22%, transparent) 100%
-  );
-  background-size: 220% 100%;
-  animation: landing-waiting 2.4s var(--ease-in-out) infinite;
-}
-
-@keyframes landing-waiting {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: -100% 0;
-  }
-}
-
-/* Mission coverage. Eleven facets, each either answered, ruled out, or open. */
-
-.landing-facets {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px 15px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--card-paper-quiet);
-}
-
-.landing-facets-head {
-  display: flex;
-  align-items: center;
   color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
+  text-wrap: pretty;
 }
 
-.landing-facets-grid {
+/* ---- Ending ------------------------------------------------------------ */
+
+/* The page ends at the footer: the scenes' own bottom room is not added after it. */
+.sp-scene.sp-ending {
+  padding-bottom: 0;
+}
+
+.sp-ending-line {
+  max-width: 15ch;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(44px, 6.6vw, 104px);
+  font-weight: 450;
+  line-height: 0.98;
+  letter-spacing: -0.035em;
+  color: var(--text-primary);
+}
+
+.sp-ending-line .sp-written-line {
+  display: block;
+}
+
+.sp-talk {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: clamp(32px, 6vw, 96px);
+  align-items: start;
+  margin-top: clamp(48px, 8vh, 96px);
+}
+
+.sp-talk-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(28px, 2.6vw, 38px);
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.sp-talk-what {
+  display: grid;
+  gap: 18px;
+  margin: 34px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sp-talk-what li {
+  display: grid;
+  gap: 3px;
+  padding-left: 16px;
+  border-left: 2px solid color-mix(in oklab, var(--text-primary) 14%, transparent);
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.sp-talk-what strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* The form is a sheet of the page's own paper, a shade whiter. */
+.sp-talk-sheet {
+  padding: clamp(22px, 2.6vw, 34px);
+  border-radius: 20px;
+  background: color-mix(in oklab, #fff 70%, var(--sp-paper));
+  box-shadow:
+    0 0 0 1px rgb(52 40 28 / 0.08),
+    0 30px 60px -40px rgb(52 40 28 / 0.4);
+}
+
+.sp-talk-roles {
+  margin: 0 0 22px;
+  padding: 0;
+  border: 0;
+}
+
+.sp-talk-roles legend {
+  margin-bottom: 8px;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sp-talk-switch {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--text-primary) 6%, transparent);
+}
+
+.sp-talk-switch button {
+  min-height: 34px;
+  padding: 0 15px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.sp-talk-switch button[aria-checked="true"] {
+  background: var(--bg-primary);
+  box-shadow: 0 1px 3px rgb(52 40 28 / 0.14);
+  color: var(--text-primary);
+}
+
+.sp-talk-form {
+  display: grid;
+  gap: 16px;
+}
+
+.sp-talk-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.sp-field {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.sp-field input,
+.sp-field textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--bg-primary);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--text-primary);
+  resize: vertical;
+}
+
+.sp-field input:focus,
+.sp-field textarea:focus {
+  border-color: var(--text-primary);
+  outline: none;
+}
+
+.sp-talk-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 14.5px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.sp-talk-toggle-track {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition: background-color 0.2s ease;
+}
+
+.sp-talk-toggle-track span {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  transition: transform 0.2s var(--sp-ease);
+}
+
+.sp-talk-toggle[aria-checked="true"] .sp-talk-toggle-track {
+  background: var(--text-primary);
+}
+
+.sp-talk-toggle[aria-checked="true"] .sp-talk-toggle-track span {
+  transform: translateX(14px);
+}
+
+.sp-talk-trap {
+  position: absolute;
+  left: -9999px;
+}
+
+.sp-talk-error {
+  margin: 0;
+  font-size: 14px;
+  color: var(--danger);
+}
+
+.sp-talk-submit {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  align-items: center;
+  gap: 12px 18px;
+  margin-top: 4px;
 }
 
-.landing-facet {
-  padding: 2px 8px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-pill);
+.sp-talk-fine {
+  font-size: 13px;
   color: var(--text-tertiary);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: capitalize;
-  transition:
-    background-color var(--motion-slow) var(--ease-standard),
-    border-color var(--motion-slow) var(--ease-standard),
-    color var(--motion-slow) var(--ease-standard);
 }
 
-.landing-facet[data-state="answered"] {
-  border-color: color-mix(in oklab, var(--brand-accent) 40%, transparent);
-  background: color-mix(in oklab, var(--brand-accent) 12%, transparent);
-  color: color-mix(in oklab, var(--brand-accent) 74%, var(--text-primary));
+.sp-talk-fine a {
+  color: inherit;
 }
 
-.landing-facet[data-state="skipped"] {
-  border-style: dashed;
-  border-color: var(--border-subtle);
-  color: color-mix(in oklab, var(--text-tertiary) 74%, transparent);
-}
-
-.landing-facets-note {
-  color: var(--text-tertiary);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.landing-btn[data-idle="true"] {
-  opacity: 0.5;
-}
-
-/* ---- The reveal ----
-   The product resolving around the panel. Every piece is a sibling of the
-   channel, never its parent, so the canvas is never remounted and the whole
-   movement stays exactly reversible. */
-
-.landing-shell {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  pointer-events: none;
+.sp-talk-hint {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
   color: var(--text-secondary);
-  font-size: 12px;
 }
 
-.landing-shell[data-present="false"] {
+.sp-talk-note {
+  margin: 16px 0 0;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: var(--bg-primary);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  font-family: var(--font-display);
+  font-size: 17px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.sp-talk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.sp-talk-sent {
+  display: grid;
+  gap: 8px;
+  padding: 26px 0 12px;
+}
+
+.sp-talk-sent-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 28px;
+}
+
+.sp-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: clamp(90px, 14vh, 150px);
+  padding-top: 22px;
+  padding-bottom: 32px;
+  border-top: 1px solid color-mix(in oklab, var(--text-primary) 10%, transparent);
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.sp-footer-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: 17px;
+  color: var(--text-primary);
+}
+
+.sp-footer nav {
+  display: flex;
+  gap: 22px;
+}
+
+.sp-footer a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.sp-footer a:hover {
+  color: var(--text-primary);
+}
+
+@media (max-width: 899px) {
+  .sp-talk {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 559px) {
+  .sp-talk-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@keyframes sp-band-sweep {
+  from {
+    background-position: 100% 0;
+    opacity: 1;
+  }
+  78% {
+    opacity: 1;
+  }
+  to {
+    background-position: 0% 0;
+    opacity: 0;
+  }
+}
+
+/* ---- Things Spectra brings in (hands.tsx, bring) ------------------------ */
+
+[data-brought="coming"] {
   visibility: hidden;
 }
 
-.landing-shell-sidebar {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  padding: 14px 12px;
-  border-right: 1px solid var(--border-subtle);
-  background: var(--bg-secondary);
-  will-change: transform;
+/* Set down in its place, it glows once in Spectra's colours. Nothing about its
+   layout changes, so it never jumps or blinks as it lands. */
+[data-brought="here"] {
+  animation: sp-landed 1.1s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.landing-shell-brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 6px;
-  color: var(--text-primary);
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+@keyframes sp-landed {
+  from {
+    box-shadow:
+      0 0 0 2px color-mix(in oklab, #8b6cf6 55%, transparent),
+      0 0 22px 2px color-mix(in oklab, #4f9fe6 35%, transparent);
+  }
 }
 
-.landing-shell-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+.sp-carried[data-settled] {
+  opacity: 0;
+  transition: opacity 0.22s ease;
 }
 
-.landing-shell-nav li {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  height: 30px;
-  padding: 0 8px;
-  border-radius: var(--radius-input);
-  color: var(--text-secondary);
-  font-size: 12.5px;
-  font-weight: 500;
-}
+/* ---- Spectra's window, page only ---------------------------------------- */
 
-.landing-shell-nav li[data-current="true"] {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-.landing-shell-glyph {
-  width: 13px;
-  height: 13px;
-  flex: none;
-  border: 1.4px solid currentColor;
-  border-radius: 3px;
-  opacity: 0.55;
-}
-
-.landing-shell-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: auto;
-  padding: 6px;
-  color: var(--text-secondary);
-  font-size: 12.5px;
-  font-weight: 500;
-}
-
-.landing-shell-avatar {
-  display: flex;
-  width: 22px;
-  height: 22px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-pill);
-  background: color-mix(in oklab, var(--brand-primary) 22%, transparent);
-  color: var(--brand-primary);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.landing-shell-rail {
-  position: absolute;
-  right: 0;
-  top: 0;
-  display: flex;
-  align-items: center;
-  gap: 0;
-  padding: 0 10px;
-  border-bottom: 1px solid var(--border-default);
+/* No rail: the window is the page itself, a sheet of Spectra's paper. */
+.landing-window[data-rail="none"] {
+  grid-template-columns: minmax(0, 1fr);
+  border-radius: 16px;
   background: var(--bg-primary);
-  will-change: transform;
 }
 
-.landing-shell-tab {
-  max-width: 190px;
-  overflow: hidden;
-  padding: 0 14px;
-  line-height: 28px;
-  border-radius: var(--radius-input) var(--radius-input) 0 0;
-  color: var(--text-tertiary);
-  font-size: 12px;
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.landing-shell-tab[data-active="true"] {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-/* The thread the page started in, still open beside the finished panel. Its
-   left edge is written from the panel's own right edge, so the two cannot
-   disagree; below a readable width the product would collapse it, so this does
-   too rather than shipping a 90px conversation. */
-.landing-shell-aside {
-  position: absolute;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-lg);
-  background: var(--card-paper);
-  box-shadow: var(--shadow-soft);
-  transition: opacity var(--motion-slow) var(--ease-standard);
-}
-
-.landing-shell-aside[data-shown="false"] {
-  display: none;
-}
-
-.landing-shell-aside-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.landing-shell-aside-meta {
-  color: var(--text-tertiary);
-  font-weight: 500;
-}
-
-/* The conversation itself. Positioned relative so the thread's own presence
-   layer has a containing block: Spectra genuinely crosses out of the panel and
-   its caret lands on real text in here. */
-.landing-shell-thread {
-  position: relative;
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  justify-content: flex-end;
-  gap: 14px;
-  min-height: 0;
-  padding: 18px 18px 10px;
-}
-
-.landing-shell-message {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-width: 90%;
-}
-
-.landing-shell-message[data-actor="pablo"] {
-  align-self: flex-end;
-  align-items: flex-end;
-  text-align: right;
-}
-
-.landing-shell-message p {
+.landing-window[data-rail="none"] .landing-window-sheet {
   margin: 0;
-  padding: 8px 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-input);
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  font-size: 12.5px;
-  line-height: 1.5;
-}
-
-.landing-shell-message[data-actor="spectra"] p {
-  border-color: color-mix(in oklab, var(--brand-primary) 24%, transparent);
-  background: color-mix(in oklab, var(--brand-primary) 7%, transparent);
-}
-
-/* A reply Spectra has not written yet is not a bubble waiting to be filled: it
-   is a message that has not been sent. The whole row waits. */
-.landing-shell-message:has(.spectra-authored[data-empty="true"]) {
-  display: none;
-}
-
-.landing-shell-who {
-  color: var(--text-tertiary);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-}
-
-.landing-shell-composer {
-  margin: 0 14px 14px;
-  padding: 9px 12px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-input);
-  background: var(--bg-elevated);
-  color: var(--text-tertiary);
-  font-size: 12.5px;
-}
-
-.landing-shell-dock {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--border-default);
-  background: var(--bg-secondary);
-  will-change: transform;
-}
-
-.landing-shell-dock-label {
-  color: var(--text-tertiary);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.landing-shell-dock-tabs {
-  display: flex;
-  gap: 10px;
-}
-
-.landing-shell-dock-tabs span {
-  display: flex;
-  max-width: 260px;
-  align-items: center;
-  overflow: hidden;
-  height: 40px;
-  padding: 0 14px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-input);
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.landing-shell-dock-tabs span[data-state="working"] {
-  border-color: color-mix(
-    in oklab,
-    var(--accent-cyan) 40%,
-    var(--border-default)
-  );
-  box-shadow: inset 3px 0 var(--accent-cyan);
-}
-
-.landing-shell-dock-tabs span[data-state="done"] {
-  box-shadow: inset 3px 0 var(--brand-accent);
-}
-
-/* --- plates: how a real surface sits on the canvas ----------------- */
-
-.landing-plate {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-lg);
-  background: var(--card-paper);
-  box-shadow: var(--shadow-soft);
-}
-
-.landing-plate[data-quiet="true"] {
-  background: var(--card-paper-quiet);
+  border-radius: inherit;
   box-shadow: none;
 }
 
-.landing-plate-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.35;
+/* Nothing in a window scrolls, and nothing in it talks about saving. */
+.sp-scaled-inner :is(.overflow-auto, .overflow-y-auto, .overflow-x-auto, .overflow-scroll, [data-scroll-area], [data-radix-scroll-area-viewport]) {
+  overflow: hidden !important;
 }
 
-.landing-plate-title {
-  font-weight: 600;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.sp-window :is([data-save-status], .studio-save-status, [data-sync-warning]) {
+  display: none !important;
 }
 
-.landing-plate-body {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: hidden;
-}
-
-/* A plate whose expensive surface is not mounted at this distance still holds
-   its own shape, so the tall page stays honest when the camera pulls back. */
-.landing-plate-husk {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 11px;
-  padding: 18px 20px;
-}
-
-.landing-plate-husk::before,
-.landing-plate-husk::after {
-  content: "";
-  height: 8px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in oklab, var(--text-primary) 7%, transparent);
-}
-
-.landing-plate-husk::before {
-  width: 58%;
-}
-
-.landing-plate-husk::after {
-  width: 84%;
-}
-
-/* --- small chrome -------------------------------------------------- */
-
-.landing-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 9px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-pill);
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  font-size: 11px;
-  line-height: 1.35;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.landing-chip[data-tone="violet"] {
-  border-color: color-mix(in oklab, var(--brand-primary) 34%, transparent);
-  background: color-mix(in oklab, var(--brand-primary) 9%, var(--bg-elevated));
-  color: var(--brand-primary);
-}
-
-.landing-chip[data-tone="cyan"] {
-  border-color: color-mix(in oklab, var(--accent-cyan) 34%, transparent);
-  background: color-mix(in oklab, var(--accent-cyan) 9%, var(--bg-elevated));
-  color: var(--accent-cyan);
-}
-
-.landing-chip[data-tone="mint"] {
-  border-color: color-mix(in oklab, var(--brand-accent) 34%, transparent);
-  background: color-mix(in oklab, var(--brand-accent) 9%, var(--bg-elevated));
-  color: var(--brand-accent);
-}
-
-.landing-chip[data-tone="gold"] {
-  border-color: color-mix(in oklab, var(--accent-gold) 40%, transparent);
-  background: color-mix(in oklab, var(--accent-gold) 12%, var(--bg-elevated));
-  color: var(--warning);
-}
-
-.landing-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-pill);
-  background: currentColor;
-  flex: none;
-}
-
-/* Buttons follow the product's own shape rule: interactive surfaces take the
-   input radius, containers take the large one. Nothing on this page is a pill
-   except a status chip. */
-.landing-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  height: 44px;
-  padding: 0 22px;
-  border-radius: var(--radius-input);
-  border: 1px solid var(--border-strong);
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  font-size: 15px;
-  font-weight: 600;
-  white-space: nowrap;
-  transition:
-    transform var(--motion-fast) var(--ease-standard),
-    border-color var(--motion-base) var(--ease-standard),
-    background-color var(--motion-base) var(--ease-standard);
-}
-
-.landing-btn[data-tone="primary"] {
-  border-color: transparent;
-  background: var(--brand-primary);
-  color: var(--text-inverse);
-}
-
-.landing-btn[data-size="compact"] {
-  height: 34px;
-  padding: 0 15px;
-  font-size: 13px;
-}
-
-.landing-btn:hover {
-  border-color: var(--text-primary);
-}
-
-.landing-btn[data-tone="primary"]:hover {
-  background: color-mix(in oklab, var(--brand-primary) 88%, #000);
-  border-color: transparent;
-}
-
-.landing-btn:active {
-  transform: translateY(1px);
-}
-
-/* The two doors out of the story. Pablo carries them in, so they travel from
-   below rather than fading up, and they stagger by one beat so the primary one
-   reads as the answer and the second as the alternative. */
-.landing-doors {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding-top: 8px;
-}
-
-.landing-doors > * {
-  opacity: 0;
-  transform: translate3d(0, 12px, 0);
-  transition:
-    opacity var(--motion-slow) var(--ease-standard),
-    transform var(--motion-slow) var(--ease-out-expo);
-}
-
-.landing-doors[data-present="true"] > * {
-  opacity: 1;
-  transform: translate3d(0, 0, 0);
-}
-
-.landing-doors > *:nth-child(2) {
-  transition-delay: 70ms;
-}
-
-.landing-doors > *:nth-child(3) {
-  transition-delay: 140ms;
-}
-
-/* --- scene 0: the surface wakes ------------------------------------ */
-
-.landing-wake {
-  display: flex;
-  align-items: flex-start;
+.sp-home {
   height: 100%;
+  overflow: hidden;
   padding-top: 30px;
 }
 
-.landing-header {
-  display: flex;
-  align-items: center;
-  gap: 28px;
-  width: 100%;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--border-subtle);
-}
+/* ---- Written headings (kit/written.tsx) ---------------------------------- */
+/* Spectra writes the heading line by line: each word comes out of a blur in
+   the colour of the spectrum it lands under, and drains to ink behind. */
 
-.landing-header-brand {
+.sp-written {
   position: relative;
-  display: flex;
-  align-items: center;
-  gap: 9px;
 }
 
-/* The guide exists only while the mark is being placed. A ruler that stayed
-   on the page would be decoration. */
-.landing-guide {
+.sp-written-line {
+  display: block;
+}
+
+.sp-written [data-w] {
+  display: inline-block;
+}
+
+.sp-written[data-state="waiting"] [data-w] {
+  opacity: 0;
+}
+
+.sp-written[data-state="writing"] [data-w] {
+  animation: sp-write 1.05s var(--d, 0ms) cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes sp-write {
+  from {
+    opacity: 0;
+    transform: translateY(0.24em);
+    filter: blur(8px);
+    color: var(--c);
+  }
+  38% {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+    color: var(--c);
+  }
+}
+
+/* The word that changes: the old one lifts away, the new one is written in letter by letter. */
+.sp-flip {
+  position: relative;
+  white-space: pre;
+  transition: width 0.6s var(--sp-ease);
+}
+
+.sp-flip-measure {
   position: absolute;
-  left: -14px;
-  top: 50%;
-  width: 0;
-  height: 1px;
-  background: color-mix(in oklab, var(--brand-primary) 46%, transparent);
+  top: 0;
+  left: 0;
+  visibility: hidden;
+}
+
+.sp-flip-out {
+  position: absolute;
+  top: 0;
+  left: 0;
+  animation: sp-flip-out 0.5s var(--sp-ease) both;
+}
+
+.sp-flip-in > span {
+  display: inline-block;
+}
+
+.sp-flip-in:not([data-turn="0"]) > span {
+  animation: sp-flip-in 0.85s calc(var(--i) * 42ms + 160ms) cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes sp-flip-out {
+  to {
+    opacity: 0;
+    transform: translateY(-0.42em);
+    filter: blur(6px);
+  }
+}
+
+@keyframes sp-flip-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.36em);
+    filter: blur(6px);
+    color: var(--c);
+  }
+  45% {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+    color: var(--c);
+  }
+}
+
+@keyframes sp-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+
+/* ---- Hero ---------------------------------------------------------------- */
+
+.sp-hero {
+  padding: clamp(118px, 16vh, 156px) var(--sp-gutter) clamp(70px, 10vh, 120px);
+}
+
+.sp-hero-copy {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  justify-items: center;
+  max-width: 900px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.sp-hero-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(38px, 4.6vw, 68px);
+  font-weight: 430;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  color: var(--text-primary);
+}
+
+.sp-hero-sub {
+  max-width: 48ch;
+  margin: 24px 0 0;
+  font-size: clamp(16.5px, 1.25vw, 19px);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  text-wrap: pretty;
+  animation: sp-rise 0.9s 0.55s var(--sp-ease) both;
+}
+
+.sp-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 30px;
+  animation: sp-rise 0.9s 0.7s var(--sp-ease) both;
+}
+
+.sp-hero-stage {
+  position: relative;
+  max-width: 1440px;
+  margin: clamp(46px, 7vh, 78px) auto 0;
+}
+
+.sp-hero-window {
+  position: relative;
+  z-index: 1;
+  max-width: 1080px;
+  margin: 0 auto;
+  animation: sp-window-rise 1.2s 0.3s var(--sp-ease) both;
+}
+
+@keyframes sp-window-rise {
+  from {
+    opacity: 0;
+    transform: translateY(46px) scale(0.975);
+  }
+}
+
+/* Home comes together part by part, the way it loads. */
+.sp-hero:not([data-seen]) .today > * {
+  opacity: 0;
+}
+
+.sp-hero[data-seen] .today > * {
+  animation: sp-assemble 0.95s var(--sp-ease) both;
+}
+
+.sp-hero[data-seen] .today > :nth-child(1) { animation-delay: 0.6s; }
+.sp-hero[data-seen] .today > :nth-child(2) { animation-delay: 0.78s; }
+.sp-hero[data-seen] .today > :nth-child(3) { animation-delay: 0.94s; }
+.sp-hero[data-seen] .today > :nth-child(4) { animation-delay: 1.1s; }
+.sp-hero[data-seen] .today > :nth-child(5) { animation-delay: 1.22s; }
+
+.sp-hero[data-seen] .today-day {
+  animation: sp-assemble 0.8s var(--sp-ease) both;
+}
+
+.sp-hero[data-seen] .today-day:nth-child(1) { animation-delay: 1s; }
+.sp-hero[data-seen] .today-day:nth-child(2) { animation-delay: 1.06s; }
+.sp-hero[data-seen] .today-day:nth-child(3) { animation-delay: 1.12s; }
+.sp-hero[data-seen] .today-day:nth-child(4) { animation-delay: 1.18s; }
+.sp-hero[data-seen] .today-day:nth-child(5) { animation-delay: 1.24s; }
+.sp-hero[data-seen] .today-day:nth-child(6) { animation-delay: 1.3s; }
+.sp-hero[data-seen] .today-day:nth-child(7) { animation-delay: 1.36s; }
+
+@keyframes sp-assemble {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+    filter: blur(3px);
+  }
+}
+
+/* ---- What arrives from outside (hero) ------------------------------------ */
+
+.sp-drift {
+  position: absolute;
+  z-index: 30;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    opacity 0.8s var(--sp-ease),
+    transform 1s var(--sp-ease);
+}
+
+.sp-drift[data-side="left"] {
+  left: max(0px, calc(50% - 540px - 150px));
+}
+
+.sp-drift[data-side="right"] {
+  right: max(0px, calc(50% - 540px - 150px));
+}
+
+.sp-drift[data-state="away"] {
   opacity: 0;
   pointer-events: none;
 }
 
-.landing-header-brand:has(.landing-carried[data-carrying="true"])
-  .landing-guide {
-  width: 148px;
-  opacity: 1;
-  transition:
-    width 420ms var(--ease-out-expo),
-    opacity 200ms var(--ease-standard);
+.sp-drift[data-side="left"][data-state="away"] {
+  transform: translateX(-90px) rotate(-7deg);
 }
 
-.landing-header-mark {
-  display: flex;
-  align-items: center;
+.sp-drift[data-side="right"][data-state="away"] {
+  transform: translateX(90px) rotate(7deg);
 }
 
-.landing-header-word {
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: -0.015em;
-  color: var(--text-primary);
+.sp-drift[data-state="taken"] {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.08s linear;
 }
 
-.landing-header-nav {
-  display: flex;
-  align-items: center;
-  gap: 22px;
-  margin-left: 18px;
+.sp-drift-bob {
+  display: block;
 }
 
-.landing-header-link {
+.sp-drift[data-state="here"] .sp-drift-bob {
+  animation: sp-bob 4.8s ease-in-out infinite;
+}
+
+.sp-drift[data-side="right"] .sp-drift-bob {
+  animation-delay: -2.2s;
+}
+
+@keyframes sp-bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-1.2deg);
+  }
+  50% {
+    transform: translateY(-7px) rotate(0.8deg);
+  }
+}
+
+.sp-drift:hover .sp-drift-card {
+  box-shadow:
+    0 0 0 1px rgb(52 40 28 / 0.12),
+    0 24px 46px -22px rgb(52 40 28 / 0.55);
+}
+
+.sp-drift-card {
+  display: grid;
+  gap: 3px;
+  width: 252px;
+  padding: 11px 14px 13px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px rgb(52 40 28 / 0.08),
+    0 18px 40px -22px rgb(52 40 28 / 0.45);
+  font-family: var(--font-sans);
   font-size: 13px;
-  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text-primary);
+  transition: box-shadow 0.25s ease;
+}
+
+.sp-drift-card strong {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.sp-drift-card p {
+  margin: 0;
   color: var(--text-secondary);
 }
 
-.landing-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-left: auto;
+.sp-drift-card small {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
 }
 
-.landing-header-cta {
-  display: inline-flex;
+.sp-drift-app {
+  display: flex;
   align-items: center;
-  height: 30px;
-  padding: 0 13px;
-  border-radius: var(--radius-input);
-  background: var(--text-primary);
-  color: var(--bg-primary);
+  gap: 6px;
+  margin-bottom: 2px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.sp-drift-app time {
+  margin-left: auto;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-drift-message {
+  border-radius: 16px 16px 16px 5px;
+  background: #ecf7f0;
+}
+
+.sp-drift-message .sp-drift-app {
+  color: #2f8a5d;
+}
+
+.sp-drift-mail {
+  width: 272px;
+  box-shadow:
+    inset 0 3px 0 #e8853a,
+    0 0 0 1px rgb(52 40 28 / 0.08),
+    0 18px 40px -22px rgb(52 40 28 / 0.45);
+}
+
+.sp-drift-file {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  width: 236px;
+  padding: 12px 14px;
+}
+
+.sp-drift-sheet {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  width: 30px;
+  height: 38px;
+  padding: 9px 6px 0 8px;
+  border-radius: 3px 9px 3px 3px;
+  background: #fff;
+  box-shadow:
+    inset 3px 0 #236eb4,
+    0 0 0 1px rgb(35 110 180 / 0.35);
+}
+
+.sp-drift-sheet i {
+  display: block;
+  height: 2px;
+  border-radius: 1px;
+  background: rgb(35 110 180 / 0.45);
+}
+
+.sp-drift-sheet i:last-child {
+  width: 60%;
+}
+
+.sp-drift-photo {
+  width: 196px;
+  padding: 7px 7px 10px;
+  border-radius: 10px;
+}
+
+.sp-drift-photo svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-bottom: 6px;
+  border-radius: 5px;
+}
+
+.sp-drift-photo > span {
+  padding: 0 4px;
+}
+
+/* Filing into Home (kit/filing.ts): what is new stays hidden until it is set down. */
+.sp-home[data-filing] :is(.today-day-item, .work-desk > *):not([data-known]) {
+  opacity: 0;
+}
+
+[data-landing="here"] {
+  animation: sp-landed 0.9s var(--sp-ease) both;
+}
+
+/* Every frame is written out: what is being filed sits under a rule that hides it, which an open end would fall back to. */
+@keyframes sp-landed {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+    filter: blur(4px) brightness(1.08);
+  }
+  45% {
+    opacity: 1;
+    transform: none;
+    filter: blur(0) brightness(1.05);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0) brightness(1);
+  }
+}
+
+.sp-home [data-filed] {
+  transition:
+    opacity 0.6s ease,
+    transform 0.6s var(--sp-ease);
+}
+
+.sp-home[data-tidying] [data-filed] {
+  opacity: 0;
+  transform: scale(0.97);
+}
+
+@media (max-width: 760px) {
+  .sp-drift-card {
+    width: 188px;
+    font-size: 12px;
+  }
+
+  .sp-drift-mail {
+    width: 200px;
+  }
+
+  .sp-drift-photo {
+    width: 150px;
+  }
+}
+
+/* ---- Scenes ------------------------------------------------------------- */
+
+.sp-scene {
+  max-width: calc(var(--sp-measure) + 2 * var(--sp-gutter));
+  margin: 0 auto;
+  padding: clamp(90px, 13vh, 150px) var(--sp-gutter);
+}
+
+.sp-scene-copy {
+  position: relative;
+  z-index: 2;
+  max-width: 760px;
+}
+
+.sp-scene-copy[data-centred] {
+  margin: 0 auto;
+  text-align: center;
+}
+
+.sp-scene-copy[data-centred] .sp-lede {
+  margin-inline: auto;
+}
+
+.sp-scene:not([data-seen]) .sp-lede {
+  opacity: 0;
+}
+
+.sp-scene[data-seen] .sp-lede {
+  animation: sp-rise 0.9s 0.45s var(--sp-ease) both;
+}
+
+/* A scene still on its way keeps its place on the paper. */
+.sp-later {
+  min-height: var(--sp-later, 900px);
+}
+
+/* ---- Classes: books on a shelf ------------------------------------------- */
+
+.sp-cl-room {
+  position: relative;
+  margin-top: clamp(28px, 4vh, 48px);
+}
+
+.sp-cl-stage {
+  position: relative;
+  perspective: 2400px;
+}
+
+.sp-cl-shelf {
+  position: absolute;
+  left: 24px;
+  bottom: 22px;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 100%;
+}
+
+.sp-cl-board {
+  position: absolute;
+  left: -24px;
+  bottom: -4px;
+  width: 1240px;
+  height: 4px;
+  border-radius: 2px;
+  background: #e6e2d9;
+}
+
+.sp-cl-spine {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 62px;
+  padding: 0 0 0;
+  border: 0;
+  border-radius: 6px 6px 3px 3px;
+  background: var(--cover);
+  box-shadow:
+    inset -6px 0 0 rgb(20 19 24 / 0.05),
+    0 10px 24px -14px rgb(20 19 24 / 0.4);
+  cursor: pointer;
+  transition:
+    transform 0.42s var(--sp-ease),
+    box-shadow 0.42s var(--sp-ease);
+}
+
+.sp-cl-spine:last-of-type {
+  transform: rotate(5deg);
+  transform-origin: bottom left;
+  margin-left: 10px;
+}
+
+.sp-cl-spine:hover,
+.sp-cl-spine:focus-visible,
+.sp-cl-spine[data-lift] {
+  transform: translateY(-14px);
+  box-shadow:
+    inset -6px 0 0 rgb(20 19 24 / 0.05),
+    0 22px 30px -16px rgb(20 19 24 / 0.42);
+}
+
+.sp-cl-spine:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.sp-cl-spine .sp-cl-band {
+  width: 100%;
+  height: 10px;
+  margin: 22px 0 18px;
+  border-radius: 0;
+}
+
+.sp-cl-band {
+  display: block;
+  width: 56px;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--ink);
+}
+
+.sp-cl-spine-name {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  color: #141318;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sp-cl-spine-level {
+  color: var(--cover-ink);
+  font-weight: 500;
+}
+
+.sp-cl-book {
+  position: absolute;
+  right: 24px;
+  bottom: 26px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: 720px;
+  height: 430px;
+  transform-style: preserve-3d;
+  border-radius: 10px 10px 6px 6px;
+  box-shadow: 0 40px 80px -36px rgb(20 19 24 / 0.45);
+  transition: box-shadow 0.5s var(--sp-ease);
+}
+
+.sp-cl-book[data-phase="closed"] {
+  box-shadow: none;
+}
+
+.sp-cl-cover {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 34px 32px;
+  border-radius: 10px 0 0 6px;
+  background: var(--cover);
+  color: #141318;
+  box-shadow:
+    0 0 0 1px rgb(20 19 24 / 0.07),
+    inset -14px 0 18px -14px rgb(20 19 24 / 0.25);
+}
+
+.sp-cl-cover .sp-cl-band {
+  margin-bottom: 26px;
+}
+
+.sp-cl-name {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 40px;
+  font-weight: 500;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+.sp-cl-meets {
+  margin: 10px 0 0;
+  color: var(--cover-ink);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.sp-cl-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--cover-ink);
+  font-size: 13px;
+}
+
+.sp-cl-synced {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.sp-cl-synced i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2f9b72;
+  box-shadow: 0 0 0 0 rgb(47 155 114 / 0.5);
+  animation: sp-cl-pulse 2.4s ease-out infinite;
+}
+
+@keyframes sp-cl-pulse {
+  70%,
+  100% {
+    box-shadow: 0 0 0 6px rgb(47 155 114 / 0);
+  }
+}
+
+.sp-cl-leaf {
+  position: relative;
+  transform-origin: left center;
+  transform-style: preserve-3d;
+  transition: transform 0.52s cubic-bezier(0.6, 0, 0.3, 1);
+}
+
+.sp-cl-book[data-phase="closed"] .sp-cl-leaf {
+  transform: rotateY(-180deg);
+}
+
+.sp-cl-page,
+.sp-cl-back {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+}
+
+.sp-cl-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 30px;
+  border-radius: 0 10px 6px 0;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgb(20 19 24 / 0.07);
+}
+
+.sp-cl-page h4 {
+  margin: 0 0 4px;
+  color: #4a4852;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sp-cl-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 0;
+  border-top: 1px solid rgb(20 19 24 / 0.07);
+  font-size: 14px;
+}
+
+.sp-cl-row b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-cl-row > span:last-child {
+  color: #4a4852;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.sp-cl-kind {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--tint) 16%, white);
+  color: var(--tint);
+}
+
+.sp-cl-back {
+  display: flex;
+  flex-direction: column;
+  padding: 34px 32px;
+  transform: rotateY(180deg);
+  border-radius: 10px 6px 6px 10px;
+  background: var(--cover);
+  box-shadow:
+    0 0 0 1px rgb(20 19 24 / 0.07),
+    0 30px 60px -30px rgb(20 19 24 / 0.45);
+}
+
+.sp-cl-back b {
+  margin-top: 26px;
+  color: #141318;
+  font-family: var(--font-display);
+  font-size: 40px;
+  font-weight: 500;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+
+
+
+
+
+
+
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-cl-leaf,
+  .sp-cl-spine {
+    transition: none;
+  }
+}
+
+/* ---- Ask: the island, large, and what it makes --------------------------- */
+
+.sp-ask-room {
+  position: relative;
+  margin-top: clamp(32px, 5vh, 56px);
+}
+
+.sp-ask-stage {
+  position: relative;
+}
+
+.sp-ask-isle-room {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 220px;
+}
+
+/* The island is fixed to the bottom of its page; this box is its page, drawn larger. */
+.sp-ask-isle {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 640px;
+  height: 116px;
+  transform: translateX(-50%) scale(1.4);
+  transform-origin: top center;
+  --spectra-rail-width: 0px;
+  --spectra-lead-width: 0px;
+  --spectra-side-width: 0px;
+}
+
+.sp-ask-status {
+  position: absolute;
+  top: 176px;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 22px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 15px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.sp-ask-status[data-on] {
+  opacity: 1;
+}
+
+.sp-ask-status i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: conic-gradient(#ff647f, #ffab4a, #f6d75d, #48c997, #4f9fe6, #9176e8, #ff647f);
+  animation: sp-spin 1.6s linear infinite;
+}
+
+.sp-ask-notes {
+  position: absolute;
+  left: 40px;
+  top: 262px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 280px;
+  height: 330px;
+  padding: 22px;
+  border-radius: 4px 14px 14px 14px;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px rgb(20 19 24 / 0.07),
+    0 24px 50px -30px rgb(20 19 24 / 0.35);
+  transform: rotate(-2deg);
+}
+
+.sp-ask-kind {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sp-ask-kind i {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: #4f9fe6;
+}
+
+.sp-ask-notes b {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.sp-ask-notes p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.sp-ask-notes mark {
+  border-radius: 3px;
+  color: inherit;
+  background: linear-gradient(90deg, rgb(255 171 74 / 0.38), rgb(145 118 232 / 0.34)) no-repeat 0 0 / 0% 100%;
+  transition: background-size 0.5s var(--sp-ease);
+}
+
+.sp-ask-notes mark[data-mark="2"] {
+  background-image: linear-gradient(90deg, rgb(72 201 151 / 0.36), rgb(79 159 230 / 0.34));
+}
+
+.sp-ask-notes mark[data-mark="3"] {
+  background-image: linear-gradient(90deg, rgb(255 100 127 / 0.32), rgb(255 171 74 / 0.36));
+}
+
+.sp-ask-notes[data-marks="1"] mark[data-mark="1"],
+.sp-ask-notes[data-marks="2"] mark:is([data-mark="1"], [data-mark="2"]),
+.sp-ask-notes[data-marks="3"] mark {
+  background-size: 100% 100%;
+}
+
+.sp-ask-line {
+  display: block;
+  height: 7px;
+  border-radius: 4px;
+  background: #efece5;
+}
+
+.sp-ask-arrow {
+  position: absolute;
+  left: 322px;
+  top: 412px;
+  fill: none;
+  stroke: #7a7782;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-dasharray: 3 5;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.sp-ask-arrow path:last-child {
+  stroke-dasharray: none;
+}
+
+.sp-ask-arrow[data-on] {
+  opacity: 1;
+}
+
+/* The fan before anything is made: a soft place for each card, named by its kind. */
+.sp-ask-slot {
+  position: absolute;
+  left: var(--x);
+  top: calc(232px + var(--y));
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 320px;
+  height: 384px;
+  border: 1.5px dashed color-mix(in oklab, var(--tint) 45%, transparent);
+  border-radius: 16px;
+  background: color-mix(in oklab, var(--tint) 6%, #fbfaf7);
+  color: color-mix(in oklab, var(--tint) 70%, #141318);
+  font-size: 14px;
+  font-weight: 600;
+  transform: rotate(var(--turn));
+  animation: sp-ask-slot 2.4s ease-in-out infinite;
+  transition: opacity 0.3s ease;
+}
+
+.sp-ask-slot[data-filled] {
+  opacity: 0;
+  animation: none;
+}
+
+@keyframes sp-ask-slot {
+  50% {
+    background: color-mix(in oklab, var(--tint) 12%, #fbfaf7);
+  }
+}
+
+/* A made card comes out of the island and lies in the fan; brought up, it is on top and straight. */
+.sp-ask-made {
+  position: absolute;
+  left: var(--x);
+  top: calc(232px + var(--y));
+  z-index: calc(2 + var(--z, var(--i)));
+  width: 320px;
+  height: 384px;
+  /* Only the card shows: the studio's own paper would show round its tab. */
+  background: transparent;
+  transform: translate(calc(620px - var(--x) - 160px), -150px) scale(0.3);
+  opacity: 0;
+  transition:
+    transform 0.75s cubic-bezier(0.2, 0.9, 0.25, 1.08),
+    opacity 0.4s ease;
+}
+
+.sp-ask-made[data-made] {
+  transform: rotate(var(--turn));
+  opacity: 1;
+}
+
+.sp-ask-made[data-made][data-top] {
+  z-index: 9;
+  transform: translateY(-14px) rotate(calc(var(--turn) / 3)) scale(1.03);
+  transition:
+    transform 0.4s var(--sp-ease),
+    opacity 0.4s ease;
+}
+
+/* Only the card itself: its tab and its face, with the shadow following their
+   outline, and no box drawn round the two. */
+.sp-ask-made > .work-embed {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  filter: drop-shadow(0 18px 26px rgb(20 19 24 / 0.16)) drop-shadow(0 1px 1px rgb(20 19 24 / 0.08));
+}
+
+.sp-ask-made > .work-embed .work-embed-face {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-ask-made {
+    transition: none;
+  }
+}
+
+/* ---- Artifacts: every editor, named, and one open ------------------------ */
+
+@property --sweep {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: -30%;
+}
+
+.sp-ed {
+  display: grid;
+  grid-template-columns: minmax(280px, 390px) minmax(0, 860px);
+  justify-content: space-between;
+  align-items: start;
+  gap: clamp(28px, 4vw, 64px);
+}
+
+.sp-artifacts .sp-heading {
+  font-size: clamp(36px, 3.7vw, 58px);
+}
+
+.sp-ed-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-top: clamp(24px, 4vh, 40px);
+}
+
+.sp-ed-name {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 5px 0;
+  border: 0;
+  background: none;
+  color: #8a8792;
+  font-family: var(--font-display);
+  font-size: clamp(26px, 2.3vw, 34px);
+  font-weight: 450;
+  letter-spacing: -0.015em;
+  line-height: 1.12;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.4s ease;
+}
+
+.sp-ed-name:hover {
+  color: #4a4852;
+}
+
+.sp-ed-name i {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 4px;
+  background: var(--kind);
+  opacity: 0.35;
+  transition:
+    opacity 0.4s ease,
+    transform 0.4s var(--sp-ease);
+}
+
+.sp-ed-name[aria-current] i {
+  opacity: 1;
+  transform: scale(1.15);
+}
+
+/* The open name fills with its colour from the left, a bright edge leading,
+   and keeps it a moment; the end of the fill is the turn's. */
+.sp-ed-name[aria-current] span {
+  color: transparent;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--kind) 78%, #141318) calc(var(--sweep) - 14%),
+    color-mix(in srgb, var(--kind) 55%, #fff) var(--sweep),
+    var(--text-primary) calc(var(--sweep) + 10%)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: sp-ed-sweep 4.6s linear both paused;
+}
+
+.sp-ed[data-playing] .sp-ed-name[aria-current] span {
+  animation-play-state: running;
+}
+
+@keyframes sp-ed-sweep {
+  from {
+    --sweep: -12%;
+  }
+
+  42% {
+    --sweep: 118%;
+  }
+
+  to {
+    --sweep: 118%;
+  }
+}
+
+.sp-ed-room {
+  position: relative;
+  margin-top: 6px;
+}
+
+/* Slides on the page have no composer under them, so the slide takes the
+   stage's whole height rather than leaving the composer's room empty. */
+.sp-studio .spectra-artifact-studio[data-blueprint="presentation"] .presentation-stage {
+  --notes-room: 44px;
+  padding: 14px 18px 10px;
+}
+
+.sp-studio .spectra-artifact-studio[data-blueprint="presentation"] .presentation-stage > .presentation-notes {
+  margin-top: 8px;
+}
+
+/* Spectra's own editor, open on a work, framed as the app frames it. */
+.sp-ed-desk {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 18px;
+  background: var(--bg-primary);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 40px 90px -40px rgb(20 19 24 / 0.4);
+  visibility: hidden;
+}
+
+.sp-ed-desk[data-open] {
+  z-index: 1;
+  visibility: visible;
+  animation: sp-ed-in 0.45s var(--sp-ease) both;
+}
+
+.sp-ed-desk > .sp-studio {
+  height: 100%;
+  min-width: 0;
+}
+
+@keyframes sp-ed-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.99);
+  }
+}
+
+@media (max-width: 900px) {
+  .sp-ed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sp-ed-list {
+    flex-flow: row wrap;
+    gap: 4px 18px;
+  }
+
+  .sp-ed-name {
+    font-size: 22px;
+  }
+}
+
+/* ---- Together: a draft with its people beside it ------------------------ */
+
+.sp-together-desk {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 290px;
+  gap: 0;
+  height: 660px;
+  margin-top: clamp(44px, 6vh, 70px);
+  overflow: hidden;
+  border-radius: 18px;
+  background: var(--bg-primary);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 30px 60px -36px rgb(52 40 28 / 0.45);
+}
+
+.sp-together-doc,
+.sp-together-studio,
+.sp-together-studio > .sp-studio {
+  height: 100%;
+  min-width: 0;
+}
+
+.sp-together-doc {
+  overflow: hidden;
+}
+
+.sp-people {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 22px 18px;
+  border-left: 1px solid var(--border-subtle);
+  background: color-mix(in oklab, var(--bg-secondary, #f3efe8) 55%, var(--bg-primary));
+}
+
+.sp-people-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px 6px;
   font-size: 13px;
   font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sp-people ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sp-person {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  transition:
+    background 0.4s ease,
+    box-shadow 0.4s ease;
+}
+
+.sp-person-mark {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--person) 16%, var(--bg-primary));
+  color: var(--person);
+}
+
+.sp-person-text {
+  display: grid;
+  min-width: 0;
+}
+
+.sp-person-text strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sp-person-now {
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: sp-rise 0.45s var(--sp-ease) both;
+}
+
+.sp-person-can {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+.sp-person[data-active] {
+  background: color-mix(in oklab, var(--person) 9%, var(--bg-primary));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--person) 30%, transparent);
+}
+
+.sp-person[data-active] .sp-person-now {
+  color: color-mix(in oklab, var(--person) 70%, var(--text-primary));
+}
+
+.sp-person[data-active] .sp-person-mark {
+  animation: sp-person-live 1.8s ease-in-out infinite;
+}
+
+@keyframes sp-person-live {
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in oklab, var(--person) 18%, transparent);
+  }
+}
+
+/* Spectra stands first and apart: a ring of the spectrum round its mark, and a card of its own. */
+.sp-person[data-ai] {
+  margin-bottom: 8px;
+  background: var(--bg-primary);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 8px 18px -14px rgb(52 40 28 / 0.4);
+}
+
+.sp-person[data-ai] .sp-person-mark {
+  position: relative;
+  background: var(--bg-primary);
+}
+
+.sp-person[data-ai] .sp-person-mark::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  -webkit-mask: radial-gradient(circle, transparent 15.5px, #000 16px);
+  mask: radial-gradient(circle, transparent 15.5px, #000 16px);
+  background: conic-gradient(from 0deg, #ff647f, #ffab4a, #e7b52f, #48c997, #4f9fe6, #9176e8, #ff647f);
+  animation: sp-ring 6s linear infinite;
+}
+
+.sp-person[data-ai][data-active] .sp-person-mark::before {
+  animation-duration: 1.6s;
+}
+
+.sp-person[data-ai] .sp-person-mark > * {
+  position: relative;
+}
+
+@keyframes sp-ring {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.sp-people-note {
+  margin: auto 6px 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 900px) {
+  .sp-together-desk {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .sp-together-doc {
+    height: 520px;
+  }
+
+  .sp-people {
+    border-top: 1px solid var(--border-subtle);
+    border-left: 0;
+  }
+}
+
+/* While someone works, what they are doing takes the row. */
+.sp-person[data-active] .sp-person-can {
+  display: none;
+}
+
+/* ---- Week: things land on the calendar ------------------------------------ */
+
+/* As in the canvas: the heading on the left, what it means on the right, the
+   week wide beneath them. */
+.sp-week-copy {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: clamp(32px, 6vw, 96px);
+  align-items: end;
+}
+
+.sp-week-copy .sp-lede {
+  max-width: 34em;
+  margin: 0 0 0.5em;
+}
+
+.sp-week-stage {
+  position: relative;
+  margin-top: clamp(40px, 6vh, 64px);
+}
+
+.sp-calendar,
+.sp-calendar-ghost {
+  height: 100%;
+}
+
+/* The week alone, as in the canvas: the page's own title row is left out. */
+.sp-week .spectra-calendar-page > .page-title-lane {
+  display: none;
+}
+
+/* Nothing in the week is all-day, so its row is left out and the school day
+   starts straight under the dates. */
+.sp-week .spectra-calendar-allday-label,
+.sp-week .spectra-calendar-allday-cell {
+  display: none;
+}
+
+/* What comes in from beyond the page, in flight: the calendar's own item, lifted. */
+.sp-week-flyer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 30;
+  pointer-events: none;
+  transform-origin: 30% 50%;
+  will-change: transform;
+}
+
+.sp-week-flyer > :first-child {
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 1px rgb(52 40 28 / 0.06),
+    0 26px 40px -18px rgb(52 40 28 / 0.5);
+  transition: box-shadow 0.4s ease;
+}
+
+.sp-week-flyer[data-landed] > :first-child {
+  box-shadow: none;
+}
+
+/* Who set it, or what Spectra did, said beside it as it comes. */
+.sp-week-tag {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  translate: -50% 0;
+  padding: 6px 12px 7px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px rgb(52 40 28 / 0.08),
+    0 12px 26px -14px rgb(52 40 28 / 0.45);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  color: var(--text-primary);
+  transition:
+    opacity 0.45s ease,
+    translate 0.45s var(--sp-ease);
+}
+
+.sp-week-tag[data-tone="spectra"] {
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(90deg, #ff647f, #ffab4a, #e7b52f, #48c997, #4f9fe6, #9176e8) border-box;
+  border: 1.5px solid transparent;
+}
+
+.sp-week-flyer[data-landed] .sp-week-tag {
+  transition-delay: 0.7s;
+  opacity: 0;
+  translate: -50% 6px;
+}
+
+.sp-week-tag--alone {
+  bottom: auto;
+  z-index: 30;
+  translate: -50% calc(-100% - 10px);
+  animation: sp-week-tag-in 0.5s var(--sp-ease) both;
+}
+
+.sp-week-tag--alone[data-gone] {
+  opacity: 0;
+}
+
+@keyframes sp-week-tag-in {
+  from {
+    opacity: 0;
+    translate: -50% calc(-100% - 2px);
+  }
+}
+
+@media (max-width: 900px) {
+  .sp-week-copy {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+}
+
+/* ---- Day: the whole sky over Home's brief ---------------------------------- */
+
+/* The section is under its own sky, edge to edge: it turns with the hour, the
+   sun and moon cross it, and it fades into the paper above and below. */
+.sp-day {
+  position: relative;
+  isolation: isolate;
+}
+
+.sp-day-sky {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  z-index: -1;
+  width: 100vw;
+  margin-left: -50vw;
+  overflow: hidden;
+  pointer-events: none;
+  background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-horizon) var(--horizon), var(--sky-horizon) 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 360px, #000 calc(100% - 260px), transparent);
+  mask-image: linear-gradient(180deg, transparent, #000 360px, #000 calc(100% - 260px), transparent);
+}
+
+.sp-day-stars {
+  position: absolute;
+  inset: 0 0 30% 0;
+  opacity: var(--night);
+}
+
+.sp-day-stars::before,
+.sp-day-stars::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(1.6px 1.6px at 6% 22%, #fff, transparent),
+    radial-gradient(1.1px 1.1px at 14% 9%, #fff, transparent),
+    radial-gradient(1.8px 1.8px at 23% 30%, #fff, transparent),
+    radial-gradient(1.1px 1.1px at 31% 14%, #fff, transparent),
+    radial-gradient(1.4px 1.4px at 42% 6%, #fff, transparent),
+    radial-gradient(1px 1px at 51% 26%, #fff, transparent),
+    radial-gradient(1.7px 1.7px at 63% 12%, #fff, transparent),
+    radial-gradient(1.1px 1.1px at 72% 33%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 81% 8%, #fff, transparent),
+    radial-gradient(1px 1px at 88% 24%, #fff, transparent),
+    radial-gradient(1.6px 1.6px at 95% 15%, #fff, transparent);
+}
+
+.sp-day-stars::after {
+  background-image:
+    radial-gradient(1.2px 1.2px at 10% 40%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 19% 52%, #fff, transparent),
+    radial-gradient(1px 1px at 36% 44%, #fff, transparent),
+    radial-gradient(1.3px 1.3px at 58% 48%, #fff, transparent),
+    radial-gradient(1px 1px at 68% 58%, #fff, transparent),
+    radial-gradient(1.4px 1.4px at 84% 46%, #fff, transparent),
+    radial-gradient(1px 1px at 92% 60%, #fff, transparent);
+  animation: sp-day-twinkle 3.6s ease-in-out infinite;
+}
+
+@keyframes sp-day-twinkle {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.sp-day-cloud {
+  position: absolute;
+  left: 0;
+  width: 200px;
+  fill: #fff;
+  opacity: max(0, 0.88 - var(--night) * 1.15);
+  filter: drop-shadow(0 8px 14px rgb(60 70 120 / 0.08));
+  animation: sp-day-drift 90s linear infinite;
+}
+
+.sp-day-cloud[data-cloud="1"] {
+  top: 41%;
+  animation-delay: -20s;
+}
+
+.sp-day-cloud[data-cloud="2"] {
+  top: 49%;
+  width: 140px;
+  animation-duration: 120s;
+  animation-delay: -84s;
+}
+
+.sp-day-cloud[data-cloud="3"] {
+  top: 37%;
+  width: 210px;
+  animation-duration: 150s;
+  animation-delay: -40s;
+}
+
+@keyframes sp-day-drift {
+  from {
+    transform: translateX(-280px);
+  }
+  to {
+    transform: translateX(100vw);
+  }
+}
+
+.sp-day-place,
+.sp-day-glow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+}
+
+/* Low in the sky, the light round the sun spreads along the hills. */
+.sp-day-glow::before {
+  content: "";
+  position: absolute;
+  width: 1100px;
+  height: 640px;
+  translate: -50% -50%;
+  background: radial-gradient(closest-side, var(--sky-glow), transparent);
+  opacity: calc(0.2 + var(--low) * 0.7);
+}
+
+.sp-day-body {
+  position: absolute;
+  width: 220px;
+  height: 220px;
+  translate: -50% -50%;
+  animation: sp-day-rise 1.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.sp-day-body[data-body="moon"] {
+  width: 160px;
+  height: 160px;
+}
+
+.sp-day-body svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+@keyframes sp-day-rise {
+  from {
+    opacity: 0;
+    transform: translateY(70px) scale(0.9);
+  }
+}
+
+.sp-day-sun {
+  fill: #ffd25a;
+  stroke: #ffab3d;
+  stroke-width: 6;
+}
+
+.sp-day-shine {
+  fill: none;
+  stroke: #fff6cf;
+  stroke-width: 10;
+  stroke-linecap: round;
+}
+
+.sp-day-rays {
+  stroke: #ffbb45;
+  stroke-width: 12;
+  stroke-linecap: round;
+  animation: sp-day-turn 48s linear infinite;
+}
+
+@keyframes sp-day-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.sp-day-moon {
+  fill: #f6edcf;
+  filter: drop-shadow(0 0 22px rgb(246 237 207 / 0.55));
+}
+
+.sp-day-hills {
+  position: absolute;
+  top: calc(var(--horizon) - 70px);
+  left: 0;
+  width: 100%;
+  height: calc(100% - var(--horizon) + 70px);
+}
+
+.sp-day-hills path {
+  fill: var(--sky-land);
+}
+
+.sp-day-hills path[data-far] {
+  fill: color-mix(in oklab, var(--sky-land) 55%, var(--sky-horizon));
+}
+
+/* Under the night sky, the words are in its light. */
+.sp-day .sp-heading,
+.sp-day .sp-lede {
+  transition: color 0.9s ease;
+}
+
+.sp-day[data-dark] .sp-heading,
+.sp-day[data-dark] .sp-heading * {
+  color: #f6f3ff;
+}
+
+.sp-day[data-dark] .sp-lede {
+  color: rgb(236 232 255 / 0.78);
+}
+
+/* Room for the sun to climb, between the words and the brief. */
+.sp-day-heaven {
+  height: clamp(190px, 26vh, 290px);
+}
+
+.sp-day-stage {
+  position: relative;
+}
+
+.sp-day-home {
+  position: relative;
+  z-index: 2;
+  max-width: 1040px;
+  margin-inline: auto;
+}
+
+.sp-day[data-dark] .sp-day-home .sp-window {
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.08),
+    0 40px 80px -40px rgb(0 0 0 / 0.7);
+}
+
+.sp-day-page {
+  height: 100%;
+  padding: 44px 56px 0;
+  overflow: hidden;
+}
+
+.sp-day-page .morning {
+  margin-top: 0;
+}
+
+/* The moves are Henry's to press; on the page they are only shown. */
+.sp-day-page .morning-move-action,
+.sp-day-page .morning-more,
+.sp-day-page .morning-move-how {
+  pointer-events: none;
+}
+
+.sp-day-page .morning-move {
+  transition: opacity 0.6s ease;
+}
+
+.sp-day-page .morning-move[data-done] {
+  animation: sp-day-done 0.7s var(--sp-ease) both;
+}
+
+@keyframes sp-day-done {
+  from {
+    opacity: 0.4;
+    transform: translateY(-10px);
+  }
+}
+
+@media (max-width: 900px) {
+  .sp-day-page {
+    padding: 28px 28px 0;
+  }
+
+  .sp-day-body {
+    width: 140px;
+    height: 140px;
+  }
+
+  .sp-day-body[data-body="moon"] {
+    width: 104px;
+    height: 104px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-day-cloud,
+  .sp-day-rays,
+  .sp-day-stars::after {
+    animation: none;
+  }
+}
+
+/* ---- Bridge: the same file on the laptop and in Spectra ------------------ */
+
+.sp-bridge-stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) clamp(140px, 12vw, 210px) minmax(0, 1.1fr);
+  gap: clamp(10px, 1.2vw, 20px);
+  align-items: center;
+  /* Wider than the copy, so what is on both screens can be read. */
+  width: min(1560px, calc(100vw - 2 * var(--sp-gutter)));
+  margin: clamp(44px, 6vh, 70px) 0 0 50%;
+  translate: -50% 0;
+}
+
+.sp-laptop {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  justify-items: center;
+}
+
+.sp-bridge-app {
+  position: relative;
+  z-index: 2;
+}
+
+/* Spectra's prism between the two copies of the file. */
+.sp-bridge-prism {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+}
+
+/* ---- A prism, anywhere ------------------------------------------------- */
+
+.sp-prism {
+  position: relative;
+  aspect-ratio: 1;
+  flex: none;
+}
+
+.sp-prism canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.sp-prism[data-interactive] canvas {
+  cursor: grab;
+  touch-action: pan-y;
+}
+
+.sp-prism[data-interactive] canvas:active {
+  cursor: grabbing;
+}
+
+.sp-prism-core {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 2px;
+}
+
+/* The pipes the files go through: a soft tube in the paper, and the light that runs in it. */
+.sp-bridge-pipes {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.sp-pipe,
+.sp-pipe-shine,
+.sp-pipe-way,
+.sp-pipe-spark {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.sp-pipe {
+  stroke: color-mix(in oklab, var(--sp-ink, #1c1b20) 9%, #ece7de);
+  stroke-width: 12;
+}
+
+.sp-pipe-shine {
+  stroke: rgb(255 255 255 / 0.75);
+  stroke-width: 3;
+  transform: translateY(-2.5px);
+}
+
+.sp-pipe-way {
+  stroke: none;
+}
+
+.sp-pipe-spark {
+  stroke: url(#sp-pipe-light);
+  stroke-width: 7;
+  stroke-dasharray: 0.3 2;
+  filter: drop-shadow(0 0 5px rgb(170 140 255 / 0.85));
+}
+
+.sp-laptop-screen {
+  width: 100%;
+  aspect-ratio: 16 / 10.4;
+  padding: 14px;
+  border-radius: 20px 20px 6px 6px;
+  background: #1d1d22;
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.08),
+    0 30px 60px -30px rgb(30 24 18 / 0.55);
+}
+
+.sp-laptop-screen > .sp-word {
+  height: 100%;
+}
+
+.sp-laptop-base {
+  width: 112%;
+  height: 14px;
+  border-radius: 0 0 16px 16px;
+  background: linear-gradient(180deg, #d9d6d0, #b9b5ae);
+  box-shadow: 0 18px 30px -18px rgb(30 24 18 / 0.6);
+  clip-path: polygon(0 0, 100% 0, 97% 100%, 3% 100%);
+}
+
+.sp-word {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #f3f2f1;
+  font-family: "Calibri", "Carlito", "Segoe UI", sans-serif;
+  color: #252423;
+}
+
+.sp-os-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #2b579a;
+  font-size: 12px;
+  color: #fff;
+}
+
+.sp-os-lights {
+  display: flex;
+  gap: 6px;
+}
+
+.sp-os-lights i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.35);
+}
+
+.sp-os-lights i:nth-child(1) {
+  background: #ff5f57;
+}
+
+.sp-os-lights i:nth-child(2) {
+  background: #febc2e;
+}
+
+.sp-os-lights i:nth-child(3) {
+  background: #28c840;
+}
+
+.sp-os-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+}
+
+.sp-word-badge {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 3px;
+  background: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  color: #2b579a;
+}
+
+.sp-word-state {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: rgb(255 255 255 / 0.85);
+  transition: background 0.4s ease;
+}
+
+.sp-word[data-saved="spectra"] .sp-word-state {
+  background: rgb(255 255 255 / 0.18);
+  color: #fff;
+  animation: sp-rise 0.45s var(--sp-ease) both;
+}
+
+.sp-word-ribbon {
+  display: flex;
+  gap: 18px;
+  padding: 7px 16px;
+  border-bottom: 1px solid #e1dfdd;
+  background: #fff;
+  font-size: 11.5px;
+  color: #605e5c;
+}
+
+.sp-word-ribbon span:first-child {
+  color: #2b579a;
+  box-shadow: 0 2px 0 #2b579a;
+}
+
+.sp-word-page {
+  flex: 1;
+  min-height: 0;
+  margin: 14px 8% 0;
+  padding: 26px 30px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 0 0 1px #e1dfdd;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.sp-word-page p {
+  margin: 0 0 9px;
+}
+
+.sp-word-heading {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2b579a;
+}
+
+.sp-word-change {
+  border-radius: 3px;
+  transition: background 1.6s ease;
+}
+
+.sp-word-change[data-fresh] {
+  background: rgb(145 118 232 / 0.2);
+  animation: sp-word-fresh 0.8s var(--sp-ease) both;
+}
+
+@keyframes sp-word-fresh {
+  from {
+    background: rgb(145 118 232 / 0.5);
+    filter: blur(1.5px);
+    opacity: 0.4;
+  }
+}
+
+.sp-word-caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 1.15em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: #252423;
+  opacity: 0;
+}
+
+.sp-word-caret[data-on] {
+  animation: sp-caret 1s steps(1) infinite;
+}
+
+@keyframes sp-caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+}
+
+.sp-word-ghost {
+  display: grid;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.sp-word-ghost span {
+  height: 7px;
+  border-radius: 4px;
+  background: #edebe9;
+}
+
+.sp-word-ghost span:nth-child(2) {
+  width: 86%;
+}
+
+.sp-word-ghost span:nth-child(3) {
+  width: 62%;
+}
+
+.sp-bridge-doc {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+}
+
+.sp-bridge-sync {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.sp-bridge-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sp-bridge-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  animation: sp-rise 0.45s var(--sp-ease) both;
+}
+
+.sp-bridge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #40c48e;
+  animation: sp-feed-pulse 2.4s ease-in-out infinite;
+}
+
+.sp-bridge-sync[data-sync="writing"] .sp-bridge-line,
+.sp-bridge-sync[data-sync="to-word"] .sp-bridge-line {
+  color: #7d63e0;
+}
+
+.sp-bridge-surface,
+.sp-bridge-studio,
+.sp-bridge-studio > .sp-studio {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+}
+
+.sp-bridge-surface {
+  overflow: hidden;
+}
+
+@media (max-width: 900px) {
+  .sp-bridge-stage {
+    grid-template-columns: minmax(0, 1fr);
+    width: auto;
+    margin-left: 0;
+    translate: none;
+  }
+
+  .sp-bridge-pipes {
+    display: none;
+  }
+
+  .sp-bridge-prism {
+    width: 200px;
+    margin: 0 auto;
+  }
+}
+
+/* ---- Agents: Ms Gonzalez makes one, and it goes to work ------------------ */
+
+.sp-agents-stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+  gap: clamp(22px, 2.6vw, 40px);
+  align-items: start;
+  margin-top: clamp(44px, 6vh, 70px);
+}
+
+.sp-agents-desk {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 120px 0 0;
+  list-style: none;
+}
+
+.sp-agents-desk-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sp-agents-file {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--bg-primary);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 14px 30px -22px rgb(52 40 28 / 0.5);
+  transition:
+    opacity 0.5s ease,
+    transform 0.5s var(--sp-ease);
+}
+
+.sp-agents-file[data-taken] {
+  opacity: 0.4;
+  transform: scale(0.97);
+}
+
+.sp-agents-file strong {
+  display: block;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.sp-agents-file small {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.sp-agents-file-kind {
+  display: grid;
+  height: 46px;
+  place-items: center;
+  border-radius: 6px 12px 6px 6px;
+  background: color-mix(in oklab, #4f9fe6 14%, #fff);
+  font-size: 10px;
+  font-weight: 700;
+  color: #2c6db0;
+}
+
+.sp-agents-file-kind[data-kind="pdf"] {
+  background: color-mix(in oklab, #ff647f 14%, #fff);
+  color: #c23a52;
+}
+
+.sp-agent-page {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  padding: 26px 40px 0;
+  overflow: hidden;
+}
+
+.sp-agent-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.sp-agent-glyph {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--ink-orange) 14%, var(--bg-primary));
+  color: var(--ink-orange);
+}
+
+.sp-agent-name {
+  display: grid;
+}
+
+.sp-agent-name small {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.sp-agent-name strong {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 500;
+  line-height: 1.1;
+  color: var(--text-primary);
+}
+
+.sp-agent-state {
+  margin-left: auto;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--bg-secondary, #f1ece4);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.sp-agent-state[data-released] {
+  background: color-mix(in oklab, #40c48e 16%, var(--bg-primary));
+  color: #1f7a55;
+  animation: sp-rise 0.5s var(--sp-ease) both;
+}
+
+.sp-agent-page .foundry-nav-part,
+.sp-agent-page .foundry-nav-primary {
+  pointer-events: none;
+}
+
+.sp-agent-body {
+  display: grid;
+  align-content: start;
+  gap: 22px;
+  max-width: 760px;
+  padding-top: 26px;
+}
+
+.sp-agent-body .interview-ask {
+  animation: sp-rise 0.5s var(--sp-ease) both;
+}
+
+.sp-agent-mission {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--bg-secondary, #f1ece4);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.sp-agent-files .interview-file-detail {
+  animation: sp-rise 0.45s var(--sp-ease) both;
+}
+
+.sp-agent-try {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 28px;
+  padding-top: 24px;
+  animation: sp-rise 0.5s var(--sp-ease) both;
+}
+
+.sp-agent-draft {
+  padding: 22px 26px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--border-subtle);
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.sp-agent-draft h4 {
+  margin: 12px 0 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.sp-agent-draft p {
+  margin: 0 0 8px;
+}
+
+.sp-agent-draft-who {
+  font-family: var(--font-sans, inherit);
+  font-size: 12px !important;
+  color: var(--text-tertiary);
+}
+
+.sp-agent-mark {
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  transition: background 0.6s ease;
+}
+
+.sp-agent-mark[data-on] {
+  background: rgb(145 118 232 / 0.18);
+  box-shadow: inset 0 -2px 0 rgb(145 118 232 / 0.6);
+}
+
+.sp-agent-said {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sp-agent-said li {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--bg-primary);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 14px 28px -22px rgb(52 40 28 / 0.5);
+  animation: sp-feed-in 0.6s var(--sp-ease) both;
+}
+
+.sp-agent-said p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.sp-agent-said-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sp-agent-cite {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  justify-self: start;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--ink-orange) 12%, var(--bg-primary));
+  font-size: 11.5px;
+  color: color-mix(in oklab, var(--ink-orange) 80%, var(--text-primary));
+}
+
+@media (max-width: 900px) {
+  .sp-agents-stage {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sp-agents-desk {
+    grid-auto-flow: column;
+    grid-auto-columns: 230px;
+    padding-top: 0;
+    overflow: hidden;
+  }
+}
+
+/* ── Sign in, sign up, invitation ─────────────────────────────── */
+
+.auth-page {
+  display: grid;
+  /* The picture of Home takes most of the room, so it reads at full size on a laptop too. */
+  grid-template-columns: minmax(0, 1.45fr) minmax(420px, 0.55fr);
+  min-height: 100dvh;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.auth-scene {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 56px clamp(24px, 3vw, 64px);
+  background: var(--bg-secondary);
+}
+
+/* The light the landing page draws around its windows: close to the frame, in the spectrum's colours, slowly turning. */
+.auth-scene-light {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  z-index: -1;
+  width: min(92%, 980px);
+  aspect-ratio: 1.55;
+  border-radius: 40px;
+  translate: -50% -50%;
+  background: conic-gradient(
+    from var(--auth-turn, 0deg),
+    oklch(0.78 0.13 25 / 0.55),
+    oklch(0.84 0.12 75 / 0.5),
+    oklch(0.8 0.12 150 / 0.45),
+    oklch(0.76 0.11 230 / 0.5),
+    oklch(0.72 0.14 290 / 0.55),
+    oklch(0.78 0.13 345 / 0.5),
+    oklch(0.78 0.13 25 / 0.55)
+  );
+  filter: blur(44px);
+  opacity: 0.75;
+  animation: auth-turn 28s linear infinite;
+}
+
+@property --auth-turn {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes auth-turn {
+  to {
+    --auth-turn: 360deg;
+  }
+}
+
+.auth-home {
+  position: relative;
+  width: min(100%, 1160px);
+  pointer-events: none;
+  user-select: none;
+}
+
+.auth-home-page {
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+  padding: 46px 56px;
+}
+
+.auth-home-page .page-greeting {
+  margin: 0;
+}
+
+.auth-home .morning-move-action {
+  pointer-events: none;
+}
+
+.auth-home .morning-move {
+  transition: opacity 400ms ease;
+}
+
+.auth-home .morning-move-tile {
+  transition: background-color 400ms ease, color 400ms ease;
+}
+
+.auth-home .today-day-item {
+  animation: auth-arrive 600ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes auth-arrive {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+  }
+}
+
+.auth-side {
+  display: grid;
+  place-items: center;
+  padding: 48px clamp(28px, 2.6vw, 56px);
+  border-left: 1px solid var(--border-subtle);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  width: min(100%, 400px);
+}
+
+.auth-switch {
+  display: flex;
+  width: fit-content;
+  padding: 3px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control);
+  background: var(--bg-secondary);
+  font-size: var(--text-caption, 13px);
+}
+
+.auth-switch > * {
+  padding: 5px 16px;
+  border-radius: calc(var(--radius-control) - 2px);
+  color: var(--text-secondary);
+  transition: color 150ms ease;
+}
+
+.auth-switch > a:hover {
+  color: var(--text-primary);
+}
+
+.auth-switch > a:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 1px;
+}
+
+.auth-switch > [aria-current="page"] {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-weight: 500;
+  box-shadow: var(--shadow-soft);
+}
+
+.auth-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 2.6vw, 2.6rem);
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+
+.auth-lede {
+  margin: 12px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-ui, 15px);
+  line-height: 1.6;
+}
+
+.auth-note {
+  padding-left: 12px;
+  border-left: 2px solid var(--border-strong, var(--border-default));
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* Clerk's form sits on the page, not in a card of its own. */
+.auth-clerk {
+  min-width: 0;
+}
+
+.auth-clerk .cl-cardBox,
+.auth-clerk .cl-card {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* A little room on every side, so the rounded corners and borders of the
+   fields and buttons are not cut straight by the card's edge. */
+.auth-clerk .cl-cardBox {
+  overflow: visible;
+}
+
+.auth-clerk .cl-card {
+  padding: 4px 4px 0;
+}
+
+.auth-clerk .cl-header {
+  display: none;
+}
+
+.auth-clerk .cl-footer {
+  background: transparent;
+}
+
+.auth-clerk .cl-footer > :not(:last-child) {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  .auth-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .auth-scene {
+    display: none;
+  }
+
+  .auth-side {
+    border-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-scene-light,
+  .auth-home .today-day-item {
+    animation: none;
+  }
+}
+
+/* Nothing inside a picture of the app scrolls or shows a scrollbar: the page scrolls instead. */
+.sp-scaled-inner * {
+  scrollbar-width: none;
+}
+
+@keyframes sp-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* Home in the hero keeps two things a day, so what to pick up is in view below the week. */
+.sp-hero .today-day-items > li:nth-child(n + 3) {
+  display: none;
+}
+
+/* No scrollbars inside the page's pictures of the app: they do not scroll. */
+.sp-main * {
+  scrollbar-width: none;
+}
+
+.sp-main *::-webkit-scrollbar {
+  display: none;
+}
+
+/* The page's own sky is the one above; Home's small copy of it is left out here. */
+.sp-day-page .day-sky {
+  display: none;
 }

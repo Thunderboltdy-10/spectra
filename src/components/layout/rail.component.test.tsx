@@ -45,8 +45,8 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("the rail", () => {
-  it("lists the six destinations in SHELL.md's order", () => {
-    expect(RAIL_DESTINATIONS.map((destination) => destination.label)).toEqual(["Home", "Library", "Calendar", "School", "Agents", "Devices"]);
+  it("lists the six destinations in SHELL.md's order, then the admin pages for those who hold them", () => {
+    expect(RAIL_DESTINATIONS.map((destination) => destination.label)).toEqual(["Home", "Library", "Calendar", "School", "Agents", "Devices", "School admin", "Platform"]);
   });
 
   it("marks the current destination", () => {

@@ -1,15 +1,10 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useState, type InputHTMLAttributes, type ReactNode } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
-import { BookOpen, FileClock, KeyRound, MessageCircle, Save, Settings2, ShieldCheck, UserCheck, Bell, Bot, Check, ChevronDown, Folder, LockKeyhole, Mail, Plus, Send, Users, Activity, Archive, Building2, CircleGauge, HardDrive, Inbox, Network, UsersRound, type GlyphIcon } from "@/components/icons/glyph-icons";
+import { KeyRound, Plus, Save } from "@/components/icons/glyph-icons";
 import { toast } from "@/components/ui/toast";
 import {
   getAdministration,
@@ -21,13 +16,12 @@ import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { PageBody, PageHeader } from "@/components/ui/page-header";
 import { LoadingRows } from "@/components/ui/page-state";
 import { LifeKey } from "@/components/ui/life-moments";
-import { PanelTabs, SidePanel, type PanelTab } from "@/components/ui/side-panel";
+import { FeedbackFilePreview } from "@/components/layout/feedback-file-preview";
+import { PanelTabs, type PanelTab } from "@/components/ui/side-panel";
 import {
   AdminButton,
-  AdminCard,
   AdminDialog,
   AdminSectionHeader,
-  EmptyPanel,
   ErrorPanel,
   formatBytes,
   formatCompact,
@@ -38,14 +32,25 @@ import {
   PrivacyNotice,
   SelectField,
   StatusBadge,
-  statusToneFor,
+  TallySheet,
   TextAreaField,
   TextField,
 } from "@/features/spectra/administration/shared";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { humanizePublicFailure } from "@/features/spectra/bridge/humanize";
+import { auditActionWords, auditTargetWords } from "@/features/spectra/administration/audit-words";
+import { formatMeter, USAGE_METERS, UsageDayChart } from "@/features/spectra/administration/usage-chart";
 import { PeopleSurface } from "@/features/spectra/administration/people/people-surface";
+import { MessageDialog } from "@/features/spectra/administration/people/message-dialog";
 import type { Person } from "@/features/spectra/administration/people/people-model";
+
+/*
+ * School admin (docs/product: administration). The same desk as Home: what
+ * needs the administrator first, the school's counts on one sheet, then
+ * ledgers. Every section says what it is for in the school's words; how the
+ * platform keeps work private is said once, quietly, at the foot. An operator
+ * who stepped in to inspect reads everything and changes nothing.
+ */
 
 const ADMIN_BAR_PLAN: readonly CollapseStep[] = [{ toMenu: "refresh" }];
 
@@ -66,14 +71,14 @@ const tabs: Array<PanelTab & { id: Tab }> = [
   { id: "overview", label: "Overview", icon: "grid" },
   { id: "people", label: "People", icon: "people" },
   { id: "groups", label: "Groups", icon: "folderTree" },
-  { id: "communication", label: "Communication", icon: "mail" },
+  { id: "communication", label: "Messages", icon: "mail" },
   { id: "usage", label: "Usage", icon: "analytics" },
-  { id: "agents", label: "Agents & resources", icon: "agent" },
-  { id: "integrations", label: "Integrations", icon: "network" },
-  { id: "governance", label: "Governance", icon: "shield" },
   { id: "feedback", label: "Feedback", icon: "conversations" },
+  { id: "integrations", label: "ManageBac", icon: "network" },
+  { id: "agents", label: "Agents", icon: "agent" },
   { id: "profile", label: "School profile", icon: "school" },
-  { id: "audit", label: "Audit", icon: "log" },
+  { id: "governance", label: "Rights & privacy", icon: "shield" },
+  { id: "audit", label: "Activity log", icon: "log" },
 ];
 
 type SchoolGroup = {
@@ -99,6 +104,8 @@ type Announcement = {
   read: number;
   failed: number;
   createdAt: number;
+  origin?: "school" | "platform";
+  recipientNames?: string[];
 };
 
 type FeedbackItem = {
@@ -125,344 +132,283 @@ type AuditEvent = {
   createdAt: number;
 };
 
-function actionLabel(value: string) {
-  return value
-    .replaceAll(".", " · ")
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+type Mutate = <T>(
+  label: string,
+  action: string,
+  payload: Record<string, unknown>,
+  success: string | null,
+) => Promise<{ result: T } | null>;
+
+type SurfaceProps = {
+  operatorSessionId?: string;
+  busy: string;
+  mutate: Mutate;
+  refreshKey: number;
+  /** An operator inspecting the school: everything reads, nothing changes. */
+  readOnly: boolean;
+};
+
+const INSPECT_ONLY = "You are inspecting this school, so nothing here can be changed.";
+
+function plain(value: string) {
+  return value.replaceAll("_", " ").replace(/^\w/, (letter) => letter.toUpperCase());
+}
+
+/** The words for a ManageBac connection, and whether it wants a hand. */
+function connectionWords(integration: SchoolAdministrationOverview["integration"]) {
+  const status = integration?.status;
+  if (status === "connected" && integration?.hasOpenConflicts)
+    return { label: "Needs review", needs: true };
+  if (status === "connected" && integration?.syncFreshness === "stale")
+    return { label: "Updates overdue", needs: true };
+  if (status === "connected" && integration?.syncFreshness === "never")
+    return { label: "Waiting for first sync", needs: true };
+  switch (status) {
+    case "connected":
+      return { label: "Connected", needs: false };
+    case "validating":
+      return { label: "Checking the key", needs: false };
+    case "degraded":
+      return { label: "Partly working", needs: true };
+    case "blocked":
+      return { label: "Stopped", needs: true };
+    case "revoked":
+      return { label: "Key withdrawn", needs: true };
+    case "disconnected":
+      return { label: "Disconnected", needs: true };
+    default:
+      return { label: "Not connected", needs: false };
+  }
+}
+
+/** Nothing on the overview is waiting on the administrator. */
+function schoolNeedsNothing(data: SchoolAdministrationOverview) {
+  return (
+    data.school.status === "active" &&
+    !connectionWords(data.integration).needs &&
+    !data.metrics.feedbackNew &&
+    !data.metrics.invitations &&
+    Boolean(data.integration)
+  );
 }
 
 function dateRange() {
   return {
-    fromDay: new Date(Date.now() - 29 * 24 * 60 * 60_000)
-      .toISOString()
-      .slice(0, 10),
+    fromDay: new Date(Date.now() - 29 * 24 * 60 * 60_000).toISOString().slice(0, 10),
     toDay: new Date().toISOString().slice(0, 10),
   };
 }
 
-function OverviewSurface({
-  data,
-  onTab,
-}: {
-  data: SchoolAdministrationOverview;
-  onTab: (tab: Tab) => void;
-}) {
-  return (
-    <div className="min-w-0">
-      <div className="min-w-0 space-y-3">
-        <div className="grid gap-1 sm:grid-cols-2 2xl:grid-cols-4">
-          <MetricCard
-            icon={Users}
-            label="Members"
-            value={formatCompact(data.metrics.members)}
-            detail={`${data.metrics.active30d} active in 30 days`}
-            tone="green"
-            state={data.metricStates.members}
-            source={metricDefinition("school.members").source}
-            action={
-              <AdminButton className="w-full" onClick={() => onTab("people")}>
-                Manage members
-              </AdminButton>
-            }
-          />
-          <MetricCard
-            icon={Mail}
-            label="Invitations"
-            value={formatCompact(data.metrics.invitations)}
-            detail={`${data.metrics.invitations} awaiting response`}
-            tone="violet"
-            state={data.metricStates.invitations}
-            source={metricDefinition("school.invitations").source}
-            action={
-              <AdminButton className="w-full" onClick={() => onTab("people")}>
-                Review invites
-              </AdminButton>
-            }
-          />
-          <MetricCard
-            icon={ShieldCheck}
-            label="Pending approvals"
-            value={formatCompact(data.metrics.pendingApprovals)}
-            detail="Support and operational requests"
-            tone="orange"
-            state={data.metricStates.pendingApprovals}
-            source={metricDefinition("school.pending_approvals").source}
-            action={
-              <AdminButton
-                className="w-full"
-                onClick={() => onTab("governance")}
-              >
-                Review governance
-              </AdminButton>
-            }
-          />
-          <MetricCard
-            icon={Folder}
-            label="Class workspaces"
-            value={formatCompact(data.metrics.classWorkspaces)}
-            detail={`${data.metrics.groups} active groups`}
-            tone="green"
-            state={data.metricStates.classWorkspaces}
-            source={metricDefinition("school.class_workspaces").source}
-            action={
-              <AdminButton className="w-full" onClick={() => onTab("groups")}>
-                View all
-              </AdminButton>
-            }
-          />
-        </div>
+const dayAndTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
-        <section className="mt-7">
-          <AdminSectionHeader
-            title="Workspace overview"
-            detail="Source-linked class workspaces only; ordinary private workspaces are never inspected here."
-            action={
-              <InlineLink onClick={() => onTab("groups")}>View all</InlineLink>
-            }
-          />
-          {data.groupWorkspaces.length ? (
-            <div className="overflow-x-auto px-4 pb-4">
-              <table className="w-full min-w-[520px] text-left text-ui">
-                <thead className="text-caption text-[var(--text-tertiary)]">
-                  <tr>
-                    <th className="pb-2 font-normal">Workspace</th>
-                    <th className="pb-2 font-normal">Type</th>
-                    <th className="pb-2 font-normal">Activity</th>
-                    <th className="pb-2 text-right font-normal">Open</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.groupWorkspaces.map((workspace) => (
-                    <tr
-                      key={workspace.workspaceId}
-                      className="rounded-card transition-colors hover:bg-[var(--bg-secondary)]"
-                    >
-                      <td className="py-2.5">
-                        <span className="font-medium text-[var(--text-primary)]">{workspace.title}</span>
-                      </td>
-                      <td className="py-2.5 capitalize text-[var(--text-secondary)]">
-                        {workspace.type}
-                      </td>
-                      <td className="py-2.5 text-[var(--text-secondary)]">
-                        {formatRelative(workspace.lastActivityAt)}
-                      </td>
-                      <td className="py-2.5 text-right">
-                        <Link
-                          href={`/workspace?workspaceId=${encodeURIComponent(workspace.workspaceId)}`}
-                          className="text-[var(--brand-primary)] hover:underline"
-                        >
-                          Open
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <EmptyPanel
-              icon={Folder}
-              title="No source-linked class workspaces yet"
-              detail="A verified ManageBac first sync creates class workspaces without exposing personal workspace content here."
-              action={
-                <Link href="/managebac">
-                  <AdminButton>Open ManageBac</AdminButton>
-                </Link>
-              }
-            />
-          )}
-        </section>
-
-        <div className="mt-7 grid gap-6 lg:grid-cols-2">
-          <section>
-            <AdminSectionHeader
-              title="Feedback inbox"
-              detail={`${data.metrics.feedbackNew} new school reports`}
-              action={
-                <InlineLink onClick={() => onTab("feedback")}>
-                  View all
-                </InlineLink>
-              }
-            />
-            {data.feedback.length ? (
-              <div className="px-4 pb-4">
-                {data.feedback.slice(0, 4).map((item) => (
-                  <button
-                    type="button"
-                    key={item.feedbackId}
-                    onClick={() => onTab("feedback")}
-                    className="flex w-full items-center gap-3 rounded-card px-2 py-2.5 text-left transition-colors hover:bg-[var(--bg-secondary)]"
-                  >
-                    <ChevronDown
-                      size={12}
-                      className="-rotate-90 text-[var(--text-tertiary)]"
-                    />
-                    <span className="min-w-0 flex-1 truncate text-micro text-[var(--text-primary)]">
-                      {item.subject}
-                    </span>
-                    <StatusBadge
-                      tone={item.status === "new" ? "attention" : "neutral"}
-                    >
-                      {item.category.replaceAll("_", " ")}
-                    </StatusBadge>
-                    <span className="text-micro text-[var(--text-tertiary)]">
-                      {formatRelative(item.createdAt)}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <EmptyPanel
-                icon={MessageCircle}
-                title="Inbox is clear"
-                detail="New feedback from your school will appear here."
-              />
-            )}
-          </section>
-          <section>
-            <AdminSectionHeader
-              title="Recent activity"
-              detail="Privileged and operational events, never private content."
-              action={
-                <InlineLink onClick={() => onTab("audit")}>
-                  View audit log
-                </InlineLink>
-              }
-            />
-            <div className="px-4 pb-4">
-              {data.recentActivity.slice(0, 5).map((event) => (
-                <div
-                  key={event.eventId}
-                  className="flex items-center gap-3 rounded-card px-2 py-2.5 transition-colors hover:bg-[var(--bg-secondary)]"
-                >
-                  <Activity size={13} className="text-[var(--accent-mint)]" />
-                  <span className="min-w-0 flex-1 truncate text-micro text-[var(--text-primary)]">
-                    {actionLabel(event.action)}
-                  </span>
-                  {event.operator ? (
-                    <StatusBadge tone="neutral">Operator</StatusBadge>
-                  ) : null}
-                  <span className="text-micro text-[var(--text-tertiary)]">
-                    {formatRelative(event.createdAt)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </section>
-        </div>
-        <PrivacyNotice>{data.privacy}</PrivacyNotice>
-      </div>
-
-    </div>
+/** Where ManageBac's settings live, or why an operator cannot open them from here. */
+function ManageBacLink({ operator, children }: { operator: boolean; children: ReactNode }) {
+  return operator ? (
+    <InlineLink disabled title="ManageBac settings open only for this school's own administrators.">
+      {children}
+    </InlineLink>
+  ) : (
+    <InlineLink href="/managebac">{children}</InlineLink>
   );
 }
 
-/** Usage, the ManageBac connection and shortcuts, beside the Overview. */
-function SchoolContext({
+function OverviewSurface({
   data,
+  operator,
   onTab,
 }: {
   data: SchoolAdministrationOverview;
+  operator: boolean;
   onTab: (tab: Tab) => void;
 }) {
+  const [allClasses, setAllClasses] = useState(false);
+  const connection = connectionWords(data.integration);
+  const totals = data.usage.totals;
+  const aiTokens = (totals.model_input_tokens ?? 0) + (totals.model_output_tokens ?? 0);
+  const classes = allClasses ? data.groupWorkspaces : data.groupWorkspaces.slice(0, 6);
+  // What changed, not who looked: opening a page is logged too, but is no news.
+  const changes = data.recentActivity.filter((event) => !event.action.endsWith(".viewed")).slice(0, 5);
+
+  const needs: Array<{ id: string; tone?: "danger" | "quiet"; title: string; detail: string; action: ReactNode }> = [];
+  if (data.school.status !== "active")
+    needs.push({
+      id: "status",
+      tone: "danger",
+      title: `The school is ${data.school.status}`,
+      detail: "People cannot sign in to it until it is active again. The platform team can restore it.",
+      action: null,
+    });
+  if (connection.needs)
+    needs.push({
+      id: "managebac",
+      tone: "danger",
+      title: `ManageBac: ${connection.label.toLowerCase()}`,
+      detail: data.integration?.status !== "connected"
+        ? ["revoked", "disconnected"].includes(data.integration?.status ?? "")
+          ? "Reconnect ManageBac with a valid school API key to resume updates."
+          : "Check the latest sync and connection so classes, tasks and deadlines stay up to date."
+        : data.integration?.hasOpenConflicts
+        ? "Source updates overlap with changes in Spectra. Review them before choosing which to keep."
+        : data.integration?.syncFreshness === "never"
+          ? "The connection is set up, but no complete sync has finished yet. Check its progress."
+          : "Check the latest sync and connection so classes, tasks and deadlines stay up to date.",
+      action: <ManageBacLink operator={operator}>Review ManageBac</ManageBacLink>,
+    });
+  if (data.metrics.feedbackNew)
+    needs.push({
+      id: "feedback",
+      title: `${data.metrics.feedbackNew} new ${data.metrics.feedbackNew === 1 ? "report" : "reports"} from the school`,
+      detail: "Read them and answer the people who wrote.",
+      action: <InlineLink onClick={() => onTab("feedback")}>Read feedback</InlineLink>,
+    });
+  if (data.metrics.invitations)
+    needs.push({
+      id: "invitations",
+      tone: "quiet",
+      title: `${data.metrics.invitations} ${data.metrics.invitations === 1 ? "person has" : "people have"} not joined yet`,
+      detail: "Their invitation is still open. Send it again or withdraw it from People.",
+      action: <InlineLink onClick={() => onTab("people")}>People</InlineLink>,
+    });
+  if (!data.integration)
+    needs.push({
+      id: "connect",
+      tone: "quiet",
+      title: "Bring in classes from ManageBac",
+      detail: "Connect it once and classes, tasks and deadlines arrive by themselves.",
+      action: <ManageBacLink operator={operator}>Connect ManageBac</ManageBacLink>,
+    });
+
   return (
-        <div className="space-y-7 px-1 pb-6 pt-2">
+    <div className="admin-page">
+      {needs.length ? (
         <section>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="font-display text-subhead font-medium">Usage</h2>
-              <p className="mt-1 text-caption text-[var(--text-secondary)]">
-                Totals for the school, never anyone&rsquo;s work.
-              </p>
-            </div>
-            <AdminButton tone="ghost" onClick={() => onTab("usage")}>View usage</AdminButton>
-          </div>
-          <div className="mt-4 space-y-1 text-ui">
-            {(
-              [
-                ["Storage", data.usage.totals.storage_bytes, "bytes"],
-                ["Model input", data.usage.totals.model_input_tokens, "count"],
-                ["Model output", data.usage.totals.model_output_tokens, "count"],
-                [
-                  "Collaboration",
-                  data.usage.totals.collaboration_bytes,
-                  "bytes",
-                ],
-              ] as const
-            )
-              .filter(([, value]) => value !== null && value !== undefined)
-              .map(([label, value, kind]) => (
-                <div key={label} className="flex justify-between gap-4 rounded-control px-2 py-1.5 hover:bg-[var(--bg-hover)]">
-                  <span className="text-[var(--text-secondary)]">{label}</span>
-                  <strong className="font-medium">
-                    {kind === "bytes"
-                      ? formatBytes(value as number)
-                      : formatCompact(value as number)}
-                  </strong>
+          <AdminSectionHeader title="Needs you" />
+          <div className="admin-needs">
+            {needs.map((need) => (
+              <div key={need.id} className="admin-need" data-tone={need.tone}>
+                <div>
+                  <strong>{need.title}</strong>
+                  <span>{need.detail}</span>
                 </div>
-              ))}
-            {[
-              data.usage.totals.storage_bytes,
-              data.usage.totals.model_input_tokens,
-              data.usage.totals.model_output_tokens,
-              data.usage.totals.collaboration_bytes,
-            ].every((value) => value === null || value === undefined) ? (
-              <p className="text-caption text-[var(--text-secondary)]">
-                No metered usage has been recorded for this range yet.
-              </p>
-            ) : null}
-          </div>
-        </section>
-
-        <section>
-          <div className="flex items-center gap-2">
-            <h2 className="font-display text-subhead font-medium">ManageBac</h2>
-          </div>
-          <div className="mt-3">
-            <StatusBadge
-              tone={statusToneFor(data.integration?.status)}
-            >
-              {data.integration?.status ?? "Not configured"}
-            </StatusBadge>
-          </div>
-          <div className="mt-3 flex justify-between text-caption text-[var(--text-secondary)]">
-            <span>Last synced</span>
-            <span>{formatRelative(data.integration?.lastSyncAt)}</span>
-          </div>
-          <Link
-            href="/managebac"
-            className="mt-3 block text-ui font-medium text-[var(--text-primary)] hover:underline"
-          >
-            Sync settings
-          </Link>
-        </section>
-
-        <section>
-          <h2 className="font-display text-subhead font-medium">School settings</h2>
-          <div className="mt-3 space-y-1">
-            {(
-              [
-                ["General settings", "profile", Settings2],
-                ["Member roles", "people", UserCheck],
-                ["Security", "governance", ShieldCheck],
-                ["Integrations", "integrations", Network],
-                ["Data & privacy", "governance", LockKeyhole],
-              ] as Array<[string, Tab, GlyphIcon]>
-            ).map(([label, tab, Icon]) => (
-              <AdminButton
-                tone="ghost"
-                key={String(label)}
-                onClick={() => onTab(tab as Tab)}
-                className="w-full justify-start"
-              >
-                <Icon size={18} />
-                {label}
-              </AdminButton>
+                {need.action}
+              </div>
             ))}
           </div>
         </section>
-        </div>
+      ) : null}
+
+      <TallySheet>
+        <MetricCard
+          label="Members"
+          value={formatCompact(data.metrics.members)}
+          detail={`${data.metrics.active30d} signed in this month`}
+          state={data.metricStates.members}
+          source={metricDefinition("school.members").source}
+          action={<InlineLink onClick={() => onTab("people")}>People</InlineLink>}
+        />
+        <MetricCard
+          label="Waiting to join"
+          value={formatCompact(data.metrics.invitations)}
+          detail="Invitations not accepted yet"
+          state={data.metricStates.invitations}
+          source={metricDefinition("school.invitations").source}
+          action={<InlineLink onClick={() => onTab("people")}>Invitations</InlineLink>}
+        />
+        <MetricCard
+          label="Classes"
+          value={formatCompact(data.metrics.classWorkspaces)}
+          detail={data.metrics.groups ? `${data.metrics.groups} groups made here` : "From ManageBac"}
+          state={data.metricStates.classWorkspaces}
+          source={metricDefinition("school.class_workspaces").source}
+          action={<InlineLink onClick={() => onTab("groups")}>Groups</InlineLink>}
+        />
+        <MetricCard
+          label="New feedback"
+          value={formatCompact(data.metrics.feedbackNew)}
+          detail="Reports nobody has read yet"
+          attention={data.metrics.feedbackNew > 0}
+          action={<InlineLink onClick={() => onTab("feedback")}>Feedback</InlineLink>}
+        />
+      </TallySheet>
+
+      <div className="admin-columns">
+        <section>
+          <AdminSectionHeader
+            title="Classes"
+            count={data.metrics.classWorkspaces}
+            action={
+              data.groupWorkspaces.length > 6 ? (
+                <InlineLink onClick={() => setAllClasses((value) => !value)}>{allClasses ? "Fewer" : "Show all"}</InlineLink>
+              ) : null
+            }
+          />
+          {data.groupWorkspaces.length ? (
+            <ul className="admin-ledger">
+              {classes.map((workspace) => (
+                <li key={workspace.workspaceId}>
+                  <Link className="admin-line" href={`/workspace?workspaceId=${encodeURIComponent(workspace.workspaceId)}`}>
+                    <span className="admin-line-main">
+                      <strong>{workspace.title}</strong>
+                    </span>
+                    <span className="admin-line-meta">
+                      {workspace.lastActivityAt ? `Active ${formatRelative(workspace.lastActivityAt).toLowerCase()}` : "No activity yet"}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="admin-ledger-empty">Classes appear here once ManageBac brings them in, or when you make a group.</p>
+          )}
+        </section>
+
+        <section>
+          <AdminSectionHeader title="Connections and usage" />
+          <dl className="admin-facts">
+            <div>
+              <dt>ManageBac</dt>
+              <dd>
+                {connection.label}
+                {data.integration?.lastSyncAt ? `, updated ${formatRelative(data.integration.lastSyncAt).toLowerCase()}` : ""}
+              </dd>
+            </div>
+            <div>
+              <dt>Files stored</dt>
+              <dd>{formatBytes(totals.storage_bytes)}</dd>
+            </div>
+            <div>
+              <dt>AI used this month</dt>
+              <dd>{formatCompact(aiTokens)} tokens</dd>
+            </div>
+          </dl>
+          <p className="mt-3 flex gap-4">
+            <ManageBacLink operator={operator}>ManageBac settings</ManageBacLink>
+            <InlineLink onClick={() => onTab("usage")}>Usage</InlineLink>
+          </p>
+        </section>
+      </div>
+
+      <section>
+        <AdminSectionHeader title="Recent activity" action={<InlineLink onClick={() => onTab("audit")}>Activity log</InlineLink>} />
+        {changes.length ? (
+          <ul className="admin-ledger">
+            {changes.map((event) => (
+              <li key={event.eventId} className="admin-line">
+                <span className="admin-line-main">
+                  <strong>{auditActionWords(event.action)}</strong>
+                  {event.operator ? <span>By the platform team</span> : null}
+                </span>
+                <span className="admin-line-meta">{formatRelative(event.createdAt)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="admin-ledger-empty">Nothing has changed yet.</p>
+        )}
+      </section>
+
+      <PrivacyNotice>School admin shows who is in the school and how much it uses Spectra. Nobody’s work, threads or memory can be opened from here.</PrivacyNotice>
+    </div>
   );
 }
 
@@ -472,38 +418,25 @@ export function SchoolAdminShell() {
   const operatorSessionId = searchParams.get("operatorSessionId") ?? undefined;
   const requestedTab = searchParams.get("tab") as Tab | null;
   const [tab, setTabState] = useState<Tab>(
-    requestedTab && tabs.some((item) => item.id === requestedTab)
-      ? requestedTab
-      : "overview",
+    requestedTab && tabs.some((item) => item.id === requestedTab) ? requestedTab : "overview",
   );
-  const [overview, setOverview] = useState<SchoolAdministrationOverview | null>(
-    null,
-  );
+  const [overview, setOverview] = useState<SchoolAdministrationOverview | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [busy, setBusy] = useState("");
 
-  const queryArgs = useMemo(
-    () => ({ ...dateRange(), operatorSessionId }),
-    [operatorSessionId],
-  );
+  const queryArgs = useMemo(() => ({ ...dateRange(), operatorSessionId }), [operatorSessionId]);
 
   const loadOverview = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      setOverview(
-        await getAdministration<SchoolAdministrationOverview>(
-          "schoolOverview",
-          queryArgs,
-        ),
-      );
+      setOverview(await getAdministration<SchoolAdministrationOverview>("schoolOverview", queryArgs));
     } catch (nextError) {
       setError(
         describeFailure(nextError, {
-          fallback:
-            "Check your connection, then try loading school administration again.",
+          fallback: "Check your connection, then try loading school admin again.",
         }).message,
       );
     } finally {
@@ -519,7 +452,7 @@ export function SchoolAdminShell() {
     if (!overview?.operatorSession) return;
     const timer = window.setInterval(() => {
       if (overview.operatorSession!.expiresAt <= Date.now()) {
-        toast.error("The operator session expired.");
+        toast.error("Your time in this school ended.");
         router.replace("/superadmin?tab=schools");
       }
     }, 5_000);
@@ -536,11 +469,14 @@ export function SchoolAdminShell() {
     [router, searchParams],
   );
 
+  const readOnly = overview?.operatorSession?.mode === "inspect";
+
   /* One answer per action: the success toast (or none, `success: null`, when
      the caller words its own outcome) or the failure toast. It never rejects,
      so a caller's `void mutate(...)` cannot become an unhandled rejection;
      null means the action failed and has already been reported. It refreshes
-     every surface itself, so callers do not refresh again. */
+     every surface itself, so callers do not refresh again. Inspecting, only
+     leaving the school is an action. */
   const mutate = useCallback(
     async <T,>(
       label: string,
@@ -548,30 +484,29 @@ export function SchoolAdminShell() {
       payload: Record<string, unknown>,
       success: string | null,
     ): Promise<{ result: T } | null> => {
+      if (readOnly && action !== "endOperatorSession") {
+        toast.error(INSPECT_ONLY);
+        return null;
+      }
       setBusy(label);
       try {
-        const result = await mutateAdministration<T>(action, {
-          ...payload,
-          operatorSessionId,
-        });
+        const result = await mutateAdministration<T>(action, { ...payload, operatorSessionId });
         if (success) toast.success(success);
         setRefreshKey((value) => value + 1);
         return { result };
       } catch (nextError) {
-        toast.error(
-          humanizePublicFailure(nextError ?? "Action failed."),
-        );
+        toast.error(humanizePublicFailure(nextError ?? "Action failed."));
         return null;
       } finally {
         setBusy("");
       }
     },
-    [operatorSessionId],
+    [operatorSessionId, readOnly],
   );
 
   if (!overview)
     return (
-      <main className="spectra-wave-y relative isolate min-h-0 flex-1 overflow-y-auto" data-spectra-app-surface="true">
+      <main className="spectra-wave-y relative isolate h-full min-h-0 flex-1 overflow-y-auto" data-spectra-app-surface="true">
         <PageBody>
           <PageHeader title="School admin" />
           {loading ? (
@@ -586,15 +521,6 @@ export function SchoolAdminShell() {
     );
 
   const commands: BarCommand[] = [
-    ...(overview.school.status !== "active"
-      ? [{
-          id: "status",
-          icon: "info",
-          label: `School ${overview.school.status}`,
-          pinned: true,
-          render: () => <StatusBadge tone="attention">{overview.school.status}</StatusBadge>,
-        } satisfies BarCommand]
-      : []),
     {
       id: "refresh",
       icon: "retry",
@@ -604,38 +530,29 @@ export function SchoolAdminShell() {
       onSelect: () => setRefreshKey((value) => value + 1),
     },
   ];
+  const session = overview.operatorSession;
+  const surface: SurfaceProps = { operatorSessionId, busy, mutate, refreshKey, readOnly };
 
   return (
-    <main className="spectra-wave-y relative isolate flex h-full min-h-0 flex-1" data-spectra-app-surface="true">
-      <div className="min-w-0 flex-1 overflow-y-auto">
-      {overview.operatorSession ? (
-        <div className="sticky top-0 z-chrome flex min-h-10 items-center justify-between gap-3 border-b border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--bg-elevated))] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-primary))] px-5 py-2 text-micro text-[var(--accent-cyan)]">
-          <span className="flex items-center gap-2">
-            <KeyRound size={13} />
-            <strong>{overview.operatorSession.label}</strong>
-            <span>
-              {overview.operatorSession.mode} access · expires{" "}
-              {new Intl.DateTimeFormat(undefined, {
-                hour: "numeric",
-                minute: "2-digit",
-              }).format(overview.operatorSession.expiresAt)}
-            </span>
+    <main className="spectra-wave-y relative isolate h-full min-h-0 flex-1 overflow-y-auto" data-spectra-app-surface="true">
+      {session ? (
+        <div className="admin-operator" role="status">
+          <KeyRound size={14} aria-hidden />
+          <span>
+            <strong>{session.label}</strong>.{" "}
+            {session.mode === "inspect" ? "You are inspecting: you can read, not change." : "You can make changes."} Until{" "}
+            {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(session.expiresAt)}.
           </span>
-          <AdminButton
-            className="min-h-7 px-2.5"
+          <InlineLink
+            disabled={busy === "end-session"}
             onClick={() =>
-              void mutate(
-                "end-session",
-                "endOperatorSession",
-                {},
-                "Operator session ended.",
-              ).then((done) => {
+              void mutate("end-session", "endOperatorSession", {}, "You left the school.").then((done) => {
                 if (done) router.push("/superadmin?tab=schools");
               })
             }
           >
-            End session
-          </AdminButton>
+            Leave the school
+          </InlineLink>
         </div>
       ) : null}
 
@@ -645,7 +562,7 @@ export function SchoolAdminShell() {
           commands={commands}
           plan={ADMIN_BAR_PLAN}
           barLabel="School admin commands"
-          description={`${overview.school.name}. Run the school from here without opening anyone's work.`}
+          description={`${overview.school.name}. ${schoolNeedsNothing(overview) ? "Nothing needs you right now." : "A few things need you."}`}
         />
 
         <PanelTabs
@@ -653,254 +570,140 @@ export function SchoolAdminShell() {
           tabs={tabs}
           value={tab}
           onChange={(id) => setTab(id as Tab)}
-          primaryCount={5}
-          className="mb-4 mt-4"
+          primaryCount={6}
+          className="mb-6 mt-4"
         />
 
         {tab === "overview" ? (
-          <OverviewSurface data={overview} onTab={setTab} />
+          <OverviewSurface data={overview} operator={Boolean(session)} onTab={setTab} />
+        ) : tab === "people" ? (
+          <PeopleSurface {...surface} onRefresh={() => setRefreshKey((value) => value + 1)} />
+        ) : tab === "groups" ? (
+          <GroupsSurface {...surface} />
+        ) : tab === "communication" ? (
+          <CommunicationSurface {...surface} />
+        ) : tab === "usage" ? (
+          <UsageSurface overview={overview} />
+        ) : tab === "agents" ? (
+          <AgentsSurface operatorSessionId={operatorSessionId} refreshKey={refreshKey} />
+        ) : tab === "integrations" ? (
+          <ManageBacSurface overview={overview} operator={Boolean(session)} />
+        ) : tab === "governance" ? (
+          <RightsSurface />
+        ) : tab === "feedback" ? (
+          <FeedbackSurface {...surface} />
+        ) : tab === "profile" ? (
+          <ProfileSurface overview={overview} busy={busy} mutate={mutate} readOnly={readOnly} />
         ) : (
-          <SchoolAdminTab
-            tab={tab}
-            overview={overview}
-            operatorSessionId={operatorSessionId}
-            busy={busy}
-            mutate={mutate}
-            refreshKey={refreshKey}
-            onRefresh={() => setRefreshKey((value) => value + 1)}
-          />
+          <AuditSurface operatorSessionId={operatorSessionId} refreshKey={refreshKey} />
         )}
       </PageBody>
-      </div>
-
-      {tab === "overview" ? (
-        <SidePanel id="admin.context" title="School context" icon="school" stageMin={720} defaultWidth={340}>
-          <SchoolContext data={overview} onTab={setTab} />
-        </SidePanel>
-      ) : null}
     </main>
   );
 }
 
-function SchoolAdminTab({
-  tab,
-  overview,
-  operatorSessionId,
-  busy,
-  mutate,
-  refreshKey,
-  onRefresh,
-}: {
-  tab: Exclude<Tab, "overview">;
-  overview: SchoolAdministrationOverview;
-  operatorSessionId?: string;
-  busy: string;
-  mutate: <T>(
-    label: string,
-    action: string,
-    payload: Record<string, unknown>,
-    success: string | null,
-  ) => Promise<{ result: T } | null>;
-  refreshKey: number;
-  onRefresh: () => void;
-}) {
-  if (tab === "people")
-    return (
-      <PeopleSurface
-        operatorSessionId={operatorSessionId}
-        busy={busy}
-        mutate={mutate}
-        refreshKey={refreshKey}
-        onRefresh={onRefresh}
-      />
-    );
-  if (tab === "groups")
-    return (
-      <GroupsSurface
-        operatorSessionId={operatorSessionId}
-        busy={busy}
-        mutate={mutate}
-        refreshKey={refreshKey}
-        onRefresh={onRefresh}
-      />
-    );
-  if (tab === "communication")
-    return (
-      <CommunicationSurface
-        operatorSessionId={operatorSessionId}
-        busy={busy}
-        mutate={mutate}
-        refreshKey={refreshKey}
-        onRefresh={onRefresh}
-      />
-    );
-  if (tab === "usage") return <UsageSurface overview={overview} />;
-  if (tab === "agents")
-    return (
-      <AgentsResourcesSurface
-        operatorSessionId={operatorSessionId}
-        refreshKey={refreshKey}
-      />
-    );
-  if (tab === "integrations")
-    return <IntegrationsSurface overview={overview} />;
-  if (tab === "governance") return <GovernanceSurface />;
-  if (tab === "feedback")
-    return (
-      <FeedbackSurface
-        operatorSessionId={operatorSessionId}
-        busy={busy}
-        mutate={mutate}
-        refreshKey={refreshKey}
-        onRefresh={onRefresh}
-      />
-    );
-  if (tab === "profile")
-    return <ProfileSurface overview={overview} busy={busy} mutate={mutate} />;
-  return (
-    <AuditSurface
-      operatorSessionId={operatorSessionId}
-      refreshKey={refreshKey}
-    />
-  );
+/** A section's records: kept from the last good read; a failed read says so and offers again. */
+function useAdminRead<T>(read: () => Promise<T>, deps: readonly unknown[], failure: string) {
+  const [data, setData] = useState<T | null>(null);
+  const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setError("");
+    void read()
+      .then((result) => active && setData(result))
+      .catch((cause) => active && setError(describeFailure(cause, { fallback: failure }).message));
+    return () => {
+      active = false;
+    };
+    // The caller names what the read depends on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [...deps, attempt]);
+  return { data, error, retry: () => setAttempt((value) => value + 1) };
 }
 
-type SchoolAdminTabProps = Parameters<typeof SchoolAdminTab>[0];
-
-function GroupsSurface({
-  operatorSessionId,
-  busy,
-  mutate,
-  refreshKey,
-}: Pick<
-  SchoolAdminTabProps,
-  "operatorSessionId" | "busy" | "mutate" | "refreshKey" | "onRefresh"
->) {
-  const [groups, setGroups] = useState<SchoolGroup[]>([]);
-  const [people, setPeople] = useState<Person[]>([]);
-  const [loading, setLoading] = useState(true);
+function GroupsSurface({ operatorSessionId, busy, mutate, refreshKey, readOnly }: SurfaceProps) {
+  const read = useAdminRead(
+    () =>
+      Promise.all([
+        getAdministration<{ groups: SchoolGroup[] }>("groups", { operatorSessionId }),
+        getAdministration<{ people: Person[] }>("people", { operatorSessionId, status: "active" }),
+      ]),
+    [operatorSessionId, refreshKey],
+    "Couldn’t read the groups. Check your connection, then try again.",
+  );
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [type, setType] = useState("class");
   const [members, setMembers] = useState<string[]>([]);
-  useEffect(() => {
-    let active = true;
-    void Promise.all([
-      getAdministration<{ groups: SchoolGroup[] }>("groups", {
-        operatorSessionId,
-      }),
-      getAdministration<{ people: Person[] }>("people", {
-        operatorSessionId,
-        status: "active",
-      }),
-    ])
-      .then(([groupResult, peopleResult]) => {
-        if (!active) return;
-        setGroups(groupResult.groups);
-        setPeople(peopleResult.people);
-      })
-      .catch((error) =>
-        toast.error(describeFailure(error, { fallback: "Couldn't load groups. Check your connection, then try again." }).message),
-      )
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
-  }, [operatorSessionId, refreshKey]);
+  const groups = read.data?.[0].groups ?? [];
+  const people = read.data?.[1].people ?? [];
 
   return (
-    <>
-      <AdminCard className="rounded-none border-0 bg-transparent shadow-none">
+    <div className="admin-page">
+      <section>
         <AdminSectionHeader
           title="Groups and classes"
-          detail="Manual groups and source-linked classes can target announcements and future assigned learning experiences."
+          count={read.data ? groups.length : undefined}
+          detail="Write to a class, a department or any group of people at once. Classes from ManageBac keep themselves up to date."
           action={
-            <AdminButton tone="primary" onClick={() => setOpen(true)}>
+            <AdminButton tone="primary" disabled={readOnly} onClick={() => setOpen(true)}>
               <Plus size={13} />
-              Create group
+              New group
             </AdminButton>
           }
         />
-        {loading ? (
-          <LoadingPanel label="Loading groups" />
+        {read.error ? (
+          <ErrorPanel message={read.error} retry={read.retry} />
+        ) : !read.data ? (
+          <LoadingPanel label="Reading the groups" />
         ) : groups.length ? (
-          <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
+          <ul className="admin-ledger">
             {groups.map((group) => (
-              <div
-                key={group.groupId}
-                className="rounded-control border border-[var(--border-subtle)] p-4"
-              >
+              <li key={group.groupId} className="admin-line">
                 <LifeKey id={`group:${group.groupId}`} />
-                <div className="flex items-start justify-between gap-3">
-                  <span className="grid size-9 place-items-center rounded-card bg-[color-mix(in_oklab,var(--accent-mint)_10%,var(--bg-primary))] text-[var(--accent-mint)]">
-                    <UsersRound size={16} />
-                  </span>
-                  <StatusBadge tone="neutral">
-                    {group.source}
-                  </StatusBadge>
-                </div>
-                <h3 className="mt-4 text-caption font-semibold">{group.name}</h3>
-                <p className="mt-1 min-h-8 text-micro leading-4 text-[var(--text-tertiary)]">
-                  {group.description || `${group.type} group`}
-                </p>
-                <div className="mt-4 flex items-center justify-between border-t border-[var(--border-subtle)] pt-3 text-micro text-[var(--text-secondary)]">
-                  <span>{group.memberCount} members</span>
+                <span className="admin-line-main">
+                  <strong>{group.name}</strong>
+                  <span>{group.description || plain(group.type)}</span>
+                </span>
+                <span className="admin-line-meta">
+                  {group.memberCount} {group.memberCount === 1 ? "person" : "people"}
+                </span>
+                <span className="admin-line-meta w-[132px]">
                   {group.source === "manual" ? (
-                    <AdminButton
-                      tone="danger"
-                      className="min-h-7"
-                      disabled={busy === `group-${group.groupId}`}
+                    <InlineLink
+                      disabled={readOnly || busy === `group-${group.groupId}`}
                       onClick={() =>
-                        void mutate(
-                          `group-${group.groupId}`,
-                          "updateGroup",
-                          { groupId: group.groupId, archived: true },
-                          "Group archived.",
-                        )
+                        void mutate(`group-${group.groupId}`, "updateGroup", { groupId: group.groupId, archived: true }, `${group.name} archived.`)
                       }
                     >
-                      <Archive size={11} />
                       Archive
-                    </AdminButton>
+                    </InlineLink>
                   ) : (
-                    <span>Managed by source</span>
+                    "From ManageBac"
                   )}
-                </div>
-              </div>
+                </span>
+              </li>
             ))}
-          </div>
+          </ul>
         ) : (
-          <EmptyPanel
-            icon={UsersRound}
-            title="No groups yet"
-            detail="Create a group or connect ManageBac to import current classes."
-          />
+          <p className="admin-ledger-empty">No groups yet. Make one, or connect ManageBac to bring in the school’s classes.</p>
         )}
-      </AdminCard>
+      </section>
       <AdminDialog
         open={open}
         onClose={() => setOpen(false)}
-        title="Create a group"
-        detail="Groups are operational audiences. They do not change ordinary Spectra product capabilities."
+        title="New group"
+        detail="A group is who a message can go to. It does not change what anyone can do in Spectra."
         footer={
           <>
             <AdminButton onClick={() => setOpen(false)}>Cancel</AdminButton>
             <AdminButton
               tone="primary"
-              disabled={!name || busy === "create-group"}
+              disabled={!name.trim() || busy === "create-group"}
               onClick={() =>
-                void mutate(
-                  "create-group",
-                  "createGroup",
-                  {
-                    name,
-                    description,
-                    type,
-                    memberAccountIds: members,
-                  },
-                  "Group created.",
-                ).then((done) => {
+                void mutate("create-group", "createGroup", { name, description, type, memberAccountIds: members }, `${name} created.`).then((done) => {
                   if (!done) return;
                   setOpen(false);
                   setName("");
@@ -916,49 +719,35 @@ function GroupsSurface({
       >
         <div className="space-y-4">
           <TextField label="Name" value={name} onChange={setName} />
-          <TextAreaField
-            label="Description"
-            value={description}
-            onChange={setDescription}
-            rows={3}
-          />
+          <TextAreaField label="What it is for" value={description} onChange={setDescription} rows={3} />
           <SelectField
-            label="Group type"
+            label="Kind"
             value={type}
             onChange={setType}
             options={[
               { value: "class", label: "Class" },
               { value: "department", label: "Department" },
               { value: "programme", label: "Programme" },
-              { value: "custom", label: "Custom" },
+              { value: "custom", label: "Other" },
             ]}
           />
           <fieldset>
-            <legend className="mb-2 text-micro font-medium text-[var(--text-secondary)]">
-              Initial members
-            </legend>
+            <legend className="mb-2 text-micro font-medium text-[var(--text-secondary)]">People in it</legend>
             <div className="max-h-48 space-y-1 overflow-y-auto rounded-control border border-[var(--border-default)] p-2">
               {people.map((person) => (
-                <label
-                  key={person.accountId}
-                  className="flex items-center gap-3 rounded-chip px-2 py-2 text-micro hover:bg-[var(--bg-secondary)]"
-                >
+                <label key={person.accountId} className="flex items-center gap-3 rounded-chip px-2 py-2 text-micro hover:bg-[var(--bg-secondary)]">
                   <input
                     type="checkbox"
                     checked={members.includes(person.accountId)}
                     onChange={(event) =>
                       setMembers((current) =>
-                        event.target.checked
-                          ? [...current, person.accountId]
-                          : current.filter((id) => id !== person.accountId),
+                        event.target.checked ? [...current, person.accountId] : current.filter((id) => id !== person.accountId),
                       )
                     }
                   />
                   <span className="min-w-0 flex-1">
                     <strong className="block truncate">{person.name}</strong>
-                    <span className="truncate text-micro text-[var(--text-tertiary)]">
-                      {person.email}
-                    </span>
+                    <span className="truncate text-micro text-[var(--text-tertiary)]">{person.email}</span>
                   </span>
                 </label>
               ))}
@@ -966,379 +755,128 @@ function GroupsSurface({
           </fieldset>
         </div>
       </AdminDialog>
-    </>
+    </div>
   );
 }
 
-function CommunicationSurface({
-  operatorSessionId,
-  busy,
-  mutate,
-  refreshKey,
-}: Pick<
-  SchoolAdminTabProps,
-  "operatorSessionId" | "busy" | "mutate" | "refreshKey" | "onRefresh"
->) {
-  const [rows, setRows] = useState<Announcement[]>([]);
-  const [groups, setGroups] = useState<SchoolGroup[]>([]);
-  const [loading, setLoading] = useState(true);
+const AUDIENCE: Record<string, string> = { school: "everyone at school", roles: "some roles", groups: "some groups", people: "some people" };
+
+/** Who a message went to, in words: the people by name when it went to a few. */
+function audienceWords(row: Announcement) {
+  if (row.origin === "platform") return row.targetKind === "roles" ? "the school’s admins" : row.targetKind === "people" ? (row.recipientNames?.[0] ?? "one person") : "everyone at school";
+  if (row.targetKind === "people" && row.recipientNames?.length) {
+    const more = row.audienceSnapshotCount - row.recipientNames.length;
+    return `${row.recipientNames.join(", ")}${more > 0 ? ` and ${more} more` : ""}`;
+  }
+  return `${AUDIENCE[row.targetKind] ?? row.targetKind} (${row.audienceSnapshotCount})`;
+}
+
+function CommunicationSurface({ operatorSessionId, busy, mutate, refreshKey, readOnly }: SurfaceProps) {
+  const read = useAdminRead(
+    () => getAdministration<{ announcements: Announcement[] }>("announcements", { operatorSessionId }),
+    [operatorSessionId, refreshKey],
+    "Couldn’t read the messages. Check your connection, then try again.",
+  );
   const [open, setOpen] = useState(false);
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [targetKind, setTargetKind] = useState("school");
-  const [targetIds, setTargetIds] = useState<string[]>([]);
-  const [sendNow, setSendNow] = useState(true);
-  const [scheduledAt, setScheduledAt] = useState("");
-  useEffect(() => {
-    let active = true;
-    void Promise.all([
-      getAdministration<{ announcements: Announcement[] }>("announcements", {
-        operatorSessionId,
-      }),
-      getAdministration<{ groups: SchoolGroup[] }>("groups", {
-        operatorSessionId,
-      }),
-    ])
-      .then(([announcements, groupRows]) => {
-        if (!active) return;
-        setRows(announcements.announcements);
-        setGroups(groupRows.groups);
-      })
-      .catch((error) =>
-        toast.error(
-          describeFailure(error, { fallback: "Couldn't load announcements. Check your connection, then try again." }).message,
-        ),
-      )
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
-  }, [operatorSessionId, refreshKey]);
+  const rows = read.data?.announcements ?? [];
 
   return (
-    <>
-      <AdminCard className="rounded-none border-0 bg-transparent shadow-none">
+    <div className="admin-page">
+      <section>
         <AdminSectionHeader
-          title="Announcements"
-          detail="Audience membership is snapshotted at send time. Delivery, reads, failures, edits, cancellation, and rate limits are audited."
+          title="Messages"
+          count={read.data ? rows.length : undefined}
+          detail="Write to the whole school, some roles, some groups or chosen people. It lands in their Spectra notifications, and you can see how many have read it. Messages from Spectra to your school are listed here too."
           action={
-            <AdminButton tone="primary" onClick={() => setOpen(true)}>
+            <AdminButton tone="primary" disabled={readOnly} onClick={() => setOpen(true)}>
               <Plus size={13} />
-              New announcement
+              New message
             </AdminButton>
           }
         />
-        {loading ? (
-          <LoadingPanel label="Loading announcements" />
+        {read.error ? (
+          <ErrorPanel message={read.error} retry={read.retry} />
+        ) : !read.data ? (
+          <LoadingPanel label="Reading the messages" />
         ) : rows.length ? (
-          <div className="overflow-x-auto px-4 pb-4">
-            <table className="w-full min-w-[720px] text-left text-micro">
-              <thead className="text-caption text-[var(--text-tertiary)]">
-                <tr>
-                  <th className="pb-2 font-normal">Announcement</th>
-                  <th className="pb-2 font-normal">Audience</th>
-                  <th className="pb-2 font-normal">Delivery</th>
-                  <th className="pb-2 font-normal">Status</th>
-                  <th className="pb-2 text-right font-normal">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr
-                    key={row.announcementId}
-                    className="rounded-card transition-colors hover:bg-[var(--bg-secondary)]"
-                  >
-                    <td className="py-3">
-                      <LifeKey id={`announcement:${row.announcementId}`} of="tr" />
-                      <strong className="block font-medium">{row.title}</strong>
-                      <span className="text-micro text-[var(--text-tertiary)]">
-                        {row.sentAt
-                          ? `Sent ${formatRelative(row.sentAt)}`
-                          : row.scheduledAt
-                            ? `Scheduled ${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(row.scheduledAt)}`
-                            : formatRelative(row.createdAt)}
-                      </span>
-                    </td>
-                    <td className="py-3">
-                      {row.audienceSnapshotCount} · {row.targetKind}
-                    </td>
-                    <td className="py-3">
-                      {row.delivered} delivered · {row.read} read
-                      {row.failed ? ` · ${row.failed} failed` : ""}
-                    </td>
-                    <td className="py-3">
-                      <StatusBadge tone={statusToneFor(row.status)}>
-                        {row.status}
-                      </StatusBadge>
-                    </td>
-                    <td className="py-3 text-right">
-                      {row.status === "scheduled" ? (
-                        <AdminButton
-                          tone="danger"
-                          disabled={busy === `cancel-${row.announcementId}`}
-                          onClick={() =>
-                            void mutate(
-                              `cancel-${row.announcementId}`,
-                              "cancelAnnouncement",
-                              { announcementId: row.announcementId },
-                              "Announcement cancelled.",
-                            )
-                          }
-                        >
-                          Cancel
-                        </AdminButton>
-                      ) : (
-                        <span className="text-micro text-[var(--text-tertiary)]">
-                          Immutable
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <EmptyPanel
-            icon={Bell}
-            title="No announcements"
-            detail="Create a clear, targeted school message with real delivery state."
-          />
-        )}
-      </AdminCard>
-      <AdminDialog
-        open={open}
-        onClose={() => setOpen(false)}
-        title="New announcement"
-        detail="Messages are visible only to the selected audience and never read private threads."
-        footer={
-          <>
-            <AdminButton onClick={() => setOpen(false)}>Cancel</AdminButton>
-            <AdminButton
-              tone="primary"
-              disabled={!title || !body || busy === "announcement"}
-              onClick={() =>
-                void mutate(
-                  "announcement",
-                  "createAnnouncement",
-                  {
-                    title,
-                    body,
-                    targetKind,
-                    targetIds,
-                    sendNow,
-                    scheduledAt: sendNow
-                      ? undefined
-                      : new Date(scheduledAt).getTime(),
-                  },
-                  sendNow ? "Announcement sent." : "Announcement scheduled.",
-                ).then((done) => {
-                  if (!done) return;
-                  setOpen(false);
-                  setTitle("");
-                  setBody("");
-                  setTargetIds([]);
-                })
-              }
-            >
-              <Send size={12} />
-              {sendNow ? "Send now" : "Schedule"}
-            </AdminButton>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <TextField label="Title" value={title} onChange={setTitle} />
-          <TextAreaField
-            label="Message"
-            value={body}
-            onChange={setBody}
-            rows={6}
-          />
-          <SelectField
-            label="Audience"
-            value={targetKind}
-            onChange={(value) => {
-              setTargetKind(value);
-              setTargetIds([]);
-            }}
-            options={[
-              { value: "school", label: "Everyone at school" },
-              { value: "roles", label: "School profiles" },
-              { value: "groups", label: "Groups and classes" },
-            ]}
-          />
-          {targetKind === "roles" ? (
-            <div className="grid gap-2 sm:grid-cols-3">
-              {["student", "teacher", "school_admin"].map((role) => (
-                <label
-                  key={role}
-                  className="flex items-center gap-2 rounded-control border border-[var(--border-default)] p-3 text-micro"
-                >
-                  <input
-                    type="checkbox"
-                    checked={targetIds.includes(role)}
-                    onChange={(event) =>
-                      setTargetIds((current) =>
-                        event.target.checked
-                          ? [...current, role]
-                          : current.filter((item) => item !== role),
-                      )
-                    }
-                  />
-                  {role.replaceAll("_", " ")}
-                </label>
-              ))}
-            </div>
-          ) : null}
-          {targetKind === "groups" ? (
-            <div className="max-h-44 overflow-y-auto rounded-control border border-[var(--border-default)] p-2">
-              {groups.map((group) => (
-                <label
-                  key={group.groupId}
-                  className="flex items-center gap-2 rounded-chip px-2 py-2 text-micro hover:bg-[var(--bg-secondary)]"
-                >
-                  <input
-                    type="checkbox"
-                    checked={targetIds.includes(group.groupId)}
-                    onChange={(event) =>
-                      setTargetIds((current) =>
-                        event.target.checked
-                          ? [...current, group.groupId]
-                          : current.filter((item) => item !== group.groupId),
-                      )
-                    }
-                  />
-                  <span className="flex-1">{group.name}</span>
-                  <span className="text-[var(--text-tertiary)]">
-                    {group.memberCount}
+          <ul className="admin-ledger">
+            {rows.map((row) => (
+              <li key={row.announcementId} className="admin-line">
+                <LifeKey id={`announcement:${row.announcementId}`} />
+                <span className="admin-line-main">
+                  <strong>{row.title}</strong>
+                  <span>
+                    {row.origin === "platform" ? "From Spectra, " : ""}
+                    {row.sentAt
+                      ? `sent ${formatRelative(row.sentAt).toLowerCase()}`
+                      : row.scheduledAt
+                        ? `goes out ${dayAndTime.format(row.scheduledAt)}`
+                        : plain(row.status).toLowerCase()}
+                    , to {audienceWords(row)}
                   </span>
-                </label>
-              ))}
-            </div>
-          ) : null}
-          <label className="flex items-center gap-2 text-micro">
-            <input
-              type="checkbox"
-              checked={sendNow}
-              onChange={(event) => setSendNow(event.target.checked)}
-            />
-            Send immediately
-          </label>
-          {!sendNow ? (
-            <TextField
-              label="Scheduled time"
-              value={scheduledAt}
-              onChange={setScheduledAt}
-              type="datetime-local"
-            />
-          ) : null}
-        </div>
-      </AdminDialog>
-    </>
+                </span>
+                <span className="admin-line-meta" data-tone={row.failed ? "danger" : undefined}>
+                  {row.status === "scheduled"
+                    ? "Scheduled"
+                    : row.status === "cancelled"
+                      ? "Cancelled"
+                      : `${row.read} of ${row.audienceSnapshotCount} read${row.failed ? `, ${row.failed} not delivered` : ""}`}
+                </span>
+                {row.status === "scheduled" && row.origin !== "platform" ? (
+                  <InlineLink
+                    disabled={readOnly || busy === `cancel-${row.announcementId}`}
+                    onClick={() =>
+                      void mutate(`cancel-${row.announcementId}`, "cancelAnnouncement", { announcementId: row.announcementId }, "Message cancelled.")
+                    }
+                  >
+                    Cancel
+                  </InlineLink>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="admin-ledger-empty">No messages yet. Write one to reach the whole school, a class or one person.</p>
+        )}
+      </section>
+      <MessageDialog open={open} onClose={() => setOpen(false)} operatorSessionId={operatorSessionId} busy={busy} mutate={mutate} />
+    </div>
   );
 }
 
-function UsageSurface({
-  overview,
-}: {
-  overview: SchoolAdministrationOverview;
-}) {
-  const categories = [
-    ["Storage", "storage_bytes", HardDrive],
-    ["Bandwidth", "bandwidth_bytes", Network],
-    ["Model input", "model_input_tokens", Activity],
-    ["Model output", "model_output_tokens", Activity],
-    ["Rendering", "render_milliseconds", CircleGauge],
-    ["Collaboration", "collaboration_bytes", UsersRound],
-  ] as const;
+/** The meters a school is measured by, in its own words, and how each is written. */
+function UsageSurface({ overview }: { overview: SchoolAdministrationOverview }) {
+  const { totals, series, completeThrough } = overview.usage;
+  const limits = overview.limits;
   return (
-    <div className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {categories.map(([label, key, Icon]) => (
-          <MetricCard
-            key={key}
-            icon={Icon}
-            label={label}
-            value={
-              key.endsWith("_bytes")
-                ? formatBytes(overview.usage.totals[key])
-                : formatCompact(overview.usage.totals[key])
-            }
-            detail={`Complete through ${overview.usage.completeThrough}`}
-            tone={
-              key === "storage_bytes"
-                ? "green"
-                : key.startsWith("model")
-                  ? "violet"
-                  : "blue"
-            }
-          />
-        ))}
-      </div>
-      <AdminCard className="rounded-none border-0 bg-transparent shadow-none">
-        <AdminSectionHeader
-          title="Daily usage"
-          detail="Privacy-safe metering by category. Missing meters remain unknown rather than being inferred from private records."
-        />
-        <div className="overflow-x-auto px-4 pb-4">
-          <div className="flex h-64 min-w-[720px] items-end gap-1 border-b border-l border-[var(--border-subtle)] px-3 pt-5">
-            {overview.usage.series.length ? (
-              overview.usage.series.map((point) => {
-                const total = Object.values(point.values).reduce(
-                  (sum, value) => sum + value,
-                  0,
-                );
-                const maximum = Math.max(
-                  1,
-                  ...overview.usage.series.map((item) =>
-                    Object.values(item.values).reduce(
-                      (sum, value) => sum + value,
-                      0,
-                    ),
-                  ),
-                );
-                return (
-                  <div
-                    key={point.day}
-                    className="group relative flex h-full min-w-3 flex-1 items-end"
-                  >
-                    <div
-                      className="w-full rounded-t-[3px] bg-[var(--accent-mint)] transition-colors group-hover:bg-[var(--accent-mint)]"
-                      style={{
-                        height: `${Math.max(2, (total / maximum) * 100)}%`,
-                      }}
-                    />
-                    <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded bg-[var(--text-primary)] px-2 py-1 text-micro text-[var(--bg-primary)] group-hover:block">
-                      {point.day} · {formatCompact(total)}
-                    </span>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="m-auto text-micro text-[var(--text-tertiary)]">
-                No completed meter window yet
-              </div>
-            )}
-          </div>
-        </div>
-      </AdminCard>
+    <div className="admin-page">
+      <section>
+        <AdminSectionHeader title="This month" detail={`The school’s totals over the last 30 days, counted up to ${completeThrough}. Nobody’s work is read to count them.`} />
+        <TallySheet>
+          {USAGE_METERS.map((item) => (
+            <MetricCard key={item.key} label={item.label} value={formatMeter(totals[item.key], item.unit)} detail={item.detail} />
+          ))}
+        </TallySheet>
+      </section>
+
+      <section>
+        <AdminSectionHeader title="Day by day" />
+        <UsageDayChart series={series} through={completeThrough} />
+      </section>
+
       <PrivacyNotice>
-        Commercial enforcement is <strong>{overview.limits.enforcement}</strong>
-        . Superadmin can define and simulate per-school limits without changing
-        this product surface.
+        {limits.enforcement === "enforced"
+          ? "Usage limits are on for this school: new AI requests stop once a limit is reached. The platform team sets them."
+          : limits.enforcement === "simulate"
+            ? "Usage limits are being tried out for this school. Nothing is blocked."
+            : "This school has no usage limits."}
       </PrivacyNotice>
     </div>
   );
 }
 
 type AgentGovernance = {
-  totals: {
-    sharedAgents: number;
-    invocations: number;
-    feedback: number;
-    passedEvaluations: number;
-  };
+  totals: { sharedAgents: number; invocations: number; feedback: number; passedEvaluations: number };
   agents: Array<{
     agentId: string;
     title: string;
@@ -1350,508 +888,321 @@ type AgentGovernance = {
     suspendedReleases: number;
     updatedAt: number;
   }>;
-  privacy: string;
 };
 
-function AgentsResourcesSurface({
-  operatorSessionId,
-  refreshKey,
-}: {
-  operatorSessionId?: string;
-  refreshKey: number;
-}) {
-  const [data, setData] = useState<AgentGovernance | null>(null);
-  const [error, setError] = useState("");
-  const [loadAttempt, setLoadAttempt] = useState(0);
-  useEffect(() => {
-    let active = true;
-    setError("");
-    void getAdministration<AgentGovernance>("agentGovernance", {
-      operatorSessionId,
-    })
-      .then((result) => {
-        if (active) setData(result);
-      })
-      .catch((failure) => {
-        if (active)
-          setError(
-            failure instanceof Error
-              ? failure.message
-              : "Agent governance could not be loaded.",
-          );
-      });
-    return () => {
-      active = false;
-    };
-  }, [loadAttempt, operatorSessionId, refreshKey]);
+function AgentsSurface({ operatorSessionId, refreshKey }: { operatorSessionId?: string; refreshKey: number }) {
+  const read = useAdminRead(
+    () => getAdministration<AgentGovernance>("agentGovernance", { operatorSessionId }),
+    [operatorSessionId, refreshKey],
+    "Couldn’t read the school’s agents. Check your connection, then try again.",
+  );
+  const data = read.data;
   return (
-    <div className="grid gap-3">
-      <AdminCard>
+    <div className="admin-page">
+      <section>
         <AdminSectionHeader
-          title="School agents"
-          detail="Review agents that were explicitly shared or published to the school. Private agents remain private."
+          title="Agents shared with the school"
+          detail="Agents people chose to share with everyone. Agents someone keeps to themselves never appear here."
+          action={<InlineLink href="/agents?view=shared">Open them in Agents</InlineLink>}
         />
-        <div className="p-4 pt-1">
-          {error ? (
-            <ErrorPanel
-              message={error}
-              retry={() => setLoadAttempt((value) => value + 1)}
-            />
-          ) : null}
-          <PrivacyNotice>
-            {data?.privacy ??
-              "Agent analytics use aggregate invocation and evaluation metadata; private prompts, sessions, memory, and unrelated work are not available here."}
-          </PrivacyNotice>
-          {data ? (
-            <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              <MetricCard
-                icon={Bot}
-                label="School-shared agents"
-                value={formatCompact(data.totals.sharedAgents)}
-                detail="Private drafts excluded"
-              />
-              <MetricCard
-                icon={Activity}
-                label="Invocations"
-                value={formatCompact(data.totals.invocations)}
-                detail="Aggregate only"
-              />
-              <MetricCard
-                icon={MessageCircle}
-                label="Feedback signals"
-                value={formatCompact(data.totals.feedback)}
-                detail="No private comments"
-              />
-              <MetricCard
-                icon={ShieldCheck}
-                label="Passing evaluations"
-                value={formatCompact(data.totals.passedEvaluations)}
-                detail="Synthetic suites"
-              />
-            </div>
-          ) : !error ? (
-            <LoadingPanel label="Loading privacy-safe agent governance…" />
-          ) : null}
-          <div className="mt-4 flex gap-2">
-            <Link href="/agents">
-              <AdminButton tone="primary">
-                <Bot size={13} />
-                Open agent library
-              </AdminButton>
-            </Link>
-            <Link href="/agents?view=shared">
-              <AdminButton>School-shared agents</AdminButton>
-            </Link>
-          </div>
-        </div>
-      </AdminCard>
+        {read.error ? (
+          <ErrorPanel message={read.error} retry={read.retry} />
+        ) : !data ? (
+          <LoadingPanel label="Reading the school’s agents" />
+        ) : (
+          <TallySheet>
+            <MetricCard label="Shared agents" value={formatCompact(data.totals.sharedAgents)} />
+            <MetricCard label="Times used" value={formatCompact(data.totals.invocations)} detail="This month" />
+            <MetricCard label="Ratings given" value={formatCompact(data.totals.feedback)} />
+            <MetricCard label="Checks passed" value={formatCompact(data.totals.passedEvaluations)} detail="Tests their makers wrote" />
+          </TallySheet>
+        )}
+      </section>
       {data?.agents.length ? (
-        <AdminCard>
-          <AdminSectionHeader
-            title="Published and school-shared agents"
-            detail="Operational quality only; private invocations and resource contents never appear."
-          />
-          <div className="overflow-x-auto px-4 pb-4">
-            <table className="w-full min-w-[760px] text-left text-micro">
-              <thead className="text-caption text-[var(--text-tertiary)]">
-                <tr>
-                  <th className="py-2">Agent</th>
-                  <th>Invocations</th>
-                  <th>Completion</th>
-                  <th>Rating</th>
-                  <th>Eval pass</th>
-                  <th>Releases</th>
-                  <th>Updated</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.agents.map((agent) => (
-                  <tr
-                    key={agent.agentId}
-                    className="border-t border-[var(--border-subtle)]"
-                  >
-                    <td className="py-3 font-semibold text-[var(--text-primary)]">
-                      {agent.title}
-                    </td>
-                    <td>{formatCompact(agent.invocations)}</td>
-                    <td>
-                      {agent.completionRate === null
-                        ? "—"
-                        : `${Math.round(agent.completionRate * 100)}%`}
-                    </td>
-                    <td>
-                      {agent.averageRating === null
-                        ? "—"
-                        : agent.averageRating.toFixed(1)}
-                    </td>
-                    <td>
-                      {agent.evaluationPassRate === null
-                        ? "—"
-                        : `${Math.round(agent.evaluationPassRate * 100)}%`}
-                    </td>
-                    <td>
-                      {agent.publishedReleases} live
-                      {agent.suspendedReleases
-                        ? ` · ${agent.suspendedReleases} suspended`
-                        : ""}
-                    </td>
-                    <td>{formatRelative(agent.updatedAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </AdminCard>
+        <section>
+          <AdminSectionHeader title="Each agent" count={data.agents.length} />
+          {data.agents.length ? (
+            <ul className="admin-ledger">
+              {data.agents.map((agent) => (
+                <li key={agent.agentId} className="admin-line">
+                  <span className="admin-line-main">
+                    <strong>{agent.title}</strong>
+                    <span>
+                      Used {formatCompact(agent.invocations)} times
+                      {agent.completionRate === null ? "" : `, finishes ${Math.round(agent.completionRate * 100)}% of the time`}
+                      {agent.averageRating === null ? "" : `, rated ${agent.averageRating.toFixed(1)} of 5`}
+                    </span>
+                  </span>
+                  <span className="admin-line-meta" data-tone={agent.suspendedReleases ? "danger" : undefined}>
+                    {agent.suspendedReleases
+                      ? `${agent.suspendedReleases} version paused`
+                      : agent.evaluationPassRate === null
+                        ? "No checks yet"
+                        : `${Math.round(agent.evaluationPassRate * 100)}% of checks pass`}
+                  </span>
+                  <span className="admin-line-meta w-[96px]">{formatRelative(agent.updatedAt)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="admin-ledger-empty">Nobody has shared an agent with the school yet.</p>
+          )}
+        </section>
       ) : null}
-      <AdminCard>
-        <AdminSectionHeader
-          title="Resource governance"
-          detail="Knowledge resources stay permission-bound to their underlying work or workspace."
-        />
-        <div className="grid gap-3 p-4 pt-1 sm:grid-cols-2">
-          <div className="rounded-control border border-[var(--border-subtle)] p-3">
-            <BookOpen size={15} className="text-[var(--accent-mint)]" />
-            <strong className="mt-3 block text-micro">
-              Permission inheritance
-            </strong>
-            <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
-              Removing a source immediately stops the agent from reading it.
-            </p>
-          </div>
-          <div className="rounded-control border border-[var(--border-subtle)] p-3">
-            <ShieldCheck size={15} className="text-[var(--brand-primary)]" />
-            <strong className="mt-3 block text-micro">
-              Evaluation health
-            </strong>
-            <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
-              Published versions can require evaluation evidence without
-              exposing user sessions.
-            </p>
-          </div>
-        </div>
-      </AdminCard>
+      <PrivacyNotice>Only counts are shown. What people ask their agents, and what the agents answer, stays with them.</PrivacyNotice>
     </div>
   );
 }
 
-function IntegrationsSurface({
-  overview,
-}: {
-  overview: SchoolAdministrationOverview;
-}) {
-  const coverage = overview.integration?.coverage;
-  const coveragePercent = coverage?.discovered
-    ? Math.round((coverage.verifiedReadable / coverage.discovered) * 100)
-    : 0;
+function ManageBacSurface({ overview, operator }: { overview: SchoolAdministrationOverview; operator: boolean }) {
+  const integration = overview.integration;
+  const connection = connectionWords(integration);
+  const coverage = integration?.coverage;
   return (
-    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
-      <AdminCard>
+    <div className="admin-page">
+      <section>
         <AdminSectionHeader
           title="ManageBac"
-          detail="Read-only school data with verified tenant capabilities, exact identity matching, provenance, quarantine, and safe later synchronization."
-          action={
-            <StatusBadge
-              tone={statusToneFor(overview.integration?.status)}
-            >
-              {overview.integration?.status ?? "Not configured"}
-            </StatusBadge>
-          }
+          detail="Spectra reads the school’s classes, tasks and deadlines from ManageBac and keeps them up to date. It never writes anything back."
+          action={<ManageBacLink operator={operator}>{integration ? "ManageBac settings" : "Connect ManageBac"}</ManageBacLink>}
         />
-        <div className="p-4 pt-1">
-          <div className="grid gap-3 sm:grid-cols-3">
-            {[
-              [
-                "Capability coverage",
-                `${coveragePercent}%`,
-                `${coverage?.verifiedReadable ?? 0} of ${coverage?.discovered ?? 0} routes`,
-              ],
-              [
-                "Last sync",
-                formatRelative(overview.integration?.lastSyncAt),
-                undefined,
-              ],
-              [
-                "Next sync",
-                formatRelative(overview.integration?.nextSyncAt),
-                undefined,
-              ],
-            ].map(([label, value, detail]) => (
-              <div
-                key={String(label)}
-                className="rounded-control border border-[var(--border-subtle)] p-3"
-              >
-                <span className="text-micro text-[var(--text-tertiary)]">
-                  {label}
-                </span>
-                <strong className="mt-1 block text-caption">{value}</strong>
-                {detail ? (
-                  <span className="mt-0.5 block text-micro text-[var(--text-tertiary)]">
-                    {detail}
-                  </span>
-                ) : null}
-              </div>
-            ))}
+        <dl className="admin-facts">
+          <div>
+            <dt>Connection</dt>
+            <dd>
+              <StatusBadge tone={connection.needs ? "attention" : integration ? "healthy" : "neutral"}>{connection.label}</StatusBadge>
+            </dd>
           </div>
-          <Link href="/managebac" className="mt-4 inline-block">
-            <AdminButton tone="primary">
-              <Network size={13} />
-              Open integration
-            </AdminButton>
-          </Link>
-        </div>
-      </AdminCard>
-      <AdminCard>
-        <AdminSectionHeader
-          title="Connector guarantees"
-          detail="Operational contract"
-        />
-        <div className="space-y-2 p-4 pt-1 text-micro">
+          <div>
+            <dt>Last brought up to date</dt>
+            <dd>{formatRelative(integration?.lastSyncAt)}</dd>
+          </div>
+          <div>
+            <dt>Next update</dt>
+            <dd>{integration?.nextSyncAt ? dayAndTime.format(integration.nextSyncAt) : "Not planned"}</dd>
+          </div>
+          {coverage?.discovered ? (
+            <div>
+              <dt>School records it can read</dt>
+              <dd>
+                {coverage.verifiedReadable} of {coverage.discovered} kinds
+                {coverage.failed ? `, ${coverage.failed} failing` : ""}
+              </dd>
+            </div>
+          ) : null}
+        </dl>
+        {operator ? (
+          <p className="admin-footnote mt-3">ManageBac settings open only for this school’s own administrators.</p>
+        ) : null}
+      </section>
+      <section>
+        <AdminSectionHeader title="What it does" />
+        <ul className="admin-ledger">
           {[
-            "Read-only token, server-side only",
-            "Verified tenant capability manifest",
-            "No client-selected provider identity",
-            "Source overlays preserve user work",
-            "Removed records are tombstoned",
-          ].map((item) => (
-            <div key={item} className="flex items-center gap-2">
-              <Check size={12} className="text-[var(--accent-mint)]" />
-              {item}
-            </div>
+            ["Reads, never writes", "Nothing in Spectra changes the school’s ManageBac."],
+            ["Keeps people’s own changes", "When the school updates a task, the notes and plans students added to it stay."],
+            ["Archives instead of deleting", "A class that ends in ManageBac is archived here with its work, not removed."],
+            ["Keeps the key on the server", "The ManageBac key is never sent to anyone’s browser."],
+          ].map(([title, detail]) => (
+            <li key={title} className="admin-line">
+              <span className="admin-line-main">
+                <strong>{title}</strong>
+                <p>{detail}</p>
+              </span>
+            </li>
           ))}
-        </div>
-      </AdminCard>
+        </ul>
+      </section>
     </div>
   );
 }
 
-function GovernanceSurface() {
-  const freedoms = [
-    {
-      icon: Activity,
-      title: "Full AI access",
-      detail:
-        "Models and adaptive AI operations are available to every ordinary user.",
-    },
-    {
-      icon: FileClock,
-      title: "Personal memory",
-      detail:
-        "Memory is on by default and controlled only by the person it belongs to.",
-    },
-    {
-      icon: Bot,
-      title: "Agents for everyone",
-      detail:
-        "Any student, teacher, or administrator can create, use, and share agents.",
-    },
-    {
-      icon: BookOpen,
-      title: "Every kind of work",
-      detail:
-        "Creation, editing, collaboration, imports, and exports are ordinary capabilities.",
-    },
-    {
-      icon: Network,
-      title: "Capable runtimes",
-      detail:
-        "Code and visualisation tools are secured by isolation, not school allowlists.",
-    },
-    {
-      icon: LockKeyhole,
-      title: "Private by default",
-      detail:
-        "People decide who can read or modify their work; public access is always explicit.",
-    },
-  ] as const;
+function RightsSurface() {
   return (
-    <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_340px]">
-      <AdminCard>
+    <div className="admin-page">
+      <section>
         <AdminSectionHeader
-          title="Freedom and privacy charter"
-          detail="School administration adds operational tools. It never removes ordinary Spectra capabilities."
+          title="What everyone can do"
+          detail="School admin adds tools for running the school. It never takes anything away from the people in it."
         />
-        <div className="grid gap-2 p-4 pt-1 sm:grid-cols-2">
-          {freedoms.map(({ icon: Icon, title, detail }) => (
-            <div
-              key={title}
-              className="rounded-card border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3.5"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <span className="grid size-8 shrink-0 place-items-center rounded-control bg-[color-mix(in_oklab,var(--accent-mint)_8%,var(--bg-primary))] text-[var(--accent-mint)]">
-                  <Icon size={15} />
-                </span>
-                <StatusBadge tone="healthy">Always available</StatusBadge>
-              </div>
-              <strong className="mt-3 block text-micro">{title}</strong>
-              <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
-                {detail}
-              </p>
-            </div>
+        <ul className="admin-ledger">
+          {[
+            ["Use the full AI", "Every student and teacher has the same models and tools."],
+            ["Keep a memory", "Spectra remembers what helps each person. Only they can see or clear it."],
+            ["Make and share agents", "Anyone can build an agent, use it and share it."],
+            ["Make every kind of work", "Documents, decks, quizzes, code and the rest, with import and export."],
+            ["Decide who sees their work", "Work is private until its owner shares it."],
+          ].map(([title, detail]) => (
+            <li key={title} className="admin-line">
+              <span className="admin-line-main">
+                <strong>{title}</strong>
+                <p>{detail}</p>
+              </span>
+            </li>
           ))}
-        </div>
-      </AdminCard>
-      <div className="space-y-3">
-        <AdminCard className="p-4">
-          <h2 className="font-display text-subhead font-medium">
-            What administration can do
-          </h2>
-          <p className="mt-2 text-micro leading-5 text-[var(--text-secondary)]">
-            Manage people, verified integrations, school profile, operational
-            communications, privacy-safe usage, audit, legal lifecycle, and
-            future commercial limits. Security isolation and permissions remain
-            enforced without turning them into educational restrictions.
-          </p>
-        </AdminCard>
-        <PrivacyNotice>
-          Private prompts, threads, memory, and unrelated work never appear here. Public access is explicit and user-directed; workspace and work permissions remain fully enforced.
-        </PrivacyNotice>
-      </div>
+        </ul>
+      </section>
+      <section>
+        <AdminSectionHeader title="What school admin can see" />
+        <ul className="admin-ledger">
+          {[
+            ["Can see", "Who is in the school, groups, announcements, totals of use, feedback sent to the school, and this school’s activity log."],
+            ["Cannot see", "Anyone’s work, threads, prompts or memory, unless its owner shares it with them."],
+          ].map(([title, detail]) => (
+            <li key={title} className="admin-line">
+              <span className="admin-line-main">
+                <strong>{title}</strong>
+                <p>{detail}</p>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
   );
 }
 
-function FeedbackSurface({
-  operatorSessionId,
-  busy,
-  mutate,
-  refreshKey,
-}: Pick<
-  SchoolAdminTabProps,
-  "operatorSessionId" | "busy" | "mutate" | "refreshKey" | "onRefresh"
->) {
-  const [rows, setRows] = useState<FeedbackItem[]>([]);
+const FEEDBACK_STATUS: Record<string, string> = {
+  new: "New",
+  triaged: "Read",
+  in_progress: "Being handled",
+  resolved: "Resolved",
+  closed: "Closed",
+};
+
+type FeedbackEvidenceData = {
+  feedbackId: string;
+  pagePath: string | null;
+  screenshotUrl: string | null;
+  attachments: Array<{ name: string; mediaType: string; bytes: number; url: string | null }>;
+};
+
+function FeedbackEvidence({ feedbackId, operatorSessionId }: { feedbackId: string; operatorSessionId?: string }) {
+  const evidence = useAdminRead(
+    () => getAdministration<FeedbackEvidenceData>("feedbackEvidence", { feedbackId, operatorSessionId }),
+    [feedbackId, operatorSessionId],
+    "Couldn’t load the files sent with this report. Try again.",
+  );
+  if (evidence.error) return <ErrorPanel message={evidence.error} retry={evidence.retry} />;
+  if (!evidence.data) return <LoadingPanel label="Reading attached evidence" />;
+  return (
+    <div className="space-y-3">
+      {evidence.data.pagePath ? <p className="admin-footnote">Sent from {evidence.data.pagePath}</p> : null}
+      {evidence.data.screenshotUrl ? (
+        <a href={evidence.data.screenshotUrl} target="_blank" rel="noreferrer" aria-label="Open the reporter’s screenshot">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={evidence.data.screenshotUrl} alt="The page as the reporter saw it" className="max-h-80 w-full rounded-control object-contain" />
+        </a>
+      ) : null}
+      {evidence.data.attachments.length ? (
+        <div className="feedback-inbox-files">
+          {evidence.data.attachments.map((file, index) => file.url ? (
+            <a key={index} href={file.url} target="_blank" rel="noreferrer" title={file.name}>
+              <FeedbackFilePreview name={file.name} mediaType={file.mediaType} url={file.url} />
+              <span className="truncate">{file.name}</span>
+            </a>
+          ) : <p key={index} className="admin-footnote">{file.name}: file no longer available.</p>)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function FeedbackSurface({ operatorSessionId, busy, mutate, refreshKey, readOnly }: SurfaceProps) {
+  const read = useAdminRead(
+    () => getAdministration<{ feedback: FeedbackItem[] }>("feedbackInbox", { operatorSessionId }),
+    [operatorSessionId, refreshKey],
+    "Couldn’t read the feedback. Check your connection, then try again.",
+  );
   const [selected, setSelected] = useState<FeedbackItem | null>(null);
   const [response, setResponse] = useState("");
   const [status, setStatus] = useState("in_progress");
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    void getAdministration<{ feedback: FeedbackItem[] }>("feedbackInbox", {
-      operatorSessionId,
-    })
-      .then((result) => setRows(result.feedback))
-      .catch((error) =>
-        toast.error(
-          describeFailure(error, { fallback: "Couldn't load feedback. Check your connection, then try again." }).message,
-        ),
-      )
-      .finally(() => setLoading(false));
-  }, [operatorSessionId, refreshKey]);
+  const rows = read.data?.feedback ?? [];
   return (
-    <>
-      <AdminCard>
+    <div className="admin-page">
+      <section>
         <AdminSectionHeader
-          title="Feedback & support"
-          detail="Visible only to the reporter and assigned school/platform responders."
+          title="Feedback"
+          count={read.data ? rows.length : undefined}
+          detail="What people at the school sent about Spectra. Only the person who wrote it and the people answering can read it."
         />
-        {loading ? (
-          <LoadingPanel label="Loading feedback" />
+        {read.error ? (
+          <ErrorPanel message={read.error} retry={read.retry} />
+        ) : !read.data ? (
+          <LoadingPanel label="Reading the feedback" />
         ) : rows.length ? (
-          <div className="divide-y divide-[var(--border-subtle)] px-4 pb-4">
+          <ul className="admin-ledger">
             {rows.map((item) => (
-              <button
-                key={item.feedbackId}
-                type="button"
-                onClick={() => {
-                  setSelected(item);
-                  setResponse(item.response ?? "");
-                  setStatus(
-                    item.status === "new" ? "in_progress" : item.status,
-                  );
-                }}
-                className="flex w-full items-start gap-3 py-3 text-left"
-              >
-                <span className="grid size-8 shrink-0 place-items-center rounded-control bg-[var(--bg-secondary)]">
-                  <MessageCircle size={14} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <strong className="block truncate text-micro">
-                    {item.subject}
-                  </strong>
-                  <span className="mt-1 block line-clamp-2 text-micro leading-4 text-[var(--text-tertiary)]">
-                    {item.message}
+              <li key={item.feedbackId}>
+                <button
+                  type="button"
+                  className="admin-line"
+                  onClick={() => {
+                    setSelected(item);
+                    setResponse(item.response ?? "");
+                    setStatus(item.status === "new" ? "in_progress" : item.status);
+                  }}
+                >
+                  <span className="admin-line-main">
+                    <strong>{item.subject}</strong>
+                    <span>
+                      {item.reporter?.name ?? "Someone who has left"}, {formatRelative(item.createdAt).toLowerCase()}: {item.message}
+                    </span>
                   </span>
-                  <span className="mt-1 block text-micro text-[var(--text-tertiary)]">
-                    {item.reporter?.name ?? "Unavailable reporter"} ·{" "}
-                    {formatRelative(item.createdAt)}
+                  <span className="admin-line-meta" data-tone={item.status === "new" ? "attention" : undefined}>
+                    {FEEDBACK_STATUS[item.status] ?? plain(item.status)}
                   </span>
-                </span>
-                <StatusBadge tone={item.status === "new" ? "attention" : "neutral"}>
-                  {item.status.replaceAll("_", " ")}
-                </StatusBadge>
-              </button>
+                </button>
+              </li>
             ))}
-          </div>
+          </ul>
         ) : (
-          <EmptyPanel
-            icon={Inbox}
-            title="Feedback inbox is clear"
-            detail="New reports from your school will appear here."
-          />
+          <p className="admin-ledger-empty">Nothing yet. What people send from the feedback button arrives here.</p>
         )}
-      </AdminCard>
+      </section>
       <AdminDialog
         open={Boolean(selected)}
         onClose={() => setSelected(null)}
         title={selected?.subject ?? "Feedback"}
-        detail={
-          selected
-            ? `${selected.reporter?.name ?? "Reporter"} · ${selected.category.replaceAll("_", " ")}`
-            : undefined
-        }
+        detail={selected ? `${selected.reporter?.name ?? "Someone who has left"}, about ${plain(selected.category).toLowerCase()}` : undefined}
         footer={
           <>
-            <AdminButton onClick={() => setSelected(null)}>Cancel</AdminButton>
+            <AdminButton onClick={() => setSelected(null)}>Close</AdminButton>
             <AdminButton
               tone="primary"
-              disabled={!selected || busy === "feedback-response"}
+              disabled={!selected || readOnly || busy === "feedback-response"}
               onClick={() =>
                 selected &&
-                void mutate(
-                  "feedback-response",
-                  "respondFeedback",
-                  {
-                    feedbackId: selected.feedbackId,
-                    status,
-                    response,
-                  },
-                  "Feedback updated.",
-                ).then((done) => {
-                  if (!done) return;
-                  setSelected(null);
+                void mutate("feedback-response", "respondFeedback", { feedbackId: selected.feedbackId, status, response }, "Answer saved.").then((done) => {
+                  if (done) setSelected(null);
                 })
               }
             >
-              Save response
+              Save answer
             </AdminButton>
           </>
         }
       >
         {selected ? (
           <div className="space-y-4">
-            <div className="rounded-control bg-[var(--bg-secondary)] p-3 text-micro leading-5">
-              {selected.message}
-            </div>
+            <p className="whitespace-pre-wrap rounded-control bg-[var(--card-paper)] p-3 text-ui leading-6 shadow-[0_0_0_1px_var(--card-border-soft)]">{selected.message}</p>
+            <FeedbackEvidence key={selected.feedbackId} feedbackId={selected.feedbackId} operatorSessionId={operatorSessionId} />
             <SelectField
-              label="Status"
+              label="Where it stands"
               value={status}
               onChange={setStatus}
               options={[
-                { value: "triaged", label: "Triaged" },
-                { value: "in_progress", label: "In progress" },
+                { value: "triaged", label: "Read" },
+                { value: "in_progress", label: "Being handled" },
                 { value: "resolved", label: "Resolved" },
                 { value: "closed", label: "Closed" },
               ]}
             />
-            <TextAreaField
-              label="Response visible to reporter"
-              value={response}
-              onChange={setResponse}
-              rows={5}
-            />
+            <TextAreaField label="Your answer (the person who wrote sees it)" value={response} onChange={setResponse} rows={5} />
           </div>
         ) : null}
       </AdminDialog>
-    </>
+    </div>
   );
 }
 
@@ -1859,38 +1210,47 @@ function ProfileSurface({
   overview,
   busy,
   mutate,
-}: Pick<SchoolAdminTabProps, "overview" | "busy" | "mutate">) {
-  const [name, setName] = useState(overview.school.name);
-  const [timezone, setTimezone] = useState(overview.school.timezone);
-  const [locale, setLocale] = useState(overview.school.locale ?? "en");
-  const [domains, setDomains] = useState(
-    overview.school.verifiedDomains.join(", "),
+  readOnly,
+}: {
+  overview: SchoolAdministrationOverview;
+  busy: string;
+  mutate: Mutate;
+  readOnly: boolean;
+}) {
+  const school = overview.school;
+  const [name, setName] = useState(school.name);
+  const [timezone, setTimezone] = useState(school.timezone);
+  const [locale, setLocale] = useState(school.locale ?? "en");
+  const [domains, setDomains] = useState(school.verifiedDomains.join(", "));
+  const [accent, setAccent] = useState(school.accentColor ?? "#15946d");
+  const [logoUrl, setLogoUrl] = useState(school.logoUrl ?? "");
+  const [start, setStart] = useState(school.academicYearStart ?? "");
+  const [end, setEnd] = useState(school.academicYearEnd ?? "");
+  const [reducedMotion, setReducedMotion] = useState(school.accessibilityDefaults?.reducedMotion ?? false);
+  const [contrast, setContrast] = useState(school.accessibilityDefaults?.increasedContrast ?? false);
+  const [largerText, setLargerText] = useState(school.accessibilityDefaults?.largerText ?? false);
+  const field = (label: string, hint: string | null, input: ReactNode) => (
+    <label key={label}>
+      <span className="admin-form-label">
+        {label}
+        {hint ? <small>{hint}</small> : null}
+      </span>
+      {input}
+    </label>
   );
-  const [accent, setAccent] = useState(
-    overview.school.accentColor ?? "#15946d",
-  );
-  const [logoUrl, setLogoUrl] = useState(overview.school.logoUrl ?? "");
-  const [start, setStart] = useState(overview.school.academicYearStart ?? "");
-  const [end, setEnd] = useState(overview.school.academicYearEnd ?? "");
-  const [reducedMotion, setReducedMotion] = useState(
-    overview.school.accessibilityDefaults?.reducedMotion ?? false,
-  );
-  const [contrast, setContrast] = useState(
-    overview.school.accessibilityDefaults?.increasedContrast ?? false,
-  );
-  const [largerText, setLargerText] = useState(
-    overview.school.accessibilityDefaults?.largerText ?? false,
+  const text = (value: string, onChange: (value: string) => void, props: InputHTMLAttributes<HTMLInputElement> = {}) => (
+    <input value={value} disabled={readOnly} onChange={(event) => onChange(event.target.value)} {...props} />
   );
   return (
-    <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_340px]">
-      <AdminCard>
+    <div className="admin-page">
+      <section>
         <AdminSectionHeader
           title="School profile"
-          detail="Brand, verified domains, locale, timezone, academic calendar, and accessibility defaults."
+          detail="How the school is named and shown, its calendar, and the comfort settings new members start with."
           action={
             <AdminButton
               tone="primary"
-              disabled={busy === "profile"}
+              disabled={readOnly || busy === "profile"}
               onClick={() =>
                 void mutate(
                   "profile",
@@ -1907,13 +1267,9 @@ function ProfileSurface({
                     logoUrl,
                     academicYearStart: start,
                     academicYearEnd: end,
-                    accessibilityDefaults: {
-                      reducedMotion,
-                      increasedContrast: contrast,
-                      largerText,
-                    },
+                    accessibilityDefaults: { reducedMotion, increasedContrast: contrast, largerText },
                   },
-                  "School profile updated.",
+                  "School profile saved.",
                 )
               }
             >
@@ -1922,188 +1278,101 @@ function ProfileSurface({
             </AdminButton>
           }
         />
-        <div className="grid gap-4 p-4 pt-1 sm:grid-cols-2">
-          <TextField label="School name" value={name} onChange={setName} />
-          <TextField
-            label="IANA timezone"
-            value={timezone}
-            onChange={setTimezone}
-            placeholder="Europe/Madrid"
-          />
-          <TextField label="Locale" value={locale} onChange={setLocale} />
-          <TextField
-            label="Accent colour"
-            value={accent}
-            onChange={setAccent}
-            placeholder="#15946d"
-          />
-          <div className="sm:col-span-2">
-            <TextField
-              label="Verified email domains (comma separated)"
-              value={domains}
-              onChange={setDomains}
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <TextField
-              label="HTTPS logo URL"
-              value={logoUrl}
-              onChange={setLogoUrl}
-              type="url"
-            />
-          </div>
-          <TextField
-            label="Academic year starts"
-            value={start}
-            onChange={setStart}
-            placeholder="2026-08-20"
-          />
-          <TextField
-            label="Academic year ends"
-            value={end}
-            onChange={setEnd}
-            placeholder="2027-06-24"
-          />
+        <div className="admin-form">
+          {field("Name", null, text(name, setName))}
+          {field("Time zone", "Deadlines and reminders follow it", text(timezone, setTimezone, { placeholder: "Europe/Madrid" }))}
+          {field("Language", "A code such as en or es", text(locale, setLocale))}
+          {field("School email domains", "People with these addresses can be invited straight in. Separate with commas.", text(domains, setDomains, { placeholder: "school.org" }))}
+          {field(
+            "Colour",
+            null,
+            <span className="flex items-center gap-2">
+              <input type="color" value={/^#[0-9a-f]{6}$/i.test(accent) ? accent : "#15946d"} disabled={readOnly} onChange={(event) => setAccent(event.target.value)} className="!h-9 !w-12 !p-1" aria-label="Pick the colour" />
+              {text(accent, setAccent, { "aria-label": "Colour code" })}
+            </span>,
+          )}
+          {field("Logo", "A link to the logo image, starting https://", text(logoUrl, setLogoUrl, { type: "url" }))}
+          {field("School year starts", null, text(start, setStart, { type: "date" }))}
+          {field("School year ends", null, text(end, setEnd, { type: "date" }))}
         </div>
-      </AdminCard>
-      <div className="space-y-3">
-        <AdminCard className="p-4">
-          <h2 className="font-display text-subhead font-medium">
-            Accessibility defaults
-          </h2>
-          <div className="mt-3 space-y-3">
-            {[
-              ["Reduced motion", reducedMotion, setReducedMotion],
-              ["Increased contrast", contrast, setContrast],
+      </section>
+      <section>
+        <AdminSectionHeader title="New members start with" detail="Each person can change these for themselves." />
+        <div className="admin-form">
+          {(
+            [
+              ["Less motion", reducedMotion, setReducedMotion],
+              ["More contrast", contrast, setContrast],
               ["Larger text", largerText, setLargerText],
-            ].map(([label, checked, setter]) => (
-              <label
-                key={String(label)}
-                className="flex items-center justify-between gap-3 text-micro"
-              >
-                {label as string}
-                <input
-                  type="checkbox"
-                  checked={checked as boolean}
-                  onChange={(event) =>
-                    (setter as (value: boolean) => void)(event.target.checked)
-                  }
-                />
-              </label>
-            ))}
-          </div>
-        </AdminCard>
-        <AdminCard className="p-4">
-          <div className="flex items-center gap-3">
-            <span
-              className="grid size-12 place-items-center rounded-surface text-white"
-              style={{ backgroundColor: accent }}
-            >
-              <Building2 size={22} />
-            </span>
-            <div>
-              <strong className="text-caption">{name}</strong>
-              <p className="mt-1 text-micro text-[var(--text-tertiary)]">
-                Profile preview
-              </p>
-            </div>
-          </div>
-        </AdminCard>
-      </div>
+            ] as const
+          ).map(([label, checked, setter]) =>
+            field(label, null, <input type="checkbox" checked={checked} disabled={readOnly} onChange={(event) => setter(event.target.checked)} className="size-4 justify-self-start" />),
+          )}
+        </div>
+      </section>
     </div>
   );
 }
 
-function AuditSurface({
-  operatorSessionId,
-  refreshKey,
-}: {
-  operatorSessionId?: string;
-  refreshKey: number;
-}) {
-  const [events, setEvents] = useState<AuditEvent[]>([]);
-  const [filter, setFilter] = useState("");
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    void getAdministration<{ events: AuditEvent[] }>("audit", {
-      operatorSessionId,
-      actionPrefix: filter || undefined,
-      limit: 250,
-    })
-      .then((result) => setEvents(result.events))
-      .catch((error) =>
-        toast.error(describeFailure(error, { fallback: "Couldn't load the audit log. Check your connection, then try again." }).message),
-      )
-      .finally(() => setLoading(false));
-  }, [operatorSessionId, filter, refreshKey]);
+function AuditSurface({ operatorSessionId, refreshKey }: { operatorSessionId?: string; refreshKey: number }) {
+  // "changes" hides the record of people merely opening admin pages, which
+  // otherwise buries every real change under a wall of "viewed".
+  const [filter, setFilter] = useState("changes");
+  const prefix = filter.endsWith(".") ? filter : undefined;
+  const read = useAdminRead(
+    () => getAdministration<{ events: AuditEvent[] }>("audit", { operatorSessionId, actionPrefix: prefix, limit: 250 }),
+    [operatorSessionId, prefix, refreshKey],
+    "Couldn’t read the activity log. Check your connection, then try again.",
+  );
+  const events = (read.data?.events ?? []).filter((event) => filter !== "changes" || !event.action.endsWith("viewed"));
   return (
-    <AdminCard>
-      <AdminSectionHeader
-        title="Privileged audit"
-        detail="Viewing this log is itself audited. Events contain safe metadata, never secrets or content excerpts."
-      />
-      <div className="px-4 pb-3">
-        <TextField
-          label="Action prefix"
-          value={filter}
-          onChange={setFilter}
-          placeholder="membership. or integration."
+    <div className="admin-page">
+      <section>
+        <AdminSectionHeader
+          title="Activity log"
+          detail="Every change made from school admin, and by the platform team, with when it happened. Opening this log is itself recorded."
+          action={
+            <SelectField
+              ariaLabel="Show"
+              value={filter}
+              onChange={setFilter}
+              size="sm"
+              options={[
+                { value: "changes", label: "Changes" },
+                { value: "all", label: "Changes and views" },
+                { value: "membership.", label: "People and invitations" },
+                { value: "school.group.", label: "Groups" },
+                { value: "announcement.", label: "Announcements" },
+                { value: "integration.", label: "ManageBac" },
+                { value: "school.profile.", label: "School profile" },
+                { value: "operator.", label: "Platform team visits" },
+              ]}
+            />
+          }
         />
-      </div>
-      {loading ? (
-        <LoadingPanel label="Loading audit events" />
-      ) : events.length ? (
-        <div className="overflow-x-auto px-4 pb-4">
-          <table className="w-full min-w-[760px] text-left text-micro">
-            <thead className="text-caption text-[var(--text-tertiary)]">
-              <tr className="border-b border-[var(--border-subtle)]">
-                <th className="pb-2 font-normal">Event</th>
-                <th className="pb-2 font-normal">Target</th>
-                <th className="pb-2 font-normal">Actor</th>
-                <th className="pb-2 font-normal">Operator session</th>
-                <th className="pb-2 font-normal">Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              {events.map((event) => (
-                <tr
-                  key={event.eventId}
-                  className="border-b border-[var(--border-subtle)] last:border-0"
-                >
-                  <td className="py-2.5 font-medium">
-                    {actionLabel(event.action)}
-                  </td>
-                  <td className="py-2.5 text-[var(--text-secondary)]">
-                    {event.targetType}
-                  </td>
-                  <td className="py-2.5 font-mono text-micro text-[var(--text-tertiary)]">
-                    {event.actorAccountId?.slice(-10) ?? "System"}
-                  </td>
-                  <td className="py-2.5">
-                    {event.operatorSessionId ? (
-                      <StatusBadge tone="neutral">Scoped operator</StatusBadge>
-                    ) : (
-                      "Local"
-                    )}
-                  </td>
-                  <td className="py-2.5 text-[var(--text-secondary)]">
-                    {new Intl.DateTimeFormat(undefined, {
-                      dateStyle: "medium",
-                      timeStyle: "short",
-                    }).format(event.createdAt)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <EmptyPanel
-          icon={FileClock}
-          title="No matching events"
-          detail="Try a broader action prefix."
-        />
-      )}
-    </AdminCard>
+        {read.error ? (
+          <ErrorPanel message={read.error} retry={read.retry} />
+        ) : !read.data ? (
+          <LoadingPanel label="Reading the activity log" />
+        ) : events.length ? (
+          <ul className="admin-ledger">
+            {events.map((event) => (
+              <li key={event.eventId} className="admin-line">
+                <span className="admin-line-main">
+                  <strong>{auditActionWords(event.action)}</strong>
+                  <span>
+                    {auditTargetWords(event.targetType)}
+                    {event.operatorSessionId ? ", by the platform team" : ""}
+                  </span>
+                </span>
+                <span className="admin-line-meta">{dayAndTime.format(event.createdAt)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="admin-ledger-empty">Nothing of this kind has happened yet.</p>
+        )}
+      </section>
+    </div>
   );
 }

@@ -265,6 +265,7 @@ export const transitionStorageStrategy = mutation({
         const mount = await ctx.db.get(args.mountId);
         const device = mount ? await ctx.db.get(mount.deviceId) : null;
         if (!mount || mount.accountId !== actor.accountId || mount.state !== "active" || !device || device.state !== "active") throw new Error("MOUNT_NOT_ACTIVE");
+        if (mount.selectedFile) throw new Error("Choose a synced folder to save a new file on this computer.");
         const relativePath = z.string().trim().min(1).max(1024).refine((value) => !value.startsWith("/") && !/^[A-Za-z]:/.test(value) && !value.split(/[\\/]/).includes(".."), "LOCAL_PATH_INVALID").parse(args.relativePath);
         const localResourceId = `lr_${crypto.randomUUID().replaceAll("-", "")}`;
         const initialRevision = `new:${cloud.revision}`;
@@ -1122,6 +1123,8 @@ export const createLocalReplica = mutation({
     if (!payload || payload.accountId !== actor.accountId || payload.state !== "active" || payload.hash !== input.contentHash) throw new Error("MATERIALIZATION_PAYLOAD_INVALID");
     const locals = await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", args.workId).eq("kind", "local")).take(20);
     const existing = locals.find((candidate) => candidate.mountId === mount._id && candidate.relativePath === input.relativePath);
+    if (mount.selectedFile && (!existing || input.relativePath !== mount.selectedFile))
+      throw new Error("Choose a synced folder to save a new file on this computer.");
     if (existing?.state === "current" && existing.contentHash === input.contentHash)
       return { state: "existing" as const, replicaId: existing._id, requestId: null };
     if (existing) {
@@ -1525,6 +1528,14 @@ async function payloadHasRemainingRefs(
   budget: SweepDocumentBudget,
 ) {
   const probes = [
+    // Newer writers already maintain compact payload ownership. A positive
+    // match avoids reopening a replica's large Office projection on every
+    // sweep. Missing legacy ownership still goes through the full probes.
+    () =>
+      ctx.db
+        .query("collaborationPayloadOwners")
+        .withIndex("by_payload", (q) => q.eq("payloadRef", payloadRef))
+        .take(budget.cap(1)),
     () =>
       ctx.db
         .query("workReplicas")

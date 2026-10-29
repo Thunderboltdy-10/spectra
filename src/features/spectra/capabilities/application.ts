@@ -198,6 +198,13 @@ const APP_SPECS: readonly AppSpec[] = [
     choreography: { target: "devices-route", region: "folders" },
   },
   {
+    id: "app.devices.add-files",
+    description: "Open the native picker to sync one or more selected files on this computer.",
+    risk: "safe",
+    availability: "readable",
+    choreography: { target: "devices-route", region: "files" },
+  },
+  {
     id: "app.devices.pause",
     description: "Pause or resume syncing for every folder on this computer.",
     risk: "safe",

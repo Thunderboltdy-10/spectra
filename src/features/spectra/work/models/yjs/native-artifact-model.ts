@@ -599,6 +599,15 @@ export function readNativeArtifactYjsDocument(
   };
 }
 
+function projectedThroughAdapter(adapter: WorkYjsAdapter, content: unknown) {
+  const scratch = adapter.createDocument(structuredClone(content));
+  try {
+    return adapter.project(scratch);
+  } finally {
+    scratch.destroy();
+  }
+}
+
 export function planNativeArtifactYjsMutation(
   document: Y.Doc,
   typeKey: ArtifactTypeKey,
@@ -632,9 +641,16 @@ export function planNativeArtifactYjsMutation(
     typeKey === "sheets"
       ? planSheetsCellProjection(current.content, value.content)
       : null;
-  const changed = sheetPlan
+  const quick = sheetPlan
     ? sheetPlan.changes.map((change) => change.regionId)
     : changedArtifactRegionIds(typeKey, current.content, value.content);
+  // A native readback arrives in the lens's own shape (Word blocks without the
+  // editor tree). Compare it as the room would hold it before calling a plain
+  // wording change a structural rewrite that needs the whole-document lease.
+  const changed =
+    !sheetPlan && quick.includes("artifact:structure")
+      ? changedArtifactRegionIds(typeKey, current.content, projectedThroughAdapter(adapter, value.content))
+      : quick;
   const descriptors = sheetPlan
     ? null
     : new Map(

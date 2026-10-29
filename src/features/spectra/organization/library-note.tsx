@@ -107,18 +107,24 @@ export function PickMark() {
 
 /** What a card reads its face from. */
 export function previewSource(node: TreeNode): PreviewSource {
+  // A reference (a workspace import adds these for work filed elsewhere) reads the work it points at.
+  const sourceId = node.kind === "link" && node.target?.kind === "work" ? node.target.sourceId : node.sourceId;
   return {
-    _id: node.sourceId ?? node.nodeId,
+    _id: sourceId ?? node.nodeId,
     // Without its source there is nothing to read; a file's face needs no read.
-    blueprintKey: node.sourceId ? workType(node) : "resource",
+    blueprintKey: sourceId ? workType(node) : "resource",
     updatedAt: node.source?.updatedAt ?? node.updatedAt,
+    // A file's name says what it is, and so whether its card can draw it.
+    title: sourceId ? node.name : undefined,
   };
 }
 
-/** The card kind a shelf row is: its work's type, or a thread. */
+/** The card kind a shelf row is: its work's type (a reference's, the work it points at), or a thread. */
 export function workType(node: TreeNode): PresentedWorkType {
   if (node.kind === "thread") return "thread_reference";
-  return (node.source?.blueprintKey as PresentedWorkType | undefined) ?? "resource";
+  if (node.kind === "link" && node.target?.kind === "thread") return "thread_reference";
+  const key = node.source?.blueprintKey ?? (node.kind === "link" ? node.target?.typeKey : undefined);
+  return (key as PresentedWorkType | undefined) ?? "resource";
 }
 
 /** One row of the side list: a place, or loose work, marked in its own colour. */

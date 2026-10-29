@@ -198,6 +198,191 @@
   background: var(--success);
 }
 
+/* The task studio's head: a round check beside the title, as in any to-do
+   list. Pressing it fills it green and strikes the title through. */
+.task-top {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.task-top .task-kicker {
+  padding-left: 42px;
+}
+.task-top-line {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+}
+.task-check {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  margin-top: calc((1.2em - 28px) / 2);
+  font-size: clamp(26px, 2.2vw, 32px);
+  place-items: center;
+  border: 2px solid color-mix(in oklab, var(--task-ink) 55%, var(--border-strong));
+  border-radius: var(--radius-pill);
+  color: #fff;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+.task-check:hover:not(:disabled, [aria-checked="true"]) {
+  border-color: var(--success);
+  background: color-mix(in oklab, var(--success) 10%, transparent);
+}
+.task-check:active:not(:disabled) {
+  transform: scale(0.9);
+}
+.task-check:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--success));
+  outline-offset: 3px;
+}
+.task-check[aria-checked="true"] {
+  border-color: var(--success);
+  background: var(--success);
+}
+
+/* Its details, one per line: what it is on the left, the value on the right. */
+.task-props {
+  display: grid;
+  margin: -4px 0 0 42px;
+}
+.task-prop {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--card-border-soft);
+}
+.task-prop:last-child {
+  border-bottom: 0;
+}
+.task-prop > dt {
+  padding-top: 5px;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+.task-prop > dd {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-ui);
+}
+.task-prop .task-when-sentence {
+  font-size: var(--text-ui);
+  color: var(--text-primary);
+}
+/* Selects sit flush with the words above them; their padding hangs left. */
+.task-prop > dd button[role="combobox"] {
+  margin-left: -10px;
+}
+.task-prop .task-elapsed {
+  width: min(320px, 100%);
+}
+.task-prop-minutes {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+.task-prop-minutes .sheet-input {
+  width: 88px;
+}
+.task-prop .task-links {
+  padding-top: 1px;
+}
+
+/* Priority: three words in a row, the chosen one inked. */
+.task-priority {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--card-border);
+  border-radius: 9px;
+  background: var(--card-paper);
+}
+.task-priority button {
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 7px;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+.task-priority button:hover:not(:disabled):not([aria-checked="true"]) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.task-priority button[aria-checked="true"] {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.task-priority button[data-level="high"][aria-checked="true"] {
+  background: color-mix(in oklab, var(--danger) 13%, var(--card-paper));
+  color: color-mix(in oklab, var(--danger) 85%, var(--text-primary));
+}
+.task-priority button[data-level="low"][aria-checked="true"] {
+  color: var(--text-secondary);
+}
+.task-priority button:disabled {
+  cursor: default;
+}
+
+/* What else a task can hold, one word each, added on demand. */
+.task-prop-more > dd {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px 2px;
+}
+.task-prop-more button {
+  height: 28px;
+  padding: 0 9px;
+  margin-left: -9px;
+  margin-right: 9px;
+  border-radius: 7px;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+.task-prop-more button:hover {
+  background: color-mix(in oklab, var(--task-ink) 9%, transparent);
+  color: var(--text-primary);
+}
+
+.task-foot {
+  display: flex;
+  justify-content: flex-start;
+  padding-top: 4px;
+  border-top: 1px solid var(--card-border-soft);
+}
+.task-export {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: -8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+}
+.task-export:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
 /* What the school asked: a slip pinned into the sheet, read only. */
 .task-brief {
   padding: 14px 18px 16px;
@@ -559,6 +744,24 @@
 [data-mode="split"] .task-when-target {
   margin-left: 0;
 }
+/* Narrow: the details stop indenting under the check and their labels shrink. */
+[data-mode="split"] .task-props,
+.task-peek .task-props {
+  margin-left: 0;
+}
+[data-mode="split"] .task-prop,
+.task-peek .task-prop {
+  grid-template-columns: 92px minmax(0, 1fr);
+}
+@container spectra-studio (max-width: 420px) {
+  .task-prop {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .task-prop > dt {
+    padding-top: 0;
+  }
+}
 
 /* How much of its time is gone: a hairline from the day it was added to the
    day it is due, filled to today, in the task's ink. */
@@ -662,8 +865,21 @@
 .task-peek .task-stamp-day {
   font-size: 20px;
 }
-.task-peek .task-title {
+.task-peek .task-title,
+.task-peek .task-check {
   font-size: 21px;
+}
+.task-peek .task-check {
+  width: 22px;
+  height: 22px;
+  margin-top: calc((1.2em - 22px) / 2);
+}
+.task-peek .task-top-line {
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+}
+.task-peek .task-top .task-kicker {
+  padding-left: 32px;
 }
 .task-peek-foot {
   display: flex;

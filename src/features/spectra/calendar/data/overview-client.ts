@@ -108,8 +108,11 @@ export async function fetchCalendarOverview(
     // A proxy error page is HTML; its parse error is not a Calendar message.
     const payload = await response.json().catch(() => null);
     options.signal?.throwIfAborted();
-    if (!response.ok)
-      throw new Error(payload?.error?.message ?? "Could not load Calendar.");
+    if (!response.ok) {
+      const message = payload?.error?.message ?? "Could not load Calendar.";
+      // Keep the code where the caller reads it: someone in no school is sent to their invitation, not told to retry.
+      throw new Error(payload?.error?.code === "AUTH_NO_SCHOOL" ? `AUTH_NO_SCHOOL: ${message}` : message);
+    }
     const data = payload.data as Record<string, unknown>;
     const pagination = data.pagination as
       Partial<CalendarPagination> | undefined;

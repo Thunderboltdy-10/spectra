@@ -5,17 +5,21 @@
  * and the week across the top is a dot for every task due, in the same inks.
  */
 
+/* Two columns only when the page itself has room for both (not the window:
+   with a task open beside it, the page is half as wide). */
 .school-columns {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   gap: 40px;
-  align-items: start;
+  align-items: flex-start;
 }
-
-@media (min-width: 1280px) {
-  .school-columns {
-    grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
-  }
+.school-columns > :first-child {
+  min-width: 0;
+  flex: 999 1 520px;
+}
+.school-columns > :last-child:not(:first-child) {
+  min-width: 0;
+  flex: 1 1 340px;
 }
 
 .school-heading {
@@ -48,6 +52,52 @@ section:first-child > .school-heading:first-child {
 
 .school-heading[data-late] {
   color: var(--danger);
+}
+
+/* The heading is the fold: press it to put a group away or bring it back. */
+.school-heading-toggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-left: -4px;
+  padding: 2px 6px 2px 4px;
+  border-radius: var(--radius-control, 8px);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.school-heading-toggle:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.school-heading-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
+
+.school-heading-toggle:disabled {
+  cursor: default;
+}
+
+.school-heading-chevron {
+  align-self: center;
+  color: var(--text-tertiary);
+  transition: transform 160ms ease;
+}
+
+[data-folded] > .school-heading .school-heading-chevron {
+  transform: rotate(-90deg);
+}
+
+[data-folded] > .school-heading {
+  margin-bottom: 0;
+}
+
+.school-find {
+  display: flex;
+  justify-content: flex-start;
+  margin: 20px 0 -8px;
 }
 
 .school-class-dot {
@@ -574,7 +624,12 @@ section:first-child > .school-heading:first-child {
   box-shadow: 0 0 0 2px var(--focus-ring-color);
 }
 
-.school-choice-item[aria-pressed="true"] {
+.school-choice-item[data-active] {
+  background: var(--card-paper);
+  color: var(--text-primary);
+}
+
+.school-choice-item:is([aria-pressed="true"], [aria-selected="true"]) {
   background: var(--card-paper);
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--class-ink) 30%, var(--card-border));
   color: var(--text-primary);
@@ -592,7 +647,7 @@ section:first-child > .school-heading:first-child {
   transition: background-color var(--motion-fast) var(--ease-standard);
 }
 
-.school-choice-item[aria-pressed="true"] .school-choice-box {
+.school-choice-item:is([aria-pressed="true"], [aria-selected="true"]) .school-choice-box {
   background: var(--class-ink);
   box-shadow: none;
 }

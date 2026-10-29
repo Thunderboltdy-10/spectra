@@ -183,7 +183,7 @@ export function createManageBacProviderFixture({
       });
     if (url.pathname === "/v2p2/students/9001/memberships")
       return send(response, 200, {
-        memberships: [
+        memberships: url.searchParams.get("archived") === "true" ? [] : [
           { id: 1001, user_id: 9001, class_id: 101, class_name: "Mathematics HL", archived: false },
           { id: 1002, user_id: 9001, class_id: 202, class_name: "History HL", archived: false },
           // Another student's row never reaches Spectra.

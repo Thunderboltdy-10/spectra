@@ -1,5 +1,6 @@
 import { createRunItem } from "@/features/spectra/actions/protocol";
-import { runHarness, type HarnessEvent, type RunCheckpoint } from "@/features/spectra/ai/harness/run";
+import { threadFold, threadFoldTranscript } from "@/features/spectra/ai/harness/compaction";
+import { modelSummariser, runHarness, type HarnessEvent, type RunCheckpoint } from "@/features/spectra/ai/harness/run";
 import type { LoopState } from "@/features/spectra/ai/harness/loop";
 import { alwaysAllowLabel, withThreadAllows } from "@/features/spectra/ai/harness/permissions";
 import { citedSources, withoutCitations } from "@/features/spectra/ai/harness/sources";
@@ -13,7 +14,15 @@ import type { PreparedAttachment, ResultAction, RunPointers, Surface } from "./c
 import { AGENT_UNAVAILABLE, AgentUnavailableError, loadAgent, readAgentIndex, readThreadSummary, type ThreadSummary } from "./agents";
 import { loadRunAttachments } from "./attachments";
 import { ConvexHarnessBackend } from "./convex-backend";
-import { attachmentParts, buildEnvironment, readPermissions, readThreadHistory, validTimeZone } from "./environment";
+import {
+  EMPTY_HISTORY,
+  attachmentParts,
+  buildEnvironment,
+  readPermissions,
+  readThreadHistory,
+  validTimeZone,
+  type ThreadHistory,
+} from "./environment";
 import { mutate, query } from "./io";
 import {
   coalesceTextDeltas,
@@ -167,6 +176,33 @@ async function readAgents(params: AttemptParams, thread: Promise<ThreadSummary |
   return retained ? { agent: retained, agents: [] } : { agent: null, agents: index };
 }
 
+/** How long folding a thread's notes may take after the reply is out. */
+const FOLD_TIMEOUT_MS = 90_000;
+
+/**
+ * Fold the oldest of a long thread's messages into its running notes, so the
+ * next run, however much later, still knows the whole conversation.
+ */
+async function foldThreadHistory(params: AttemptParams, history: ThreadHistory) {
+  const fold = params.threadId ? threadFold(history.unfolded) : null;
+  if (!fold) return;
+  const notes = (
+    await modelSummariser({
+      transcript: threadFoldTranscript(history.notes, fold.older),
+      signal: AbortSignal.timeout(FOLD_TIMEOUT_MS),
+    })
+  ).trim();
+  if (!notes) return;
+  await mutate("spectraThreads:recordThreadNotes", {
+    actorClerkId: params.actorClerkId,
+    threadId: params.threadId,
+    runId: params.runId,
+    executionId: params.executionId,
+    notes,
+    through: fold.through,
+  });
+}
+
 export function runHarnessAttempt(params: AttemptParams, emit: (event: unknown) => void) {
   return withRunUsageLedger(() =>
     withSpectraRunLog({ runId: params.runId, executionId: params.executionId }, () => attempt(params, emit)),
@@ -204,7 +240,7 @@ async function readBeforeFirstTurn(params: AttemptParams) {
       workspaceId: params.workspaceId,
       attachments: params.attachments,
     }),
-    params.mode === "start" ? readThreadHistory(actorClerkId, params.threadId, runId) : Promise.resolve([]),
+    params.mode === "start" ? readThreadHistory(actorClerkId, params.threadId, runId) : Promise.resolve(EMPTY_HISTORY),
     thread,
   ]);
   return { loaded, agents, permissions, environment, history, threadSummary };
@@ -425,7 +461,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       signal,
       prompt: params.prompt,
       attachments: attachmentParts(params.attachments),
-      history,
+      history: history.messages,
       environment: {
         ...environment,
         timeZone,
@@ -513,19 +549,24 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     }
 
     if (result.status === "stopped") {
+      // A stopped run always leaves its reply in the thread, however little it said: the words so far, the work it
+      // touched and its trace stay with the conversation instead of vanishing with the live view.
+      const content = reply || (touches.some((touch) => touch.action !== "referenced") ? "Stopped. What was done before stopping is kept." : "Stopped before replying.");
+      await saveAssistantMessage({
+        actorClerkId,
+        threadId: params.threadId,
+        runId,
+        executionId,
+        content,
+        affected: backend.affected,
+        artifacts: touches,
+        caption: finalCaption,
+        widgets: result.state.widgets,
+        sources: citedSources(content, result.state.sources),
+        model: getSpectraModelId(),
+      }).catch(() => null);
       publish({ type: "stopped", runId, partial: Boolean(reply || touches.length) });
       await flushEvents();
-      if (reply)
-        await saveAssistantMessage({
-          actorClerkId,
-          threadId: params.threadId,
-          runId,
-          executionId,
-          content: reply,
-          affected: backend.affected,
-          widgets: result.state.widgets,
-          sources: citedSources(reply, result.state.sources),
-        }).catch(() => null);
       return;
     }
 
@@ -612,6 +653,11 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     publish({ type: "text_replace", runId, content });
     publish({ type: "final", runId, summary: content, card: streamCard(card) });
     await flushEvents();
+    titleWrites.push(
+      foldThreadHistory(params, history).catch((error) =>
+        runLog().warn("spectra.harness.thread_fold", { error: error instanceof Error ? error.message : String(error) }),
+      ),
+    );
     runLog().info("spectra.harness.completed", { durationMs: Date.now() - started, turns: result.state.turns });
   } catch (error) {
     clearInterval(heartbeat);

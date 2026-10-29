@@ -630,6 +630,15 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     reach: tool("devices", { fixed: { action: "add_folder" }, appCommand: "control_device", example: {} }),
   },
   {
+    id: "devices.add_files",
+    area: "devices",
+    title: "Add files",
+    description: "Open the native picker so the user chooses one or more individual files to sync, without granting access to their folder.",
+    keywords: ["sync files", "select files", "single file", "multiple files", "bridge files"],
+    ui: ["app.devices.add-files"],
+    reach: tool("devices", { fixed: { action: "add_files" }, appCommand: "control_device", example: {} }),
+  },
+  {
     id: "devices.retry_folder",
     area: "devices",
     title: "Retry a folder",
@@ -711,11 +720,19 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     title: "Connect an account",
     description: "Connect or disconnect an outside service.",
     ui: ["app.providers.connect"],
-    server: ["managebac:configure", "managebac:disconnect", "managebac:reopenBlocked"],
+    server: ["managebac:configure", "managebac:disconnect", "managebac:reopenBlocked", "managebac:confirmSchoolSetup"],
     reach: user("Connecting a service goes through its own sign-in, which only the user completes."),
   },
 
   // Sharing
+  {
+    id: "sharing.audience",
+    area: "sharing",
+    title: "Choose a workspace's sharing audience",
+    description: "Choose whether everyone can edit, whether new work is shared, which works share access, and which class or workspace is linked.",
+    server: ["sharingPeople:setEveryoneCanEdit", "workspaceSharing:setShareNewWork", "workspaceSharing:setWorksShared", "workspaceSharing:link", "workspaceSharing:unlink", "workspaceSharing:inviteClass"],
+    reach: user("Changing an entire audience or the default access of future work requires the user's own choice in sharing settings. Spectra can propose individual invitations through share."),
+  },
   {
     id: "sharing.change",
     area: "sharing",
@@ -1064,6 +1081,8 @@ export const SERVER_PLUMBING: Readonly<Record<string, string>> = {
   "localStudentRehearsal:*": "Local-only rehearsal fixtures for development.",
   "managebac:replaceCapabilityManifest": "ManageBac sync protocol.",
   "managebac:claimScheduledSync": "ManageBac sync protocol.",
+  "managebac:claimLoginSync": "Claims the one refresh associated with the user's sign-in; it is not a separate AI action.",
+  "managebac:finishLoginSync": "Acknowledges completion of the refresh claimed during sign-in.",
   "managebac:connectorContext": "ManageBac sync protocol.",
   "managebac:beginSync": "ManageBac sync protocol.",
   "managebac:commitIdentityResolution": "ManageBac sync protocol.",
@@ -1129,6 +1148,7 @@ export const SERVER_PLUMBING: Readonly<Record<string, string>> = {
   "spectraRuns:setResearchEvidence": "Spectra's own run machinery.",
   "spectraRuns:beginRunAttachmentUpload": "Upload protocol for message attachments.",
   "spectraThreads:applyGeneratedMetadata": "Spectra's own run machinery.",
+  "spectraThreads:recordThreadNotes": "Spectra's own run machinery: a thread's running notes.",
   "spectraThreads:createFromRun": "Spectra's own run machinery.",
   "spectraWorkspaces:createPending": "Spectra's own run machinery.",
   "spectraWorkspaces:finalizePending": "Spectra's own run machinery.",

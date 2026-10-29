@@ -6,6 +6,7 @@ import { requireActorArtifactCapability } from "./authorityShared";
 import { canonicalArtifactWriteContent, resolveArtifactWriteInput } from "../src/features/spectra/operations/artifact-write-content";
 import { classifyArtifactContentWipe } from "../src/features/spectra/operations/artifact-content-wipe";
 import { isArtifactTypeKey } from "../src/features/spectra/artifacts/registry";
+import { withoutDerivedNativeBinding, withoutFileOwnedFields } from "../src/features/spectra/artifacts/native-binding";
 import { assertPlannerSourceEdit } from "../shared/planner-source.mjs";
 import { isDurableContentRef } from "../shared/durable-content";
 
@@ -291,7 +292,9 @@ export async function buildAiArtifactContentEvidence(args: {
   const after = canonicalArtifactWriteContent(type, args.afterContent);
   const expected = resolveArtifactWriteInput(type, before, args.input, args.prompt);
   const afterDigest = await artifactScopeDigest(after);
-  if (afterDigest !== await artifactScopeDigest(expected.content)) throw new Error("AI_ARTIFACT_RESULT_SCOPE_MISMATCH");
+  const comparable = (content: unknown) => withoutFileOwnedFields(withoutDerivedNativeBinding(content));
+  if (await artifactScopeDigest(comparable(after)) !== await artifactScopeDigest(comparable(expected.content)))
+    throw new Error("AI_ARTIFACT_RESULT_SCOPE_MISMATCH");
   return {
     version: 1, operationDigest: args.operationDigest, sourceContentIdentity: args.sourceContentIdentity,
     baseContentDigest: await artifactScopeDigest(before), resultContentDigest: afterDigest,

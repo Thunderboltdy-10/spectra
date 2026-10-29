@@ -31,6 +31,14 @@ function normalizeErrorStatus(message: string) {
   )
     return 404;
   if (message.startsWith("INVITATION_EMAIL_FAILED")) return 502;
+  if (message.startsWith("INTEGRATION_RATE_LIMITED")) return 429;
+  if (message.startsWith("QUIZ_PRACTICE_NOT_PUBLISHED:")) return 409;
+  // ManageBac refused the key: the administrator's to correct, not a server failure.
+  if (
+    message.startsWith("INTEGRATION_KEY_REFUSED") ||
+    message.startsWith("INTEGRATION_CREDENTIAL_REJECTED")
+  )
+    return 422;
   if (
     message.startsWith("INTEGRATION_NOT_READY") ||
     message.startsWith("INTEGRATION_CAPABILITY_REQUIRED") ||

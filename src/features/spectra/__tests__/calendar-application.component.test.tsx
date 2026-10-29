@@ -350,6 +350,30 @@ describe("Calendar application", () => {
     );
   });
 
+  it("saves the same time shown by a drag preview when grabbed below the top of an event", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
+    installFetch(() => undefined, [{ ...workBlock(), id: "event-drag", kind: "personal_event", title: "Dentist", taskItemId: undefined }]);
+    render(<CalendarApplication />);
+    const block = await screen.findByTitle(blockTitled("Dentist"));
+    const column = block.parentElement!;
+    const nextDay = column.nextElementSibling as HTMLElement;
+    const rectangle = (top: number, height: number) => ({ top, height, left: 0, right: 100, bottom: top + height, width: 100, x: 0, y: top, toJSON: () => ({}) });
+    vi.spyOn(block, "getBoundingClientRect").mockReturnValue(rectangle(100, 60));
+    vi.spyOn(nextDay, "getBoundingClientRect").mockReturnValue(rectangle(0, 1440));
+    const drag = (type: string, element: HTMLElement, clientY: number) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "clientY", { value: clientY });
+      fireEvent(element, event);
+    };
+    drag("dragstart", block, 130);
+    drag("dragover", nextDay, 570);
+    expect(within(nextDay).getByText(/9:00.*10:00/)).toBeTruthy();
+    drag("drop", nextDay, 570);
+    await waitFor(() => expect(posts.find(post => post.action === "moveWorkBlock")).toMatchObject({
+      itemId: "event-drag", startAt: new Date(2026, 8, 30, 9, 0).getTime(), endAt: new Date(2026, 8, 30, 10, 0).getTime(),
+    }));
+  });
+
   it("keeps a plan's scheduled block's own actions a right-click away", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
     installFetch(() => undefined, [

@@ -139,7 +139,7 @@ async function ensureInstance(instanceId, options, environment) {
       explicitSource ??
       (existsSync(resolve(repositoryRoot, ".env.local"))
         ? resolve(repositoryRoot, ".env.local")
-        : resolve(repositoryRoot, ".env.local.example"));
+        : resolve(repositoryRoot, ".env.example"));
     if (!existsSync(source)) {
       throw new Error(`No local environment template exists at ${source}.`);
     }

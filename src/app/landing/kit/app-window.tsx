@@ -42,8 +42,8 @@ export function AppWindow({
   threads?: string[];
   /** Whose Spectra it is, for the account line. */
   who?: string;
-  /** "slim" keeps only the glyphs until the pointer opens it; "full" holds it open. */
-  rail?: "full" | "slim";
+  /** "slim" keeps only the glyphs until the pointer opens it; "full" holds it open; "none" shows the page alone. */
+  rail?: "full" | "slim" | "none";
   className?: string;
   children: ReactNode;
   /** What the window shows, for assistive technology. */
@@ -55,6 +55,7 @@ export function AppWindow({
       data-rail={rail}
       aria-label={label}
     >
+      {rail === "none" ? null : (
       <aside className="landing-window-rail" aria-hidden>
         <div className="landing-window-brand">
           <SpectraMark size={20} />
@@ -100,6 +101,7 @@ export function AppWindow({
           <span>{who}</span>
         </div>
       </aside>
+      )}
       <div className="landing-window-sheet">{children}</div>
     </figure>
   );

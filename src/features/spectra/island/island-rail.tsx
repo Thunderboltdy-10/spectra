@@ -20,7 +20,9 @@ import type { TabGhost as TabGhostRect } from "./use-tab-drag";
 export const RAIL_DONE = 8;
 
 export type RailHandlers = {
-  onHover: (tab: IslandTab) => void;
+  onHover: (tab: IslandTab, point: { x: number; y: number }) => void;
+  onMove: (tab: IslandTab, point: { x: number; y: number }) => void;
+  onLeave: (tab: IslandTab) => void;
   onPress: (tab: IslandTab) => void;
   onMenu: (tab: IslandTab, x: number, y: number) => void;
   onPointerDown: (tab: IslandTab, event: ReactPointerEvent<HTMLButtonElement>) => void;
@@ -223,7 +225,9 @@ function RailTab({
       aria-pressed={current}
       aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight Delete"
       style={{ "--order": order } as CSSProperties}
-      onPointerEnter={() => handlers.onHover(tab)}
+      onPointerEnter={(event) => handlers.onHover(tab, { x: event.clientX, y: event.clientY })}
+      onPointerMove={(event) => handlers.onMove(tab, { x: event.clientX, y: event.clientY })}
+      onPointerLeave={() => handlers.onLeave(tab)}
       onPointerDown={(event) => handlers.onPointerDown(tab, event)}
       onClick={() => handlers.onPress(tab)}
       onContextMenu={(event) => {

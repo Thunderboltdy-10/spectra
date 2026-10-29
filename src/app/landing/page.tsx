@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { LandingClient } from "./landing-client";
 
-export const dynamic = "force-dynamic";
-
 export const metadata: Metadata = {
   title: "Spectra landing (preview)",
   description:

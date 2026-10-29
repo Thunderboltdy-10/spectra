@@ -59,7 +59,7 @@ export const WEEK_REPLY: Reply = {
 export const MAKE_REPLY: Reply = {
   key: "make",
   matches: has(/\bquiz\b/i, /\bflash ?cards?\b/i, /\bslides?\b/i, /\brevise\b/i, /\bstudy\b/i, /\btest me\b/i),
-  title: "Revision for Thursday",
+  title: `Revision for ${dayName(test.startAt!)}`,
   steps: [
     { label: "Read Cell respiration notes", work: WORKS.notes._id },
     { label: "Made a quiz", work: WORKS.quiz._id },

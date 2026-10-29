@@ -20,7 +20,8 @@ import {
   isProgrammaticOpen,
   useFollowAi,
 } from "./follow-ai";
-import { disengageFollow, isProgrammaticFollowOpen } from "./follow";
+import { disengageFollow, isFollowing, isProgrammaticFollowOpen } from "./follow";
+import { toast } from "@/components/ui/toast";
 import { spectraBus } from "../events";
 import { getSpectraMotionSnapshot } from "../motion/motion-level";
 import type { SpectraCommandOutcome } from "../events/contracts";
@@ -355,6 +356,9 @@ export function startAppChoreographyMaintenance(): () => void {
   const onInput = (event: Event) => {
     if (isProgrammaticOpen() || isProgrammaticFollowOpen()) return;
     if (isFollowControlEvent(event)) return;
+    // Watching someone work is not handing the page back: pressing, scrolling, selecting and reading all go on
+    // while following. Only what would take the page away from them (leaving it, editing under their hands) is held.
+    if (isFollowingAi() || isFollowing()) return;
     const interaction = event.type === "pointerdown"
       ? "pointer"
       : event.type === "wheel"
@@ -386,6 +390,38 @@ export function startAppChoreographyMaintenance(): () => void {
     if (phase === "completed" || phase === "partial" || phase === "failed" || phase === "cancelled")
       releaseChoreographyActor(runId);
   });
+  const following = () => isFollowingAi() || isFollowing();
+  const holdNotice = () =>
+    toast.info("You're following Spectra", {
+      id: "follow:held",
+      description: "Stop following to move around or edit.",
+      action: { label: "Stop following", onClick: () => {
+        disengageFollowAi();
+        disengageFollow("explicit");
+      } },
+    });
+  // Leaving the page while following: the link is held, with the way out offered.
+  const onClick = (event: MouseEvent) => {
+    if (!following() || isFollowControlEvent(event) || event.defaultPrevented) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target || target.closest("[data-island], [data-side-panel], [role='dialog'], [role='menu']")) return;
+    const link = target.closest<HTMLElement>("a[href], [data-rail-destination], [data-nav-link]");
+    if (!link) return;
+    if (link instanceof HTMLAnchorElement && (link.target === "_blank" || link.getAttribute("href")?.startsWith("#"))) return;
+    event.preventDefault();
+    event.stopPropagation();
+    holdNotice();
+  };
+  // Editing under the hands of whoever is followed: typing, pasting and dropping into the work wait.
+  const onBeforeInput = (event: Event) => {
+    if (!following()) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target?.closest("[data-spectra-studio], [data-spectra-artifact-studio]")) return;
+    event.preventDefault();
+    holdNotice();
+  };
+  window.addEventListener("click", onClick, true);
+  window.addEventListener("beforeinput", onBeforeInput, true);
   window.addEventListener("pointerdown", onInput, true);
   window.addEventListener("keydown", onInput, true);
   window.addEventListener("wheel", onInput, {
@@ -399,6 +435,8 @@ export function startAppChoreographyMaintenance(): () => void {
       window.clearInterval(claimTicker);
       claimTicker = null;
     }
+    window.removeEventListener("click", onClick, true);
+    window.removeEventListener("beforeinput", onBeforeInput, true);
     window.removeEventListener("pointerdown", onInput, true);
     window.removeEventListener("keydown", onInput, true);
     window.removeEventListener("wheel", onInput, true);

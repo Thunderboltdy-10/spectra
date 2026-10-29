@@ -1,11 +1,10 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo, useRef } from "react";
+import { memo, useMemo, useRef } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { openWorkInSide } from "@/features/spectra/components/side-open";
 import type { SpectraArtifact } from "@/features/spectra/data/api";
-import { useNear } from "./build";
+import { useNearAtRest } from "./build";
 
 /*
  * A work's own studio, set into the page the way an embed is set into a
@@ -36,8 +35,13 @@ const ArtifactStudio = dynamic(
 );
 
 const noop = () => undefined;
+const NO_TABS: never[] = [];
 
-export function InlineStudio({
+/**
+ * Kept out of its scene's renders: a scene re-renders on every beat (who is
+ * pointing where, what is said), and the studio under it must not.
+ */
+export const InlineStudio = memo(function InlineStudio({
   work,
   instanceKey,
   label = "Henry's Library",
@@ -52,9 +56,10 @@ export function InlineStudio({
   compact?: boolean;
 }) {
   const dirty = useMemo(() => new Set<string>(), []);
+  const artifacts = useMemo(() => [work], [work]);
   const ref = useRef<HTMLDivElement>(null);
   // A studio is the heaviest thing on the page; it opens only as the reader nears it.
-  const near = useNear(ref);
+  const near = useNearAtRest(ref);
   return (
     <div
       ref={ref}
@@ -68,13 +73,13 @@ export function InlineStudio({
           compact={compact}
           instanceKey={instanceKey}
           artifact={work}
-          artifacts={[work]}
-          tabs={[]}
+          artifacts={artifacts}
+          tabs={NO_TABS}
           dirtyIds={dirty}
           sourceLabel={label}
           onClose={noop}
           onCloseTab={noop}
-          onExpand={() => openWorkInSide(work._id)}
+          onExpand={noop}
           onActivateTab={noop}
           onDirtyChange={noop}
         />
@@ -83,4 +88,4 @@ export function InlineStudio({
       )}
     </div>
   );
-}
+});

@@ -42,9 +42,16 @@ function bandFits(element: Element) {
   return width * height <= BAND_MAX_AREA;
 }
 
+/**
+ * The rich-text editor owns its DOM: it rebuilds any node written into from
+ * outside, and the rebuilt node reads as new content to mark again. Prose has
+ * its band from the editor's own decorations instead.
+ */
+const ownedByEditor = (element: Element) => Boolean(element.closest(".ProseMirror"));
+
 /** Marks `element` as being worked on until the returned function is called. */
 export function markWorking(element: Element) {
-  if (!bandFits(element)) return () => {};
+  if (!bandFits(element) || ownedByEditor(element)) return () => {};
   workingHolds.set(element, (workingHolds.get(element) ?? 0) + 1);
   element.setAttribute("data-life-working", "");
   let held = true;
@@ -59,7 +66,7 @@ export function markWorking(element: Element) {
 
 /** Something Spectra just made lands: the band crosses it once, the way a loaded page settles. */
 export function markArrival(element: Element) {
-  if (element.hasAttribute("data-life-working") || !bandFits(element)) return;
+  if (element.hasAttribute("data-life-working") || !bandFits(element) || ownedByEditor(element)) return;
   element.setAttribute("data-life-working", "arrival");
   window.setTimeout(() => {
     if (element.getAttribute("data-life-working") === "arrival") element.removeAttribute("data-life-working");

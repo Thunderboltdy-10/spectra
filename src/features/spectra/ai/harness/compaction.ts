@@ -61,6 +61,8 @@ export const SUMMARY_INSTRUCTIONS = `Summarise the earlier part of this Spectra 
 ## Facts gathered
 ## Still open
 
+If the transcript opens with NOTES SO FAR, those notes cover everything before it: carry what still matters forward into the new summary, so nothing earlier is lost.
+
 Write plain, compact notes. Do not invent anything.`;
 
 /**
@@ -81,6 +83,33 @@ export function compactionCut(messages: readonly HarnessMessage[], keepTokens: n
   const lastUser = messages.findLastIndex((message) => message.role === "user");
   if (lastUser >= 0 && cut > lastUser) cut = lastUser;
   return cut;
+}
+
+/*
+ * A thread keeps its whole past across runs, weeks apart or not: once enough
+ * messages have built up, the oldest are folded into the thread's running
+ * notes and only the recent ones are replayed verbatim.
+ */
+
+/** Unfolded messages a thread may build up before the oldest are folded. */
+export const THREAD_FOLD_AT = 40;
+/** Messages that stay verbatim after a fold. */
+export const THREAD_KEEP_MESSAGES = 16;
+
+export function threadFold<T extends { createdAt: number }>(unfolded: readonly T[]) {
+  if (unfolded.length <= THREAD_FOLD_AT) return null;
+  const older = unfolded.slice(0, unfolded.length - THREAD_KEEP_MESSAGES);
+  return { older, through: older.at(-1)!.createdAt };
+}
+
+export function threadFoldTranscript(notes: string | undefined, older: readonly HarnessMessage[]) {
+  const transcript = transcriptForSummary(older);
+  return notes?.trim() ? `NOTES SO FAR:\n${notes.trim()}\n\n${transcript}` : transcript;
+}
+
+/** The thread's notes as the first message a run sees. */
+export function notesMessage(notes: string): HarnessMessage {
+  return { role: "user", content: `${SUMMARY_MARKER}\n${notes.trim()}` };
 }
 
 export type Summariser = (input: { transcript: string; signal: AbortSignal }) => Promise<string>;

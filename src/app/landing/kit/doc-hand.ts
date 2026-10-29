@@ -66,3 +66,10 @@ export function replaceText(editor: Editor, text: string, next: string) {
   if (!range) return false;
   return editor.chain().insertContentAt(range, next).run();
 }
+
+/** Takes a mark off `text` again, as a round of the story starts over. */
+export function unmarkText(editor: Editor, text: string, mark: "bold" | "italic" | "highlight" | "underline") {
+  const range = findText(editor, text);
+  if (!range) return false;
+  return editor.chain().setTextSelection(range).unsetMark(mark).setTextSelection(range.to).run();
+}

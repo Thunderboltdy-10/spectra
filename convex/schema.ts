@@ -307,6 +307,22 @@ export default defineSchema({
     .index("by_status_created", ["status", "createdAt"])
     .index("by_created", ["createdAt"]),
 
+  // Walkthrough requests from the landing page's close, one per email
+  // address, read by the platform team in the superadmin's Requests.
+  landingRequests: defineTable({
+    email: v.string(),
+    name: v.string(),
+    school: v.string(),
+    role: v.string(),
+    message: v.string(),
+    usesManageBac: v.boolean(),
+    status: v.union(v.literal("new"), v.literal("answered"), v.literal("closed")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_email", ["email"])
+    .index("by_status_created", ["status", "createdAt"]),
+
   schoolRequests: defineTable({
     schoolId: v.optional(v.id("schools")),
     requestedByAccountId: v.id("accounts"),
@@ -4231,6 +4247,8 @@ export default defineSchema({
     sourceUpdatedAt: v.number(),
     indexedAt: v.number(),
     chunkCount: v.number(),
+    /** What the item is about, in words: its most central passages, nearest the centroid. */
+    about: v.optional(v.string()),
     embeddingVersion: v.optional(v.string()),
     embeddingState: v.union(v.literal("complete"), v.literal("pending"), v.literal("disabled")),
     centroid: v.optional(v.array(v.float64())),
@@ -4515,7 +4533,10 @@ export default defineSchema({
     /** When the generated title was written. It is written once, never replaced. */
     titleGeneratedAt: v.optional(v.number()),
     summaryShort: v.optional(v.string()),
+    /** Running notes on everything before `summaryThrough`, so a thread keeps its whole past. */
     summaryLong: v.optional(v.string()),
+    /** createdAt of the last message folded into summaryLong. */
+    summaryThrough: v.optional(v.number()),
     origin: v.union(
       v.literal("chat"),
       v.literal("workspace"),

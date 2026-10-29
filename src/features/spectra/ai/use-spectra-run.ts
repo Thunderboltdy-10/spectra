@@ -171,8 +171,8 @@ export type SpectraLiveExchange = Omit<HarnessExchangeFields, "steps"> & {
     status: "running" | "done" | "error";
     createdAt: number;
   }>;
-  /** "waiting": the run asked a question or for approval and is paused. */
-  status: "starting" | "streaming" | "waiting" | "failed";
+  /** "waiting": the run asked a question or for approval and is paused. "stopped": the user stopped it; what it showed stays. */
+  status: "starting" | "streaming" | "waiting" | "failed" | "stopped";
   startedAt: number;
 };
 
@@ -792,11 +792,8 @@ export function useSpectraRun({
             // Durable history can replay an older attempt's terminal event
             // while a retry is already active. Its card keeps the history;
             // only the live request path raises a toast for a current failure.
-            if (
-              event.type === "error" ||
-              event.type === "stopped" ||
-              event.type === "interrupted"
-            )
+            // A stopped run keeps its live view until the saved reply replaces it.
+            if (event.type === "error" || event.type === "interrupted")
               setLiveExchange((current) =>
                 current?.runId === tab.runId ? null : current,
               );
@@ -1768,11 +1765,16 @@ export function useSpectraRun({
         publishActiveRuns();
       }
       setActiveRequestCount((count) => Math.max(0, count - 1));
+      // What the run showed stays where it was, finished as it stood, until its saved reply takes its place.
       setLiveExchange((current) =>
         current &&
         ((!targetRunId && current.id === submissionKey) ||
           current.runId === targetRunId)
-          ? null
+          ? {
+              ...current,
+              status: "stopped",
+              steps: current.steps.map((step) => (step.status === "running" ? { ...step, status: "done" as const } : step)),
+            }
           : current,
       );
       if (targetRunId)

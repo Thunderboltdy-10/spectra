@@ -22,6 +22,7 @@ import {
 import { metricDefinition } from "@/features/spectra/administration/metric-registry";
 import { EmergencyStop } from "@/features/spectra/administration/emergency-stop";
 import { FeedbackInbox } from "@/features/spectra/administration/feedback-inbox";
+import { LandingInbox } from "@/features/spectra/administration/landing-inbox";
 import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { PageBody, PageHeader } from "@/components/ui/page-header";
 import { LoadingRows } from "@/components/ui/page-state";
@@ -1657,6 +1658,7 @@ function RequestsSurface({
   return (
     <>
       <div className="admin-page">
+        <LandingInbox />
         <FeedbackInbox />
         <section>
           <AdminSectionHeader

@@ -1,3 +1,6 @@
+import { seededRandom, type Random } from "./hand/random";
+import { planStroke, type Stroke } from "./hand/stroke";
+
 /**
  * Cursor travel physics.
  *
@@ -70,6 +73,8 @@ function easeInOutQuad(t: number): number {
 }
 
 type Journey = {
+  /** A hand's path (bowed, minimum-jerk, a slight overshoot) for an AI body. */
+  stroke?: Stroke;
   fromX: number;
   fromY: number;
   toX: number;
@@ -96,7 +101,19 @@ export class CursorTravel {
   private lastY = 0;
   private speed = 0;
 
-  constructor(private readonly reducedMotion: () => boolean) {}
+  private readonly random?: Random;
+
+  /**
+   * `handSeed` gives the body a hand: an AI's journeys then follow the bowed,
+   * accelerating path of a real pointer. A person's own cursor needs none,
+   * since their real path arrives with their frames.
+   */
+  constructor(
+    private readonly reducedMotion: () => boolean,
+    handSeed?: string,
+  ) {
+    if (handSeed) this.random = seededRandom(handSeed);
+  }
 
   /** Current settled position, or null when nothing has been placed yet. */
   get position(): { x: number; y: number } | null {
@@ -140,7 +157,12 @@ export class CursorTravel {
       this.journey = null;
       return;
     }
+    const stroke =
+      kind === "fade" || !this.random
+        ? undefined
+        : planStroke({ x: current.x, y: current.y }, { x, y }, this.random);
     this.journey = {
+      ...(stroke && stroke.durationMs > 0 ? { stroke } : {}),
       fromX: current.x,
       fromY: current.y,
       toX: x,
@@ -149,7 +171,9 @@ export class CursorTravel {
       duration:
         kind === "fade"
           ? Math.min(300, travelDuration(distance))
-          : travelDuration(distance),
+          : stroke && stroke.durationMs > 0
+            ? stroke.durationMs
+            : travelDuration(distance),
       kind,
     };
   }
@@ -168,14 +192,17 @@ export class CursorTravel {
     if (this.journey) {
       const elapsed = now - this.journey.startedAt;
       progress = Math.max(0, Math.min(1, elapsed / this.journey.duration));
+      const handPoint = this.journey.stroke?.at(elapsed);
       const eased =
         this.journey.kind === "fade"
           ? easeInOutQuad(progress)
           : easeOutExpo(progress);
-      this.x =
-        this.journey.fromX + (this.journey.toX - this.journey.fromX) * eased;
-      this.y =
-        this.journey.fromY + (this.journey.toY - this.journey.fromY) * eased;
+      this.x = handPoint
+        ? handPoint.x
+        : this.journey.fromX + (this.journey.toX - this.journey.fromX) * eased;
+      this.y = handPoint
+        ? handPoint.y
+        : this.journey.fromY + (this.journey.toY - this.journey.fromY) * eased;
       kind = this.journey.kind;
       if (progress >= 1) {
         this.x = this.journey.toX;
@@ -208,55 +235,5 @@ export class CursorTravel {
     const t = sample.progress;
     if (t <= 0 || t >= 1) return 1;
     return Math.max(0, 1 - Math.sin(t * Math.PI) * 1.35);
-  }
-}
-
-/* ------------------------------------------------------------------ *
- * Comet trail
- * ------------------------------------------------------------------ */
-
-export type TrailPoint = {
-  x: number;
-  y: number;
-  /** 0..1, where 1 is the freshest point. */
-  strength: number;
-};
-
-/**
- * A short positional memory used to draw the faint comet tail behind a fast
- * journey. It only accrues while the body is genuinely moving quickly, so a
- * working cursor never leaves a permanent smear across the editor.
- */
-export class CometTrail {
-  private points: Array<{ x: number; y: number; at: number }> = [];
-
-  constructor(
-    private readonly maxPoints = 5,
-    private readonly lifetimeMs = 260,
-  ) {}
-
-  push(x: number, y: number, now: number, active: boolean): void {
-    if (!active) {
-      if (this.points.length) this.points = [];
-      return;
-    }
-    const last = this.points[this.points.length - 1];
-    if (last && Math.hypot(x - last.x, y - last.y) < 6) return;
-    this.points.push({ x, y, at: now });
-    if (this.points.length > this.maxPoints) this.points.shift();
-  }
-
-  sample(now: number): TrailPoint[] {
-    this.points = this.points.filter(
-      (point) => now - point.at <= this.lifetimeMs,
-    );
-    const count = this.points.length;
-    return this.points.map((point, index) => ({
-      x: point.x,
-      y: point.y,
-      strength:
-        ((index + 1) / Math.max(1, count)) *
-        Math.max(0, 1 - (now - point.at) / this.lifetimeMs),
-    }));
   }
 }

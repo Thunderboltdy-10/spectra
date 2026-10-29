@@ -39,7 +39,8 @@ export function cellVisualStyle(
   format: SheetCell["format"],
   zoom: number,
 ): CSSProperties {
-  if (!format) return {};
+  // Text sits on the cell's floor unless told otherwise, as the toolbar says.
+  if (!format) return { alignItems: "flex-end" };
   const borders = format.borders;
   const decoration = [
     format.underline ? "underline" : null,
@@ -53,9 +54,9 @@ export function cellVisualStyle(
     alignItems:
       format.verticalAlign === "top"
         ? "flex-start"
-        : format.verticalAlign === "bottom"
-          ? "flex-end"
-          : undefined,
+        : format.verticalAlign === "middle"
+          ? "center"
+          : "flex-end",
     justifyContent:
       format.align === "center"
         ? "center"

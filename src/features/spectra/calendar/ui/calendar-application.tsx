@@ -38,6 +38,7 @@ import {
 } from "../domain/local-days";
 import { requestSpectra } from "../../data/request";
 import { layoutTimedLanes, type TimedLane } from "../domain/timed-lanes";
+import { useClassBook } from "../../school/use-class-book";
 import { useDeadlineClasses, type DeadlineClass } from "../../school/use-deadline-classes";
 import { planWorkId } from "./calendar-plans";
 import { TaskPeek } from "./task-peek";
@@ -398,8 +399,10 @@ type ResizeGesture = {
   endAt: number;
 };
 
-export function CalendarApplication() {
-  const initialStart = startOfLocalWeek(Date.now());
+/** `startAt` opens the calendar on that day instead of this week's Monday (the landing page shows the days ahead). */
+/** `still`: a picture of the calendar (the landing page), where a wheel always scrolls the page around it. */
+export function CalendarApplication({ startAt, still = false }: { startAt?: number; still?: boolean } = {}) {
+  const initialStart = startAt ?? startOfLocalWeek(Date.now());
   const [daySpan, setDaySpanState] = useState(7);
   const [days, setDays] = useState(() => daysAround(initialStart));
   const [focusedStart, setFocusedStart] = useState(initialStart);
@@ -624,8 +627,10 @@ export function CalendarApplication() {
       ),
     [overview?.items, visibleLayers],
   );
-  // A deadline, and time given to one, wears its class's ink.
+  // A deadline, and time given to one, wears its class's ink; so does a lesson.
   const classOf = useDeadlineClasses();
+  const book = useClassBook();
+  const lessonInkOf = useCallback((item: CalendarItem) => (item.classId ? book.of(item.classId, item.title)?.ink : undefined), [book]);
   const schoolClassOf = useMemo(() => {
     const byId = new Map((overview?.items ?? []).map((item) => [item.id, item]));
     return (item: CalendarItem) => {
@@ -1119,7 +1124,7 @@ export function CalendarApplication() {
 
   useEffect(() => {
     const scroller = scrollerRef.current;
-    if (!scroller) return;
+    if (!scroller || still) return;
     const onWheel = (event: WheelEvent) => {
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
@@ -1131,7 +1136,7 @@ export function CalendarApplication() {
     };
     scroller.addEventListener("wheel", onWheel, { passive: false });
     return () => scroller.removeEventListener("wheel", onWheel);
-  }, [changeDaySpan, error, overview]);
+  }, [changeDaySpan, error, overview, still]);
 
   const commands: BarCommand[] = [
     { id: "add", icon: "add", label: "Add", pinned: true, onSelect: () => setComposerOpen(true) },
@@ -1268,6 +1273,7 @@ export function CalendarApplication() {
                   merge={mergeTarget}
                   planOf={planOfDeadline}
                   schoolClassOf={schoolClassOf}
+                  lessonInkOf={lessonInkOf}
                   onPlanDragStart={beginPlanDrag}
                   onBlockDragStart={(item, offset) => {
                     dragRef.current = { type: "block", item, grabOffsetMinutes: offset };
@@ -1393,6 +1399,7 @@ function WeekGrid({
   merge,
   planOf,
   schoolClassOf,
+  lessonInkOf,
   onPlanDragStart,
   onBlockDragStart,
   onBlockDragEnd,
@@ -1418,6 +1425,7 @@ function WeekGrid({
   /** The plan a deadline's task has, which dragging the deadline places. */
   planOf: (item: CalendarItem) => CalendarItem | undefined;
   schoolClassOf: (item: CalendarItem) => DeadlineClass | null;
+  lessonInkOf: (item: CalendarItem) => string | undefined;
   onPlanDragStart: (plan: CalendarItem) => void;
   onBlockDragStart: (item: CalendarItem, grabOffsetMinutes: number) => void;
   onBlockDragEnd: () => void;
@@ -1558,6 +1566,7 @@ function WeekGrid({
                     key={item.id}
                     item={item}
                     schoolClass={schoolClassOf(item)}
+                    lessonInk={lessonInkOf(item)}
                     lane={lanes.get(item.id) ?? { lane: 0, lanes: 1 }}
                     timezone={timezone}
                     previewing={gesturePreview?.itemId === item.id}
@@ -1621,6 +1630,7 @@ function timedBlockDuration(item: CalendarItem) {
 function TimedBlock({
   item,
   schoolClass,
+  lessonInk,
   lane,
   timezone,
   previewing,
@@ -1638,6 +1648,8 @@ function TimedBlock({
   item: CalendarItem;
   /** The class a deadline, or time given to it, belongs to, when School knows it. */
   schoolClass: DeadlineClass | null;
+  /** The ink of the class a lesson is for. */
+  lessonInk?: string;
   lane: TimedLane;
   timezone: string;
   previewing: boolean;
@@ -1667,7 +1679,7 @@ function TimedBlock({
   const height = Math.max(24, (duration / HOUR) * HOUR_PX);
   // Blocks sharing time sit side by side, so each one stays clickable.
   const laneWidth = 100 / lane.lanes;
-  const ink = schoolClass?.identity?.ink ?? layer.color;
+  const ink = schoolClass?.identity?.ink ?? lessonInk ?? layer.color;
   /* A deadline is a moment, so it is a pin: when it is due and what, on one
      line in its class's ink. A short block keeps its title on one line too. */
   const due = isDeadline(item);

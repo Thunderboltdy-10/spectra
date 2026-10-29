@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { convexPublicMutation } from "@/lib/convex-server";
 import { EMAIL_INK, EMAIL_SANS, emailPage, escapeHtml } from "@/lib/email-layout";
 
 /*
@@ -9,6 +10,9 @@ import { EMAIL_INK, EMAIL_SANS, emailPage, escapeHtml } from "@/lib/email-layout
  * that are mostly links. A guarded request that looks like a bot is answered
  * as if it went through, so a bot learns nothing. Limits live in memory and
  * reset when the server restarts.
+ *
+ * A request is kept in Convex, one per email address, for the platform team
+ * to read in the superadmin; when email is configured, they are also told.
  */
 
 const HOUR = 60 * 60 * 1000;
@@ -76,6 +80,7 @@ export async function POST(request: NextRequest) {
   const role = text(body.role);
   const message = text(body.message);
   const walkthrough = body.kind === "walkthrough";
+  const usesManageBac = body.usesManageBac === true;
 
   if (!name.trim() || !email.trim() || (walkthrough ? !school.trim() : !message.trim())) {
     return NextResponse.json(
@@ -104,14 +109,36 @@ export async function POST(request: NextRequest) {
   const safeMessage = sanitize(message) || (walkthrough ? "Asked for a walkthrough." : "");
   const subject = walkthrough ? `[Spectra] Walkthrough request from ${safeName}${safeSchool ? `, ${safeSchool}` : ""}` : `[Spectra Contact] New message from ${safeName}`;
 
-  const apiKey = process.env.RESEND_API_KEY;
-  const fromEmail = process.env.INVITE_FROM_EMAIL;
-
-  if (!apiKey || !fromEmail) {
-    // Email is not configured here (development): the request is logged instead of sent.
-    console.info("[contact] Email is not configured; request not sent:", { subject, from: safeEmail });
+  const key = process.env.SPECTRA_SECRET_BRIDGE_KEY;
+  if (!key) {
+    console.error("[contact] SPECTRA_SECRET_BRIDGE_KEY is not set; the request cannot be kept.");
     return NextResponse.json({ error: "Requests cannot be sent from this server yet." }, { status: 503 });
   }
+  try {
+    const kept = await convexPublicMutation<Record<string, unknown>, { status: "sent" | "already" }>("landingRequests:submit", {
+      key,
+      email: safeEmail,
+      name: safeName,
+      school: safeSchool,
+      role: safeRole,
+      message: sanitize(message),
+      usesManageBac,
+    });
+    if (kept.status === "already") {
+      return NextResponse.json(
+        { error: "We already have a request from this address, and we'll write to you there." },
+        { status: 409 },
+      );
+    }
+  } catch (error) {
+    console.error("[contact] Could not keep the request:", error);
+    return NextResponse.json({ error: "The request did not go through. Please try again." }, { status: 500 });
+  }
+
+  // The request is kept; an email to the team is a courtesy, when email is set up.
+  const apiKey = process.env.RESEND_API_KEY;
+  const fromEmail = process.env.INVITE_FROM_EMAIL;
+  if (!apiKey || !fromEmail) return NextResponse.json({ status: "sent" });
 
   try {
     const response = await fetch("https://api.resend.com/emails", {
@@ -125,26 +152,23 @@ export async function POST(request: NextRequest) {
         to: ["pablo.martinez.dovale@gmail.com"],
         reply_to: safeEmail,
         subject,
-        html: contactEmailHtml({ name: safeName, email: safeEmail, school: safeSchool, role: safeRole, message: safeMessage }),
+        html: contactEmailHtml({
+          name: safeName,
+          email: safeEmail,
+          school: safeSchool,
+          role: safeRole,
+          message: walkthrough ? `Uses ManageBac: ${usesManageBac ? "yes" : "no"}
+
+${safeMessage}` : safeMessage,
+        }),
       }),
     });
 
-    if (!response.ok) {
-      console.error("[contact] Resend error:", await response.text());
-      return NextResponse.json(
-        { error: "The request did not go through. Please try again." },
-        { status: 500 },
-      );
-    }
-
-    return NextResponse.json({ status: "sent" });
+    if (!response.ok) console.error("[contact] Resend error:", await response.text());
   } catch (error) {
     console.error("[contact] Send error:", error);
-    return NextResponse.json(
-      { error: "The request did not go through. Please try again." },
-      { status: 500 },
-    );
   }
+  return NextResponse.json({ status: "sent" });
 }
 
 /** The message, laid out on Spectra's paper. Every value is escaped here, once. */

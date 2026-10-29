@@ -59,7 +59,7 @@ export function createArtifactTool(session: HarnessSession): HarnessTool<CreateA
   return {
     name: "create_artifact",
     description: [
-      "Create a new piece of work in the user's library, whole, in this one call: a deck with its theme, every slide and the speaker notes; a document with every section; a workbook with every sheet. Write complete, finished content, never placeholders, and never build it up with edits afterwards.",
+      "Create a new piece of work in the user's library. Something short goes in whole. Substantial work is built in steps: create it with its structure and the first part written for real (a deck's theme and opening slides, a document's opening sections, a workbook's main sheet), then add the rest with edit_artifact a section or a few slides at a time, so it takes shape in front of the user. A deck built that way ends with one design edit over the whole deck. Every part you write is complete and finished, never a placeholder, and never leave empty headings or blank slides waiting.",
       "`content` uses the type's authoring format:",
       formatCheatSheet("create"),
       "Load the type's skill first (load_skill) for anything beyond a simple item. The result reads back what was saved and lists any problems; edit_artifact is for changes after that.",

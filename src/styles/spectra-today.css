@@ -310,13 +310,26 @@
 }
 
 .day-sky-art {
-  width: 64px;
-  height: 40px;
+  width: 132px;
+  height: 76px;
   overflow: visible;
+  filter: drop-shadow(0 10px 18px rgb(40 46 90 / 0.14));
+}
+
+.day-sky-air,
+.day-sky-hills {
+  transition: fill 1.2s ease;
 }
 
 .day-sky-place {
   transition: transform 1.2s var(--ease-standard);
+}
+
+.day-sky-glow {
+  transition:
+    cx 1.2s var(--ease-standard),
+    cy 1.2s var(--ease-standard),
+    opacity 1.2s ease;
 }
 
 .day-sky-rise {
@@ -329,12 +342,21 @@
 }
 
 .day-sky-sun {
-  fill: var(--hue-orange);
+  fill: #ffd25a;
+  stroke: #ffab3d;
+  stroke-width: 1.4;
+}
+
+.day-sky-shine {
+  fill: none;
+  stroke: #fff6cf;
+  stroke-width: 1.6;
+  stroke-linecap: round;
 }
 
 .day-sky-rays {
   fill: none;
-  stroke: var(--hue-yellow);
+  stroke: #ffbf48;
   stroke-width: 2.2;
   stroke-linecap: round;
   transform: rotate(calc(var(--lean-x) * 18deg));
@@ -343,22 +365,24 @@
 }
 
 .day-sky-moon {
-  fill: color-mix(in oklab, var(--hue-yellow) 85%, var(--ink-orange));
-  stroke: color-mix(in oklab, var(--ink-blue) 35%, transparent);
-  stroke-width: 0.8;
+  fill: #f6edcf;
+  filter: drop-shadow(0 0 3px rgb(246 237 207 / 0.7));
   transform: rotate(calc(-20deg + var(--lean-x) * 14deg));
   transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.day-sky-horizon {
-  fill: none;
-  stroke: color-mix(in oklab, var(--ink-orange) 55%, var(--text-tertiary));
-  stroke-width: 2;
-  stroke-linecap: round;
+.day-sky-stars {
+  fill: #fff;
+  transition: opacity 1.2s ease;
 }
 
-.day-sky[data-body="moon"] .day-sky-horizon {
-  stroke: color-mix(in oklab, var(--ink-blue) 45%, var(--text-tertiary));
+.day-sky-stars circle {
+  animation: day-sky-twinkle 3.2s ease-in-out infinite;
+}
+
+.day-sky-edge {
+  fill: none;
+  stroke: rgb(20 19 24 / 0.08);
 }
 
 .day-sky-date {
@@ -378,7 +402,7 @@
 }
 
 .morning-time {
-  margin-top: 6px;
+  margin-top: 12px;
   font-family: var(--font-display);
   font-size: 40px;
   font-weight: 500;
@@ -608,6 +632,12 @@
   }
 }
 
+@keyframes day-sky-twinkle {
+  50% {
+    opacity: 0.35;
+  }
+}
+
 @keyframes day-sky-rays {
   from {
     opacity: 0;
@@ -636,6 +666,7 @@
   .day-sky-place,
   .day-sky-body,
   .day-sky-moon,
+  .day-sky-stars circle,
   .morning-body {
     animation: none !important;
   }

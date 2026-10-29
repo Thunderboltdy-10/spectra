@@ -126,26 +126,113 @@ const textObject = (id: string, text: string, x: number, y: number, width: numbe
   style: { color: INK, ...style },
 });
 
-const slide = (id: string, title: string, body?: string) => ({
+/** A flat shape on a slide: a ground, a panel or a mark. */
+const shapeObject = (id: string, x: number, y: number, width: number, height: number, fill: string, shape = "rectangle", radius = 0) => ({
+  id,
+  type: "shape" as const,
+  x,
+  y,
+  width,
+  height,
+  rotation: 0,
+  content: { shape, text: "" },
+  style: { shape, fill, stroke: fill, strokeWidth: 0, radius },
+});
+
+const ROSE = "#c23b5a";
+const BLUSH = "#ffe3e8";
+const NIGHT = "#4a1a28";
+
+const slide = (id: string, title: string, objects: unknown[], background?: string) => ({
   id,
   title,
-  layoutId: body ? "title-content" : "title-only",
+  layoutId: "blank",
   transition: { kind: "fade" as const, durationMs: 350 },
   speakerNotes: "",
-  objects: [
-    textObject(`${id}-title`, title, 80, body ? 60 : 200, 840, body ? 90 : 130, { fontSize: body ? 40 : 54, fontWeight: 700, align: body ? "left" : "center" }),
-    ...(body ? [textObject(`${id}-body`, body, 80, 170, 840, 320, { fontSize: 24, lineHeight: 1.5 })] : []),
-  ],
+  ...(background ? { background } : {}),
+  objects,
 });
+
+/** The four stages, as cards along the slide with where each happens. */
+const STAGES: Array<[string, string, string]> = [
+  ["Glycolysis", "Cytoplasm", "2 ATP"],
+  ["Link reaction", "Matrix", "2 CO2"],
+  ["Krebs cycle", "Matrix", "2 ATP, 6 NADH"],
+  ["Electron transport", "Cristae", "about 28 ATP"],
+];
 
 export const DECK_CONTENT = normalizePresentationContent({
   theme: { id: "spectra-default" },
   slides: [
-    slide("s1", "Cell respiration, in five slides"),
-    slide("s2", "Why cells respire", "Every cell needs ATP, all the time.\nRespiration releases it from glucose.\nIt is not the same as breathing."),
-    slide("s3", "Four stages", "Glycolysis, in the cytoplasm\nThe link reaction, in the matrix\nThe Krebs cycle, in the matrix\nOxidative phosphorylation, on the cristae"),
-    slide("s4", "Without oxygen", "Only glycolysis runs: 2 ATP per glucose.\nYeast: ethanol and CO2.\nMuscle: lactate."),
-    slide("s5", "Remember for Thursday", "Oxygen is the final electron acceptor.\nThe cristae give the chain its surface.\nAerobic gives about 30 to 32 ATP."),
+    slide(
+      "s1",
+      "Cell respiration, in five slides",
+      [
+        shapeObject("s1-sun", 600, -90, 520, 520, ROSE, "ellipse"),
+        shapeObject("s1-moon", 760, 330, 260, 260, "#ff8fa3", "ellipse"),
+        textObject("s1-class", "Biology SL, unit test revision", 72, 120, 520, 36, { fontSize: 20, fontWeight: 600, color: "#ffb3c0" }),
+        textObject("s1-title", "Cell respiration, in five slides", 72, 170, 560, 180, { fontSize: 60, fontWeight: 700, color: "#fff7f8", lineHeight: 1.05 }),
+        textObject("s1-by", "Henry, from his notes", 72, 440, 400, 32, { fontSize: 18, color: "#f3c6cf" }),
+      ],
+      NIGHT,
+    ),
+    slide("s2", "Why cells respire", [
+      shapeObject("s2-band", 0, 0, 18, 563, ROSE),
+      textObject("s2-title", "Why cells respire", 72, 64, 520, 70, { fontSize: 44, fontWeight: 700 }),
+      textObject("s2-body", "Every cell needs ATP, all the time.\nRespiration releases it from glucose, step by step.\nIt is not the same as breathing.", 72, 170, 500, 260, { fontSize: 28, lineHeight: 1.5 }),
+      shapeObject("s2-panel", 610, 120, 320, 320, BLUSH, "rounded-rectangle", 28),
+      textObject("s2-stat", "30-32", 640, 190, 260, 100, { fontSize: 84, fontWeight: 700, color: ROSE, align: "center" }),
+      textObject("s2-stat-of", "ATP from one glucose, with oxygen", 650, 300, 240, 70, { fontSize: 20, align: "center", lineHeight: 1.35 }),
+    ]),
+    slide("s3", "Four stages", [
+      textObject("s3-title", "Four stages", 72, 56, 600, 70, { fontSize: 44, fontWeight: 700 }),
+      ...STAGES.flatMap(([name, where, yields], index) => {
+        const x = 72 + index * 222;
+        return [
+          shapeObject(`s3-card-${index}`, x, 170, 202, 290, index === 3 ? ROSE : BLUSH, "rounded-rectangle", 22),
+          textObject(`s3-step-${index}`, String(index + 1), x + 22, 190, 60, 60, { fontSize: 40, fontWeight: 700, color: index === 3 ? "#ffd3dc" : ROSE }),
+          textObject(`s3-name-${index}`, name, x + 22, 266, 170, 70, { fontSize: 23, fontWeight: 700, lineHeight: 1.15, color: index === 3 ? "#fff" : INK }),
+          textObject(`s3-where-${index}`, where, x + 22, 346, 170, 30, { fontSize: 17, color: index === 3 ? "#ffe3e8" : "#7a2a3b" }),
+          textObject(`s3-yield-${index}`, yields, x + 22, 400, 170, 40, { fontSize: 16, fontWeight: 600, color: index === 3 ? "#fff" : INK }),
+        ];
+      }),
+    ]),
+    slide("s4", "Without oxygen", [
+      textObject("s4-title", "Without oxygen", 72, 56, 520, 70, { fontSize: 44, fontWeight: 700 }),
+      textObject("s4-body", "Only glycolysis runs.\nYeast makes ethanol and CO2.\nMuscle makes lactate.", 72, 160, 380, 240, { fontSize: 28, lineHeight: 1.5 }),
+      {
+        id: "s4-chart",
+        type: "chart" as const,
+        x: 470,
+        y: 120,
+        width: 460,
+        height: 340,
+        rotation: 0,
+        content: {
+          chartType: "column",
+          title: "ATP from one glucose",
+          categories: ["With oxygen", "Without"],
+          series: [{ name: "ATP", categories: ["With oxygen", "Without"], values: [32, 2] }],
+          showLegend: false,
+        },
+        style: { colors: [ROSE] },
+        altText: "Column chart: 32 ATP with oxygen, 2 without",
+      },
+    ]),
+    slide(
+      "s5",
+      "Remember for the test",
+      [
+        textObject("s5-title", "Remember for the test", 72, 64, 600, 70, { fontSize: 44, fontWeight: 700, color: "#fff7f8" }),
+        textObject("s5-1", "Oxygen is the final electron acceptor.", 120, 190, 760, 40, { fontSize: 26, color: "#fff7f8" }),
+        textObject("s5-2", "The cristae give the chain its surface.", 120, 260, 760, 40, { fontSize: 26, color: "#fff7f8" }),
+        textObject("s5-3", "Aerobic gives about 30 to 32 ATP; without oxygen, 2.", 120, 330, 800, 40, { fontSize: 26, color: "#fff7f8" }),
+        shapeObject("s5-dot-1", 80, 200, 18, 18, "#ff8fa3", "ellipse"),
+        shapeObject("s5-dot-2", 80, 270, 18, 18, "#ff8fa3", "ellipse"),
+        shapeObject("s5-dot-3", 80, 340, 18, 18, "#ff8fa3", "ellipse"),
+      ],
+      NIGHT,
+    ),
   ],
   settings: { aspectRatio: "16:9", defaultTransition: "none", showSlideNumbers: true },
 });

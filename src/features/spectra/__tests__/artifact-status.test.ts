@@ -89,7 +89,7 @@ describe("the status control's states", () => {
     const syncing = status({ replicas: [{ kind: "cloud", state: "current" }, LOCAL], nativeActivity: true, nativeBridgeAvailable: true });
     expect(syncing.state).toBe("syncing");
     expect(syncing.glyph).toBe("syncing");
-    expect(syncing.words).toBe("Updating Essay.docx");
+    expect(syncing.words).toBe("Updating file");
     expect(syncing.running).toBe(true);
   });
 

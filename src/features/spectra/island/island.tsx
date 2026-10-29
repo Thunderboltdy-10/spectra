@@ -48,11 +48,18 @@ import { firstTipMoment } from "../onboarding/first-tips";
 type Shape = "composer";
 type ReplyTo = { runId: string; threadId: string; title: string } | "new" | null;
 
-const CLOSE_DELAY = 450;
-/** A hand resting on a tab this long means to look; passing over it does not. */
-const VIEW_DELAY = 420;
+/** Leaving the island: it settles back quickly, so it never lingers over the page. */
+const CLOSE_DELAY = 220;
+/** A hand resting still on a tab this long means to look; passing over it does not. */
+const VIEW_DELAY = 560;
 /** Moving from one open card's tab to the next. */
-const VIEW_SWITCH_DELAY = 140;
+const VIEW_SWITCH_DELAY = 160;
+/** A card only shown on hover goes this soon after the hand leaves its tab and the card. */
+const PEEK_CLOSE_DELAY = 140;
+/** After a press elsewhere on the island (new thread, stop, send), tabs under the hand stay quiet this long. */
+const PRESS_QUIET_MS = 900;
+/** Movement within this many pixels still counts as resting. */
+const REST_SLOP = 5;
 const ARRIVAL_MS = 1600;
 
 const PLACEHOLDER_TITLE = 36;
@@ -123,6 +130,9 @@ export function Island() {
   const arrivingUntil = useRef(0);
   const closeTimer = useRef(0);
   const viewTimer = useRef(0);
+  const peekTimer = useRef(0);
+  const quietUntil = useRef(0);
+  const restAnchor = useRef<{ x: number; y: number } | null>(null);
   const pointerInside = useRef(false);
   const focusOnShow = useRef(false);
 
@@ -283,7 +293,7 @@ export function Island() {
         setAnnouncement(`${ready}.`);
         // A reply landing in the thread on screen is its own news; work it made elsewhere is still called out.
         const watched = tab.threadId === focusThread && !tab.source.card?.provenance?.artifactTitles?.length;
-        if (!watched) toast.success(ready, { id: `run:${tab.runId}:done`, action: { label: "Open", onClick: () => openRun(tab.runId) } });
+        if (!watched && !madeOnScreen(tab)) toast.success(ready, { id: `run:${tab.runId}:done`, action: { label: "Open", onClick: () => openRun(tab.runId) } });
         radiateFromIsland(STATUS_COLOURS.done, 14, 24);
       } else if (tab.state === "failed_terminal" || tab.state === "paused") {
         toast.error(`${tab.title} stopped with a problem`, { id: `run:${tab.runId}:problem`, action: { label: "Open", onClick: () => openRun(tab.runId) } });
@@ -562,6 +572,7 @@ export function Island() {
   const onLeave = () => {
     pointerInside.current = false;
     window.clearTimeout(viewTimer.current);
+    setView((current) => (current && !current.pinned ? null : current));
     scheduleClose();
   };
 
@@ -588,15 +599,6 @@ export function Island() {
 
   /* ------------------------------------------------------------ sending */
 
-  // The run a new conversation started takes the card as soon as it has a tab.
-  const peekNext = useRef(false);
-  const activeRunId = engine?.activeRunId ?? null;
-  useEffect(() => {
-    if (!peekNext.current || !activeRunId || !allTabs.some((tab) => tab.runId === activeRunId)) return;
-    peekNext.current = false;
-    openView(activeRunId, true);
-  }, [activeRunId, allTabs, openView]);
-
   const send = useCallback(
     (message: ComposerSend) => {
       if (!engine) return;
@@ -618,11 +620,8 @@ export function Island() {
         const trip = life.travel({ strokes }, { absorb: home }, { colour: "spectrum" });
         void within(trip.arrived, 1600).then(receive);
       }
-      // A new conversation has nowhere on the page to show yet: its card opens over its tab, so what was sent is seen
-      // working. A page that binds a thread (chat) shows it itself.
-      const unseen = !focus && !slot?.bindsThread;
-      peekNext.current = unseen;
-      if (unseen) setReaching(true);
+      // Sending never opens a card over the page: the new thread's tab stands on the rail, working, to open when wanted.
+      quietUntil.current = performance.now() + PRESS_QUIET_MS;
       const options = {
         ...(slot?.bindsThread ? {} : { threadId: focus?.threadId ?? null }),
         ...(message.references.length ? { references: message.references } : {}),
@@ -793,12 +792,40 @@ export function Island() {
     void go("composer", { focus: true }).then(() => composerRef.current?.focus());
   };
 
+  /** A card only shown on hover goes once the hand is off both its tab and the card. */
+  const schedulePeekClose = () => {
+    window.clearTimeout(peekTimer.current);
+    peekTimer.current = window.setTimeout(() => {
+      setView((current) => (current && !current.pinned ? null : current));
+    }, PEEK_CLOSE_DELAY);
+  };
+  const keepPeek = () => window.clearTimeout(peekTimer.current);
+
+  /** Opens a tab's card once the hand has rested on it, not when it only passes over. */
+  const armView = (tab: IslandTab) => {
+    window.clearTimeout(viewTimer.current);
+    // A thread already on screen (this page's, or the Side's) needs no card over it; nor does a hand just back from a press.
+    if (tabDrag.dragging || onScreen(tab.threadId) || performance.now() < quietUntil.current) return;
+    viewTimer.current = window.setTimeout(() => openView(tab.runId, false), view ? VIEW_SWITCH_DELAY : VIEW_DELAY);
+  };
+
   const railHandlers: RailHandlers = {
-    onHover: (tab) => {
+    onHover: (tab, point) => {
+      keepPeek();
+      restAnchor.current = point;
+      armView(tab);
+    },
+    onMove: (tab, point) => {
+      const anchor = restAnchor.current;
+      if (anchor && Math.hypot(point.x - anchor.x, point.y - anchor.y) <= REST_SLOP) return;
+      // Still moving: the wait starts again where the hand is now.
+      restAnchor.current = point;
+      if (!view || view.runId !== tab.runId) armView(tab);
+    },
+    onLeave: () => {
       window.clearTimeout(viewTimer.current);
-      // A thread already on screen (this page's, or the Side's) needs no card over it.
-      if (tabDrag.dragging || onScreen(tab.threadId)) return;
-      viewTimer.current = window.setTimeout(() => openView(tab.runId, false), view ? VIEW_SWITCH_DELAY : VIEW_DELAY);
+      restAnchor.current = null;
+      if (view && !view.pinned) schedulePeekClose();
     },
     onPress: (tab) => {
       if (tabDrag.consumeClick()) return;
@@ -818,6 +845,13 @@ export function Island() {
       data-island-status={status ?? undefined}
       onPointerEnter={onEnter}
       onPointerLeave={onLeave}
+      onPointerDownCapture={(event) => {
+        // A press anywhere on the island but a tab (new thread, stop, the field) keeps the tabs under the hand from opening.
+        if (!(event.target as Element).closest("[data-island-tab]")) {
+          quietUntil.current = performance.now() + PRESS_QUIET_MS;
+          window.clearTimeout(viewTimer.current);
+        }
+      }}
       onFocus={() => setReaching(true)}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null) && !pointerInside.current) scheduleClose();
@@ -852,7 +886,7 @@ export function Island() {
       ) : null}
 
       {viewTab ? (
-        <div className="pointer-events-auto">
+        <div className="pointer-events-auto" onPointerEnter={keepPeek} onPointerLeave={() => view && !view.pinned && schedulePeekClose()}>
           <ThreadView
             ref={viewRef}
             tab={viewTab}
@@ -1002,6 +1036,13 @@ function MenuGlyph({ name }: { name: IconName }) {
       <Icon name={name} size={16} />
     </span>
   );
+}
+
+/** Everything the run made is open in front of the user already: there is nothing to go and open. */
+function madeOnScreen(tab: IslandTab) {
+  const ids = tab.source.card?.provenance?.artifactIds ?? [];
+  return ids.length > 0 && ids.every((id) =>
+    document.querySelector(`.spectra-artifact-studio[data-artifact-id="${CSS.escape(id)}"]`));
 }
 
 /** What a finished run made, by name: the work it wrote, or else its thread. A thread keeps its first title while later asks make other things. */

@@ -100,6 +100,15 @@ function textPoint(value: string, offset: number): TextPoint {
     : { offset: point.offset };
 }
 
+/** Where `longer` holds `shorter` with one run of characters added, that run. */
+function keyedSpan(shorter: string, longer: string): { start: number; end: number } | null {
+  if (longer.length <= shorter.length) return null;
+  let start = 0;
+  while (start < shorter.length && shorter[start] === longer[start]) start += 1;
+  const end = start + longer.length - shorter.length;
+  return longer.slice(end) === shorter.slice(start) ? { start, end } : null;
+}
+
 /**
  * Derive the act from what actually changed between two provisional values at
  * the same path. Returns `focus` when nothing observable changed, so presence
@@ -110,6 +119,8 @@ export function actForValueChange(input: {
   after: unknown;
   /** Set when the caller is mid-selection before a replacement lands. */
   selectionEnd?: number;
+  /** Where that selection starts; the start of the value when absent. */
+  selectionStart?: number;
 }): InteractionAct {
   const { before, after } = input;
 
@@ -124,10 +135,22 @@ export function actForValueChange(input: {
       return {
         kind: "select",
         span: {
-          anchor: textPoint(before, 0),
+          anchor: textPoint(before, input.selectionStart ?? 0),
           head: textPoint(before, input.selectionEnd),
         },
       };
+    }
+    // A keystroke is judged by its characters: "I" to "It" is typing, though
+    // the word-level delta below would call it a rewrite of the word.
+    const added = keyedSpan(before, after);
+    if (added) {
+      const point = textPoint(after, added.end);
+      return added.end >= after.length ? { kind: "type", point } : { kind: "insert", point };
+    }
+    const erased = keyedSpan(after, before);
+    if (erased) {
+      const point = textPoint(after, erased.start);
+      return { kind: "delete", span: { anchor: point, head: point } };
     }
     const delta = describeTextDelta(before, after);
     if (!delta) return { kind: "focus" };
@@ -179,6 +202,7 @@ export type AiFrameInput = {
   /** Overrides the derived act — used for menus, presses and view switches. */
   act?: InteractionAct;
   selectionEnd?: number;
+  selectionStart?: number;
   menu?: MenuObservation | null;
   lifecycle?: InteractionLifecycle;
   /** Monotonic per actor; peers drop frames that arrive out of order. */
@@ -210,6 +234,9 @@ export function aiInteractionFrame(input: AiFrameInput): InteractionState {
       after: input.after,
       ...(input.selectionEnd !== undefined
         ? { selectionEnd: input.selectionEnd }
+        : {}),
+      ...(input.selectionStart !== undefined
+        ? { selectionStart: input.selectionStart }
         : {}),
     });
   return {

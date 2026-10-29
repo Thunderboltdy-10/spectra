@@ -17,6 +17,7 @@ import {
 import type { QueueMaterializationArgs, CloudMaterializationArgs } from "../../../../../../convex/replicaMaterialization";
 import { checkpointArtifactDurableContent, convexMutation, convexQuery } from "@/lib/convex-server";
 import { sha256Payload } from "@/features/spectra/lenses/docx-lens";
+import { officeReadbackDifference } from "@/features/spectra/lenses/office-readback-difference";
 import {
   fetchVerifiedNativePayload,
   fetchStoredNativeBase,
@@ -346,7 +347,7 @@ async function materializeOfficeArtifactAttempt(
       ? await xlsxSemanticDigest(baseProjection as XlsxProjection)
       : await pptxProjectionSemanticDigest(baseProjection as PptxProjection);
     if (readbackDigest !== requestedDigest)
-      throw new Error("OFFICE_READBACK_MISMATCH");
+      throw new Error(`OFFICE_READBACK_MISMATCH: ${await officeReadbackDifference(projection as OfficeProjection, baseProjection as OfficeProjection, isSheet)}.`);
     const unchanged = {
       state: "unchanged" as const,
       hash,
@@ -392,7 +393,7 @@ async function materializeOfficeArtifactAttempt(
   // never an attestation of the requested edit. Input edits deliberately clear
   // all native formula caches; Excel will calculate them on reopen.
   if (readbackDigest !== requestedDigest) {
-    throw new Error("OFFICE_READBACK_MISMATCH");
+    throw new Error(`OFFICE_READBACK_MISMATCH: ${await officeReadbackDifference(projection as OfficeProjection, next.projection as OfficeProjection, isSheet)}.`);
   }
   /**
    * The preservation promise, checked against the bytes before anything is

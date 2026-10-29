@@ -487,7 +487,7 @@ function keepMarker(id: string, node: PmNode) {
   const label =
     (typeof node.attrs?.label === "string" && node.attrs.label) ||
     (typeof node.attrs?.title === "string" && node.attrs.title) ||
-    node.type;
+    (node.type === "paragraph" ? "blank line" : node.type);
   return `<!-- keep:${id} ${String(label).replace(/--+/g, "-").slice(0, 80)} -->`;
 }
 

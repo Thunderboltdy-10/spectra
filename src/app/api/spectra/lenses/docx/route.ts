@@ -12,6 +12,7 @@ import {
   DocxLensError,
   docxLens,
   docxProjectionReadbackDigest,
+  docxReadbackDifference,
   docxProjectionSemanticDigest,
   sha256Payload,
   type DocxWriteOptions,
@@ -210,7 +211,7 @@ async function materializeDocxArtifactAttempt(
     if (readbackDigest !== requestedDigest)
       throw new DocxLensError(
         "DOCX_READBACK_MISMATCH",
-        "Word readback did not match the requested text, image, page, or header/footer edit.",
+        `Word readback did not match the requested edit: ${await docxReadbackDifference(opened.projection, projection)}.`,
       );
     const unchanged = {
       state: "unchanged" as const,
@@ -259,7 +260,8 @@ async function materializeDocxArtifactAttempt(
     projection,
   );
   if (readbackDigest !== requestedDigest)
-    throw new DocxLensError("DOCX_READBACK_MISMATCH", "Word readback did not match the requested text, image, page, or header/footer edit.");
+    throw new DocxLensError("DOCX_READBACK_MISMATCH",
+      `Word readback did not match the requested edit: ${await docxReadbackDifference(nextProjection, projection)}.`);
   await assertNativePreservationKept({ entries: opened.fidelityMap.entries, parts: comparison.parts,
     before: opened.preservedCarry.safePayload ?? payload, after: next.preservedCarry.safePayload ?? output,
     intent: { format: "docx", projection: opened.projection, operations },
@@ -646,7 +648,8 @@ export async function POST(request: Request) {
         resolved.projection,
       );
       if (readbackDigest !== requestedDigest)
-        throw new DocxLensError("DOCX_READBACK_MISMATCH", "Word readback did not match the requested text, image, page, or header/footer edit.");
+        throw new DocxLensError("DOCX_READBACK_MISMATCH",
+          `Word readback did not match the requested edit: ${await docxReadbackDifference(nextProjection, resolved.projection)}.`);
       await assertNativePreservationKept({ entries: externalOpened.fidelityMap.entries, parts: comparison.parts,
         before: externalOpened.preservedCarry.safePayload ?? local.payload, after: next.preservedCarry.safePayload ?? output,
         intent: { format: "docx", projection: externalOpened.projection, operations: docxOperationsBetween(externalOpened.projection, resolved.projection) },

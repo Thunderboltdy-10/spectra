@@ -15,6 +15,7 @@
   --sp-ease-in-out: cubic-bezier(0.6, 0, 0.25, 1);
   --sp-gutter: clamp(20px, 4.4vw, 64px);
   --sp-measure: 1320px;
+  overflow: clip;
   position: relative;
   min-height: 100vh;
   overflow-x: clip;
@@ -94,11 +95,13 @@
 /* ---- The light --------------------------------------------------------- */
 
 .sp-light {
-  position: fixed;
-  inset: 0;
-  width: 100vw;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
   height: 100vh;
   pointer-events: none;
+  will-change: transform;
 }
 
 .sp-light[data-layer="back"] {
@@ -132,7 +135,7 @@
 }
 
 .sp-header[data-away] {
-  background: color-mix(in oklab, var(--bg-elevated) 84%, transparent);
+  background: color-mix(in oklab, var(--bg-elevated) 94%, transparent);
   box-shadow:
     0 0 0 1px color-mix(in oklab, var(--border-default) 70%, transparent),
     0 14px 34px -22px rgb(40 30 20 / 0.35);
@@ -259,68 +262,6 @@
 }
 
 /* ---- The island, docked where it lives in Spectra --------------------- */
-
-.sp-island {
-  /* The landing has no rail beside the page: the island centres on the window. */
-  --spectra-rail-width: 0px;
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-composer-dock, 120);
-  pointer-events: none;
-  opacity: 0;
-  transform: translateY(18px);
-  transition:
-    opacity 0.7s var(--sp-ease),
-    transform 0.7s var(--sp-ease);
-}
-
-.sp-island[data-shown] {
-  opacity: 1;
-  transform: none;
-}
-
-/* Over the hero it sits under Henry's window, so an answer opens over his Home and not over the title. */
-@media (min-width: 1100px) {
-  .sp-island .z-composer-dock {
-    transition: left 0.6s var(--sp-ease);
-  }
-
-  .sp-island[data-over-hero] {
-    --spectra-lead-width: min(44vw, 620px);
-  }
-
-  /* With the side open the hero has less room: the island centres on what is left. */
-  .sp-root[data-side] .sp-island[data-over-hero] {
-    --spectra-lead-width: 0px;
-  }
-}
-
-.sp-island:not([data-shown]) * {
-  pointer-events: none !important;
-}
-
-/* ---- The side ---------------------------------------------------------- */
-
-.landing-side {
-  position: fixed;
-  inset: 0 0 0 auto;
-  z-index: 125;
-  display: flex;
-  max-width: 100vw;
-  border-left: 1px solid var(--card-border);
-  background: var(--bg-primary);
-  box-shadow: -24px 0 60px -40px rgb(41 34 27 / 0.4);
-  animation: sp-side-in 0.45s var(--sp-ease) both;
-}
-
-@keyframes sp-side-in {
-  from {
-    transform: translateX(40px);
-    opacity: 0;
-  }
-}
-
-/* ---- Spectra's window -------------------------------------------------- */
 
 .sp-scaled {
   position: relative;
@@ -497,12 +438,6 @@
 }
 
 /* Home inside the window: the app's own page, held still. */
-.sp-home {
-  height: 100%;
-  overflow: hidden;
-  padding-top: 26px;
-}
-
 /* ---- Type -------------------------------------------------------------- */
 
 .sp-heading {
@@ -525,577 +460,11 @@
   text-wrap: pretty;
 }
 
-/* ---- Hero -------------------------------------------------------------- */
-
-.sp-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 500px) minmax(0, 1fr);
-  gap: clamp(28px, 4vw, 64px);
-  align-items: start;
-  min-height: 100vh;
-  padding: clamp(120px, 17vh, 170px) 0 120px var(--sp-gutter);
-}
-
-.sp-hero-copy {
-  position: relative;
-  z-index: 3;
-  padding-top: 8px;
-}
-
-.sp-hero-title {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: clamp(50px, 6.4vw, 100px);
-  font-weight: 420;
-  line-height: 0.96;
-  letter-spacing: -0.04em;
-  color: var(--text-primary);
-}
-
-.sp-hero-sub {
-  max-width: 34ch;
-  margin: 28px 0 0;
-  font-size: clamp(17px, 1.35vw, 20px);
-  line-height: 1.5;
-  color: var(--text-secondary);
-}
-
-.sp-hero-asks {
-  display: grid;
-  justify-items: start;
-  gap: 8px;
-  margin-top: 40px;
-}
-
-.sp-hero-ask {
-  position: relative;
-  padding: 10px 16px 11px;
-  border: 0;
-  border-radius: 14px 14px 14px 4px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 15px;
-  font-weight: 500;
-  text-align: left;
-  cursor: pointer;
-  box-shadow:
-    0 0 0 1px var(--border-subtle),
-    0 6px 16px -10px rgb(52 40 28 / 0.3);
-  transition:
-    transform 0.2s var(--sp-ease),
-    box-shadow 0.2s ease;
-}
-
-.sp-hero-ask:hover {
-  transform: translateX(3px);
-  box-shadow:
-    0 0 0 1px var(--border-default),
-    0 8px 20px -10px rgb(52 40 28 / 0.35);
-}
-
-.sp-hero-ask[data-asked] {
-  background: var(--text-primary);
-  color: var(--text-inverse);
-}
-
-.sp-hero-stage {
-  position: relative;
-  z-index: 2;
-  width: calc(100% + 280px);
-  margin-top: 12px;
-}
-
-@media (max-width: 1099px) {
-  .sp-hero {
-    grid-template-columns: minmax(0, 1fr);
-    padding-right: var(--sp-gutter);
-  }
-
-  .sp-hero-stage {
-    width: 100%;
-  }
-}
-
-/* ---- Scenes: shared ---------------------------------------------------- */
-
-.sp-scene {
-  width: min(100%, calc(var(--sp-measure) + 2 * var(--sp-gutter)));
-  margin: 0 auto;
-  padding: clamp(110px, 16vh, 170px) var(--sp-gutter) clamp(60px, 10vh, 110px);
-}
-
-.sp-scene-copy {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-  gap: 20px clamp(28px, 5vw, 80px);
-  align-items: end;
-}
-
-.sp-scene-copy .sp-lede {
-  margin: 0;
-  padding-bottom: 6px;
-}
-
-/* A studio set into the page: the real editor, at a window's height. */
-.sp-studio {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-.landing-studio-ghost {
-  display: grid;
-  gap: 14px;
-  padding: 28px;
-}
-
-@keyframes sp-land {
-  from {
-    opacity: 0;
-    transform: translateY(14px) scale(0.94);
-  }
-}
-
-@media (max-width: 899px) {
-  .sp-scene-copy {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-/* ---- Make -------------------------------------------------------------- */
-
-.sp-make-stage {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 500px) minmax(0, 1fr);
-  gap: clamp(20px, 2.4vw, 36px);
-  margin-top: clamp(36px, 6vh, 60px);
-}
-
-.sp-make-cards {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 22px 16px;
-  align-content: start;
-}
-
-.sp-make-card {
-  position: relative;
-  min-width: 0;
-}
-
-.sp-make-card > .work-card {
-  width: 100%;
-}
-
-.sp-make-card[data-made] > .work-card {
-  animation: sp-land 0.5s var(--sp-ease) both;
-}
-
-.sp-make-card[data-active] > .work-card {
-  translate: 0 -4px;
-  box-shadow:
-    0 0 0 1.5px var(--card-type-ink, var(--text-primary)),
-    0 18px 34px -20px rgb(52 40 28 / 0.4);
-}
-
-.sp-make-slot {
-  display: block;
-  height: 236px;
-  margin-top: 26px;
-  border-radius: var(--radius-surface, 14px);
-  background: repeating-linear-gradient(-45deg, transparent 0 9px, rgb(52 40 28 / 0.035) 9px 10px);
-  box-shadow: inset 0 0 0 1px rgb(52 40 28 / 0.1);
-}
-
-.sp-make-studio {
-  position: relative;
-  z-index: 1;
-  height: min(640px, 76vh);
-  overflow: hidden;
-  border-radius: 16px;
-  background: var(--bg-primary);
-  box-shadow:
-    0 0 0 1px rgb(52 40 28 / 0.08),
-    0 30px 70px -34px rgb(52 40 28 / 0.38);
-}
-
-.sp-make-studio[data-empty] {
-  display: grid;
-  place-items: center;
-  background: color-mix(in oklab, var(--bg-primary) 55%, transparent);
-  box-shadow: inset 0 0 0 1px rgb(52 40 28 / 0.1);
-}
-
-.sp-make-wait {
-  margin: 0;
-  color: var(--text-tertiary);
-  font-size: 15px;
-}
-
-@media (max-width: 999px) {
-  .sp-make-stage {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-/* ---- Morning ----------------------------------------------------------- */
-
-.sp-morning-stage {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
-  gap: clamp(24px, 3.4vw, 56px);
-  align-items: start;
-  margin-top: clamp(36px, 6vh, 60px);
-}
-
-.sp-morning-window {
-  position: relative;
-  z-index: 1;
-  min-width: 0;
-}
-
-.sp-morning-night {
-  position: relative;
-  z-index: 1;
-  padding-top: 0;
-}
-
-.sp-morning-sky {
-  height: clamp(220px, 30vh, 300px);
-}
-
-.sp-morning-night-head {
-  margin: 0 0 14px;
-  font-family: var(--font-display);
-  font-size: 22px;
-  font-weight: 450;
-  letter-spacing: -0.01em;
-  color: var(--text-primary);
-}
-
-.sp-morning-night ol {
-  display: grid;
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.sp-morning-night li {
-  display: grid;
-  grid-template-columns: 46px minmax(0, 1fr);
-  gap: 10px;
-  font-size: 14.5px;
-  line-height: 1.4;
-  color: var(--text-secondary);
-  opacity: 0.18;
-  transition: opacity 0.35s ease;
-}
-
-.sp-morning-night li[data-shown] {
-  opacity: 1;
-}
-
-.sp-morning-night time {
-  font-variant-numeric: tabular-nums;
-  color: var(--text-tertiary);
-}
-
-@media (max-width: 999px) {
-  .sp-morning-stage {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .sp-morning-sky {
-    height: 160px;
-  }
-}
-
-/* ---- Together ---------------------------------------------------------- */
-
-.sp-together-doc {
-  z-index: 1;
-  margin-top: clamp(36px, 6vh, 60px);
-}
-
-.sp-together-studio {
-  height: min(660px, 74vh);
-  overflow: hidden;
-  border-radius: 16px;
-  background: var(--bg-primary);
-  box-shadow:
-    0 0 0 1px rgb(52 40 28 / 0.08),
-    0 30px 70px -34px rgb(52 40 28 / 0.38);
-}
-
-/* ---- Bridge ------------------------------------------------------------ */
-
-.sp-bridge-stage {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
-  gap: clamp(24px, 3vw, 48px);
-  align-items: start;
-  margin-top: clamp(36px, 6vh, 60px);
-}
-
-/* Henry's laptop: its own windows, drawn plainly as a computer draws them. */
-.sp-laptop {
-  position: relative;
-  min-height: 540px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", var(--font-sans);
-  color: #2b2722;
-}
-
-.sp-finder,
-.sp-word {
-  position: absolute;
-  overflow: hidden;
-  border-radius: 12px;
-  background: #fbfaf8;
-  box-shadow:
-    0 0 0 1px rgb(40 32 24 / 0.12),
-    0 22px 50px -24px rgb(40 32 24 / 0.4);
-}
-
-.sp-finder {
-  top: 0;
-  left: 0;
-  width: min(100%, 470px);
-}
-
-.sp-os-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 38px;
-  padding: 0 14px;
-  border-bottom: 1px solid rgb(40 32 24 / 0.08);
-  background: #f1eeea;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: #4a443d;
-}
-
-.sp-os-lights {
-  display: flex;
-  gap: 7px;
-}
-
-.sp-os-lights i {
-  width: 11px;
-  height: 11px;
-  border-radius: 999px;
-  background: #e2ddd6;
-  box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.12);
-}
-
-.sp-os-title {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  align-items: center;
-  gap: 8px;
-}
-
-.sp-finder-path {
-  margin: 0;
-  padding: 10px 16px 0;
-  font-size: 12px;
-  color: #8a8279;
-}
-
-.sp-finder-items {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  margin: 0;
-  padding: 16px 14px 22px;
-  list-style: none;
-}
-
-.sp-finder-items li {
-  display: grid;
-  justify-items: center;
-  gap: 6px;
-  padding: 10px 4px 8px;
-  border-radius: 8px;
-  font-size: 12.5px;
-  transition: opacity 300ms ease;
-}
-
-.sp-finder-items li[data-moved] {
-  opacity: 0.42;
-}
-
-.sp-finder-folder {
-  display: grid;
-  place-items: center;
-  width: 56px;
-  height: 48px;
-  color: #6aa5de;
-}
-
-.sp-word {
-  right: 0;
-  bottom: 0;
-  width: min(100%, 500px);
-  opacity: 0;
-  transform: translateY(16px) scale(0.97);
-  transform-origin: 30% 100%;
-  transition:
-    opacity 260ms ease,
-    transform 360ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.sp-word[data-open] {
-  opacity: 1;
-  transform: none;
-}
-
-.sp-word-badge {
-  display: inline-grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  background: #2f6bd8;
-  font-size: 11px;
-  font-weight: 700;
-  color: #fff;
-}
-
-.sp-word-state {
-  font-size: 12px;
-  font-weight: 500;
-  color: #8a8279;
-}
-
-.sp-word-page {
-  margin: 18px 22px 0;
-  padding: 26px 30px 30px;
-  min-height: 250px;
-  border-radius: 2px 2px 0 0;
-  background: #fff;
-  box-shadow: 0 0 0 1px rgb(40 32 24 / 0.08);
-  font-family: Cambria, Georgia, serif;
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.sp-word-page p {
-  margin: 0 0 10px;
-}
-
-.sp-word-heading {
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.sp-word-new {
-  background: color-mix(in oklab, #4f9fe6 16%, transparent);
-}
-
-.sp-word-caret {
-  display: inline-block;
-  width: 1.5px;
-  height: 1.05em;
-  margin-left: 1px;
-  vertical-align: -0.15em;
-  background: #2b2722;
-  opacity: 0;
-}
-
-.sp-word-caret[data-on] {
-  animation: sp-caret 1s steps(1) infinite;
-}
-
-@keyframes sp-caret {
-  0%,
-  49% {
-    opacity: 1;
-  }
-  50%,
-  100% {
-    opacity: 0;
-  }
-}
-
-.sp-word-ghost {
-  display: grid;
-  gap: 9px;
-  margin-top: 16px !important;
-}
-
-.sp-word-ghost span {
-  height: 7px;
-  border-radius: 4px;
-  background: #eeeae4;
-}
-
-.sp-word-ghost span:nth-child(2) {
-  width: 92%;
-}
-
-.sp-word-ghost span:nth-child(3) {
-  width: 64%;
-}
-
-.sp-bridge-app {
-  min-width: 0;
-}
-
-.sp-devices {
-  height: 100%;
-  overflow: hidden;
-}
-
-.sp-devices-heading {
-  margin: 22px 0 14px;
-}
-
-@media (max-width: 999px) {
-  .sp-bridge-stage {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .sp-laptop {
-    min-height: 470px;
-  }
-}
-
-/* ---- School ------------------------------------------------------------ */
-
-.sp-school-stage {
-  position: relative;
-  margin-top: clamp(36px, 6vh, 60px);
-}
-
-.sp-calendar {
-  display: flex;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.sp-calendar > * {
-  flex: 1;
-  min-width: 0;
-}
-
-.sp-calendar-ghost {
-  height: 100%;
-  background: var(--bg-primary);
-}
-
 /* ---- Ending ------------------------------------------------------------ */
 
-.sp-ending {
-  padding-bottom: 28px;
+/* The page ends at the footer: the scenes' own bottom room is not added after it. */
+.sp-scene.sp-ending {
+  padding-bottom: 0;
 }
 
 .sp-ending-line {
@@ -1118,7 +487,7 @@
   grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
   gap: clamp(32px, 6vw, 96px);
   align-items: start;
-  margin-top: clamp(80px, 14vh, 150px);
+  margin-top: clamp(48px, 8vh, 96px);
 }
 
 .sp-talk-title {
@@ -1365,7 +734,7 @@
   gap: 14px;
   margin-top: clamp(90px, 14vh, 150px);
   padding-top: 22px;
-  padding-bottom: 96px;
+  padding-bottom: 32px;
   border-top: 1px solid color-mix(in oklab, var(--text-primary) 10%, transparent);
   font-size: 14px;
   color: var(--text-secondary);
@@ -1406,53 +775,6 @@
   }
 }
 
-/* ---- Written headings (kit/written.tsx) -------------------------------- */
-/* Spectra writing, as in a document: faint words resolve from a slight blur,
-   a soft spectral band crosses behind them once, and the prism caret rides
-   the end of the line. */
-
-.sp-written {
-  position: relative;
-  isolation: isolate;
-}
-
-.sp-w {
-  opacity: 0.16;
-  filter: blur(3px);
-  transition:
-    opacity 0.42s var(--sp-ease),
-    filter 0.42s var(--sp-ease);
-}
-
-.sp-w[data-on] {
-  opacity: 1;
-  filter: none;
-}
-
-.sp-written::after {
-  content: "";
-  position: absolute;
-  inset: -4% -2%;
-  z-index: -1;
-  pointer-events: none;
-  border-radius: 14px;
-  background: linear-gradient(
-    100deg,
-    transparent 36%,
-    color-mix(in oklab, #8b6cf6 17%, transparent) 44%,
-    color-mix(in oklab, #4f9fe6 22%, transparent) 50%,
-    color-mix(in oklab, #40c48e 17%, transparent) 56%,
-    transparent 64%
-  );
-  background-size: 300% 100%;
-  background-position: 100% 0;
-  opacity: 0;
-}
-
-.sp-written:not([data-state="waiting"])::after {
-  animation: sp-band-sweep 1.15s cubic-bezier(0.4, 0, 0.2, 1) both;
-}
-
 @keyframes sp-band-sweep {
   from {
     background-position: 100% 0;
@@ -1467,188 +789,24 @@
   }
 }
 
-/* The prism caret: a spectrum rule with a little light about it. It takes no room in the line. */
-.sp-written-caret {
-  display: inline-block;
-  width: 3px;
-  height: 0.78em;
-  margin: 0 -3px 0 0.06em;
-  border-radius: 2px;
-  vertical-align: -0.04em;
-  background: linear-gradient(180deg, #8b6cf6, #4f9fe6 55%, #40c48e);
-  box-shadow: 0 0 14px 1px color-mix(in oklab, #4f9fe6 50%, transparent);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sp-w {
-    opacity: 1;
-    filter: none;
-    transition: none;
-  }
-
-  .sp-written::after {
-    content: none;
-  }
-}
-
-/* ---- Threads: in Henry's window, or beside the page --------------------- */
-
-.sp-thread {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  min-width: 0;
-  background: var(--card-paper, var(--bg-primary));
-}
-
-.sp-thread-head {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 4px;
-  padding: 12px 10px 12px 18px;
-  border-bottom: 1px solid var(--card-border-soft, var(--border-subtle));
-}
-
-.sp-thread-name {
-  flex: 1;
-  min-width: 0;
-}
-
-.sp-thread-title {
-  margin: 0;
-  overflow: hidden;
-  font-family: var(--font-display);
-  font-size: 17px;
-  font-weight: 500;
-  line-height: 1.35;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--text-primary);
-}
-
-.sp-thread-caption {
-  margin: 1px 0 0;
-  overflow: hidden;
-  font-size: 12px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--text-tertiary);
-}
-
-/* While it works, the caption carries the band, as a working run's words do in Spectra. */
-.sp-thread[data-working] .sp-thread-caption {
-  background: linear-gradient(100deg, var(--text-tertiary) 30%, #8b6cf6 44%, #4f9fe6 50%, #40c48e 56%, var(--text-tertiary) 70%);
-  background-size: 300% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  animation: sp-caption-band 1.6s linear infinite;
-}
-
-@keyframes sp-caption-band {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: 0% 0;
-  }
-}
-
-.sp-thread-action {
-  display: inline-grid;
-  width: 30px;
-  height: 30px;
-  flex: none;
-  place-items: center;
-  border: 0;
-  border-radius: 9px;
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  transition:
-    background-color 0.15s ease,
-    color 0.15s ease;
-}
-
-.sp-thread-action:hover {
-  background: var(--bg-hover, rgb(52 40 28 / 0.06));
-  color: var(--text-primary);
-}
-
-/* The conversation scrolls on its own; the wheel over it never moves the page. */
-.sp-thread-body {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
-}
-
-.sp-thread-body *,
-.sp-island [data-island-thread] * {
-  overscroll-behavior: contain;
-}
-
-/* Beside the page: the page narrows for it, so it lies over nothing. */
-.sp-thread-side {
-  width: min(440px, 34vw);
-}
-
-.sp-main,
-.sp-header {
-  transition:
-    margin-right 0.45s var(--sp-ease),
-    width 0.45s var(--sp-ease),
-    left 0.45s var(--sp-ease);
-}
-
-.sp-root[data-side] .sp-main {
-  margin-right: var(--spectra-side-width, 0px);
-}
-
-/* Henry's window stops reaching past the page's edge while the side is open. */
-.sp-hero-stage {
-  transition: width 0.45s var(--sp-ease);
-}
-
-.sp-root[data-side] .sp-hero-stage {
-  width: 100%;
-}
-
-.sp-root[data-side] .sp-header {
-  left: calc((100% - var(--spectra-side-width, 0px)) / 2);
-  width: min(var(--sp-measure), calc(100% - var(--spectra-side-width, 0px) - 24px));
-}
-
 /* ---- Things Spectra brings in (hands.tsx, bring) ------------------------ */
 
 [data-brought="coming"] {
   visibility: hidden;
 }
 
-/* Set down in its place, it lands with the band passing over it once. */
+/* Set down in its place, it glows once in Spectra's colours. Nothing about its
+   layout changes, so it never jumps or blinks as it lands. */
 [data-brought="here"] {
-  position: relative;
+  animation: sp-landed 1.1s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-[data-brought="here"]::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  pointer-events: none;
-  border-radius: inherit;
-  background: linear-gradient(
-    100deg,
-    transparent 36%,
-    color-mix(in oklab, #8b6cf6 14%, transparent) 44%,
-    color-mix(in oklab, #4f9fe6 18%, transparent) 50%,
-    color-mix(in oklab, #40c48e 14%, transparent) 56%,
-    transparent 64%
-  );
-  background-size: 300% 100%;
-  animation: sp-band-sweep 0.9s cubic-bezier(0.4, 0, 0.2, 1) both;
+@keyframes sp-landed {
+  from {
+    box-shadow:
+      0 0 0 2px color-mix(in oklab, #8b6cf6 55%, transparent),
+      0 0 22px 2px color-mix(in oklab, #4f9fe6 35%, transparent);
+  }
 }
 
 .sp-carried[data-settled] {
@@ -1656,150 +814,2719 @@
   transition: opacity 0.22s ease;
 }
 
-/* What Spectra carries into the calendar: the event as the week draws it. */
-.sp-carried-event {
-  display: grid;
-  align-content: start;
-  gap: 2px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: color-mix(in oklab, #8b6cf6 16%, var(--bg-primary));
-  box-shadow:
-    inset 2px 0 #8b6cf6,
-    0 18px 30px -16px rgb(40 30 20 / 0.45);
-  font-size: 11px;
-  line-height: 1.25;
-  color: var(--text-primary);
+/* ---- Spectra's window, page only ---------------------------------------- */
+
+/* No rail: the window is the page itself, a sheet of Spectra's paper. */
+.landing-window[data-rail="none"] {
+  grid-template-columns: minmax(0, 1fr);
+  border-radius: 16px;
+  background: var(--bg-primary);
 }
 
-.sp-carried-event strong {
-  font-weight: 600;
+.landing-window[data-rail="none"] .landing-window-sheet {
+  margin: 0;
+  border-radius: inherit;
+  box-shadow: none;
 }
 
-.sp-carried-event span {
-  color: var(--text-secondary);
+/* Nothing in a window scrolls, and nothing in it talks about saving. */
+.sp-scaled-inner :is(.overflow-auto, .overflow-y-auto, .overflow-x-auto, .overflow-scroll, [data-scroll-area], [data-radix-scroll-area-viewport]) {
+  overflow: hidden !important;
 }
 
-.sp-school[data-bringing] .sp-calendar button[title*="Write up the yeast lab"]:not([data-brought="here"]) {
+.sp-window :is([data-save-status], .studio-save-status, [data-sync-warning]) {
+  display: none !important;
+}
+
+.sp-home {
+  height: 100%;
+  overflow: hidden;
+  padding-top: 30px;
+}
+
+/* ---- Written headings (kit/written.tsx) ---------------------------------- */
+/* Spectra writes the heading line by line: each word comes out of a blur in
+   the colour of the spectrum it lands under, and drains to ink behind. */
+
+.sp-written {
+  position: relative;
+}
+
+.sp-written-line {
+  display: block;
+}
+
+.sp-written [data-w] {
+  display: inline-block;
+}
+
+.sp-written[data-state="waiting"] [data-w] {
+  opacity: 0;
+}
+
+.sp-written[data-state="writing"] [data-w] {
+  animation: sp-write 1.05s var(--d, 0ms) cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes sp-write {
+  from {
+    opacity: 0;
+    transform: translateY(0.24em);
+    filter: blur(8px);
+    color: var(--c);
+  }
+  38% {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+    color: var(--c);
+  }
+}
+
+/* The word that changes: the old one lifts away, the new one is written in letter by letter. */
+.sp-flip {
+  position: relative;
+  white-space: pre;
+  transition: width 0.6s var(--sp-ease);
+}
+
+.sp-flip-measure {
+  position: absolute;
+  top: 0;
+  left: 0;
   visibility: hidden;
 }
 
-/* ---- Make: a place being made ------------------------------------------- */
-
-.sp-make-slot {
-  position: relative;
-  display: grid;
-  place-items: end start;
-  overflow: hidden;
-  padding: 16px;
-}
-
-.sp-make-card[data-making] .sp-make-slot {
-  background: color-mix(in oklab, var(--accent-cyan, #4f9fe6) 4%, var(--bg-primary));
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, #4f9fe6 28%, rgb(52 40 28 / 0.1));
-}
-
-.sp-make-card[data-making] .sp-make-slot::after {
-  content: "";
+.sp-flip-out {
   position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    104deg,
-    transparent 20%,
-    color-mix(in oklab, #8b6cf6 12%, transparent) 40%,
-    color-mix(in oklab, #4f9fe6 16%, transparent) 50%,
-    color-mix(in oklab, #40c48e 12%, transparent) 60%,
-    transparent 80%
-  );
-  transform: translateX(-118%);
-  animation: sp-making 1.5s cubic-bezier(0.38, 0.02, 0.22, 1) infinite;
+  top: 0;
+  left: 0;
+  animation: sp-flip-out 0.5s var(--sp-ease) both;
 }
 
-@keyframes sp-making {
-  12% {
-    opacity: 1;
-  }
+.sp-flip-in > span {
+  display: inline-block;
+}
+
+.sp-flip-in:not([data-turn="0"]) > span {
+  animation: sp-flip-in 0.85s calc(var(--i) * 42ms + 160ms) cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes sp-flip-out {
   to {
-    transform: translateX(118%);
+    opacity: 0;
+    transform: translateY(-0.42em);
+    filter: blur(6px);
   }
 }
 
-.sp-make-slot-label {
-  position: relative;
-  z-index: 1;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  animation: sp-rise 0.3s var(--sp-ease) both;
+@keyframes sp-flip-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.36em);
+    filter: blur(6px);
+    color: var(--c);
+  }
+  45% {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+    color: var(--c);
+  }
 }
 
 @keyframes sp-rise {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(14px);
   }
 }
 
-/* The window's rail, collapsed to its glyphs so the page keeps the room. The pointer opens it over the page. */
-.landing-window[data-rail="slim"] {
-  --landing-rail-w: 58px;
-}
+/* ---- Hero ---------------------------------------------------------------- */
 
-.landing-window[data-rail="slim"] .landing-window-rail {
-  position: relative;
-  z-index: 4;
-  width: var(--landing-rail-w);
-  overflow: hidden;
-  border-radius: 18px 0 0 18px;
-  background: var(--bg-desk);
-  transition:
-    width 0.24s cubic-bezier(0.2, 0.7, 0.2, 1),
-    box-shadow 0.24s ease;
-}
-
-.landing-window[data-rail="slim"] .landing-window-rail:hover {
-  width: 204px;
-  box-shadow: 24px 0 48px -30px rgb(52 40 28 / 0.38);
-}
-
-.landing-window[data-rail="slim"] .landing-window-brand > span,
-.landing-window[data-rail="slim"] .landing-window-places a > span,
-.landing-window[data-rail="slim"] .landing-window-account > span:last-child,
-.landing-window[data-rail="slim"] .landing-window-threads {
-  opacity: 0;
-  transition: opacity 0.16s ease;
-}
-
-.landing-window[data-rail="slim"] .landing-window-rail:hover .landing-window-brand > span,
-.landing-window[data-rail="slim"] .landing-window-rail:hover .landing-window-places a > span,
-.landing-window[data-rail="slim"] .landing-window-rail:hover .landing-window-account > span:last-child,
-.landing-window[data-rail="slim"] .landing-window-rail:hover .landing-window-threads {
-  opacity: 1;
-  transition-delay: 0.06s;
-}
-
-.landing-window[data-rail="slim"] .landing-window-places li,
-.landing-window[data-rail="slim"] .landing-window-account {
-  width: 188px;
-}
-
-.landing-window[data-rail="slim"] .landing-window-rail:not(:hover) .landing-window-places li[data-current] {
-  width: 42px;
-}
-
-/* With an answer beside it the hero gives its title less of the room, so Henry's window stays readable. */
 .sp-hero {
-  transition: grid-template-columns 0.45s var(--sp-ease);
+  padding: clamp(118px, 16vh, 156px) var(--sp-gutter) clamp(70px, 10vh, 120px);
+}
+
+.sp-hero-copy {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  justify-items: center;
+  max-width: 900px;
+  margin: 0 auto;
+  text-align: center;
 }
 
 .sp-hero-title {
-  transition: font-size 0.45s var(--sp-ease);
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(38px, 4.6vw, 68px);
+  font-weight: 430;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  color: var(--text-primary);
 }
 
-.sp-root[data-side] .sp-hero {
-  grid-template-columns: minmax(0, 380px) minmax(0, 1fr);
+.sp-hero-sub {
+  max-width: 48ch;
+  margin: 24px 0 0;
+  font-size: clamp(16.5px, 1.25vw, 19px);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  text-wrap: pretty;
+  animation: sp-rise 0.9s 0.55s var(--sp-ease) both;
 }
 
-.sp-root[data-side] .sp-hero-title {
-  font-size: clamp(44px, 4.9vw, 74px);
+.sp-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 30px;
+  animation: sp-rise 0.9s 0.7s var(--sp-ease) both;
+}
+
+.sp-hero-stage {
+  position: relative;
+  max-width: 1440px;
+  margin: clamp(46px, 7vh, 78px) auto 0;
+}
+
+.sp-hero-window {
+  position: relative;
+  z-index: 1;
+  max-width: 1080px;
+  margin: 0 auto;
+  animation: sp-window-rise 1.2s 0.3s var(--sp-ease) both;
+}
+
+@keyframes sp-window-rise {
+  from {
+    opacity: 0;
+    transform: translateY(46px) scale(0.975);
+  }
+}
+
+/* Home comes together part by part, the way it loads. */
+.sp-hero:not([data-seen]) .today > * {
+  opacity: 0;
+}
+
+.sp-hero[data-seen] .today > * {
+  animation: sp-assemble 0.95s var(--sp-ease) both;
+}
+
+.sp-hero[data-seen] .today > :nth-child(1) { animation-delay: 0.6s; }
+.sp-hero[data-seen] .today > :nth-child(2) { animation-delay: 0.78s; }
+.sp-hero[data-seen] .today > :nth-child(3) { animation-delay: 0.94s; }
+.sp-hero[data-seen] .today > :nth-child(4) { animation-delay: 1.1s; }
+.sp-hero[data-seen] .today > :nth-child(5) { animation-delay: 1.22s; }
+
+.sp-hero[data-seen] .today-day {
+  animation: sp-assemble 0.8s var(--sp-ease) both;
+}
+
+.sp-hero[data-seen] .today-day:nth-child(1) { animation-delay: 1s; }
+.sp-hero[data-seen] .today-day:nth-child(2) { animation-delay: 1.06s; }
+.sp-hero[data-seen] .today-day:nth-child(3) { animation-delay: 1.12s; }
+.sp-hero[data-seen] .today-day:nth-child(4) { animation-delay: 1.18s; }
+.sp-hero[data-seen] .today-day:nth-child(5) { animation-delay: 1.24s; }
+.sp-hero[data-seen] .today-day:nth-child(6) { animation-delay: 1.3s; }
+.sp-hero[data-seen] .today-day:nth-child(7) { animation-delay: 1.36s; }
+
+@keyframes sp-assemble {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+    filter: blur(3px);
+  }
+}
+
+/* ---- What arrives from outside (hero) ------------------------------------ */
+
+.sp-drift {
+  position: absolute;
+  z-index: 30;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    opacity 0.8s var(--sp-ease),
+    transform 1s var(--sp-ease);
+}
+
+.sp-drift[data-side="left"] {
+  left: max(0px, calc(50% - 540px - 150px));
+}
+
+.sp-drift[data-side="right"] {
+  right: max(0px, calc(50% - 540px - 150px));
+}
+
+.sp-drift[data-state="away"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sp-drift[data-side="left"][data-state="away"] {
+  transform: translateX(-90px) rotate(-7deg);
+}
+
+.sp-drift[data-side="right"][data-state="away"] {
+  transform: translateX(90px) rotate(7deg);
+}
+
+.sp-drift[data-state="taken"] {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.08s linear;
+}
+
+.sp-drift-bob {
+  display: block;
+}
+
+.sp-drift[data-state="here"] .sp-drift-bob {
+  animation: sp-bob 4.8s ease-in-out infinite;
+}
+
+.sp-drift[data-side="right"] .sp-drift-bob {
+  animation-delay: -2.2s;
+}
+
+@keyframes sp-bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-1.2deg);
+  }
+  50% {
+    transform: translateY(-7px) rotate(0.8deg);
+  }
+}
+
+.sp-drift:hover .sp-drift-card {
+  box-shadow:
+    0 0 0 1px rgb(52 40 28 / 0.12),
+    0 24px 46px -22px rgb(52 40 28 / 0.55);
+}
+
+.sp-drift-card {
+  display: grid;
+  gap: 3px;
+  width: 252px;
+  padding: 11px 14px 13px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px rgb(52 40 28 / 0.08),
+    0 18px 40px -22px rgb(52 40 28 / 0.45);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  transition: box-shadow 0.25s ease;
+}
+
+.sp-drift-card strong {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.sp-drift-card p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.sp-drift-card small {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+.sp-drift-app {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.sp-drift-app time {
+  margin-left: auto;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-drift-message {
+  border-radius: 16px 16px 16px 5px;
+  background: #ecf7f0;
+}
+
+.sp-drift-message .sp-drift-app {
+  color: #2f8a5d;
+}
+
+.sp-drift-mail {
+  width: 272px;
+  box-shadow:
+    inset 0 3px 0 #e8853a,
+    0 0 0 1px rgb(52 40 28 / 0.08),
+    0 18px 40px -22px rgb(52 40 28 / 0.45);
+}
+
+.sp-drift-file {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  width: 236px;
+  padding: 12px 14px;
+}
+
+.sp-drift-sheet {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  width: 30px;
+  height: 38px;
+  padding: 9px 6px 0 8px;
+  border-radius: 3px 9px 3px 3px;
+  background: #fff;
+  box-shadow:
+    inset 3px 0 #236eb4,
+    0 0 0 1px rgb(35 110 180 / 0.35);
+}
+
+.sp-drift-sheet i {
+  display: block;
+  height: 2px;
+  border-radius: 1px;
+  background: rgb(35 110 180 / 0.45);
+}
+
+.sp-drift-sheet i:last-child {
+  width: 60%;
+}
+
+.sp-drift-photo {
+  width: 196px;
+  padding: 7px 7px 10px;
+  border-radius: 10px;
+}
+
+.sp-drift-photo svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-bottom: 6px;
+  border-radius: 5px;
+}
+
+.sp-drift-photo > span {
+  padding: 0 4px;
+}
+
+/* Filing into Home (kit/filing.ts): what is new stays hidden until it is set down. */
+.sp-home[data-filing] :is(.today-day-item, .work-desk > *):not([data-known]) {
+  opacity: 0;
+}
+
+[data-landing="here"] {
+  animation: sp-landed 0.9s var(--sp-ease) both;
+}
+
+/* Every frame is written out: what is being filed sits under a rule that hides it, which an open end would fall back to. */
+@keyframes sp-landed {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+    filter: blur(4px) brightness(1.08);
+  }
+  45% {
+    opacity: 1;
+    transform: none;
+    filter: blur(0) brightness(1.05);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0) brightness(1);
+  }
+}
+
+.sp-home [data-filed] {
+  transition:
+    opacity 0.6s ease,
+    transform 0.6s var(--sp-ease);
+}
+
+.sp-home[data-tidying] [data-filed] {
+  opacity: 0;
+  transform: scale(0.97);
+}
+
+@media (max-width: 760px) {
+  .sp-drift-card {
+    width: 188px;
+    font-size: 12px;
+  }
+
+  .sp-drift-mail {
+    width: 200px;
+  }
+
+  .sp-drift-photo {
+    width: 150px;
+  }
+}
+
+/* ---- Scenes ------------------------------------------------------------- */
+
+.sp-scene {
+  max-width: calc(var(--sp-measure) + 2 * var(--sp-gutter));
+  margin: 0 auto;
+  padding: clamp(90px, 13vh, 150px) var(--sp-gutter);
+}
+
+.sp-scene-copy {
+  position: relative;
+  z-index: 2;
+  max-width: 760px;
+}
+
+.sp-scene-copy[data-centred] {
+  margin: 0 auto;
+  text-align: center;
+}
+
+.sp-scene-copy[data-centred] .sp-lede {
+  margin-inline: auto;
+}
+
+.sp-scene:not([data-seen]) .sp-lede {
+  opacity: 0;
+}
+
+.sp-scene[data-seen] .sp-lede {
+  animation: sp-rise 0.9s 0.45s var(--sp-ease) both;
+}
+
+/* A scene still on its way keeps its place on the paper. */
+.sp-later {
+  min-height: var(--sp-later, 900px);
+}
+
+/* ---- Classes: books on a shelf ------------------------------------------- */
+
+.sp-cl-room {
+  position: relative;
+  margin-top: clamp(28px, 4vh, 48px);
+}
+
+.sp-cl-stage {
+  position: relative;
+  perspective: 2400px;
+}
+
+.sp-cl-shelf {
+  position: absolute;
+  left: 24px;
+  bottom: 22px;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 100%;
+}
+
+.sp-cl-board {
+  position: absolute;
+  left: -24px;
+  bottom: -4px;
+  width: 1240px;
+  height: 4px;
+  border-radius: 2px;
+  background: #e6e2d9;
+}
+
+.sp-cl-spine {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 62px;
+  padding: 0 0 0;
+  border: 0;
+  border-radius: 6px 6px 3px 3px;
+  background: var(--cover);
+  box-shadow:
+    inset -6px 0 0 rgb(20 19 24 / 0.05),
+    0 10px 24px -14px rgb(20 19 24 / 0.4);
+  cursor: pointer;
+  transition:
+    transform 0.42s var(--sp-ease),
+    box-shadow 0.42s var(--sp-ease);
+}
+
+.sp-cl-spine:last-of-type {
+  transform: rotate(5deg);
+  transform-origin: bottom left;
+  margin-left: 10px;
+}
+
+.sp-cl-spine:hover,
+.sp-cl-spine:focus-visible,
+.sp-cl-spine[data-lift] {
+  transform: translateY(-14px);
+  box-shadow:
+    inset -6px 0 0 rgb(20 19 24 / 0.05),
+    0 22px 30px -16px rgb(20 19 24 / 0.42);
+}
+
+.sp-cl-spine:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.sp-cl-spine .sp-cl-band {
+  width: 100%;
+  height: 10px;
+  margin: 22px 0 18px;
+  border-radius: 0;
+}
+
+.sp-cl-band {
+  display: block;
+  width: 56px;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--ink);
+}
+
+.sp-cl-spine-name {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  color: #141318;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sp-cl-spine-level {
+  color: var(--cover-ink);
+  font-weight: 500;
+}
+
+.sp-cl-book {
+  position: absolute;
+  right: 24px;
+  bottom: 26px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: 720px;
+  height: 430px;
+  transform-style: preserve-3d;
+  border-radius: 10px 10px 6px 6px;
+  box-shadow: 0 40px 80px -36px rgb(20 19 24 / 0.45);
+  transition: box-shadow 0.5s var(--sp-ease);
+}
+
+.sp-cl-book[data-phase="closed"] {
+  box-shadow: none;
+}
+
+.sp-cl-cover {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 34px 32px;
+  border-radius: 10px 0 0 6px;
+  background: var(--cover);
+  color: #141318;
+  box-shadow:
+    0 0 0 1px rgb(20 19 24 / 0.07),
+    inset -14px 0 18px -14px rgb(20 19 24 / 0.25);
+}
+
+.sp-cl-cover .sp-cl-band {
+  margin-bottom: 26px;
+}
+
+.sp-cl-name {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 40px;
+  font-weight: 500;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+.sp-cl-meets {
+  margin: 10px 0 0;
+  color: var(--cover-ink);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.sp-cl-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--cover-ink);
+  font-size: 13px;
+}
+
+.sp-cl-synced {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.sp-cl-synced i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2f9b72;
+  box-shadow: 0 0 0 0 rgb(47 155 114 / 0.5);
+  animation: sp-cl-pulse 2.4s ease-out infinite;
+}
+
+@keyframes sp-cl-pulse {
+  70%,
+  100% {
+    box-shadow: 0 0 0 6px rgb(47 155 114 / 0);
+  }
+}
+
+.sp-cl-leaf {
+  position: relative;
+  transform-origin: left center;
+  transform-style: preserve-3d;
+  transition: transform 0.52s cubic-bezier(0.6, 0, 0.3, 1);
+}
+
+.sp-cl-book[data-phase="closed"] .sp-cl-leaf {
+  transform: rotateY(-180deg);
+}
+
+.sp-cl-page,
+.sp-cl-back {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+}
+
+.sp-cl-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 30px;
+  border-radius: 0 10px 6px 0;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgb(20 19 24 / 0.07);
+}
+
+.sp-cl-page h4 {
+  margin: 0 0 4px;
+  color: #4a4852;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sp-cl-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 0;
+  border-top: 1px solid rgb(20 19 24 / 0.07);
+  font-size: 14px;
+}
+
+.sp-cl-row b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-cl-row > span:last-child {
+  color: #4a4852;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.sp-cl-kind {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--tint) 16%, white);
+  color: var(--tint);
+}
+
+.sp-cl-back {
+  display: flex;
+  flex-direction: column;
+  padding: 34px 32px;
+  transform: rotateY(180deg);
+  border-radius: 10px 6px 6px 10px;
+  background: var(--cover);
+  box-shadow:
+    0 0 0 1px rgb(20 19 24 / 0.07),
+    0 30px 60px -30px rgb(20 19 24 / 0.45);
+}
+
+.sp-cl-back b {
+  margin-top: 26px;
+  color: #141318;
+  font-family: var(--font-display);
+  font-size: 40px;
+  font-weight: 500;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+
+
+
+
+
+
+
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-cl-leaf,
+  .sp-cl-spine {
+    transition: none;
+  }
+}
+
+/* ---- Ask: the island, large, and what it makes --------------------------- */
+
+.sp-ask-room {
+  position: relative;
+  margin-top: clamp(32px, 5vh, 56px);
+}
+
+.sp-ask-stage {
+  position: relative;
+}
+
+.sp-ask-isle-room {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 220px;
+}
+
+/* The island is fixed to the bottom of its page; this box is its page, drawn larger. */
+.sp-ask-isle {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 640px;
+  height: 116px;
+  transform: translateX(-50%) scale(1.4);
+  transform-origin: top center;
+  --spectra-rail-width: 0px;
+  --spectra-lead-width: 0px;
+  --spectra-side-width: 0px;
+}
+
+.sp-ask-status {
+  position: absolute;
+  top: 176px;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 22px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 15px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.sp-ask-status[data-on] {
+  opacity: 1;
+}
+
+.sp-ask-status i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: conic-gradient(#ff647f, #ffab4a, #f6d75d, #48c997, #4f9fe6, #9176e8, #ff647f);
+  animation: sp-spin 1.6s linear infinite;
+}
+
+.sp-ask-notes {
+  position: absolute;
+  left: 40px;
+  top: 262px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 280px;
+  height: 330px;
+  padding: 22px;
+  border-radius: 4px 14px 14px 14px;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px rgb(20 19 24 / 0.07),
+    0 24px 50px -30px rgb(20 19 24 / 0.35);
+  transform: rotate(-2deg);
+}
+
+.sp-ask-kind {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sp-ask-kind i {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: #4f9fe6;
+}
+
+.sp-ask-notes b {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.sp-ask-notes p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.sp-ask-notes mark {
+  border-radius: 3px;
+  color: inherit;
+  background: linear-gradient(90deg, rgb(255 171 74 / 0.38), rgb(145 118 232 / 0.34)) no-repeat 0 0 / 0% 100%;
+  transition: background-size 0.5s var(--sp-ease);
+}
+
+.sp-ask-notes mark[data-mark="2"] {
+  background-image: linear-gradient(90deg, rgb(72 201 151 / 0.36), rgb(79 159 230 / 0.34));
+}
+
+.sp-ask-notes mark[data-mark="3"] {
+  background-image: linear-gradient(90deg, rgb(255 100 127 / 0.32), rgb(255 171 74 / 0.36));
+}
+
+.sp-ask-notes[data-marks="1"] mark[data-mark="1"],
+.sp-ask-notes[data-marks="2"] mark:is([data-mark="1"], [data-mark="2"]),
+.sp-ask-notes[data-marks="3"] mark {
+  background-size: 100% 100%;
+}
+
+.sp-ask-line {
+  display: block;
+  height: 7px;
+  border-radius: 4px;
+  background: #efece5;
+}
+
+.sp-ask-arrow {
+  position: absolute;
+  left: 322px;
+  top: 412px;
+  fill: none;
+  stroke: #7a7782;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-dasharray: 3 5;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.sp-ask-arrow path:last-child {
+  stroke-dasharray: none;
+}
+
+.sp-ask-arrow[data-on] {
+  opacity: 1;
+}
+
+/* The fan before anything is made: a soft place for each card, named by its kind. */
+.sp-ask-slot {
+  position: absolute;
+  left: var(--x);
+  top: calc(232px + var(--y));
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 320px;
+  height: 384px;
+  border: 1.5px dashed color-mix(in oklab, var(--tint) 45%, transparent);
+  border-radius: 16px;
+  background: color-mix(in oklab, var(--tint) 6%, #fbfaf7);
+  color: color-mix(in oklab, var(--tint) 70%, #141318);
+  font-size: 14px;
+  font-weight: 600;
+  transform: rotate(var(--turn));
+  animation: sp-ask-slot 2.4s ease-in-out infinite;
+  transition: opacity 0.3s ease;
+}
+
+.sp-ask-slot[data-filled] {
+  opacity: 0;
+  animation: none;
+}
+
+@keyframes sp-ask-slot {
+  50% {
+    background: color-mix(in oklab, var(--tint) 12%, #fbfaf7);
+  }
+}
+
+/* A made card comes out of the island and lies in the fan; brought up, it is on top and straight. */
+.sp-ask-made {
+  position: absolute;
+  left: var(--x);
+  top: calc(232px + var(--y));
+  z-index: calc(2 + var(--z, var(--i)));
+  width: 320px;
+  height: 384px;
+  /* Only the card shows: the studio's own paper would show round its tab. */
+  background: transparent;
+  transform: translate(calc(620px - var(--x) - 160px), -150px) scale(0.3);
+  opacity: 0;
+  transition:
+    transform 0.75s cubic-bezier(0.2, 0.9, 0.25, 1.08),
+    opacity 0.4s ease;
+}
+
+.sp-ask-made[data-made] {
+  transform: rotate(var(--turn));
+  opacity: 1;
+}
+
+.sp-ask-made[data-made][data-top] {
+  z-index: 9;
+  transform: translateY(-14px) rotate(calc(var(--turn) / 3)) scale(1.03);
+  transition:
+    transform 0.4s var(--sp-ease),
+    opacity 0.4s ease;
+}
+
+/* Only the card itself: its tab and its face, with the shadow following their
+   outline, and no box drawn round the two. */
+.sp-ask-made > .work-embed {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  filter: drop-shadow(0 18px 26px rgb(20 19 24 / 0.16)) drop-shadow(0 1px 1px rgb(20 19 24 / 0.08));
+}
+
+.sp-ask-made > .work-embed .work-embed-face {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-ask-made {
+    transition: none;
+  }
+}
+
+/* ---- Artifacts: every editor, named, and one open ------------------------ */
+
+@property --sweep {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: -30%;
+}
+
+.sp-ed {
+  display: grid;
+  grid-template-columns: minmax(280px, 390px) minmax(0, 860px);
+  justify-content: space-between;
+  align-items: start;
+  gap: clamp(28px, 4vw, 64px);
+}
+
+.sp-artifacts .sp-heading {
+  font-size: clamp(36px, 3.7vw, 58px);
+}
+
+.sp-ed-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-top: clamp(24px, 4vh, 40px);
+}
+
+.sp-ed-name {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 5px 0;
+  border: 0;
+  background: none;
+  color: #8a8792;
+  font-family: var(--font-display);
+  font-size: clamp(26px, 2.3vw, 34px);
+  font-weight: 450;
+  letter-spacing: -0.015em;
+  line-height: 1.12;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.4s ease;
+}
+
+.sp-ed-name:hover {
+  color: #4a4852;
+}
+
+.sp-ed-name i {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 4px;
+  background: var(--kind);
+  opacity: 0.35;
+  transition:
+    opacity 0.4s ease,
+    transform 0.4s var(--sp-ease);
+}
+
+.sp-ed-name[aria-current] i {
+  opacity: 1;
+  transform: scale(1.15);
+}
+
+/* The open name fills with its colour from the left, a bright edge leading,
+   and keeps it a moment; the end of the fill is the turn's. */
+.sp-ed-name[aria-current] span {
+  color: transparent;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--kind) 78%, #141318) calc(var(--sweep) - 14%),
+    color-mix(in srgb, var(--kind) 55%, #fff) var(--sweep),
+    var(--text-primary) calc(var(--sweep) + 10%)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: sp-ed-sweep 4.6s linear both paused;
+}
+
+.sp-ed[data-playing] .sp-ed-name[aria-current] span {
+  animation-play-state: running;
+}
+
+@keyframes sp-ed-sweep {
+  from {
+    --sweep: -12%;
+  }
+
+  42% {
+    --sweep: 118%;
+  }
+
+  to {
+    --sweep: 118%;
+  }
+}
+
+.sp-ed-room {
+  position: relative;
+  margin-top: 6px;
+}
+
+/* Slides on the page have no composer under them, so the slide takes the
+   stage's whole height rather than leaving the composer's room empty. */
+.sp-studio .spectra-artifact-studio[data-blueprint="presentation"] .presentation-stage {
+  --notes-room: 44px;
+  padding: 14px 18px 10px;
+}
+
+.sp-studio .spectra-artifact-studio[data-blueprint="presentation"] .presentation-stage > .presentation-notes {
+  margin-top: 8px;
+}
+
+/* Spectra's own editor, open on a work, framed as the app frames it. */
+.sp-ed-desk {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 18px;
+  background: var(--bg-primary);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 40px 90px -40px rgb(20 19 24 / 0.4);
+  visibility: hidden;
+}
+
+.sp-ed-desk[data-open] {
+  z-index: 1;
+  visibility: visible;
+  animation: sp-ed-in 0.45s var(--sp-ease) both;
+}
+
+.sp-ed-desk > .sp-studio {
+  height: 100%;
+  min-width: 0;
+}
+
+@keyframes sp-ed-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.99);
+  }
+}
+
+@media (max-width: 900px) {
+  .sp-ed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sp-ed-list {
+    flex-flow: row wrap;
+    gap: 4px 18px;
+  }
+
+  .sp-ed-name {
+    font-size: 22px;
+  }
+}
+
+/* ---- Together: a draft with its people beside it ------------------------ */
+
+.sp-together-desk {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 290px;
+  gap: 0;
+  height: 660px;
+  margin-top: clamp(44px, 6vh, 70px);
+  overflow: hidden;
+  border-radius: 18px;
+  background: var(--bg-primary);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 30px 60px -36px rgb(52 40 28 / 0.45);
+}
+
+.sp-together-doc,
+.sp-together-studio,
+.sp-together-studio > .sp-studio {
+  height: 100%;
+  min-width: 0;
+}
+
+.sp-together-doc {
+  overflow: hidden;
+}
+
+.sp-people {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 22px 18px;
+  border-left: 1px solid var(--border-subtle);
+  background: color-mix(in oklab, var(--bg-secondary, #f3efe8) 55%, var(--bg-primary));
+}
+
+.sp-people-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sp-people ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sp-person {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  transition:
+    background 0.4s ease,
+    box-shadow 0.4s ease;
+}
+
+.sp-person-mark {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--person) 16%, var(--bg-primary));
+  color: var(--person);
+}
+
+.sp-person-text {
+  display: grid;
+  min-width: 0;
+}
+
+.sp-person-text strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sp-person-now {
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: sp-rise 0.45s var(--sp-ease) both;
+}
+
+.sp-person-can {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+.sp-person[data-active] {
+  background: color-mix(in oklab, var(--person) 9%, var(--bg-primary));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--person) 30%, transparent);
+}
+
+.sp-person[data-active] .sp-person-now {
+  color: color-mix(in oklab, var(--person) 70%, var(--text-primary));
+}
+
+.sp-person[data-active] .sp-person-mark {
+  animation: sp-person-live 1.8s ease-in-out infinite;
+}
+
+@keyframes sp-person-live {
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in oklab, var(--person) 18%, transparent);
+  }
+}
+
+/* Spectra stands first and apart: a ring of the spectrum round its mark, and a card of its own. */
+.sp-person[data-ai] {
+  margin-bottom: 8px;
+  background: var(--bg-primary);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 8px 18px -14px rgb(52 40 28 / 0.4);
+}
+
+.sp-person[data-ai] .sp-person-mark {
+  position: relative;
+  background: var(--bg-primary);
+}
+
+.sp-person[data-ai] .sp-person-mark::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  -webkit-mask: radial-gradient(circle, transparent 15.5px, #000 16px);
+  mask: radial-gradient(circle, transparent 15.5px, #000 16px);
+  background: conic-gradient(from 0deg, #ff647f, #ffab4a, #e7b52f, #48c997, #4f9fe6, #9176e8, #ff647f);
+  animation: sp-ring 6s linear infinite;
+}
+
+.sp-person[data-ai][data-active] .sp-person-mark::before {
+  animation-duration: 1.6s;
+}
+
+.sp-person[data-ai] .sp-person-mark > * {
+  position: relative;
+}
+
+@keyframes sp-ring {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.sp-people-note {
+  margin: auto 6px 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 900px) {
+  .sp-together-desk {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .sp-together-doc {
+    height: 520px;
+  }
+
+  .sp-people {
+    border-top: 1px solid var(--border-subtle);
+    border-left: 0;
+  }
+}
+
+/* While someone works, what they are doing takes the row. */
+.sp-person[data-active] .sp-person-can {
+  display: none;
+}
+
+/* ---- Week: things land on the calendar ------------------------------------ */
+
+/* As in the canvas: the heading on the left, what it means on the right, the
+   week wide beneath them. */
+.sp-week-copy {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: clamp(32px, 6vw, 96px);
+  align-items: end;
+}
+
+.sp-week-copy .sp-lede {
+  max-width: 34em;
+  margin: 0 0 0.5em;
+}
+
+.sp-week-stage {
+  position: relative;
+  margin-top: clamp(40px, 6vh, 64px);
+}
+
+.sp-calendar,
+.sp-calendar-ghost {
+  height: 100%;
+}
+
+/* The week alone, as in the canvas: the page's own title row is left out. */
+.sp-week .spectra-calendar-page > .page-title-lane {
+  display: none;
+}
+
+/* Nothing in the week is all-day, so its row is left out and the school day
+   starts straight under the dates. */
+.sp-week .spectra-calendar-allday-label,
+.sp-week .spectra-calendar-allday-cell {
+  display: none;
+}
+
+/* What comes in from beyond the page, in flight: the calendar's own item, lifted. */
+.sp-week-flyer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 30;
+  pointer-events: none;
+  transform-origin: 30% 50%;
+  will-change: transform;
+}
+
+.sp-week-flyer > :first-child {
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 1px rgb(52 40 28 / 0.06),
+    0 26px 40px -18px rgb(52 40 28 / 0.5);
+  transition: box-shadow 0.4s ease;
+}
+
+.sp-week-flyer[data-landed] > :first-child {
+  box-shadow: none;
+}
+
+/* Who set it, or what Spectra did, said beside it as it comes. */
+.sp-week-tag {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  translate: -50% 0;
+  padding: 6px 12px 7px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px rgb(52 40 28 / 0.08),
+    0 12px 26px -14px rgb(52 40 28 / 0.45);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  color: var(--text-primary);
+  transition:
+    opacity 0.45s ease,
+    translate 0.45s var(--sp-ease);
+}
+
+.sp-week-tag[data-tone="spectra"] {
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(90deg, #ff647f, #ffab4a, #e7b52f, #48c997, #4f9fe6, #9176e8) border-box;
+  border: 1.5px solid transparent;
+}
+
+.sp-week-flyer[data-landed] .sp-week-tag {
+  transition-delay: 0.7s;
+  opacity: 0;
+  translate: -50% 6px;
+}
+
+.sp-week-tag--alone {
+  bottom: auto;
+  z-index: 30;
+  translate: -50% calc(-100% - 10px);
+  animation: sp-week-tag-in 0.5s var(--sp-ease) both;
+}
+
+.sp-week-tag--alone[data-gone] {
+  opacity: 0;
+}
+
+@keyframes sp-week-tag-in {
+  from {
+    opacity: 0;
+    translate: -50% calc(-100% - 2px);
+  }
+}
+
+@media (max-width: 900px) {
+  .sp-week-copy {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+}
+
+/* ---- Day: the whole sky over Home's brief ---------------------------------- */
+
+/* The section is under its own sky, edge to edge: it turns with the hour, the
+   sun and moon cross it, and it fades into the paper above and below. */
+.sp-day {
+  position: relative;
+  isolation: isolate;
+}
+
+.sp-day-sky {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  z-index: -1;
+  width: 100vw;
+  margin-left: -50vw;
+  overflow: hidden;
+  pointer-events: none;
+  background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-horizon) var(--horizon), var(--sky-horizon) 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 360px, #000 calc(100% - 260px), transparent);
+  mask-image: linear-gradient(180deg, transparent, #000 360px, #000 calc(100% - 260px), transparent);
+}
+
+.sp-day-stars {
+  position: absolute;
+  inset: 0 0 30% 0;
+  opacity: var(--night);
+}
+
+.sp-day-stars::before,
+.sp-day-stars::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(1.6px 1.6px at 6% 22%, #fff, transparent),
+    radial-gradient(1.1px 1.1px at 14% 9%, #fff, transparent),
+    radial-gradient(1.8px 1.8px at 23% 30%, #fff, transparent),
+    radial-gradient(1.1px 1.1px at 31% 14%, #fff, transparent),
+    radial-gradient(1.4px 1.4px at 42% 6%, #fff, transparent),
+    radial-gradient(1px 1px at 51% 26%, #fff, transparent),
+    radial-gradient(1.7px 1.7px at 63% 12%, #fff, transparent),
+    radial-gradient(1.1px 1.1px at 72% 33%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 81% 8%, #fff, transparent),
+    radial-gradient(1px 1px at 88% 24%, #fff, transparent),
+    radial-gradient(1.6px 1.6px at 95% 15%, #fff, transparent);
+}
+
+.sp-day-stars::after {
+  background-image:
+    radial-gradient(1.2px 1.2px at 10% 40%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 19% 52%, #fff, transparent),
+    radial-gradient(1px 1px at 36% 44%, #fff, transparent),
+    radial-gradient(1.3px 1.3px at 58% 48%, #fff, transparent),
+    radial-gradient(1px 1px at 68% 58%, #fff, transparent),
+    radial-gradient(1.4px 1.4px at 84% 46%, #fff, transparent),
+    radial-gradient(1px 1px at 92% 60%, #fff, transparent);
+  animation: sp-day-twinkle 3.6s ease-in-out infinite;
+}
+
+@keyframes sp-day-twinkle {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.sp-day-cloud {
+  position: absolute;
+  left: 0;
+  width: 200px;
+  fill: #fff;
+  opacity: max(0, 0.88 - var(--night) * 1.15);
+  filter: drop-shadow(0 8px 14px rgb(60 70 120 / 0.08));
+  animation: sp-day-drift 90s linear infinite;
+}
+
+.sp-day-cloud[data-cloud="1"] {
+  top: 41%;
+  animation-delay: -20s;
+}
+
+.sp-day-cloud[data-cloud="2"] {
+  top: 49%;
+  width: 140px;
+  animation-duration: 120s;
+  animation-delay: -84s;
+}
+
+.sp-day-cloud[data-cloud="3"] {
+  top: 37%;
+  width: 210px;
+  animation-duration: 150s;
+  animation-delay: -40s;
+}
+
+@keyframes sp-day-drift {
+  from {
+    transform: translateX(-280px);
+  }
+  to {
+    transform: translateX(100vw);
+  }
+}
+
+.sp-day-place,
+.sp-day-glow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+}
+
+/* Low in the sky, the light round the sun spreads along the hills. */
+.sp-day-glow::before {
+  content: "";
+  position: absolute;
+  width: 1100px;
+  height: 640px;
+  translate: -50% -50%;
+  background: radial-gradient(closest-side, var(--sky-glow), transparent);
+  opacity: calc(0.2 + var(--low) * 0.7);
+}
+
+.sp-day-body {
+  position: absolute;
+  width: 220px;
+  height: 220px;
+  translate: -50% -50%;
+  animation: sp-day-rise 1.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.sp-day-body[data-body="moon"] {
+  width: 160px;
+  height: 160px;
+}
+
+.sp-day-body svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+@keyframes sp-day-rise {
+  from {
+    opacity: 0;
+    transform: translateY(70px) scale(0.9);
+  }
+}
+
+.sp-day-sun {
+  fill: #ffd25a;
+  stroke: #ffab3d;
+  stroke-width: 6;
+}
+
+.sp-day-shine {
+  fill: none;
+  stroke: #fff6cf;
+  stroke-width: 10;
+  stroke-linecap: round;
+}
+
+.sp-day-rays {
+  stroke: #ffbb45;
+  stroke-width: 12;
+  stroke-linecap: round;
+  animation: sp-day-turn 48s linear infinite;
+}
+
+@keyframes sp-day-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.sp-day-moon {
+  fill: #f6edcf;
+  filter: drop-shadow(0 0 22px rgb(246 237 207 / 0.55));
+}
+
+.sp-day-hills {
+  position: absolute;
+  top: calc(var(--horizon) - 70px);
+  left: 0;
+  width: 100%;
+  height: calc(100% - var(--horizon) + 70px);
+}
+
+.sp-day-hills path {
+  fill: var(--sky-land);
+}
+
+.sp-day-hills path[data-far] {
+  fill: color-mix(in oklab, var(--sky-land) 55%, var(--sky-horizon));
+}
+
+/* Under the night sky, the words are in its light. */
+.sp-day .sp-heading,
+.sp-day .sp-lede {
+  transition: color 0.9s ease;
+}
+
+.sp-day[data-dark] .sp-heading,
+.sp-day[data-dark] .sp-heading * {
+  color: #f6f3ff;
+}
+
+.sp-day[data-dark] .sp-lede {
+  color: rgb(236 232 255 / 0.78);
+}
+
+/* Room for the sun to climb, between the words and the brief. */
+.sp-day-heaven {
+  height: clamp(190px, 26vh, 290px);
+}
+
+.sp-day-stage {
+  position: relative;
+}
+
+.sp-day-home {
+  position: relative;
+  z-index: 2;
+  max-width: 1040px;
+  margin-inline: auto;
+}
+
+.sp-day[data-dark] .sp-day-home .sp-window {
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.08),
+    0 40px 80px -40px rgb(0 0 0 / 0.7);
+}
+
+.sp-day-page {
+  height: 100%;
+  padding: 44px 56px 0;
+  overflow: hidden;
+}
+
+.sp-day-page .morning {
+  margin-top: 0;
+}
+
+/* The moves are Henry's to press; on the page they are only shown. */
+.sp-day-page .morning-move-action,
+.sp-day-page .morning-more,
+.sp-day-page .morning-move-how {
+  pointer-events: none;
+}
+
+.sp-day-page .morning-move {
+  transition: opacity 0.6s ease;
+}
+
+.sp-day-page .morning-move[data-done] {
+  animation: sp-day-done 0.7s var(--sp-ease) both;
+}
+
+@keyframes sp-day-done {
+  from {
+    opacity: 0.4;
+    transform: translateY(-10px);
+  }
+}
+
+@media (max-width: 900px) {
+  .sp-day-page {
+    padding: 28px 28px 0;
+  }
+
+  .sp-day-body {
+    width: 140px;
+    height: 140px;
+  }
+
+  .sp-day-body[data-body="moon"] {
+    width: 104px;
+    height: 104px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-day-cloud,
+  .sp-day-rays,
+  .sp-day-stars::after {
+    animation: none;
+  }
+}
+
+/* ---- Bridge: the same file on the laptop and in Spectra ------------------ */
+
+.sp-bridge-stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) clamp(140px, 12vw, 210px) minmax(0, 1.1fr);
+  gap: clamp(10px, 1.2vw, 20px);
+  align-items: center;
+  /* Wider than the copy, so what is on both screens can be read. */
+  width: min(1560px, calc(100vw - 2 * var(--sp-gutter)));
+  margin: clamp(44px, 6vh, 70px) 0 0 50%;
+  translate: -50% 0;
+}
+
+.sp-laptop {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  justify-items: center;
+}
+
+.sp-bridge-app {
+  position: relative;
+  z-index: 2;
+}
+
+/* Spectra's prism between the two copies of the file. */
+.sp-bridge-prism {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+}
+
+/* ---- A prism, anywhere ------------------------------------------------- */
+
+.sp-prism {
+  position: relative;
+  aspect-ratio: 1;
+  flex: none;
+}
+
+.sp-prism canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.sp-prism[data-interactive] canvas {
+  cursor: grab;
+  touch-action: pan-y;
+}
+
+.sp-prism[data-interactive] canvas:active {
+  cursor: grabbing;
+}
+
+.sp-prism-core {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 2px;
+}
+
+/* The pipes the files go through: a soft tube in the paper, and the light that runs in it. */
+.sp-bridge-pipes {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.sp-pipe,
+.sp-pipe-shine,
+.sp-pipe-way,
+.sp-pipe-spark {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.sp-pipe {
+  stroke: color-mix(in oklab, var(--sp-ink, #1c1b20) 9%, #ece7de);
+  stroke-width: 12;
+}
+
+.sp-pipe-shine {
+  stroke: rgb(255 255 255 / 0.75);
+  stroke-width: 3;
+  transform: translateY(-2.5px);
+}
+
+.sp-pipe-way {
+  stroke: none;
+}
+
+.sp-pipe-spark {
+  stroke: url(#sp-pipe-light);
+  stroke-width: 7;
+  stroke-dasharray: 0.3 2;
+  filter: drop-shadow(0 0 5px rgb(170 140 255 / 0.85));
+}
+
+.sp-laptop-screen {
+  width: 100%;
+  aspect-ratio: 16 / 10.4;
+  padding: 14px;
+  border-radius: 20px 20px 6px 6px;
+  background: #1d1d22;
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.08),
+    0 30px 60px -30px rgb(30 24 18 / 0.55);
+}
+
+.sp-laptop-screen > .sp-word {
+  height: 100%;
+}
+
+.sp-laptop-base {
+  width: 112%;
+  height: 14px;
+  border-radius: 0 0 16px 16px;
+  background: linear-gradient(180deg, #d9d6d0, #b9b5ae);
+  box-shadow: 0 18px 30px -18px rgb(30 24 18 / 0.6);
+  clip-path: polygon(0 0, 100% 0, 97% 100%, 3% 100%);
+}
+
+.sp-word {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #f3f2f1;
+  font-family: "Calibri", "Carlito", "Segoe UI", sans-serif;
+  color: #252423;
+}
+
+.sp-os-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #2b579a;
+  font-size: 12px;
+  color: #fff;
+}
+
+.sp-os-lights {
+  display: flex;
+  gap: 6px;
+}
+
+.sp-os-lights i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.35);
+}
+
+.sp-os-lights i:nth-child(1) {
+  background: #ff5f57;
+}
+
+.sp-os-lights i:nth-child(2) {
+  background: #febc2e;
+}
+
+.sp-os-lights i:nth-child(3) {
+  background: #28c840;
+}
+
+.sp-os-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+}
+
+.sp-word-badge {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 3px;
+  background: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  color: #2b579a;
+}
+
+.sp-word-state {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: rgb(255 255 255 / 0.85);
+  transition: background 0.4s ease;
+}
+
+.sp-word[data-saved="spectra"] .sp-word-state {
+  background: rgb(255 255 255 / 0.18);
+  color: #fff;
+  animation: sp-rise 0.45s var(--sp-ease) both;
+}
+
+.sp-word-ribbon {
+  display: flex;
+  gap: 18px;
+  padding: 7px 16px;
+  border-bottom: 1px solid #e1dfdd;
+  background: #fff;
+  font-size: 11.5px;
+  color: #605e5c;
+}
+
+.sp-word-ribbon span:first-child {
+  color: #2b579a;
+  box-shadow: 0 2px 0 #2b579a;
+}
+
+.sp-word-page {
+  flex: 1;
+  min-height: 0;
+  margin: 14px 8% 0;
+  padding: 26px 30px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 0 0 1px #e1dfdd;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.sp-word-page p {
+  margin: 0 0 9px;
+}
+
+.sp-word-heading {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2b579a;
+}
+
+.sp-word-change {
+  border-radius: 3px;
+  transition: background 1.6s ease;
+}
+
+.sp-word-change[data-fresh] {
+  background: rgb(145 118 232 / 0.2);
+  animation: sp-word-fresh 0.8s var(--sp-ease) both;
+}
+
+@keyframes sp-word-fresh {
+  from {
+    background: rgb(145 118 232 / 0.5);
+    filter: blur(1.5px);
+    opacity: 0.4;
+  }
+}
+
+.sp-word-caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 1.15em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: #252423;
+  opacity: 0;
+}
+
+.sp-word-caret[data-on] {
+  animation: sp-caret 1s steps(1) infinite;
+}
+
+@keyframes sp-caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+}
+
+.sp-word-ghost {
+  display: grid;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.sp-word-ghost span {
+  height: 7px;
+  border-radius: 4px;
+  background: #edebe9;
+}
+
+.sp-word-ghost span:nth-child(2) {
+  width: 86%;
+}
+
+.sp-word-ghost span:nth-child(3) {
+  width: 62%;
+}
+
+.sp-bridge-doc {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+}
+
+.sp-bridge-sync {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.sp-bridge-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sp-bridge-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  animation: sp-rise 0.45s var(--sp-ease) both;
+}
+
+.sp-bridge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #40c48e;
+  animation: sp-feed-pulse 2.4s ease-in-out infinite;
+}
+
+.sp-bridge-sync[data-sync="writing"] .sp-bridge-line,
+.sp-bridge-sync[data-sync="to-word"] .sp-bridge-line {
+  color: #7d63e0;
+}
+
+.sp-bridge-surface,
+.sp-bridge-studio,
+.sp-bridge-studio > .sp-studio {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+}
+
+.sp-bridge-surface {
+  overflow: hidden;
+}
+
+@media (max-width: 900px) {
+  .sp-bridge-stage {
+    grid-template-columns: minmax(0, 1fr);
+    width: auto;
+    margin-left: 0;
+    translate: none;
+  }
+
+  .sp-bridge-pipes {
+    display: none;
+  }
+
+  .sp-bridge-prism {
+    width: 200px;
+    margin: 0 auto;
+  }
+}
+
+/* ---- Agents: Ms Gonzalez makes one, and it goes to work ------------------ */
+
+.sp-agents-stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+  gap: clamp(22px, 2.6vw, 40px);
+  align-items: start;
+  margin-top: clamp(44px, 6vh, 70px);
+}
+
+.sp-agents-desk {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 120px 0 0;
+  list-style: none;
+}
+
+.sp-agents-desk-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sp-agents-file {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--bg-primary);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 14px 30px -22px rgb(52 40 28 / 0.5);
+  transition:
+    opacity 0.5s ease,
+    transform 0.5s var(--sp-ease);
+}
+
+.sp-agents-file[data-taken] {
+  opacity: 0.4;
+  transform: scale(0.97);
+}
+
+.sp-agents-file strong {
+  display: block;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.sp-agents-file small {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.sp-agents-file-kind {
+  display: grid;
+  height: 46px;
+  place-items: center;
+  border-radius: 6px 12px 6px 6px;
+  background: color-mix(in oklab, #4f9fe6 14%, #fff);
+  font-size: 10px;
+  font-weight: 700;
+  color: #2c6db0;
+}
+
+.sp-agents-file-kind[data-kind="pdf"] {
+  background: color-mix(in oklab, #ff647f 14%, #fff);
+  color: #c23a52;
+}
+
+.sp-agent-page {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  padding: 26px 40px 0;
+  overflow: hidden;
+}
+
+.sp-agent-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.sp-agent-glyph {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--ink-orange) 14%, var(--bg-primary));
+  color: var(--ink-orange);
+}
+
+.sp-agent-name {
+  display: grid;
+}
+
+.sp-agent-name small {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.sp-agent-name strong {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 500;
+  line-height: 1.1;
+  color: var(--text-primary);
+}
+
+.sp-agent-state {
+  margin-left: auto;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--bg-secondary, #f1ece4);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.sp-agent-state[data-released] {
+  background: color-mix(in oklab, #40c48e 16%, var(--bg-primary));
+  color: #1f7a55;
+  animation: sp-rise 0.5s var(--sp-ease) both;
+}
+
+.sp-agent-page .foundry-nav-part,
+.sp-agent-page .foundry-nav-primary {
+  pointer-events: none;
+}
+
+.sp-agent-body {
+  display: grid;
+  align-content: start;
+  gap: 22px;
+  max-width: 760px;
+  padding-top: 26px;
+}
+
+.sp-agent-body .interview-ask {
+  animation: sp-rise 0.5s var(--sp-ease) both;
+}
+
+.sp-agent-mission {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--bg-secondary, #f1ece4);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.sp-agent-files .interview-file-detail {
+  animation: sp-rise 0.45s var(--sp-ease) both;
+}
+
+.sp-agent-try {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 28px;
+  padding-top: 24px;
+  animation: sp-rise 0.5s var(--sp-ease) both;
+}
+
+.sp-agent-draft {
+  padding: 22px 26px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--border-subtle);
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.sp-agent-draft h4 {
+  margin: 12px 0 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.sp-agent-draft p {
+  margin: 0 0 8px;
+}
+
+.sp-agent-draft-who {
+  font-family: var(--font-sans, inherit);
+  font-size: 12px !important;
+  color: var(--text-tertiary);
+}
+
+.sp-agent-mark {
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  transition: background 0.6s ease;
+}
+
+.sp-agent-mark[data-on] {
+  background: rgb(145 118 232 / 0.18);
+  box-shadow: inset 0 -2px 0 rgb(145 118 232 / 0.6);
+}
+
+.sp-agent-said {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sp-agent-said li {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--bg-primary);
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 14px 28px -22px rgb(52 40 28 / 0.5);
+  animation: sp-feed-in 0.6s var(--sp-ease) both;
+}
+
+.sp-agent-said p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.sp-agent-said-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sp-agent-cite {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  justify-self: start;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--ink-orange) 12%, var(--bg-primary));
+  font-size: 11.5px;
+  color: color-mix(in oklab, var(--ink-orange) 80%, var(--text-primary));
+}
+
+@media (max-width: 900px) {
+  .sp-agents-stage {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sp-agents-desk {
+    grid-auto-flow: column;
+    grid-auto-columns: 230px;
+    padding-top: 0;
+    overflow: hidden;
+  }
+}
+
+/* ── Sign in, sign up, invitation ─────────────────────────────── */
+
+.auth-page {
+  display: grid;
+  /* The picture of Home takes most of the room, so it reads at full size on a laptop too. */
+  grid-template-columns: minmax(0, 1.45fr) minmax(420px, 0.55fr);
+  min-height: 100dvh;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.auth-scene {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 56px clamp(24px, 3vw, 64px);
+  background: var(--bg-secondary);
+}
+
+/* The light the landing page draws around its windows: close to the frame, in the spectrum's colours, slowly turning. */
+.auth-scene-light {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  z-index: -1;
+  width: min(92%, 980px);
+  aspect-ratio: 1.55;
+  border-radius: 40px;
+  translate: -50% -50%;
+  background: conic-gradient(
+    from var(--auth-turn, 0deg),
+    oklch(0.78 0.13 25 / 0.55),
+    oklch(0.84 0.12 75 / 0.5),
+    oklch(0.8 0.12 150 / 0.45),
+    oklch(0.76 0.11 230 / 0.5),
+    oklch(0.72 0.14 290 / 0.55),
+    oklch(0.78 0.13 345 / 0.5),
+    oklch(0.78 0.13 25 / 0.55)
+  );
+  filter: blur(44px);
+  opacity: 0.75;
+  animation: auth-turn 28s linear infinite;
+}
+
+@property --auth-turn {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes auth-turn {
+  to {
+    --auth-turn: 360deg;
+  }
+}
+
+.auth-home {
+  position: relative;
+  width: min(100%, 1160px);
+  pointer-events: none;
+  user-select: none;
+}
+
+.auth-home-page {
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+  padding: 46px 56px;
+}
+
+.auth-home-page .page-greeting {
+  margin: 0;
+}
+
+.auth-home .morning-move-action {
+  pointer-events: none;
+}
+
+.auth-home .morning-move {
+  transition: opacity 400ms ease;
+}
+
+.auth-home .morning-move-tile {
+  transition: background-color 400ms ease, color 400ms ease;
+}
+
+.auth-home .today-day-item {
+  animation: auth-arrive 600ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes auth-arrive {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+  }
+}
+
+.auth-side {
+  display: grid;
+  place-items: center;
+  padding: 48px clamp(28px, 2.6vw, 56px);
+  border-left: 1px solid var(--border-subtle);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  width: min(100%, 400px);
+}
+
+.auth-switch {
+  display: flex;
+  width: fit-content;
+  padding: 3px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control);
+  background: var(--bg-secondary);
+  font-size: var(--text-caption, 13px);
+}
+
+.auth-switch > * {
+  padding: 5px 16px;
+  border-radius: calc(var(--radius-control) - 2px);
+  color: var(--text-secondary);
+  transition: color 150ms ease;
+}
+
+.auth-switch > a:hover {
+  color: var(--text-primary);
+}
+
+.auth-switch > a:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 1px;
+}
+
+.auth-switch > [aria-current="page"] {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-weight: 500;
+  box-shadow: var(--shadow-soft);
+}
+
+.auth-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 2.6vw, 2.6rem);
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+
+.auth-lede {
+  margin: 12px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-ui, 15px);
+  line-height: 1.6;
+}
+
+.auth-note {
+  padding-left: 12px;
+  border-left: 2px solid var(--border-strong, var(--border-default));
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* Clerk's form sits on the page, not in a card of its own. */
+.auth-clerk {
+  min-width: 0;
+}
+
+.auth-clerk .cl-cardBox,
+.auth-clerk .cl-card {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* A little room on every side, so the rounded corners and borders of the
+   fields and buttons are not cut straight by the card's edge. */
+.auth-clerk .cl-cardBox {
+  overflow: visible;
+}
+
+.auth-clerk .cl-card {
+  padding: 4px 4px 0;
+}
+
+.auth-clerk .cl-header {
+  display: none;
+}
+
+.auth-clerk .cl-footer {
+  background: transparent;
+}
+
+.auth-clerk .cl-footer > :not(:last-child) {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  .auth-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .auth-scene {
+    display: none;
+  }
+
+  .auth-side {
+    border-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-scene-light,
+  .auth-home .today-day-item {
+    animation: none;
+  }
+}
+
+/* Nothing inside a picture of the app scrolls or shows a scrollbar: the page scrolls instead. */
+.sp-scaled-inner * {
+  scrollbar-width: none;
+}
+
+@keyframes sp-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* Home in the hero keeps two things a day, so what to pick up is in view below the week. */
+.sp-hero .today-day-items > li:nth-child(n + 3) {
+  display: none;
+}
+
+/* No scrollbars inside the page's pictures of the app: they do not scroll. */
+.sp-main * {
+  scrollbar-width: none;
+}
+
+.sp-main *::-webkit-scrollbar {
+  display: none;
+}
+
+/* The page's own sky is the one above; Home's small copy of it is left out here. */
+.sp-day-page .day-sky {
+  display: none;
 }

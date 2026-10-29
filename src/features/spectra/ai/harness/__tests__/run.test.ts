@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import { CaptionScheduler, parseCaptionReply, type CaptionEvent, type CaptionTimers } from "../captions";
-import { SUMMARY_MARKER, compactionCut, createCompactor, estimateTokens } from "../compaction";
+import {
+  SUMMARY_MARKER,
+  THREAD_FOLD_AT,
+  THREAD_KEEP_MESSAGES,
+  compactionCut,
+  createCompactor,
+  estimateTokens,
+  threadFold,
+  threadFoldTranscript,
+} from "../compaction";
 import type { ModelCaller } from "../loop";
 import { MemoryBackend } from "../memory-backend";
 import { DEFAULT_PERMISSION_PREFS } from "../permissions";
@@ -179,6 +188,25 @@ describe("compaction", () => {
   });
 });
 
+describe("thread notes", () => {
+  it("fold the oldest messages of a long thread and carry the notes so far forward", () => {
+    const messages = Array.from({ length: THREAD_FOLD_AT }, (_, index) => ({
+      role: (index % 2 ? "assistant" : "user") as "user" | "assistant",
+      content: `turn ${index}`,
+      createdAt: 100 + index,
+    }));
+    expect(threadFold(messages)).toBeNull();
+    const longer = [...messages, { role: "user" as const, content: "latest", createdAt: 999 }];
+    const fold = threadFold(longer)!;
+    expect(fold.older).toHaveLength(longer.length - THREAD_KEEP_MESSAGES);
+    expect(fold.through).toBe(fold.older.at(-1)!.createdAt);
+    const transcript = threadFoldTranscript("## Done so far\nA deck on cells (id d1).", fold.older);
+    expect(transcript.startsWith("NOTES SO FAR:\n## Done so far")).toBe(true);
+    expect(transcript).toMatch(/USER: turn 0/);
+    expect(transcript).not.toMatch(/latest/);
+  });
+});
+
 describe("system prompt", () => {
   it("is under 1,500 words and carries the skill index and environment", () => {
     expect(SPECTRA_SYSTEM_PROMPT.split(/\s+/).length).toBeLessThan(1_500);
@@ -221,7 +249,7 @@ describe("system prompt", () => {
 
   it("tells the model to search and read instead of expecting content", () => {
     expect(SPECTRA_SYSTEM_PROMPT).toMatch(/never its content/);
-    expect(SPECTRA_SYSTEM_PROMPT).toMatch(/search for what a request is about and read it/);
+    expect(SPECTRA_SYSTEM_PROMPT).toMatch(/Otherwise search: it covers every workspace and class/);
     expect(SPECTRA_SYSTEM_PROMPT).not.toMatch(/focused artifact with its outline/);
   });
 });

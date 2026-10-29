@@ -28,12 +28,17 @@ export function useLandingEngine(onOpenWork: (workId: string) => void) {
   });
 }
 
+const keepClosed = () => undefined;
+
 export function LandingIsland({
   engine,
-  onOpenThread,
+  onOpenThread = keepClosed,
+  bindsThread = true,
 }: {
   engine: SpectraRunEngine;
-  onOpenThread: (thread: {
+  /** False: the island opens each answer as its own card over itself, as it does on any page of the app. */
+  bindsThread?: boolean;
+  onOpenThread?: (thread: {
     runId: string;
     threadId: string;
     title: string;
@@ -45,7 +50,7 @@ export function LandingIsland({
       () => ({
         engine,
         focus: null,
-        bindsThread: true,
+        bindsThread,
         // A new question is a thread of its own; words typed after an answer follow it up.
         startNewThread: () => {
           world.fresh = true;
@@ -53,7 +58,7 @@ export function LandingIsland({
         openThread: (runId: string, threadId: string, title: string) =>
           onOpenThread({ runId, threadId, title }),
       }),
-      [engine, onOpenThread, world],
+      [engine, onOpenThread, world, bindsThread],
     ),
   );
   return <Island />;

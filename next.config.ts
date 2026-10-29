@@ -27,7 +27,10 @@ const nextConfig: NextConfig = {
   // Browser evidence is taken against the development server, but framework
   // diagnostics are not part of Spectra's product chrome.
   devIndicators: false,
-  transpilePackages: ["@lobehub/icons", "@lobehub/ui", "es-toolkit"],
+  // Packages that import yjs are bundled so they share the one aliased copy;
+  // left external, Node loads a second Yjs and its instanceof checks fail.
+  transpilePackages: ["@lobehub/icons", "@lobehub/ui", "es-toolkit", "y-prosemirror", "@tiptap/y-tiptap",
+    "y-protocols", "@hocuspocus/provider", "@hocuspocus/common"],
   serverExternalPackages: ["pdfjs-dist", "@napi-rs/canvas", "esbuild"],
   turbopack: {
     root: projectRoot,

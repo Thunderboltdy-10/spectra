@@ -16,6 +16,10 @@ import type {
   RecoveryCurrent,
 } from "./types";
 import { readInteractionState } from "./interaction-model";
+import { readPerformances } from "./performance";
+import { PerformanceStage } from "./performance-stage";
+import { readArtifactYjsDocument } from "./artifact-yjs-model";
+import { readNativeArtifactYjsDocument } from "../work/models/yjs/native-artifact-model";
 import { resolveDocumentRelativeSelection } from "../work/models/yjs/relative-position";
 import { ScopedCollaborationSnapshots } from "./scoped-snapshots";
 import { COLLAB_RECONNECT } from "./reconnect-backoff";
@@ -313,6 +317,13 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   private durabilityEpoch = 0;
   private unsynchronizedChanges = 0;
   private presence: CollaborationPresence[] = [];
+  private awarenessEntries: Array<{ clientId: number | string; user?: unknown }> = [];
+  private readonly performanceStage = new PerformanceStage(
+    (performance) =>
+      readNativeArtifactYjsDocument(this.document, performance.typeKey) ??
+      readArtifactYjsDocument(this.document, performance.typeKey),
+    () => this.publishPresence(),
+  );
   private presenceSignature = "[]";
   private localPresence: CollaborationPresence | null = null;
   private localPresenceSignature = "";
@@ -587,6 +598,169 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     });
   }
 
+  /** One awareness entry as presence. */
+  private presenceFromEntry(entry: { clientId: number | string; user?: unknown }): CollaborationPresence {
+    const user =
+      entry.user && typeof entry.user === "object"
+        ? (entry.user as Record<string, unknown>)
+        : {};
+    const clientId =
+      typeof user.clientId === "string"
+        ? user.clientId
+        : String(entry.clientId);
+    return {
+      clientId,
+      // Protocol v2 frame, when the peer publishes one. Everything
+      // below is the superseded v1 shape kept for older peers.
+      ...(readInteractionState(user.interactionState, clientId)
+        ? {
+            interactionState: readInteractionState(
+              user.interactionState,
+              clientId,
+            ),
+          }
+        : {}),
+      ...(typeof user.accountId === "string"
+        ? { accountId: user.accountId }
+        : {}),
+      ...(typeof user.name === "string" ? { name: user.name } : {}),
+      ...(typeof user.color === "string"
+        ? { color: user.color }
+        : {}),
+      ...(user.actorKind === "ai" || user.actorKind === "human"
+        ? { actorKind: user.actorKind as "ai" | "human" }
+        : {}),
+      ...(typeof user.runId === "string"
+        ? { runId: user.runId }
+        : {}),
+      ...(typeof user.operationId === "string"
+        ? { operationId: user.operationId }
+        : {}),
+      ...(typeof user.activeRegionId === "string"
+        ? { activeRegionId: user.activeRegionId }
+        : {}),
+      ...(Array.isArray(user.activeRegionIds) &&
+      user.activeRegionIds.every(
+        (regionId) => typeof regionId === "string",
+      )
+        ? { activeRegionIds: user.activeRegionIds as string[] }
+        : {}),
+      ...(Array.isArray(user.previewPatches) &&
+      user.previewPatches.every(
+        (patch) =>
+          patch &&
+          typeof patch === "object" &&
+          typeof (patch as { path?: unknown }).path === "string" &&
+          "value" in patch,
+      )
+        ? {
+            previewPatches: user.previewPatches as Array<{
+              path: string;
+              value: unknown;
+            }>,
+          }
+        : {}),
+      ...(Number.isInteger(user.previewSequence)
+        ? { previewSequence: user.previewSequence as number }
+        : {}),
+      ...(user.previewPhase === "streaming"
+        ? { previewPhase: "streaming" as const }
+        : {}),
+      ...(user.previewGesture === "erasing" ||
+      user.previewGesture === "typing" ||
+      user.previewGesture === "selecting"
+        ? { previewGesture: user.previewGesture }
+        : {}),
+      ...(user.interaction &&
+      typeof user.interaction === "object" &&
+      typeof (user.interaction as { kind?: unknown }).kind ===
+        "string"
+        ? {
+            interaction: user.interaction as CollaborationPresence["interaction"],
+          }
+        : {}),
+      ...(collaborationCursor(user.cursor)
+        ? { cursor: collaborationCursor(user.cursor) }
+        : {}),
+      ...(collaborationSelection(user.selection) !== undefined
+        ? { selection: collaborationSelection(user.selection) }
+        : {}),
+      ...(user.menu &&
+      typeof user.menu === "object" &&
+      (user.menu as { open?: unknown }).open === true &&
+      typeof (user.menu as { label?: unknown }).label === "string" &&
+      Array.isArray((user.menu as { options?: unknown }).options)
+        ? {
+            menu: {
+              open: true as const,
+              label: String((user.menu as { label: string }).label),
+              options: (
+                (user.menu as { options: unknown[] }).options ?? []
+              ).flatMap((option) => {
+                if (!option || typeof option !== "object") return [];
+                const entry = option as Record<string, unknown>;
+                if (
+                  typeof entry.value !== "string" ||
+                  typeof entry.label !== "string"
+                )
+                  return [];
+                return [
+                  {
+                    value: entry.value,
+                    label: entry.label,
+                  },
+                ];
+              }),
+              ...(typeof (user.menu as { highlighted?: unknown })
+                .highlighted === "string"
+                ? {
+                    highlighted: String(
+                      (user.menu as { highlighted: string })
+                        .highlighted,
+                    ),
+                  }
+                : {}),
+            },
+          }
+        : user.menu === null
+          ? { menu: null }
+          : {}),
+      ...(user.viewport !== undefined
+        ? { viewport: user.viewport }
+        : {}),
+    };
+  }
+
+  /**
+   * Presence from the last awareness states, with each performing AI shown by
+   * its local performance: the same record shape a live peer publishes.
+   */
+  private publishPresence() {
+    const entries = this.awarenessEntries.map((entry) => {
+      const user = entry.user && typeof entry.user === "object" ? (entry.user as Record<string, unknown>) : {};
+      const clientId = typeof user.clientId === "string" ? user.clientId : String(entry.clientId);
+      const performed = this.performanceStage.presence().get(clientId);
+      return performed ? { clientId: entry.clientId, user: { ...user, ...performed } } : entry;
+    });
+    const listed = new Set(
+      entries.map((entry) => {
+        const user = entry.user as Record<string, unknown> | undefined;
+        return typeof user?.clientId === "string" ? user.clientId : String(entry.clientId);
+      }),
+    );
+    // The AI's connection may already be gone; its hand keeps going here.
+    for (const [clientId, record] of this.performanceStage.presence())
+      if (!listed.has(clientId)) entries.push({ clientId, user: record });
+    const resolvedPresence = entries.map((entry) => this.resolveRelativePresence(this.presenceFromEntry(entry)));
+    // Awareness callbacks rebuild wrapper objects. Compare one compact
+    // array signature instead of stringifying both sides for every peer.
+    const signature = JSON.stringify(resolvedPresence);
+    if (signature !== this.presenceSignature) {
+      this.presenceSignature = signature;
+      this.update({ presence: resolvedPresence });
+    }
+  }
+
   private resolveRelativePresence(
     presence: CollaborationPresence,
   ): CollaborationPresence {
@@ -807,147 +981,9 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
           this.updateSynchronizationState();
         },
         onAwarenessChange: ({ states }) => {
-          const presence: CollaborationPresence[] = states.map((entry) => {
-              const user =
-                entry.user && typeof entry.user === "object"
-                  ? (entry.user as Record<string, unknown>)
-                  : {};
-              const clientId =
-                typeof user.clientId === "string"
-                  ? user.clientId
-                  : String(entry.clientId);
-              return {
-                clientId,
-                // Protocol v2 frame, when the peer publishes one. Everything
-                // below is the superseded v1 shape kept for older peers.
-                ...(readInteractionState(user.interactionState, clientId)
-                  ? {
-                      interactionState: readInteractionState(
-                        user.interactionState,
-                        clientId,
-                      ),
-                    }
-                  : {}),
-                ...(typeof user.accountId === "string"
-                  ? { accountId: user.accountId }
-                  : {}),
-                ...(typeof user.name === "string" ? { name: user.name } : {}),
-                ...(typeof user.color === "string"
-                  ? { color: user.color }
-                  : {}),
-                ...(user.actorKind === "ai" || user.actorKind === "human"
-                  ? { actorKind: user.actorKind as "ai" | "human" }
-                  : {}),
-                ...(typeof user.runId === "string"
-                  ? { runId: user.runId }
-                  : {}),
-                ...(typeof user.operationId === "string"
-                  ? { operationId: user.operationId }
-                  : {}),
-                ...(typeof user.activeRegionId === "string"
-                  ? { activeRegionId: user.activeRegionId }
-                  : {}),
-                ...(Array.isArray(user.activeRegionIds) &&
-                user.activeRegionIds.every(
-                  (regionId) => typeof regionId === "string",
-                )
-                  ? { activeRegionIds: user.activeRegionIds as string[] }
-                  : {}),
-                ...(Array.isArray(user.previewPatches) &&
-                user.previewPatches.every(
-                  (patch) =>
-                    patch &&
-                    typeof patch === "object" &&
-                    typeof (patch as { path?: unknown }).path === "string" &&
-                    "value" in patch,
-                )
-                  ? {
-                      previewPatches: user.previewPatches as Array<{
-                        path: string;
-                        value: unknown;
-                      }>,
-                    }
-                  : {}),
-                ...(Number.isInteger(user.previewSequence)
-                  ? { previewSequence: user.previewSequence as number }
-                  : {}),
-                ...(user.previewPhase === "streaming"
-                  ? { previewPhase: "streaming" as const }
-                  : {}),
-                ...(user.previewGesture === "erasing" ||
-                user.previewGesture === "typing" ||
-                user.previewGesture === "selecting"
-                  ? { previewGesture: user.previewGesture }
-                  : {}),
-                ...(user.interaction &&
-                typeof user.interaction === "object" &&
-                typeof (user.interaction as { kind?: unknown }).kind ===
-                  "string"
-                  ? {
-                      interaction: user.interaction as CollaborationPresence["interaction"],
-                    }
-                  : {}),
-                ...(collaborationCursor(user.cursor)
-                  ? { cursor: collaborationCursor(user.cursor) }
-                  : {}),
-                ...(collaborationSelection(user.selection) !== undefined
-                  ? { selection: collaborationSelection(user.selection) }
-                  : {}),
-                ...(user.menu &&
-                typeof user.menu === "object" &&
-                (user.menu as { open?: unknown }).open === true &&
-                typeof (user.menu as { label?: unknown }).label === "string" &&
-                Array.isArray((user.menu as { options?: unknown }).options)
-                  ? {
-                      menu: {
-                        open: true as const,
-                        label: String((user.menu as { label: string }).label),
-                        options: (
-                          (user.menu as { options: unknown[] }).options ?? []
-                        ).flatMap((option) => {
-                          if (!option || typeof option !== "object") return [];
-                          const entry = option as Record<string, unknown>;
-                          if (
-                            typeof entry.value !== "string" ||
-                            typeof entry.label !== "string"
-                          )
-                            return [];
-                          return [
-                            {
-                              value: entry.value,
-                              label: entry.label,
-                            },
-                          ];
-                        }),
-                        ...(typeof (user.menu as { highlighted?: unknown })
-                          .highlighted === "string"
-                          ? {
-                              highlighted: String(
-                                (user.menu as { highlighted: string })
-                                  .highlighted,
-                              ),
-                            }
-                          : {}),
-                      },
-                    }
-                  : user.menu === null
-                    ? { menu: null }
-                    : {}),
-                ...(user.viewport !== undefined
-                  ? { viewport: user.viewport }
-                  : {}),
-              };
-            });
-          const resolvedPresence = presence.map((entry) =>
-            this.resolveRelativePresence(entry),
-          );
-          // Awareness callbacks rebuild wrapper objects. Compare one compact
-          // array signature instead of stringifying both sides for every peer.
-          const signature = JSON.stringify(resolvedPresence);
-          if (signature !== this.presenceSignature) {
-            this.presenceSignature = signature;
-            this.update({ presence: resolvedPresence });
-          }
+          this.awarenessEntries = states.map((entry) => ({ clientId: entry.clientId, user: entry.user }));
+          for (const entry of states) this.performanceStage.ingest(readPerformances(entry.user));
+          this.publishPresence();
         },
         onAuthenticationFailed: ({ reason }) => {
           const revoked = collaborationAccessRevoked(reason);
@@ -1270,6 +1306,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     this.recoveryCurrentRequests.clear();
     this.websocketProvider?.destroy();
     this.websocketProvider = null;
+    this.performanceStage.destroy();
     this.document.off("update", this.onLocalDocumentUpdate);
     this.document.destroy();
     this.update({ state: "closed", presence: [] });

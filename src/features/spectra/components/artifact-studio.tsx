@@ -1,6 +1,12 @@
 "use client";
 
 import { OpenAnchorScope } from "../anchors/use-open-anchor";
+import {
+  AuthorMark,
+  VersionChanges,
+  timelineAuthors,
+  versionAuthor,
+} from "./history/version-changes";
 import { useWorkAvailability } from "./use-work-availability";
 
 import { Tooltip } from "@/components/ui/tooltip";
@@ -118,14 +124,12 @@ import {
   refreshGeneratedArtifactSummary,
 } from "../operations/hollow-content";
 import {
-  disengageFollow,
   noteFollowLocation,
   useFollow,
 } from "../collaboration/follow";
 import { stableAiActorId } from "../collaboration/ai-actor-id";
 import {
   clearAiLocation,
-  disengageFollowAi,
   noteAiLocation,
   useFollowAi,
 } from "../collaboration/follow-ai";
@@ -156,6 +160,7 @@ import type { AdmittedUpdateDescriptor, CollaborationPresence } from "../collabo
 import { useArtifactLiveModel } from "../collaboration/use-artifact-live-model";
 import { useLocalOnlyCollaboration } from "../collaboration/local-only";
 import { usePresencePreview } from "../collaboration/scoped-hooks";
+import type { SpeculativeBlockText } from "../editor/ai-speculation-decoration";
 import { useInteractionPresence } from "../collaboration/use-interaction-presence";
 import { contextSourceRegistry } from "../context";
 import {
@@ -464,6 +469,8 @@ function livePreviewOuterPointer(path: string) {
 }
 
 /** Content-relative destination for a canonical live patch. */
+const NO_SPECULATIVE_BLOCKS: readonly SpeculativeBlockText[] = [];
+
 function livePreviewContentPointer(path: string): string | null {
   if (ARTIFACT_LIVE_METADATA_POINTERS.has(path)) return null;
   if (path === "/content") return "/";
@@ -1260,6 +1267,7 @@ function HistoryComparisonOverlay({
   versions,
   selected,
   changes,
+  versionChanges,
   selectedRegions,
   busyVersionId,
   listLoading,
@@ -1281,6 +1289,8 @@ function HistoryComparisonOverlay({
   versions: SpectraArtifactVersionSummary[];
   selected: SpectraArtifactVersion | null;
   changes: HumanChange[];
+  /** What the selected version itself changed, from its parent to it. */
+  versionChanges: HumanChange[];
   selectedRegions: Set<string>;
   busyVersionId: string | null;
   listLoading: boolean;
@@ -1300,7 +1310,8 @@ function HistoryComparisonOverlay({
   onCreateCheckpoint: (name: string) => Promise<void>;
   onClose: () => void;
 }) {
-  const [showChanges, setShowChanges] = useState(false);
+  const [view, setView] = useState<"changed" | "side" | "live">("changed");
+  const authors = useMemo(() => timelineAuthors(versions), [versions]);
   const [split, setSplit] = useState(50);
   const [checkpointOpen, setCheckpointOpen] = useState(false);
   const [checkpointName, setCheckpointName] = useState("");
@@ -1387,18 +1398,31 @@ function HistoryComparisonOverlay({
                 This earlier version is for reference only. Your current work stays editable after you close the comparison.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowChanges((value) => !value)}
-              className={`h-8 rounded-control border px-3 text-micro font-medium ${showChanges ? "border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-primary))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
-            >
-              {showChanges
-                ? "Show comparison"
-                : `${changes.length} changed ${changes.length === 1 ? "field" : "fields"}`}
-            </button>
+<div role="tablist" aria-label="How to look at this version" className="flex rounded-control border border-[var(--border-default)] p-0.5">
+              {(
+                [
+                  ["changed", "What changed"],
+                  ["side", "Side by side"],
+                  ["live", `Against live${changes.length ? ` (${changes.length})` : ""}`],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === key}
+                  onClick={() => setView(key)}
+                  className={`h-7 rounded-[calc(var(--radius-control)-2px)] px-2.5 text-micro font-medium transition ${view === key ? "bg-[var(--bg-secondary)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
           {selected?.after ? (
-            showChanges ? (
+            view === "changed" ? (
+              <VersionChanges version={selected} changes={versionChanges} />
+            ) : view === "live" ? (
               <div className="min-h-0 flex-1 space-y-2 overflow-auto p-4">
                 {changes.map((change, index) => (
                   <article
@@ -1590,8 +1614,17 @@ function HistoryComparisonOverlay({
                 Version history
               </h3>
               <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
-                {versions.length} versions loaded{hasMore ? " · more available" : ""}
+                {versions.length} versions loaded{hasMore ? ", more further back" : ""}
               </p>
+              {authors.length > 1 ? (
+                <ul aria-label="Who worked on this" className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-micro text-[var(--text-secondary)]">
+                  {authors.map((author) => (
+                    <li key={author.name} className="min-w-0 max-w-full">
+                      <AuthorMark author={author} />
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
             {!readOnly ? (
               <button
@@ -1673,11 +1706,10 @@ function HistoryComparisonOverlay({
             </div>
             {versions.map((version, index) => {
               const selectedVersion = selected?._id === version._id;
-              const creator =
-                version.source === "ai"
-                  ? "Spectra AI"
-                  : version.creators?.map((entry) => entry.name).join(", ") ||
-                    "A collaborator";
+              const author = versionAuthor(version);
+              // Who made it leads; the kind is said only when the author does not already say it.
+              const kind = historyKind(version);
+              const plainEdit = kind === "AI edit" || kind === "User edit";
               return (
                 <button
                   type="button"
@@ -1687,7 +1719,13 @@ function HistoryComparisonOverlay({
                   className={`relative flex w-full gap-3 rounded-control border px-3 py-2.5 text-left ${selectedVersion ? "border-[color-mix(in_oklab,var(--brand-primary)_50%,var(--border-default))] bg-[color-mix(in_oklab,var(--brand-primary)_5%,var(--bg-primary))]" : "border-transparent hover:bg-[var(--bg-hover)]"}`}
                 >
                   <span
-                    className={`relative z-chrome mt-1.5 h-2 w-2 shrink-0 rounded-full ${version.source === "ai" ? "bg-[var(--brand-primary)]" : version.source === "restore" || version.source === "revert" ? "bg-[#278bd8]" : version.source === "checkpoint" ? "bg-[var(--brand-primary)]" : "bg-[var(--text-secondary)]"}`}
+                    aria-hidden
+                    className="relative z-chrome mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[var(--bg-elevated)]"
+                    style={
+                      author.ai
+                        ? { boxShadow: `inset 0 0 0 1.5px ${author.color}` }
+                        : { background: author.color }
+                    }
                   />
                   {index < versions.length - 1 ? (
                     <span className="absolute bottom-[-8px] left-[18px] top-5 w-px bg-[var(--border-default)]" />
@@ -1695,7 +1733,7 @@ function HistoryComparisonOverlay({
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center justify-between gap-2">
                       <span className="truncate text-micro font-semibold text-[var(--text-primary)]">
-                        {version.name || historyKind(version)}
+                        {author.name}
                       </span>
                       <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
                         {new Date(version.createdAt).toLocaleString([], {
@@ -1706,14 +1744,11 @@ function HistoryComparisonOverlay({
                         })}
                       </span>
                     </span>
-                    <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                      <span className="rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro font-medium text-[var(--text-secondary)]">
-                        {historyKind(version)}
+                    {plainEdit ? null : (
+                      <span className="mt-0.5 block truncate text-micro font-medium text-[var(--text-secondary)]">
+                        {kind}
                       </span>
-                      <span className="truncate text-micro text-[var(--text-tertiary)]">
-                        {creator}
-                      </span>
-                    </span>
+                    )}
                     {version.summary ? (
                       <span className="mt-1 block line-clamp-2 text-micro leading-3.5 text-[var(--text-tertiary)]">
                         {version.summary}
@@ -1744,6 +1779,18 @@ function HistoryComparisonOverlay({
       </div>
     </section>
   );
+}
+
+/**
+ * What a person reads in a version: not the editor's internal mirror (the
+ * rich-text tree beside its blocks) or the native package hashes.
+ */
+function readableSnapshot(snapshot: ArtifactSnapshot): ArtifactSnapshot {
+  const { nativeSources: _sources, ...readable } = snapshot as ArtifactSnapshot & { nativeSources?: unknown };
+  const content = record(readable.content);
+  if (!("tiptap" in content)) return readable;
+  const { tiptap: _tiptap, ...rest } = content;
+  return { ...readable, content: rest };
 }
 
 type HumanChange = {
@@ -3766,6 +3813,14 @@ function ArtifactStudioEditor({
       snapshotKey,
     ],
   );
+  const previewVersionChanges = useMemo(() => {
+    if (!previewVersion?.after || !previewVersion.before) return [];
+    return humanDiff(
+      readableSnapshot(previewVersion.after),
+      readableSnapshot(previewVersion.before),
+      artifact.blueprintKey,
+    );
+  }, [artifact.blueprintKey, previewVersion]);
   const previewDiff = useMemo(() => {
     if (!previewVersion?.after) return [];
     return humanDiff(
@@ -4455,25 +4510,8 @@ function ArtifactStudioEditor({
     );
   }, [followedClientId, followedInteractionState, artifact._id]);
 
-  // Local input always wins: the first gesture ends spectating immediately
-  // and leaves the "Return to …" affordance offered by the header cluster.
-  useEffect(() => {
-    if (!followedClientId) return;
-    const surface = presenceSurfaceRef.current;
-    if (!surface) return;
-    const disengage = () => disengageFollow("user_input");
-    surface.addEventListener("pointerdown", disengage, true);
-    surface.addEventListener("keydown", disengage, true);
-    surface.addEventListener("wheel", disengage, {
-      capture: true,
-      passive: true,
-    });
-    return () => {
-      surface.removeEventListener("pointerdown", disengage, true);
-      surface.removeEventListener("keydown", disengage, true);
-      surface.removeEventListener("wheel", disengage, true);
-    };
-  }, [followedClientId]);
+  // Following someone survives pressing, scrolling and selecting; only editing is held (app-choreography-host.ts),
+  // and the header cluster's Stop ends it.
 
   useInteractionPresence({
     artifactId: artifact._id,
@@ -4579,6 +4617,21 @@ function ArtifactStudioEditor({
       return blockProjection;
     }
     return next;
+  }, [artifact.blueprintKey, durableEditorContent, remoteSpeculation]);
+
+  /** The document blocks someone is writing, as text the shared editor draws over the room's. */
+  const speculativeBlockTexts = useMemo(() => {
+    if (artifact.blueprintKey !== "document" || remoteSpeculation.size === 0) return NO_SPECULATIVE_BLOCKS;
+    const blocks = (durableEditorContent as { blocks?: Array<{ id?: unknown }> } | null)?.blocks;
+    const texts: SpeculativeBlockText[] = [];
+    for (const [pointer, value] of remoteSpeculation) {
+      const match = livePreviewContentPointer(pointer)?.match(/^\/blocks\/(\d+)\/text$/);
+      if (!match || typeof value !== "string") continue;
+      const index = Number(match[1]);
+      const id = blocks?.[index]?.id;
+      texts.push({ index, text: value, ...(typeof id === "string" ? { blockId: id } : {}) });
+    }
+    return texts.length ? texts : NO_SPECULATIVE_BLOCKS;
   }, [artifact.blueprintKey, durableEditorContent, remoteSpeculation]);
 
   const editorChange =
@@ -4715,8 +4768,7 @@ function ArtifactStudioEditor({
   const noteStudioInteraction = useCallback(() => {
     lastStudioInteractionAtRef.current = Date.now();
     lastInteractedStudioSurface = studioSurfaceRef.current;
-    // Any direct input returns control of the viewport to the user instantly.
-    disengageFollowAi();
+    // Watching Spectra goes on through the user's own presses and scrolls; Stop is what ends it.
   }, []);
   // Never steal the peer's viewport for AI edits — they may be reading or
   // typing elsewhere. Cyan ink and the AI caret are the only locators.
@@ -6026,6 +6078,7 @@ function ArtifactStudioEditor({
     <div
       ref={studioSurfaceRef}
       className="spectra-artifact-studio relative flex h-full min-h-0 flex-col"
+      data-artifact-id={artifact._id}
       onPointerMove={handlePresencePointerMove}
       onPointerLeave={clearPresenceCursor}
       onPointerDownCapture={noteStudioInteraction}
@@ -6543,6 +6596,7 @@ function ArtifactStudioEditor({
                   title={title}
                   content={editorContent}
                   contentIsProvisional={streamingSource !== "local" || remoteSpeculation.size > 0}
+                  speculation={speculativeBlockTexts}
                   onChange={editorChange}
                   onBeforeNativeExport={async () => !dirty || save()}
                   aiChangedPaths={highlightPaths}
@@ -6874,6 +6928,7 @@ function ArtifactStudioEditor({
           versions={versions.filter(version => version.artifactId === artifact._id)}
           selected={previewVersion?.artifactId === artifact._id ? previewVersion : null}
           changes={previewDiff}
+          versionChanges={previewVersionChanges}
           selectedRegions={selectedRestoreRegions}
           busyVersionId={historyBusy}
           listLoading={historyLoading}

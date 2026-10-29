@@ -81,5 +81,21 @@ export const GONZALEZ_AI: ActorIdentity = {
   ownerName: "Ms Gonzalez",
 };
 
-export const CAST = { henry: HENRY, gonzalez: GONZALEZ, henryAi: HENRY_AI, gonzalezAi: GONZALEZ_AI } as const;
+/** Henry's friend from History, who shares the class's timeline with him. */
+export const MAYA: ActorIdentity = {
+  clientId: "story-maya",
+  kind: "human",
+  name: "Maya",
+  accountId: "maya-h",
+};
+
+/** Henry's Biology teacher. */
+export const OKAFOR: ActorIdentity = {
+  clientId: "story-okafor",
+  kind: "human",
+  name: "Mr Okafor",
+  accountId: "okafor",
+};
+
+export const CAST = { henry: HENRY, gonzalez: GONZALEZ, okafor: OKAFOR, henryAi: HENRY_AI, gonzalezAi: GONZALEZ_AI, maya: MAYA } as const;
 export type CastId = keyof typeof CAST;

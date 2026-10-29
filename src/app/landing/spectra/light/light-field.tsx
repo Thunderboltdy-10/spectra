@@ -28,6 +28,7 @@ uniform float u_time;
 uniform int u_count;
 uniform vec4 u_src[${MAX_SOURCES}];
 uniform vec4 u_hue[${MAX_SOURCES}];
+uniform vec4 u_box[${MAX_SOURCES}];
 uniform int u_front;
 uniform int u_rects;
 uniform vec4 u_rect[${MAX_TEXT}];
@@ -100,17 +101,35 @@ void main() {
     // A negative flow marks a body (the sun): a disc with an edge and a halo, not a pool.
     bool disc = hue.w < 0.0;
     float flow = abs(hue.w);
-    vec2 d = ((disc ? px : q) - src.xy) / vec2(src.z, src.w);
-    float r2 = dot(d, d);
-    float fall = disc ? (1.0 - smoothstep(0.86, 1.0, sqrt(r2))) * (0.74 - 0.25 * r2) + exp(-r2 * 0.55) * 0.3 : exp(-r2 * 1.6);
+    vec4 box = u_box[s];
+    bool halo = box.x > 0.0;
+    float fall;
+    float r2 = 0.0;
+    vec2 rel = px - src.xy;
+    if (halo) {
+      // Around a box: how far outside its rounded edge, against how far the light reaches.
+      // The edge only breathes a little, so the light keeps the window's shape.
+      vec2 e = abs(rel + warp * 26.0) - box.xy + box.z;
+      float outside = length(max(e, 0.0)) + min(max(e.x, e.y), 0.0) - box.z;
+      vec2 reach = vec2(src.z, src.w);
+      float o = max(outside, 0.0) / mix(reach.y, reach.x, clamp(abs(rel.x) / (abs(rel.x) + abs(rel.y) + 1.0), 0.0, 1.0));
+      fall = exp(-o * o * 2.2);
+    } else {
+      vec2 d = ((disc ? px : q) - src.xy) / vec2(src.z, src.w);
+      r2 = dot(d, d);
+      fall = disc ? (1.0 - smoothstep(0.86, 1.0, sqrt(r2))) * (0.74 - 0.25 * r2) + exp(-r2 * 0.55) * 0.3 : exp(-r2 * 1.6);
+    }
     if (fall < 0.002) continue;
-    // Wisps: the pool is uneven, and its unevenness moves.
+    // Wisps: the pool is uneven, and its unevenness moves. A halo is nearly even.
     float wisp = fbm(q * 0.009 + vec2(float(s) * 3.7, t * 0.18 * (0.4 + flow)));
-    float body = fall * (disc ? 0.55 + 0.5 * wisp : 0.35 + 1.1 * wisp) * hue.z;
+    float body = fall * (disc ? 0.55 + 0.5 * wisp : halo ? 0.78 + 0.32 * wisp : 0.35 + 1.1 * wisp) * hue.z;
     total += body;
     if (disc) solid = max(solid, fall * hue.z);
-    float along = disc ? clamp(sqrt(r2) * 0.75 + wisp * 0.3, 0.0, 1.0) : fbm(q * 0.0035 + vec2(t * 0.06 * flow, float(s)));
-    vec3 c = ramp(mix(hue.x, hue.y, disc ? along : clamp(along * 1.6 - 0.3, 0.0, 1.0)));
+    // A halo goes round its box through its hues, and slowly turns.
+    float turn = fract(atan(rel.y * box.x / max(box.y, 1.0), rel.x) / 6.2831853 + 0.5 + t * 0.012 * flow);
+    float round_ = 1.0 - abs(turn * 2.0 - 1.0);
+    float along = disc ? clamp(sqrt(r2) * 0.75 + wisp * 0.3, 0.0, 1.0) : halo ? clamp(round_ + (wisp - 0.5) * 0.16, 0.0, 1.0) : fbm(q * 0.0035 + vec2(t * 0.06 * flow, float(s)));
+    vec3 c = ramp(mix(hue.x, hue.y, disc || halo ? along : clamp(along * 1.6 - 0.3, 0.0, 1.0)));
     colour += c * body;
     weight += body;
   }
@@ -173,13 +192,13 @@ function layer(canvas: HTMLCanvasElement): Layer | null {
   const position = gl.getAttribLocation(program, "a_pos");
   gl.enableVertexAttribArray(position);
   gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
-  const names = ["u_res", "u_scale", "u_time", "u_count", "u_src", "u_hue", "u_front", "u_rects", "u_rect", "u_ramp"];
+  const names = ["u_res", "u_scale", "u_time", "u_count", "u_src", "u_hue", "u_box", "u_front", "u_rects", "u_rect", "u_ramp"];
   const uniforms = Object.fromEntries(names.map((name) => [name, gl.getUniformLocation(program, name)]));
   gl.uniform3fv(uniforms.u_ramp!, new Float32Array(RAMP));
   return { gl, canvas, uniforms };
 }
 
-function paint(target: Layer, drawn: Drawn[], time: number, rects: Float32Array, rectCount: number, front: boolean) {
+function paint(target: Layer, drawn: Drawn[], time: number, rects: Float32Array, rectCount: number, front: boolean, pad: number) {
   const { gl, canvas, uniforms } = target;
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.clearColor(0, 0, 0, 0);
@@ -187,9 +206,11 @@ function paint(target: Layer, drawn: Drawn[], time: number, rects: Float32Array,
   if (!drawn.length || (front && !rectCount)) return;
   const src = new Float32Array(MAX_SOURCES * 4);
   const hue = new Float32Array(MAX_SOURCES * 4);
+  const box = new Float32Array(MAX_SOURCES * 4);
   drawn.slice(0, MAX_SOURCES).forEach((source, index) => {
-    src.set([source.x, source.y, source.rx, source.ry], index * 4);
+    src.set([source.x, source.y + pad, source.rx, source.ry], index * 4);
     hue.set([source.h0, source.h1, source.strength, source.flow], index * 4);
+    if (source.box) box.set([...source.box, 0], index * 4);
   });
   gl.uniform2f(uniforms.u_res!, canvas.width, canvas.height);
   gl.uniform1f(uniforms.u_scale!, canvas.width / Math.max(1, canvas.clientWidth));
@@ -197,6 +218,7 @@ function paint(target: Layer, drawn: Drawn[], time: number, rects: Float32Array,
   gl.uniform1i(uniforms.u_count!, Math.min(MAX_SOURCES, drawn.length));
   gl.uniform4fv(uniforms.u_src!, src);
   gl.uniform4fv(uniforms.u_hue!, hue);
+  gl.uniform4fv(uniforms.u_box!, box);
   gl.uniform1i(uniforms.u_front!, front ? 1 : 0);
   gl.uniform1i(uniforms.u_rects!, rectCount);
   gl.uniform4fv(uniforms.u_rect!, rects);
@@ -219,14 +241,23 @@ export function LightField() {
     const started = last;
     const rects = new Float32Array(MAX_TEXT * 4);
 
+    // The canvases lie on the page, not on the screen, and reach past the view
+    // above and below: between two paints they scroll with what they light, so
+    // a quick scroll never leaves colour behind where it was.
+    let pad = 0;
     // Washes have no detail to lose: a third of the page's resolution, smoothed up, is enough and cheap.
     const size = () => {
+      pad = Math.round(window.innerHeight * 0.4);
       // The ink layer is cut to the headings' boxes, so it keeps a finer edge.
       for (const [target, ratio] of [[back, 0.34], [front, 0.6]] as const) {
         if (!target) continue;
+        target.canvas.style.height = `${window.innerHeight + pad * 2}px`;
         target.canvas.width = Math.round(window.innerWidth * ratio);
-        target.canvas.height = Math.round(window.innerHeight * ratio);
+        target.canvas.height = Math.round((window.innerHeight + pad * 2) * ratio);
       }
+    };
+    const pin = (scrollY: number) => {
+      for (const target of [back, front]) if (target) target.canvas.style.transform = `translate3d(0, ${scrollY - pad}px, 0)`;
     };
 
     const tick = (now: number) => {
@@ -236,18 +267,19 @@ export function LightField() {
       const view = { width: window.innerWidth, height: window.innerHeight, scrollY: window.scrollY };
       const { drawn, moving } = frame(now, dt, view);
       const time = (now - started) / 1000;
-      paint(back, drawn, time, rects, 0, false);
+      paint(back, drawn, time, rects, 0, false, pad);
       if (front) {
         let count = 0;
         for (const element of document.querySelectorAll("[data-light-text]")) {
           if (count >= MAX_TEXT) break;
           const box = element.getBoundingClientRect();
           if (box.bottom < 0 || box.top > view.height) continue;
-          rects.set([box.left, box.top, box.width, box.height], count * 4);
+          rects.set([box.left, box.top + pad, box.width, box.height], count * 4);
           count += 1;
         }
-        paint(front, drawn, time, rects, count, true);
+        paint(front, drawn, time, rects, count, true, pad);
       }
+      pin(view.scrollY);
       if (moving) raf = requestAnimationFrame(tick);
     };
 

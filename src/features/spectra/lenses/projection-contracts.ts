@@ -258,7 +258,9 @@ export const docxOperationSchema = z.discriminatedUnion("kind", [
   ...wordCitationOperationSchemas,
   z.object({ kind: z.literal("replace-paragraph"), regionId: z.string(), text: z.string(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),
   z.object({ kind: z.literal("edit-table-cell"), regionId: z.string(), row: z.number().int().nonnegative(), column: z.number().int().nonnegative(), text: z.string(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),
-  z.object({ kind: z.literal("insert-paragraph"), regionId: z.string().optional(), afterRegionId: z.string().nullable().optional(), text: z.string(), style: z.string().optional(), inlineContent: z.array(docxRichInlineSchema).optional() }).strict(),
+  z.object({ kind: z.literal("insert-paragraph"), regionId: z.string().optional(), afterRegionId: z.string().nullable().optional(), text: z.string(), style: z.string().optional(), inlineContent: z.array(docxRichInlineSchema).optional(),
+    // Items of one new list share `group`, so Word numbers them as one list.
+    list: z.object({ format: z.enum(["bullet", "decimal"]), level: z.number().int().min(0).max(8), group: z.string().min(1).max(300) }).strict().optional() }).strict(),
   docxInsertTableOperationSchema,
   z.object({ kind: z.literal("delete-region"), regionId: z.string() }).strict(),
   z.object({

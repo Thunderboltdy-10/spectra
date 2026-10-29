@@ -10,7 +10,7 @@ export function shouldStageAiPreviewContent(blueprintKey: string) {
   return blueprintKey !== "sheets";
 }
 
-type StringChange = {
+export type StringChange = {
   path: Array<string | number>;
   before: string;
   after: string;
@@ -45,7 +45,7 @@ const NON_STREAMING_STRING_FIELDS = new Set([
   "path",
 ]);
 
-function collectStringChanges(
+export function collectStringChanges(
   before: unknown,
   after: unknown,
   path: Array<string | number> = [],
@@ -86,7 +86,7 @@ function collectStringChanges(
     const beforeRecord = before as Record<string, unknown>;
     const afterRecord = after as Record<string, unknown>;
     return Object.keys(beforeRecord).flatMap((key) =>
-      key in afterRecord
+      key in afterRecord && !mirrorsText(beforeRecord, key)
         ? collectStringChanges(beforeRecord[key], afterRecord[key], [
             ...path,
             key,
@@ -98,11 +98,20 @@ function collectStringChanges(
 }
 
 /**
+ * A document block carries its words twice: `text`, and the formatted runs
+ * that spell the same words. Only `text` is written by hand; the runs follow
+ * it, or the same words would be typed a second time.
+ */
+function mirrorsText(record: Record<string, unknown>, key: string) {
+  return key === "inlineContent" && typeof record.text === "string";
+}
+
+/**
  * `root` with the string at `path` replaced. Only the containers on that path
  * are copied; everything else is shared, and `root` itself is never written.
  * A missing parent leaves `root` unchanged.
  */
-function withStringAt(
+export function withStringAt(
   root: unknown,
   path: readonly (string | number)[],
   next: string,
@@ -348,7 +357,7 @@ export type ArtifactLivePreviewPatch = {
   value: unknown;
 };
 
-function pointer(path: readonly (string | number)[]) {
+export function pointer(path: readonly (string | number)[]) {
   return `/${path
     .map((segment) =>
       String(segment).replaceAll("~", "~0").replaceAll("/", "~1"),

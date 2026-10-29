@@ -13,7 +13,8 @@ import { dimAll, shine } from "../light/light";
  * asks for a walkthrough here; a student, who cannot bring Spectra in alone,
  * gets a note to pass to a teacher instead, sent from their own email. The
  * request goes to /api/contact, which guards itself (a field only bots fill,
- * a minimum time, rate limits). Every colour of the page meets here.
+ * a minimum time, rate limits) and keeps one request per address for the
+ * platform team. Every colour of the page meets here.
  */
 
 type Role = "student" | "teacher" | "leader" | "it";
@@ -84,21 +85,19 @@ export function Ending() {
       ref={sectionRef}
       id="talk"
       className="sp-scene sp-ending"
+      data-seen={arrived ? "" : undefined}
       aria-labelledby="sp-ending-title"
     >
       <div ref={lineRef}>
         <Written
           id="sp-ending-title"
           className="sp-ending-line"
-          text={
-            "ManageBac is where work is set.\nSpectra is where it gets done."
-          }
+          text={"Bring Spectra\nto your school."}
         />
       </div>
 
       <div className="sp-talk">
         <div className="sp-talk-copy">
-          <h3 className="sp-talk-title">Bring Spectra to your school.</h3>
           <p className="sp-lede">
             We show Spectra on classes like yours, and answer what your teachers
             and IT team will ask.
@@ -218,9 +217,8 @@ function Walkthrough({ role }: { role: Exclude<Role, "student"> }) {
           email,
           school: value("school"),
           role: ROLES.find((entry) => entry.id === role)!.label,
-          message: [`Uses ManageBac: ${managebac ? "yes" : "no"}`, note]
-            .filter(Boolean)
-            .join("\n\n"),
+          message: note,
+          usesManageBac: managebac,
           website: value("website"),
           elapsedMs: Date.now() - opened.current,
         }),

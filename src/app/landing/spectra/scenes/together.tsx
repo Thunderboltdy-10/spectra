@@ -1,224 +1,224 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
-import {
-  editorIn,
-  findText,
-  markText,
-  replaceText,
-  waitForEditor,
-} from "../../kit/doc-hand";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Icon } from "@/components/icons";
+import { SpectraMark } from "@/components/spectra-mark";
+import { presenceColor } from "@/features/spectra/collaboration/interaction-model";
 import { InlineStudio } from "../../kit/inline-studio";
-import { typeIntoIsland } from "../../kit/landing-island";
 import { Surface, usePresence, type Move } from "../../kit/presence";
-import { useWorld, useWorldEvent } from "../../kit/world-context";
-import type { CastId } from "../../world/story";
-import { WORKS } from "../../world/works";
 import { Written } from "../../kit/written";
-import { useScene } from "../director";
-import { dimAll, flash, shine } from "../light/light";
+import { CAST, type CastId } from "../../world/story";
+import { WORKS } from "../../world/works";
+import { dimAll, flash, shine, travel } from "../light/light";
+import { useLoop, type Beat } from "../loop";
+import { useStill } from "../window";
 
 /*
- * Henry's History IA in the real document studio, with Ms Gonzalez's comment
- * on it. He asks for it to be tidied; his AI does it in the document, the way
- * a collaborator's edits arrive: the vote count picked out, the setting in
- * italics, the paragraph she commented on said better. Then she is in it too,
- * from her own class, and sees her comment answered. Everyone is drawn by
- * Spectra's own presence layer, named and coloured as the product names them.
+ * Henry's revision slides in the real presentation studio, with the people
+ * who work on them beside it. Everyone meets on the slide of the four stages:
+ * his AI picks out the stage that makes most of the ATP, the way any
+ * collaborator does, in front of him; Mr Okafor comes in from his class and
+ * leaves a note; and Maya marks the stage she is taking for their group's
+ * deck. Everyone is drawn by Spectra's own presence layer, named and coloured
+ * as the product names them. The heading says who is working now.
  */
 
-const QUESTION =
-  "tidy up my IA and make the second source paragraph read better";
-const OLD =
-  "Its value is that it was spoken by an opponent in the room, at the time, knowing the risk.";
-const PHRASE = "Its value lies in its origin";
-const PRAISE = "That's what I meant. Well done.";
-const NEW =
-  "Its value lies in its origin: Wels spoke for the SPD in the Reichstag on 23 March 1933, minutes before the vote, knowing what opposing it could cost.";
+const WHO = ["AI", "teacher", "friend"] as const;
+
+type Person = { id: CastId; role: string; can: string; ai?: boolean };
+const PEOPLE: Person[] = [
+  { id: "henryAi", role: "Henry's AI", can: "Can edit", ai: true },
+  { id: "henry", role: "Owner", can: "Owner" },
+  { id: "okafor", role: "Biology SL teacher", can: "Can comment" },
+  { id: "maya", role: "Friend, Biology SL", can: "Can edit" },
+];
+
+const nameOf = (id: CastId) => (CAST[id].kind === "ai" ? "Spectra" : CAST[id].name);
+
+type Deck = { slides: Array<{ id: string; objects: Array<{ id: string }> }> };
+const SLIDES = (WORKS.deck.content as Deck).slides;
+const STAGES = SLIDES.findIndex((slide) => slide.id === "s3");
+/**
+ * The deck opened on the four stages, where everyone works. Changing slides
+ * rebuilds every text box on the slide, which is too heavy to do while the
+ * page scrolls, so the scene never does.
+ */
+const OPENED = {
+  ...WORKS.deck,
+  _id: `${WORKS.deck._id}-together`,
+  content: { ...(WORKS.deck.content as object), slides: [...SLIDES.slice(STAGES), ...SLIDES.slice(0, STAGES)] },
+} as typeof WORKS.deck;
+const DECK = OPENED.content as Deck;
+
+/** A slide object, as the presence layer addresses it: by the slide's place in the deck and the object's on the slide. */
+const on = (slide: string, object: string): Move => {
+  const at = DECK.slides.findIndex((entry) => entry.id === slide);
+  const index = DECK.slides[at]?.objects.findIndex((entry) => entry.id === object) ?? -1;
+  return { path: `/slides/${at}/objects/${index}`, primitive: "canvasObject", act: { kind: "focus" } };
+};
 
 export function Together() {
-  const world = useWorld();
-  const sectionRef = useRef<HTMLElement>(null);
+  const sceneRef = useRef<HTMLElement>(null);
+  const deskRef = useRef<HTMLDivElement>(null);
   const studioRef = useRef<HTMLDivElement>(null);
   const presence = usePresence("together");
   const { move, leave } = presence;
-  const reads = useRef(0);
-  const tidying = useRef<((value: void) => void) | null>(null);
+  const [who, setWho] = useState(0);
+  const [doing, setDoing] = useState<Partial<Record<CastId, string>>>({});
+  useStill(deskRef);
 
-  /** Points a collaborator at `text` in the document, as a selection the presence layer draws. */
-  const pointAt = useCallback(
-    (who: CastId, text: string, extra: Partial<Move> = {}) => {
-      const editor = editorIn(studioRef.current);
-      const range = editor ? findText(editor, text) : null;
-      if (!range?.blockId) return null;
-      move(who, {
-        path: `/blocks/${range.blockId}`,
-        primitive: "richtext",
-        act: {
-          kind: "select",
-          span: {
-            anchor: { offset: range.offset },
-            head: { offset: range.offset + text.length },
-          },
-        },
-        ...extra,
-      });
-      return (
-        studioRef.current?.querySelector(
-          `[data-block-id="${range.blockId}"], [data-id="${range.blockId}"]`,
-        ) ?? studioRef.current
-      );
+  const say = (id: CastId, what: string | null) =>
+    setDoing((was) => {
+      const next = { ...was };
+      if (what) next[id] = what;
+      else delete next[id];
+      return next;
+    });
+
+  /** Points a collaborator at a slide object, with what they are saying there. */
+  const point = useCallback(
+    (id: CastId, slide: string, object: string, note?: string) => {
+      move(id, { ...on(slide, object), note });
+      const { path } = on(slide, object);
+      // The slide on the stage, not its thumbnail in the list.
+      const found = [...(studioRef.current?.querySelectorAll(`[data-spectra-target="${path}"]`) ?? [])];
+      return found.at(-1) ?? studioRef.current;
     },
     [move],
   );
 
-  // The AI starts on the document once it has read it, as its run says so.
-  useWorldEvent((event) => {
-    if (event.type === "run_started" && event.reply.key === "tidy")
-      reads.current = 0;
-    if (
-      event.type === "reading" &&
-      event.workId === WORKS.ia._id &&
-      ++reads.current === 2
-    )
-      tidying.current?.();
-  });
+  const lightAt = (element: Element | null | undefined, hues: [number, number]) =>
+    element && flash({ el: element, rx: 260, ry: 140, strength: 0.6, hues, hold: 420 });
 
   useEffect(() => {
-    const studio = studioRef.current;
-    if (!studio) return;
-    shine("together-doc", {
-      el: studio,
-      at: [0.5, 0.3],
-      rx: 760,
-      ry: 360,
-      strength: 0.32,
-      hues: [4.0, 5.2],
-      flow: 0.5,
-      ease: 1400,
-    });
+    const desk = deskRef.current;
+    if (!desk) return;
+    shine("together-halo", { el: desk, halo: { radius: 18 }, rx: 120, ry: 90, strength: 0.7, hues: [0, 1.4], flow: 0.6, ease: 1400 });
     return () => dimAll("together");
   }, []);
 
-  useScene(
-    sectionRef,
-    async ({ wait, skipped, signal }) => {
-      const editor = await waitForEditor(() => studioRef.current, signal).catch(
-        () => null,
-      );
-      if (!editor) return;
-      const tidy = () => {
-        markText(editor, "444 votes to 94", "bold");
-        markText(editor, "Kroll Opera House", "italic");
-        if (findText(editor, OLD)) replaceText(editor, OLD, NEW);
-      };
-      if (skipped) {
-        tidy();
-        return;
-      }
-      await world.whenIdle();
-      world.pace = 0.35;
-      world.quiet = true;
-      const read = new Promise<void>((resolve) => {
-        tidying.current = resolve;
-        window.setTimeout(resolve, 4000);
-      });
-      void typeIntoIsland(QUESTION, { fresh: true, perLetter: 10 });
-      await read;
-      tidying.current = null;
+  /** Writes a note a few letters at a time, as someone types it. */
+  const typeNote = async (id: CastId, slide: string, object: string, note: string, { wait }: Beat) => {
+    for (let length = 1; length < note.length; length += 2 + Math.round(Math.random())) {
+      point(id, slide, object, note.slice(0, length));
+      await wait(24);
+    }
+    point(id, slide, object, note);
+  };
 
-      // Henry's AI, in the document.
-      const flashAt = (
-        element: Element | null | undefined,
-        hues: [number, number],
-      ) =>
-        element &&
-        flash({
-          el: element,
-          rx: 260,
-          ry: 120,
-          strength: 0.6,
-          hues,
-          hold: 500,
+  useLoop(sceneRef, {
+    open: async ({ wait }) => {
+      const title = sceneRef.current?.querySelector(".sp-heading");
+      const desk = deskRef.current;
+      if (title && desk) {
+        const box = title.getBoundingClientRect();
+        travel("together-title", [box.left + box.width * 0.5, box.top + window.scrollY + box.height * 0.6], desk, {
+          at: [0.4, 0.3],
+          rx: 420,
+          ry: 220,
+          strength: 0.45,
+          hues: [0, 1.6],
+          flow: 0.5,
+          ease: 500,
+          ms: 1500,
         });
-      flashAt(
-        pointAt("henryAi", "444 votes to 94", { note: "Bold" }),
-        [4.6, 5.6],
-      );
-      await wait(520);
-      markText(editor, "444 votes to 94", "bold");
-      await wait(380);
-      pointAt("henryAi", "Kroll Opera House", { note: "Italic" });
-      await wait(480);
-      markText(editor, "Kroll Opera House", "italic");
-      await wait(380);
-      flashAt(pointAt("henryAi", OLD, { note: "Rewording" }), [4.6, 6.2]);
-      await wait(700);
-      replaceText(editor, OLD, NEW);
-      pointAt("henryAi", NEW, { note: "Reworded" });
-      await wait(900);
-      leave("henryAi");
-
-      // Ms Gonzalez comes in from her class to see whether her comment was taken.
-      await wait(300);
-      flashAt(pointAt("gonzalez", PHRASE), [0.7, 1.6]);
-      shine("together-teacher", {
-        el: studioRef.current,
-        at: [0.72, 0.5],
-        rx: 420,
-        ry: 300,
-        strength: 0.4,
-        hues: [0.6, 1.8],
-        flow: 0.6,
-        ease: 900,
-      });
-      await wait(420);
-      // She writes him a line, there on the paragraph.
-      for (
-        let length = 1;
-        length < PRAISE.length;
-        length += 1 + Math.round(Math.random())
-      ) {
-        pointAt("gonzalez", PHRASE, { note: PRAISE.slice(0, length) });
-        await wait(34);
+        window.setTimeout(() => dimAll("together-title", 1400), 1800);
       }
-      pointAt("gonzalez", PHRASE, { note: PRAISE });
-      await wait(1800);
-      leave("gonzalez");
+      await wait(300);
     },
-    2800,
-  );
+    round: async (beat) => {
+      const { wait, signal } = beat;
+      for (let tries = 0; !studioRef.current?.querySelector('button[aria-label="Next slide"]') && tries < 50 && !signal.aborted; tries += 1) await wait(120);
+      if (signal.aborted) return;
+
+      // Henry's AI goes through the stages.
+      setWho(0);
+      say("henryAi", "Checking the yields against your notes");
+      lightAt(point("henryAi", "s3", "s3-yield-0", "2 ATP, matches"), [0.2, 1]);
+      await wait(700);
+      say("henryAi", "Picking out the stage that makes most ATP");
+      lightAt(point("henryAi", "s3", "s3-card-3", "Most of the ATP is made here"), [0, 0.8]);
+      await wait(1000);
+      leave("henryAi");
+      say("henryAi", null);
+      if (signal.aborted) return;
+
+      // Mr Okafor comes in from his class and leaves a note.
+      setWho(1);
+      say("okafor", "Reading the slide");
+      lightAt(point("okafor", "s3", "s3-title", "Reading"), [2.6, 3.4]);
+      await wait(350);
+      say("okafor", "Writing to you");
+      await typeNote("okafor", "s3", "s3-title", "Good. Add the total: 30-32 ATP per glucose.", beat);
+      await wait(900);
+      leave("okafor");
+      say("okafor", null);
+      if (signal.aborted) return;
+
+      // Maya marks the stage she is taking for their group's deck.
+      setWho(2);
+      say("maya", "Looking at the four stages");
+      lightAt(point("maya", "s3", "s3-card-0", "Looking at the stages"), [4.4, 5.2]);
+      await wait(300);
+      say("maya", "Adding it to the group deck");
+      await typeNote("maya", "s3", "s3-card-0", "Taking this one for our group deck!", beat);
+      await wait(900);
+      leave("maya");
+      say("maya", null);
+      await wait(400);
+    },
+  });
 
   return (
-    <section
-      ref={sectionRef}
-      className="sp-scene sp-together"
-      aria-labelledby="sp-together-title"
-    >
-      <div className="sp-scene-copy" data-settle-to>
-        <Written
-          id="sp-together-title"
-          className="sp-heading"
-          text="Your AI edits with you. So can your teacher."
-        />
+    <section ref={sceneRef} className="sp-scene sp-together" aria-labelledby="sp-together-title">
+      <div className="sp-scene-copy" data-centred>
+        <Written id="sp-together-title" className="sp-heading" text={"Work on it\nwith your {}."} flip={{ words: WHO, index: who }} />
         <p className="sp-lede">
-          Spectra works in your own document, the way a collaborator does, and
-          your teacher is one click from your draft.
+          Spectra works on your slides the way a collaborator does, in front of you and with its own cursor. Your teacher and your
+          friends can be in the same deck, and you see who is doing what.
         </p>
       </div>
-      <Surface
-        id="together"
-        states={presence.states}
-        className="sp-together-doc"
-      >
-        <div ref={studioRef} className="sp-together-studio">
-          <InlineStudio
-            work={WORKS.ia}
-            instanceKey="landing-together-ia"
-            className="sp-studio"
-          />
-        </div>
-      </Surface>
+
+      <div ref={deskRef} className="sp-together-desk">
+        <Surface id="together" states={presence.states} className="sp-together-doc">
+          <div ref={studioRef} className="sp-together-studio">
+            <InlineStudio work={OPENED} instanceKey="landing-together-deck" className="sp-studio" />
+          </div>
+        </Surface>
+
+        <aside className="sp-people" aria-label="People in this deck">
+          <p className="sp-people-title">
+            <Icon name="people" size={15} />
+            In this deck
+          </p>
+          <ul>
+            {PEOPLE.map((person) => {
+              const now = doing[person.id];
+              return (
+                <li
+                  key={person.id}
+                  className="sp-person"
+                  data-ai={person.ai || undefined}
+                  data-active={Boolean(now) || undefined}
+                  style={{ ["--person" as string]: presenceColor(CAST[person.id]) }}
+                >
+                  <span className="sp-person-mark" aria-hidden>
+                    {person.ai ? <SpectraMark size={18} /> : <Icon name="pointer" size={14} />}
+                  </span>
+                  <span className="sp-person-text">
+                    <strong>{person.ai ? "Spectra" : nameOf(person.id)}</strong>
+                    <span key={now ?? person.role} className="sp-person-now">
+                      {now ?? person.role}
+                    </span>
+                  </span>
+                  <span className="sp-person-can">{person.can}</span>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="sp-people-note">Anyone you share with, and your AI, work live in the same deck.</p>
+        </aside>
+      </div>
     </section>
   );
 }

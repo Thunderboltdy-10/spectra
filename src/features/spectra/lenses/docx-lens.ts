@@ -1197,16 +1197,44 @@ function placeInsertedRegion(document: Document, element: XmlElement, afterRegio
   document._markMainDirty();
 }
 
+// The first item of each new list, per document being written. Later items
+// copy its paragraph properties so the whole group shares one numbering.
+const insertedListHeads = new WeakMap<Document, Map<string, Paragraph>>();
+
+function insertListParagraph(document: Document, list: NonNullable<Extract<DocxSemanticDelta, { kind: "insert-paragraph" }>["list"]>, text: string) {
+  const heads = insertedListHeads.get(document) ?? new Map<string, Paragraph>();
+  insertedListHeads.set(document, heads);
+  const head = heads.get(list.group);
+  if (!head) {
+    const item = { text, level: list.level };
+    const [paragraph] = list.format === "bullet" ? document.addBulletList([item]) : document.addNumberedList([item]);
+    if (!paragraph) throw new DocxLensError("DOCX_UNSUPPORTED_EDIT", "Word could not create the list.");
+    heads.set(list.group, paragraph);
+    return paragraph;
+  }
+  const paragraph = document.addParagraph(text);
+  const properties = head.element.find(WML_NAMESPACE, "pPr");
+  if (properties) {
+    paragraph.element.find(WML_NAMESPACE, "pPr") && paragraph.element.removeChild(paragraph.element.find(WML_NAMESPACE, "pPr")!);
+    const copy = properties.clone();
+    copy.find(WML_NAMESPACE, "numPr")?.find(WML_NAMESPACE, "ilvl")?.setAttributeNs(WML_NAMESPACE, "val", String(list.level));
+    paragraph.element.insertBefore(copy, paragraph.element.children[0] ?? null);
+  }
+  return paragraph;
+}
+
 async function insertParagraph(
   document: Document,
   operation: Extract<DocxSemanticDelta, { kind: "insert-paragraph" }>,
   options?: DocxWriteOptions,
 ) {
-  const paragraph = document.addParagraph(operation.text, {
-    ...(operation.style
-      ? { style: await resolveParagraphStyleId(document, operation.style) }
-      : {}),
-  });
+  const paragraph = operation.list
+    ? insertListParagraph(document, operation.list, operation.text)
+    : document.addParagraph(operation.text, {
+        ...(operation.style
+          ? { style: await resolveParagraphStyleId(document, operation.style) }
+          : {}),
+      });
   if (operation.inlineContent) await replaceParagraphRich(document, paragraph, operation.inlineContent, options);
   // AI/cloud projections can give an inserted block an identity whose stable
   // Word paraId is already present on the native placeholder it replaces.
@@ -3426,6 +3454,24 @@ export async function docxProjectionSemanticDigest(projection: Pick<DocxProjecti
  * omitted them, while explicit text, rich content, and formatting remain part
  * of the digest.
  */
+const INHERITED_RUN_FORMAT = new Set(["fontFamily", "fontSizePoints", "color"]);
+
+/** Name the first block whose Word readback differs from the request, so a
+ * failed write tells the writer what Word could not represent. */
+export async function docxReadbackDifference(readback: DocxProjection, requested: DocxProjection) {
+  if (readback.blocks.length !== requested.blocks.length)
+    return `Word reopened ${readback.blocks.length} blocks where ${requested.blocks.length} were written`;
+  for (let index = 0; index < requested.blocks.length; index++) {
+    const want = { ...requested, blocks: [requested.blocks[index]!] };
+    const got = { ...readback, blocks: [readback.blocks[index]!] };
+    if (await docxProjectionReadbackDigest(got, want) === await docxProjectionSemanticDigest(want)) continue;
+    const block = requested.blocks[index]!;
+    const kind = block.type === readback.blocks[index]!.type ? block.type : `${block.type} (reopened as ${readback.blocks[index]!.type})`;
+    return `block ${index + 1}, a ${kind} starting "${block.text.slice(0, 40)}", did not survive Word's readback`;
+  }
+  return "the page setup, header or footer did not survive Word's readback";
+}
+
 export async function docxProjectionReadbackDigest(
   readback: DocxProjection,
   requested: DocxProjection,
@@ -3440,6 +3486,16 @@ export async function docxProjectionReadbackDigest(
       if (intent.attrs?.rowCount === undefined && attrs.rowCount === block.rows?.length) delete attrs.rowCount;
       if (intent.attrs?.columnCount === undefined && attrs.columnCount === block.rows?.[0]?.length) delete attrs.columnCount;
     }
+    // A run format the intent omitted is resolved from the paragraph style.
+    if (attrs && !intent.attrs?.format) delete attrs.format;
+    // A new list item reopens with Word's numbering ids and list style; its
+    // authored meaning is the list kind and level.
+    const requestedList = intent.attrs?.list as { format?: string; level?: number; group?: string } | undefined;
+    if (attrs && requestedList?.group && attrs.list && typeof attrs.list === "object") {
+      const readList = attrs.list as { format?: string; level?: number };
+      attrs.list = { format: readList.format === "bullet" ? "bullet" : readList.format, level: readList.level, group: requestedList.group };
+      if (!intent.attrs?.styleId) delete attrs.styleId;
+    }
     if (!intent.attrs?.paragraphFormat && attrs?.paragraphFormat)
       delete attrs.paragraphFormat;
     else if (attrs?.paragraphFormat) {
@@ -3453,11 +3509,22 @@ export async function docxProjectionReadbackDigest(
       }
       attrs.paragraphFormat = paragraphFormat;
     }
-    const inlineContent = block.inlineContent;
+    const requestedRunFormat = (authoredSemanticValue({ format: intent.attrs?.format ?? {} }) as { format?: Record<string, unknown> }).format ?? {};
+    // Word resolves an omitted font, size or colour from the document default
+    // or the paragraph style (a heading's colour) when it reopens new runs.
+    // Those are not authored changes; explicit values still have to match.
+    const pairedInline = intent.inlineContent?.length === block.inlineContent?.length ? intent.inlineContent : undefined;
+    const inlineContent = block.inlineContent?.map((item, itemIndex) => {
+      const requested = pairedInline?.[itemIndex];
+      if (!requested || requested.kind !== item.kind || !("format" in item) || !item.format) return item;
+      const requestedFormat = ("format" in requested ? requested.format : undefined) as Record<string, unknown> | undefined;
+      const format = Object.fromEntries(Object.entries(item.format).filter(([key]) =>
+        !INHERITED_RUN_FORMAT.has(key) || requestedFormat?.[key] !== undefined || requestedRunFormat[key] !== undefined));
+      return { ...item, format } as typeof item;
+    });
     const semanticInline = inlineContent?.map(
       (item) => authoredSemanticValue(item) as Record<string, unknown>,
     );
-    const requestedRunFormat = (authoredSemanticValue({ format: intent.attrs?.format ?? {} }) as { format?: Record<string, unknown> }).format ?? {};
     const mirroredText =
       !intent.inlineContent &&
       semanticInline?.every(
@@ -3472,7 +3539,7 @@ export async function docxProjectionReadbackDigest(
               // plain paragraph. An omitted font/size inherits that default; it is
               // not an authored font change. Explicit fonts and every other
               // mark still have to match exactly.
-              ((key === "fontFamily" || key === "fontSizePoints") && requestedRunFormat[key] === undefined));
+              (INHERITED_RUN_FORMAT.has(key) && requestedRunFormat[key] === undefined));
         },
       ) &&
       semanticInline

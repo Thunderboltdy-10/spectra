@@ -112,6 +112,79 @@ export function useNear(ref: RefObject<Element | null>, margin = "100% 0px") {
 }
 
 /**
+ * Runs `work` once the scroll has rested and the page is idle, so a long task
+ * (building a studio) never lands in the middle of a scroll. Returns a cancel.
+ */
+export function atRest(work: () => void) {
+  let quiet = 0;
+  let idle = 0;
+  const clear = () => {
+    window.clearTimeout(quiet);
+    if (idle && "cancelIdleCallback" in window) window.cancelIdleCallback(idle);
+    idle = 0;
+  };
+  const run = () => {
+    cancel();
+    work();
+  };
+  const settle = () => {
+    clear();
+    quiet = window.setTimeout(() => {
+      if ("requestIdleCallback" in window) idle = window.requestIdleCallback(run, { timeout: 900 });
+      else run();
+    }, 180);
+  };
+  const cancel = () => {
+    clear();
+    window.removeEventListener("scroll", settle);
+  };
+  window.addEventListener("scroll", settle, { passive: true });
+  settle();
+  return cancel;
+}
+
+/**
+ * Like `useNear` for the heaviest surfaces, whose first render is a long task:
+ * once within a window and a half of the view, it is built when the scroll
+ * rests (`atRest`). If the reader reaches it first, it builds at once.
+ */
+export function useNearAtRest(ref: RefObject<Element | null>) {
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || near) return;
+    let cancel = () => {};
+    const build = () => {
+      observer.disconnect();
+      cancel();
+      window.removeEventListener("scroll", reached);
+      setNear(true);
+    };
+    const reached = () => {
+      const box = node.getBoundingClientRect();
+      if (box.top < window.innerHeight && box.bottom > 0) build();
+    };
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        observer.disconnect();
+        window.addEventListener("scroll", reached, { passive: true });
+        cancel = atRest(build);
+        reached();
+      },
+      { rootMargin: "150% 0px" },
+    );
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      cancel();
+      window.removeEventListener("scroll", reached);
+    };
+  }, [near, ref]);
+  return near;
+}
+
+/**
  * A pinned scene: the section is taller than the window and its stage sticks
  * while the reader scrolls through it, so the scroll plays the scene instead
  * of moving the page. Its progress, 0 to 1, is written to `--p` on the section

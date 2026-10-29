@@ -667,6 +667,7 @@ export function docxOperationsBetween(
         ...(typeof block.attrs?.styleId === "string"
           ? { style: block.attrs.styleId }
           : {}),
+        ...(block.type === "list" && isNewDocxList(block.attrs?.list) ? { list: block.attrs.list } : {}),
       });
       const equation = block.inlineContent?.find((item) => item.kind === "equation");
       if (equation) operations.push({
@@ -843,6 +844,63 @@ export function docxIntentFromDocumentBlocks(
 }
 
 /** The one document editor-model -> DOCX projection transform. */
+function isNewDocxList(value: unknown): value is { format: "bullet" | "decimal"; level: number; group: string } {
+  const list = value as Record<string, unknown> | undefined;
+  return (list?.format === "bullet" || list?.format === "decimal") && typeof list.level === "number" && typeof list.group === "string";
+}
+
+type TiptapNode = { type?: string; text?: string; attrs?: Record<string, unknown>;
+  marks?: { type?: string; attrs?: Record<string, unknown> }[]; content?: TiptapNode[] };
+
+function tiptapInline(nodes: TiptapNode[] = []) {
+  return nodes.flatMap((node) => {
+    if (node.type !== "text" || !node.text) return [];
+    const format: Record<string, boolean> = {};
+    let href: string | undefined;
+    for (const mark of node.marks ?? []) {
+      if (mark.type === "bold" || mark.type === "italic" || mark.type === "underline" || mark.type === "strike") format[mark.type] = true;
+      if (mark.type === "link" && typeof mark.attrs?.href === "string") href = mark.attrs.href;
+    }
+    return [{ kind: "text" as const, text: node.text, ...(Object.keys(format).length ? { format } : {}), ...(href ? { href } : {}) }];
+  });
+}
+
+/** Word has no single "list" region: each item is its own numbered
+ * paragraph. A new Spectra list block keeps its items in the editor tree, so
+ * expand it into one Word list block per item (nested items keep their
+ * level); every item shares the source block id as its numbering group. */
+function expandNewDocxListBlocks<T extends { id: string; type: string; text: string; attrs?: Record<string, unknown> }>(
+  blocks: T[], tiptap: unknown, baseIds: Set<string>,
+): T[] {
+  const lists = new Map<string, TiptapNode>();
+  for (const node of (tiptap as TiptapNode | undefined)?.content ?? [])
+    if ((node.type === "bulletList" || node.type === "orderedList") && typeof node.attrs?.blockId === "string")
+      lists.set(node.attrs.blockId, node);
+  return blocks.flatMap((block) => {
+    const list = block.type === "list" && !baseIds.has(block.id) ? lists.get(block.id) : undefined;
+    if (!list) return [block];
+    const items: T[] = [];
+    const visit = (node: TiptapNode, level: number) => {
+      const format = node.type === "orderedList" ? "decimal" : "bullet";
+      for (const item of node.content ?? []) {
+        if (item.type !== "listItem") continue;
+        for (const child of item.content ?? []) {
+          if (child.type === "paragraph") {
+            const inlineContent = tiptapInline(child.content);
+            const text = inlineContent.map((part) => part.text).join("");
+            const rich = inlineContent.some((part) => part.format || part.href);
+            items.push({ ...block, id: items.length ? `${block.id}-item-${items.length}` : block.id, text,
+              ...(rich ? { inlineContent } : { inlineContent: undefined }),
+              attrs: { ...(block.attrs ?? {}), list: { format, level: Math.min(level, 8), group: block.id } } });
+          } else if (child.type === "bulletList" || child.type === "orderedList") visit(child, level + 1);
+        }
+      }
+    };
+    visit(list, 0);
+    return items.length ? items : [block];
+  });
+}
+
 export function docxProjectionFromContent(
   value: unknown,
   base: DocxProjection,
@@ -851,7 +909,9 @@ export function docxProjectionFromContent(
   // activated. Convex legitimately carries `null` in that state; the native
   // projection we just read is the only safe starting point.
   if (value == null) return { projection: base, operations: [] };
-  const parsed = documentContentSchema.parse(value);
+  const parsedContent = documentContentSchema.parse(value);
+  const parsed = { ...parsedContent, blocks: expandNewDocxListBlocks(parsedContent.blocks,
+    parsedContent.tiptap, new Set(base.blocks.map((block) => block.id))) };
   const baseById = new Map(base.blocks.map((block) => [block.id, block]));
   const mergeBlock = (incoming: DocxProjection["blocks"][number]) => {
     const previous = baseById.get(incoming.id);

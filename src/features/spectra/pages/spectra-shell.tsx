@@ -2542,7 +2542,7 @@ export function SpectraShell({
 
   useEffect(() => {
     const exchange = runEngine.liveExchange;
-    if (!exchange?.runId || exchange.status !== "failed") return;
+    if (!exchange?.runId || (exchange.status !== "failed" && exchange.status !== "stopped")) return;
     const runId = exchange.runId;
     const clearChrome = (artifact: SpectraArtifact): SpectraArtifact => {
         if (
@@ -4274,7 +4274,8 @@ export function SpectraShell({
                           runs={workspaceRuns}
                           optimisticActive={Boolean(
                             runEngine.liveExchange &&
-                            runEngine.liveExchange.status !== "failed",
+                            runEngine.liveExchange.status !== "failed" &&
+                            runEngine.liveExchange.status !== "stopped",
                           )}
                           optimisticRunId={runEngine.liveExchange?.runId}
                           onEditWorkspace={openWorkspaceEdit}

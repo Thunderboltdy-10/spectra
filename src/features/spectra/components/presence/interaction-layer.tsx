@@ -19,12 +19,13 @@
  * frame, so nothing depends on a peer's pane size, scroll offset or zoom.
  */
 
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   actIsDrag,
   actIsResize,
   actorLabel,
   cursorModeForAct,
+  describeLifecycle,
   describeState,
   presenceColor,
   stateIsVisible,
@@ -41,7 +42,6 @@ import {
   type SurfaceBox,
 } from "../../collaboration/interaction-geometry";
 import {
-  CometTrail,
   CursorTravel,
   type TravelSample,
 } from "../../collaboration/cursor-motion";
@@ -50,8 +50,6 @@ import {
   type FrameTravel,
 } from "../../collaboration/presentation-lane";
 import { useSpectraMotion } from "../../motion";
-import { life } from "../../life/life";
-import { prismPoint } from "../../life/use-life";
 
 /** Presence for an actor whose last frame is older than this is dropped. */
 const STALE_AFTER_MS = 20_000;
@@ -61,8 +59,6 @@ const SETTLE_FADE_MS = 480;
 const PRESENCE_LABEL_BUCKET_MS = 800;
 /** Window in which the completion ring plays after an act completes. */
 const COMPLETION_RING_MS = 900;
-/** Above this pointer speed (px/ms) a journey leaves a short comet trail. */
-const TRAIL_SPEED_PX_PER_MS = 1.15;
 
 type ActorVisual = {
   key: string;
@@ -75,9 +71,8 @@ type ActorVisual = {
   travel: TravelKind;
   point: { left: number; top: number };
   opacity: number;
-  /** Tilt in degrees while travelling, so the body leans into its journey. */
-  tilt: number;
-  trail: Array<{ x: number; y: number; strength: number }>;
+  /** True while the body is actually moving between two points. */
+  moving: boolean;
   /** True while the actor is leaving: chrome fades rather than vanishing. */
   departing: boolean;
   /** Fires one completion ring on the finished target (completion grammar). */
@@ -89,8 +84,10 @@ type TravelKind = FrameTravel["kind"];
 type ActorRuntime = {
   lane: PresentationLane;
   travel: CursorTravel;
-  trail: CometTrail;
   lastSignature: string;
+  /** The act shown before the current one, to tell a drag from a click. */
+  previousActKind: InteractionState["act"]["kind"] | null;
+  currentActKind: InteractionState["act"]["kind"] | null;
   departingAt: number | null;
   /** When the current act transitioned into a completed/settled lifecycle. */
   completedAt: number | null;
@@ -100,7 +97,7 @@ type ActorRuntime = {
 
 /**
  * Coarse pointers and small viewports get the truthful bits of presence
- * (identity, caret, selection) without velocity ornaments like trails/tilt.
+ * (identity, caret, selection) and no travel at all.
  */
 function useSimplifiedPresence(): boolean {
   const [simplified, setSimplified] = useState(false);
@@ -154,6 +151,8 @@ function frameIdentity(state: InteractionState): string {
       ? `${state.target.scope.kind}:${state.target.scope.id}`
       : "",
     state.menu?.highlighted ?? "",
+    // A note that changes on the same target (someone typing a comment) repaints the flag.
+    state.note ?? "",
   ].join("~");
 }
 
@@ -254,9 +253,15 @@ export const InteractionLayer = memo(function InteractionLayer({
         if (!runtime) {
           runtime = {
             lane: new PresentationLane(key),
-            travel: new CursorTravel(() => reducedRef.current),
-            trail: new CometTrail(),
+            // An AI body moves with a hand; a person's real path arrives
+            // with their own frames.
+            travel: new CursorTravel(
+              () => reducedRef.current,
+              state.actor.kind === "ai" ? key : undefined,
+            ),
             lastSignature: "",
+            previousActKind: null,
+            currentActKind: null,
             departingAt: null,
             completedAt: null,
             completedForSignature: null,
@@ -332,20 +337,36 @@ export const InteractionLayer = memo(function InteractionLayer({
           top: placement?.point.top ?? 0,
         };
         let opacity = 1 - departing;
-        let tilt = 0;
-        let trailPoints: Array<{ x: number; y: number; strength: number }> = [];
+        let moving = false;
 
+        if (state.act.kind !== runtime.currentActKind) {
+          runtime.previousActKind = runtime.currentActKind;
+          runtime.currentActKind = state.act.kind;
+        }
         if (placement && !placement.offSurface) {
           const settled =
             state.lifecycle === "settled" || state.lifecycle === "completed";
+          const act = state.act.kind;
+          // A person's caret tracks the glyph. A hand reaches for the word it
+          // will click (caret), drags a selection out across a phrase, and
+          // only then snaps: typing advances glyph by glyph, a double-click
+          // selects at once.
+          const writing =
+            act === "type" || act === "insert" || act === "delete" || act === "replace";
+          const reaching =
+            state.actor.kind === "ai" &&
+            (act === "caret" || (act === "select" && runtime.previousActKind === "select"));
           const isCaretAct =
             cursorModeForAct(state.act) === "caret" ||
             cursorModeForAct(state.act) === "selection";
-          if (quietRef.current || reducedRef.current) {
+          if (quietRef.current || reducedRef.current || effectsMutedRef.current) {
             runtime.travel.snapTo(point.left, point.top);
-          } else if (travel.kind === "stay" || isCaretAct || settled) {
-            // Caret advances and settle landings track the glyph directly;
-            // a visible journey between characters would read as lag.
+          } else if (
+            settled ||
+            writing ||
+            (isCaretAct && !reaching) ||
+            (travel.kind === "stay" && !reaching)
+          ) {
             runtime.travel.snapTo(point.left, point.top);
           } else {
             runtime.travel.moveTo(
@@ -357,35 +378,13 @@ export const InteractionLayer = memo(function InteractionLayer({
           }
           const sample: TravelSample = runtime.travel.sample(now);
           if (sample.travelling) keepAnimating = true;
+          moving = sample.travelling;
           point = { left: sample.x, top: sample.y };
           opacity *= runtime.travel.fadeOpacity(sample);
-          if (effectsMutedRef.current) {
-            // Dense rooms and simplified environments keep travel honest but
-            // shed the trail/tilt ornaments — presence stays exact, never busy.
-            runtime.trail.push(point.left, point.top, now, false);
-            trailPoints = [];
-          } else if (sample.travelling && sample.kind === "journey") {
-            // Lean into the direction of travel, capped and decayed.
-            const position = runtime.travel.position;
-            if (position) {
-              const dx = point.left - (trailPoints[0]?.x ?? position.x);
-              tilt = Math.max(-7, Math.min(7, dx * 0.06 * sample.speed));
-            }
-            runtime.trail.push(
-              point.left,
-              point.top,
-              now,
-              sample.speed > TRAIL_SPEED_PX_PER_MS,
-            );
-            trailPoints = runtime.trail.sample(now);
-          } else {
-            runtime.trail.push(point.left, point.top, now, false);
-            trailPoints = runtime.trail.sample(now);
-          }
-        } else {
-          runtime.trail.push(0, 0, now, false);
+          // Whatever the viewer has opened over this spot (a menu, a dialog,
+          // a popover) stays on top: the body is hidden under it.
+          if (occluded(surface, anchor, point)) opacity = 0;
         }
-        if (trailPoints.length > 0) keepAnimating = true;
         const justCompleted =
           runtime.completedAt !== null &&
           now - runtime.completedAt < COMPLETION_RING_MS;
@@ -398,12 +397,11 @@ export const InteractionLayer = memo(function InteractionLayer({
           color: presenceColor(state.actor),
           mode: cursorModeForAct(state.act),
           placement,
-          description: describeState(state),
+          description: flagDescription(state),
           travel: travel.kind,
           point,
           opacity,
-          tilt,
-          trail: trailPoints,
+          moving,
           departing: runtime.departingAt !== null,
           justCompleted,
         });
@@ -433,9 +431,16 @@ export const InteractionLayer = memo(function InteractionLayer({
     surface.addEventListener("scroll", scheduleMeasure, { passive: true });
     window.addEventListener("resize", scheduleMeasure, { passive: true });
     document.addEventListener("visibilitychange", scheduleMeasure);
+    // Menus, dialogs and popovers mount and unmount: whatever opens over a
+    // collaborator's spot hides it, and it reappears when closed.
+    const overlays = new MutationObserver(scheduleMeasure);
+    overlays.observe(document.body, { childList: true });
+    document.addEventListener("focusin", scheduleMeasure);
     scheduleMeasure();
     return () => {
       disposed = true;
+      overlays.disconnect();
+      document.removeEventListener("focusin", scheduleMeasure);
       if (frame) cancelAnimationFrame(frame);
       if (staleTimer !== null) window.clearTimeout(staleTimer);
       resize.disconnect();
@@ -493,16 +498,7 @@ function visualsEqual(left: ActorVisual[], right: ActorVisual[]): boolean {
       !near(entry.point.top, other.point.top)
     )
       return false;
-    if (entry.trail.length !== other.trail.length) return false;
-    if (
-      entry.trail.some(
-        (point, pointIndex) =>
-          !near(point.x, other.trail[pointIndex]?.x ?? 0) ||
-          !near(point.y, other.trail[pointIndex]?.y ?? 0) ||
-          !near(point.strength, other.trail[pointIndex]?.strength ?? 0),
-      )
-    )
-      return false;
+    if (entry.moving !== other.moving) return false;
     return placementsEqual(entry.placement, other.placement);
   });
 }
@@ -546,56 +542,20 @@ function boxesEqual(
  * Per-actor chrome
  * ------------------------------------------------------------------ */
 
-/** Spectra actors whose light has already come into this work, so a cursor
- *  that remounts (back from an edge, a re-render) does not arrive again. */
-const aiInWork = new Set<string>();
-/** The cursor never waits on the field for longer than this. */
-const ARRIVAL_FALLBACK_MS = 900;
-
-const centreOf = (element: Element): [number, number] => {
-  const r = element.getBoundingClientRect();
-  return [r.left + r.width / 2, r.top + r.height / 2];
-};
-
-/**
- * Spectra in a work (LIFE.md, travel): its light leaves the prism, crosses
- * the field and becomes its cursor where it lands; when it is done, the
- * cursor's light crosses back into the prism, which takes it in.
- */
-export function useAiCursorLight(clientId: string, isAi: boolean, departing: boolean) {
-  const cursor = useRef<HTMLElement | null>(null);
-  const attach = useCallback(
-    (node: HTMLElement | null) => {
-      cursor.current = node;
-      if (!node || !isAi || aiInWork.has(clientId)) return;
-      aiInWork.add(clientId);
-      if (!life.on) return;
-      node.style.opacity = "0";
-      const show = () => {
-        node.style.opacity = "";
-      };
-      const fallback = window.setTimeout(show, ARRIVAL_FALLBACK_MS);
-      requestAnimationFrame(() => {
-        if (!node.isConnected) return show();
-        void life.send(prismPoint(), centreOf(node), { colour: "spectrum", strength: 0.7 }).then(() => {
-          window.clearTimeout(fallback);
-          show();
-        });
-      });
-    },
-    [clientId, isAi],
-  );
-  useEffect(() => {
-    if (!isAi || !departing || !aiInWork.has(clientId)) return;
-    aiInWork.delete(clientId);
-    const node = cursor.current;
-    const home = document.querySelector("[data-island-home]")?.getBoundingClientRect();
-    if (!life.on || !node?.isConnected || !home?.width) return;
-    void life.send(centreOf(node), { x: home.x, y: home.y, width: home.width, height: home.height }, { colour: "spectrum", strength: 0.6, absorb: true });
-  }, [clientId, isAi, departing]);
-  // Gone from the layer (the work closed): next time, its light comes in again.
-  useEffect(() => () => void aiInWork.delete(clientId), [clientId]);
-  return attach;
+/** True when something the viewer opened covers this point of the surface. */
+function occluded(
+  surface: HTMLElement,
+  anchor: HTMLElement,
+  point: { left: number; top: number },
+) {
+  if (typeof document.elementFromPoint !== "function") return false;
+  const origin = anchor.getBoundingClientRect();
+  const x = origin.left + point.left + 2;
+  const y = origin.top + point.top + 2;
+  if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight)
+    return false;
+  const hit = document.elementFromPoint(x, y);
+  return Boolean(hit && !surface.contains(hit));
 }
 
 function ActorPresence({ visual }: { visual: ActorVisual }) {
@@ -608,14 +568,11 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
     description,
     point,
     opacity,
-    tilt,
-    trail,
+    moving,
     travel,
     departing,
     justCompleted,
   } = visual;
-  const isAi = state.actor.kind === "ai";
-  const cursorLight = useAiCursorLight(state.actor.clientId, isAi, Boolean(departing));
 
   if (!placement) {
     // The control is not in the DOM at all — another slide, a collapsed section,
@@ -631,7 +588,6 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
         box={placement.box}
         color={color}
         label={label}
-        isAi={isAi}
         opacity={opacity}
       />
     );
@@ -660,27 +616,13 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
   const settled =
     state.lifecycle === "settled" || state.lifecycle === "completed";
   const provisional = Boolean(state.speculation) && !settled;
+  const reachingText = moving && (mode === "caret" || mode === "selection");
   return (
     <div
       className="spectra-presence-actor"
-      data-ai={isAi ? "true" : undefined}
       data-departing={departing ? "true" : undefined}
       style={style}
     >
-      {/* Comet trail: only while a journey is genuinely fast. */}
-      {travel === "journey" &&
-        trail.map((trailPoint, index) => (
-          <span
-            key={`trail-${index}`}
-            className="spectra-presence-trail"
-            style={{
-              left: trailPoint.x,
-              top: trailPoint.y,
-              opacity: trailPoint.strength * 0.34,
-            }}
-          />
-        ))}
-
       {/* Completion ring (completion grammar): one restrained settle pulse on
           the finished target, fired once per act — never repeated while the
           actor remains settled. */}
@@ -782,8 +724,11 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
         />
       )}
 
-      {/* Caret, positioned on the exact glyph. */}
-      {placement.caret && (mode === "caret" || mode === "selection") && (
+      {/* Caret, positioned on the exact glyph. While a hand is still reaching
+          for the word, the body is the I-beam a pointer is over text. */}
+      {placement.caret &&
+        (mode === "caret" || mode === "selection") &&
+        !moving && (
         <span
           className="spectra-presence-caret"
           data-typing={typing ? "true" : undefined}
@@ -825,28 +770,26 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
           working actor's label stays visible and a settled actor's label
           decays away ~3.6 s after the last movement — no JS timer needed. */}
       <div
-        ref={cursorLight}
         className="spectra-presence-cursor"
-        data-mode={mode}
-        data-ai={isAi ? "true" : undefined}
+        data-mode={reachingText ? "text" : mode}
         data-travelling={travel === "journey" ? "true" : undefined}
         // Positioned by transform: the body moves every frame of a journey,
         // and a transform never re-lays out the layer.
         style={{
-          transform: `translate3d(${point.left}px, ${point.top}px, 0)${
-            tilt ? ` rotate(${tilt}deg)` : ""
-          }`,
+          transform: `translate3d(${point.left}px, ${point.top}px, 0)`,
         }}
       >
-        {mode !== "caret" && mode !== "selection" && mode !== "hidden" && (
-          <CursorGlyph mode={mode} pressed={pressing} ai={isAi} />
+        {reachingText ? (
+          <TextBeam height={placement.caret?.height ?? 16} />
+        ) : (
+          mode !== "caret" &&
+          mode !== "selection" &&
+          mode !== "hidden" && <CursorGlyph mode={mode} pressed={pressing} />
         )}
         <span
           key={Math.floor(state.at / PRESENCE_LABEL_BUCKET_MS)}
           className="spectra-presence-flag"
-          data-ai={isAi ? "true" : undefined}
         >
-          {isAi && <SparkGlyph />}
           <span className="spectra-presence-flag-name">{label}</span>
           {description && description !== "Present" && (
             <>
@@ -860,6 +803,16 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
       </div>
     </div>
   );
+}
+
+/** At the text itself the place is plain to see: the flag says only what is happening. */
+const TEXT_VERBS: Partial<Record<InteractionState["act"]["kind"], string>> = {
+  caret: "Editing", select: "Selecting", type: "Typing", insert: "Writing", delete: "Deleting", replace: "Rewriting",
+};
+
+function flagDescription(state: InteractionState) {
+  const verb = TEXT_VERBS[state.act.kind];
+  return verb && !describeLifecycle(state.lifecycle) ? verb : describeState(state);
 }
 
 function boxStyle(box: SurfaceBox): React.CSSProperties {
@@ -928,14 +881,12 @@ function EdgeMarker({
   box,
   color,
   label,
-  isAi,
   opacity,
 }: {
   edge: OffSurfaceEdge;
   box: SurfaceBox;
   color: string;
   label: string;
-  isAi: boolean;
   opacity: number;
 }) {
   const vertical = edge === "top" || edge === "bottom";
@@ -954,7 +905,6 @@ function EdgeMarker({
       }
       title={label}
     >
-      {isAi ? <SparkGlyph /> : null}
       <span className="spectra-presence-edge-name">{label}</span>
     </div>
   );
@@ -967,11 +917,9 @@ function EdgeMarker({
 function CursorGlyph({
   mode,
   pressed,
-  ai = false,
 }: {
   mode: CursorMode;
   pressed: boolean;
-  ai?: boolean;
 }) {
   if (mode === "grab")
     return (
@@ -1007,8 +955,6 @@ function CursorGlyph({
         />
       </svg>
     );
-  // Spectra's body in a work is a small prism (MOTION.md, "Spectra's presence"): its apex is the hotspot.
-  if (ai) return <PrismPointer pressed={pressed} />;
   // Pointer / press / menu share the compact arrow; a press tips it down.
   return (
     <svg
@@ -1032,48 +978,31 @@ function CursorGlyph({
   );
 }
 
-function PrismPointer({ pressed }: { pressed: boolean }) {
-  const id = useId();
+/** The text pointer, sized to the line it is over; its centre is the hotspot. */
+function TextBeam({ height }: { height: number }) {
+  const h = Math.max(12, Math.min(28, height + 2));
+  const path = `M1 0.8c1.6 0 2.6.5 3 1.4.4-.9 1.4-1.4 3-1.4M4 2.2V${h - 2.2}M1 ${h - 0.8}c1.6 0 2.6-.5 3-1.4.4.9 1.4 1.4 3 1.4`;
   return (
     <svg
-      className="spectra-presence-glyph"
-      data-ai="true"
-      data-pressed={pressed ? "true" : undefined}
-      viewBox="0 0 16 16"
-      width="16"
-      height="16"
+      className="spectra-presence-beam"
+      viewBox={`0 0 8 ${h}`}
+      width="8"
+      height={h}
+      style={{ top: -h / 2 + 4 }}
     >
-      <defs>
-        <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#8b6cf6" />
-          <stop offset="0.5" stopColor="#4f9fe6" />
-          <stop offset="1" stopColor="#40c48e" />
-        </linearGradient>
-      </defs>
       <path
-        d="M4.2 1.6 12.3 9.6 3.2 11.9z"
-        fill={`url(#${id})`}
+        d={path}
+        fill="none"
         stroke="var(--bg-elevated)"
-        strokeWidth="0.9"
-        strokeLinejoin="round"
+        strokeWidth="2.6"
+        strokeLinecap="round"
       />
-      <path d="M4.2 1.6 7.6 10.6" stroke="#fff" strokeOpacity="0.45" strokeWidth="0.7" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function SparkGlyph() {
-  return (
-    <svg
-      className="spectra-presence-spark"
-      viewBox="0 0 12 12"
-      width="9"
-      height="9"
-      aria-hidden="true"
-    >
       <path
-        d="M6 0.6 7 4.3 10.6 5.4 7 6.5 6 10.2 5 6.5 1.4 5.4 5 4.3z"
-        fill="currentColor"
+        d={path}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
       />
     </svg>
   );

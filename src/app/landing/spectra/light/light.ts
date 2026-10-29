@@ -32,17 +32,33 @@ export type Source = {
   ease?: number;
   /** A body in the sky (the sun): a disc with an edge, rather than a pool. */
   disc?: boolean;
+  /**
+   * Light around an element rather than on it: it hugs the element's edges
+   * (rx and ry are how far it reaches out) and goes round them through its hues.
+   */
+  halo?: { radius: number };
 };
 
 type Live = Required<Pick<Source, "rx" | "ry" | "strength" | "hues" | "flow" | "ease" | "disc">> &
-  Pick<Source, "el" | "at" | "x" | "y"> & {
+  Pick<Source, "el" | "at" | "x" | "y" | "halo"> & {
     shown: number;
     target: number;
     sized: boolean;
     path?: { from: [number, number]; to: () => [number, number]; start: number; ms: number };
   };
 
-export type Drawn = { x: number; y: number; rx: number; ry: number; strength: number; h0: number; h1: number; flow: number };
+export type Drawn = {
+  x: number;
+  y: number;
+  rx: number;
+  ry: number;
+  strength: number;
+  h0: number;
+  h1: number;
+  flow: number;
+  /** A halo's box: half its width and height, and its corner radius. */
+  box?: [number, number, number];
+};
 
 const sources = new Map<string, Live>();
 const listeners = new Set<() => void>();
@@ -70,6 +86,7 @@ export function shine(id: string, source: Source) {
     flow: source.flow ?? was?.flow ?? 0.5,
     ease: source.ease ?? was?.ease ?? 700,
     disc: source.disc ?? was?.disc ?? false,
+    halo: source.halo ?? was?.halo,
     el: source.el === undefined ? was?.el : source.el,
     at: source.at ?? was?.at,
     x: source.x ?? was?.x,
@@ -141,6 +158,7 @@ export function frame(now: number, dt: number, view: { width: number; height: nu
     let y = 0;
     let rx = live.rx;
     let ry = live.ry;
+    let box: Drawn["box"];
     if (live.path) {
       const t = Math.min(1, (now - live.path.start) / live.path.ms);
       const [tx, ty] = live.path.to();
@@ -158,21 +176,24 @@ export function frame(now: number, dt: number, view: { width: number; height: nu
         live.target = 0;
         continue;
       }
-      const box = live.el.getBoundingClientRect();
+      const rect = live.el.getBoundingClientRect();
       const at = live.at ?? [0.5, 0.5];
-      x = box.left + box.width * at[0];
-      y = box.top + box.height * at[1];
-      if (!live.sized) {
-        rx = box.width * 0.62;
-        ry = box.height * 0.62;
+      x = rect.left + rect.width * at[0];
+      y = rect.top + rect.height * at[1];
+      if (live.halo) box = [rect.width / 2, rect.height / 2, live.halo.radius];
+      else if (!live.sized) {
+        rx = rect.width * 0.62;
+        ry = rect.height * 0.62;
       }
     } else {
       x = live.x ?? 0;
       y = (live.y ?? 0) - view.scrollY;
     }
     // Light well off screen costs nothing.
-    if (y + ry * 2 < 0 || y - ry * 2 > view.height || x + rx * 2 < 0 || x - rx * 2 > view.width) continue;
-    out.push({ x, y, rx: Math.max(1, rx), ry: Math.max(1, ry), strength: live.shown * live.strength, h0: live.hues[0], h1: live.hues[1], flow: live.disc ? -Math.max(0.01, live.flow) : live.flow });
+    const reachX = rx * 2 + (box?.[0] ?? 0);
+    const reachY = ry * 2 + (box?.[1] ?? 0);
+    if (y + reachY < 0 || y - reachY > view.height || x + reachX < 0 || x - reachX > view.width) continue;
+    out.push({ x, y, rx: Math.max(1, rx), ry: Math.max(1, ry), strength: live.shown * live.strength, h0: live.hues[0], h1: live.hues[1], flow: live.disc ? -Math.max(0.01, live.flow) : live.flow, box });
   }
   return { drawn: out, moving: moving || out.some((source) => source.strength > 0.001) };
 }

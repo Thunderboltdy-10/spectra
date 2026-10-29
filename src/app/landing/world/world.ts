@@ -8,12 +8,14 @@ import type {
   SpectraThread,
   SpectraWorkspace,
 } from "@/features/spectra/data/api";
+import { invalidateSpectraCache } from "@/features/spectra/data/api";
 import { spectraBus } from "@/features/spectra/events";
 import { fn, type ShowcaseWorld } from "@/features/spectra/showcase/showcase-provider";
 import type { ShowcaseRequest } from "@/features/spectra/showcase/showcase-transport";
 import { ndjsonStream } from "@/features/spectra/showcase/showcase-transport";
 import { zonedDay } from "@/features/spectra/today/daily-brief";
 import { PAGE_BOARD, SUPERCHARGE } from "./board";
+import { CLASS_WORKS, PAST_TASKS, SOURCE_PACK, classOfFolder, classOfProvider, inClass, treeNode } from "./classes";
 import { replyFor, type Reply } from "./replies";
 import { DEADLINES, LAB_BLOCK, PLAN_BLOCKS, SCHOOL_CLASSES, ZONE, initialCalendar, morningBrief, schoolTask, type WireItem } from "./school";
 import { STORY, TODAY } from "./story";
@@ -90,7 +92,7 @@ function sharedWith(artifactId: string) {
 
 export class StoryWorld {
   calendar: WireItem[] = initialCalendar();
-  works = new Map<string, SpectraArtifact>(ALL_WORKS.map((work) => [work._id, work]));
+  works = new Map<string, SpectraArtifact>([...ALL_WORKS, ...CLASS_WORKS].map((work) => [work._id, work]));
   threads = new Map<string, SpectraThread>();
   messages = new Map<string, SpectraMessage[]>();
   traces = new Map<string, Trace[]>();
@@ -99,7 +101,10 @@ export class StoryWorld {
   /** ManageBac's state as the calendar sees it; "stale" makes it sync. */
   sourceStale = false;
   /** Works that open by id but are not Henry's, so no list of his shows them. */
-  private outside = new Map<string, SpectraArtifact>([[PAGE_BOARD._id, PAGE_BOARD]]);
+  private outside = new Map<string, SpectraArtifact>([
+    [PAGE_BOARD._id, PAGE_BOARD],
+    [SOURCE_PACK._id, SOURCE_PACK],
+  ]);
   comments: SpectraArtifactComment[] = [
     {
       _id: "comment-supercharge",
@@ -210,6 +215,53 @@ export class StoryWorld {
     if (!missing.length) return;
     this.calendar.push(...missing);
     this.emit({ type: "calendar" });
+  }
+
+  /** Something a scene files: it is on the calendar from now on, until the scene takes it back. */
+  place(item: WireItem) {
+    if (this.calendar.some((entry) => entry.id === item.id)) return;
+    this.calendar.push(item);
+    this.emit({ type: "calendar" });
+    spectraBus.emit("calendar.changed", {});
+  }
+
+  /** ManageBac moved something: it keeps its length and lands `by` milliseconds later (or earlier). */
+  shift(id: string, by: number) {
+    const index = this.calendar.findIndex((entry) => entry.id === id);
+    const item = this.calendar[index];
+    if (!item) return;
+    this.calendar[index] = {
+      ...item,
+      startAt: item.startAt === undefined ? item.startAt : item.startAt + by,
+      endAt: item.endAt === undefined ? item.endAt : item.endAt + by,
+      revision: item.revision + 1,
+    };
+    this.emit({ type: "calendar" });
+    spectraBus.emit("calendar.changed", {});
+  }
+
+  unplace(...ids: string[]) {
+    const before = this.calendar.length;
+    this.calendar = this.calendar.filter((entry) => !ids.includes(entry.id));
+    if (this.calendar.length === before) return;
+    this.emit({ type: "calendar" });
+    spectraBus.emit("calendar.changed", {});
+  }
+
+  /** A work a scene files, or takes back. */
+  file(work: SpectraArtifact) {
+    this.works.set(work._id, work);
+    // Home keeps the overview for a while; a work filed on the page is there at once.
+    invalidateSpectraCache();
+    this.touched();
+  }
+
+  unfile(...ids: string[]) {
+    let changed = false;
+    for (const id of ids) changed = this.works.delete(id) || changed;
+    if (!changed) return;
+    invalidateSpectraCache();
+    this.touched();
   }
 
   private plan(blocks: WireItem[]) {
@@ -557,6 +609,15 @@ export class StoryWorld {
         return { account: { name: "Henry", accountId: "henry" }, membership: { role: "student", schoolName: "Your school" } };
       case "/api/spectra/brief":
         return { ok: true };
+      case "/api/spectra/runtime/build": {
+        // The story's simulations are one self-contained page; they run as written.
+        const files = (body?.files ?? []) as Array<{ source?: string }>;
+        const bytes = files.reduce((sum, file) => sum + (file.source?.length ?? 0), 0);
+        return { build: { files, sourceBytes: bytes, outputBytes: bytes } };
+      }
+      case "/api/spectra/runtime/publish":
+        // Nothing in the story has been published; the simulation runs from its source.
+        return method === "GET" ? { ok: true, build: null, sourceMatchesCurrent: false } : json(400, { error: "Publishing is not part of the story." });
       case "/api/spectra/assets":
         // Nothing is uploaded in the story; an image dropped on a work stays on the page.
         return method === "GET" ? { ok: true, assets: [] } : json(400, { error: "Uploads are not part of the story." });
@@ -571,9 +632,33 @@ export class StoryWorld {
     return {
       [fn("catalogGraph", "identity")]: () => ({ accountId: "henry", schoolId: "school", membershipId: "membership-henry" }),
       [fn("school", "classes")]: () => ({ classes: SCHOOL_CLASSES }),
-      [fn("school", "tasks")]: () => ({
-        tasks: this.calendar.filter((item) => item.kind === "official_deadline").map(schoolTask),
-      }),
+      [fn("school", "tasks")]: (args) => {
+        const due = this.calendar.filter((item) => item.kind === "official_deadline");
+        // A class's own page asks for its whole term: what is due and what is past.
+        if (typeof args.providerClassId !== "string") return { tasks: due.map(schoolTask) };
+        return { tasks: [...due, ...PAST_TASKS].filter((item) => item.classId === args.providerClassId).map(schoolTask) };
+      },
+      [fn("orgTree", "listChildren")]: (args) => {
+        const parentId = String(args.parentId ?? "");
+        const key = classOfFolder(parentId);
+        // One page, as Convex pages a list: the whole class fits on it.
+        const page = key ? [...this.works.values()].filter((work) => inClass(work, key)).map((work) => treeNode(work, parentId)) : [];
+        return { page, isDone: true, continueCursor: "end" };
+      },
+      [fn("workspaceSharing", "sharedWorks")]: (args) => {
+        const key = classOfProvider(`mb-${String(args.workspaceId ?? "").replace(/^ws-/, "")}`);
+        if (key !== "history") return [];
+        return [
+          {
+            workspaceId: "ws-gonzalez-history",
+            title: CLASSES.history.title,
+            author: CLASSES.history.teacher,
+            level: "read",
+            works: [{ ...treeNode(SOURCE_PACK, "ws-gonzalez-history"), author: CLASSES.history.teacher, accessLevel: "read" }],
+          },
+        ];
+      },
+      [fn("workStacks", "members")]: () => [],
       [fn("dailyBriefs", "today")]: (args) =>
         args.day === morningDay ? { state: "ready", day: morningDay, ...morningBrief() } : null,
       [fn("bridge", "hasDevice")]: () => true,

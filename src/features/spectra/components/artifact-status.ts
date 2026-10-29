@@ -157,7 +157,7 @@ function retrying(replicas: readonly ArtifactStatusReplica[]) {
   );
 }
 
-function wordsOf(state: ArtifactStatusState, input: ArtifactStatusInput, fileName: string | undefined) {
+function wordsOf(state: ArtifactStatusState, input: ArtifactStatusInput) {
   const app = input.officeApplication ?? "Office";
   switch (state) {
     case "saved":
@@ -165,7 +165,8 @@ function wordsOf(state: ArtifactStatusState, input: ArtifactStatusInput, fileNam
     case "saving":
       return input.presentation.key === "access" ? input.presentation.label : "Saving";
     case "syncing":
-      return fileName ? `Updating ${fileName}` : "Updating";
+      // The file's name is the title beside it; the sentence names it.
+      return "Updating file";
     case "waitingOffice":
       return `Open in ${app}`;
     case "readOnly":
@@ -247,7 +248,7 @@ export function artifactStatusOf(input: ArtifactStatusInput): ArtifactStatus {
     state,
     glyph: GLYPH[state],
     hue: HUE[state],
-    words: wordsOf(state, input, fileName),
+    words: wordsOf(state, input),
     running: state === "saving" || state === "syncing" || (state === "problem" && retrying(input.replicas)),
     sentence,
     facts,

@@ -758,6 +758,28 @@ function boundedPresence(value, max = 4_000) {
   }
 }
 
+/** An AI's edit performances, under the identity its token proves. Viewers
+ * expand each into the hand locally, so dropping them leaves the edit to
+ * land with no one seen making it. */
+function aiPerformances(value, context) {
+  if (context.actorKind !== "ai" || !Array.isArray(value)) return undefined;
+  const actor = {
+    clientId: context.clientId,
+    kind: "ai",
+    name: `${context.displayName}'s AI`,
+    accountId: context.accountId,
+    ownerAccountId: context.accountId,
+    ownerName: context.displayName,
+  };
+  const kept = value
+    .slice(-6)
+    .filter((entry) => entry && typeof entry === "object" && !Array.isArray(entry) &&
+      entry.v === 1 && entry.artifactId === context.artifactId &&
+      boundedPresence(entry, 240_000) !== undefined)
+    .map((entry) => ({ ...entry, actor }));
+  return kept.length ? kept : undefined;
+}
+
 function interactionPresence(value, context, actorKind) {
   if (!value || typeof value !== "object" || Array.isArray(value))
     return undefined;
@@ -1196,6 +1218,7 @@ const server = new Server({
         context,
         actorKind,
       );
+      const performances = aiPerformances(supplied.performances, context);
       const activeRegionIds = Array.isArray(supplied.activeRegionIds)
         ? supplied.activeRegionIds
             .filter((regionId) => typeof regionId === "string")
@@ -1248,6 +1271,7 @@ const server = new Server({
           // legacy cursor/preview fields, visually separating the "fake human"
           // performance from the real mutation.
           ...(interactionState ? { interactionState } : {}),
+          ...(performances ? { performances } : {}),
           ...(boundedPresence(supplied.cursor) !== undefined
             ? { cursor: boundedPresence(supplied.cursor) }
             : {}),

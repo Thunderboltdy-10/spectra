@@ -8,6 +8,7 @@ import {
 } from "../artifacts/registry";
 import type { ArtifactTypeKey, SemanticRegion } from "../artifacts/types";
 import { normalizeWhiteboardContent } from "../whiteboard/model";
+import { withoutDerivedNativeBinding } from "../artifacts/native-binding";
 import { normalizeArtifactContent } from "../ai/content-normalization";
 import { planSheetsCellProjection } from "../work/models/yjs/structured-adapters";
 
@@ -413,9 +414,12 @@ export function recomposeArtifactContent(
 
 export function changedArtifactRegionIds(
   typeKey: ArtifactTypeKey,
-  before: unknown,
-  after: unknown,
+  beforeContent: unknown,
+  afterContent: unknown,
 ) {
+  // A native save re-derives the file's hashes; that is not a structural edit.
+  const before = withoutDerivedNativeBinding(beforeContent);
+  const after = withoutDerivedNativeBinding(afterContent);
   if (typeKey === "sheets") {
     const cellPlan = planSheetsCellProjection(before, after);
     if (cellPlan) return cellPlan.changes.map((change) => change.regionId);

@@ -71,6 +71,7 @@ import type * as functions from "../functions.js";
 import type * as identity from "../identity.js";
 import type * as identityShared from "../identityShared.js";
 import type * as intakeAttestation from "../intakeAttestation.js";
+import type * as landingRequests from "../landingRequests.js";
 import type * as localStudentRehearsal from "../localStudentRehearsal.js";
 import type * as managebac from "../managebac.js";
 import type * as managebacProjectionAction from "../managebacProjectionAction.js";
@@ -219,6 +220,7 @@ declare const fullApi: ApiFromModules<{
   identity: typeof identity;
   identityShared: typeof identityShared;
   intakeAttestation: typeof intakeAttestation;
+  landingRequests: typeof landingRequests;
   localStudentRehearsal: typeof localStudentRehearsal;
   managebac: typeof managebac;
   managebacProjectionAction: typeof managebacProjectionAction;

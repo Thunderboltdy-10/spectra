@@ -9,6 +9,7 @@ import {
   parseBlocks,
   serializeBlock,
   serializeInline,
+  type PmMark,
   type PmNode,
 } from "./markdown";
 import { AuthoringError, type IdFactory, defaultIdFactory, record, truncate } from "./shared";
@@ -36,7 +37,10 @@ export function documentChunks(content: unknown): DocumentChunk[] {
     let id = blockIdOf(node, index);
     while (seen.has(id)) id = `${id}~`;
     seen.add(id);
-    const markdown = expressibleInMarkdown(node) ? serializeBlock(node) : keepMarker(id, node);
+    // A blank paragraph has no Markdown of its own and would vanish on the way
+    // back, so it travels as a marker like anything else Markdown cannot say.
+    const written = expressibleInMarkdown(node) ? serializeBlock(node) : "";
+    const markdown = written.trim() ? written : keepMarker(id, node);
     return { id, node, markdown };
   });
 }
@@ -59,6 +63,35 @@ export function documentOutline(doc: PmNode) {
   );
 }
 
+/** Marks Markdown writes itself; anything else (a font, a colour) it cannot say. */
+const WRITTEN_MARKS = new Set(["link", "bold", "italic", "strike", "highlight", "underline", "code"]);
+
+function textNodes(node: PmNode): PmNode[] {
+  return node.type === "text" ? [node] : (node.content ?? []).flatMap(textNodes);
+}
+
+/** The marks Markdown cannot say that cover every word of a block, like a Word paragraph's font. */
+function wholeUnwrittenMarks(node: PmNode) {
+  const texts = textNodes(node);
+  if (!texts.length) return [];
+  return (texts[0]!.marks ?? []).filter(
+    (mark) =>
+      !WRITTEN_MARKS.has(mark.type) &&
+      texts.every((text) => text.marks?.some((other) => JSON.stringify(other) === JSON.stringify(mark))),
+  );
+}
+
+/** A rewritten block keeps the look its words had all over: new words wear it too. */
+function withWholeMarks(node: PmNode, marks: readonly PmMark[]): PmNode {
+  if (!marks.length) return node;
+  if (node.type === "text") {
+    const own = node.marks ?? [];
+    const added = marks.filter((mark) => !own.some((other) => other.type === mark.type));
+    return added.length ? { ...node, marks: [...own, ...added] } : node;
+  }
+  return node.content ? { ...node, content: node.content.map((child) => withWholeMarks(child, marks)) } : node;
+}
+
 /** Builds document content from Markdown, reusing unchanged nodes of `previous`. */
 export function documentFromMarkdown(
   markdown: string,
@@ -73,8 +106,10 @@ export function documentFromMarkdown(
     byMarkdown.set(chunk.markdown, list);
   }
   const byId = new Map(before.map((chunk) => [chunk.id, chunk]));
+  const oldIndex = new Map(before.map((chunk, index) => [chunk.id, index]));
   const used = new Set<string>();
-  const nodes: PmNode[] = [];
+  // Unchanged blocks are reused whole; the rest are written fresh for now.
+  const entries: Array<{ node: PmNode; reused?: string }> = [];
   for (const parsed of parseBlocks(markdown)) {
     if (parsed.type === "__keep") {
       const kept = byId.get(String(parsed.attrs?.id));
@@ -84,7 +119,7 @@ export function documentFromMarkdown(
         );
       if (!used.has(kept.id)) {
         used.add(kept.id);
-        nodes.push(kept.node);
+        entries.push({ node: kept.node, reused: kept.id });
       }
       continue;
     }
@@ -92,14 +127,45 @@ export function documentFromMarkdown(
     const reusable = byMarkdown.get(text)?.find((chunk) => !used.has(chunk.id));
     if (reusable) {
       used.add(reusable.id);
-      nodes.push(reusable.node);
+      entries.push({ node: reusable.node, reused: reusable.id });
       continue;
+    }
+    entries.push({ node: parsed });
+  }
+  // A rewritten block is still the block it replaced: the old block of the
+  // same kind in the same place between unchanged neighbours keeps its id and
+  // what Markdown cannot say, so comments, history and anyone's caret on it
+  // stay with it.
+  const nodes: PmNode[] = [];
+  let lastAnchor = -1;
+  entries.forEach((entry, index) => {
+    if (entry.reused) {
+      lastAnchor = Math.max(lastAnchor, oldIndex.get(entry.reused) ?? lastAnchor);
+      nodes.push(entry.node);
+      return;
+    }
+    const nextReused = entries.slice(index + 1).find((later) => later.reused)?.reused;
+    const nextAnchor = nextReused !== undefined ? (oldIndex.get(nextReused) ?? before.length) : before.length;
+    const end = nextAnchor > lastAnchor ? nextAnchor : before.length;
+    const replaced = before
+      .slice(lastAnchor + 1, end)
+      .find((chunk) => !used.has(chunk.id) && chunk.node.type === entry.node.type);
+    if (replaced) {
+      used.add(replaced.id);
+      lastAnchor = oldIndex.get(replaced.id) ?? lastAnchor;
+      nodes.push(
+        withWholeMarks(
+          { ...entry.node, attrs: { ...(replaced.node.attrs ?? {}), ...(entry.node.attrs ?? {}), blockId: replaced.id } },
+          wholeUnwrittenMarks(replaced.node),
+        ),
+      );
+      return;
     }
     let id = ids("block");
     while (used.has(id) || byId.has(id)) id = ids("block");
     used.add(id);
-    nodes.push({ ...parsed, attrs: { ...(parsed.attrs ?? {}), blockId: id } });
-  }
+    nodes.push({ ...entry.node, attrs: { ...(entry.node.attrs ?? {}), blockId: id } });
+  });
   if (!nodes.length) nodes.push({ type: "paragraph", attrs: { blockId: ids("block") } });
   const doc: PmNode & { content: PmNode[] } = { type: "doc", content: nodes };
   const base = record(previous);
@@ -269,7 +335,8 @@ function words(text: string) {
 /** What the model sees after a create or edit: shape, problems, changed parts. */
 export function documentReadback(content: unknown, previous?: unknown) {
   const chunks = documentChunks(content);
-  const beforeIds = new Set(previous ? documentChunks(previous).map((chunk) => chunk.id) : []);
+  // A rewritten block keeps its id, so a change is a block whose text moved on.
+  const beforeById = new Map(previous ? documentChunks(previous).map((chunk) => [chunk.id, chunk.markdown]) : []);
   const markdown = chunks.map((chunk) => chunk.markdown).join("\n\n");
   const lines: string[] = [];
   const outline = documentOutline(documentContentToProseMirrorJson(content) as PmNode);
@@ -285,7 +352,7 @@ export function documentReadback(content: unknown, previous?: unknown) {
   });
   if (problems.length) lines.push(`Empty: ${problems.join("; ")}.`);
   if (previous) {
-    const changed = chunks.filter((chunk) => !beforeIds.has(chunk.id));
+    const changed = chunks.filter((chunk) => beforeById.get(chunk.id) !== chunk.markdown);
     lines.push(
       changed.length
         ? `Changed or new blocks:\n${truncate(changed.map((chunk) => chunk.markdown).join("\n\n"), 2_400)}`

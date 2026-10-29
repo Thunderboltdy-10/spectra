@@ -1148,6 +1148,7 @@ export const SERVER_PLUMBING: Readonly<Record<string, string>> = {
   "spectraRuns:setResearchEvidence": "Spectra's own run machinery.",
   "spectraRuns:beginRunAttachmentUpload": "Upload protocol for message attachments.",
   "spectraThreads:applyGeneratedMetadata": "Spectra's own run machinery.",
+  "spectraThreads:recordThreadNotes": "Spectra's own run machinery: a thread's running notes.",
   "spectraThreads:createFromRun": "Spectra's own run machinery.",
   "spectraWorkspaces:createPending": "Spectra's own run machinery.",
   "spectraWorkspaces:finalizePending": "Spectra's own run machinery.",

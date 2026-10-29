@@ -820,10 +820,13 @@ export function CollaborationPresenceIndicator({
                 </span>
               ))}
             </span>
-            <Users className="h-3.5 w-3.5 text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)]" />
-            <span className="pr-1 text-micro font-medium text-[var(--text-secondary)]">
-              {activeAiName ?? `${activeCount || collaborators.length} here`}
-              {activeAiName && activeAiPlace ? <span className="ml-1.5 font-normal text-[var(--text-tertiary)]">{activeAiPlace}</span> : null}
+            {activeAiName ? null : (
+              <Users className="h-3.5 w-3.5 text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)]" />
+            )}
+            {/* The work's title comes first: what the AI is doing gives way. */}
+            <span className="flex min-w-0 max-w-[13rem] items-baseline pr-1 text-micro font-medium text-[var(--text-secondary)]">
+              <span className="shrink-0">{activeAiName ?? `${activeCount || collaborators.length} here`}</span>
+              {activeAiName && activeAiPlace ? <span className="spectra-presence-place ml-1.5 min-w-0 truncate font-normal text-[var(--text-tertiary)]">{activeAiPlace}</span> : null}
             </span>
           </button>
         </PopoverTrigger>

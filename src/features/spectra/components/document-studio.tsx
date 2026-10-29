@@ -84,6 +84,11 @@ import {
   aiRegionDecorationKey,
   type AiRegionDecorationTarget,
 } from "../editor/ai-region-decoration";
+import {
+  AiSpeculationDecoration,
+  aiSpeculationKey,
+  type SpeculativeBlockText,
+} from "../editor/ai-speculation-decoration";
 import { AiTextResolve } from "../editor/ai-text-resolve";
 import { Callout } from "../editor/callout-node";
 import { DocumentImage, NativeDocxImage } from "../editor/document-image";
@@ -169,6 +174,8 @@ import {
 import { requestSpectra } from "../data/request";
 import { documentReferenceIds } from "./document-reference-ids";
 import { entryOf, withStacked } from "../editor/reference-stack";
+
+const NO_SPECULATION: readonly SpeculativeBlockText[] = [];
 
 function documentMarkdown(json: JSONContent) {
   const renderInline = (node: JSONContent): string => {
@@ -688,6 +695,7 @@ export function DocumentStudio({
   collaborationDocument,
   binding = false,
   contentIsProvisional = false,
+  speculation = NO_SPECULATION,
   onLocalCollaborativeChange,
   header,
   mode = "tab",
@@ -704,6 +712,8 @@ export function DocumentStudio({
   /** The live room is still arriving: hold typing so it lands in the bound editor. */
   binding?: boolean;
   contentIsProvisional?: boolean;
+  /** Blocks a collaborator is writing right now, as they have them. */
+  speculation?: readonly SpeculativeBlockText[];
   onLocalCollaborativeChange?: (userInitiated?: boolean) => void;
   header: ReactNode;
   mode?: "split" | "tab";
@@ -1087,6 +1097,7 @@ export function DocumentStudio({
           nativeReadOnlyBlockIds: nativeReadOnlyRegionIds,
         }),
         AiRegionDecoration,
+        AiSpeculationDecoration,
         AiTextResolve,
         SpectraTiptapAutocomplete.configure({
           enabled:
@@ -1679,6 +1690,20 @@ export function DocumentStudio({
         .setMeta("addToHistory", false),
     );
   }, [aiChangedPaths, collaborationDocument, contentIsProvisional, editor, incomingEditorJson, nativeBinding.format]);
+
+  // A shared document is bound to the room; a collaborator's in-flight words
+  // are drawn over it instead (ai-speculation-decoration).
+  const speculationKey = JSON.stringify(speculation);
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || !editor.isInitialized || !editor.view) return;
+    editor.view.dispatch(
+      editor.state.tr
+        .setMeta(aiSpeculationKey, collaborationDocument ? speculation : NO_SPECULATION)
+        .setMeta("addToHistory", false),
+    );
+    // speculationKey stands for speculation's contents.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collaborationDocument, editor, speculationKey]);
 
   const editorText = editor?.getText({ blockSeparator: "\n" }) ?? "";
   const wordCount = editorText.trim()

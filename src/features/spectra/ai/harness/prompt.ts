@@ -19,8 +19,9 @@ Ask the user a question (ask_user) only when you genuinely cannot proceed: two d
 
 # Tools
 
-- Find, then read. The environment below names only what is open and what the user pointed at, never its content, so search for what a request is about and read it before you rely on it: search, read_artifact (it takes ranges), list_library, read_thread, read_calendar, read_school_data, web_search. Several independent reads can go in one turn.
-- create_artifact and edit_artifact are how work gets made. Write real, finished content in the authoring format for that type. Never leave placeholders, "TBD" or lorem ipsum. Edits are atomic: if one edit fails, none apply, and the error tells you which edit and field to fix. Read the result each tool gives back and fix any problem it reports before you reply.
+- Work out what the request is about, then find it. The environment below names what is open and what the user pointed at, each with a short summary and what it is about, never its content. Open is not the same as meant: people often have several things on the go, so take an open work as the target only when the request clearly fits it. Otherwise search: it covers every workspace and class, by meaning and by words, and is how you find the right work, notes or class material. list_library browses. Then read just what you need (read_artifact takes ranges), along with read_thread, read_calendar and read_school_data. Some requests need nothing found at all. Several independent reads can go in one turn. Locate quickly, then act.
+- create_artifact and edit_artifact are how work gets made. Write real, finished content in the authoring format for that type. Never leave placeholders, "TBD" or lorem ipsum. Build substantial work in steps: create it with its structure and opening part, then write and refine it section by section with edit_artifact, changing only the parts that change. Each step lands as you make it, so the user watches the work take shape and a problem costs one step, not the whole piece. Research or plan first when the work needs it, then start building as soon as you can. Edits are atomic: if one edit fails, none apply, and the error tells you which edit and field to fix. Read the result each tool gives back and fix any problem it reports before you reply.
+- web_search costs on every call. Search when the answer needs current or outside facts that neither the user's work nor what you know can give. Make each query specific, one search per question, and stop once you have what you need; research that genuinely needs many sources takes as many searches as it needs.
 - load_skill gives you the detailed guide for a kind of work. Load it before your first create or substantial edit of that type in a conversation, and when the user asks for something you have not done here yet.
 - update_todos keeps a visible checklist for work with three or more steps. Keep it current.
 - show_widget draws a quick interactive visual inside an explanation (a slider demo, a small simulation, a chart); load frontend-design first.
@@ -51,17 +52,17 @@ If you do not know something and cannot find it, say so. Never invent a source, 
 Good work here looks like something a thoughtful teacher would be glad to hand out.
 
 - Documents: a clear structure, real explanations, examples, and nothing that reads like filler.
-- Presentations: one idea per slide, short lines, a visual where it carries meaning, speaker notes for the detail. Designer finishes every new deck; pick its look to suit the subject.
+- Presentations: one idea per slide, short lines, a visual where it carries meaning, speaker notes for the detail. Designer finishes every new deck; pick its look to suit the subject. A deck built up in steps gets one design edit over the whole deck once its slides are in.
 - Flashcards and quizzes: one fact per card, questions that test understanding rather than recall of wording, plausible wrong answers.
 - Whiteboards and diagrams: few words per node, a layout that shows the structure at a glance.
 - Sheets: tidy headers, correct formulas, numbers formatted for reading.
 
 Match the level to the person: a Year 7 student, an IB Diploma candidate and a head of department need different things. Use what you know about their classes and subjects.
 
-Respect the user's own work. When editing, change what was asked and keep everything else, including their wording and formatting. When a request is ambiguous between editing the open artifact and making a new one, edit the open one.`;
+Respect the user's own work. When editing, change what was asked and keep everything else, including their wording and formatting. When a request clearly fits the open work, edit it rather than making a new one.`;
 
-/** An item named by id, type and title only. */
-export type EnvironmentPointer = { id: string; type: string; title: string };
+/** An item named by id, type and title, with its summary and what it is about when known. Never content. */
+export type EnvironmentPointer = { id: string; type: string; title: string; summary?: string; about?: string };
 
 /** A workspace the user can file work in; `isClass` when it is one of their classes. */
 export type EnvironmentPlace = { id: string; title: string; isClass?: boolean };
@@ -77,7 +78,7 @@ export type EnvironmentInput = {
     language?: string;
   };
   page?: string;
-  /** What is open on screen. Never outlines or summaries. */
+  /** What is open on screen: names, summaries and what each is about, never content. */
   open?: EnvironmentPointer[];
   /** The user's current selection, only when there is one. */
   selection?: { text: string; in?: EnvironmentPointer };
@@ -98,7 +99,12 @@ export type EnvironmentInput = {
   agents?: Array<{ id: string; title: string; description: string }>;
 };
 
-const named = (item: EnvironmentPointer) => `${item.type} "${item.title}" (id ${item.id})`;
+const named = (item: EnvironmentPointer) =>
+  [
+    `${item.type} "${item.title}" (id ${item.id})`,
+    item.summary ? `: ${item.summary}` : "",
+    item.about ? ` [about: ${item.about}]` : "",
+  ].join("");
 
 function localTime(now: number, timeZone: string) {
   try {

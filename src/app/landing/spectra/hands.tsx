@@ -45,6 +45,40 @@ const sleep = (ms: number, signal?: AbortSignal) =>
     });
   });
 
+/**
+ * A copy that looks like the original wherever it is put: every node keeps its
+ * computed style, since a card's look often comes from the page it sits in.
+ * Nothing in the copy animates or hides on its own.
+ */
+export function likeness(element: HTMLElement) {
+  const copy = element.cloneNode(true) as HTMLElement;
+  const from = [element, ...element.querySelectorAll<HTMLElement>("*")];
+  const to = [copy, ...copy.querySelectorAll<HTMLElement>("*")];
+  from.forEach((node, index) => {
+    const target = to[index];
+    if (!target?.style) return;
+    const style = getComputedStyle(node);
+    for (let i = 0; i < style.length; i += 1) {
+      const name = style[i]!;
+      target.style.setProperty(name, style.getPropertyValue(name));
+    }
+    target.style.setProperty("animation", "none");
+    target.style.setProperty("transition", "none");
+    target.removeAttribute("data-brought");
+  });
+  copy.style.setProperty("position", "absolute");
+  copy.style.setProperty("inset", "0 auto auto 0");
+  copy.style.setProperty("translate", "none");
+  copy.style.setProperty("rotate", "none");
+  copy.style.setProperty("scale", "none");
+  copy.style.setProperty("opacity", "1");
+  copy.style.setProperty("margin", "0");
+  copy.style.setProperty("z-index", "39");
+  copy.style.setProperty("pointer-events", "none");
+  copy.style.setProperty("visibility", "visible");
+  return copy;
+}
+
 const ease = (t: number) =>
   t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
@@ -223,10 +257,11 @@ export class Hand {
    */
   grab(element: HTMLElement, look?: HTMLElement) {
     const box = element.getBoundingClientRect();
-    const copy = look ?? (element.cloneNode(true) as HTMLElement);
+    const copy = look ?? likeness(element);
     const natural = look ? box.width : element.offsetWidth || box.width;
     this.carriedScale = natural ? box.width / natural : 1;
     copy.classList.add("sp-carried");
+    if (!look) copy.style.setProperty("transition", "opacity 0.3s ease, scale 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)");
     copy.style.width = `${natural}px`;
     copy.style.height = `${look ? box.height : element.offsetHeight || box.height}px`;
     copy.style.transformOrigin = "0 0";
@@ -244,8 +279,14 @@ export class Hand {
     this.carried = null;
     this.glyph.setAttribute("d", this.person.ai ? PRISM : ARROW);
     if (!copy) return;
-    copy.dataset[settle ? "settled" : "dropped"] = "true";
-    await sleep(settle ? 220 : 320, this.signal);
+    if (settle) {
+      // The real thing is already showing beneath it: the copy goes the next frame, with nothing between.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      copy.remove();
+      return;
+    }
+    copy.dataset.dropped = "true";
+    await sleep(320, this.signal);
     copy.remove();
   }
 
@@ -258,12 +299,18 @@ export class Hand {
     from: Target,
     { look, ms = 720 }: { look?: HTMLElement; ms?: number } = {},
   ) {
+    if (!look) this.grab(target);
     target.dataset.brought = "coming";
+    if (this.carried) {
+      // Picked up where it was made, before it is shown anywhere else.
+      this.carried.style.opacity = "0";
+    }
     if (this.shown) await this.move(from, { ms: 360, aim: [0.5, 0.3] });
     else await this.show(from, [0.5, 0.3]);
     await sleep(80, this.signal);
     await this.press({ light: false });
-    this.grab(target, look);
+    if (look) this.grab(target, look);
+    else if (this.carried) this.carried.style.opacity = "1";
     // The hand holds the copy by its corner: it aims so the copy lands square on its place.
     const box = target.getBoundingClientRect();
     const stage = this.layer.getBoundingClientRect();

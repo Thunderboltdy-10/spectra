@@ -189,7 +189,7 @@ export function schoolTask(item: WireItem) {
     status: "open",
     taskType: "summative",
     term: "Term 1",
-    past: false,
+    past: (item.startAt ?? Infinity) < TODAY,
     sourceState: "available",
     provenanceUrl: null,
   };

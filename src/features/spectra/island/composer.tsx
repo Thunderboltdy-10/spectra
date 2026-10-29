@@ -12,13 +12,21 @@ import {
   type DragEvent,
   type KeyboardEvent,
   type HTMLAttributes,
-  type MouseEvent,
 } from "react";
+import Link from "next/link";
 import { Icon } from "@/components/icons";
 import { PrismLoader } from "@/components/spectra-prism-optic";
 import { IconButton } from "@/components/ui/icon-button";
 import { Tooltip } from "@/components/ui/tooltip";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type { SpectraRunPointer } from "../ai/use-spectra-run";
 import { workTypeMeta, type PresentedWorkType } from "../artifacts/presentation";
@@ -166,14 +174,6 @@ export const IslandComposer = forwardRef<
   const agent = agentIndex !== undefined && agentIndex >= 0 ? agents[agentIndex] : null;
   const agentLabel = agentIndex === undefined || agentIndex < 0 ? "Auto: Spectra picks the agent" : agent?.title ?? "Auto";
 
-  const cycleAgent = (event: MouseEvent) => {
-    if (!agents.length) return;
-    const stops = agents.length + 1;
-    const position = (agentIndex ?? -1) + 1;
-    const next = (position + (event.shiftKey ? -1 : 1) + stops) % stops;
-    setAgentIndex(next - 1);
-  };
-
   const sending = useRef(false);
   // Each send turns the prism once: the message has gone to Spectra.
   const [sends, setSends] = useState(0);
@@ -313,7 +313,7 @@ export const IslandComposer = forwardRef<
         </div>
       ) : null}
       <div className="flex items-end gap-1.5 p-2">
-        <AgentSwitch label={agentLabel} agent={agent} agents={agents} sends={sends} onCycle={cycleAgent} onChoose={setAgentIndex} />
+        <AgentSwitch label={agentLabel} agent={agent} agentIndex={agentIndex} agents={agents} sends={sends} onChoose={setAgentIndex} />
         <textarea
           ref={fieldRef}
           data-composer-text
@@ -395,17 +395,18 @@ export const IslandComposer = forwardRef<
 function AgentSwitch({
   label,
   agent,
+  agentIndex,
   agents,
   sends,
-  onCycle,
   onChoose,
 }: {
   label: string;
   agent: SpectraInstalledAgent | null;
+  /** Which agent is chosen; below zero (or none) is Auto. */
+  agentIndex: number | undefined;
   agents: SpectraInstalledAgent[];
   /** Messages sent so far; each one spins the mark once. */
   sends: number;
-  onCycle: (event: MouseEvent) => void;
   onChoose: (index: number) => void;
 }) {
   // Auto is Spectra itself: the live prism, which turns toward the pointer and round once for each message sent.
@@ -418,40 +419,44 @@ function AgentSwitch({
   ) : (
     <PrismLoader size={24} optics="dormant" interactive turns={sends} />
   );
-  if (!agents.length) {
-    return (
-      <Tooltip label="Auto: Spectra picks the agent">
-        <span data-agent-switch data-island-home data-prism-host className="grid size-9 shrink-0 place-items-center">
-          {face}
-        </span>
-      </Tooltip>
-    );
-  }
+  const chosen = agentIndex === undefined || agentIndex < 0 ? "auto" : String(agentIndex);
+  // The mark is the switch: pressing it opens the agents to choose from, Auto first.
   return (
-    <span className="flex shrink-0 items-center">
-      <Tooltip label={`${label}. Click for the next agent, Shift-click for the previous one.`}>
-        <button type="button" data-agent-switch aria-label={label} onClick={onCycle} className="grid size-9 place-items-center rounded-control outline-none hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]">
+    <DropdownMenu>
+      <Tooltip label={`${label}. Choose an agent.`}>
+        <DropdownMenuTrigger
+          data-agent-switch
+          data-island-home
+          aria-label={`${label}. Choose an agent`}
+          className="grid size-9 shrink-0 place-items-center rounded-control outline-none hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
+        >
           {face}
-        </button>
-      </Tooltip>
-      <DropdownMenu>
-        <DropdownMenuTrigger aria-label="All agents" className="grid h-9 w-4 place-items-center rounded-control text-[var(--text-tertiary)] outline-none hover:text-[var(--text-primary)]">
-          <Icon name="chevronDown" size={12} />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" side="top" layer="toast" className="min-w-[14rem]">
-          <DropdownMenuItem onSelect={() => onChoose(-1)}>
-            <span className="min-w-0 flex-1">Auto</span>
+      </Tooltip>
+      <DropdownMenuContent align="start" side="top" layer="toast" className="min-w-[16rem]">
+        <DropdownMenuRadioGroup value={chosen} onValueChange={(value) => onChoose(value === "auto" ? -1 : Number(value))}>
+          <DropdownMenuRadioItem value="auto">
+            <span className="min-w-0 flex-1 font-medium">Auto</span>
             <span className="text-micro text-[var(--text-tertiary)]">Spectra picks</span>
-          </DropdownMenuItem>
+          </DropdownMenuRadioItem>
           {agents.map((item, index) => (
-            <DropdownMenuItem key={item.agentId} onSelect={() => onChoose(index)} className="flex-col items-start gap-0.5">
-              <span className="font-medium">{item.title}</span>
-              {item.summary ? <span className="line-clamp-1 text-micro text-[var(--text-tertiary)]">{item.summary}</span> : null}
-            </DropdownMenuItem>
+            <DropdownMenuRadioItem key={item.agentId} value={String(index)}>
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="truncate font-medium">{item.title}</span>
+                {item.summary ? <span className="line-clamp-1 text-micro text-[var(--text-tertiary)]">{item.summary}</span> : null}
+              </span>
+            </DropdownMenuRadioItem>
           ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </span>
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link href="/agents" className="text-[var(--text-secondary)]">
+            <Icon name="agents" size={13} />
+            <span className="flex-1">{agents.length ? "More agents" : "Find or make an agent"}</span>
+          </Link>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

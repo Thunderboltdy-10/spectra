@@ -12,6 +12,11 @@ vi.mock("../components/class-shelf-picker", async importOriginal => ({
   ...await importOriginal<typeof import("../components/class-shelf-picker")>(),
   fetchMyClassCandidates: harness.candidates,
 }));
+vi.mock("convex/react", async importOriginal => ({
+  ...await importOriginal<typeof import("convex/react")>(),
+  useConvexAuth: () => ({ isAuthenticated: false, isLoading: false }),
+  useQuery: () => undefined,
+}));
 vi.mock("../settings/preference-store", () => ({ useSpectraPreferences: () => ({ update: vi.fn() }) }));
 
 const integration = {

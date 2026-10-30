@@ -21,8 +21,8 @@ import { workspaceHref } from "../pages/shell-location";
  * on the left with everything in it by the hour, then the six days after it
  * with what falls due on each. A deadline from ManageBac wears its class's
  * ink and opens beside Home as the planner work Spectra made for it; a plan
- * opens as its work there too; anything else opens the Calendar. Above
- * class opens its workspace when one exists. Above it, the two things a student checks before anything else: what is late,
+ * opens as its work there too. A class opens its workspace when one exists;
+ * anything else opens the Calendar. Above it, the two things a student checks before anything else: what is late,
  * and how much has no date yet.
  */
 

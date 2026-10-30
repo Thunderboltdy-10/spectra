@@ -740,7 +740,8 @@ export async function executeApplicationCommand(
     const result = await executeReferenceInsertion({
       actorClerkId, runId, executionId, operationId,
       hostWorkId: String(parsed.hostWorkId), targetWorkId: String(parsed.targetWorkId),
-      label: typeof parsed.label === "string" ? parsed.label : undefined, signal,
+      label: typeof parsed.label === "string" ? parsed.label : undefined,
+      after: typeof parsed.after === "string" ? parsed.after : undefined, signal,
     });
     onUiEvent?.({ key: "reference_insert", payload: {
       ...result, note: "Live reference saved", phase: result.receipt.phase,

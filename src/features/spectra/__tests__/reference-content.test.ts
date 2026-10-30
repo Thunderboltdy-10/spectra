@@ -30,6 +30,20 @@ describe("unmounted reference content", () => {
     doc.destroy();
   });
 
+  it("sets a document reference at the end of the section it belongs to", () => {
+    const heading = (blockId: string, level: number, text: string) => ({ type: "heading", attrs: { blockId, level }, content: [{ type: "text", text }] });
+    const paragraph = (blockId: string, text: string) => ({ type: "paragraph", attrs: { blockId }, content: [{ type: "text", text }] });
+    const tiptap = { type: "doc", content: [
+      heading("h1", 2, "Session 1 – Membranes"), paragraph("p1", "Diffusion and osmosis."), heading("h1a", 3, "Check yourself"), paragraph("p1a", "Why does water move?"),
+      heading("h2", 2, "Session 2 – Enzymes"), paragraph("p2", "Active sites."),
+    ] };
+    const ids = (value: unknown) => ((value as { tiptap: typeof tiptap }).tiptap.content).map((node) => node.attrs.blockId);
+    const changed = insertOperationReference("document", { tiptap }, reference, { after: "session 1 – membranes" });
+    expect(ids(changed)).toEqual(["h1", "p1", "h1a", "p1a", "reference-region", "h2", "p2"]);
+    expect(ids(insertOperationReference("document", { tiptap }, reference, { after: "Session 2 – Enzymes" })).at(-1)).toBe("reference-region");
+    expect(() => insertOperationReference("document", { tiptap }, reference, { after: "Session 3" })).toThrow(/No heading matches/);
+  });
+
   it("places a board reference in an unlocked visible layer without moving its viewport", () => {
     const board = normalizeWhiteboardContent({});
     const changed = insertOperationReference("whiteboard", board, reference) as typeof board;

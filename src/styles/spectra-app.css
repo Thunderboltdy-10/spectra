@@ -14421,31 +14421,19 @@ span.number-field {
 }
 
 /* A block Spectra is adding, by how far its hand has got: not reached yet,
-   a work it is carrying here (its place opens under the travelling card,
-   collaboration/carry-work.ts), and just set down (it settles out of the
-   card's light). */
+   a work it is carrying here (its place is held open, empty, so the
+   travelling card has somewhere still to land, collaboration/carry-work.ts),
+   and just set down (it settles out of the card). */
 .spectra-artifact-main .spectra-ai-pending {
   display: none;
 }
 
 .spectra-artifact-main .spectra-ai-arriving {
   visibility: hidden;
-  overflow: hidden;
-  animation: spectra-ai-place-open var(--motion-slow) var(--ease-out-expo) both;
 }
 
 .spectra-artifact-main .spectra-ai-placed {
   animation: spectra-ai-place-settle 520ms var(--ease-out-expo) both;
-}
-
-@keyframes spectra-ai-place-open {
-  from {
-    max-height: 0;
-    margin-block: 0;
-  }
-  to {
-    max-height: 40rem;
-  }
 }
 
 @keyframes spectra-ai-place-settle {
@@ -14480,7 +14468,6 @@ span.number-field {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .spectra-artifact-main .spectra-ai-arriving,
   .spectra-artifact-main .spectra-ai-placed {
     animation: none;
   }

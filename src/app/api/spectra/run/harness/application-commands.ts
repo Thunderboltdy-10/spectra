@@ -277,7 +277,7 @@ const COMMANDS: Record<string, ApplicationCommand> = {
     authority: "managebac_resource_import",
   },
   insert_reference: {
-    input: z.object({ hostWorkId: z.string(), targetWorkId: z.string(), label: z.string().max(160).optional() }),
+    input: z.object({ hostWorkId: z.string(), targetWorkId: z.string(), label: z.string().max(160).optional(), after: z.string().max(200).optional() }),
     authority: "content",
   },
   // Calendar writes go through the same revision-checked gesture path as a drag.

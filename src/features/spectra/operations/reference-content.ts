@@ -25,16 +25,42 @@ function hasPlacement(value: unknown, reference: OperationReference): boolean {
   return Object.values(row).some((child) => hasPlacement(child, reference));
 }
 
+/** Where in the host a reference goes: in a document, at the end of a section. */
+export type ReferencePlace = { after?: string };
+
+const headingText = (node: DocumentJsonNode): string =>
+  node.text ?? (node.content ?? []).map(headingText).join("");
+const normalTitle = (value: string) => value.replace(/^#+\s*/, "").replace(/[*_~=`]/g, "").trim().toLowerCase();
+
+/** The index just past the section under `heading`, before the next heading of its rank or above. */
+function sectionEnd(blocks: readonly DocumentJsonNode[], heading: string) {
+  const wanted = normalTitle(heading);
+  const headings = blocks.flatMap((node, index) =>
+    node.type === "heading" ? [{ index, level: Number(node.attrs?.level ?? 1), title: normalTitle(headingText(node)) }] : []);
+  const exact = headings.filter((entry) => entry.title === wanted);
+  const matches = exact.length ? exact : headings.filter((entry) => entry.title.includes(wanted));
+  if (matches.length !== 1) {
+    const titles = headings.map((entry) => `"${headingText(blocks[entry.index]!)}"`).join(", ") || "none";
+    throw new Error(matches.length
+      ? `"${heading}" matches ${matches.length} headings. Use the full heading text.`
+      : `No heading matches "${heading}". Headings: ${titles}.`);
+  }
+  const start = matches[0]!;
+  return headings.find((entry) => entry.index > start.index && entry.level <= start.level)?.index ?? blocks.length;
+}
+
 /** Rebase on the current model. Replay recognizes the journal operation, not
  * a label or source id (two intentional references to one source are valid). */
-export function insertOperationReference(type: string, content: unknown, reference: OperationReference) {
+export function insertOperationReference(type: string, content: unknown, reference: OperationReference, place: ReferencePlace = {}) {
   if (hasPlacement(content, reference)) return content;
   const current = record(content);
   if (type === "document") {
     const document = documentContentToProseMirrorJson(current);
-    const tiptap: DocumentJsonNode = { ...document, content: [...document.content ?? [], {
+    const blocks = [...document.content ?? []];
+    blocks.splice(place.after ? sectionEnd(blocks, place.after) : blocks.length, 0, {
       type: "spectraReference", attrs: { ...reference, blockId: reference.containerRegionId },
-    }] };
+    });
+    const tiptap: DocumentJsonNode = { ...document, content: blocks };
     // Keep the existing source bundle, native metadata and all rich inline
     // content; both canonical representations describe the same insertion.
     return { ...current, tiptap, blocks: documentBlocksFromJson(tiptap) };

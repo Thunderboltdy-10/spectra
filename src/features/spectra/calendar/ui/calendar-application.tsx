@@ -6,7 +6,9 @@ import type { BarCommand } from "@/components/ui/adaptive-bar";
 import { IconButton } from "@/components/ui/icon-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/ui/page-header";
-import { useLifeArrival, useLifeDeparture } from "../../life/use-life";
+import { life } from "../../life/life";
+import { prismPoint, useLifeArrival, useLifeDeparture } from "../../life/use-life";
+import { getAiSurfaceLocation, subscribeFollowAi } from "../../collaboration/follow-ai";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
@@ -1628,6 +1630,38 @@ function timedBlockDuration(item: CalendarItem) {
   return Math.max(30 * 60_000, item.endAt! - item.startAt!);
 }
 
+/** How long after Spectra puts a block in the week it still arrives out of its light. */
+const SPECTRA_PLACED_MS = 6_000;
+
+/**
+ * A block Spectra has just put in the week arrives the way Spectra's work
+ * does: light leaves the prism and settles where the block is. The block
+ * itself is there at once; this is only how it comes.
+ */
+function useSpectraPlacement(ref: React.RefObject<HTMLElement | null>, itemId: string | undefined) {
+  useEffect(() => {
+    if (!itemId) return;
+    const mounted = Date.now();
+    let landed = false;
+    const check = () => {
+      const surface = getAiSurfaceLocation();
+      if (landed || surface?.route !== "calendar" || surface.target !== itemId) return;
+      if (Math.abs(surface.updatedAt - mounted) > SPECTRA_PLACED_MS) return;
+      landed = true;
+      const box = ref.current?.getBoundingClientRect();
+      if (!box || !box.width || !life.on) return;
+      void life.send(prismPoint(), { x: box.left, y: box.top, width: box.width, height: box.height }, { colour: "spectrum", strength: 0.8, absorb: true });
+    };
+    check();
+    const stop = subscribeFollowAi(check);
+    const expire = window.setTimeout(stop, SPECTRA_PLACED_MS);
+    return () => {
+      stop();
+      window.clearTimeout(expire);
+    };
+  }, [ref, itemId]);
+}
+
 function TimedBlock({
   item,
   schoolClass,
@@ -1675,6 +1709,7 @@ function TimedBlock({
   // A new event forms where it was placed; a removed one parts there.
   useLifeArrival(ref, placed ? item.id : undefined, "human");
   useLifeDeparture(ref, placed, undefined, placed ? item.id : undefined);
+  useSpectraPlacement(ref, placed ? item.id : undefined);
   const top = (minutesOnDay(item.startAt!, timezone) / 60) * HOUR_PX;
   const duration = timedBlockDuration(item);
   const height = Math.max(24, (duration / HOUR) * HOUR_PX);

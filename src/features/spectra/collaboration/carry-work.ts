@@ -44,7 +44,7 @@ const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 
 
 export type CarryInput = {
   workId: string;
-  /** Where the work goes, read every frame: the place opens as the card travels. */
+  /** Where the work goes, read every frame, since the page can move while the card travels. */
   target: () => CarryBox | null;
   /** From the lift to the moment the embed is set down. */
   flightMs: number;

@@ -8,7 +8,7 @@ type ReferenceReceipt = { embedId: string; operationId: string; versionId: strin
 
 export async function executeReferenceInsertion(input: {
   actorClerkId: string; runId: string; executionId: string; operationId: string;
-  hostWorkId: string; targetWorkId: string; label?: string; signal?: AbortSignal;
+  hostWorkId: string; targetWorkId: string; label?: string; after?: string; signal?: AbortSignal;
 }) {
   throwIfAborted(input.signal);
   const host = await query<{ actorClerkId: string; artifactId: string }, { blueprintKey: string; compatibilityProfile?: string }>(
@@ -42,7 +42,7 @@ export async function executeReferenceInsertion(input: {
     artifactId: input.hostWorkId, runId: input.runId, executionId: input.executionId, operationId: input.operationId,
     signal: input.signal, operations: [host.blueprintKey === "document" ? "document.insert.reference" : "app.reference.insert"],
     beforeCommit: async () => { throwIfAborted(input.signal); }, receipt: "placement",
-    resolveDesired: (current) => ({ ...current, content: insertOperationReference(host.blueprintKey, current.content, reference) }),
+    resolveDesired: (current) => ({ ...current, content: insertOperationReference(host.blueprintKey, current.content, reference, { after: input.after }) }),
   });
   // The existing change-group writer confirms placements in the transaction
   // that stores the immutable version. A room ack alone is insufficient.

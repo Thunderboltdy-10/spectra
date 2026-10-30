@@ -25,7 +25,7 @@ export type SpeculativeBlockText = {
   /**
    * A block the writer is adding, by how far they have got: not reached yet
    * (`pending`, not on screen), a work being carried to this place
-   * (`arriving`, its place opens), or just set down (`placed`, it settles).
+   * (`arriving`, its place held open), or just set down (`placed`, it settles).
    */
   arrival?: "pending" | "arriving" | "placed";
 };

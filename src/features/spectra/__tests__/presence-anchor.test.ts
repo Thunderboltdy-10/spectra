@@ -30,7 +30,7 @@ describe("presence-anchor", () => {
     `;
     const root = document.querySelector(".root") as HTMLElement;
     const starts: [Node, number][] = [];
-    const proto = Range.prototype as Range & { getClientRects?: () => DOMRectList };
+    const proto = Range.prototype as unknown as { getClientRects?: () => DOMRectList };
     const setStart = vi.spyOn(Range.prototype, "setStart").mockImplementation(function (node, offset) {
       starts.push([node, offset]);
     });

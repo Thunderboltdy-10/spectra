@@ -50,6 +50,7 @@ export function LibraryNote({
       data-node-row={node.nodeId}
       data-life-launch
       data-work-card={type}
+      data-work-source={workSourceOf(node)}
       data-picking={picking || undefined}
       data-picked={picked || undefined}
       aria-pressed={picking ? picked : undefined}
@@ -106,6 +107,12 @@ export function PickMark() {
 }
 
 /** What a card reads its face from. */
+/** The work a card stands for, so Spectra can pick that card up and carry it into a page. */
+export function workSourceOf(node: TreeNode): string | undefined {
+  if (node.kind === "work") return node.sourceId;
+  return node.kind === "link" && node.target?.kind === "work" ? node.target.sourceId : undefined;
+}
+
 export function previewSource(node: TreeNode): PreviewSource {
   // A reference (a workspace import adds these for work filed elsewhere) reads the work it points at.
   const sourceId = node.kind === "link" && node.target?.kind === "work" ? node.target.sourceId : node.sourceId;

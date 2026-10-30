@@ -59,6 +59,31 @@ export type CollaborationPresence = {
    * not been updated still renders coarse presence instead of nothing.
    */
   interactionState?: InteractionState | null;
+  /** Set on an AI performing in a document: how far its hand has got, block by block. */
+  documentStage?: DocumentStage;
+};
+
+/** How far an AI performance has got through one block of a shared document. */
+export type DocumentStageBlock =
+  | { id: string; state: "pending" }
+  | { id: string; state: "arriving" }
+  | { id: string; state: "placed" }
+  | { id: string; state: "writing"; text: string };
+
+/** The document blocks an AI performance is writing, for viewers bound to the room. */
+export type DocumentStage = {
+  operationId: string;
+  blocks: DocumentStageBlock[];
+  /** A work being carried into the page right now. */
+  carry?: {
+    blockId: string;
+    workId: string;
+    /** The block beside the place, on screen before the work arrives. */
+    seamBlockId?: string;
+    phase: "lift" | "fly" | "drop";
+    /** How long until it lands, from the lift. */
+    flightMs?: number;
+  };
 };
 
 export type CollaborationInteraction = {

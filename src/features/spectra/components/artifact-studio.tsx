@@ -162,6 +162,7 @@ import { useLocalOnlyCollaboration } from "../collaboration/local-only";
 import { usePresencePreview } from "../collaboration/scoped-hooks";
 import type { SpeculativeBlockText } from "../editor/ai-speculation-decoration";
 import { documentPerformancePreview } from "../collaboration/document-performance-preview";
+import { boxOf, carryWork } from "../collaboration/carry-work";
 import { useInteractionPresence } from "../collaboration/use-interaction-presence";
 import { contextSourceRegistry } from "../context";
 import {
@@ -4623,20 +4624,64 @@ function ArtifactStudioEditor({
     return next;
   }, [artifact.blueprintKey, durableEditorContent, remoteSpeculation]);
 
+  /** How far the AI's hand has got through the blocks it is adding or rewriting here. */
+  const aiDocumentStage = artifact.blueprintKey === "document" ? activeAiCollaborator?.documentStage : undefined;
   /** The document blocks someone is writing, as text the shared editor draws over the room's. */
   const speculativeBlockTexts = useMemo(() => {
-    if (artifact.blueprintKey !== "document" || remoteSpeculation.size === 0) return NO_SPECULATIVE_BLOCKS;
-    const blocks = (durableEditorContent as { blocks?: Array<{ id?: unknown }> } | null)?.blocks;
+    if (artifact.blueprintKey !== "document") return NO_SPECULATIVE_BLOCKS;
     const texts: SpeculativeBlockText[] = [];
+    // The performance says block by block what is written so far, including
+    // blocks it adds (a list of whole blocks travels as one patch below).
+    const staged = new Set<string>();
+    for (const block of aiDocumentStage?.blocks ?? []) {
+      staged.add(block.id);
+      texts.push(
+        block.state === "writing"
+          ? { blockId: block.id, text: block.text }
+          : { blockId: block.id, text: "", arrival: block.state },
+      );
+    }
+    const blocks = (durableEditorContent as { blocks?: Array<{ id?: unknown }> } | null)?.blocks;
     for (const [pointer, value] of remoteSpeculation) {
       const match = livePreviewContentPointer(pointer)?.match(/^\/blocks\/(\d+)\/text$/);
       if (!match || typeof value !== "string") continue;
       const index = Number(match[1]);
       const id = blocks?.[index]?.id;
+      if (typeof id === "string" && staged.has(id)) continue;
       texts.push({ index, text: value, ...(typeof id === "string" ? { blockId: id } : {}) });
     }
     return texts.length ? texts : NO_SPECULATIVE_BLOCKS;
-  }, [artifact.blueprintKey, durableEditorContent, remoteSpeculation]);
+  }, [aiDocumentStage, artifact.blueprintKey, durableEditorContent, remoteSpeculation]);
+
+  // A work the AI is setting into this page travels from its card to its place.
+  const carry = aiDocumentStage?.carry;
+  const carryKey = carry && carry.phase !== "drop" ? `${aiDocumentStage!.operationId}:${carry.blockId}` : null;
+  const carryRef = useRef(carry);
+  carryRef.current = carry;
+  useEffect(() => {
+    const current = carryRef.current;
+    if (!carryKey || !current || current.flightMs === undefined) return;
+    const page = presenceSurfaceRef.current;
+    const target = () => {
+      const root = presenceSurfaceRef.current;
+      if (!root) return null;
+      const placed = root.querySelector(`[data-block-id="${CSS.escape(current.blockId)}"]`);
+      const placedBox = placed ? boxOf(placed) : null;
+      if (placedBox) return placedBox;
+      // Not on screen yet (the followed page builds from the performance):
+      // the place is just under the block beside it.
+      const seam = current.seamBlockId ? root.querySelector(`[data-block-id="${CSS.escape(current.seamBlockId)}"]`) : null;
+      const seamBox = seam ? boxOf(seam) : null;
+      return seamBox ? { left: seamBox.left, top: seamBox.top + seamBox.height + 8, width: seamBox.width, height: 96 } : null;
+    };
+    return carryWork({
+      workId: current.workId,
+      target,
+      flightMs: current.flightMs,
+      page,
+      reduced: getSpectraMotionSnapshot().reduced,
+    });
+  }, [carryKey]);
 
   const editorChange =
     aiPreviewActive && artifact.aiPreview?.content !== undefined
@@ -6600,7 +6645,7 @@ function ArtifactStudioEditor({
                   title={title}
                   content={documentPerformanceContent ?? editorContent}
                   contentIsProvisional={streamingSource !== "local" || remoteSpeculation.size > 0}
-                  speculation={showingDocumentPerformance ? NO_SPECULATIVE_BLOCKS : speculativeBlockTexts}
+                  speculation={showingDocumentPerformance ? arrivalsOnly(speculativeBlockTexts) : speculativeBlockTexts}
                   onChange={showingDocumentPerformance ? () => undefined : editorChange}
                   onBeforeNativeExport={async () => !dirty || save()}
                   aiChangedPaths={highlightPaths}
@@ -7875,6 +7920,12 @@ function SideCard({ title, children }: { title: string; children: ReactNode }) {
       {children}
     </section>
   );
+}
+
+/** A followed page is built from the performance itself; only a work being set down still needs telling. */
+function arrivalsOnly(texts: readonly SpeculativeBlockText[]): readonly SpeculativeBlockText[] {
+  const placed = texts.filter((text) => text.arrival === "placed");
+  return placed.length ? placed : NO_SPECULATIVE_BLOCKS;
 }
 
 const AI_FORM_CONTROL_TAGS = new Set(["input", "textarea", "select", "button"]);

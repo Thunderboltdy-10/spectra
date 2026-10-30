@@ -50,6 +50,7 @@ export function WorkCard({
   onOpen,
   className,
   ink,
+  workId,
   ...content
 }: WorkCardContent & {
   href: string;
@@ -57,9 +58,11 @@ export function WorkCard({
   onOpen?: () => void;
   className?: string;
   ink?: string | null;
+  /** The work's id, so Spectra can pick this card up and carry it into a page. */
+  workId?: string;
 }) {
   return (
-    <Link href={href} prefetch={false} onClick={onOpen ? sideClick(onOpen) : undefined} data-work-card={content.type} style={workCardStyle(content.type, ink)} className={cn("work-card group", className)}>
+    <Link href={href} prefetch={false} onClick={onOpen ? sideClick(onOpen) : undefined} data-work-card={content.type} data-work-source={workId} style={workCardStyle(content.type, ink)} className={cn("work-card group", className)}>
       <WorkCardBody {...content} />
     </Link>
   );

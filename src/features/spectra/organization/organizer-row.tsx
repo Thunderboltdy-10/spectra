@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronRight, Check, MoreHorizontal, Star, Users } from "@/components/icons/glyph-icons";
-import { sharedLabel } from "./library-note";
+import { sharedLabel, workSourceOf } from "./library-note";
 import { StatusBadge, type StatusTone } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { aiWorking } from "../artifacts/ai-working";
@@ -129,6 +129,7 @@ export const OrganizerRow = memo(function OrganizerRow({
       data-life-receive={node.isContainer || undefined}
       data-life-launch
       data-node-row={node.nodeId}
+      data-work-source={workSourceOf(node)}
       style={{ top, height: ROW_HEIGHT }}
       className={cn(
         "spectra-organizer-row group absolute inset-x-0 flex cursor-default items-center gap-2.5 rounded-chip pl-2 pr-1.5 text-body transition-colors",

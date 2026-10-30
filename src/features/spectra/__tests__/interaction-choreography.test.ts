@@ -323,3 +323,44 @@ describe("buildArtifactLivePreviewBeats", () => {
     );
   });
 });
+
+describe("placing a work into a page", () => {
+  const reference = { embedId: "embed-1", sourceArtifactId: "work-diagram", blockId: "e1", label: "Cell membrane diagram" };
+  const before = {
+    title: "Notes",
+    tags: [],
+    content: {
+      blocks: [
+        { id: "b1", type: "paragraph", text: "Transport across the membrane." },
+        { id: "b2", type: "paragraph", text: "Osmosis is passive." },
+      ],
+    },
+  };
+  const after = {
+    ...before,
+    content: {
+      blocks: [
+        before.content.blocks[0],
+        { id: "e1", type: "paragraph", text: reference.label, reference },
+        before.content.blocks[1],
+      ],
+    },
+  };
+
+  it("carries the work to its seam and sets it down whole, never typing its identity", () => {
+    const beats = buildArtifactLivePreviewBeats(before, after);
+    const carry = beats.filter((beat) => beat.carry);
+    expect(carry.map((beat) => beat.carry?.phase)).toEqual(["lift", "fly", "drop"]);
+    expect(carry.every((beat) => beat.carry?.workId === "work-diagram" && beat.carry.blockId === "e1")).toBe(true);
+    expect(carry[0]?.carry?.seamBlockId).toBe("b1");
+    expect(carry[0]?.interaction?.kind).toBe("dragging");
+    expect(carry[0]?.focusPath).toContain("id:b1");
+    expect(carry[2]?.focusPath).toContain("id:e1");
+    // Until the drop the page holds no trace of the embed; then it holds all of it.
+    const blocksOf = (beat: (typeof beats)[number]) => (beat.value.content as { blocks: { id: string; reference?: unknown }[] }).blocks;
+    expect(blocksOf(carry[0]!).some((block) => block.id === "e1")).toBe(false);
+    expect(blocksOf(carry[2]!).find((block) => block.id === "e1")?.reference).toEqual(reference);
+    expect(beats.some((beat) => beat.previewGesture === "typing" && beat.focusPath?.includes("e1"))).toBe(false);
+    expect(beats.at(-1)?.value).toEqual(after);
+  });
+});

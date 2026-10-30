@@ -14419,3 +14419,69 @@ span.number-field {
 .spectra-artifact-main .spectra-ai-written {
   white-space: pre-wrap;
 }
+
+/* A block Spectra is adding, by how far its hand has got: not reached yet,
+   a work it is carrying here (its place opens under the travelling card,
+   collaboration/carry-work.ts), and just set down (it settles out of the
+   card's light). */
+.spectra-artifact-main .spectra-ai-pending {
+  display: none;
+}
+
+.spectra-artifact-main .spectra-ai-arriving {
+  visibility: hidden;
+  overflow: hidden;
+  animation: spectra-ai-place-open var(--motion-slow) var(--ease-out-expo) both;
+}
+
+.spectra-artifact-main .spectra-ai-placed {
+  animation: spectra-ai-place-settle 520ms var(--ease-out-expo) both;
+}
+
+@keyframes spectra-ai-place-open {
+  from {
+    max-height: 0;
+    margin-block: 0;
+  }
+  to {
+    max-height: 40rem;
+  }
+}
+
+@keyframes spectra-ai-place-settle {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+.spectra-carry-ghost {
+  position: fixed;
+  z-index: 80;
+  margin: 0;
+  pointer-events: none;
+  transform-origin: 0 0;
+  will-change: transform, opacity;
+  box-shadow: 0 18px 40px -18px color-mix(in oklab, var(--text-primary) 38%, transparent);
+}
+
+[data-carry-source] {
+  transition: opacity var(--motion-base) var(--ease-standard);
+}
+
+[data-carry-source="lifted"] {
+  opacity: 0.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spectra-artifact-main .spectra-ai-arriving,
+  .spectra-artifact-main .spectra-ai-placed {
+    animation: none;
+  }
+}

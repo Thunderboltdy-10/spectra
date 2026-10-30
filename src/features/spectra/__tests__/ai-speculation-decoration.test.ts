@@ -68,4 +68,21 @@ describe("a collaborator's words while they are still writing", () => {
     show([{ index: 0, text: "Something else entirely." }]);
     expect(editor.getJSON()).toEqual(before);
   });
+
+  it("keeps a block the writer has not reached off screen, and settles one just set down", () => {
+    show([{ index: 0, text: "", arrival: "pending" }, { index: 1, text: "", arrival: "arriving" }]);
+    expect(block(0).classList.contains("spectra-ai-pending")).toBe(true);
+    expect(block(0).getAttribute("data-spectra-unwritten")).toBe("true");
+    expect(block(1).classList.contains("spectra-ai-arriving")).toBe(true);
+    show([{ index: 1, text: "", arrival: "placed" }]);
+    expect(block(1).classList.contains("spectra-ai-placed")).toBe(true);
+    expect(block(1).hasAttribute("data-spectra-unwritten")).toBe(false);
+    expect(block(0).classList.contains("spectra-ai-pending")).toBe(false);
+  });
+
+  it("draws a block rewritten through and through as the writer has it, not as the room does", () => {
+    const rewrite = "Qx Zy Wv Ut Sr Po Nm Lk Jh Gf Ed Cb Az By Cx Dw";
+    show([{ index: 1, text: rewrite }]);
+    expect(visible(block(1))).toBe(rewrite);
+  });
 });

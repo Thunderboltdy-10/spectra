@@ -11,6 +11,7 @@ import {
   buildArtifactLivePreviewBeats,
   type AiStreamBeat,
 } from "./interaction-choreography";
+import type { DocumentStage, DocumentStageBlock } from "./types";
 import type { ActorIdentity, InteractionAct } from "./interaction-model";
 
 /*
@@ -270,8 +271,10 @@ export function beatPresence(
     ...(regionId ? { heldRegionIds: [regionId] } : {}),
   });
   const gesture = beat.previewGesture ?? (beat.menu?.open ? "selecting" : "typing");
+  const stage = documentStage(performance, beats, index, base);
   return {
     ...identityRecord(performance),
+    ...(stage ? { documentStage: stage } : {}),
     interactionState,
     ...(regionId ? { activeRegionId: regionId, activeRegionIds: [regionId] } : {}),
     ...(previewPatches.length ? { previewPatches } : {}),
@@ -298,6 +301,78 @@ export function beatPresence(
         ? { kind: "block", id: blockId, charOffset: selecting ? selectionEnd : caretOffset, lineIndex }
         : { kind: "path", id: focusPath, charOffset: selecting ? selectionEnd : caretOffset, lineIndex },
     },
+  };
+}
+
+type StageBlock = { id: string; text: string; placed: boolean };
+
+function stageBlocks(value: ArtifactLiveValue | undefined): StageBlock[] {
+  const blocks = (value?.content as { blocks?: unknown } | undefined)?.blocks;
+  if (!Array.isArray(blocks)) return [];
+  return blocks.flatMap((block) => {
+    if (!block || typeof block !== "object") return [];
+    const record = block as Record<string, unknown>;
+    if (typeof record.id !== "string" || !record.id) return [];
+    const reference = record.reference;
+    return [{
+      id: record.id,
+      text: typeof record.text === "string" ? record.text : "",
+      placed: Boolean(reference && typeof reference === "object" && Object.values(reference).some((entry) => typeof entry === "string" && entry)),
+    }];
+  });
+}
+
+/**
+ * A shared document stays bound to its room while the AI performs in it, so a
+ * viewer who is not following still has the committed words on screen. This
+ * says, for every block the edit adds or rewrites, how far the hand has got:
+ * a block it has not reached is not there yet, a work it is carrying in is
+ * opening its place, and a block it is writing reads as written so far.
+ * Blocks the edit does not touch are left alone, so a person writing in the
+ * same document at the same time is never hidden.
+ */
+export function documentStage(
+  performance: AiPerformance,
+  beats: readonly AiStreamBeat[],
+  index: number,
+  base: ArtifactLiveValue,
+): DocumentStage | undefined {
+  if (performance.typeKey !== "document") return undefined;
+  const beat = beats[index]!;
+  const before = new Map(stageBlocks(base).map((block) => [block.id, block]));
+  const now = new Map(stageBlocks(beat.value).map((block) => [block.id, block]));
+  const carry = beat.carry;
+  const blocks: DocumentStageBlock[] = [];
+  for (const end of stageBlocks(beats.at(-1)?.value)) {
+    const start = before.get(end.id);
+    const current = now.get(end.id);
+    const added = !start;
+    if (carry?.blockId === end.id) {
+      blocks.push({ id: end.id, state: carry.phase === "drop" ? "placed" : "arriving" });
+      continue;
+    }
+    if (added && (!current || (end.placed && !current.placed))) {
+      blocks.push({ id: end.id, state: "pending" });
+      continue;
+    }
+    // A work set into the page has no words of its own to write.
+    if (end.placed) continue;
+    const text = current?.text ?? start?.text ?? "";
+    if ((added || start!.text !== end.text) && text !== end.text) blocks.push({ id: end.id, state: "writing", text });
+  }
+  if (!blocks.length && !carry) return undefined;
+  let flightMs: number | undefined;
+  if (carry && carry.phase !== "drop") {
+    flightMs = 0;
+    for (let next = index + 1; next < beats.length; next += 1) {
+      flightMs += Math.max(0, beats[next]!.delayMs);
+      if (beats[next]!.carry?.phase === "drop") break;
+    }
+  }
+  return {
+    operationId: performance.operationId,
+    blocks,
+    ...(carry ? { carry: { ...carry, ...(flightMs !== undefined ? { flightMs } : {}) } } : {}),
   };
 }
 

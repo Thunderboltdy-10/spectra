@@ -15,7 +15,7 @@ import { useWorkPreview } from "../artifacts/use-work-previews";
 import { workTypeMeta } from "../components/artifact-card";
 import { WorkCardBody, workCardStyle } from "../components/work-card";
 import { useAuthedArgs } from "../data/use-authed-args";
-import { LibraryNote, PickMark, pickable, previewSource, workType, type WorkPicking } from "./library-note";
+import { LibraryNote, PickMark, pickable, previewSource, workSourceOf, workType, type WorkPicking } from "./library-note";
 import { relativeTime } from "./node-identity";
 import { useShelfGather, type GatherDrop } from "./shelf-gather";
 import { useStackLook } from "./library-view";
@@ -197,6 +197,7 @@ function LibraryStack({
       className="work-card work-stack"
       data-open={open || undefined}
       data-work-card={type}
+      data-work-source={workSourceOf(active)}
       data-node-row={active.nodeId}
       data-picking={picking ? true : undefined}
       data-picked={picked || undefined}

@@ -47,6 +47,19 @@ export type AiStreamBeat = {
   gesturePhase?: "start" | "move" | "release";
   /** Exact sub-control for composite gestures, such as a resize handle. */
   focusPart?: string;
+  /** A work carried into the page: its card lifts, travels and settles as the embed. */
+  carry?: CarryBeat;
+};
+
+/** One step of carrying a work into a page (see `carryBeats`). */
+export type CarryBeat = {
+  /** The block the work becomes in the page. */
+  blockId: string;
+  /** The work being carried, so a viewer can lift its own card from the shelf. */
+  workId: string;
+  /** The block beside the place, which a viewer can see before the work arrives. */
+  seamBlockId?: string;
+  phase: "lift" | "fly" | "drop";
 };
 
 const ATOMIC_ENUM_FIELDS = new Set([
@@ -319,6 +332,64 @@ function typedEntry(item: unknown): unknown {
   );
 }
 
+/** A document block that sets another work into the page (an embed). */
+function placedWorkOf(item: unknown): { blockId: string; workId: string } | null {
+  if (!isPlainRecord(item) || typeof item.id !== "string" || !isPlainRecord(item.reference)) return null;
+  const reference = item.reference;
+  const workId = [reference.sourceArtifactId, reference.workId, reference.artifactId].find(
+    (value): value is string => typeof value === "string" && value.length > 0,
+  );
+  return workId ? { blockId: item.id, workId } : null;
+}
+
+/**
+ * Setting a work into a page is a carry, not typing: the hand lifts the work's
+ * card where the viewer can see it (the shelf, the list), takes it to its place
+ * between two blocks and lets go, and the card becomes the embed there. The
+ * reference arrives whole; its identity is never typed out.
+ */
+function carryBeats(
+  base: ArtifactLiveValue,
+  staged: ArtifactLiveValue,
+  collection: unknown[],
+  change: CollectionChange,
+  placed: { blockId: string; workId: string },
+): AiStreamBeat[] {
+  const collectionPath = uiFocusPath(change.path);
+  const prefix = collectionPath === "/" ? "" : collectionPath;
+  // Before the drop the hand hovers at the seam it will open: the block above
+  // the place (or, at the top, the block the work goes in front of).
+  const neighbour = collection[change.index - 1] ?? collection[change.index + 1];
+  const neighbourIndex = collection[change.index - 1] !== undefined ? change.index - 1 : change.index + 1;
+  const seamPath =
+    neighbour !== undefined
+      ? `${prefix}/${isPlainRecord(neighbour) && typeof neighbour.id === "string" ? `id:${encodeURIComponent(neighbour.id)}` : neighbourIndex}`
+      : collectionPath;
+  const itemPath = `${prefix}/id:${encodeURIComponent(placed.blockId)}`;
+  const seamBlockId = isPlainRecord(neighbour) && typeof neighbour.id === "string" ? neighbour.id : undefined;
+  const step = (
+    delayMs: number,
+    value: ArtifactLiveValue,
+    phase: CarryBeat["phase"],
+    gesturePhase: NonNullable<AiStreamBeat["gesturePhase"]>,
+  ): AiStreamBeat => ({
+    delayMs,
+    value,
+    previewGesture: "selecting",
+    cursorMode: "pointer",
+    interaction: { kind: "dragging", targetId: phase === "drop" ? itemPath : seamPath, targetKind: "path", label: "Place work" },
+    focusPath: phase === "drop" ? itemPath : seamPath,
+    gesturePhase,
+    carry: { ...placed, ...(seamBlockId ? { seamBlockId } : {}), phase },
+    menu: null,
+  });
+  return [
+    step(180, base, "lift", "start"),
+    step(280, base, "fly", "move"),
+    step(860, staged, "drop", "release"),
+  ];
+}
+
 function collectionLabel(path: readonly (string | number)[]) {
   const name = String(path.at(-1) ?? "item")
     .replaceAll("_", " ")
@@ -365,6 +436,13 @@ function collectionBeats(
     ];
   }
   if (!Array.isArray(collection)) return [];
+
+  const placed = change.kind === "insert" ? placedWorkOf(change.item) : null;
+  if (placed) {
+    const before = [...collection];
+    collection.splice(change.index, 0, structuredClone(change.item));
+    return carryBeats(base, staged, before, change, placed);
+  }
 
   if (change.kind === "insert")
     collection.splice(change.index, 0, provisionalItem(change.item));

@@ -10,6 +10,8 @@ import type {
   AdmittedUpdateReceipt,
   ArtifactCollaborationTransport,
   CollaborationPresence,
+  DocumentStage,
+  DocumentStageBlock,
   CollaborationSyncState,
   CollaborationTransportSnapshot,
   LocalRecoveryAncestry,
@@ -119,6 +121,28 @@ function collaborationCursor(
     ...(anchor ? { anchor } : {}),
   };
   return cursor;
+}
+
+function documentStage(value: unknown): DocumentStage | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Partial<DocumentStage>;
+  if (typeof candidate.operationId !== "string" || !Array.isArray(candidate.blocks)) return undefined;
+  const blocks = candidate.blocks.filter(
+    (block): block is DocumentStageBlock =>
+      Boolean(block) &&
+      typeof block.id === "string" &&
+      (block.state === "pending" || block.state === "arriving" || block.state === "placed" ||
+        (block.state === "writing" && typeof (block as { text?: unknown }).text === "string")),
+  );
+  const carry = candidate.carry;
+  return {
+    operationId: candidate.operationId,
+    blocks,
+    ...(carry && typeof carry.blockId === "string" && typeof carry.workId === "string" &&
+    (carry.phase === "lift" || carry.phase === "fly" || carry.phase === "drop")
+      ? { carry: { blockId: carry.blockId, workId: carry.workId, phase: carry.phase, ...(typeof carry.seamBlockId === "string" ? { seamBlockId: carry.seamBlockId } : {}), ...(typeof carry.flightMs === "number" ? { flightMs: carry.flightMs } : {}) } }
+      : {}),
+  };
 }
 
 function collaborationSelection(
@@ -737,6 +761,9 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
           : {}),
       ...(user.viewport !== undefined
         ? { viewport: user.viewport }
+        : {}),
+      ...(documentStage(user.documentStage)
+        ? { documentStage: documentStage(user.documentStage) }
         : {}),
     };
   }

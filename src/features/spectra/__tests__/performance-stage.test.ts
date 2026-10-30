@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArtifactLiveValue } from "../collaboration/artifact-yjs-model";
 import {
   beatsDuration,
+  documentStage,
   performanceBeats,
   performancePatches,
   type AiPerformance,
@@ -143,5 +144,59 @@ describe("AI performances", () => {
     expect(stage.isPerforming("ai-1")).toBe(false);
     vi.advanceTimersByTime(20_000);
     expect(stage.isPerforming("ai-1")).toBe(false);
+  });
+});
+
+describe("the document stage a viewer draws while the AI writes", () => {
+  const reference = { embedId: "embed-1", sourceArtifactId: "work-diagram", blockId: "e1", label: "Membrane diagram" };
+  const start: ArtifactLiveValue = {
+    title: "Notes",
+    tags: [],
+    content: { blocks: [{ id: "b1", type: "paragraph", text: "Transport." }, { id: "h1", type: "paragraph", text: "A person's line." }] },
+  };
+  const end: ArtifactLiveValue = {
+    ...start,
+    content: {
+      blocks: [
+        { id: "b1", type: "paragraph", text: "Transport across membranes." },
+        { id: "e1", type: "paragraph", text: reference.label, reference },
+        { id: "b3", type: "paragraph", text: "Osmosis moves water." },
+        { id: "h1", type: "paragraph", text: "A person's line." },
+      ],
+    },
+  };
+  const played = (): { perf: AiPerformance; beats: ReturnType<typeof performanceBeats> } => {
+    const { before, after } = performancePatches(start, end);
+    const perf: AiPerformance = { ...performance(0), before, after };
+    return { perf, beats: performanceBeats(perf, end) };
+  };
+
+  it("hides what is not reached, opens the carried work's place, and never touches a person's block", () => {
+    const { perf, beats } = played();
+    const lift = beats.findIndex((beat) => beat.carry?.phase === "lift");
+    const drop = beats.findIndex((beat) => beat.carry?.phase === "drop");
+    expect(lift).toBeGreaterThanOrEqual(0);
+    const lifting = documentStage(perf, beats, lift, start)!;
+    expect(lifting.blocks).toContainEqual({ id: "e1", state: "arriving" });
+    expect(lifting.blocks).toContainEqual({ id: "b3", state: "pending" });
+    expect(lifting.blocks.some((block) => block.id === "h1")).toBe(false);
+    expect(lifting.carry).toMatchObject({ workId: "work-diagram", phase: "lift" });
+    expect(lifting.carry?.flightMs).toBe(beats.slice(lift + 1, drop + 1).reduce((sum, beat) => sum + beat.delayMs, 0));
+    expect(documentStage(perf, beats, drop, start)!.blocks).toContainEqual({ id: "e1", state: "placed" });
+    // Once every block reads as it will, nothing is staged.
+    expect(documentStage(perf, beats, beats.length - 1, start)).toBeUndefined();
+  });
+
+  it("draws a block mid-write as written so far", () => {
+    const { perf, beats } = played();
+    const writing = beats.findIndex((beat) => {
+      const text = (beat.value.content as { blocks: { id: string; text: string }[] }).blocks.find((block) => block.id === "b3")?.text;
+      return typeof text === "string" && text.length > 0 && text !== "Osmosis moves water.";
+    });
+    expect(writing).toBeGreaterThan(0);
+    const stage = documentStage(perf, beats, writing, start)!;
+    const block = stage.blocks.find((entry) => entry.id === "b3");
+    expect(block?.state).toBe("writing");
+    expect(block && "text" in block && "Osmosis moves water.".startsWith(block.text)).toBe(true);
   });
 });

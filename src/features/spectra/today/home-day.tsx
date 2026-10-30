@@ -81,6 +81,7 @@ export function HomeDay({ onAllThreads }: { onAllThreads: () => void }) {
                 work ? (
                   <WorkCard
                     key={work._id}
+                    workId={work._id}
                     type={work.blueprintKey}
                     title={work.title}
                     preview={previewOf(work)}

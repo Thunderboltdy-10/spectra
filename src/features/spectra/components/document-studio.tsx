@@ -1698,7 +1698,9 @@ export function DocumentStudio({
     if (!editor || editor.isDestroyed || !editor.isInitialized || !editor.view) return;
     editor.view.dispatch(
       editor.state.tr
-        .setMeta(aiSpeculationKey, collaborationDocument ? speculation : NO_SPECULATION)
+        // A page not bound to the room is drawn from the writer's own value;
+        // only a work being set down into it still needs telling.
+        .setMeta(aiSpeculationKey, collaborationDocument ? speculation : speculation.filter((target) => target.arrival === "placed"))
         .setMeta("addToHistory", false),
     );
     // speculationKey stands for speculation's contents.

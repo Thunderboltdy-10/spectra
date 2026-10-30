@@ -22,12 +22,25 @@ export type SpeculativeBlockText = {
   index?: number;
   /** The block's whole text as the writer has it now (lines joined by \n). */
   text: string;
+  /**
+   * A block the writer is adding, by how far they have got: not reached yet
+   * (`pending`, not on screen), a work being carried to this place
+   * (`arriving`, its place opens), or just set down (`placed`, it settles).
+   */
+  arrival?: "pending" | "arriving" | "placed";
 };
 
 export const aiSpeculationKey = new PluginKey<DecorationSet>("spectraAiSpeculation");
 
 /** Hidden text the presence layer must not count when it finds a caret. */
 export const UNWRITTEN_ATTRIBUTE = "data-spectra-unwritten";
+
+/** Classes for a block the writer is adding (see `SpeculativeBlockText.arrival`). */
+const ARRIVAL_CLASS = {
+  pending: "spectra-ai-pending",
+  arriving: "spectra-ai-arriving",
+  placed: "spectra-ai-placed",
+} as const;
 
 /** Above this many places differing, the block is mid-rewrite; show the room's text. */
 const MAX_HUNKS = 12;
@@ -83,17 +96,48 @@ function writtenWidget(text: string) {
   };
 }
 
+function hideAll(decorations: Decoration[], glyphs: readonly Glyph[]) {
+  let from: number | null = null;
+  let to = 0;
+  for (const glyph of glyphs) {
+    if (glyph.pos === null) continue;
+    if (from !== null && glyph.pos === to) {
+      to = glyph.pos + 1;
+      continue;
+    }
+    if (from !== null) decorations.push(Decoration.inline(from, to, { class: "spectra-ai-unwritten", [UNWRITTEN_ATTRIBUTE]: "true" }));
+    from = glyph.pos;
+    to = glyph.pos + 1;
+  }
+  if (from !== null) decorations.push(Decoration.inline(from, to, { class: "spectra-ai-unwritten", [UNWRITTEN_ATTRIBUTE]: "true" }));
+}
+
 function decorationsFor(doc: ProseMirrorNode, targets: readonly SpeculativeBlockText[]) {
   const decorations: Decoration[] = [];
   for (const target of targets) {
     const block = findBlock(doc, target);
     if (!block) continue;
+    if (target.arrival) {
+      decorations.push(
+        Decoration.node(block.pos, block.pos + block.node.nodeSize, {
+          class: ARRIVAL_CLASS[target.arrival],
+          ...(target.arrival === "placed" ? {} : { [UNWRITTEN_ATTRIBUTE]: "true", "aria-hidden": "true" }),
+        }),
+      );
+      continue;
+    }
     const glyphs = glyphsOf(block.node, block.pos);
     const held = glyphs.map((glyph) => glyph.char).join("");
     if (held === target.text) continue;
     const hunks = textHunks(held, target.text);
-    if (hunks.length > MAX_HUNKS) continue;
     const end = block.pos + block.node.nodeSize - 1;
+    if (hunks.length > MAX_HUNKS) {
+      // Rewritten through and through (a paragraph turned into a list, say):
+      // the room's words are hidden and the writer's are drawn in whole.
+      hideAll(decorations, glyphs);
+      if (target.text) decorations.push(Decoration.widget(Math.min(end, block.pos + 1), writtenWidget(target.text), { side: -1, key: `spectra-ai-written:${block.pos}:whole:${target.text.length}` }));
+      continue;
+    }
     const positionAt = (offset: number) => {
       for (let index = offset; index < glyphs.length; index += 1)
         if (glyphs[index]!.pos !== null) return glyphs[index]!.pos!;

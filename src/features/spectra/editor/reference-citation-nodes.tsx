@@ -87,6 +87,7 @@ function ReferenceNodeView({ node, selected, editor, getPos }: NodeViewProps) {
     <NodeViewWrapper
       className="my-3"
       data-spectra-reference=""
+      data-block-id={typeof node.attrs.blockId === "string" && node.attrs.blockId ? node.attrs.blockId : undefined}
       data-selected={selected || undefined}
       data-reference-id={embedId || undefined}
       data-stacked={ids.length > 1 || undefined}

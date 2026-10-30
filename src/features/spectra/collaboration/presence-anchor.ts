@@ -261,12 +261,15 @@ export function positionForPresenceAnchor(
   };
 }
 
+/** The room's text under an element: words the AI is drawing in that the room
+ * does not hold yet are not counted, so a person's offset lands on their glyph. */
 function textNodesUnder(element: HTMLElement) {
   const nodes: Text[] = [];
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
   let current = walker.nextNode();
   while (current) {
-    if (current.nodeType === Node.TEXT_NODE) nodes.push(current as Text);
+    if (current.nodeType === Node.TEXT_NODE && !current.parentElement?.closest(".spectra-ai-written"))
+      nodes.push(current as Text);
     current = walker.nextNode();
   }
   return nodes;
@@ -315,7 +318,13 @@ export function clientRectsForSelectionRange(
     }
     consumed += length;
   }
-  if (!startNode) return [];
+  // The writer is ahead of this screen (their keystrokes are still on the
+  // way): the caret is at the front of what has arrived, never back at the
+  // start of the line.
+  if (!startNode) {
+    startNode = nodes[nodes.length - 1]!;
+    startOffset = startNode.data.length;
+  }
   if (!endNode) {
     endNode = nodes[nodes.length - 1]!;
     endOffset = endNode.data.length;

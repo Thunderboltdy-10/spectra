@@ -81,7 +81,7 @@ function timetable(): WireItem[] {
 }
 
 /** A school day `n` days ahead or more, never a weekend. */
-function schoolDay(from: number) {
+export function schoolDay(from: number) {
   let day = from;
   for (;;) {
     const weekday = new Date(dayAt(day, 12)).getDay();

@@ -283,14 +283,14 @@ export function Day() {
           setAt(index);
           setDone(0);
           setWritten(false);
-          await pass(6 * 60 + 20, 1300, beat, since);
+          await pass(6 * 60 + 20, 900, beat, since);
           if (!going()) return;
           setWritten(true);
-          await pass(START, 1100, beat, since);
+          await pass(START, 700, beat, since);
           if (!going()) return;
         } else setAt(index);
         // Through the day the moves are done one by one, while the sun keeps crossing.
-        const sunset = pass(19 * 60 + 30, 6400, beat, since);
+        const sunset = pass(19 * 60 + 30, 4200, beat, since);
         for (let count = 1; count <= DAYS_SHOWN[index % DAYS_SHOWN.length]!.moves.length && going(); count += 1) {
           // Morning, after lunch, after school.
           while (going() && now.current < [10 * 60, 13 * 60, 16 * 60][count - 1]!) await beat.wait(48);
@@ -299,7 +299,7 @@ export function Day() {
         await sunset;
         if (!going()) return;
         // The sun goes down in a glow and the moon comes up over the day that was.
-        await pass(DAY_MINUTES, 1800, beat, since);
+        await pass(DAY_MINUTES, 1200, beat, since);
       }
     },
   });

@@ -8,7 +8,7 @@ import { HomeDay } from "@/features/spectra/today/home-day";
 import { arrival, glide, morph, settle, snapshot } from "../../kit/filing";
 import { Written } from "../../kit/written";
 import { useWorld } from "../../kit/world-context";
-import { DEADLINES, ZONE, type WireItem } from "../../world/school";
+import { DEADLINES, ZONE, schoolDay, type WireItem } from "../../world/school";
 import { STORY, dayAt, dayName } from "../../world/story";
 import { PEOPLE, useHands } from "../hands";
 import { dimAll, flash, shine, travel } from "../light/light";
@@ -50,8 +50,8 @@ const TRIP_FORM: WireItem = {
 };
 
 
-/** The email's lab report, on the free Tuesday so the week has room to show it. */
-const LAB: WireItem = { ...DEADLINES.labReport, id: "hero-lab", startAt: dayAt(5, 16, 0), endAt: dayAt(5, 16, 0) };
+/** The email's lab report, on a free school day later in the week so the week has room to show it. */
+const LAB: WireItem = { ...DEADLINES.labReport, id: "hero-lab", startAt: dayAt(schoolDay(4), 16, 0), endAt: dayAt(schoolDay(4), 16, 0) };
 
 const ARRIVALS: Arrival[] = [
   {
@@ -157,9 +157,9 @@ export function Hero() {
     setState(item.key, "taken");
 
     // Spectra files it: Home is told, and shows it where it belongs.
-    const selector = item.lands.selector;
     home.dataset.filing = "";
-    const before = snapshot(home, selector);
+    // Everything already on Home is known, so only what is filed now waits to be set down.
+    const before = snapshot(home, ".today-day-item, .work-desk > *");
     if (item.key === "message") world.place(TRIP_FORM);
     if (item.key === "email") world.place(LAB);
     refresh();

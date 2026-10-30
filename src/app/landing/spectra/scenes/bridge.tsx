@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { SpectraMark } from "@/components/spectra-mark";
+import type { InteractionState } from "@/features/spectra/collaboration/interaction-model";
 import { editorIn, findText, markText, replaceText, unmarkText, waitForEditor } from "../../kit/doc-hand";
 import { InlineStudio } from "../../kit/inline-studio";
+import { perform } from "../../kit/perform";
 import { Surface, usePresence, type Move } from "../../kit/presence";
 import { Written } from "../../kit/written";
-import type { CastId } from "../../world/story";
+import { CAST, type CastId } from "../../world/story";
 import { WORKS } from "../../world/works";
 import { PEOPLE, sleep, useHands } from "../hands";
 import { dimAll, flash, shine, travel } from "../light/light";
@@ -21,8 +23,9 @@ import { Window } from "../window";
  * between them. Pipes run from the laptop into the prism and out to Spectra;
  * every save goes through them as light, and the prism lights and turns as it
  * passes. He writes a sentence in Word and saves; it is in Spectra. Then his
- * AI picks out the vote and rewords the paragraph Ms Gonzalez asked about, in
- * Spectra, and each change goes back to the file on the laptop as it is made.
+ * AI rewords the paragraph Ms Gonzalez asked about and picks out the vote, in
+ * Spectra, with the hand it has in the app (kit/perform), and each change goes
+ * back to the file on the laptop as it is made.
  * The laptop is drawn; Spectra's side is the real document studio and
  * presence. A visitor can spin the prism whenever they like.
  */
@@ -39,6 +42,16 @@ const WHERE = ["Word", "Spectra"] as const;
 const A2_START = "The second source is a speech by Otto Wels, leader of the SPD, given in the Reichstag before the vote. ";
 const B1_START = "The Act was passed by ";
 const B1_MIDDLE = ", but the vote took place with SA men lining the Kroll Opera House and the Communist deputies already arrested or in hiding. It was legal in form, but ";
+
+type Content = { blocks: Array<{ id: string; text: string }> };
+/** The draft with one block's words changed, as the file has it after a save. */
+const changed = (content: Content, id: string, from: string, to: string): Content => ({
+  ...content,
+  blocks: content.blocks.map((block) => (block.id === id ? { ...block, text: block.text.replace(from, to) } : block)),
+});
+const DRAFT = WORKS.ia.content as Content;
+const WRITTEN = changed(DRAFT, "ia-b1", END, END + SENTENCE);
+const REWORDED = changed(WRITTEN, "ia-a2", OLD, NEW);
 
 type Saved = "saved" | "editing" | "saving" | "spectra";
 /** The two pipes: laptop to prism, prism to Spectra, in the stage's own pixels. */
@@ -65,7 +78,19 @@ export function Bridge() {
   const studioRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<HTMLDivElement>(null);
   const presence = usePresence("bridge");
-  const { move, leave } = presence;
+  const { move, put, leave } = presence;
+  // The page's body lives in its editor, as in the app, so each frame of the work is written into it block by block.
+  const shown = useRef<Content>(DRAFT);
+  const show = useCallback((content: unknown) => {
+    const next = content as Content;
+    const editor = editorIn(studioRef.current);
+    if (editor)
+      for (const block of next.blocks) {
+        const was = shown.current.blocks.find((old) => old.id === block.id)?.text;
+        if (was && was !== block.text) replaceText(editor, was, block.text);
+      }
+    shown.current = next;
+  }, []);
   const { layer, hand } = useHands();
   const [where, setWhere] = useState(0);
   const [typed, setTyped] = useState(0);
@@ -205,8 +230,9 @@ export function Bridge() {
       // Bridge carries the save across, through the prism; it is in Spectra's copy.
       await send("word", "#4f9fe6", signal);
       if (signal.aborted) return;
-      replaceText(editor, END, END + SENTENCE);
+      show(WRITTEN);
       setSync("from-word");
+      await wait(60);
       const added = pointAt("henry", SENTENCE.trim());
       leave("henry");
       if (added) flash({ el: added, rx: 300, ry: 90, strength: 0.6, hues: [3.4, 4.2], hold: 600 });
@@ -215,22 +241,22 @@ export function Bridge() {
       // In Spectra: Henry's AI edits, and each change is written to the file on the laptop.
       setWhere(1);
       setSync("writing");
-      flash({ el: pointAt("henryAi", VOTE, { note: "Bold" }), rx: 240, ry: 90, strength: 0.6, hues: [4.6, 5.6], hold: 500 });
-      await wait(450);
-      markText(editor, VOTE, "bold");
-      await send("spectra", "#9176e8", signal);
-      setBold(true);
-      setFresh("vote");
-      setSaved("spectra");
-      await wait(500);
-
-      flash({ el: pointAt("henryAi", OLD, { note: "Rewording" }), rx: 300, ry: 110, strength: 0.6, hues: [4.6, 6.2], hold: 600 });
-      await wait(550);
-      replaceText(editor, OLD, NEW);
-      pointAt("henryAi", NEW, { note: "Reworded, in the file too" });
+      const ai = { surface: "bridge", show: (state: InteractionState | null) => put("henryAi", state), apply: show, wait, signal };
+      await perform(WORKS.ia, WRITTEN, REWORDED, CAST.henryAi, "bridge-reword", ai);
+      if (signal.aborted) return;
       await send("spectra", "#ff647f", signal);
       setReworded(true);
       setFresh("reword");
+      setSaved("spectra");
+      await wait(400);
+
+      flash({ el: pointAt("henryAi", VOTE, { note: "Bold" }), rx: 240, ry: 90, strength: 0.6, hues: [4.6, 5.6], hold: 500 });
+      await wait(400);
+      const now = editorIn(studioRef.current);
+      if (now) markText(now, VOTE, "bold");
+      await send("spectra", "#9176e8", signal);
+      setBold(true);
+      setFresh("vote");
       setSync("to-word");
       await wait(1400);
       leave("henryAi");
@@ -244,9 +270,8 @@ export function Bridge() {
       setTyped(0);
       setBold(false);
       setReworded(false);
-      unmarkText(editor, VOTE, "bold");
-      replaceText(editor, NEW, OLD);
-      replaceText(editor, END + SENTENCE, END);
+      unmarkText(editorIn(studioRef.current) ?? editor, VOTE, "bold");
+      show(DRAFT);
       await wait(500);
     },
   });

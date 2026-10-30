@@ -3110,6 +3110,11 @@
   min-height: 0;
 }
 
+/* Spectra's copy is open on the sources, where both changes are made: the page sits a little up its desk. */
+.sp-bridge-studio .document-desk > .document-page {
+  translate: 0 -104px;
+}
+
 .sp-bridge-surface {
   overflow: hidden;
 }

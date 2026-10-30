@@ -160,6 +160,13 @@ export const PLAN_BLOCKS = [
 /** The time Spectra finds for the lab report when Henry asks. */
 export const LAB_BLOCK = block("plan-lab", "Write up the yeast lab", DAYS.biologyTest, 17, 50, DEADLINES.labReport, 30);
 
+/** What Spectra makes of Henry's respiration slides for the test: the revision in pieces, around tomorrow's study block. */
+export const REVISION_BLOCKS = [
+  block("plan-rev-1", "Glycolysis and the link reaction", DAYS.tomorrow, 15, 40, DEADLINES.biologyTest, 40),
+  block("plan-rev-2", "Krebs cycle flashcards", DAYS.tomorrow, 16, 30, DEADLINES.biologyTest, 25),
+  block("plan-rev-3", "Past paper: respiration questions", DAYS.tomorrow, 17, 40, DEADLINES.biologyTest, 50),
+];
+
 export const STUDY_BLOCK = block("plan-bio", "Revise cell respiration", DAYS.tomorrow, 17, 45, DEADLINES.biologyTest);
 
 export function initialCalendar(): WireItem[] {

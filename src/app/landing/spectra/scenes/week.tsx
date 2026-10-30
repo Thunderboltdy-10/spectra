@@ -4,20 +4,22 @@ import dynamic from "next/dynamic";
 import { useEffect, useRef } from "react";
 import { useWorld } from "../../kit/world-context";
 import { Written } from "../../kit/written";
-import { DAYS, DEADLINES, LAB_BLOCK, type WireItem } from "../../world/school";
-import { TODAY, dayAt, dayName } from "../../world/story";
+import { DEADLINES, REVISION_BLOCKS, type WireItem } from "../../world/school";
+import { TODAY, dayName } from "../../world/story";
 import { CLASSES, type ClassKey } from "../../world/works";
-import { likeness, sleep } from "../hands";
+import { PEOPLE, likeness, sleep, useHands } from "../hands";
 import { dimAll, flash, shine, travel } from "../light/light";
 import { useLoop, type Beat } from "../loop";
 import { Window } from "../window";
 
 /*
  * Henry's week in Spectra's own calendar, kept light: an afternoon lesson a
- * day and what is due. Things arrive from outside the page and land on their
- * day: Mr Okafor sets a lab report in ManageBac and it comes in from one side;
- * Spectra finds the time to write it and that comes in from the other. Then he
- * moves the test a day and it moves. Then a new week, and the same again.
+ * day and what is due. Spectra turns his respiration slides into revision for
+ * Wednesday's test, writing the pieces on the deck's last slide, then finds
+ * the time for each and carries it there by hand, one free slot after another.
+ * Then Mr Okafor sets a lab report in ManageBac and it comes in from beyond
+ * the page and lands on its day, and he moves the test a day and it moves.
+ * Then a new week, and the same again.
  */
 
 const CalendarApplication = dynamic(() => import("@/features/spectra/calendar/ui/calendar-application").then((module) => module.CalendarApplication), {
@@ -27,9 +29,9 @@ const CalendarApplication = dynamic(() => import("@/features/spectra/calendar/ui
 
 const DAY = 86_400_000;
 const LAB: WireItem = { ...DEADLINES.labReport, id: "week-lab" };
-/** Tomorrow, straight after school. */
-const BLOCK: WireItem = { ...LAB_BLOCK, id: "week-lab-block", startAt: dayAt(DAYS.tomorrow, 15, 40), endAt: dayAt(DAYS.tomorrow, 16, 30) };
 const MOVED = DEADLINES.biologyTest;
+const TASKS = REVISION_BLOCKS;
+const length = (item: WireItem) => Math.round(((item.endAt ?? 0) - (item.startAt ?? 0)) / 60_000);
 /** The calendar's height for an hour, and the room left above the first one shown for its label. */
 const HOUR = 60;
 const LEAD = 14;
@@ -45,6 +47,8 @@ export function Week() {
   const sceneRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const calendarRef = useRef<HTMLDivElement>(null);
+  const slideRef = useRef<HTMLDivElement>(null);
+  const { layer, hand } = useHands();
   /** Hides what is on its way in, from the moment the calendar first draws it until it lands. */
   const comingRef = useRef<HTMLStyleElement>(null);
   const coming = useRef(new Set<string>());
@@ -63,12 +67,12 @@ export function Week() {
     return () => {
       dimAll("week");
       // The story's own week is left as it was found.
-      world.unplace(LAB.id, BLOCK.id);
+      world.unplace(LAB.id, ...TASKS.map((task) => task.id));
       if (shifted.current) world.shift(MOVED.id, -DAY);
     };
   }, [world]);
 
-  /** The week shows the whole school day, from eight; the hours run under the dates, an hour to sixty pixels. */
+  /** The week shows the school day from nine, and the evening after it; the hours run under the dates, an hour to sixty pixels. */
   const toHour = (hour: number) => {
     const scroller = calendarRef.current?.querySelector<HTMLElement>(".spectra-calendar-scroll");
     scroller?.scrollTo({ top: hour * HOUR - LEAD });
@@ -189,7 +193,7 @@ export function Week() {
     open: async ({ wait, signal }) => {
       // The calendar opens itself on seven once its week has loaded; the school day is set after that.
       for (let tries = 0; !calendarRef.current?.querySelector(".spectra-calendar-block") && tries < 60 && !signal.aborted; tries += 1) await wait(80);
-      toHour(8);
+      toHour(9);
       const title = sceneRef.current?.querySelector(".sp-heading");
       const stage = stageRef.current;
       if (title && stage) {
@@ -210,16 +214,68 @@ export function Week() {
     },
     round: async (beat) => {
       const { wait, signal } = beat;
+      const slide = slideRef.current;
+      const stage = stageRef.current;
+      if (!slide || !stage) return;
+      const rows = TASKS.map((task) => slide.querySelector<HTMLElement>(`[data-task="${task.id}"]`)!);
       await wait(200);
+
+      // The deck's last slide, where Spectra writes the revision it makes of the slides before it.
+      slide.dataset.shown = "";
+      await wait(420);
+      const spectra = hand(PEOPLE.spectra, signal);
+      for (const [index, task] of TASKS.entries()) {
+        const row = rows[index]!;
+        const words = row.querySelector<HTMLElement>(".sp-week-task-title")!;
+        await spectra.move(row, { aim: [0.08, 0.5], ms: 340 });
+        row.dataset.state = "typing";
+        for (let typed = 1; typed <= task.title.length && !signal.aborted; typed += 1) {
+          words.textContent = task.title.slice(0, typed);
+          await wait(task.title[typed - 1] === " " ? 34 : 15);
+        }
+        if (signal.aborted) return;
+        row.dataset.state = "written";
+      }
+      await wait(260);
+
+      // It finds the time for each, one free slot after another, and carries each there.
+      for (const [index, task] of TASKS.entries()) {
+        const row = rows[index]!;
+        hold(task.title, true);
+        world.place(task);
+        const target = await appear(task.title, beat);
+        if (!target || signal.aborted) {
+          hold(task.title, false);
+          return;
+        }
+        await spectra.move(row, { aim: [0.06, 0.4], ms: 320 });
+        await spectra.press({ light: false });
+        const from = row.getBoundingClientRect();
+        const scale = from.width / (row.offsetWidth || from.width) || 1;
+        const copy = spectra.grab(row);
+        copy.querySelector<HTMLElement>(".sp-week-task-time")?.style.setProperty("display", "none");
+        row.dataset.state = "lifted";
+        // On its way it takes the shape of the slot it is going to.
+        const box = target.getBoundingClientRect();
+        copy.style.setProperty("transition", "width 0.5s cubic-bezier(0.3, 0.6, 0.25, 1), height 0.5s cubic-bezier(0.3, 0.6, 0.25, 1)");
+        copy.style.width = `${box.width / scale}px`;
+        copy.style.height = `${box.height / scale}px`;
+        const room = stage.getBoundingClientRect();
+        await spectra.move([box.left - room.left + 24, box.top - room.top + 18], { ms: 560, overshoot: false });
+        hold(task.title, false);
+        target.dataset.brought = "here";
+        flash({ el: target, rx: 150, ry: 70, strength: 0.4, hues: [3.8, 5.4], hold: 400 });
+        await spectra.drop({ settle: true });
+        row.dataset.state = "placed";
+        window.setTimeout(() => delete target.dataset.brought, 700);
+        await wait(80);
+      }
+      void spectra.hide().then(() => spectra.remove());
+      await wait(300);
 
       // Mr Okafor sets the lab report in ManageBac; it comes in and lands on its day.
       const lab = classOf(LAB);
       await arrive(LAB, "left", `${CLASSES[lab].teacher} set this in ManageBac`, "school", beat);
-      if (signal.aborted) return;
-      await wait(150);
-
-      // Spectra finds the time to write it, after school tomorrow.
-      await arrive(BLOCK, "right", "Spectra found 50 minutes, after school", "spectra", beat);
       if (signal.aborted) return;
       await wait(250);
 
@@ -229,11 +285,16 @@ export function Week() {
       await wait(1500);
 
       // A new week: what came in is done with, and the test is back where it was.
-      await Promise.all([leave(LAB.title), leave(BLOCK.title)]);
-      world.unplace(LAB.id, BLOCK.id);
+      await Promise.all([leave(LAB.title), ...TASKS.map((task) => leave(task.title))]);
+      world.unplace(LAB.id, ...TASKS.map((task) => task.id));
+      delete slide.dataset.shown;
       await move(-DAY, beat);
       shifted.current = false;
       await wait(300);
+      for (const row of rows) {
+        delete row.dataset.state;
+        row.querySelector(".sp-week-task-title")!.textContent = "";
+      }
     },
   });
 
@@ -256,6 +317,19 @@ export function Week() {
             </div>
           </Window>
         </div>
+        <div ref={slideRef} className="sp-week-slide" aria-hidden>
+          <span className="sp-week-slide-deck">Cell respiration</span>
+          <p className="sp-week-slide-title">Before {MOVED.startAt ? dayName(MOVED.startAt) : "the"}&rsquo;s test</p>
+          <ol className="sp-week-slide-tasks">
+            {TASKS.map((task) => (
+              <li key={task.id} data-task={task.id}>
+                <span className="sp-week-task-title" />
+                <span className="sp-week-task-time">{length(task)} min</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+        {layer}
       </div>
     </section>
   );

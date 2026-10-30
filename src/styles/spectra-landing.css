@@ -2341,6 +2341,118 @@
   }
 }
 
+/* The last slide of Henry's respiration deck, laid over the empty weekend:
+   Spectra writes the revision on it, and each piece is carried to its slot. */
+.sp-week-slide {
+  --sp-week-class: #3a7bc8;
+  position: absolute;
+  top: 17%;
+  right: 1.6%;
+  z-index: 20;
+  width: 25.5%;
+  padding: 18px 16px 20px;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px rgb(52 40 28 / 0.07),
+    0 30px 60px -30px rgb(52 40 28 / 0.55);
+  opacity: 0;
+  translate: 0 14px;
+  rotate: 1.2deg;
+  transition:
+    opacity 0.45s ease,
+    translate 0.6s var(--sp-ease),
+    rotate 0.6s var(--sp-ease);
+}
+
+.sp-week-slide[data-shown] {
+  opacity: 1;
+  translate: 0 0;
+  rotate: 0deg;
+}
+
+.sp-week-slide-deck {
+  display: block;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--sp-week-class);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sp-week-class);
+}
+
+.sp-week-slide-title {
+  margin: 12px 0 14px;
+  font-family: var(--font-display);
+  font-size: 22px;
+  line-height: 1.1;
+  color: var(--text-primary);
+}
+
+.sp-week-slide-tasks {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A piece of revision, drawn as the calendar draws a plan, so it is the same thing on the slide and in the week. */
+.sp-week-slide-tasks > li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--sp-week-class);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--sp-week-class) 11%, #fff);
+  font-size: 13px;
+  line-height: 1.25;
+  color: var(--text-primary);
+  overflow: hidden;
+  visibility: hidden;
+  transition: opacity 0.3s ease;
+}
+
+.sp-week-slide-tasks > li[data-state] {
+  visibility: visible;
+}
+
+.sp-week-slide-tasks > li[data-state="lifted"] {
+  opacity: 0.25;
+}
+
+.sp-week-slide-tasks > li[data-state="placed"] {
+  opacity: 0.45;
+}
+
+.sp-week-task-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.sp-week-slide-tasks > li[data-state="typing"] .sp-week-task-title::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: -0.15em;
+  background: #7d63e0;
+}
+
+.sp-week-task-time {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.sp-week-slide-tasks > li:is([data-state="written"], [data-state="lifted"], [data-state="placed"]) .sp-week-task-time {
+  opacity: 1;
+}
+
 @media (max-width: 900px) {
   .sp-week-copy {
     grid-template-columns: minmax(0, 1fr);

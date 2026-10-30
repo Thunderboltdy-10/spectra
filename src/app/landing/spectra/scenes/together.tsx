@@ -1,10 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "@/components/icons";
 import { SpectraMark } from "@/components/spectra-mark";
-import { presenceColor } from "@/features/spectra/collaboration/interaction-model";
+import { presenceColor, type InteractionState } from "@/features/spectra/collaboration/interaction-model";
+import type { CollaborationPresence } from "@/features/spectra/collaboration/types";
+import { CollaborationPresenceIndicator } from "@/features/spectra/components/collaboration-presence";
 import { InlineStudio } from "../../kit/inline-studio";
+import { perform } from "../../kit/perform";
 import { Surface, usePresence, type Move } from "../../kit/presence";
 import { Written } from "../../kit/written";
 import { CAST, type CastId } from "../../world/story";
@@ -14,12 +18,13 @@ import { useLoop, type Beat } from "../loop";
 
 /*
  * Henry's revision slides in the real presentation studio, with the people
- * who work on them beside it. Everyone meets on the slide of the four stages:
- * his AI picks out the stage that makes most of the ATP, the way any
- * collaborator does, in front of him; Mr Okafor comes in from his class and
- * leaves a note; and Maya marks the stage she is taking for their group's
- * deck. Everyone is drawn by Spectra's own presence layer, named and coloured
- * as the product names them. The heading says who is working now.
+ * who work on them beside it. Everyone meets on the slide of the four stages.
+ * His AI checks the yields and adds what the Krebs cycle is missing, with the
+ * hand it has in the app: it takes the text box, finds its place and types.
+ * Mr Okafor comes in from his class and leaves a note, and the AI does what it
+ * asks. Maya marks the stage she is taking for their group's deck. Everyone is
+ * drawn by Spectra's own presence layer and shown at the top of the studio, as
+ * the product shows them. The heading says who is working now.
  */
 
 const WHO = ["AI", "teacher", "friend"] as const;
@@ -31,6 +36,25 @@ const PEOPLE: Person[] = [
   { id: "okafor", role: "Biology SL teacher", can: "Can comment" },
   { id: "maya", role: "Friend, Biology SL", can: "Can edit" },
 ];
+
+type Slide = Deck["slides"][number] & { objects: Array<{ id: string; content?: unknown; text?: unknown }> };
+
+/** The deck with one text box saying something else, as the AI leaves it. */
+function withText(deck: Deck, object: string, from: string, to: string): Deck {
+  const swap = (value: unknown): unknown =>
+    typeof value === "string" ? (value === from ? to : value) : Array.isArray(value) ? value.map(swap) : value && typeof value === "object"
+      ? Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, swap(entry)]))
+      : value;
+  return {
+    ...deck,
+    slides: deck.slides.map((slide) => ({
+      ...slide,
+      objects: (slide as Slide).objects.map((entry) => (entry.id === object ? (swap(entry) as typeof entry) : entry)),
+    })),
+  };
+}
+
+const NO_REGIONS: never[] = [];
 
 const nameOf = (id: CastId) => (CAST[id].kind === "ai" ? "Spectra" : CAST[id].name);
 
@@ -48,6 +72,11 @@ const OPENED = {
   content: { ...(WORKS.deck.content as object), slides: [...SLIDES.slice(STAGES), ...SLIDES.slice(0, STAGES)] },
 } as typeof WORKS.deck;
 const DECK = OPENED.content as Deck;
+/** What the AI adds, and what Mr Okafor asks it for. */
+const KREBS = { from: "2 ATP, 6 NADH", to: "2 ATP, 6 NADH, 2 FADH2" };
+const TOTAL = { from: "Four stages", to: "Four stages, 30 to 32 ATP" };
+const CHECKED = withText(DECK, "s3-yield-2", KREBS.from, KREBS.to);
+const ASKED = withText(CHECKED, "s3-title", TOTAL.from, TOTAL.to);
 
 /** A slide object, as the presence layer addresses it: by the slide's place in the deck and the object's on the slide. */
 const on = (slide: string, object: string): Move => {
@@ -61,7 +90,22 @@ export function Together() {
   const deskRef = useRef<HTMLDivElement>(null);
   const studioRef = useRef<HTMLDivElement>(null);
   const presence = usePresence("together");
-  const { move, leave } = presence;
+  const { move, put, leave } = presence;
+  const [deck, setDeck] = useState(OPENED);
+  const show = useCallback((content: unknown) => setDeck((was) => ({ ...was, content, updatedAt: was.updatedAt + 1 })), []);
+  const [header, setHeader] = useState<Element | null>(null);
+  /** Who is in the deck, as the studio's own header shows them. */
+  const here = useMemo<CollaborationPresence[]>(
+    () =>
+      presence.states.map((state: InteractionState) => ({
+        clientId: state.actor.clientId,
+        accountId: state.actor.accountId,
+        name: state.actor.name,
+        actorKind: state.actor.kind,
+        interactionState: state,
+      })),
+    [presence.states],
+  );
   const [who, setWho] = useState(0);
   const [doing, setDoing] = useState<Partial<Record<CastId, string>>>({});
 
@@ -128,15 +172,25 @@ export function Together() {
       const { wait, signal } = beat;
       for (let tries = 0; !studioRef.current?.querySelector('button[aria-label="Next slide"]') && tries < 50 && !signal.aborted; tries += 1) await wait(120);
       if (signal.aborted) return;
+      // The studio's own place for the people in it, at the start of its header actions.
+      setHeader(studioRef.current?.querySelector(".spectra-artifact-header-actions > span:first-child") ?? null);
 
-      // Henry's AI goes through the stages.
+      // Henry's AI checks the yields, and adds what the Krebs cycle makes.
       setWho(0);
+      const hand = {
+        surface: "together",
+        show: (state: InteractionState | null) => put("henryAi", state),
+        apply: show,
+        wait,
+        signal,
+      };
       say("henryAi", "Checking the yields against your notes");
       lightAt(point("henryAi", "s3", "s3-yield-0", "2 ATP, matches"), [0.2, 1]);
-      await wait(700);
-      say("henryAi", "Picking out the stage that makes most ATP");
-      lightAt(point("henryAi", "s3", "s3-card-3", "Most of the ATP is made here"), [0, 0.8]);
-      await wait(1000);
+      await wait(650);
+      say("henryAi", "Adding the FADH2 the Krebs cycle makes");
+      lightAt(point("henryAi", "s3", "s3-card-2"), [3.2, 4]);
+      await perform(OPENED, DECK, CHECKED, CAST.henryAi, "together-krebs", hand);
+      await wait(500);
       leave("henryAi");
       say("henryAi", null);
       if (signal.aborted) return;
@@ -147,10 +201,19 @@ export function Together() {
       lightAt(point("okafor", "s3", "s3-title", "Reading"), [2.6, 3.4]);
       await wait(350);
       say("okafor", "Writing to you");
-      await typeNote("okafor", "s3", "s3-title", "Good. Add the total: 30-32 ATP per glucose.", beat);
-      await wait(900);
+      await typeNote("okafor", "s3", "s3-title", "Good. Add the total: 30 to 32 ATP per glucose.", beat);
+      await wait(700);
       leave("okafor");
       say("okafor", null);
+      if (signal.aborted) return;
+
+      // The AI does what he asked, on the title.
+      setWho(0);
+      say("henryAi", "Adding the total to the title");
+      await perform(OPENED, CHECKED, ASKED, CAST.henryAi, "together-total", hand);
+      await wait(600);
+      leave("henryAi");
+      say("henryAi", null);
       if (signal.aborted) return;
 
       // Maya marks the stage she is taking for their group's deck.
@@ -164,6 +227,9 @@ export function Together() {
       leave("maya");
       say("maya", null);
       await wait(400);
+      // The deck as it was, for the next round.
+      show(DECK);
+      await wait(200);
     },
   });
 
@@ -180,8 +246,9 @@ export function Together() {
       <div ref={deskRef} className="sp-together-desk">
         <Surface id="together" states={presence.states} className="sp-together-doc">
           <div ref={studioRef} className="sp-together-studio">
-            <InlineStudio work={OPENED} instanceKey="landing-together-deck" className="sp-studio" />
+            <InlineStudio work={deck} instanceKey="landing-together-deck" className="sp-studio" />
           </div>
+          {header ? createPortal(<CollaborationPresenceIndicator presence={here} currentClientId={CAST.henry.clientId} regions={NO_REGIONS} />, header) : null}
         </Surface>
 
         <aside className="sp-people" aria-label="People in this deck">

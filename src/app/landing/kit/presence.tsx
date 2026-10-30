@@ -69,6 +69,16 @@ export function usePresence(surface: string) {
     [surface],
   );
 
+  /** Shows a frame someone else planned, such as a beat of the AI's choreography. */
+  const put = useCallback((who: CastId, state: InteractionState | null) => {
+    setStates((current) => {
+      const next = new Map(current);
+      if (state) next.set(who, state);
+      else next.delete(who);
+      return next;
+    });
+  }, []);
+
   const leave = useCallback((who?: CastId) => {
     setStates((current) => {
       if (!who) return current.size ? new Map() : current;
@@ -93,7 +103,7 @@ export function usePresence(surface: string) {
   }, [states.size]);
 
   const list = useMemo(() => [...states.values()], [states]);
-  return { states: list, move, leave };
+  return { states: list, move, put, leave };
 }
 
 /** A surface people work on: the presence layer resolves targets inside it. */

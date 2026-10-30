@@ -199,7 +199,7 @@ export function authorNew(type: AuthoredType, spec: unknown, context: AuthoringC
       readback = presentationReadback(content);
       break;
     case "sheets":
-      content = sheetsFromSpec({ sheets: asArray(input.sheets, "sheets") } as SheetsSpec, ids);
+      content = sheetsFromSpec({ sheets: asArray(input.sheets, "sheets") } as SheetsSpec, ids).content as unknown as Record<string, unknown>;
       readback = sheetsReadback(content);
       break;
     case "whiteboard":

@@ -110,6 +110,19 @@ describe("planner task authoring", () => {
 });
 
 describe("code authoring", () => {
+  it("sets the accessibility metadata publishing requires at create time and without rewriting files", () => {
+    const original = codeFromSpec({
+      files: [{ path: "index.html", source: "<main>Interactive oscillator</main>" }],
+      title: "Spring oscillator", description: "A spring and mass oscillate about equilibrium.",
+    });
+    expect(original.accessibility).toMatchObject({ title: "Spring oscillator", description: "A spring and mass oscillate about equilibrium." });
+    const next = applyCodeEdits(original, [{ op: "set_accessibility", title: "Oscillation", description: "Use the sliders to change the mass and spring constant.", reducedMotion: true }]);
+    expect(next.accessibility).toEqual({ title: "Oscillation", description: "Use the sliders to change the mass and spring constant.", reducedMotion: true });
+    expect(next.files).toEqual(original.files);
+    expect(() => resolveArtifactWriteInput("code", original, { content: next }, "")).not.toThrow();
+    expect(() => applyCodeEdits(original, [{ op: "set_accessibility", title: "", description: "" }])).toThrow(/non-empty accessible title/);
+  });
+
   it("creates files, edits by find-and-replace and reads back the changed lines", () => {
     const code = codeFromSpec(
       { files: [{ path: "index.html", source: "<main>\n  <h1>Hello</h1>\n</main>" }, { path: "app.js", source: "console.log(1);" }] },

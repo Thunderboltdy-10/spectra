@@ -182,11 +182,11 @@ function argsHint(tool: AnyHarnessTool | undefined, fixed: Record<string, unknow
     .join(", ")}}`;
 }
 
-function describe(command: CatalogCommand, tools: Map<string, AnyHarnessTool>) {
+function describe(command: CatalogCommand, tools: Map<string, AnyHarnessTool>, offered: Map<string, AnyHarnessTool>) {
   const head = `- ${command.id}: ${command.title}. ${command.description}`;
   if (command.reach.kind === "user") return `${head}\n  Only the user can do this: ${command.reach.reason}`;
   const reach = command.reach;
-  const direct = tools.has(reach.tool) && !reach.fixed ? ` (or call ${reach.tool} directly)` : "";
+  const direct = offered.has(reach.tool) && !reach.fixed ? ` (or call ${reach.tool} directly)` : "";
   return `${head}\n  run_command {id: "${command.id}", args: ${argsHint(tools.get(reach.tool), reach.fixed)}}${direct}`;
 }
 
@@ -233,7 +233,7 @@ export function commandTools(runnable: AnyHarnessTool[], offered: AnyHarnessTool
           ok: true,
           content: `No command matches "${args.query}". Areas: ${[...new Set(COMMAND_CATALOG.map((command) => command.area))].join(", ")}. Try other words or an area.`,
         };
-      return { ok: true, content: found.map((command) => describe(command, direct)).join("\n") };
+      return { ok: true, content: found.map((command) => describe(command, byName, direct)).join("\n") };
     },
   };
 

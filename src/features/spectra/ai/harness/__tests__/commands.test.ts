@@ -44,6 +44,18 @@ function setup(ai: unknown = {}) {
 const top = (query: string) => rankCommands(query)[0]?.id;
 
 describe("find_commands", () => {
+  it("describes arguments for commands that are available only through run_command", async () => {
+    const { run } = setup();
+    const outcome = await run([
+      { text: "", toolCalls: [call("f1", "find_commands", { query: "insert a live reference" })] },
+      { text: "Ready.", toolCalls: [] },
+    ]);
+    const result = toolResults(outcome.state.messages).join("\n");
+    expect(result).toContain('run_command {id: "work.insert_reference", args: {hostWorkId: string, targetWorkId: string, label?: string, after?: string}}');
+    expect(result).toContain("after names a heading");
+    expect(result).not.toContain("call insert_reference directly");
+  });
+
   it("finds actions by meaning, not only by their words", () => {
     expect(top("make it dark mode")).toBe("settings.change");
     expect(top("get rid of this folder")).toBe("library.trash");

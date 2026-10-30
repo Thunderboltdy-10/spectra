@@ -283,7 +283,7 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     id: "work.insert_reference",
     area: "work",
     title: "Insert a live reference",
-    description: "Insert a live reference to one work inside another (hostWorkId, targetWorkId, label?).",
+      description: "Insert a live reference to one work inside another (hostWorkId, targetWorkId, label?, after?). In a document, after names a heading and places the reference at the end of that section, before the next heading.",
     keywords: ["link", "embed", "cite", "connect"],
     ui: ["app.reference.insert"],
     server: ["artifactEmbeds:create", "spectraArtifactLinks:create", "spectraArtifactLinks:remove"],

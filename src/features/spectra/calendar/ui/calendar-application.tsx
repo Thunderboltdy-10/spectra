@@ -1258,6 +1258,7 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
               {days.length && overview ? (
                 <WeekGrid
                   days={days}
+                  focusedStart={focusedStart}
                   timezone={timezone}
                   timedItems={timedItems}
                   dayItems={dayItems}
@@ -1387,6 +1388,7 @@ function mergeHandlers(target: MergeTarget, onOver?: (over: boolean) => void) {
 
 function WeekGrid({
   days,
+  focusedStart,
   timezone,
   timedItems,
   dayItems,
@@ -1409,6 +1411,7 @@ function WeekGrid({
   onResizeStart,
 }: {
   days: number[];
+  focusedStart: number;
   timezone: string;
   timedItems: CalendarItem[];
   dayItems: CalendarItem[];
@@ -1441,7 +1444,7 @@ function WeekGrid({
   const dayDates = days.map((stamp) => new Date(stamp));
   const now = Date.now();
   const hoursHeight = HOURS * HOUR_PX;
-  const first = dayDates[0];
+  const first = new Date(focusedStart);
   return (
     <article className="spectra-calendar-week">
       <div

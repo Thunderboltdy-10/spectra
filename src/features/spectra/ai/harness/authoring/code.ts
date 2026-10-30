@@ -22,7 +22,8 @@ export type CodeEditOp =
   | { op: "write_file"; path: string; source: string; language?: string }
   | { op: "delete_file"; path: string }
   | { op: "rename_file"; path: string; to: string }
-  | { op: "set_entry"; path: string };
+  | { op: "set_entry"; path: string }
+  | { op: "set_accessibility"; title: string; description: string; reducedMotion?: boolean };
 
 export type CodeSpec = {
   files: Array<{ path: string; source: string; language?: string }>;
@@ -62,6 +63,7 @@ export function applyCodeEdits(content: unknown, ops: CodeEditOp[], ids: IdFacto
   const code = normalizeCodeContent(structuredClone(content ?? {}));
   let files = [...code.files];
   let entryFileId = code.entryFileId;
+  let accessibility = code.accessibility;
   if (!Array.isArray(ops) || !ops.length) throw new AuthoringError("No operations were given.");
   ops.forEach((op, index) => {
     const label = `Edit ${index + 1} (${String(op?.op)})`;
@@ -115,11 +117,16 @@ export function applyCodeEdits(content: unknown, ops: CodeEditOp[], ids: IdFacto
       case "set_entry":
         entryFileId = findFile(files, op.path, label, "path").id;
         break;
+      case "set_accessibility":
+        if (typeof op.title !== "string" || !op.title.trim() || typeof op.description !== "string" || !op.description.trim())
+          throw new AuthoringError(`${label}: give a non-empty accessible title and description.`);
+        accessibility = { ...accessibility, title: op.title.trim(), description: op.description.trim(), ...(typeof op.reducedMotion === "boolean" ? { reducedMotion: op.reducedMotion } : {}) };
+        break;
       default:
-        throw new AuthoringError(`${label}: unknown operation. Use replace, write_file, delete_file, rename_file or set_entry.`);
+        throw new AuthoringError(`${label}: unknown operation. Use replace, write_file, delete_file, rename_file, set_entry or set_accessibility.`);
     }
   });
-  return normalizeCodeContent({ ...code, files, entryFileId });
+  return normalizeCodeContent({ ...code, files, entryFileId, ...(accessibility ? { accessibility } : {}) });
 }
 
 export function codeFromSpec(spec: CodeSpec, ids: IdFactory = defaultIdFactory()): CodeContent {
@@ -143,6 +150,7 @@ export function codeFromSpec(spec: CodeSpec, ids: IdFactory = defaultIdFactory()
     ...built,
     runtime,
     entryFileId: entry.id,
+    ...(spec.title || spec.description ? { accessibility: { ...(spec.title ? { title: spec.title } : {}), ...(spec.description ? { description: spec.description } : {}) } } : {}),
     visualisation: {
       ...built.visualisation,
       enabled: runtime === "browser" || runtime === "react",

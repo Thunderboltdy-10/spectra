@@ -68,6 +68,25 @@ describe("AI UI events", () => {
     expect(opened).toEqual(["artifact-7"]);
   });
 
+  it("refreshes Calendar on each committed placement with its arrival target already available", () => {
+    const targets: Array<string | undefined> = [];
+    const remove = spectraBus.on("calendar.changed", () => {
+      targets.push(getAiSurfaceLocation()?.target);
+    });
+    try {
+      for (const targetId of ["monday-block", "tuesday-block", "wednesday-block"]) {
+        handleSpectraAiUiEvent({
+          key: "calendar_changed",
+          runId: "planning-run",
+          payload: { targetId },
+        });
+      }
+      expect(targets).toEqual(["monday-block", "tuesday-block", "wednesday-block"]);
+    } finally {
+      remove();
+    }
+  });
+
   it("opens a followed view at the place Spectra named, and drops a malformed one", () => {
     const regions: unknown[] = [];
     const remove = spectraBus.handle("work.open", ({ region }) => {

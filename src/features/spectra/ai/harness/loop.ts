@@ -282,7 +282,6 @@ function prepare(call: HarnessToolCall, tools: Map<string, AnyHarnessTool>): Pre
     return {
       call,
       tool,
-      args: raw,
       effect: "read",
       label: safeLabel(tool, raw),
       targets: [],

@@ -60,7 +60,7 @@ export const AUTHORING_FORMATS: Record<AuthoredType, { create: string; edit: str
   code: {
     create:
       '{"files": [{"path": "index.html", "source": "..."}], "runtime"?: "browser"|"react"|"python"|"none", "entry"?: "index.html", "title"?, "description"?}',
-    edit: "replace {file, find, replace, all?} (exact text, including indentation) | write_file {path, source} | delete_file {path} | rename_file {path, to} | set_entry {path}",
+    edit: "replace {file, find, replace, all?} (exact text, including indentation) | write_file {path, source} | delete_file {path} | rename_file {path, to} | set_entry {path} | set_accessibility {title, description, reducedMotion?} (required metadata before publishing a visualisation; HTML labels alone do not set it)",
     read: "file, and from/to line numbers",
   },
   agent: {

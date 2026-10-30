@@ -123,6 +123,15 @@ afterAll(() => {
 });
 
 describe("Calendar application", () => {
+  it("labels the visible month's week rather than the days buffered to its left", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 9, 30, 12, 0) });
+    installFetch(() => undefined);
+    const { container } = render(<CalendarApplication />);
+    await waitFor(() => expect(container.querySelector(".spectra-calendar-week-caption")?.textContent).toBe("Oct"));
+    fireEvent.click(screen.getByRole("button", { name: "Next range" }));
+    await waitFor(() => expect(container.querySelector(".spectra-calendar-week-caption")?.textContent).toBe("Nov"));
+  });
+
   it("shows each date once across the autumn daylight-saving change", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 9, 21, 12, 0) });
     installFetch(() => undefined);

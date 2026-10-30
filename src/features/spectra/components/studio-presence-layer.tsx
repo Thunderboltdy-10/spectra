@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import type { ArtifactCollaborationTransport } from "../collaboration/types";
 import { usePresence } from "../collaboration/scoped-hooks";
-import type { InteractionState } from "../collaboration/interaction-model";
+import { stateIsVisible, type InteractionState } from "../collaboration/interaction-model";
 import {
   CollaborationCursorLayer,
   CollaborationPresenceIndicator,
@@ -22,7 +22,10 @@ export function StudioLegacyCursorLayer({
 }) {
   const presence = usePresence(transport);
   const legacyPresence = useMemo(
-    () => presence.filter((person) => !person.interactionState),
+    // Native editors publish their own exact selection. An idle generic
+    // interaction frame must not suppress that caret; only a visible semantic
+    // frame owns its rendering in InteractionLayer.
+    () => presence.filter((person) => !person.interactionState || !stateIsVisible(person.interactionState)),
     [presence],
   );
   return (

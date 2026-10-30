@@ -66,6 +66,27 @@ function deps(overrides: Partial<LoopDeps> & Pick<LoopDeps, "callModel" | "tools
 const user = (content: string): HarnessMessage => ({ role: "user", content });
 
 describe("runHarnessLoop", () => {
+  it("returns a rejected argument error without exposing unparsed input to presentation hooks", async () => {
+    const command = tool({
+      name: "command",
+      parse: () => { throw new Error("Unknown command"); },
+      shows: (args: { work: { id: string } }) => args.work.id,
+    });
+    const model = scripted([
+      { text: "", toolCalls: [call("invalid", "command", { id: "missing" })] },
+      (messages) => {
+        expect(messages.at(-1)).toEqual({ role: "tool", tool_call_id: "invalid", content: "command: Unknown command" });
+        return { text: "I can try another command.", toolCalls: [] };
+      },
+    ]);
+    const outcome = await runHarnessLoop(emptyLoopState([user("go")]), deps({
+      callModel: model.caller,
+      tools: [command],
+      hooks: { onToolStart: (step) => { if (step.args) step.tool?.shows?.(step.args); } },
+    }));
+    expect(outcome.status).toBe("completed");
+  });
+
   it("answers in one model call when no tools are needed", async () => {
     const model = scripted([{ text: "Hello! What are you working on?", toolCalls: [] }]);
     const texts: string[] = [];

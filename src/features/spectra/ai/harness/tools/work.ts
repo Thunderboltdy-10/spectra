@@ -311,7 +311,7 @@ export function workTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "publish_code",
       description:
-        "Publish a Code work's live build, so everyone who can open the work runs the current code (publish), or take the build down (unpublish). Publishing builds the work's saved source; when the build fails you get the compiler's report to fix the code with edit_artifact. The user approves it unless they allowed publishing.",
+        "Publish a Code work's live build, so everyone who can open the work runs the current code (publish), or take the build down (unpublish). Before publishing a visualisation, set its accessible title and text alternative using edit_artifact set_accessibility {title, description}; HTML labels do not set the work's metadata. Publishing builds the work's saved source; when the build fails you get the compiler's report to fix the code with edit_artifact. The user approves it unless they allowed publishing.",
       parameters: {
         type: "object",
         properties: { artifactId: { type: "string" }, action: { type: "string", enum: ["publish", "unpublish"] } },

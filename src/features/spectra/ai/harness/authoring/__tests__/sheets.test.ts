@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { resolveArtifactWriteInput } from "../../../../operations/artifact-write-content";
 import { applySheetsEdits, sheetRangeText, sheetsFromSpec, sheetsProblems, sheetsReadback } from "../sheets";
 import { AuthoringError, sequentialIdFactory } from "../shared";
+import { authorNew } from "../index";
+import { parseModelOperation } from "../../../../operations/schema";
+import { assertCreateContentNotHollow } from "../../../../operations/hollow-content";
 
 const budget = {
   sheets: [
@@ -21,6 +24,21 @@ const budget = {
 };
 
 describe("sheets authoring", () => {
+  it("passes the authored workbook through the operation create path with its cells intact", () => {
+    const authored = authorNew("sheets", budget, { timeZone: "Europe/Madrid" });
+    const operation = parseModelOperation({
+      type: "artifact.create",
+      input: {
+        blueprintKey: "sheets", title: "Budget", content: authored.content,
+        summary: null, workspaceId: null, tags: [], placement: "inbox", pinned: false, exclusivePin: false,
+      },
+    });
+    if (operation.type !== "artifact.create") throw new Error("Expected a create operation");
+    expect(() => assertCreateContentNotHollow("sheets", operation.input.content, "create")).not.toThrow();
+    expect(sheetRangeText(operation.input.content)).toMatch(/4 \| Total \|\s+\|\s+\| 27/);
+    expect(authored.readback).toContain("1 chart");
+  });
+
   it("builds a workbook from rows with formulas, formats and a chart", () => {
     const { content } = sheetsFromSpec(budget, sequentialIdFactory());
     const sheet = content.sheets[0]!;

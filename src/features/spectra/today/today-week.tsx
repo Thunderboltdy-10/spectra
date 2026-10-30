@@ -13,6 +13,8 @@ import type { SchoolTask } from "../school/school-model";
 import { inkStyle } from "../school/use-class-book";
 import { useDeadlineClasses } from "../school/use-deadline-classes";
 import type { TodayAgenda } from "./today-model";
+import { useWorkspaceCatalog } from "../data/use-catalog-pages";
+import { workspaceHref } from "../pages/shell-location";
 
 /*
  * The week across the top of Home, as a desk calendar laid open: today wide
@@ -20,7 +22,7 @@ import type { TodayAgenda } from "./today-model";
  * with what falls due on each. A deadline from ManageBac wears its class's
  * ink and opens beside Home as the planner work Spectra made for it; a plan
  * opens as its work there too; anything else opens the Calendar. Above
- * it, the two things a student checks before anything else: what is late,
+ * class opens its workspace when one exists. Above it, the two things a student checks before anything else: what is late,
  * and how much has no date yet.
  */
 
@@ -58,6 +60,7 @@ const endOfDay = (at: number) => {
 export function TodayWeek({ agenda, failed, now }: { agenda: TodayAgenda | null; failed: boolean; now: number }) {
   const { tasks } = useDueByClass();
   const classOf = useDeadlineClasses();
+  const workspaces = useWorkspaceCatalog().items;
   const start = startOfLocalDay(now);
 
   const days = useMemo(() => {
@@ -123,7 +126,8 @@ export function TodayWeek({ agenda, failed, now }: { agenda: TodayAgenda | null;
                 ) : entries.length ? (
                   <ul className="today-day-items">
                     {entries.slice(0, limit).map((entry) => (
-                      <DayItem key={entry.item.id} entry={entry} now={now} showTime={today} />
+                      <DayItem key={entry.item.id} entry={entry} now={now} showTime={today}
+                        classWorkspaceId={entry.item.kind === "official_event" ? workspaces.find((workspace) => workspace.title === entry.item.title)?._id : undefined} />
                     ))}
                     {entries.length > limit ? (
                       <li>
@@ -145,7 +149,7 @@ export function TodayWeek({ agenda, failed, now }: { agenda: TodayAgenda | null;
   );
 }
 
-function DayItem({ entry, now, showTime }: { entry: Entry; now: number; showTime: boolean }) {
+function DayItem({ entry, now, showTime, classWorkspaceId }: { entry: Entry; now: number; showTime: boolean; classWorkspaceId?: string }) {
   const { item, identity, task } = entry;
   const at = item.startAt!;
   const over = (item.endAt ?? at) < now;
@@ -156,7 +160,7 @@ function DayItem({ entry, now, showTime }: { entry: Entry; now: number; showTime
   return (
     <li>
       <Link
-        href={task ? schoolTaskHref(task.recordId) : work ? `/library/${encodeURIComponent(work)}` : "/calendar"}
+        href={classWorkspaceId ? workspaceHref(classWorkspaceId) : task ? schoolTaskHref(task.recordId) : work ? `/library/${encodeURIComponent(work)}` : "/calendar"}
         onClick={task ? onTaskClick(task.recordId) : work ? sideClick(() => openWorkInSide(work)) : undefined}
         prefetch={false}
         style={style}

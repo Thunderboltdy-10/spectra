@@ -272,6 +272,10 @@ function rememberEvent(event: SpectraAiUiEvent): void {
           ? event.payload.note
           : "Updating Calendar",
     });
+    // Read each committed placement while its arrival target is still fresh.
+    // Waiting for the run's final event can leave a mounted Calendar stale
+    // throughout a multi-step plan and miss the block's light entirely.
+    spectraBus.emit("calendar.changed", {});
     return;
   }
   if (event.key === "reference_insert") {

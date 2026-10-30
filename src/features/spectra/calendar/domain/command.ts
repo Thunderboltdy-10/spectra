@@ -118,7 +118,7 @@ export function calendarSemanticAction(
       typeof args.planTaskId === "string" && args.planTaskId.trim()
         ? args.planTaskId.trim()
         : undefined;
-    if (!taskItemId && !(planArtifactId && planTaskId))
+    if (!taskItemId && !planArtifactId)
       throw new Error("CALENDAR_TASK_REQUIRED: Choose a task or plan to schedule.");
     return {
       type: "calendar.schedule_task",

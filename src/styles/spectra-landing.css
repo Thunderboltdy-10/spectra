@@ -829,9 +829,30 @@
   box-shadow: none;
 }
 
-/* Nothing in a window scrolls, and nothing in it talks about saving. */
-.sp-scaled-inner :is(.overflow-auto, .overflow-y-auto, .overflow-x-auto, .overflow-scroll, [data-scroll-area], [data-radix-scroll-area-viewport]) {
+/* Disable the app's scroll containers in landing mockups, including editors outside Scaled. */
+.sp-root :is(
+  .overflow-auto, .overflow-y-auto, .overflow-x-auto,
+  .overflow-scroll, .overflow-y-scroll, .overflow-x-scroll,
+  [data-scroll-area], [data-radix-scroll-area-viewport],
+  .document-desk, .spectra-editor-body, .spectra-item-rail-list,
+  .sheets-grid-viewport, .cm-scroller,
+  .today-week, .island-rail-scroller
+) {
+  overflow: clip !important;
+}
+
+.sp-root :is(.sp-scaled-inner, .sp-together-desk, .landing-studio) textarea {
+  overflow: clip !important;
+}
+
+/* Keep the calendar's scripted initial position, but let gestures scroll the page. */
+.sp-root .spectra-calendar-scroll {
   overflow: hidden !important;
+}
+
+.sp-root :is(.sp-scaled-inner, .sp-together-desk, .landing-studio) * {
+  overscroll-behavior: auto !important;
+  touch-action: auto !important;
 }
 
 .sp-window :is([data-save-status], .studio-save-status, [data-sync-warning]) {
@@ -3501,11 +3522,6 @@
   }
 }
 
-/* Nothing inside a picture of the app scrolls or shows a scrollbar: the page scrolls instead. */
-.sp-scaled-inner * {
-  scrollbar-width: none;
-}
-
 @keyframes sp-spin {
   to {
     transform: rotate(1turn);
@@ -3514,15 +3530,6 @@
 
 /* Home in the hero keeps two things a day, so what to pick up is in view below the week. */
 .sp-hero .today-day-items > li:nth-child(n + 3) {
-  display: none;
-}
-
-/* No scrollbars inside the page's pictures of the app: they do not scroll. */
-.sp-main * {
-  scrollbar-width: none;
-}
-
-.sp-main *::-webkit-scrollbar {
   display: none;
 }
 

@@ -4,12 +4,24 @@ import { AuthShell } from "@/components/auth/auth-shell";
 import { SignedInContinue } from "@/components/signed-in-continue";
 import { SignInConnectionState } from "@/components/account-connection-state";
 import { authHrefForRedirect } from "@/lib/invitation-session";
+import {
+  invitationLanding,
+  invitationRoleLabel,
+  joinTokenFromRedirect,
+  type InvitationLanding,
+} from "@/lib/invitation-landing";
 
 function getSearchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function SignUpCard({ redirectUrl }: { redirectUrl?: string }) {
+function SignUpCard({
+  redirectUrl,
+  invitation,
+}: {
+  redirectUrl?: string;
+  invitation: InvitationLanding | null;
+}) {
   const invitationFlow = redirectUrl?.includes("/join?token=") ?? false;
 
   return (
@@ -19,14 +31,27 @@ function SignUpCard({ redirectUrl }: { redirectUrl?: string }) {
         <span aria-current="page">Sign up</span>
       </nav>
       <div>
-        <h1 className="auth-title">Create your account</h1>
+        <h1 className="auth-title">
+          {invitation ? `Join ${invitation.schoolName}` : "Create your account"}
+        </h1>
         <p className="auth-lede">
-          Join your school on Spectra to plan, study and make work together,
-          with Spectra AI beside you.
+          {invitation
+            ? `You were invited as a ${invitationRoleLabel(invitation.role)}. Create your account with ${invitation.email} and you'll join straight after.`
+            : "Join your school on Spectra to plan, study and make work together, with Spectra AI beside you."}
         </p>
       </div>
       <div className="auth-note">
-        {invitationFlow ? (
+        {invitation ? (
+          <>
+            Already have an account?{" "}
+            <Link
+              href={authHrefForRedirect("/sign-in", redirectUrl)}
+              className="font-medium text-[var(--text-primary)] underline underline-offset-2"
+            >
+              Sign in instead
+            </Link>
+          </>
+        ) : invitationFlow ? (
           <>
             Use the email your invitation went to. You&rsquo;ll come back to the
             invitation to join.
@@ -58,6 +83,7 @@ function SignUpCard({ redirectUrl }: { redirectUrl?: string }) {
           }}
           fallbackRedirectUrl={redirectUrl || "/workspace"}
           forceRedirectUrl={redirectUrl || "/workspace"}
+          initialValues={invitation ? { emailAddress: invitation.email } : undefined}
         />
       </div>
     </AuthShell>
@@ -71,5 +97,6 @@ export default async function SignUpPage({
 }) {
   const params = await searchParams;
   const redirectUrl = getSearchParam(params.redirect_url);
-  return <SignUpCard redirectUrl={redirectUrl} />;
+  const invitation = await invitationLanding(joinTokenFromRedirect(redirectUrl));
+  return <SignUpCard redirectUrl={redirectUrl} invitation={invitation} />;
 }

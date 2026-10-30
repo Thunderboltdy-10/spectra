@@ -11,7 +11,6 @@ import { CAST, type CastId } from "../../world/story";
 import { WORKS } from "../../world/works";
 import { dimAll, flash, shine, travel } from "../light/light";
 import { useLoop, type Beat } from "../loop";
-import { useStill } from "../window";
 
 /*
  * Henry's revision slides in the real presentation studio, with the people
@@ -65,7 +64,6 @@ export function Together() {
   const { move, leave } = presence;
   const [who, setWho] = useState(0);
   const [doing, setDoing] = useState<Partial<Record<CastId, string>>>({});
-  useStill(deskRef);
 
   const say = (id: CastId, what: string | null) =>
     setDoing((was) => {

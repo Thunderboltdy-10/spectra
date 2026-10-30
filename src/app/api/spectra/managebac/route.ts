@@ -299,9 +299,19 @@ function officialPersonalCapabilities() {
         transform: "managebac_timetable",
         recordsPath: "timetable.academic_years",
         idPath: "id",
+        // Two classes can share a slot, so the class is part of its key.
+        recordKeyTemplate: "timetable:{$classId}:{id}",
         classification: "personal",
         audienceScope: "mapped_user",
-        fields: {},
+        fields: {
+          day: "day",
+          periodKey: "periodKey",
+          location: "location",
+          academicYearStartsOn: "academic_year_starts_on",
+          academicYearEndsOn: "academic_year_ends_on",
+          startAt: "start_at",
+          endAt: "end_at",
+        },
       },
     },
     {
@@ -758,9 +768,10 @@ function normalizeProviderPage(
             for (const slotValue of slots) {
               const slot = object(slotValue);
               if (slot.enabled === false) continue;
+              // A cycle day, not a weekday: a two-week rotation numbers its days 1 to 10.
               const day = Number(slot.day);
               const period = Number(slot.period);
-              if (!Number.isInteger(day) || day < 1 || day > 7) continue;
+              if (!Number.isInteger(day) || day < 1 || day > 30) continue;
               const explicitStart = timestamp(
                 slot.starts_at ?? slot.start_at ?? slot.start,
               );

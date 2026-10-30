@@ -1,14 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SpectraMark } from "@/components/spectra-mark";
 import { ShowcaseProvider } from "@/features/spectra/showcase/showcase-provider";
 import { LaterScene, later, useWarm } from "../kit/later";
 import { WorldContext } from "../kit/world-context";
 import { StoryWorld } from "../world/world";
 import { LightField } from "./light/light-field";
-import { useStill } from "./window";
 import { Ending } from "./scenes/ending";
 import { Hero } from "./scenes/hero";
 
@@ -66,17 +65,15 @@ function Header() {
 export function SpectraPage() {
   const [world] = useState(() => new StoryWorld());
   const showcase = useMemo(() => world.showcase(), [world]);
-  const mainRef = useRef<HTMLElement>(null);
   useWarm(SCENES);
-  // Nothing in the page's pictures of the app scrolls on its own; a wheel anywhere scrolls the page.
-  useStill(mainRef);
   return (
     <ShowcaseProvider world={showcase}>
       <WorldContext.Provider value={world}>
         <div className="sp-root">
           <LightField />
           <Header />
-          <main ref={mainRef} className="sp-main">
+          {/* Bypass editor wheel handlers without cancelling the browser's native scroll. */}
+          <main className="sp-main" onWheelCapture={(event) => event.stopPropagation()}>
             <Hero />
             {SCENES.map((scene, index) => (
               <LaterScene key={index} scene={scene} />

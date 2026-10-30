@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AppWindow, type RailPlace } from "../kit/app-window";
 
 /*
@@ -9,50 +9,6 @@ import { AppWindow, type RailPlace } from "../kit/app-window";
  * has; it reads the same on every screen, and everything in it still works.
  * The page shows the page alone: no rail, no island, nothing that scrolls.
  */
-
-/** The page's pictures of the app: a wheel over any of them scrolls the page. */
-const PICTURES = ".sp-scaled, .sp-together-desk, .sp-studio, .sp-people, .landing-studio, .sp-bridge-app";
-const LINE = 16;
-
-/**
- * A wheel or a swipe over a picture of the app scrolls the page, never something inside the picture: whatever
- * would scroll under the pointer is made still as the pointer comes to it. A still box still holds the wheel,
- * so the wheel over a picture is taken before the app sees it and handed to the page.
- */
-export function useStill(ref: RefObject<HTMLElement | null>) {
-  useEffect(() => {
-    const outer = ref.current;
-    if (!outer) return;
-    const still = (event: Event) => {
-      for (let node = event.target as HTMLElement | null; node && node !== outer; node = node.parentElement) {
-        if (node.dataset.still) continue;
-        // Only what scrolls is marked, so a surface that becomes scrollable later is still caught.
-        const style = getComputedStyle(node);
-        if (!/(auto|scroll)/.test(style.overflowY + style.overflowX)) continue;
-        node.style.setProperty("overflow", "hidden", "important");
-        node.dataset.still = "";
-      }
-    };
-    const forward = (event: WheelEvent) => {
-      // A pinch or ctrl-wheel stays the browser's zoom.
-      if (event.ctrlKey || event.defaultPrevented) return;
-      const target = event.target as Element | null;
-      if (!target?.closest?.(PICTURES)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const unit = event.deltaMode === 1 ? LINE : event.deltaMode === 2 ? window.innerHeight : 1;
-      window.scrollBy({ top: event.deltaY * unit, left: 0, behavior: "instant" });
-    };
-    outer.addEventListener("pointerover", still, { passive: true });
-    outer.addEventListener("wheel", still, { passive: true });
-    outer.addEventListener("wheel", forward, { passive: false, capture: true });
-    return () => {
-      outer.removeEventListener("pointerover", still);
-      outer.removeEventListener("wheel", still);
-      outer.removeEventListener("wheel", forward, { capture: true });
-    };
-  }, [ref]);
-}
 
 /**
  * Holds a design size and scales it to its container's width, keeping its
@@ -75,7 +31,6 @@ export function Scaled({
 }) {
   const outerRef = useRef<HTMLDivElement>(null);
   const [room, setRoom] = useState(width);
-  useStill(outerRef);
   useEffect(() => {
     const outer = outerRef.current;
     if (!outer) return;

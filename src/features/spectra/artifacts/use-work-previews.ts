@@ -6,6 +6,7 @@ import type { PresentedWorkType } from "./presentation";
 import { cornerPreview, threadPreview, workPreview, type WorkPreview } from "./work-preview";
 import { fileViewKind } from "../files/file-kind";
 import { readOfficeBytes } from "../files/office-preview-client";
+import { useBusyArtifacts } from "../collaboration/artifact-ai-activity";
 
 /*
  * Previews for cards. Catalogs carry no content, so each card's work is read
@@ -18,6 +19,7 @@ import { readOfficeBytes } from "../files/office-preview-client";
 export type PreviewSource = { _id: string; blueprintKey: PresentedWorkType; updatedAt: number; title?: string };
 
 const cache = new Map<string, WorkPreview | null>();
+const lastFinished = new Map<string, WorkPreview | null>();
 const keyOf = (work: PreviewSource) => `${work._id}:${work.updatedAt}`;
 /** The files a card draws from their own bytes: a PDF's first page, a sheet's corner, a deck's slides. */
 function fileFace(work: PreviewSource) {
@@ -104,7 +106,10 @@ async function readPreview(work: PreviewSource, signal: AbortSignal) {
   try {
     if (signal.aborted || cache.has(keyOf(work))) return;
     const preview = await previewFor(work, signal);
-    if (!signal.aborted) cache.set(keyOf(work), preview);
+    if (!signal.aborted) {
+      cache.set(keyOf(work), preview);
+      lastFinished.set(work._id, preview);
+    }
   } catch {
     if (!signal.aborted) cache.set(keyOf(work), null);
   } finally {
@@ -114,18 +119,19 @@ async function readPreview(work: PreviewSource, signal: AbortSignal) {
 
 /** `undefined` while the work is being read. */
 function previewOf(work: PreviewSource): WorkPreview | null | undefined {
-  return readable(work) ? cache.get(keyOf(work)) : null;
+  return readable(work) ? cache.get(keyOf(work)) ?? lastFinished.get(work._id) : null;
 }
 
 /** Previews for a short, fixed set of cards, read as soon as they are known. */
 export function useWorkPreviews(works: readonly PreviewSource[] | null) {
   const [, setVersion] = useState(0);
+  const busy = useBusyArtifacts(works?.map((work) => work._id) ?? []);
   const signature = works?.map(keyOf).join("|") ?? "";
 
   useEffect(() => {
     if (!works) return;
     const controller = new AbortController();
-    const missing = works.filter((work) => readable(work) && !cache.has(keyOf(work)));
+    const missing = works.filter((work) => !busy.has(work._id) && readable(work) && !cache.has(keyOf(work)));
     for (const work of missing)
       void readPreview(work, controller.signal).finally(() => {
         if (!controller.signal.aborted) setVersion((version) => version + 1);
@@ -133,19 +139,20 @@ export function useWorkPreviews(works: readonly PreviewSource[] | null) {
     return () => controller.abort();
     // `signature` names exactly the works and versions in `works`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature]);
+  }, [signature, busy]);
 
-  return previewOf;
+  return (work: PreviewSource) => busy.has(work._id) ? lastFinished.get(work._id) : previewOf(work);
 }
 
 /** One card's preview, read only once the card comes near the screen. */
 export function useWorkPreview(work: PreviewSource, target: RefObject<Element | null>) {
   const [, setVersion] = useState(0);
+  const busy = useBusyArtifacts([work._id]).has(work._id);
   const key = keyOf(work);
 
   useEffect(() => {
     const element = target.current;
-    if (!element || !readable(work) || cache.has(key)) return;
+    if (!element || busy || !readable(work) || cache.has(key)) return;
     const controller = new AbortController();
     const observer = new IntersectionObserver(
       (entries) => {
@@ -164,7 +171,7 @@ export function useWorkPreview(work: PreviewSource, target: RefObject<Element | 
     };
     // `key` names the work and its version; `target` is a stable ref.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, busy]);
 
-  return previewOf(work);
+  return busy ? lastFinished.get(work._id) : previewOf(work);
 }

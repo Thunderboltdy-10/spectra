@@ -1,3 +1,4 @@
+import { rememberCommittedPerformance } from "./committed-performances";
 import { isFollowingAi, noteAiLocation, noteAiSurface } from "./follow-ai";
 import { touchOnScreen } from "./ai-touch";
 import { isFollowRoute } from "./follow-navigation";
@@ -390,5 +391,10 @@ function rememberEvent(event: SpectraAiUiEvent): void {
  * performances use app-choreography-host before execution, never this feed. */
 export function handleSpectraAiUiEvent(event: SpectraAiUiEvent): void {
   if (handleSettingsObservationEvent(event)) return;
+  if (event.key === "artifact_performance") {
+    const performance = rememberCommittedPerformance(event.payload?.performance, event.payload?.committedAt);
+    if (performance) noteAiLocation({ actorId: event.runId ?? performance.runId, artifactId: performance.artifactId });
+    return;
+  }
   rememberEvent(event);
 }

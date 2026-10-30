@@ -8,6 +8,7 @@ import {
   getAiSurfaceLocation,
   getFollowedAiActorId,
   followAiActor,
+  endFollowedRun,
   isFollowingAi,
   isProgrammaticOpen,
   noteAiLocation,
@@ -16,10 +17,42 @@ import {
 } from "../collaboration/follow-ai";
 import { spectraBus } from "../events";
 import { clearLandings, pendingLanding } from "../anchors/open-anchor";
+import * as performanceStage from "../collaboration/performance-stage";
 
 describe("follow AI", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     __resetFollowAi();
+  });
+
+  it("keeps following a completed run until its visible performance ends", () => {
+    vi.useFakeTimers();
+    try {
+      const playing = vi.spyOn(performanceStage, "isRunPerforming").mockReturnValue(true);
+      followAiActor("run");
+      endFollowedRun("run");
+      vi.advanceTimersByTime(2_000);
+      expect(isFollowingAi()).toBe(true);
+      expect(playing).toHaveBeenCalledWith("run");
+      playing.mockReturnValue(false);
+      vi.advanceTimersByTime(250);
+      expect(isFollowingAi()).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("lets the user stop following while the final performance is still playing", () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(performanceStage, "isRunPerforming").mockReturnValue(true);
+      followAiActor("run");
+      endFollowedRun("run");
+      vi.advanceTimersByTime(1_700);
+      setFollowingAi(false);
+      followAiActor("another-run");
+      vi.advanceTimersByTime(1_000);
+      expect(getFollowedAiActorId()).toBe("another-run");
+      expect(isFollowingAi()).toBe(true);
+    } finally { vi.useRealTimers(); }
   });
 
   function openEvents(): string[] {
@@ -29,6 +62,18 @@ describe("follow AI", () => {
     });
     return opened;
   }
+
+  it("ignores a late studio frame after its run advances to the next work", () => {
+    const opened = openEvents();
+    followAiActor("run");
+    noteAiLocation({ actorId: "run", artifactId: "first" });
+    noteAiLocation({ actorId: "run", artifactId: "next" });
+    noteAiLocation({ actorId: "run", artifactId: "first", path: "/blocks/old/text", refineOnly: true });
+    expect(opened).toEqual(["first", "next"]);
+    expect(getAiLocation()?.artifactId).toBe("next");
+    noteAiLocation({ actorId: "run", artifactId: "next", path: "/blocks/new/text", refineOnly: true });
+    expect(getAiLocation()?.path).toBe("/blocks/new/text");
+  });
 
   it("never opens anything while the mode is off", () => {
     const opened = openEvents();

@@ -4,6 +4,10 @@ import { parseApplicationCommand } from "@/app/api/spectra/run/harness/applicati
 import { calendarSemanticAction } from "../calendar/domain/command";
 
 describe("Calendar wall-time intent", () => {
+  it("allows a task card to be scheduled by work id, leaving root resolution to Calendar", () => {
+    const { args } = parseApplicationCommand("schedule_calendar_task", { planArtifactId: "task-card", startLocal: "2026-10-31T10:00", endLocal: "2026-10-31T10:45", timezone: "Europe/Madrid" });
+    expect(calendarSemanticAction("schedule_calendar_task", args)).toMatchObject({ type: "calendar.schedule_task", planArtifactId: "task-card" });
+  });
   it.each([
     ["2026-09-21T13:00", "Europe/Madrid", "2026-09-21T11:00:00.000Z"],
     ["2026-01-21T13:00", "Europe/Madrid", "2026-01-21T12:00:00.000Z"],

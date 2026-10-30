@@ -1053,6 +1053,7 @@ async function synchronizeMutation(params: {
     params.provider.setAwarenessField("user", idlePresence);
   };
   let publishedPerformanceId: string | undefined;
+  let publishedPerformance: AiPerformance | undefined;
   try {
     // One performance per edit. Viewers expand it locally into the hand's
     // gestures; the durable write never waits for the animation.
@@ -1085,6 +1086,7 @@ async function synchronizeMutation(params: {
           after,
         };
         if (JSON.stringify(performance).length <= MAX_PERFORMANCE_BYTES) {
+          publishedPerformance = performance;
           performanceClock.set(clockKey, startAt + estimateMs + 420);
           if (performanceClock.size > 200) performanceClock.delete(performanceClock.keys().next().value!);
           const current = params.provider.awareness?.getLocalState()?.user;
@@ -1224,6 +1226,7 @@ async function synchronizeMutation(params: {
     return {
       changedRegionIds: plan.regions.map((region) => region.regionId),
       ...(acceptedFrontier ? { acceptedFrontier } : {}),
+      ...(publishedPerformance ? { performance: publishedPerformance } : {}),
     };
   } catch (error) {
     logPhase("failed", {

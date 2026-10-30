@@ -55,6 +55,12 @@ function tokenExpiry(token: string) {
   }
 }
 
+/** Drop a user's cached tokens once their claims change (an email just verified). */
+export function forgetConvexTokens(userId: string) {
+  for (const key of convexTokenCache.keys())
+    if (key.startsWith(`${userId}:`)) convexTokenCache.delete(key);
+}
+
 async function getCachedSessionToken(
   cacheKey: string,
   loader: () => Promise<string | null>,

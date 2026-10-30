@@ -879,10 +879,23 @@ export function documentBlocksFromJson(json) {
 
 const MIRROR_KEYS = ["type", "text", "rows", "richRows", "inlineContent", "attrs"];
 
+// Schema validation can reorder object fields. That does not author a new
+// mirror: rebuilding an unchanged rich list would discard its item boundaries.
+function sameJsonValue(left, right) {
+  if (left === right) return true;
+  if (!left || !right || typeof left !== "object" || typeof right !== "object") return false;
+  if (Array.isArray(left) || Array.isArray(right))
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
+      left.every((value, index) => sameJsonValue(value, right[index]));
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length &&
+    keys.every((key) => Object.hasOwn(right, key) && sameJsonValue(left[key], right[key]));
+}
+
 function blockMirrorsNode(block, node) {
   const own = documentBlocksFromJson({ content: [node] })[0];
   return MIRROR_KEYS.every((key) =>
-    JSON.stringify(block[key] ?? null) === JSON.stringify(own?.[key] ?? null));
+    sameJsonValue(block[key] ?? null, own?.[key] ?? null));
 }
 
 function containsCanonicalReference(node) {

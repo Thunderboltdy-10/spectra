@@ -42,7 +42,9 @@ const authMiddleware = clerkMiddleware(async (auth, request) => {
       { status: 401 },
     );
   }
-  const signIn = new URL("/sign-in", request.url);
+  // Most people opening an invitation are new, so it starts at sign-up,
+  // which names the school and links to sign-in for existing accounts.
+  const signIn = new URL(url.pathname === "/join" ? "/sign-up" : "/sign-in", request.url);
   signIn.searchParams.set("redirect_url", `${url.pathname}${url.search}`);
   return NextResponse.redirect(signIn);
 });

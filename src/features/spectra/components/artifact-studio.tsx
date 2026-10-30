@@ -161,6 +161,7 @@ import { useArtifactLiveModel } from "../collaboration/use-artifact-live-model";
 import { useLocalOnlyCollaboration } from "../collaboration/local-only";
 import { usePresencePreview } from "../collaboration/scoped-hooks";
 import type { SpeculativeBlockText } from "../editor/ai-speculation-decoration";
+import { documentPerformancePreview } from "../collaboration/document-performance-preview";
 import { useInteractionPresence } from "../collaboration/use-interaction-presence";
 import { contextSourceRegistry } from "../context";
 import {
@@ -4438,6 +4439,7 @@ function ArtifactStudioEditor({
       artifactId: artifact._id,
       path: aiInteractionState.target.path,
       note: describeState(aiInteractionState),
+      refineOnly: true,
     });
   }, [artifact._id, aiInteractionState]);
 
@@ -4583,6 +4585,8 @@ function ArtifactStudioEditor({
    * provisional value is visible while the peer is still typing, and vanishes
    * on its own if their operation never lands.
    */
+  const showingDocumentPerformance = artifact.blueprintKey === "document" && followAi.following && Boolean(presencePreview);
+  const documentPerformanceContent = useMemo(() => showingDocumentPerformance ? documentPerformancePreview(durableEditorContent) : null, [showingDocumentPerformance, durableEditorContent]);
   const editorContent = useMemo(() => {
     if (remoteSpeculation.size === 0) return durableEditorContent;
     let documentBlocksAreSpeculative = false;
@@ -6591,23 +6595,23 @@ function ArtifactStudioEditor({
             <StudioContractProvider value={studioContract}>
               {artifact.blueprintKey === "document" ? (
                 <DocumentStudio
-                  key={`${artifact._id}:document`}
+                  key={`${artifact._id}:${showingDocumentPerformance ? "performance" : "document"}`}
                   artifactId={artifact._id}
                   title={title}
-                  content={editorContent}
+                  content={documentPerformanceContent ?? editorContent}
                   contentIsProvisional={streamingSource !== "local" || remoteSpeculation.size > 0}
-                  speculation={speculativeBlockTexts}
-                  onChange={editorChange}
+                  speculation={showingDocumentPerformance ? NO_SPECULATIVE_BLOCKS : speculativeBlockTexts}
+                  onChange={showingDocumentPerformance ? () => undefined : editorChange}
                   onBeforeNativeExport={async () => !dirty || save()}
                   aiChangedPaths={highlightPaths}
-                  readOnly={readOnly}
+                  readOnly={readOnly || showingDocumentPerformance}
                   nativeReadOnlyRegionIds={nativeReadOnlyRegionIds}
                   collaborationDocument={
-                    live.modelSnapshot.initialized
+                    !showingDocumentPerformance && live.modelSnapshot.initialized
                       ? live.transport?.document
                       : undefined
                   }
-                  binding={bodyRoomBinding}
+                  binding={!showingDocumentPerformance && bodyRoomBinding}
                   onLocalCollaborativeChange={
                     markLocalCollaborativeDocumentChange
                   }

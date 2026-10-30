@@ -176,10 +176,13 @@ export function DaySky() {
         </g>
         <rect className="day-sky-edge" x="0.5" y="0.5" width={W - 1} height={H - 1} rx="15.5" />
       </svg>
-      <time className="morning-time" dateTime={now.toISOString()}>
+      {/* The server and the reader can format times in different locales
+          ("8:05 AM" against "8:05"); a mismatch here broke the whole page's
+          hydration, so the sign-in and join forms stopped responding. */}
+      <time className="morning-time" dateTime={now.toISOString()} suppressHydrationWarning>
         {timeFormat.format(now)}
       </time>
-      <span className="day-sky-date">{dateFormat.format(now)}</span>
+      <span className="day-sky-date" suppressHydrationWarning>{dateFormat.format(now)}</span>
     </div>
   );
 }

@@ -1202,6 +1202,9 @@ export async function executeOperation(
         await new Promise((resolve) => setTimeout(resolve, 250));
       }
     }
+    if ("performance" in mutationResult && mutationResult.performance) {
+      await context.onUiEvent?.({ key: "artifact_performance", payload: { performance: mutationResult.performance, committedAt: Date.now() } });
+    }
     if (!output.nodeId && pending.nodeId) output.nodeId = pending.nodeId;
     if (typeof output.artifactId === "string") affected.push({ type: "artifact", id: output.artifactId });
     if (typeof output.nodeId === "string") affected.push({ type: "workspaceItem", id: output.nodeId });
@@ -1248,7 +1251,9 @@ export async function executeOperation(
         content: input.content ?? current.content,
       }),
     });
-    output = mutationResult as Record<string, unknown>;
+    const { performance, ...receipt } = mutationResult as typeof mutationResult & { performance?: unknown };
+    output = receipt as Record<string, unknown>;
+    if (performance) await context.onUiEvent?.({ key: "artifact_performance", payload: { performance, committedAt: Date.now() } });
     const changedPaths =
       input.content !== null
         ? materializeAiChangedPaths(

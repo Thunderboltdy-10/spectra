@@ -70,6 +70,9 @@ vi.mock("@hocuspocus/provider", () => ({
 }));
 
 import { HocuspocusArtifactTransport } from "../collaboration/hocuspocus-transport";
+import { rememberCommittedPerformance } from "../collaboration/committed-performances";
+import { performancePatches } from "../collaboration/performance";
+import { initializeNativeArtifactDocument } from "../../../../scripts/collaboration-native-projection.mjs";
 
 describe("P5.I2 Hocuspocus transport lifecycle", () => {
   beforeEach(() => {
@@ -101,6 +104,20 @@ describe("P5.I2 Hocuspocus transport lifecycle", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("plays the acknowledged creation when its document arrives after the event", async () => {
+    const before = { title: "Revision", tags: [], content: { blocks: [] } };
+    const after = { ...before, content: { blocks: [{ id: "intro", type: "paragraph", text: "Review vectors." }] } };
+    rememberCommittedPerformance({ v: 1, id: "transport-creation", artifactId: "new-work", runId: "run", operationId: "op",
+      typeKey: "document", actor: { clientId: "ai-new", kind: "ai", name: "Spectra" }, regionIds: ["artifact:structure"],
+      startAt: Date.now() - 30_000, estimateMs: 1_000, seed: 1, tempo: 1, ...performancePatches(before, after) }, Date.now());
+    const transport = new HocuspocusArtifactTransport("new-work");
+    await transport.connect();
+    expect(transport.getSnapshot().presence).toEqual([]);
+    initializeNativeArtifactDocument(transport.document, { ...after, typeKey: "document", schemaVersion: 4 });
+    expect(transport.getSnapshot().presence).toContainEqual(expect.objectContaining({ actorKind: "ai", clientId: "ai-new", previewPhase: "streaming" }));
+    transport.destroy();
   });
 
   it("attaches the document provider and owns the external socket lifecycle", async () => {

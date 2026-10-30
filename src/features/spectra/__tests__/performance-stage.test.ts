@@ -6,7 +6,7 @@ import {
   performancePatches,
   type AiPerformance,
 } from "../collaboration/performance";
-import { PerformanceStage } from "../collaboration/performance-stage";
+import { PerformanceStage, isRunPerforming } from "../collaboration/performance-stage";
 
 const base: ArtifactLiveValue = {
   title: "Notes",
@@ -51,6 +51,21 @@ function performance(startAt: number, id = "op-1"): AiPerformance {
 afterEach(() => vi.useRealTimers());
 
 describe("AI performances", () => {
+  it("tracks queued playback by run and releases it on completion or teardown", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const stage = new PerformanceStage(() => desired, () => undefined);
+    const pending = { ...performance(11_000), runId: "queued-follow-run" };
+    stage.ingest([pending]);
+    expect(isRunPerforming(pending.runId)).toBe(true);
+    expect(isRunPerforming("another-run")).toBe(false);
+    vi.advanceTimersByTime(20_000);
+    expect(isRunPerforming(pending.runId)).toBe(false);
+    stage.ingest([{ ...performance(31_000, "op-next"), runId: pending.runId }]);
+    expect(isRunPerforming(pending.runId)).toBe(true);
+    stage.destroy();
+    expect(isRunPerforming(pending.runId)).toBe(false);
+  });
   it("send only the changed text and rebuild both sides from either copy", () => {
     const { before, after } = performancePatches(base, desired);
     expect(after).toEqual([{ path: "/content/blocks/0/text", value: "The mitochondrion makes ATP." }]);

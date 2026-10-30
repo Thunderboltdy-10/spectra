@@ -4,12 +4,24 @@ import { AuthShell } from "@/components/auth/auth-shell";
 import { SignedInContinue } from "@/components/signed-in-continue";
 import { SignInConnectionState } from "@/components/account-connection-state";
 import { authHrefForRedirect } from "@/lib/invitation-session";
+import {
+  invitationLanding,
+  invitationRoleLabel,
+  joinTokenFromRedirect,
+  type InvitationLanding,
+} from "@/lib/invitation-landing";
 
 function getSearchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function SignInCard({ redirectUrl }: { redirectUrl?: string }) {
+function SignInCard({
+  redirectUrl,
+  invitation,
+}: {
+  redirectUrl?: string;
+  invitation: InvitationLanding | null;
+}) {
   const invitationFlow = redirectUrl?.includes("/join?token=") ?? false;
 
   return (
@@ -19,13 +31,16 @@ function SignInCard({ redirectUrl }: { redirectUrl?: string }) {
         <Link href={authHrefForRedirect("/sign-up", redirectUrl)}>Sign up</Link>
       </nav>
       <div>
-        <h1 className="auth-title">Welcome back</h1>
+        <h1 className="auth-title">
+          {invitation ? `Join ${invitation.schoolName}` : "Welcome back"}
+        </h1>
         <p className="auth-lede">
-          Pick up where you left off: your work, your chats and your school, in
-          one place.
+          {invitation
+            ? `You were invited as a ${invitationRoleLabel(invitation.role)}. Sign in with ${invitation.email} to join, or create your account if you're new.`
+            : "Pick up where you left off: your work, your chats and your school, in one place."}
         </p>
       </div>
-      {invitationFlow ? (
+      {invitationFlow && !invitation ? (
         <div className="auth-note">
           Sign in with the email your invitation went to. You&rsquo;ll come back
           to the invitation to join.
@@ -45,6 +60,7 @@ function SignInCard({ redirectUrl }: { redirectUrl?: string }) {
           }}
           fallbackRedirectUrl={redirectUrl || "/workspace"}
           forceRedirectUrl={redirectUrl || "/workspace"}
+          initialValues={invitation ? { emailAddress: invitation.email } : undefined}
         />
       </div>
     </AuthShell>
@@ -58,5 +74,6 @@ export default async function SignInPage({
 }) {
   const params = await searchParams;
   const redirectUrl = getSearchParam(params.redirect_url);
-  return <SignInCard redirectUrl={redirectUrl} />;
+  const invitation = await invitationLanding(joinTokenFromRedirect(redirectUrl));
+  return <SignInCard redirectUrl={redirectUrl} invitation={invitation} />;
 }

@@ -3102,6 +3102,231 @@ async function ensureTimetableProjection(
   return { projection: (await ctx.db.get(projectionId))!, created: calendar.created };
 }
 
+/*
+ * ManageBac's timetable names a cycle day and a period, never a date or a clock
+ * time. Each slot becomes its lessons around today: cycle days run over school
+ * weekdays from the first Monday of the academic year (a two-week rotation is
+ * days 1 to 10), and the school's verified period map gives each lesson its
+ * time. Every sync moves the window, so the calendar always has the weeks ahead.
+ */
+const LESSON_DAYS_BEFORE = 14;
+const LESSON_DAYS_AFTER = 56;
+const DAY_MS = 24 * 60 * 60_000;
+
+function timetableCycleDay(source: Doc<"externalRecords">) {
+  if (source.recordType !== "timetable") return undefined;
+  const day = Number(record(source.normalized).day);
+  return Number.isInteger(day) && day >= 1 ? day : undefined;
+}
+
+type TimetableContext = {
+  cycleLengths: Map<string, number>;
+  classNames: Map<string, string>;
+  periods: Map<string, Doc<"calendarPeriodMaps">>;
+};
+const timetableContexts = new WeakMap<MutationCtx, Map<string, TimetableContext>>();
+
+/** What every slot of one student needs, read once per mutation. */
+async function timetableContext(
+  ctx: MutationCtx,
+  schoolId: Id<"schools">,
+  accountId: Id<"accounts">,
+) {
+  const byAccount = timetableContexts.get(ctx) ?? new Map<string, TimetableContext>();
+  timetableContexts.set(ctx, byAccount);
+  const known = byAccount.get(accountId);
+  if (known) return known;
+  const [slots, classes, periods] = await Promise.all([
+    ctx.db.query("externalRecords")
+      .withIndex("by_account_type", (q) => q.eq("mappedAccountId", accountId).eq("recordType", "timetable"))
+      .take(1_000),
+    ctx.db.query("externalRecords")
+      .withIndex("by_account_type", (q) => q.eq("mappedAccountId", accountId).eq("recordType", "class"))
+      .take(500),
+    ctx.db.query("calendarPeriodMaps")
+      .withIndex("by_school_updated", (q) => q.eq("schoolId", schoolId))
+      .take(100),
+  ]);
+  const cycleLengths = new Map<string, number>();
+  for (const slot of slots) {
+    const day = timetableCycleDay(slot);
+    if (slot.tombstone || day === undefined) continue;
+    const year = slot.academicPeriodKey ?? "";
+    cycleLengths.set(year, Math.max(cycleLengths.get(year) ?? 5, day));
+  }
+  const classNames = new Map<string, string>();
+  for (const item of classes) {
+    const name = classTitle(item);
+    if (item.providerClassId && name && !classNames.has(item.providerClassId))
+      classNames.set(
+        item.providerClassId,
+        classIdentity({ providerClassId: item.providerClassId, title: name }).name,
+      );
+  }
+  const context = {
+    cycleLengths,
+    classNames,
+    periods: new Map(periods.map((period) => [period.periodKey, period])),
+  };
+  byAccount.set(accountId, context);
+  return context;
+}
+
+/** The dates in the window a slot meets on. */
+function lessonDates(
+  normalized: Record<string, unknown>,
+  cycleDay: number,
+  cycleLength: number,
+  weekdays: number[],
+  now: number,
+) {
+  const parse = (value: unknown) => {
+    const date = typeof value === "string" ? value.slice(0, 10) : "";
+    return /^\d{4}-\d{2}-\d{2}$/.test(date) ? Date.parse(`${date}T00:00:00.000Z`) : undefined;
+  };
+  const yearStart = parse(normalized.academicYearStartsOn);
+  if (yearStart === undefined) return [];
+  const yearEnd = parse(normalized.academicYearEndsOn) ?? yearStart + 366 * DAY_MS;
+  // Day 1 of the cycle is the first Monday of the academic year.
+  const firstMonday = yearStart + ((8 - new Date(yearStart).getUTCDay()) % 7) * DAY_MS;
+  const today = Math.floor(now / DAY_MS) * DAY_MS;
+  const from = Math.max(firstMonday, today - LESSON_DAYS_BEFORE * DAY_MS);
+  const to = Math.min(yearEnd, today + LESSON_DAYS_AFTER * DAY_MS);
+  const dates: string[] = [];
+  for (let day = from; day <= to; day += DAY_MS) {
+    const weekday = new Date(day).getUTCDay();
+    if (weekday === 0 || weekday === 6) continue;
+    if (weekdays.length && !weekdays.includes(weekday)) continue;
+    const weeks = Math.floor((day - firstMonday) / (7 * DAY_MS));
+    const schoolDay = weeks * 5 + (weekday - 1);
+    if ((schoolDay % cycleLength) + 1 === cycleDay)
+      dates.push(new Date(day).toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
+/** Retire a slot's lessons: every one, or those in the window it was just placed in that it no longer meets on. */
+async function retireLessons(
+  ctx: MutationCtx,
+  sourceId: Id<"externalRecords">,
+  accountId: Id<"accounts">,
+  keep?: { keys: Set<string>; from: number },
+) {
+  const items = await ctx.db
+    .query("calendarItems")
+    .withIndex("by_source_record", (q) => q.eq("sourceRecordId", sourceId))
+    .take(500);
+  const now = Date.now();
+  for (const item of items) {
+    if (item.ownerAccountId !== accountId || !item.sourceLocked || item.status === "removed") continue;
+    // Past lessons before the window stay as they were.
+    if (keep && item.startAt !== undefined && item.startAt < keep.from) continue;
+    if (keep && item.sourceKey && keep.keys.has(item.sourceKey)) continue;
+    await ctx.db.patch(item._id, {
+      status: "removed",
+      sourceCapabilityState: "stale",
+      revision: item.revision + 1,
+      updatedAt: now,
+    });
+  }
+}
+
+async function ensureTimetableLessons(
+  ctx: MutationCtx,
+  integration: Doc<"schoolIntegrations">,
+  accountId: Id<"accounts">,
+  source: Doc<"externalRecords">,
+  cycleDay: number,
+) {
+  const normalized = record(source.normalized);
+  const context = await timetableContext(ctx, integration.schoolId, accountId);
+  const periodKey = text(String(normalized.periodKey ?? normalized.period ?? ""), 120);
+  const period = context.periods.get(periodKey);
+  const now = Date.now();
+  const sourceKey = projectionSourceKey(source);
+  const dates = period
+    ? lessonDates(
+        normalized,
+        cycleDay,
+        context.cycleLengths.get(source.academicPeriodKey ?? "") ?? Math.max(5, cycleDay),
+        period.weekdays,
+        now,
+      )
+    : [];
+  const title =
+    (source.providerClassId && context.classNames.get(source.providerClassId)) || "Class";
+  // A lesson changes when its class name or period time does, not only its slot.
+  const sourceHash = [
+    source.sourceHash,
+    title,
+    period ? `${period.startMinutes}-${period.endMinutes}-${period.timezone}` : "",
+  ].join("|").slice(0, 180);
+  const keys = new Set<string>();
+  let firstItemId: Id<"calendarItems"> | undefined;
+  let created = false;
+  for (const date of dates) {
+    const lesson = await upsertSourceCalendarItem(ctx, {
+      ownerAccountId: accountId,
+      schoolId: integration.schoolId,
+      sourceRecordId: source._id,
+      sourceKey: `${sourceKey}:${date}`,
+      sourceHash,
+      sourceUrl: source.provenanceUrl,
+      fetchedAt: source.fetchedAt,
+      recordType: source.recordType,
+      normalized: {
+        title,
+        date,
+        periodKey,
+        location: normalized.location,
+        classId: source.providerClassId,
+      },
+    });
+    keys.add(`${sourceKey}:${date}:official_event`.slice(0, 500));
+    firstItemId ??= lesson.itemId;
+    created ||= lesson.created;
+  }
+  await retireLessons(ctx, source._id, accountId, {
+    keys,
+    from: Math.floor(now / DAY_MS) * DAY_MS - LESSON_DAYS_BEFORE * DAY_MS,
+  });
+
+  const providerKey = `timetable:${sourceKey}`;
+  const existing = (
+    await ctx.db
+      .query("externalProjections")
+      .withIndex("by_record_type", (q) =>
+        q.eq("recordId", source._id).eq("projectionType", "timetable_event"),
+      )
+      .collect()
+  ).find((item) => item.schoolId === integration.schoolId && item.accountId === accountId);
+  if (existing) {
+    await ctx.db.patch(existing._id, {
+      ...(firstItemId ? { projectionId: String(firstItemId) } : {}),
+      providerKey,
+      sourceHash: source.sourceHash,
+      state: "active",
+      updatedAt: now,
+    });
+    return { projection: (await ctx.db.get(existing._id))!, created };
+  }
+  const projectionId = await ctx.db.insert("externalProjections", {
+    integrationId: integration._id,
+    schoolId: integration.schoolId,
+    recordId: source._id,
+    accountId,
+    projectionType: "timetable_event",
+    projectionId: firstItemId ? String(firstItemId) : "",
+    providerKey,
+    sourceHash: source.sourceHash,
+    state: "active",
+    bootstrapVersion: integration.bootstrapVersion,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { projection: (await ctx.db.get(projectionId))!, created };
+}
+
 function legacyTimetableParts(projectionId: string) {
   const separator = projectionId.indexOf("#");
   if (separator <= 0 || separator === projectionId.length - 1) return null;
@@ -3313,6 +3538,8 @@ async function safelyRefreshProjection(
 ) {
   const normalized = record(source.normalized);
   if (projection.projectionType === "timetable_event") {
+    // A cycle slot's lessons are placed again by the projection that follows every sync.
+    if (timetableCycleDay(source) !== undefined) return true;
     const directItem = await directTimetableCalendarItem(ctx, projection, source);
     if (directItem) {
       if (!force && directItem.sourceHash !== previousSourceHash) return false;
@@ -3407,6 +3634,10 @@ async function markProjectionSourceRemoved(
 ) {
   if (projection.projectionType === "timetable_event") {
     const source = await ctx.db.get(projection.recordId);
+    if (source && projection.accountId && timetableCycleDay(source) !== undefined) {
+      await retireLessons(ctx, source._id, projection.accountId);
+      return;
+    }
     const directItem = source
       ? await directTimetableCalendarItem(ctx, projection, source)
       : null;
@@ -3518,6 +3749,17 @@ async function projectRecord(
       projected: true,
       created: result.created || calendar.created,
     };
+  }
+  const cycleDay = timetableCycleDay(source);
+  if (cycleDay !== undefined) {
+    const result = await ensureTimetableLessons(
+      ctx,
+      integration,
+      syncRun.accountId,
+      source,
+      cycleDay,
+    );
+    return { projected: true, created: result.created };
   }
   if (
     ["timetable", "lesson", "class_event", "calendar_event"].includes(

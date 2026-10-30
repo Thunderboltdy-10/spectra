@@ -17,6 +17,7 @@ import type {
 } from "./types";
 import { readInteractionState } from "./interaction-model";
 import { readPerformances } from "./performance";
+import { committedPerformancesFor, subscribeCommittedPerformances } from "./committed-performances";
 import { PerformanceStage } from "./performance-stage";
 import { readArtifactYjsDocument } from "./artifact-yjs-model";
 import { readNativeArtifactYjsDocument } from "../work/models/yjs/native-artifact-model";
@@ -324,6 +325,14 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       readArtifactYjsDocument(this.document, performance.typeKey),
     () => this.publishPresence(),
   );
+  private readonly stopCommittedPerformances = subscribeCommittedPerformances(() => this.playCommittedPerformances());
+  private playCommittedPerformances() {
+    if (this.destroyed || !this.level) return;
+    for (const performance of committedPerformancesFor(this.artifactId)) {
+      const live = readNativeArtifactYjsDocument(this.document, performance.typeKey) ?? readArtifactYjsDocument(this.document, performance.typeKey);
+      if (live) this.performanceStage.ingest([performance]);
+    }
+  }
   private presenceSignature = "[]";
   private localPresence: CollaborationPresence | null = null;
   private localPresenceSignature = "";
@@ -339,6 +348,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     origin: unknown,
   ) => {
     this.documentChangeVersion += 1;
+    this.playCommittedPerformances();
     this.localDurabilityPending = true;
     if (origin !== this.provider && this.connectionStarted) {
       if (!this.provider?.synced) {
@@ -875,6 +885,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
         accountId: initial.accountId,
         displayName: initial.displayName,
       });
+      this.playCommittedPerformances();
       const websocketProvider = new HocuspocusProviderWebsocket({
         WebSocketPolyfill: framedWebSocket(WebSocket),
         url: initial.url,
@@ -974,6 +985,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
           this.sendLocalRecoveryUpdate();
           this.requestDurableConfirmation();
           this.updateSynchronizationState();
+          this.playCommittedPerformances();
         },
         onUnsyncedChanges: ({ number }) => {
           if (this.provider !== provider) return;
@@ -1306,6 +1318,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     this.recoveryCurrentRequests.clear();
     this.websocketProvider?.destroy();
     this.websocketProvider = null;
+    this.stopCommittedPerformances();
     this.performanceStage.destroy();
     this.document.off("update", this.onLocalDocumentUpdate);
     this.document.destroy();

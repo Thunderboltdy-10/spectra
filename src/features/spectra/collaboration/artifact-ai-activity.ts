@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import type { InteractionActKind } from "./interaction-model";
 
 /**
@@ -86,4 +86,15 @@ function snapshotFor(artifactId: string): ArtifactAiActivity | null {
 export function useArtifactAiActivity(artifactId: string) {
   const getSnapshot = useCallback(() => snapshotFor(artifactId), [artifactId]);
   return useSyncExternalStore(subscribe, getSnapshot, () => null);
+}
+
+/** Cards keep their last finished preview until all writers have let go. */
+export function useBusyArtifacts(artifactIds: readonly string[]) {
+  const ids = artifactIds.join("|");
+  const getSnapshot = useCallback(
+    () => ids.split("|").filter((id) => activityByArtifact.has(id)).join("|"),
+    [ids],
+  );
+  const busy = useSyncExternalStore(subscribe, getSnapshot, () => "");
+  return useMemo(() => new Set(busy ? busy.split("|") : []), [busy]);
 }

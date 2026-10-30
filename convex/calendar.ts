@@ -858,7 +858,7 @@ export const scheduleTask = mutation({
     const actor = await actorOrThrow(ctx);
     if (args.endAt <= args.startAt)
       throw new Error("CALENDAR_TIME_INVALID: End must be after start.");
-    if (!args.taskItemId && !(args.planArtifactId && args.planTaskId))
+    if (!args.taskItemId && !args.planArtifactId)
       throw new Error("CALENDAR_TASK_REQUIRED: Choose a task or plan to schedule.");
     const idempotencyKey = args.idempotencyKey?.trim().slice(0, 240);
     if (
@@ -899,7 +899,9 @@ export const scheduleTask = mutation({
       const legacySubtask = !Array.isArray(content.tasks) && Array.isArray(content.subtasks) &&
         content.subtasks.some(candidate => object(candidate).id === args.planTaskId);
       plannerTask =
-        availableTasks.find((candidate) => candidate.id === args.planTaskId) ??
+        (args.planTaskId
+          ? availableTasks.find((candidate) => candidate.id === args.planTaskId)
+          : availableTasks.length === 1 ? availableTasks[0] : undefined) ??
         // Retain the historical visual-subtask alias only when that subtask
         // actually belongs to the single-root plan, never for arbitrary IDs.
         (legacySubtask && availableTasks.length === 1 ? availableTasks[0] : undefined);

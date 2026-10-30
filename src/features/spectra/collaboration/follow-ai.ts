@@ -22,6 +22,7 @@ import { spectraBus } from "../events";
 import type { FollowRoute } from "./follow-navigation";
 import { expectLanding } from "../anchors/open-anchor";
 import type { WorkRegion } from "../anchors/locate";
+import { isRunPerforming } from "./performance-stage";
 
 export type AiLocation = {
   actorId?: string;
@@ -186,9 +187,12 @@ const SETTLE_MS = 1600;
 /** A followed run that ended hands the view back; the user stays where it brought them. */
 export function endFollowedRun(runId: string): void {
   if (!following || followedActorId !== runId) return;
-  window.setTimeout(() => {
-    if (following && followedActorId === runId) setFollowingAi(false);
-  }, SETTLE_MS);
+  const finish = () => {
+    if (!following || followedActorId !== runId) return;
+    if (isRunPerforming(runId)) window.setTimeout(finish, 250);
+    else setFollowingAi(false);
+  };
+  window.setTimeout(finish, SETTLE_MS);
 }
 
 export function getFollowedAiActorId(): string | null {
@@ -237,8 +241,12 @@ export function noteAiLocation(update: {
   note?: string;
   /** A place inside the work Spectra asked to show (open_in_spectra): a followed view lands there. */
   region?: WorkRegion;
+  /** A mounted studio may refine its target, but cannot pull a run back after
+   * the run feed has moved to another work while the next studio loads. */
+  refineOnly?: boolean;
 }): void {
   if (!update.artifactId) return;
+  if (update.refineOnly && location && location.actorId === update.actorId && location.artifactId !== update.artifactId) return;
   const sameArtifact = location?.artifactId === update.artifactId;
   // A coarse publisher (the run feed) names only the artifact; never let it
   // overwrite a precise path and note reported by the open studio.

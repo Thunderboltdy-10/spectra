@@ -23,7 +23,7 @@ export function schoolRecordOf(item: CalendarItem) {
 
 /** Whether a calendar item is a task (or time given to one) that can open beside its block. */
 export function isPeekable(item: CalendarItem) {
-  return Boolean(planWorkId(item) || schoolRecordOf(item));
+  return Boolean(planWorkId(item) || schoolRecordOf(item) || item.officialDeadlineItemId);
 }
 
 export function useTaskPeek() {

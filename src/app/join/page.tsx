@@ -2,8 +2,8 @@
 
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { useClerk } from "@clerk/nextjs";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useClerk, useUser } from "@clerk/nextjs";
+import { useSearchParams } from "next/navigation";
 import { LoaderCircle, Check } from "@/components/icons/glyph-icons";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { Button } from "@/components/ui/button";
@@ -45,7 +45,6 @@ type UnavailableInvitation = {
 };
 
 function JoinSchoolContent() {
-  const router = useRouter();
   const { signOut } = useClerk();
   const searchParams = useSearchParams();
   const token = resolveJoinToken(
@@ -64,6 +63,12 @@ function JoinSchoolContent() {
   const [previewAttempt, setPreviewAttempt] = useState(0);
   /** An unknown, withdrawn or expired link: nothing here can make it work. */
   const [ended, setEnded] = useState(false);
+  /** Signed up without confirming the email: Spectra needs it confirmed first. */
+  const [unverified, setUnverified] = useState(false);
+  const [code, setCode] = useState("");
+  const [codeState, setCodeState] = useState<"idle" | "sending" | "sent" | "checking">("idle");
+  const { user } = useUser();
+  const { session } = useClerk();
 
   useEffect(() => {
     if (token) persistJoinTokenCookie(token, document);
@@ -95,6 +100,11 @@ function JoinSchoolContent() {
       .catch((nextError) => {
         if (!active) return;
         const raw = invitationFailureText(nextError);
+        if (/AUTH_EMAIL_UNVERIFIED/.test(raw)) {
+          setUnverified(true);
+          setPreviewState("error");
+          return;
+        }
         const retryable = invitationPreviewCanRetry(raw, previewAttempt);
         if (
           /INVITATION_INVALID|INVITATION_EXPIRED|INVITATION_SCHOOL_UNAVAILABLE/.test(
@@ -117,6 +127,39 @@ function JoinSchoolContent() {
       active = false;
     };
   }, [previewAttempt, token]);
+
+  async function sendCode() {
+    const email = user?.primaryEmailAddress;
+    if (!email) return;
+    setCodeState("sending");
+    setError("");
+    try {
+      await email.prepareVerification({ strategy: "email_code" });
+      setCodeState("sent");
+    } catch (nextError) {
+      setCodeState("idle");
+      setError(clerkMessage(nextError, "The code could not be sent. Try again."));
+    }
+  }
+
+  async function checkCode() {
+    const email = user?.primaryEmailAddress;
+    if (!email || !code.trim()) return;
+    setCodeState("checking");
+    setError("");
+    try {
+      await email.attemptVerification({ code: code.trim() });
+      // The next requests must carry the verified claim, not a cached token.
+      await session?.getToken({ skipCache: true });
+      setUnverified(false);
+      setCodeState("idle");
+      setCode("");
+      retryPreview();
+    } catch (nextError) {
+      setCodeState("sent");
+      setError(clerkMessage(nextError, "That code didn't work. Check it and try again."));
+    }
+  }
 
   function retryPreview() {
     setStatus("ready");
@@ -147,10 +190,8 @@ function JoinSchoolContent() {
       }
       clearJoinTokenCookie(document);
       setStatus("accepted");
-      window.setTimeout(() => {
-        router.replace("/workspace");
-        router.refresh();
-      }, 900);
+      // A full load, so the app mounts with the new membership in the session.
+      window.setTimeout(() => window.location.replace("/workspace"), 900);
     } catch (nextError) {
       const raw = invitationFailureText(nextError);
       if (
@@ -167,6 +208,61 @@ function JoinSchoolContent() {
   }
 
   const schoolName = preview?.schoolName;
+  const verifyEmail = user?.primaryEmailAddress?.emailAddress ?? "your email";
+  if (unverified && token && !ended)
+    return (
+      <AuthShell home="joining">
+        <div>
+          <h1 className="auth-title">Confirm your email</h1>
+          <p className="auth-lede">
+            {codeState === "sent" || codeState === "checking"
+              ? `Enter the code we sent to ${verifyEmail}. Then you'll join your school.`
+              : `One step before you join: confirm ${verifyEmail} with a code.`}
+          </p>
+        </div>
+        {error ? (
+          <p role="alert" className="mt-5 border-l-2 border-[var(--danger)] pl-3 text-ui leading-6">
+            {error}
+          </p>
+        ) : null}
+        {codeState === "sent" || codeState === "checking" ? (
+          <form
+            className="flex flex-col gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void checkCode();
+            }}
+          >
+            <input
+              value={code}
+              onChange={(event) => setCode(event.target.value)}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              autoFocus
+              aria-label="Verification code"
+              placeholder="6-digit code"
+              className="h-11 rounded-control border border-[var(--border-default)] bg-[var(--surface-primary)] px-3 text-body tracking-[0.3em] text-[var(--text-primary)]"
+            />
+            <Button variant="primary" size="lg" className="w-full" type="submit" disabled={codeState === "checking" || !code.trim()}>
+              {codeState === "checking" ? <LoaderCircle size={15} className="animate-spin" /> : null}
+              Confirm and continue
+            </Button>
+            <button
+              type="button"
+              onClick={() => void sendCode()}
+              className="text-caption font-medium text-[var(--text-secondary)] underline underline-offset-2"
+            >
+              Send a new code
+            </button>
+          </form>
+        ) : (
+          <Button variant="primary" size="lg" className="w-full" onClick={() => void sendCode()} disabled={codeState === "sending"}>
+            {codeState === "sending" ? <LoaderCircle size={15} className="animate-spin" /> : null}
+            Send the code
+          </Button>
+        )}
+      </AuthShell>
+    );
   const heading =
     status === "accepted"
       ? schoolName
@@ -283,6 +379,12 @@ function JoinSchoolContent() {
       )}
     </AuthShell>
   );
+}
+
+/** Clerk's own sentence for a failed step, when it gives one. */
+function clerkMessage(error: unknown, fallback: string) {
+  const first = (error as { errors?: Array<{ longMessage?: string; message?: string }> })?.errors?.[0];
+  return first?.longMessage || first?.message || fallback;
 }
 
 export default function JoinSchoolPage() {

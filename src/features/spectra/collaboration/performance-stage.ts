@@ -24,6 +24,12 @@ const SETTLE_MS = 420;
 /** How long the last frame may wait for the commit to reach this document. */
 const COMMIT_WAIT_MS = 4_000;
 const SEEN_LIMIT = 400;
+const stages = new Set<PerformanceStage>();
+
+/** Local playback can outlive the server run that committed the edit. */
+export function isRunPerforming(runId: string): boolean {
+  return [...stages].some((stage) => stage.hasRun(runId));
+}
 
 type Playing = {
   performance: AiPerformance;
@@ -46,7 +52,12 @@ export class PerformanceStage {
     private readonly readLive: (performance: AiPerformance) => ArtifactLiveValue | null,
     private readonly onChange: () => void,
     private readonly now: () => number = () => Date.now(),
-  ) {}
+  ) { stages.add(this); }
+
+  hasRun(runId: string): boolean {
+    return [...this.playing.values()].some(({ performance }) => performance.runId === runId) ||
+      [...this.queues.values()].some((queue) => queue.some((performance) => performance.runId === runId));
+  }
 
   /** Every performance an awareness entry lists; repeats are ignored. */
   ingest(performances: readonly AiPerformance[]) {
@@ -80,6 +91,7 @@ export class PerformanceStage {
 
   destroy() {
     this.destroyed = true;
+    stages.delete(this);
     for (const playing of this.playing.values()) clearTimeout(playing.timer);
     this.playing.clear();
     this.queues.clear();

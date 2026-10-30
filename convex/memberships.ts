@@ -206,6 +206,26 @@ export const previewInvitation = query({
   },
 });
 
+/**
+ * What the invitation link itself says, before anyone signs in: the school,
+ * the role and the invited address, so sign-up can name the school and fill
+ * the email. Only the holder of the emailed token can read it.
+ */
+export const invitationLanding = query({
+  args: { tokenHash: v.string() },
+  handler: async (ctx, args) => {
+    const invitation = await ctx.db
+      .query("membershipInvitations")
+      .withIndex("by_token_hash", (q) => q.eq("tokenHash", args.tokenHash))
+      .unique();
+    if (!invitation || invitation.status === "revoked") return null;
+    if (invitation.status === "expired" || invitation.expiresAt <= Date.now()) return null;
+    const school = await ctx.db.get(invitation.schoolId);
+    if (!school || school.status !== "active") return null;
+    return { schoolName: school.name, role: invitation.role, email: invitation.email };
+  },
+});
+
 export const listMine = query({
   args: {},
   handler: async (ctx) => {

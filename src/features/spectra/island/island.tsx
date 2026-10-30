@@ -403,6 +403,8 @@ export function Island() {
   /* ------------------------------------------------------------ thread view */
 
   const [view, setView] = useState<{ runId: string; pinned: boolean } | null>(null);
+  const currentView = useRef(view);
+  currentView.current = view;
   const [viewShown, setViewShown] = useState(false);
   const viewTab = view ? allTabs.find((tab) => tab.runId === view.runId) ?? null : null;
   const viewOpen = Boolean(viewTab);
@@ -541,6 +543,7 @@ export function Island() {
     window.clearTimeout(closeTimer.current);
     closeTimer.current = window.setTimeout(function close() {
       if (pointerInside.current) return;
+      if (currentView.current?.pinned) return;
       if (menuOpen() || dragActive.current || performance.now() < arrivingUntil.current) {
         closeTimer.current = window.setTimeout(close, CLOSE_DELAY);
         return;
@@ -572,7 +575,7 @@ export function Island() {
   const onLeave = () => {
     pointerInside.current = false;
     window.clearTimeout(viewTimer.current);
-    setView((current) => (current && !current.pinned ? null : current));
+    schedulePeekClose();
     scheduleClose();
   };
 
@@ -886,13 +889,13 @@ export function Island() {
       ) : null}
 
       {viewTab ? (
-        <div className="pointer-events-auto" onPointerEnter={keepPeek} onPointerLeave={() => view && !view.pinned && schedulePeekClose()}>
+        <div className="pointer-events-auto -mb-3 pb-3 transition-transform duration-200 ease-[var(--ease-standard)]" style={{ transform: `translateX(${viewOffset}px)` }} onPointerEnter={keepPeek} onPointerLeave={() => view && !view.pinned && schedulePeekClose()}>
           <ThreadView
             ref={viewRef}
             tab={viewTab}
             engine={engine}
             visible={viewShown}
-            offset={viewOffset}
+            offset={0}
             onOpenSide={() => {
               closeView();
               openThread(viewTab.runId, viewTab.threadId, viewTab.title);

@@ -982,7 +982,8 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
   function openWork(workId: string) {
     setOpened(null);
     // Work opens in the Side (SHELL.md); its "Open full" goes on to Library.
-    void spectraBus.command("work.open", { workId });
+    taskPeek.close();
+    void spectraBus.command("work.open", { workId, surface: "panel" });
   }
 
   function openItem(item: CalendarItem, from?: HTMLElement) {

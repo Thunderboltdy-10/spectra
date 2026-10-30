@@ -4663,7 +4663,7 @@ button:not(:disabled),
   position: fixed;
   z-index: calc(var(--z-panel) + 10);
   inset-block-start: 10px;
-  left: 50%;
+  left: calc((100vw + var(--spectra-rail-width, 0px) + var(--spectra-lead-width, 0px) - var(--spectra-side-width, 0px) - 8px) / 2);
   display: flex;
   max-width: min(460px, calc(100vw - 32px));
   align-items: center;
@@ -4675,6 +4675,7 @@ button:not(:disabled),
   color: var(--text-primary);
   box-shadow: var(--shadow-md);
   translate: -50% 0;
+  transition: left 300ms var(--ease-standard);
   animation: spectra-follow-status-in 320ms var(--ease-standard) both;
 }
 

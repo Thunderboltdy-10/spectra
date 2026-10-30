@@ -124,7 +124,13 @@ function feedLedger(event: ReturnType<typeof parseSpectraStreamEvent>): void {
       break;
     case "step":
       // Where the run is: a followed view opens the work as Spectra starts reading or editing it, so the edit lands in sight.
-      if (event.status === "running" && event.work) noteAiLocation({ actorId: runId, artifactId: event.work, note: event.label.replace(/\*/g, "") });
+      if (event.status === "running" && event.work) {
+        noteAiLocation({ actorId: runId, artifactId: event.work, note: event.label.replace(/\*/g, "") });
+        const published = runFeedArtifacts.get(runId) ?? new Set<string>();
+        published.add(event.work);
+        runFeedArtifacts.set(runId, published);
+        publishArtifactAiActivity(event.work, RUN_FEED_SOURCE, { phase: "editing", detail: event.label.replace(/\*/g, "") });
+      }
       break;
     case "artifact_touched":
       // Work made or changed without a step that named it (a new artifact).

@@ -447,7 +447,7 @@ describe("Calendar application", () => {
     ]);
     render(<CalendarApplication />);
     fireEvent.click(await screen.findByTitle(blockTitled("Essay draft")));
-    expect(opened).toHaveBeenCalledWith({ workId: "plan-1" });
+    expect(opened).toHaveBeenCalledWith({ workId: "plan-1", surface: "panel" });
     stop();
   });
 });

@@ -32,6 +32,15 @@ beforeEach(() => vi.stubEnv("SPECTRA_CONNECTOR_BRIDGE_KEY", bridgeKey));
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 describe("scheduled block lost-response recovery", () => {
+  it("resolves a single task card's root and replays the same admitted association", async () => {
+    const f = await fixture();
+    const request = { ...times, planArtifactId: f.plan._id, idempotencyKey: "single-card-root" };
+    const block = await f.user.mutation(api.calendar.scheduleTask, request);
+    expect(block).toMatchObject({ kind: "scheduled_work_block", planArtifactId: f.plan._id, planTaskId: "task-1" });
+    expect(await f.user.mutation(api.calendar.scheduleTask, request)).toEqual(block);
+    await f.editPlan(f.plan._id, { content: { ...f.plan.content, tasks: [{ id: "a", title: "First", status: "todo" }, { id: "b", title: "Second", status: "todo" }] } });
+    await expect(f.user.mutation(api.calendar.scheduleTask, { ...request, idempotencyKey: "ambiguous-card-root" })).rejects.toThrow("CALENDAR_PLAN_TASK_NOT_FOUND");
+  });
   it.each(["completed", "cancelled"] as const)("recovers the exact block after %s without writes or discovery rows", async status => {
     const f = await fixture();
     for (const taskItemId of [f.task._id, undefined]) {

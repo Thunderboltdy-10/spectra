@@ -1,6 +1,6 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { hasClerkServerConfig } from "@/lib/clerk-config";
-import { convexMutation, convexQuery } from "@/lib/convex-server";
+import { convexMutation, convexQuery, forgetConvexTokens } from "@/lib/convex-server";
 
 export type SchoolRole = "student" | "teacher" | "school_admin";
 
@@ -125,6 +125,8 @@ async function ensureVerifiedClerkAccount() {
     throw new Error(
       "AUTH_EMAIL_UNVERIFIED: Verify your school email before using Spectra.",
     );
+  // A token cached before the email was verified still says it is not.
+  forgetConvexTokens(profile.id);
   await convexMutation("identity:registerSelf", {
     name: profile.fullName ?? profile.firstName ?? "Spectra user",
     avatarUrl: profile.imageUrl || undefined,

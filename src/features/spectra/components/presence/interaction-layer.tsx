@@ -620,6 +620,7 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
   return (
     <div
       className="spectra-presence-actor"
+      data-actor-kind={state.actor.kind}
       data-departing={departing ? "true" : undefined}
       style={style}
     >

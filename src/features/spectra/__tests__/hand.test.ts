@@ -28,8 +28,9 @@ describe("the hand", () => {
     const delays = chunks.map((chunk) => chunk.delayMs);
     expect(new Set(delays).size).toBeGreaterThan(delays.length / 2);
     const total = delays.reduce((sum, delay) => sum + delay, 0);
-    expect(total).toBeGreaterThan(1_500);
-    expect(total).toBeLessThan(7_000);
+    // A sentence flows in about a second: quick, never a crawl.
+    expect(total).toBeGreaterThan(600);
+    expect(total).toBeLessThan(2_000);
   });
 
   it("is the same performance for the same seed", () => {

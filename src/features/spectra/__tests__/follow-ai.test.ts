@@ -82,6 +82,64 @@ describe("follow AI", () => {
     expect(isFollowingAi()).toBe(false);
   });
 
+  it("finishes the hand on screen before it moves the view on, then plays the moves in order", () => {
+    vi.useFakeTimers();
+    try {
+      const opened = openEvents();
+      const navigated: string[] = [];
+      spectraBus.handle("navigation.show", ({ route, target }) => {
+        navigated.push(`${route}:${target ?? ""}`);
+      });
+      const playing = vi.spyOn(performanceStage, "isRunPerforming").mockReturnValue(false);
+      followAiActor("run");
+      noteAiLocation({ actorId: "run", artifactId: "plan" });
+      expect(opened).toEqual(["plan"]);
+      // The plan is still being typed here while the run already schedules.
+      playing.mockReturnValue(true);
+      noteAiSurface({ actorId: "run", route: "calendar", target: "mon", note: "Scheduling" });
+      noteAiLocation({ actorId: "run", artifactId: "plan", path: "/blocks/3/text", refineOnly: true });
+      vi.advanceTimersByTime(400);
+      noteAiSurface({ actorId: "run", route: "calendar", target: "tue", note: "Scheduling" });
+      vi.advanceTimersByTime(2_000);
+      expect(navigated).toEqual([]);
+      expect(getAiLocation()?.path).toBe("/blocks/3/text");
+      playing.mockReturnValue(false);
+      vi.advanceTimersByTime(200);
+      expect(navigated).toEqual(["calendar:mon"]);
+      // A replayed move is news on arrival, so what it placed is shown arriving.
+      expect(getAiSurfaceLocation()).toMatchObject({ target: "mon" });
+      expect(Date.now() - getAiSurfaceLocation()!.updatedAt).toBeLessThan(200);
+      vi.advanceTimersByTime(450);
+      expect(navigated).toEqual(["calendar:mon", "calendar:tue"]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("never holds a view that is not following", () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(performanceStage, "isRunPerforming").mockReturnValue(true);
+      noteAiSurface({ actorId: "run", route: "calendar", target: "mon" });
+      expect(getAiSurfaceLocation()).toMatchObject({ target: "mon" });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("brings the record up to date when the user stops following during a hold", () => {
+    vi.useFakeTimers();
+    try {
+      const opened = openEvents();
+      const playing = vi.spyOn(performanceStage, "isRunPerforming").mockReturnValue(false);
+      followAiActor("run");
+      noteAiLocation({ actorId: "run", artifactId: "plan" });
+      playing.mockReturnValue(true);
+      noteAiLocation({ actorId: "run", artifactId: "task" });
+      expect(opened).toEqual(["plan"]);
+      disengageFollowAi();
+      expect(getAiLocation()?.artifactId).toBe("task");
+      vi.advanceTimersByTime(1_000);
+      expect(opened).toEqual(["plan"]);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("carries a followed actor across app routes without moving a non-followed viewport", () => {
     const navigated: string[] = [];
     spectraBus.handle("navigation.show", ({ route }) => {

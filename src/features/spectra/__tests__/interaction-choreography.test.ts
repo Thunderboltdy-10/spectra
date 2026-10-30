@@ -364,3 +364,79 @@ describe("placing a work into a page", () => {
     expect(beats.at(-1)?.value).toEqual(after);
   });
 });
+
+describe("writing a new document", () => {
+  const placeholder = {
+    title: "Untitled",
+    tags: [],
+    content: { blocks: [{ id: "intro", type: "paragraph", text: "Start writing here." }], outline: [] },
+  };
+  const paragraph = (index: number) =>
+    `Session ${index} works through one idea with a worked example, then a short question to check it before moving on.`;
+  const written = {
+    title: "SHM: three sessions before Thursday",
+    tags: [],
+    content: {
+      blocks: [
+        { id: "h1", type: "heading", level: 2, text: "Session 1 · What SHM is" },
+        { id: "p1", type: "paragraph", text: paragraph(1) },
+        { id: "eq", type: "equation", latex: "a = -\\omega^2 x" },
+        { id: "h2", type: "heading", level: 2, text: "Session 2 · Energy" },
+        { id: "p2", type: "paragraph", text: paragraph(2) },
+        { id: "h3", type: "heading", level: 2, text: "Session 3 · Graphs and the test" },
+        { id: "p3", type: "paragraph", text: paragraph(3) },
+      ],
+      outline: [],
+    },
+  };
+  const beats = buildArtifactLivePreviewBeats(placeholder, written, undefined, { seed: 11 });
+  const blocksOf = (beat: (typeof beats)[number]) =>
+    (beat.value.content as { blocks: Array<{ id: string; text?: string; latex?: string }> }).blocks;
+
+  it("clears the placeholder first, so it never sits under the new work", () => {
+    const firstNew = beats.findIndex((beat) => blocksOf(beat).some((block) => block.id === "h1"));
+    expect(firstNew).toBeGreaterThan(0);
+    expect(blocksOf(beats[firstNew]!).some((block) => block.id === "intro")).toBe(false);
+    expect(beats.some((beat) => beat.focusPath?.endsWith("/id") && beat.previewGesture === "typing")).toBe(false);
+    expect(beats.at(-1)!.value).toEqual(written);
+  });
+
+  it("writes each block in full before the next exists, so nothing waits empty ahead of the caret", () => {
+    for (const beat of beats) {
+      const blocks = blocksOf(beat);
+      const target = new Map(written.content.blocks.map((block) => [block.id, block]));
+      // Only the last block on the page may be unfinished.
+      blocks.slice(0, -1).forEach((block) => {
+        const done = target.get(block.id);
+        if (done) expect(block).toEqual(done);
+      });
+    }
+  });
+
+  it("goes from block to block with a key, not a trip back to the page", () => {
+    const creates = beats.filter((beat) => beat.interaction?.kind === "create");
+    expect(creates).toHaveLength(written.content.blocks.length);
+    const approaches = beats.filter((beat) => beat.interaction?.kind === "pointer" && beat.focusPath === "/blocks");
+    expect(approaches.length).toBeLessThanOrEqual(1);
+    // After a new block is made, the very next beat types into it.
+    for (const [index, beat] of beats.entries()) {
+      if (beat.interaction?.kind !== "create" || index === beats.length - 1) continue;
+      expect(beats[index + 1]!.previewGesture).toBe("typing");
+    }
+  });
+
+  it("is quick: a short plan is written in seconds", () => {
+    const total = beats.reduce((sum, beat) => sum + beat.delayMs, 0);
+    expect(total).toBeLessThan(9_000);
+  });
+
+  it("never shows half of an equation", () => {
+    const partial = beats
+      .map((beat) => blocksOf(beat).find((block) => block.id === "eq")?.latex)
+      .filter((latex): latex is string => typeof latex === "string" && latex.length > 0);
+    const full = "a = -\\omega^2 x";
+    // Every frame stops between tokens, never inside a command.
+    expect(partial.every((latex) => full.startsWith(latex) && (latex === full || /\s/.test(full[latex.length]!) || /\s$/.test(latex)))).toBe(true);
+    expect(partial).toContain(full);
+  });
+});

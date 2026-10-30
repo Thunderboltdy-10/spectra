@@ -212,29 +212,43 @@ function firstCollectionChange(
   path: Array<string | number> = [],
 ): CollectionChange | null {
   if (Array.isArray(before) && Array.isArray(after)) {
-    if (before.length !== after.length) {
-      let prefix = 0;
-      while (
-        prefix < before.length &&
-        prefix < after.length &&
-        itemsMatch(before[prefix], after[prefix])
-      )
-        prefix += 1;
-
-      if (after.length > before.length)
-        return {
-          path,
-          kind: "insert",
-          index: prefix,
-          item: after[prefix],
-        };
+    let prefix = 0;
+    while (
+      prefix < before.length &&
+      prefix < after.length &&
+      itemsMatch(before[prefix], after[prefix])
+    )
+      prefix += 1;
+    // An item the edit replaces goes first, as a person clears a placeholder
+    // before writing; it never lingers under the new work, nor gets its
+    // identity typed over.
+    const stale = before[prefix];
+    if (
+      prefix < before.length &&
+      stableItemIdentity(stale) &&
+      !after.some((item) => itemsMatch(stale, item))
+    )
+      return { path, kind: "remove", index: prefix, item: stale };
+    const fresh = after[prefix];
+    const added =
+      prefix < after.length &&
+      (after.length > before.length ||
+        (stableItemIdentity(fresh) !== null &&
+          !before.some((item) => itemsMatch(item, fresh))));
+    if (added)
+      return {
+        path,
+        kind: "insert",
+        index: prefix,
+        item: fresh,
+      };
+    if (before.length !== after.length)
       return {
         path,
         kind: "remove",
         index: prefix,
         item: before[prefix],
       };
-    }
     for (let index = 0; index < before.length; index += 1) {
       const nested = firstCollectionChange(before[index], after[index], [
         ...path,
@@ -295,8 +309,9 @@ const STRUCTURAL_STRING_KEYS = new Set([
  * their own observable beats.
  */
 function provisionalItem(value: unknown, key = ""): unknown {
+  // Identity and settings exist from the start; only words are typed.
   if (typeof value === "string")
-    return STRUCTURAL_STRING_KEYS.has(key) ? value : "";
+    return STRUCTURAL_STRING_KEYS.has(key) || ATOMIC_ENUM_FIELDS.has(key) ? value : "";
   if (Array.isArray(value)) return [];
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(
@@ -383,10 +398,12 @@ function carryBeats(
     carry: { ...placed, ...(seamBlockId ? { seamBlockId } : {}), phase },
     menu: null,
   });
+  // The hand reaches the card, presses and picks it up, carries it over and
+  // sets it down: about as long as a person's drag, never longer.
   return [
-    step(180, base, "lift", "start"),
-    step(280, base, "fly", "move"),
-    step(860, staged, "drop", "release"),
+    step(160, base, "lift", "start"),
+    step(560, base, "fly", "move"),
+    step(700, staged, "drop", "release"),
   ];
 }
 
@@ -397,35 +414,64 @@ function collectionLabel(path: readonly (string | number)[]) {
   return `Add ${name || "item"}`;
 }
 
+/** The last place these beats left the hand. */
+function lastFocus(beats: readonly AiStreamBeat[]) {
+  return beats.findLast((beat) => beat.focusPath)?.focusPath;
+}
+
+/** The item a field belongs to (`/blocks/3` for `/blocks/3/text`). */
+function ancestorOf(path: string) {
+  const cut = path.lastIndexOf("/");
+  return cut > 0 ? path.slice(0, cut) : "/";
+}
+
+/** A content-relative path, whichever form it was written in. */
+function contentRelative(path: string) {
+  return path.startsWith("/content/") ? path.slice("/content".length) : path;
+}
+
+/** Whether the hand, last at `handAt`, is already working inside `path`. */
+function handIsIn(handAt: string | undefined, path: string) {
+  if (!handAt) return false;
+  const at = contentRelative(handAt);
+  return path === "/" || at === path || at.startsWith(`${path}/`);
+}
+
 function collectionBeats(
   base: ArtifactLiveValue,
   change: CollectionChange,
+  /** Where the hand last worked: inside the same collection it needs no approach. */
+  handAt?: string,
 ): AiStreamBeat[] {
   const collectionPath = uiFocusPath(change.path);
   const itemPath = `${collectionPath === "/" ? "" : collectionPath}/${change.index}`;
   const label = collectionLabel(change.path);
   const staged = structuredClone(base) as ArtifactLiveValue;
   const collection = valueAtPath(staged, pathKey(change.path));
+  const there = handIsIn(handAt, collectionPath);
   if (change.kind === "add") {
     if (!isPlainRecord(collection) || change.key === undefined) return [];
-    // Click into the place, then the entry exists, still empty of words.
+    // Click into the place, then the entry exists, still empty of words. A
+    // hand already in the grid moves there with a key instead.
     const entryPath = `${collectionPath === "/" ? "" : collectionPath}/${change.key}`;
     const provisional = entryShell(change.item) as Record<string, unknown>;
     // A formula's result appears when the formula does, not before it.
     if (typeof provisional.formula === "string") delete provisional.value;
     collection[change.key] = provisional;
     return [
+      ...(there
+        ? []
+        : [{
+            delayMs: 180,
+            value: base,
+            previewGesture: "selecting" as const,
+            cursorMode: "pointer" as const,
+            interaction: { kind: "pointer" as const, targetId: entryPath, targetKind: "path" as const },
+            focusPath: entryPath,
+            menu: null,
+          }]),
       {
-        delayMs: 220,
-        value: base,
-        previewGesture: "selecting",
-        cursorMode: "pointer",
-        interaction: { kind: "pointer", targetId: entryPath, targetKind: "path" },
-        focusPath: entryPath,
-        menu: null,
-      },
-      {
-        delayMs: 110,
+        delayMs: there ? 70 : 90,
         value: staged,
         previewGesture: "typing",
         cursorMode: "typing",
@@ -448,10 +494,26 @@ function collectionBeats(
     collection.splice(change.index, 0, provisionalItem(change.item));
   else collection.splice(change.index, 1);
 
+  // Working in the list already, the next item is one key away (Enter, a
+  // shortcut): the caret is in it at once, with no trip to a button.
+  if (there && change.kind === "insert")
+    return [
+      {
+        delayMs: 110,
+        value: staged,
+        previewGesture: "typing",
+        cursorMode: "typing",
+        interaction: { kind: "create", targetId: itemPath, targetKind: "path", label },
+        focusPath: itemPath,
+        caretOffset: 0,
+        menu: null,
+      },
+    ];
+
   return [
     ...approachBeats(base, collectionPath, label),
     {
-      delayMs: 260,
+      delayMs: 180,
       value: staged,
       previewGesture: "selecting",
       cursorMode: "pointer",
@@ -521,7 +583,7 @@ function approachBeats(
 ): AiStreamBeat[] {
   return [
     {
-      delayMs: 200,
+      delayMs: 160,
       value,
       previewGesture: "selecting",
       cursorMode: "pointer",
@@ -535,7 +597,7 @@ function approachBeats(
       menu: null,
     },
     {
-      delayMs: 240,
+      delayMs: 110,
       value,
       previewGesture: "selecting",
       cursorMode: "pointer",
@@ -563,7 +625,7 @@ function dropdownBeats(
   const beats: AiStreamBeat[] = [
     ...approachBeats(base, focusPath, label),
     {
-      delayMs: 260,
+      delayMs: 170,
       value: base,
       previewGesture: "selecting",
       cursorMode: "selecting",
@@ -584,7 +646,7 @@ function dropdownBeats(
   ];
   // Pause on the open menu, then walk highlight toward the chosen option.
   beats.push({
-    delayMs: 280,
+    delayMs: 150,
     value: base,
     previewGesture: "selecting",
     cursorMode: "selecting",
@@ -604,7 +666,7 @@ function dropdownBeats(
   });
   if (String(change.before) !== afterValue) {
     beats.push({
-      delayMs: 240,
+      delayMs: 140,
       value: base,
       previewGesture: "selecting",
       cursorMode: "selecting",
@@ -626,7 +688,7 @@ function dropdownBeats(
   const committed = structuredClone(base) as ArtifactLiveValue;
   setAtPath(committed, change.path, change.after);
   beats.push({
-    delayMs: 220,
+    delayMs: 130,
     value: committed,
     previewGesture: "typing",
     cursorMode: "pointer",
@@ -645,7 +707,7 @@ function dropdownBeats(
     },
   });
   beats.push({
-    delayMs: 200,
+    delayMs: 110,
     value: committed,
     previewGesture: "typing",
     cursorMode: "pointer",
@@ -672,7 +734,7 @@ function toggleBeats(
   return [
     ...approachBeats(base, focusPath, label),
     {
-      delayMs: 200,
+      delayMs: 120,
       value: base,
       previewGesture: "selecting",
       cursorMode: "pointer",
@@ -686,7 +748,7 @@ function toggleBeats(
       menu: null,
     },
     {
-      delayMs: 220,
+      delayMs: 140,
       value: committed,
       previewGesture: "typing",
       cursorMode: "pointer",
@@ -763,7 +825,7 @@ function spatialBeats(
     ) => {
       if (!activeChanges.length) return;
       beats.push({
-        delayMs: 190,
+        delayMs: 150,
         value: structuredClone(value),
         previewGesture: "selecting",
         interaction: {
@@ -787,7 +849,7 @@ function spatialBeats(
         }
         value = next;
         beats.push({
-          delayMs: frame === 6 ? 150 : 78,
+          delayMs: frame === 6 ? 110 : 60,
           value: structuredClone(value),
           previewGesture: "selecting",
           interaction: {
@@ -876,6 +938,8 @@ function buildArtifactLivePreviewBeatsFromDiff(
   before: ArtifactLiveValue,
   after: ArtifactLiveValue,
   pacing: Pacing,
+  /** Where the hand is when this part of the edit begins. */
+  handAt?: string,
 ): AiStreamBeat[] {
   const structuralChange = firstCollectionChange(
     {
@@ -891,8 +955,11 @@ function buildArtifactLivePreviewBeatsFromDiff(
       content: after.content,
     },
   );
+  /** Continue the edit from where these beats leave the hand. */
+  const onwards = (beats: AiStreamBeat[], from: ArtifactLiveValue, to: ArtifactLiveValue) =>
+    buildArtifactLivePreviewBeatsFromDiff(from, to, pacing, lastFocus(beats) ?? handAt);
   if (structuralChange?.kind === "add" && structuralChange.key !== undefined) {
-    const structuralBeats = collectionBeats(before, structuralChange);
+    const structuralBeats = collectionBeats(before, structuralChange, handAt);
     const staged = structuralBeats.at(-1)?.value;
     if (staged) {
       // The new entry is written in full before the hand moves on.
@@ -904,14 +971,12 @@ function buildArtifactLivePreviewBeatsFromDiff(
       };
       // Numbers are typed as their digits; the rest goes on from the real entry.
       const filled = withEntry(structuralChange.item);
-      const beats = [
-        ...structuralBeats,
-        ...buildArtifactLivePreviewBeatsFromDiff(staged, withEntry(typedEntry(structuralChange.item)), pacing),
-        ...buildArtifactLivePreviewBeatsFromDiff(filled, after, pacing),
-      ];
+      const beats = [...structuralBeats];
+      beats.push(...onwards(beats, staged, withEntry(typedEntry(structuralChange.item))));
+      beats.push(...onwards(beats, filled, after));
       // Typed digits become the numbers they stand for as the hand leaves.
       if (JSON.stringify(beats.at(-1)?.value) !== JSON.stringify(after))
-        beats.push({ delayMs: 120, value: structuredClone(after), previewGesture: "typing", cursorMode: "typing", interaction: null, menu: null });
+        beats.push({ delayMs: 60, value: structuredClone(after), previewGesture: "typing", cursorMode: "typing", interaction: null, menu: null });
       // A beat that only lands the untyped rest keeps the hand where it was.
       let resting: string | undefined;
       return beats.map((beat) => {
@@ -923,13 +988,23 @@ function buildArtifactLivePreviewBeatsFromDiff(
       });
     }
   } else if (structuralChange) {
-    const structuralBeats = collectionBeats(before, structuralChange);
+    const structuralBeats = collectionBeats(before, structuralChange, handAt);
     const staged = structuralBeats.at(-1)?.value;
     if (staged && JSON.stringify(staged) !== JSON.stringify(before)) {
-      return [
-        ...structuralBeats,
-        ...buildArtifactLivePreviewBeatsFromDiff(staged, after, pacing),
-      ];
+      const beats = [...structuralBeats];
+      if (structuralChange.kind === "insert" && !structuralBeats.some((beat) => beat.carry)) {
+        // A new item is written in full before the next one is made, so the
+        // hand is always where the words are appearing; an empty shell never
+        // waits on screen for words that come much later.
+        const filled = structuredClone(staged) as ArtifactLiveValue;
+        (valueAtPath(filled, pathKey(structuralChange.path)) as unknown[])[structuralChange.index] =
+          structuredClone(structuralChange.item);
+        beats.push(...onwards(beats, staged, filled));
+        beats.push(...onwards(beats, filled, after));
+        return beats;
+      }
+      beats.push(...onwards(beats, staged, after));
+      return beats;
     }
   }
 
@@ -991,7 +1066,7 @@ function buildArtifactLivePreviewBeatsFromDiff(
   if (remainingPaths.size === 0) {
     if (JSON.stringify(current) !== JSON.stringify(after)) {
       beats.push({
-        delayMs: 380,
+        delayMs: 160,
         value: structuredClone(after),
         previewGesture: "typing",
         cursorMode: "typing",
@@ -1010,8 +1085,19 @@ function buildArtifactLivePreviewBeatsFromDiff(
     const focusPath = pointer(change.path);
     // The file's own bookkeeping is never on screen; it lands with the rest.
     if (BOOKKEEPING_PATH.test(focusPath)) continue;
-    const code = /\/(?:files|source|code)(?:\/|$)/.test(focusPath);
-    for (const step of planTextHand(change.before, change.after, pacing.random, { tempo: pacing.tempo, code })) {
+    // Source, equations and formulas never show half a token.
+    const code = /\/(?:files|source|code|latex|formula)(?:\/|$)/.test(focusPath);
+    // A caret just put into a new, empty item is already where typing starts.
+    const previous = beats.at(-1);
+    const caretHere =
+      change.before === "" &&
+      (beats.length ? previous?.interaction?.kind === "create" || previous?.interaction?.kind === "focus" : true) &&
+      handIsIn(beats.length ? previous?.focusPath : handAt, ancestorOf(contentRelative(focusPath)));
+    for (const step of planTextHand(change.before, change.after, pacing.random, {
+      tempo: pacing.tempo,
+      code,
+      ...(caretHere ? { caretAt: 0 } : {}),
+    })) {
       value = withStringAt(value, change.path, step.value);
       const caret = pointForOffset(step.value, step.caret);
       const selection = step.selection
@@ -1041,7 +1127,7 @@ function buildArtifactLivePreviewBeatsFromDiff(
     // What is left is not typed; the hand stays where it last worked.
     const resting = beats.findLast((beat) => beat.focusPath)?.focusPath;
     beats.push({
-      delayMs: 220,
+      delayMs: 100,
       value: structuredClone(after),
       previewGesture: "typing",
       cursorMode: "typing",

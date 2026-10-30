@@ -20,7 +20,7 @@ import {
  * local, so it carries on after the AI's own connection has gone.
  */
 
-const SETTLE_MS = 420;
+const SETTLE_MS = 300;
 /** How long the last frame may wait for the commit to reach this document. */
 const COMMIT_WAIT_MS = 4_000;
 const SEEN_LIMIT = 400;

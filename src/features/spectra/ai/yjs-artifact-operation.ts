@@ -1087,7 +1087,7 @@ async function synchronizeMutation(params: {
         };
         if (JSON.stringify(performance).length <= MAX_PERFORMANCE_BYTES) {
           publishedPerformance = performance;
-          performanceClock.set(clockKey, startAt + estimateMs + 420);
+          performanceClock.set(clockKey, startAt + estimateMs + 300);
           if (performanceClock.size > 200) performanceClock.delete(performanceClock.keys().next().value!);
           const current = params.provider.awareness?.getLocalState()?.user;
           const record = current && typeof current === "object" ? (current as Record<string, unknown>) : {};

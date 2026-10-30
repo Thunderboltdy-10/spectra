@@ -125,6 +125,69 @@ export function pickFollowAiActorId(): string | null {
   return best?.id ?? location?.actorId ?? surfaceLocation?.actorId ?? null;
 }
 
+/*
+ * A followed view shows the AI's work in the order it did it. The server is
+ * usually ahead of the hand on screen: the edit is committed while its
+ * performance still plays here. A move elsewhere waits until that
+ * performance ends, then the held moves play back in order, at their own
+ * spacing, so the view never leaves a sentence half written and never lands
+ * on work that was finished out of sight.
+ */
+type HeldMove = { artifactId?: string; at: number; apply: () => void };
+const held: HeldMove[] = [];
+let heldTimer: ReturnType<typeof setTimeout> | undefined;
+let heldSince = 0;
+const HOLD_POLL_MS = 140;
+/** The longest a view trails the run; past it the view catches up anyway. */
+const MAX_HOLD_MS = 15_000;
+/** Held moves replay at the AI's own spacing, within these bounds. */
+const REPLAY_GAP_MS = { min: 260, max: 1_400 };
+
+function handStillPlaying(): boolean {
+  return Boolean(following && followedActorId && isRunPerforming(followedActorId));
+}
+
+/** Apply a followed move now, or once the hand on screen has finished. */
+function inTurn(actorId: string | undefined, move: HeldMove): void {
+  if (!shouldAnnounce(actorId) || (!held.length && !handStillPlaying())) {
+    move.apply();
+    return;
+  }
+  if (!held.length) heldSince = Date.now();
+  held.push(move);
+  pumpHeld();
+}
+
+function pumpHeld(delay = HOLD_POLL_MS): void {
+  if (heldTimer !== undefined) return;
+  heldTimer = setTimeout(() => {
+    heldTimer = undefined;
+    if (!held.length) return;
+    // Not following any more: bring the record up to date without moving.
+    if (!following) {
+      for (const move of held.splice(0)) move.apply();
+      return;
+    }
+    if (handStillPlaying() && Date.now() - heldSince < MAX_HOLD_MS) return pumpHeld();
+    // The AI came back to the work on screen from other works: those are
+    // finished, so the view stays. Its moves to other places still play.
+    const shown = location?.artifactId;
+    const back = shown ? held.findLastIndex((entry) => entry.artifactId === shown) : -1;
+    if (back > 0 && held.slice(0, back).every((entry) => entry.artifactId)) held.splice(0, back);
+    const move = held.shift()!;
+    const gap = held[0] ? Math.min(REPLAY_GAP_MS.max, Math.max(REPLAY_GAP_MS.min, held[0].at - move.at)) : 0;
+    move.apply();
+    heldSince = Date.now();
+    if (held.length) pumpHeld(gap);
+  }, delay);
+}
+
+function dropHeld(): void {
+  held.length = 0;
+  if (heldTimer !== undefined) clearTimeout(heldTimer);
+  heldTimer = undefined;
+}
+
 function shouldAnnounce(actorId?: string): boolean {
   if (!following) return false;
   if (followedActorId) return Boolean(actorId) && actorId === followedActorId;
@@ -144,6 +207,8 @@ export function setFollowingAi(next: boolean): void {
   if (following === next) return;
   following = next;
   if (!next) {
+    for (const move of held.splice(0)) move.apply();
+    dropHeld();
     followedActorId = null;
     lastDispatchedArtifactId = null;
     lastDispatchedSurfaceKey = null;
@@ -205,11 +270,18 @@ export function noteAiSurface(update: Omit<AiSurfaceLocation, "updatedAt">): voi
   const next = { ...update, updatedAt: Date.now() };
   const unchanged = surfaceLocation?.route === next.route && surfaceLocation?.target === next.target && surfaceLocation?.note === next.note && surfaceLocation?.actorId === next.actorId;
   if (unchanged) return;
-  surfaceLocation = next;
-  if (next.actorId) surfacesByActor.set(next.actorId, next);
   lockActorIfNeeded(next.actorId);
-  if (shouldAnnounce(next.actorId)) dispatchSurface(next);
-  emit();
+  inTurn(next.actorId, {
+    at: next.updatedAt,
+    apply: () => {
+      // A replayed move is news now: what it names is happening on screen.
+      const shown = { ...next, updatedAt: Math.max(next.updatedAt, Date.now()) };
+      surfaceLocation = shown;
+      if (shown.actorId) surfacesByActor.set(shown.actorId, shown);
+      if (shouldAnnounce(shown.actorId)) dispatchSurface(shown);
+      emit();
+    },
+  });
 }
 
 export function getAiSurfaceLocation(): AiSurfaceLocation | null {
@@ -220,6 +292,8 @@ export function getAiSurfaceLocation(): AiSurfaceLocation | null {
 export function disengageFollowAi(): void {
   if (!following) return;
   following = false;
+  for (const move of held.splice(0)) move.apply();
+  dropHeld();
   followedActorId = null;
   emit();
 }
@@ -247,6 +321,16 @@ export function noteAiLocation(update: {
 }): void {
   if (!update.artifactId) return;
   if (update.refineOnly && location && location.actorId === update.actorId && location.artifactId !== update.artifactId) return;
+  // The studio on screen refines where the hand is in it; that never waits.
+  if (update.refineOnly || (!held.length && location?.artifactId === update.artifactId)) {
+    applyAiLocation(update);
+    return;
+  }
+  lockActorIfNeeded(update.actorId);
+  inTurn(update.actorId, { artifactId: update.artifactId, at: Date.now(), apply: () => applyAiLocation(update) });
+}
+
+function applyAiLocation(update: Parameters<typeof noteAiLocation>[0]): void {
   const sameArtifact = location?.artifactId === update.artifactId;
   // A coarse publisher (the run feed) names only the artifact; never let it
   // overwrite a precise path and note reported by the open studio.
@@ -349,6 +433,7 @@ export function __resetFollowAi(): void {
   lastDispatchedArtifactId = null;
   lastDispatchedSurfaceKey = null;
   programmaticOpenAt = 0;
+  dropHeld();
   locationsByActor.clear();
   surfacesByActor.clear();
   listeners.clear();

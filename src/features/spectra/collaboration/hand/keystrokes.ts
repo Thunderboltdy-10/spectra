@@ -4,8 +4,9 @@ import type { Random } from "./random";
  * How a hand types. Keys come in bursts with log-normal gaps, a little slower
  * after a space, clearly slower after a comma, and with a breath after a
  * sentence or a line. The whole run is paced to a budget that grows with the
- * length of the text but ever more slowly, so a word takes about as long as a
- * quick typist and a paragraph never becomes a crawl.
+ * length of the text but ever more slowly: a label types like a quick typist,
+ * a paragraph flows in word by word in about a second, and a long passage
+ * never keeps anyone waiting. The AI is a fast collaborator, not a slow one.
  */
 
 export type TypedChunk = {
@@ -18,18 +19,18 @@ export type TypedChunk = {
 /** The typing budget for `length` characters at tempo 1. */
 export function typingBudgetMs(length: number) {
   if (length <= 0) return 0;
-  if (length <= 40) return length * 46;
-  return Math.round(600 + 2_400 * Math.log2(1 + length / 60));
+  if (length <= 20) return length * 22;
+  return Math.round(440 * (length / 20) ** 0.4);
 }
 
 /** No frame comes sooner than this; the editor cannot paint faster anyway. */
 const MIN_FRAME_MS = 34;
 
 function pauseAfter(character: string) {
-  if (character === "\n") return 4.5;
-  if (/[.!?]/.test(character)) return 3.4;
-  if (/[,;:)]/.test(character)) return 2.1;
-  if (character === " ") return 1.25;
+  if (character === "\n") return 3.2;
+  if (/[.!?]/.test(character)) return 2.6;
+  if (/[,;:)]/.test(character)) return 1.7;
+  if (character === " ") return 1.15;
   return 1;
 }
 
@@ -53,7 +54,7 @@ export function typingRhythm(
     const character = text[index]!;
     let gap = random.around(perChar, 0.32) * (index > 0 ? pauseAfter(text[index - 1]!) : 1);
     // Now and then a person stops to think before a new sentence.
-    if (sentenceStart && index > 0 && random.chance(0.18)) gap += random.around(240, 0.35) * tempo;
+    if (sentenceStart && index > 0 && random.chance(0.12)) gap += random.around(150, 0.35) * tempo;
     sentenceStart = /[.!?\n]/.test(character);
     gaps.push(gap);
   }
@@ -80,6 +81,6 @@ export function typingRhythm(
 /** Backspacing a short run, one key at a time, a touch quicker than typing. */
 export function backspaceRhythm(count: number, random: Random, tempo = 1) {
   return Array.from({ length: count }, (_, index) =>
-    Math.round(Math.max(MIN_FRAME_MS, random.around((index === 0 ? 120 : 62) * tempo, 0.22))),
+    Math.round(Math.max(MIN_FRAME_MS, random.around((index === 0 ? 90 : 50) * tempo, 0.22))),
   );
 }

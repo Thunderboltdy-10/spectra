@@ -14459,6 +14459,36 @@ span.number-field {
   box-shadow: 0 18px 40px -18px color-mix(in oklab, var(--text-primary) 38%, transparent);
 }
 
+/* The hand carrying it: the AI's own cursor, out of the page for the trip. */
+.spectra-carry-hand {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 81;
+  color: var(--presence-color);
+  pointer-events: none;
+  will-change: transform, opacity;
+  transform-origin: 4px 3px;
+  transition: opacity var(--motion-base) var(--ease-standard);
+}
+
+.spectra-carry-hand > * {
+  position: absolute;
+}
+
+.spectra-carry-hand[data-pressed] .spectra-presence-glyph {
+  scale: 0.9;
+}
+
+.spectra-carry-hand[data-leaving] {
+  opacity: 0 !important;
+}
+
+/* While its hand carries a work, the AI's cursor in the page is that hand. */
+html[data-spectra-carrying] .spectra-presence-actor[data-actor-kind="ai"] {
+  visibility: hidden;
+}
+
 [data-carry-source] {
   transition: opacity var(--motion-base) var(--ease-standard);
 }

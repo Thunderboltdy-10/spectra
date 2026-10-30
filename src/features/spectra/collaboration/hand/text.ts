@@ -115,7 +115,12 @@ export function planTextHand(
   before: string,
   after: string,
   random: Random,
-  options: { tempo?: number; code?: boolean } = {},
+  options: {
+    tempo?: number;
+    code?: boolean;
+    /** Where the caret already is in this value, if the hand is in it. */
+    caretAt?: number;
+  } = {},
 ): HandTextStep[] {
   const tempo = options.tempo ?? 1;
   const steps: HandTextStep[] = [];
@@ -125,7 +130,7 @@ export function planTextHand(
   for (const [index, hunk] of textHunks(before, after, { wholeRewrites: true }).entries()) {
     const start = hunk.start + shift;
     const removedEnd = start + hunk.removed.length;
-    const reach = Math.round(random.around(index === 0 ? 150 : 210, 0.3) * tempo);
+    const reach = Math.round(random.around(index === 0 ? 120 : 170, 0.3) * tempo);
     if (hunk.removed) {
       const shortTail = hunk.removed.length <= 3 && !/\n/.test(hunk.removed);
       if (shortTail) {
@@ -147,14 +152,14 @@ export function planTextHand(
           // Double-click a word, triple-click a whole line: the selection lands at once.
           steps.push({
             value: current,
-            delayMs: Math.round(random.around(oneWord ? 150 : 230, 0.2) * tempo),
+            delayMs: Math.round(random.around(oneWord ? 120 : 170, 0.2) * tempo),
             gesture: "selecting",
             caret: removedEnd,
             selection: { start, end: removedEnd },
           });
         } else {
           // Drag across: the selection grows with the hand.
-          const dragMs = strokeDuration(textWidth(hunk.removed.length), 10, 0.5) * tempo;
+          const dragMs = strokeDuration(textWidth(hunk.removed.length), 10, 0.36) * tempo;
           const frames = Math.max(2, Math.min(6, Math.ceil(hunk.removed.length / 14)));
           for (let frame = 1; frame <= frames; frame += 1) {
             const t = frame / frames;
@@ -170,7 +175,7 @@ export function planTextHand(
           }
         }
         // A beat to read what is selected before replacing it.
-        const read = Math.round(random.around(160 + Math.min(260, hunk.removed.length * 3), 0.25) * tempo);
+        const read = Math.round(random.around(110 + Math.min(170, hunk.removed.length * 2), 0.25) * tempo);
         if (!hunk.inserted) {
           current = current.slice(0, start) + current.slice(removedEnd);
           steps.push({ value: current, delayMs: read, gesture: "erasing", caret: start });
@@ -185,7 +190,7 @@ export function planTextHand(
           const tail = typeOver ? removedEnd : start;
           const chunks = typingRhythm(hunk.inserted, random, { tempo, wholeWords: options.code });
           let typed = "";
-          const pause = Math.round(random.around(typeOver ? read : 140, 0.25) * tempo);
+          const pause = Math.round(random.around(typeOver ? read : 100, 0.25) * tempo);
           for (const [chunkIndex, chunk] of chunks.entries()) {
             typed += chunk.text;
             const value = current.slice(0, start) + typed + current.slice(tail);
@@ -212,8 +217,9 @@ export function planTextHand(
       shift += hunk.inserted.length - hunk.removed.length;
       continue;
     }
-    // A pure insertion: click where it goes and type.
-    steps.push({ value: current, delayMs: reach, gesture: "pointer", caret: start });
+    // A pure insertion: click where it goes, unless the caret is there, and type.
+    if (index > 0 || options.caretAt !== start)
+      steps.push({ value: current, delayMs: reach, gesture: "pointer", caret: start });
     let typed = "";
     for (const chunk of typingRhythm(hunk.inserted, random, { tempo, wholeWords: options.code })) {
       typed += chunk.text;

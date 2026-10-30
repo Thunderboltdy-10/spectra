@@ -2,8 +2,10 @@ import { readPerformances, type AiPerformance } from "./performance";
 
 // A newly created work only becomes readable after its commit. Its writer's
 // socket can already be gone by then, so keep the acknowledged performance
-// briefly for the studio Follow AI is opening. This never writes document data.
-const JOIN_WINDOW_MS = 15_000;
+// briefly for the studio Follow AI is opening, which may be a while behind the
+// run: a followed view finishes the hand on screen before it moves on. This
+// never writes document data.
+const JOIN_WINDOW_MS = 30_000;
 const recent = new Map<string, { performance: AiPerformance; committedAt: number }>();
 const listeners = new Set<() => void>();
 

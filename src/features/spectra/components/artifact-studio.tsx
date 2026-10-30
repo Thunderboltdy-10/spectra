@@ -149,6 +149,7 @@ import {
   describeAct,
   describeState,
   pathSegments,
+  presenceColor,
   stateIsVisible,
   type ActorIdentity,
   type InteractionState,
@@ -4658,6 +4659,8 @@ function ArtifactStudioEditor({
   const carryKey = carry && carry.phase !== "drop" ? `${aiDocumentStage!.operationId}:${carry.blockId}` : null;
   const carryRef = useRef(carry);
   carryRef.current = carry;
+  const aiActorRef = useRef(aiInteractionState?.actor);
+  aiActorRef.current = aiInteractionState?.actor ?? aiActorRef.current;
   useEffect(() => {
     const current = carryRef.current;
     if (!carryKey || !current || current.flightMs === undefined) return;
@@ -4674,11 +4677,13 @@ function ArtifactStudioEditor({
       const seamBox = seam ? boxOf(seam) : null;
       return seamBox ? { left: seamBox.left, top: seamBox.top + seamBox.height + 8, width: seamBox.width, height: 96 } : null;
     };
+    const actor = aiActorRef.current;
     return carryWork({
       workId: current.workId,
       target,
       flightMs: current.flightMs,
       page,
+      ...(actor ? { hand: { name: actorLabel(actor), color: presenceColor(actor) } } : {}),
       reduced: getSpectraMotionSnapshot().reduced,
     });
   }, [carryKey]);

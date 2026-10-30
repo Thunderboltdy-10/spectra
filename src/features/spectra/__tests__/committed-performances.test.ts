@@ -26,7 +26,7 @@ it("keeps a committed creation for its opening studio after the writer disconnec
   stage.ingest(committedPerformancesFor("revision"));
   expect(stage.presence().get("ai")).toMatchObject({ actorKind: "ai" });
   expect(committedPerformancesFor("another-work")).toEqual([]);
-  vi.advanceTimersByTime(20_000);
+  vi.advanceTimersByTime(30_000);
   expect(stage.presence().size).toBe(0);
   expect(committedPerformancesFor("revision")).toEqual([]);
   expect(rememberCommittedPerformance({ ...performance, id: "history" }, 1)).toBeUndefined();

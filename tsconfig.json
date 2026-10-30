@@ -44,6 +44,7 @@
   "exclude": [
     "node_modules",
     "ai-education-workspace-landing-page",
+    "film",
     ".next/dev/types",
     ".next-local/*/dev/types"
   ]

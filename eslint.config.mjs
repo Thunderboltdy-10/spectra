@@ -64,6 +64,8 @@ const eslintConfig = defineConfig([
     ".playwright-cli/**",
     ".shots/**",
     ".spectra-local/**",
+    // The portfolio film is its own Remotion package.
+    "film/**",
     "scripts/final-verification/playwright/**",
   ]),
 ]);

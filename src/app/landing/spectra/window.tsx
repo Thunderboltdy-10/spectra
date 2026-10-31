@@ -59,9 +59,14 @@ export function Window({
   threads,
   label,
   className,
+  rail = "none",
+  open,
   children,
 }: {
   at: RailPlace;
+  /** The film shows the rail, and opens it as a hand reaches for it; the landing shows the page alone. */
+  rail?: "slim" | "none";
+  open?: boolean;
   className?: string;
   width?: number;
   height?: number;
@@ -71,7 +76,7 @@ export function Window({
 }) {
   return (
     <Scaled width={width} height={height} className={className ? `sp-window ${className}` : "sp-window"}>
-      <AppWindow at={at} threads={threads} label={label} rail="none" className="sp-window-app">
+      <AppWindow at={at} threads={threads} label={label} rail={rail} open={open} className="sp-window-app">
         {children}
       </AppWindow>
     </Scaled>

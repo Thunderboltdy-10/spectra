@@ -1,12 +1,15 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
+import { ArtifactEmbed } from "@/features/spectra/components/artifact-embed";
+import type { SpectraArtifactEmbed } from "@/features/spectra/data/api";
 import { useWorld } from "../../kit/world-context";
 import { Written } from "../../kit/written";
 import { DEADLINES, REVISION_BLOCKS, type WireItem } from "../../world/school";
-import { TODAY, dayName } from "../../world/story";
+import { TODAY, dayAt, dayName } from "../../world/story";
 import { CLASSES, type ClassKey } from "../../world/works";
+import { morph } from "../../kit/filing";
 import { PEOPLE, likeness, sleep, useHands } from "../hands";
 import { dimAll, flash, shine, travel } from "../light/light";
 import { useLoop, type Beat } from "../loop";
@@ -36,18 +39,52 @@ const length = (item: WireItem) => Math.round(((item.endAt ?? 0) - (item.startAt
 const HOUR = 60;
 const LEAD = 14;
 
+/** The film's two: revision for the test, on two different days, each made as a task. */
+const timed = (item: WireItem, id: string, day: number, hour: number, minutes: number, minute = 0): WireItem => {
+  const startAt = dayAt(day, hour, minute);
+  return { ...item, id, startAt, endAt: startAt + minutes * 60_000 };
+};
+const DROPPED = [
+  { item: timed(REVISION_BLOCKS[0]!, "film-rev-1", 0, 16, 60), x: 250, turn: -4, hue: 4.2 },
+  { item: timed(REVISION_BLOCKS[1]!, "film-rev-2", 1, 15, 45, 30), x: 690, turn: 3.5, hue: 5.2 },
+];
+const taskEmbed = (item: WireItem): SpectraArtifactEmbed => ({
+  embedId: `landing-${item.id}`,
+  containerType: "thread",
+  containerId: "landing-week",
+  containerRegionId: "reply:landing-week",
+  sourceArtifactId: `task-${item.id}`,
+  mode: "expanded",
+  interaction: "interact",
+  versionPolicy: "live",
+  contextPolicy: "none",
+  state: "ready",
+  source: {
+    artifactId: `task-${item.id}`,
+    title: item.title,
+    blueprintKey: "planner_task",
+    updatedAt: TODAY,
+    snapshot: {
+      title: item.title,
+      content: { taskTitle: item.title, dueAt: item.startAt, status: "todo", priority: "high", estimateMinutes: length(item) },
+    },
+  },
+});
+const DROPPED_EMBEDS = DROPPED.map(({ item }) => taskEmbed(item));
+
 const classOf = (item: WireItem) => (Object.keys(CLASSES) as ClassKey[]).find((key) => CLASSES[key].providerClassId === item.classId) ?? "biology";
 
 /** The calendar's button for an item, found by the title it carries. */
 const itemIn = (root: HTMLElement | null, title: string) =>
   [...(root?.querySelectorAll<HTMLElement>("button[title]") ?? [])].find((button) => button.title.includes(title)) ?? null;
 
-export function Week() {
+export function Week({ film = false }: { film?: boolean } = {}) {
   const world = useWorld();
   const sceneRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const calendarRef = useRef<HTMLDivElement>(null);
   const slideRef = useRef<HTMLDivElement>(null);
+  const droppedRef = useRef<(HTMLDivElement | null)[]>([]);
   const { layer, hand } = useHands();
   /** Hides what is on its way in, from the moment the calendar first draws it until it lands. */
   const comingRef = useRef<HTMLStyleElement>(null);
@@ -67,7 +104,7 @@ export function Week() {
     return () => {
       dimAll("week");
       // The story's own week is left as it was found.
-      world.unplace(LAB.id, ...TASKS.map((task) => task.id));
+      world.unplace(LAB.id, ...TASKS.map((task) => task.id), ...DROPPED.map((each) => each.item.id));
       if (shifted.current) world.shift(MOVED.id, -DAY);
     };
   }, [world]);
@@ -189,6 +226,52 @@ export function Week() {
     await found?.animate([{ opacity: 1 }, { opacity: 0, transform: "translateY(-10px) scale(0.96)" }], { duration: 320, easing: "ease-in", fill: "forwards" }).finished.catch(() => undefined);
   };
 
+  /**
+   * The film's week: two tasks fall in from above the page, and two of Spectra's
+   * hands catch them at once and carry each to its own day.
+   */
+  const dropTasks = async ({ wait, signal }: Beat) => {
+    const stage = stageRef.current;
+    const cards = droppedRef.current;
+    if (!stage || cards.some((card) => !card)) return;
+    await wait(250);
+    for (const card of cards) card!.dataset.fallen = "";
+    await wait(820);
+    if (signal.aborted) return;
+    for (const { item } of DROPPED) hold(item.title, true);
+    for (const { item } of DROPPED) world.place(item);
+    const hands = DROPPED.map(() => hand(PEOPLE.spectra, signal));
+    await Promise.all(
+      hands.map(async (each, index) => {
+        const card = cards[index]!;
+        const box = card.getBoundingClientRect();
+        await wait(index * 110);
+        await each.show(card, [30 / box.width, 22 / box.height]);
+        await each.press({ light: false });
+      }),
+    );
+    const copies = hands.map((each, index) => each.grab(cards[index]!));
+    for (const card of cards) card!.dataset.taken = "";
+    const targets = await Promise.all(DROPPED.map(({ item }) => appear(item.title, { wait, signal } as Beat)));
+    const room = stage.getBoundingClientRect();
+    await Promise.all(
+      hands.map(async (each, index) => {
+        const target = targets[index];
+        if (!target) return;
+        const box = target.getBoundingClientRect();
+        await each.move([box.left - room.left + 24, box.top - room.top + 18], { ms: 520, overshoot: false });
+        hold(DROPPED[index]!.item.title, false);
+        target.dataset.brought = "here";
+        flash({ el: target, rx: 150, ry: 80, strength: 0.5, hues: [DROPPED[index]!.hue - 0.6, DROPPED[index]!.hue + 0.6], hold: 400 });
+        await morph(copies[index]!, target, stage.querySelector(".sp-hands") as HTMLElement, 340);
+        await each.drop();
+        window.setTimeout(() => delete target.dataset.brought, 700);
+      }),
+    );
+    await Promise.all(hands.map((each) => each.hide().then(() => each.remove())));
+    await wait(60_000);
+  };
+
   useLoop(sceneRef, {
     open: async ({ wait, signal }) => {
       // The calendar opens itself on seven once its week has loaded; the school day is set after that.
@@ -213,6 +296,7 @@ export function Week() {
       await wait(300);
     },
     round: async (beat) => {
+      if (film) return dropTasks(beat);
       const { wait, signal } = beat;
       const slide = slideRef.current;
       const stage = stageRef.current;
@@ -317,7 +401,22 @@ export function Week() {
             </div>
           </Window>
         </div>
-        <div ref={slideRef} className="sp-week-slide" aria-hidden>
+        {film
+          ? DROPPED.map((each, index) => (
+              <div
+                key={each.item.id}
+                ref={(node) => {
+                  droppedRef.current[index] = node;
+                }}
+                className="sp-week-dropped spectra-artifact-studio"
+                style={{ "--x": `${each.x}px`, "--turn": `${each.turn}deg`, "--i": index } as CSSProperties}
+                aria-hidden
+              >
+                <ArtifactEmbed embed={DROPPED_EMBEDS[index]!} />
+              </div>
+            ))
+          : null}
+        <div ref={slideRef} className="sp-week-slide" hidden={film} aria-hidden>
           <span className="sp-week-slide-deck">Cell respiration</span>
           <p className="sp-week-slide-title">Before {MOVED.startAt ? dayName(MOVED.startAt) : "the"}&rsquo;s test</p>
           <ol className="sp-week-slide-tasks">

@@ -7,7 +7,7 @@ import { workTypeMeta, type PresentedWorkType } from "../artifacts/presentation"
 import { dueSentence, taskInstant } from "../components/task/task-time";
 import type { BriefSuggestion, BriefTaskDraft } from "./daily-brief";
 import { useShowcaseTime } from "../showcase/showcase-time";
-import { DaySky, dayPart } from "./day-sky";
+import { dayPart } from "./day-sky";
 import type { TodayAgenda } from "./today-model";
 import { useBriefActions } from "./use-brief-actions";
 import type { BriefState } from "./use-daily-brief";
@@ -44,9 +44,6 @@ export function TodayBrief({ brief, agenda }: { brief: BriefState; agenda: Today
   if (brief.status === "writing")
     return (
       <section aria-label="Your morning" className="morning" data-writing>
-        <div className="morning-dawn">
-          <DaySky />
-        </div>
         <p className="morning-writing">
           <WorkingMark />
           Spectra is getting your morning ready.
@@ -79,7 +76,6 @@ function ReadyBrief({ brief, agenda }: { brief: Extract<BriefState, { status: "r
   return (
     <section aria-labelledby="morning-title" className="morning">
       <div className="morning-dawn">
-        <DaySky />
         <h2 id="morning-title" className="morning-title">
           {brief.earlier ? "Yesterday's brief" : `Your ${dayPart(hour)}`}
         </h2>

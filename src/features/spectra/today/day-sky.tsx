@@ -1,14 +1,9 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { useShowcaseTime } from "../showcase/showcase-time";
 
 /*
- * The time on Home, drawn as the sky (HOME.md, "The morning brief"). A small
- * window on the day: its colour follows the hour, the sun crosses its arc and
- * sets behind the hills in a glow, the moon rises for the night with the
- * stars. It follows the reader's own clock minute by minute, and the body in
- * the sky turns a little toward a hand that comes near it.
+ * The sky through the day: what stands in it at a minute, and its colours,
+ * for whatever draws it. Home names its brief by the part of the day.
  */
 
 const SUNRISE = 6 * 60;
@@ -57,134 +52,6 @@ export function skyColours(minute: number): SkyColours {
   const t = (at - from[0]) / (to[0] - from[0] || 1);
   const dark = at < 5 * 60 ? 1 : at < 6 * 60 + 30 ? 1 - (at - 5 * 60) / 90 : at < 20 * 60 ? 0 : at < 21 * 60 + 30 ? (at - 20 * 60) / 90 : 1;
   return { top: mix(from[1], to[1], t), horizon: mix(from[2], to[2], t), land: mix(from[3], to[3], t), glow: mix(from[4], to[4], t), night: dark };
-}
-
-/** The reader's clock, read again at the turn of each minute. Null until mounted, so the server never guesses it. */
-function useMinute() {
-  const [now, setNow] = useState<Date | null>(null);
-  useEffect(() => {
-    let timer = 0;
-    const tick = () => {
-      const at = new Date();
-      setNow(at);
-      timer = window.setTimeout(tick, 60_000 - (at.getSeconds() * 1000 + at.getMilliseconds()) + 50);
-    };
-    tick();
-    return () => window.clearTimeout(timer);
-  }, []);
-  return now;
-}
-
-const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
-const dateFormat = new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long" });
-
-/** The window's size, and where the arc runs in it: from the hills on the left, over, to the hills on the right. */
-const W = 132;
-const H = 76;
-const arc = (across: number) => ({ x: 14 + (W - 28) * across, y: 60 - 44 * Math.sin(Math.PI * across) });
-const STARS: Array<[number, number, number]> = [
-  [18, 12, 0.7],
-  [34, 22, 0.5],
-  [52, 9, 0.8],
-  [71, 18, 0.5],
-  [88, 8, 0.7],
-  [106, 20, 0.6],
-  [118, 11, 0.45],
-  [26, 34, 0.4],
-  [96, 33, 0.4],
-];
-
-export function DaySky() {
-  const clock = useMinute();
-  const story = useShowcaseTime();
-  const now = story === null ? clock : new Date(story);
-  const id = useId();
-  const root = useRef<HTMLDivElement>(null);
-
-  // A hand near the sky: the sun's rays and the moon turn toward it. Set as CSS
-  // variables, so following the pointer never renders again.
-  const lean = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const body = root.current?.querySelector(".day-sky-body")?.getBoundingClientRect();
-    if (!body) return;
-    const dx = (event.clientX - (body.left + body.width / 2)) / 90;
-    const dy = (event.clientY - (body.top + body.height / 2)) / 90;
-    root.current?.style.setProperty("--lean-x", String(Math.max(-1, Math.min(1, dx))));
-    root.current?.style.setProperty("--lean-y", String(Math.max(-1, Math.min(1, dy))));
-  };
-  const rest = () => {
-    root.current?.style.setProperty("--lean-x", "0");
-    root.current?.style.setProperty("--lean-y", "0");
-  };
-
-  if (!now) return <div className="day-sky" aria-hidden />;
-  const minute = now.getHours() * 60 + now.getMinutes();
-  const { body, across } = skyAt(minute);
-  const sky = skyColours(minute);
-  const { x, y } = arc(across);
-  /** How near the horizon the body is: the glow round it grows as it sinks. */
-  const low = Math.pow(1 - Math.sin(Math.PI * across), 2);
-
-  return (
-    <div ref={root} className="day-sky" data-body={body} onPointerMove={lean} onPointerLeave={rest}>
-      <svg className="day-sky-art" viewBox={`0 0 ${W} ${H}`} aria-hidden>
-        <defs>
-          <clipPath id={`${id}-frame`}>
-            <rect width={W} height={H} rx="16" />
-          </clipPath>
-          <linearGradient id={`${id}-air`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" style={{ stopColor: sky.top }} />
-            <stop offset="0.85" style={{ stopColor: sky.horizon }} />
-          </linearGradient>
-          <radialGradient id={`${id}-glow`}>
-            <stop offset="0" style={{ stopColor: sky.glow, stopOpacity: 0.95 }} />
-            <stop offset="1" style={{ stopColor: sky.glow, stopOpacity: 0 }} />
-          </radialGradient>
-        </defs>
-        <g clipPath={`url(#${id}-frame)`}>
-          <rect className="day-sky-air" width={W} height={H} fill={`url(#${id}-air)`} />
-          <g className="day-sky-stars" style={{ opacity: sky.night }}>
-            {STARS.map(([cx, cy, r], index) => (
-              <circle key={index} cx={cx} cy={cy} r={r} style={{ animationDelay: `${index * -0.7}s` }} />
-            ))}
-          </g>
-          <circle className="day-sky-glow" cx={x} cy={y} r={body === "sun" ? 30 : 20} fill={`url(#${id}-glow)`} style={{ opacity: body === "sun" ? 0.35 + 0.65 * low : 0.35 }} />
-          <g className="day-sky-place" style={{ transform: `translate(${x}px, ${y}px)` }}>
-            {/* Keyed by the body, so sunset brings the moon up over the horizon, and dawn the sun. */}
-            <g key={body} className="day-sky-rise">
-              <g className="day-sky-body">
-                {body === "sun" ? (
-                  <>
-                    <g className="day-sky-rays">
-                      <path d="M0-14.5v3.6M0 10.9v3.6M-14.5 0h3.6M10.9 0h3.6M-10.3-10.3l2.5 2.5M7.8 7.8l2.5 2.5M-10.3 10.3l2.5-2.5M7.8-7.8l2.5-2.5" />
-                    </g>
-                    <circle className="day-sky-sun" r="7.4" />
-                    <path className="day-sky-shine" d="M-4.4-2.6a5 5 0 0 1 3.4-2.6" />
-                  </>
-                ) : (
-                  <path className="day-sky-moon" d="M3.5-6.06A7 7 0 1 0 3.5 6.06 6.2 6.2 0 0 1 3.5-6.06Z" />
-                )}
-              </g>
-            </g>
-          </g>
-          {/* The hills it rises from and sets behind: the far ones lighter, in the sky's own air. */}
-          <path
-            className="day-sky-hills"
-            d={`M0 58C16 52 30 51 46 55S78 50 96 53 122 50 ${W} 52V${H}H0Z`}
-            style={{ fill: mix(sky.land, sky.horizon, 0.45) }}
-          />
-          <path className="day-sky-hills" d={`M0 64C22 58 40 60 60 63S98 57 ${W} 61V${H}H0Z`} style={{ fill: sky.land }} />
-        </g>
-        <rect className="day-sky-edge" x="0.5" y="0.5" width={W - 1} height={H - 1} rx="15.5" />
-      </svg>
-      {/* The server and the reader can format times in different locales
-          ("8:05 AM" against "8:05"); a mismatch here broke the whole page's
-          hydration, so the sign-in and join forms stopped responding. */}
-      <time className="morning-time" dateTime={now.toISOString()} suppressHydrationWarning>
-        {timeFormat.format(now)}
-      </time>
-      <span className="day-sky-date" suppressHydrationWarning>{dateFormat.format(now)}</span>
-    </div>
-  );
 }
 
 /** What part of the day it is, for the brief's name. */

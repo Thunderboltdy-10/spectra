@@ -621,6 +621,10 @@ export class StoryWorld {
       case "/api/spectra/assets":
         // Nothing is uploaded in the story; an image dropped on a work stays on the page.
         return method === "GET" ? { ok: true, assets: [] } : json(400, { error: "Uploads are not part of the story." });
+      case "/api/spectra/lenses/docx":
+      case "/api/spectra/lenses/office":
+        // A work titled like a Word or Office file opens as itself: the story keeps no file behind it.
+        return { state: "open" };
       default:
         return undefined;
     }

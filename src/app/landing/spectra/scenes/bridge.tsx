@@ -71,7 +71,10 @@ const SYNC_LINE: Record<Sync, string> = {
   "to-word": "Saved to Henry's MacBook Air",
 };
 
-export function Bridge() {
+/** The file as Spectra has it from the laptop: by its file's name. */
+const IA_FILE = { ...WORKS.ia, title: FILE };
+
+export function Bridge({ film = false }: { film?: boolean } = {}) {
   const sceneRef = useRef<HTMLElement>(null);
   const wordRef = useRef<HTMLDivElement>(null);
   const caretRef = useRef<HTMLSpanElement>(null);
@@ -366,7 +369,7 @@ export function Bridge() {
         <BridgePrism drive={drive} anchorRef={coreRef} />
 
         <div ref={appRef} className="sp-bridge-app">
-          <Window at="library" width={860} height={640} label="Henry's Spectra">
+          <Window at="library" width={film ? 800 : 860} height={film ? 1060 : 640} label="Henry's Spectra">
             <div className="sp-bridge-doc">
               <p className="sp-bridge-sync" data-sync={sync} aria-live="polite">
                 <span className="sp-bridge-file">
@@ -380,7 +383,7 @@ export function Bridge() {
               </p>
               <Surface id="bridge" states={presence.states} className="sp-bridge-surface">
                 <div ref={studioRef} className="sp-bridge-studio">
-                  <InlineStudio work={WORKS.ia} instanceKey="landing-bridge-ia" className="sp-studio" />
+                  <InlineStudio work={IA_FILE} instanceKey="landing-bridge-ia" className="sp-studio" />
                 </div>
               </Surface>
             </div>

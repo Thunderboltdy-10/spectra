@@ -35,7 +35,10 @@ export function AppWindow({
   className,
   children,
   label,
+  open,
 }: {
+  /** A slim rail opened over the page, as when the pointer is on it. */
+  open?: boolean;
   /** The destination open in the rail. */
   at: RailPlace;
   /** Recent threads under the destinations, newest first. */
@@ -53,6 +56,7 @@ export function AppWindow({
     <figure
       className={className ? `landing-window ${className}` : "landing-window"}
       data-rail={rail}
+      data-open={open || undefined}
       aria-label={label}
     >
       {rail === "none" ? null : (

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { ArtifactEmbed } from "@/features/spectra/components/artifact-embed";
+import type { SpectraArtifactEmbed } from "@/features/spectra/data/api";
 import { ShowcaseTime } from "@/features/spectra/showcase/showcase-time";
 import { skyAt, skyColours } from "@/features/spectra/today/day-sky";
 import { TodayBrief } from "@/features/spectra/today/today-brief";
@@ -8,7 +10,7 @@ import type { BriefState } from "@/features/spectra/today/use-daily-brief";
 import { Written } from "../../kit/written";
 import { DAYS, DEADLINES } from "../../world/school";
 import { dayAt, dayName } from "../../world/story";
-import { WORKS } from "../../world/works";
+import { WORKS, type StoryWork } from "../../world/works";
 import { PEOPLE, useHands } from "../hands";
 import { dimAll, flash, shine, travel } from "../light/light";
 import { useLoop, type Beat } from "../loop";
@@ -64,6 +66,44 @@ const DAYS_SHOWN: Day[] = [
   },
 ];
 
+/**
+ * The film's day: its brief is written before the sun is up, and each move
+ * Spectra is asked for happens there and then. The flashcards and the quiz
+ * come out of their rows and are sent on their way; the source analysis opens
+ * the IA itself, which grows into the window the next part is in.
+ */
+const FILM_DAY: Day = {
+  offset: DAYS.tomorrow,
+  recap: "You finished the yeast lab results and Spectra made you notes, a quiz, cards and slides for the Biology test.",
+  moves: [
+    { kind: "make", title: "Flashcards for the respiration test", why: "The key terms from your notes, ready for tomorrow.", workType: "flashcard_deck" },
+    { kind: "open", title: "Do the cell respiration quiz", why: "Your notes are thinnest on the electron transport chain, and the quiz starts there.", workType: "quiz", targetId: WORKS.quiz._id },
+    { kind: "open", title: "Write the source analysis", why: `Origin, purpose and content for each source, due ${source.startAt ? dayName(source.startAt) : "soon"}.`, workType: "document", targetId: WORKS.ia._id },
+  ],
+};
+/** What each press makes, and where it goes: off to a side, or held, growing, for the next part. */
+const FILM_MADE: { work: StoryWork; to: "left" | "right" | "stay"; hue: number }[] = [
+  { work: WORKS.cards, to: "right", hue: 5 },
+  { work: WORKS.quiz, to: "left", hue: 6.1 },
+  { work: { ...WORKS.ia, title: "History IA draft.docx" }, to: "stay", hue: 3.8 },
+];
+const madeEmbed = (work: StoryWork): SpectraArtifactEmbed => ({
+  embedId: `landing-day-${work._id}`,
+  containerType: "thread",
+  containerId: "landing-day",
+  containerRegionId: "reply:landing-day",
+  sourceArtifactId: work._id,
+  mode: "expanded",
+  interaction: "interact",
+  versionPolicy: "live",
+  contextPolicy: "none",
+  state: "ready",
+  source: { artifactId: work._id, title: work.title, blueprintKey: work.blueprintKey, updatedAt: work.updatedAt, snapshot: { title: work.title, content: work.content } },
+});
+const FILM_EMBEDS = FILM_MADE.map(({ work }) => madeEmbed(work));
+/** Where the IA ends, in the frame: where the bridge's Spectra window stands (film.css). */
+const IA_END = { x: 790, y: 52, w: 465, h: 616 };
+
 const weekday = (offset: number) => new Intl.DateTimeFormat("en-GB", { weekday: "long" }).format(dayAt(offset, 12));
 /** The days go on, each the next date; their briefs take turns. */
 const FIRST = DAYS_SHOWN[0]!.offset;
@@ -74,7 +114,7 @@ const TOLD = 30;
 /** Where the sky's arc runs: the horizon line and the top of the arc, from the top of the sky, and its width. */
 type Arc = { width: number; horizon: number; apex: number };
 
-export function Day() {
+export function Day({ film = false }: { film?: boolean } = {}) {
   const sceneRef = useRef<HTMLElement>(null);
   const skyRef = useRef<HTMLDivElement>(null);
   const homeRef = useRef<HTMLDivElement>(null);
@@ -82,6 +122,8 @@ export function Day() {
   const bodyRef = useRef<HTMLDivElement>(null);
   const glowRef = useRef<HTMLDivElement>(null);
   const placeRef = useRef<HTMLDivElement>(null);
+  const madeRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const stageRef = useRef<HTMLDivElement>(null);
   const { layer, hand } = useHands();
   /** How many days on from the first; never wraps, so the dates keep going. */
   const [at, setAt] = useState(0);
@@ -97,7 +139,7 @@ export function Day() {
   const [done, setDone] = useState(0);
   const [arc, setArc] = useState<Arc | null>(null);
 
-  const day = DAYS_SHOWN[at % DAYS_SHOWN.length]!;
+  const day = film ? FILM_DAY : DAYS_SHOWN[at % DAYS_SHOWN.length]!;
   const offset = FIRST + at;
   const time = dayAt(offset, 0) + clock * MINUTE;
   const brief: BriefState = useMemo(
@@ -252,6 +294,86 @@ export function Day() {
     henry.remove();
   };
 
+  /** The film: Spectra's hand does the brief's moves, and each one happens. */
+  const filmDay = async (beat: Beat) => {
+    const since = left.current;
+    const going = () => !beat.signal.aborted && left.current === since;
+    draw(5 * 60 + 30);
+    setWritten(false);
+    setDone(0);
+    await pass(6 * 60 + 50, 1000, beat, since);
+    if (!going()) return;
+    setWritten(true);
+    const dusk = pass(17 * 60 + 40, 7600, beat, since);
+    await beat.wait(650);
+    const spectra = hand(PEOPLE.spectra, beat.signal);
+    for (const [index, made] of FILM_MADE.entries()) {
+      if (!going()) return;
+      const action = homeRef.current?.querySelector<HTMLElement>(".morning-move:not([data-done]) .morning-move-action");
+      const card = madeRefs.current[index];
+      const stage = stageRef.current;
+      if (!action || !card || !stage) return;
+      if (index === 0) await spectra.show(action);
+      else await spectra.move(action, { ms: 380 });
+      await spectra.press();
+      const row = action.closest<HTMLElement>(".morning-move");
+      const from = action.getBoundingClientRect();
+      setDone(index + 1);
+      if (row) flash({ el: row, rx: 260, ry: 60, strength: 0.45, hues: [made.hue - 0.5, made.hue + 0.5], hold: 400 });
+      // Out of the row it comes, as the card it is.
+      const room = stage.getBoundingClientRect();
+      const width = card.offsetWidth;
+      const height = card.offsetHeight;
+      const end =
+        made.to === "stay"
+          ? { x: IA_END.x - room.left, y: IA_END.y - room.top, scale: IA_END.w / width }
+          : { x: made.to === "right" ? room.width - width * 0.72 - 40 : 40, y: -230, scale: 0.72 };
+      const start = { x: from.left - room.left - width * 0.1, y: from.top - room.top - height * 0.05, scale: 0.12 };
+      const turn = made.to === "right" ? 4 : made.to === "left" ? -4 : 0;
+      card.dataset.out = "";
+      const rise = card.animate(
+        [
+          { transform: `translate(${start.x}px, ${start.y}px) scale(${start.scale})`, opacity: 0 },
+          { opacity: 1, offset: 0.25 },
+          {
+            transform: `translate(${made.to === "stay" ? end.x : end.x}px, ${made.to === "stay" ? end.y + 40 : end.y}px) scale(${made.to === "stay" ? 0.62 : end.scale}) rotate(${turn}deg)`,
+            opacity: 1,
+          },
+        ],
+        { duration: 620, easing: "cubic-bezier(0.2, 0.9, 0.25, 1.06)", fill: "forwards" },
+      );
+      await rise.finished.catch(() => undefined);
+      flash({ el: card, rx: 200, ry: 220, strength: 0.5, hues: [made.hue - 0.6, made.hue + 0.6], hold: 300 });
+      if (made.to === "stay") {
+        // The IA grows into the window the next part opens it in.
+        await beat.wait(260);
+        void spectra.hide().then(() => spectra.remove());
+        card.animate(
+          [
+            { transform: `translate(${end.x}px, ${end.y + 40}px) scale(0.62)` },
+            { transform: `translate(${end.x}px, ${end.y}px) scale(${end.scale})` },
+          ],
+          { duration: 760, easing: "cubic-bezier(0.5, 0, 0.15, 1)", fill: "forwards" },
+        );
+        break;
+      }
+      await beat.wait(560);
+      // And off it goes, out of the side of the frame.
+      const away = made.to === "right" ? window.innerWidth - room.left + 80 : -room.left - width - 80;
+      card.animate(
+        [
+          { transform: `translate(${end.x}px, ${end.y}px) scale(${end.scale}) rotate(${turn}deg)`, filter: "blur(0px)" },
+          { transform: `translate(${end.x + (away - end.x) * 0.12}px, ${end.y - 14}px) scale(${end.scale * 1.04}) rotate(${turn * 0.5}deg)`, filter: "blur(0px)", offset: 0.25 },
+          { transform: `translate(${away}px, ${end.y - 60}px) scale(${end.scale * 0.9}) rotate(${turn * 3}deg)`, filter: "blur(6px)" },
+        ],
+        { duration: 520, easing: "cubic-bezier(0.55, 0, 0.75, 0.2)", fill: "forwards" },
+      );
+      await beat.wait(200);
+    }
+    await dusk;
+    await beat.wait(60_000);
+  };
+
   useLoop(sceneRef, {
     open: async ({ wait }) => {
       const title = sceneRef.current?.querySelector(".sp-heading");
@@ -273,6 +395,7 @@ export function Day() {
       await wait(300);
     },
     round: async (beat) => {
+      if (film) return filmDay(beat);
       const since = left.current;
       const going = () => !beat.signal.aborted && left.current === since;
       // The days go on for as long as the reader watches.
@@ -360,7 +483,7 @@ export function Day() {
       <div ref={heavenRef} className="sp-day-heaven" />
 
       <ShowcaseTime.Provider value={time}>
-        <div className="sp-day-stage">
+        <div ref={stageRef} className="sp-day-stage">
           <div ref={homeRef} className="sp-day-home">
             <Window at="home" width={1040} height={360} label={`Henry's Home, ${weekday(offset)}`}>
               <div className="sp-day-page">
@@ -368,6 +491,21 @@ export function Day() {
               </div>
             </Window>
           </div>
+          {film
+            ? FILM_MADE.map(({ work, to }, index) => (
+                <div
+                  key={work._id}
+                  ref={(node) => {
+                    madeRefs.current[index] = node;
+                  }}
+                  className="sp-day-made spectra-artifact-studio"
+                  data-to={to}
+                  aria-hidden
+                >
+                  <ArtifactEmbed embed={FILM_EMBEDS[index]!} />
+                </div>
+              ))
+            : null}
           {layer}
         </div>
       </ShowcaseTime.Provider>

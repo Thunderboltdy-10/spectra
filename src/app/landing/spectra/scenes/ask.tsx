@@ -17,37 +17,40 @@ import { useLoop, type Beat } from "../loop";
 import { Scaled } from "../window";
 
 /*
- * The island, large, as the one thing on the page. Henry hands it his Biology
- * notes and asks for something to revise from. While it works it says what it
- * is doing, its reading lights up the notes, and what it makes comes out of it
- * as the cards it would sit on a page as: a quiz, flashcards and slides, each
- * working where it lands. A visitor can bring any card to the top to look at
- * it; the island itself is a picture here and takes no input.
+ * The island, large, as the one thing on the page. Henry asks it for notes and
+ * something to revise from. While it works it says what it is doing, and what
+ * it makes comes out of it as the cards it would sit on a page as: his notes,
+ * a quiz, flashcards and slides, each working where it lands. A visitor can
+ * bring any card to the top to look at it; the island itself is a picture here
+ * and takes no input.
  */
 
-const MAKE = `make me something to revise for ${DEADLINES.biologyTest.startAt ? dayName(DEADLINES.biologyTest.startAt) : "Thursday"}'s test`;
-const MADE = [WORKS.quiz, WORKS.cards, WORKS.deck];
+const MAKE = `make me notes on cell respiration and something to revise for ${DEADLINES.biologyTest.startAt ? dayName(DEADLINES.biologyTest.startAt) : "Thursday"}'s test`;
+const MADE = [WORKS.notes, WORKS.quiz, WORKS.cards, WORKS.deck];
 const HUES: Record<string, [number, number]> = {
+  [WORKS.notes._id]: [3.6, 4.4],
   [WORKS.quiz._id]: [5.8, 6.4],
   [WORKS.cards._id]: [4.6, 5.4],
   [WORKS.deck._id]: [0.4, 1.2],
 };
 /** What the island says it is doing, in order; each made card lands as its line is written. */
-const STEPS: { text: string; lands?: string; marks?: number }[] = [
-  { text: "Reading Cell respiration notes", marks: 3 },
+const STEPS: { text: string; lands: string }[] = [
+  { text: "Writing notes on cell respiration", lands: WORKS.notes._id },
   { text: "Writing a quiz on the electron transport chain", lands: WORKS.quiz._id },
   { text: "Turning the key terms into flashcards", lands: WORKS.cards._id },
   { text: "Making five slides, filed in Biology SL", lands: WORKS.deck._id },
 ];
 /** Where each card lies in the fan: across, down, and its turn. */
 const FAN: Record<string, { x: number; y: number; turn: number }> = {
-  [WORKS.quiz._id]: { x: 350, y: 34, turn: -4 },
-  [WORKS.cards._id]: { x: 615, y: 6, turn: 0 },
-  [WORKS.deck._id]: { x: 880, y: 34, turn: 4 },
+  [WORKS.notes._id]: { x: 46, y: 40, turn: -5 },
+  [WORKS.quiz._id]: { x: 330, y: 12, turn: -1.6 },
+  [WORKS.cards._id]: { x: 594, y: 12, turn: 1.6 },
+  [WORKS.deck._id]: { x: 878, y: 40, turn: 5 },
 };
 
 /** The kind of each card, shown in its place until it arrives. */
 const SLOTS: Record<string, { kind: string; icon: IconName; tint: string }> = {
+  [WORKS.notes._id]: { kind: "Notes", icon: "document", tint: "#4f9fe6" },
   [WORKS.quiz._id]: { kind: "Quiz", icon: "quiz", tint: "#ff647f" },
   [WORKS.cards._id]: { kind: "Flashcards", icon: "flashcards", tint: "#9176e8" },
   [WORKS.deck._id]: { kind: "Slides", icon: "slides", tint: "#ffab4a" },
@@ -82,12 +85,10 @@ export function Ask() {
   const world = useWorld();
   const sceneRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
-  const notesRef = useRef<HTMLDivElement>(null);
   const isleRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const { layer, hand } = useHands();
   const [made, setMade] = useState<ReadonlySet<string>>(() => new Set());
-  const [marks, setMarks] = useState(0);
   const [status, setStatus] = useState<{ text: string; shown: number } | null>(null);
   const [top, setTop] = useState<string | null>(null);
   /** The cards from bottom to top: the last one looked at stays above the others. */
@@ -126,24 +127,18 @@ export function Ask() {
 
   const round = async (beat: Beat) => {
     const { wait, signal } = beat;
-    const notes = notesRef.current;
     const field = islandField();
-    if (!notes || !field) return;
+    if (!field) return;
     setMade(new Set());
-    setMarks(0);
     setStatus(null);
     setTop(null);
     await wait(150);
 
-    // Henry hands the island his notes.
+    // Henry puts the island's caret where he will type.
     const henry = hand(PEOPLE.henry, signal);
-    await henry.show(notes, [0.45, 0.4]);
+    await henry.show(field, [0.3, 0.5]);
     await henry.press({ light: false });
-    henry.grab(notes);
-    await henry.move(field, { ms: 480, aim: [0.3, 0.5] });
-    await henry.drop();
-    await henry.hide();
-    henry.remove();
+    void henry.hide().then(() => henry.remove());
     if (signal.aborted) return;
 
     // He asks; the island answers in a run of its own, which stays a tab on its rail.
@@ -158,30 +153,21 @@ export function Ask() {
     world.quiet = true;
     await typeIntoIsland(MAKE, {
       fresh: true,
-      perLetter: 12,
-      references: [{ id: WORKS.notes._id, type: WORKS.notes.blueprintKey, title: WORKS.notes.title }],
+      perLetter: 46,
     });
     if (signal.aborted) return;
 
     for (const step of STEPS) {
       say(step.text);
-      if (step.marks) {
-        for (let mark = 1; mark <= step.marks && !signal.aborted; mark += 1) {
-          await wait(180);
-          setMarks(mark);
-        }
-        await wait(120);
-        continue;
-      }
-      await wait(260);
-      const id = step.lands!;
+      await wait(340);
+      const id = step.lands;
       setMade((was) => new Set(was).add(id));
       await wait(40);
       const card = cardRefs.current[id];
       if (card) flash({ el: card, rx: 220, ry: 200, strength: 0.5, hues: HUES[id]!, hold: 360 });
-      await wait(220);
+      await wait(300);
     }
-    say(`Done. Three things for ${DEADLINES.biologyTest.startAt ? dayName(DEADLINES.biologyTest.startAt) : "the test"}, in Biology SL`);
+    say(`Done. Four things for ${DEADLINES.biologyTest.startAt ? dayName(DEADLINES.biologyTest.startAt) : "the test"}, in Biology SL`);
     for (let tries = 0; !waiting.current?.done && tries < 25 && !signal.aborted; tries += 1) await wait(80);
     lastRun.current = waiting.current?.runId ?? null;
     waiting.current = null;
@@ -237,28 +223,6 @@ export function Ask() {
                 ) : null}
               </p>
             </div>
-
-            <div ref={notesRef} className="sp-ask-notes" data-marks={marks}>
-              <span className="sp-ask-kind">
-                <i aria-hidden />
-                Notes, Biology SL
-              </span>
-              <b>{WORKS.notes.title}</b>
-              <p>
-                Glycolysis happens in the cytoplasm and splits glucose into two <mark data-mark="1">pyruvate</mark>. The link reaction
-                and Krebs cycle run in the <mark data-mark="2">mitochondrial matrix</mark>, and the{" "}
-                <mark data-mark="3">electron transport chain</mark> on the inner membrane makes most of the ATP.
-              </p>
-              <span className="sp-ask-line" style={{ width: "92%" }} />
-              <span className="sp-ask-line" style={{ width: "80%" }} />
-              <span className="sp-ask-line" style={{ width: "86%" }} />
-              <span className="sp-ask-line" style={{ width: "58%" }} />
-            </div>
-
-            <svg className="sp-ask-arrow" data-on={made.size ? "" : undefined} width="80" height="24" viewBox="0 0 80 24" aria-hidden>
-              <path d="M4 12h66" />
-              <path d="M62 5l9 7-9 7" />
-            </svg>
 
             {/* Where each card will lie, waiting in the fan before the island fills it. */}
             {MADE.map((work) => {

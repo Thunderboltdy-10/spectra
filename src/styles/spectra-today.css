@@ -276,140 +276,28 @@
   color: var(--text-primary);
 }
 
-/* The morning brief: waiting when the student wakes. The sun rises over the
-   time they wake, once; beside it, yesterday in a few lines and the day's
-   few moves, each one press away. Open on the page, not on a card. */
+/* The morning brief: waiting when the student wakes. Its name, then
+   yesterday in a few lines and the day's few moves, each one press away.
+   Open on the page, not on a card. */
 .morning {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 148px minmax(0, 1fr);
-  gap: 36px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
   max-width: 1120px;
   margin-top: -14px;
 }
 
 .morning-dawn {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  padding-top: 2px;
-}
-
-/* The sky over the time it is now: the sun on its arc by day, the moon by
-   night. It rises over the horizon once when it appears; through the day it
-   moves only as the minutes do, and turns a little toward a near hand. */
-.day-sky {
-  --lean-x: 0;
-  --lean-y: 0;
-  display: flex;
-  min-height: 92px;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-}
-
-.day-sky-art {
-  width: 132px;
-  height: 76px;
-  overflow: visible;
-  filter: drop-shadow(0 10px 18px rgb(40 46 90 / 0.14));
-}
-
-.day-sky-air,
-.day-sky-hills {
-  transition: fill 1.2s ease;
-}
-
-.day-sky-place {
-  transition: transform 1.2s var(--ease-standard);
-}
-
-.day-sky-glow {
-  transition:
-    cx 1.2s var(--ease-standard),
-    cy 1.2s var(--ease-standard),
-    opacity 1.2s ease;
-}
-
-.day-sky-rise {
-  animation: day-sky-rise 1100ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.day-sky-body {
-  transform: translate(calc(var(--lean-x) * 1.5px), calc(var(--lean-y) * 1.5px));
-  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.day-sky-sun {
-  fill: #ffd25a;
-  stroke: #ffab3d;
-  stroke-width: 1.4;
-}
-
-.day-sky-shine {
-  fill: none;
-  stroke: #fff6cf;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-}
-
-.day-sky-rays {
-  fill: none;
-  stroke: #ffbf48;
-  stroke-width: 2.2;
-  stroke-linecap: round;
-  transform: rotate(calc(var(--lean-x) * 18deg));
-  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
-  animation: day-sky-rays 700ms 650ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.day-sky-moon {
-  fill: #f6edcf;
-  filter: drop-shadow(0 0 3px rgb(246 237 207 / 0.7));
-  transform: rotate(calc(-20deg + var(--lean-x) * 14deg));
-  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.day-sky-stars {
-  fill: #fff;
-  transition: opacity 1.2s ease;
-}
-
-.day-sky-stars circle {
-  animation: day-sky-twinkle 3.2s ease-in-out infinite;
-}
-
-.day-sky-edge {
-  fill: none;
-  stroke: rgb(20 19 24 / 0.08);
-}
-
-.day-sky-date {
-  font-size: 12.5px;
-  color: var(--text-tertiary);
+  align-items: baseline;
+  gap: 12px;
 }
 
 .morning-earlier {
   font-size: 12.5px;
   line-height: 1.4;
   color: var(--text-tertiary);
-}
-
-/* While the brief is written, the sun waits low, breathing. */
-.morning[data-writing] .day-sky-rays {
-  opacity: 0.4;
-}
-
-.morning-time {
-  margin-top: 12px;
-  font-family: var(--font-display);
-  font-size: 40px;
-  font-weight: 500;
-  line-height: 1;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-primary);
 }
 
 .morning-title {
@@ -623,32 +511,6 @@
   color: var(--move-ink);
 }
 
-@keyframes day-sky-rise {
-  from {
-    transform: translateY(22px);
-  }
-  to {
-    transform: none;
-  }
-}
-
-@keyframes day-sky-twinkle {
-  50% {
-    opacity: 0.35;
-  }
-}
-
-@keyframes day-sky-rays {
-  from {
-    opacity: 0;
-    scale: 0.7;
-  }
-  to {
-    opacity: 1;
-    scale: 1;
-  }
-}
-
 @keyframes morning-settle {
   from {
     opacity: 0;
@@ -661,29 +523,12 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .day-sky-rise,
-  .day-sky-rays,
-  .day-sky-place,
-  .day-sky-body,
-  .day-sky-moon,
-  .day-sky-stars circle,
   .morning-body {
     animation: none !important;
   }
 }
 
 @media (max-width: 1100px) {
-  .morning {
-    grid-template-columns: 1fr;
-    gap: 16px;
-  }
-
-  .morning-dawn {
-    flex-direction: row;
-    align-items: flex-end;
-    gap: 12px;
-  }
-
   .morning-body {
     grid-template-columns: 1fr;
   }

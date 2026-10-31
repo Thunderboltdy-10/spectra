@@ -6,7 +6,7 @@ import { AppWindow } from "@/app/landing/kit/app-window";
 import { Scaled } from "@/app/landing/spectra/window";
 import { workTypeMeta, type PresentedWorkType } from "@/features/spectra/artifacts/presentation";
 import { ShowcaseTime } from "@/features/spectra/showcase/showcase-time";
-import { DaySky, dayPart } from "@/features/spectra/today/day-sky";
+import { dayPart } from "@/features/spectra/today/day-sky";
 
 /*
  * A Home beside the form, drawn with Home's own styles and sky: whose it is
@@ -128,7 +128,6 @@ export function AuthHome({ kind }: { kind: AuthHomeKind }) {
             <h2 className="page-greeting">{greeting}</h2>
             <section className="morning">
               <div className="morning-dawn">
-                <DaySky />
                 <p className="morning-title">Your {dayPart(hour)}</p>
               </div>
               <div className="morning-body">

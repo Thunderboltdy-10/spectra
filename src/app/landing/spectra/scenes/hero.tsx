@@ -99,7 +99,7 @@ const stay = (event: React.MouseEvent) => {
   if ((event.target as HTMLElement).closest("a[href]")) event.preventDefault();
 };
 
-export function Hero() {
+export function Hero({ film = false }: { film?: boolean } = {}) {
   const world = useWorld();
   const sceneRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -109,6 +109,9 @@ export function Hero() {
   const [time, setTime] = useState(STORY.evening);
   const [states, setStates] = useState<Record<string, "away" | "here" | "taken">>({});
   const hurry = useRef<Record<string, () => void>>({});
+  /** The film's Home has its rail: Henry opens it and goes to the Library. */
+  const [railOpen, setRailOpen] = useState(false);
+  const [place, setPlace] = useState<"home" | "library">("home");
 
   const refresh = () => setTime((at) => at + 1);
   const setState = (key: string, state: "away" | "here" | "taken") => setStates((was) => ({ ...was, [key]: state }));
@@ -189,6 +192,66 @@ export function Hero() {
     await wait(250);
   };
 
+  /** The film files both arrivals at once, a Spectra hand for each, quickly. */
+  const fileTogether = async ({ wait, signal }: Beat) => {
+    const home = homeRef.current;
+    const stage = stageRef.current;
+    if (!home || !stage) return;
+    for (const item of ARRIVALS) setState(item.key, "here");
+    await wait(520);
+    const drifts = ARRIVALS.map((item) => stage.querySelector<HTMLElement>(`[data-drift="${item.key}"] .sp-drift-card`));
+    if (drifts.some((drift) => !drift) || signal.aborted) return;
+    const hands = ARRIVALS.map(() => hand(PEOPLE.spectra, signal));
+    await Promise.all(
+      hands.map(async (each, index) => {
+        const card = drifts[index]!.getBoundingClientRect();
+        await wait(index * 90);
+        await each.show(drifts[index], [24 / card.width, 18 / card.height]);
+        await each.press();
+      }),
+    );
+    const copies = hands.map((each, index) => each.grab(drifts[index]!));
+    for (const item of ARRIVALS) setState(item.key, "taken");
+    home.dataset.filing = "";
+    const before = snapshot(home, ".today-day-item, .work-desk > *");
+    world.place(TRIP_FORM);
+    world.place(LAB);
+    refresh();
+    const targets = await Promise.all(ARRIVALS.map((item) => arrival(home, item.lands.selector, item.lands.text, signal)));
+    glide(before);
+    const layerBox = stage.getBoundingClientRect();
+    await Promise.all(
+      hands.map(async (each, index) => {
+        const target = targets[index];
+        if (!target) return;
+        const box = target.getBoundingClientRect();
+        await each.move([box.left - layerBox.left + 24, box.top - layerBox.top + 18], { ms: 440, overshoot: false });
+        flash({ el: target, at: [0.5, 0.5], rx: 120, ry: 90, strength: 0.6, hues: [ARRIVALS[index]!.hue - 0.5, ARRIVALS[index]!.hue + 0.5], hold: 300 });
+        await morph(copies[index]!, target, stage.querySelector(".sp-hands") as HTMLElement, 360);
+        target.dataset.filed = "";
+        await each.drop();
+      }),
+    );
+    delete home.dataset.filing;
+    settle(home);
+    await Promise.all(hands.map((each) => each.hide().then(() => each.remove())));
+  };
+
+  /** Then Henry opens the rail and goes to his Library. */
+  const toLibrary = async ({ wait, signal }: Beat) => {
+    const stage = stageRef.current;
+    const item = stage?.querySelector<HTMLElement>(".landing-window-places li:nth-child(2)");
+    if (!stage || !item) return;
+    const henry = hand(PEOPLE.henry, signal);
+    await henry.show(item, [0.5, 0.5]);
+    setRailOpen(true);
+    await wait(260);
+    await henry.move(item, { ms: 300, aim: [0.42, 0.5] });
+    await henry.press();
+    setPlace("library");
+    await wait(900);
+  };
+
   useLoop(sceneRef, {
     threshold: 0.2,
     open: async ({ wait }) => {
@@ -196,6 +259,13 @@ export function Hero() {
       await wait(700);
     },
     round: async (beat) => {
+      if (film) {
+        await fileTogether(beat);
+        await beat.wait(120);
+        await toLibrary(beat);
+        await beat.wait(60_000);
+        return;
+      }
       for (const item of ARRIVALS) {
         if (beat.signal.aborted) return;
         await file(item, beat);
@@ -236,7 +306,14 @@ export function Hero() {
 
       <div ref={stageRef} className="sp-hero-stage">
         <div className="sp-hero-window" onClickCapture={stay}>
-          <Window at="home" width={1240} height={800} label="Henry's Home in Spectra">
+          <Window
+            at={place}
+            width={film ? 1280 : 1240}
+            height={film ? 720 : 800}
+            rail={film ? "slim" : "none"}
+            open={railOpen}
+            label="Henry's Home in Spectra"
+          >
             <ShowcaseTime.Provider value={time}>
               <div ref={homeRef} className="sp-home">
                 <HomeDay onAllThreads={() => undefined} />

@@ -61,14 +61,10 @@ recordings/
 storage-state-*.json
 .shots/
 
-# Film footage and Remotion exports stay local; keep source and capture scripts.
-/film/**/*.mp4
-/film/**/*.mov
-/film/**/*.webm
-/film/**/*.mkv
-/film/**/*.avi
-/film/**/*.m4v
-/film/renders/
+# Local film projects, recording stages and their supporting tools.
+/film/
+/src/app/landing/film/
+/.claude/skills/remotion*/
 
 # Local-only: pre-migration Convex snapshots and scratch working files.
 # Never commit user data.

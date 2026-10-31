@@ -14,7 +14,6 @@ Start with the [engineering overview](docs/README.md) for the architecture, deve
 | [`scripts/`](scripts/), [`fixtures/`](fixtures/) | Development tools, verification harnesses and test fixtures |
 | [`deploy/`](deploy/), [`workers/`](workers/) | Collaboration gateway deployment and optional Cloudflare realtime provider |
 | [`docs/`](docs/) | Engineering, product and design docs, launch audits and archived plans |
-| [`film/`](film/README.md) | Film source, capture scripts and production notes |
 
 ## Quick start
 
@@ -29,6 +28,5 @@ npx vitest run <files>     # focused tests
 ## Local files
 
 Local instances and data live in `.spectra-local/`; review captures live in `.shots/`.
-Film videos stay in their existing folders under `film/`, and Remotion exports live in
-`film/renders/`. These files are ignored by Git. Historical audit reports may refer to
-local captures that are unavailable in a fresh clone.
+Local film projects and recording assets also stay on disk and are ignored by Git.
+Historical audit reports may refer to local captures that are unavailable in a fresh clone.

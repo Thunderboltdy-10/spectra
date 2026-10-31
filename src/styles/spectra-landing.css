@@ -1643,10 +1643,17 @@
   position: relative;
 }
 
+/* Asked at the foot of the page, where the island lives; sent, it rises to the top and makes room for the work. */
 .sp-ask-isle-room {
   position: absolute;
   inset: 0 0 auto;
   height: 220px;
+  translate: 0 440px;
+  transition: translate 0.7s cubic-bezier(0.65, 0, 0.25, 1);
+}
+
+.sp-ask-stage[data-asked] .sp-ask-isle-room {
+  translate: 0 0;
 }
 
 /* The island is fixed to the bottom of its page; this box is its page, drawn larger. */
@@ -1692,41 +1699,6 @@
   animation: sp-spin 1.6s linear infinite;
 }
 
-/* The fan before anything is made: a soft place for each card, named by its kind. */
-.sp-ask-slot {
-  position: absolute;
-  left: var(--x);
-  top: calc(232px + var(--y));
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  width: 320px;
-  height: 384px;
-  border: 1.5px dashed color-mix(in oklab, var(--tint) 45%, transparent);
-  border-radius: 16px;
-  background: color-mix(in oklab, var(--tint) 6%, #fbfaf7);
-  color: color-mix(in oklab, var(--tint) 70%, #141318);
-  font-size: 14px;
-  font-weight: 600;
-  transform: rotate(var(--turn));
-  animation: sp-ask-slot 2.4s ease-in-out infinite;
-  transition: opacity 0.3s ease;
-}
-
-.sp-ask-slot[data-filled] {
-  opacity: 0;
-  animation: none;
-}
-
-@keyframes sp-ask-slot {
-  50% {
-    background: color-mix(in oklab, var(--tint) 12%, #fbfaf7);
-  }
-}
-
 /* A made card comes out of the island and lies in the fan; brought up, it is on top and straight. */
 .sp-ask-made {
   position: absolute;
@@ -1745,7 +1717,7 @@
 }
 
 .sp-ask-made.spectra-artifact-studio {
-  background: transparent;
+  background: transparent !important;
 }
 
 .sp-ask-made[data-made] {
@@ -1779,7 +1751,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sp-ask-made {
+  .sp-ask-made,
+  .sp-ask-isle-room {
     transition: none;
   }
 }
@@ -2268,7 +2241,7 @@
 }
 
 .sp-week-dropped.spectra-artifact-studio {
-  background: transparent;
+  background: transparent !important;
 }
 
 .sp-week-dropped[data-fallen] {
@@ -2286,7 +2259,10 @@
   filter: drop-shadow(0 22px 30px rgb(20 19 24 / 0.2)) drop-shadow(0 1px 1px rgb(20 19 24 / 0.08));
 }
 
-.sp-week-dropped > .work-embed .work-embed-face {
+/* Only as tall as the task's facts: the card ends just under its status and due date. */
+.sp-week-dropped > .work-embed[data-mode] .work-embed-face {
+  flex: none;
+  min-height: 0;
   box-shadow: none;
 }
 
@@ -2652,7 +2628,7 @@
 }
 
 .sp-day-made.spectra-artifact-studio {
-  background: transparent;
+  background: transparent !important;
 }
 
 .sp-day-made[data-to="stay"] {

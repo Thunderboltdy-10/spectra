@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { Icon, type IconName } from "@/components/icons";
 import { postSpectra, type SpectraArtifactEmbed } from "@/features/spectra/data/api";
 import { ArtifactEmbed } from "@/features/spectra/components/artifact-embed";
 import { refreshRunTabs } from "@/features/spectra/island/run-tabs";
@@ -18,7 +17,8 @@ import { Scaled } from "../window";
 
 /*
  * The island, large, as the one thing on the page. Henry asks it for notes and
- * something to revise from. While it works it says what it is doing, and what
+ * something to revise from, at the foot of the page where it lives; sent, it
+ * rises to the top. While it works it says what it is doing, and what
  * it makes comes out of it as the cards it would sit on a page as: his notes,
  * a quiz, flashcards and slides, each working where it lands. A visitor can
  * bring any card to the top to look at it; the island itself is a picture here
@@ -46,14 +46,6 @@ const FAN: Record<string, { x: number; y: number; turn: number }> = {
   [WORKS.quiz._id]: { x: 330, y: 12, turn: -1.6 },
   [WORKS.cards._id]: { x: 594, y: 12, turn: 1.6 },
   [WORKS.deck._id]: { x: 878, y: 40, turn: 5 },
-};
-
-/** The kind of each card, shown in its place until it arrives. */
-const SLOTS: Record<string, { kind: string; icon: IconName; tint: string }> = {
-  [WORKS.notes._id]: { kind: "Notes", icon: "document", tint: "#4f9fe6" },
-  [WORKS.quiz._id]: { kind: "Quiz", icon: "quiz", tint: "#ff647f" },
-  [WORKS.cards._id]: { kind: "Flashcards", icon: "flashcards", tint: "#9176e8" },
-  [WORKS.deck._id]: { kind: "Slides", icon: "slides", tint: "#ffab4a" },
 };
 
 const STAGE = { width: 1240, height: 640 };
@@ -91,6 +83,8 @@ export function Ask() {
   const [made, setMade] = useState<ReadonlySet<string>>(() => new Set());
   const [status, setStatus] = useState<{ text: string; shown: number } | null>(null);
   const [top, setTop] = useState<string | null>(null);
+  /** Sent: the island rises from the foot of the page to the top, and what it makes comes out below it. */
+  const [asked, setAsked] = useState(false);
   /** The cards from bottom to top: the last one looked at stays above the others. */
   const [order, setOrder] = useState<readonly string[]>(() => MADE.map((work) => work._id));
   const waiting = useRef<{ key: string; runId: string | null; done: boolean } | null>(null);
@@ -132,6 +126,7 @@ export function Ask() {
     setMade(new Set());
     setStatus(null);
     setTop(null);
+    setAsked(false);
     await wait(150);
 
     // Henry puts the island's caret where he will type.
@@ -156,6 +151,8 @@ export function Ask() {
       perLetter: 46,
     });
     if (signal.aborted) return;
+    setAsked(true);
+    await wait(700);
 
     for (const step of STEPS) {
       say(step.text);
@@ -209,7 +206,7 @@ export function Ask() {
 
       <div className="sp-ask-room">
         <Scaled width={STAGE.width} height={STAGE.height} least={0.8}>
-          <div ref={stageRef} className="sp-ask-stage" style={{ width: "100%", height: "100%" }}>
+          <div ref={stageRef} className="sp-ask-stage" data-asked={asked || undefined} style={{ width: "100%", height: "100%" }}>
             <div className="sp-ask-isle-room">
               <div ref={isleRef} className="sp-ask-isle" inert aria-label="Spectra's island">
                 <LandingIsland engine={engine} />
@@ -223,23 +220,6 @@ export function Ask() {
                 ) : null}
               </p>
             </div>
-
-            {/* Where each card will lie, waiting in the fan before the island fills it. */}
-            {MADE.map((work) => {
-              const place = FAN[work._id]!;
-              return (
-                <span
-                  key={`slot-${work._id}`}
-                  className="sp-ask-slot"
-                  data-filled={made.has(work._id) || undefined}
-                  style={{ "--x": `${place.x}px`, "--y": `${place.y}px`, "--turn": `${place.turn}deg`, "--tint": SLOTS[work._id]!.tint } as CSSProperties}
-                  aria-hidden
-                >
-                  <Icon name={SLOTS[work._id]!.icon} size={16} />
-                  {SLOTS[work._id]!.kind}
-                </span>
-              );
-            })}
 
             {MADE.map((work, index) => {
               const place = FAN[work._id]!;

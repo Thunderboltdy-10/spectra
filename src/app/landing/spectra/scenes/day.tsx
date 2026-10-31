@@ -114,7 +114,7 @@ const TOLD = 30;
 /** Where the sky's arc runs: the horizon line and the top of the arc, from the top of the sky, and its width. */
 type Arc = { width: number; horizon: number; apex: number };
 
-export function Day({ film = false }: { film?: boolean } = {}) {
+export function Day({ film = false }: { film?: boolean }) {
   const sceneRef = useRef<HTMLElement>(null);
   const skyRef = useRef<HTMLDivElement>(null);
   const homeRef = useRef<HTMLDivElement>(null);

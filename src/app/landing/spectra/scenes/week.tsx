@@ -78,7 +78,7 @@ const classOf = (item: WireItem) => (Object.keys(CLASSES) as ClassKey[]).find((k
 const itemIn = (root: HTMLElement | null, title: string) =>
   [...(root?.querySelectorAll<HTMLElement>("button[title]") ?? [])].find((button) => button.title.includes(title)) ?? null;
 
-export function Week({ film = false }: { film?: boolean } = {}) {
+export function Week({ film = false }: { film?: boolean }) {
   const world = useWorld();
   const sceneRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);

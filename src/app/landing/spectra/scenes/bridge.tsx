@@ -74,7 +74,7 @@ const SYNC_LINE: Record<Sync, string> = {
 /** The file as Spectra has it from the laptop: by its file's name. */
 const IA_FILE = { ...WORKS.ia, title: FILE };
 
-export function Bridge({ film = false }: { film?: boolean } = {}) {
+export function Bridge({ film = false }: { film?: boolean }) {
   const sceneRef = useRef<HTMLElement>(null);
   const wordRef = useRef<HTMLDivElement>(null);
   const caretRef = useRef<HTMLSpanElement>(null);

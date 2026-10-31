@@ -39,7 +39,8 @@ const SCENES = [
 function Header() {
   const [away, setAway] = useState(false);
   useEffect(() => {
-    const read = () => setAway(window.scrollY > 24);
+    const title = document.getElementById("sp-hero-title");
+    const read = () => setAway(title ? title.getBoundingClientRect().top <= 0 : window.scrollY > 24);
     read();
     window.addEventListener("scroll", read, { passive: true });
     return () => window.removeEventListener("scroll", read);

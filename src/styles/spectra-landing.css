@@ -130,8 +130,25 @@
   border-radius: 999px;
   transform: translateX(-50%);
   transition:
+    opacity 0.2s ease,
     background-color 0.35s ease,
     box-shadow 0.35s ease;
+}
+
+.sp-header::before {
+  content: "";
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  width: 100vw;
+  height: 32px;
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+.sp-header[data-away]:not(:hover):not(:focus-within) {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .sp-header[data-away] {

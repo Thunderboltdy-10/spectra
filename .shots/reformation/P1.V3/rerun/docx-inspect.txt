@@ -1,5 +1,0 @@
-﻿PATH=<local-workspace> essay.docx
-BYTES=43336
-SHA256=B790E6BC89F916FA2C14E7E10AFB582E48A3F8D2D15BBF4073A5ED08437ED531
-PARTS=[Content_Types].xml|_rels/.rels|word/_rels/document.xml.rels|word/document.xml|word/footer1.xml|word/footer2.xml|word/endnotes.xml|word/footnotes.xml|word/media/image1.wmf|word/theme/theme1.xml|word/settings.xml|word/_rels/settings.xml.rels|word/webSettings.xml|word/styles.xml|word/numbering.xml|docProps/app.xml|docProps/core.xml|word/fontTable.xml|docProps/custom.xml
-HAS_CONTENT_TYPES=True

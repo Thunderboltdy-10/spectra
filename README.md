@@ -2,6 +2,8 @@
 
 Spectra is an AI-native school workspace. It is built with Next.js, Convex, Yjs real-time collaboration and a Rust desktop Bridge for native Office files.
 
+[spectra.ink](https://spectra.ink)
+
 https://github.com/user-attachments/assets/a19a1e71-8a6b-437f-881f-c435cff57344
 
 Start with the [engineering overview](docs/README.md) for the architecture, development workflow and cross-system contracts. See the [environment guide](docs/ENVIRONMENT.md) for configuration and the [launch guide](docs/LAUNCH.md) for deployment.

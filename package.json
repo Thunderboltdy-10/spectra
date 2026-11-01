@@ -1,5 +1,5 @@
 {
-  "name": "ai-school",
+  "name": "spectra",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -28,7 +28,7 @@
     "test:local-start": "node --test scripts/local/start-all.node.mjs",
     "test:node": "node --test scripts/local/start-all.node.mjs scripts/local/managebac-provider-fixture.node.mjs scripts/s10-security-authorization.node.mjs",
     "test:p8-foundation": "vitest run scripts/final-verification/foundation.test.mjs scripts/reformation-evidence.test.mjs",
-    "inventory:spectra": "node scripts/generate-spectra-inventory.mjs --write docs/archive/spectra-definitive/generated/baseline-inventory.json",
+    "inventory:spectra": "node scripts/generate-spectra-inventory.mjs --write .spectra-local/reports/baseline-inventory.json",
     "check:architecture": "node scripts/check-spectra-architecture.mjs",
     "check:copy": "node scripts/check-user-facing-copy.mjs",
     "check:design-tokens": "node scripts/check-design-tokens.mjs",
@@ -39,16 +39,17 @@
     "check:skills": "node scripts/bundle-skills.mjs --check",
     "skills:bundle": "node scripts/bundle-skills.mjs",
     "eval:ai": "tsx --conditions=react-server scripts/eval-ai.ts",
-    "test:realtime": "vitest run workers/collaboration",
-    "fidelity:docx": "tsx scripts/fidelity-harness/docx.ts",
-    "fidelity:office": "tsx scripts/fidelity-harness/office.ts",
-    "fidelity:seam": "vitest run src/features/spectra/__tests__/seam-contract.test.ts",
+    "test:realtime": "vitest run collaboration",
+    "fidelity:docx": "node scripts/office-corpus.mjs && tsx scripts/fidelity-harness/docx.ts",
+    "fidelity:office": "node scripts/office-corpus.mjs && tsx scripts/fidelity-harness/office.ts",
+    "fidelity:seam": "node scripts/office-corpus.mjs && vitest run src/features/spectra/__tests__/seam-contract.test.ts",
     "eval:semantic": "vitest run --config scripts/semantic-eval/vitest.live.config.ts",
-    "build:realtime": "wrangler deploy --dry-run --config workers/collaboration/wrangler.toml",
+    "build:realtime": "docker build -f deploy/collaboration-gateway/Dockerfile .",
     "convex:dev": "convex dev",
     "lint:design": "node scripts/report-design-census.mjs",
     "start:collab:raw": "SPECTRA_COLLAB_ALLOW_RAW=1 node scripts/collaboration-gateway.mjs",
-    "verify:collab-secrets": "node scripts/verify-collab-secrets.mjs"
+    "verify:collab-secrets": "node scripts/verify-collab-secrets.mjs",
+    "test:office": "node scripts/office-corpus.mjs --test"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.79",
@@ -196,7 +197,6 @@
     "tailwindcss": "^4",
     "tsx": "^4.20.5",
     "typescript": "^5",
-    "vitest": "^4.0.18",
-    "wrangler": "^4.118.0"
+    "vitest": "^4.0.18"
   }
 }

@@ -88,3 +88,42 @@ storage-state-*.json
 # Local review captures and editor launch configs
 /docs/review/
 /.claude/launch.json
+
+# Developer tool state and instructions are local to each checkout.
+/.claude/
+/.codex/
+/.factory/
+/.opencode/
+/.cursor/
+/.idea/
+/.vscode/
+/AGENTS.md
+/CLAUDE.md
+/CODEX.md
+/SKILL.md
+
+# External Office corpus and generated native build metadata.
+/fixtures/office/
+/bridge/bridge-app/gen/
+
+# Retired deployment and one-off migration tooling.
+/workers/
+/deploy/collaboration-gateway/railway.toml
+/scripts/export-next-generation-migration-baseline.ps1
+/scripts/verify-next-generation-migration-baseline.ps1
+
+# Generated review artifacts and agent dispatch state.
+/tmp/
+/.tmp/
+/evidence/
+/artifacts/
+/reports/
+/spectra-redesign-mission-artifacts/
+/docs/archive/root-snapshots/
+/docs/archive/spectra-definitive/generated/
+/docs/spectra-launch-audit/prompts/
+/docs/spectra-launch-audit/review-cases/
+/docs/spectra-launch-audit/evaluations/*.mjs
+
+# Safe environment templates are public.
+!.env.local.example

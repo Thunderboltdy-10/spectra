@@ -31,8 +31,7 @@ Four properties shape almost every module:
 | Product features | `src/features/spectra/` | One directory per subsystem. The main ones are listed below this table. | Client code reaches the server through `data/request.ts` (`requestSpectra`) and `data/api.ts`. Semantic UI events go through `spectraBus`, never `window` events (enforced by `check:architecture`). |
 | Backend | `convex/` | The schema (`schema.ts`), about 200 function modules (identity, schools, memberships, catalog, artifacts, versions and history, collaboration persistence, native write operations, runs and receipts, metering, account erasure, ManageBac), crons and generated types. | The authorization and durability boundary. Reads are bounded (D42/R10). `_generated/api.d.ts` must list every module (guarded by `module-graph.test.ts`). |
 | Shared contracts | `shared/` | Code imported by the web app, Convex, the gateway and scripts: durable-content and native-AI-commit contracts, collaboration framing and recovery, intake integrity and limits, sync and retry policy, region-claim policy, human formatting. | No React, Next.js or Convex function imports. `convex/values` validators are the one exception (`artifact-embed.ts`). |
-| Collaboration gateway | `scripts/collaboration-gateway.mjs`, `scripts/serve-collaboration-gateway.mjs`, `scripts/collaboration-*.mjs` | The Hocuspocus/Yjs server. Rooms are held in memory, persisted to Convex as an append-only log with checkpoints and compaction, and projected to native files. | Deployed from `deploy/collaboration-gateway/` (Dockerfile, `fly.toml`, `railway.toml`, `compose.yml`). |
-| Cloudflare realtime (opt-in) | `workers/collaboration/` | An alternative Durable Object realtime provider, enabled only by `NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME`. | Off by default. It does not yet give AI writes an admission receipt (see open risks). |
+| Collaboration gateway | `scripts/collaboration-gateway.mjs`, `scripts/serve-collaboration-gateway.mjs`, `scripts/collaboration-*.mjs` | The Hocuspocus/Yjs server. Rooms are held in memory, persisted to Convex as an append-only log with checkpoints and compaction, and projected to native files. | Fly.io in production (`deploy/collaboration-gateway/fly.toml`); Docker Compose for local hosting. |
 | Spectra Bridge | `bridge/` | `bridge-core` (file watching, journal, sync protocol, retry) and `bridge-app` (the Tauri desktop shell, release notes in `RELEASE.md`). Built by `.github/workflows/bridge-desktop.yml`. | It talks to the web app's native routes. Windows and macOS are launch platforms. |
 | Tooling | `scripts/` | The `check:*` gates, local stack (`scripts/local/`), fidelity harnesses, the classroom load test, the P8 verification harness (`scripts/final-verification/`), and fixtures. | Scripts named in `package.json` are the supported entry points. |
 
@@ -78,7 +77,7 @@ Node and dependencies come from `package.json`. Copy `.env.example` to `.env.loc
 | Full local stack | `npm run local:start` / `local:status` / `local:stop` / `local:reset` (`scripts/local/stack.mjs`) |
 | Convex in development | `npm run convex:dev` |
 | Unit and integration tests | `npx vitest run <files>` for a focused run, `npm run test:run` for Node tests plus the full Vitest suite |
-| Cloudflare realtime tests | `npm run test:realtime` |
+| Collaboration tests | `npm run test:realtime` |
 | Types | `npx tsc --noEmit -p tsconfig.json` |
 | Lint | `npm run lint` (zero warnings) |
 | Gates (also run in `prebuild`) | `npm run check:architecture`, `check:copy`, `check:design-tokens`, `check:capabilities`, `check:secrets`, `check:deploy-env` |
@@ -88,6 +87,7 @@ Node and dependencies come from `package.json`. Copy `.env.example` to `.env.loc
 
 Notes:
 
+- [TESTING.md](TESTING.md) explains public-clone tests, the optional local Office corpus, and live verification requirements.
 - Convex-backed tests use `convex-test` with in-memory fixtures. Some lifecycle suites need a larger timeout under a full parallel run.
 - `next build` needs a real `node_modules`. It fails in a worktree whose `node_modules` is a junction.
 
@@ -116,12 +116,12 @@ The launch audit replaced the old process rituals, not these decisions.
 
 ## Launch audit: where the reports live
 
-- `docs/spectra-launch-audit/START-HERE.md` is the audit charter and audience decisions. `STATE.md` is the running state. `S11-INTEGRATION.md` and `S11-CLOSEOUT.md` hold the integrated S11 decisions.
+- `docs/spectra-launch-audit/START-HERE.md` records the audit's scope and audience decisions. `S11-INTEGRATION.md` and `S11-CLOSEOUT.md` hold the integrated S11 decisions. Agent dispatch prompts, transient state and generated captures stay local.
 - `docs/spectra-launch-audit/reports/` has one report per task:
   - waves `W1`–`W9`, `V7`–`V9`, and sessions `S6`–`S11`;
   - Phase 2 hardening, `P2-*.md`: security-privacy, ops-performance, experience, write-paths, account lifecycle, outcomes, scale, code health, AI quality, residuals and sync-resume;
   - Phase 3 launch work, `P3-*.md`: Bridge/Lens, UI system, AI engine, editors, editors-2, sync durability, AI context, workspace flows, surfaces-2, client performance and Convex errors.
-- Each P2 and P3 report ends with a findings ledger ("Reported, not fixed" included) and a "Needs live verification" script: actions and expected results. Those scripts are the browser verification plan. Run the P3 scripts first, because they cover the newest code. `docs/spectra-launch-audit/LIVE-VERIFICATION-PROMPTS.md` has the two prompts for running them: a verifier that only documents issues, and a fixer that works the resulting `LIVE-ISSUES.md` ledger.
+- Each P2 and P3 report ends with a findings ledger ("Reported, not fixed" included) and a "Needs live verification" script: actions and expected results. Those scripts describe the browser verification plan at the time of the report. Current test entry points are in [TESTING.md](TESTING.md).
 
 ## Open launch risks
 
@@ -141,7 +141,7 @@ This list reflects main after Phase 3 (`853e4a12`). A tag in brackets names the 
 
 - Complete internal `spectraArtifacts:backfillSummaries` on each deployment that lacks the current `catalog-artifact-summaries` completion marker: start with `{cursor:null,limit:10}`, then use each returned cursor until `done`. Agent and artifact catalogs require this complete, versioned traversal; partial tail repairs do not certify readiness. The existing migration caps each page at 25 rows and 2 MB. [S10-CONVEX]
 - `npx convex run metering:backfillSchoolUsageTotals '{}'` once, so school usage ceilings start from real totals. [RESIDUALS]
-- Check that Fly `kill_timeout 30s`, Railway `drainingSeconds 30` and Compose `stop_grace_period 30s` are accepted. [P3-SYNC-DURABILITY]
+- Check that Fly `kill_timeout 30s` and local Compose `stop_grace_period 30s` are accepted. [P3-SYNC-DURABILITY]
 
 **Product decisions (not blocking)**
 
@@ -151,7 +151,6 @@ This list reflects main after Phase 3 (`853e4a12`). A tag in brackets names the 
 
 **Known residuals (Low/Medium, listed in the reports)**
 
-- **Keep off:** the Cloudflare realtime provider has no admission receipt. [WRITE-PATHS]
 - **Bridge:** a delete it has already carried out cannot be undone by a Library restore. [P3-SURFACES-2 X2]
 - **Editors:** a sheet save still forces one full rebuild, kept deliberately until a "no foreign update since the last rebuild" guard exists. [P3-CLIENT-PERF 1]
 - **Office viewers:** slide backgrounds, the theme's text colour, table styles, freeform shapes and Word's first-page headers are not drawn yet. [R-D4e-OFFICE-DEPTH]

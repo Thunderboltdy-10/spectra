@@ -79,12 +79,6 @@ export function deployEnvProblems(env) {
   add(remoteUrl(env, "SPECTRA_APP_URL", ["https:"],
     "Convex scheduled callbacks; without it every AI run executes inline in the request"));
   add(remoteUrl(env, "NEXT_PUBLIC_SPECTRA_COLLAB_URL", ["wss:"], "realtime collaboration gateway"));
-  // The Durable Object worker queues projections for CONVEX_PROJECTION_URL,
-  // but Convex exposes no HTTP receiver for them, so edits made there never
-  // reach durable state. Hocuspocus is the launch provider.
-  if (value(env, "NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME") === "true")
-    add("NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME must stay off: the Cloudflare room has no Convex projection receiver.");
-
   if (!value(env, "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY").startsWith("pk_live_"))
     add("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY must be a production (pk_live_) key.");
   if (!value(env, "CLERK_SECRET_KEY").startsWith("sk_live_"))

@@ -56,9 +56,7 @@ import {
 import { workYjsAdapter } from "@/features/spectra/work/models/yjs/registry";
 import { workYjsOrigins } from "@/features/spectra/work/models/yjs/origins";
 import { boundedRegionClaims, claimAcquireAction } from "../../../../shared/region-claim-policy";
-import { CloudflareRealtimeProvider } from "@/features/spectra/realtime/providers";
 import { realtimeProviderForWorkType } from "@/features/spectra/realtime/providers/provider-factory";
-import type { CollaborationPresence } from "@/features/spectra/collaboration/types";
 import { gateAiArtifactMutation } from "@/features/spectra/commands/office/operation-gate";
 import { fidelityRegionMap } from "@/features/spectra/commands/office/fidelity-regions";
 import type { CompatibilityProfile } from "@/features/spectra/commands/types";
@@ -93,7 +91,7 @@ type CollaborationSession = {
   documentName: string;
   token: string;
   url: string;
-  providerKind: "cloudflare" | "hocuspocus";
+  providerKind: "hocuspocus";
   level: "read" | "modify";
   policyVersion: number;
 };
@@ -114,68 +112,6 @@ type AiRealtimeProvider = {
   subscribeState(listener: () => void): () => void;
   destroy(): void;
 };
-
-class CloudflareAiRealtimeProvider implements AiRealtimeProvider {
-  private localUser: unknown;
-
-  constructor(readonly transport: CloudflareRealtimeProvider) {}
-
-  readonly awareness = {
-    getLocalState: () =>
-      this.localUser === undefined ? null : { user: this.localUser },
-    getStates: () =>
-      new Map(
-        this.transport
-          .getSnapshot()
-          .presence.map((presence) => [presence.clientId, { user: presence }]),
-      ),
-  };
-
-  get document() {
-    return this.transport.document;
-  }
-
-  get synced() {
-    return this.transport.getSnapshot().state === "synchronized";
-  }
-
-  get isAuthenticated() {
-    return this.transport.getSnapshot().level !== null;
-  }
-
-  get hasUnsyncedChanges() {
-    return this.transport.getSnapshot().unsynchronizedChanges > 0;
-  }
-
-  beginDurableTransaction() {
-    // Cloudflare rooms do not emit spectra.durable_ack; transport cleanliness
-    // remains the completion signal on that path.
-  }
-
-  setAwarenessField(field: string, value: unknown) {
-    if (field !== "user") return;
-    this.localUser = value;
-    this.transport.setPresence(
-      (value && typeof value === "object" ? value : {}) as Omit<
-        CollaborationPresence,
-        "clientId"
-      >,
-    );
-  }
-
-  flushPendingUpdates() {
-    // Local Yjs updates are sent synchronously by the transport; durable ack is
-    // observed through hasUnsyncedChanges below.
-  }
-
-  subscribeState(listener: () => void) {
-    return this.transport.subscribe(listener);
-  }
-
-  destroy() {
-    this.transport.destroy();
-  }
-}
 
 class HocuspocusAiRealtimeProvider implements AiRealtimeProvider {
   private readonly durableAck = new AiDurableAckGate();
@@ -272,50 +208,6 @@ async function createAiRealtimeProvider(params: {
   observer?: AiConnectionObserver;
 }): Promise<AiRealtimeProvider> {
   const { session, document, observer } = params;
-  if (session.providerKind === "cloudflare") {
-    const transport = new CloudflareRealtimeProvider({
-      workId: session.artifact._id,
-      partitionKey: "root",
-      schemaVersion: session.artifact.schemaVersion ?? 1,
-      document,
-      clientId: session.clientId,
-      actorKind: session.actorKind,
-      fetch: async () =>
-        Response.json({
-          token: session.token,
-          url: session.url,
-          level: session.level,
-          accountId: session.actor.accountId,
-          displayName: session.actor.name,
-        }),
-      createSocket: (url) =>
-        new WebSocket(url) as unknown as globalThis.WebSocket,
-    });
-    const provider = new CloudflareAiRealtimeProvider(transport);
-    let lastState = transport.getSnapshot().state;
-    transport.subscribe(() => {
-      const snapshot = transport.getSnapshot();
-      observer?.onStatus?.(snapshot.state);
-      if (lastState === "connecting" && snapshot.state !== "connecting")
-        observer?.onOpen?.();
-      if (snapshot.level) observer?.onAuthenticated?.();
-      if (snapshot.state === "synchronized") observer?.onSynced?.();
-      if (snapshot.state === "permission_lost")
-        observer?.onError?.(
-          new Error(
-            "AI_ARTIFACT_PERMISSION_REVOKED: Collaboration access was removed.",
-          ),
-        );
-      else if (snapshot.state === "unsynchronized" && snapshot.error)
-        observer?.onError?.(
-          new Error(`AI_ARTIFACT_CONNECTION_CLOSED: ${snapshot.error}`),
-        );
-      lastState = snapshot.state;
-    });
-    await transport.connect();
-    return provider;
-  }
-
   const providerBox: { current?: HocuspocusAiRealtimeProvider } = {};
   const rawProvider = new HocuspocusProvider({
     url: session.url,
@@ -567,7 +459,7 @@ async function createCollaborationSession(
     providerKind,
     level,
     policyVersion: room.policyVersion,
-    url: collaborationGatewayUrl(providerKind),
+    url: collaborationGatewayUrl(),
   };
 }
 
@@ -1368,11 +1260,9 @@ async function applyAiArtifactMutationAttempt(params: {
     claimActorKind,
   );
   const typeKey = requireArtifactType(session.artifact.blueprintKey);
-  // Every AI artifact write is admitted once by the signed sink. Only the
-  // self-hosted gateway room is that sink's canonical store; an explicitly
-  // opted-in Cloudflare room keeps its own transport acknowledgement.
-  const admitsArtifactWrite = claimActorKind === "ai" && params.receipt !== "placement" &&
-    (Boolean(params.beforeCommit) || session.providerKind === "hocuspocus");
+  // Every AI artifact write is admitted once by the signed sink. The
+  // Hocuspocus gateway room is that sink's canonical store.
+  const admitsArtifactWrite = claimActorKind === "ai" && params.receipt !== "placement";
   const readHead = () => convexQuery<{ artifactId: string; aiOperation: { runId: string; executionId: string; operationId: string } }, NativeAiHead>(
     "nativeAiCommit:head", { artifactId: params.artifactId, aiOperation: {
       runId: params.runId, executionId: params.executionId, operationId: params.operationId,

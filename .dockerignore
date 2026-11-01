@@ -1,12 +1,18 @@
-node_modules
-.next
-.git
-.shots
-.playwright
-.playwright-cli
-bridge/target
-coverage
-*.md
-.env*
-!.env.example
-ai-education-workspace-landing-page
+# The gateway image needs only its package manifest and runtime import graph.
+# Private local instances, environments, recovery bundles and media never enter
+# the Docker build context.
+**
+!package.json
+!package-lock.json
+!scripts
+scripts/**
+!scripts/*.mjs
+!shared
+shared/**
+!shared/*.mjs
+!shared/*.json
+!deploy
+deploy/**
+!deploy/collaboration-gateway
+deploy/collaboration-gateway/**
+!deploy/collaboration-gateway/Dockerfile

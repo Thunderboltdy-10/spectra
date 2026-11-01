@@ -64,16 +64,12 @@ export function collaborationProtocolVersion() {
  * deployment without it used to hand every client ws://localhost and leave all
  * editors silently offline; it now fails with a configuration error instead.
  */
-export function collaborationGatewayUrl(provider: "cloudflare" | "hocuspocus") {
-  const configured =
-    (provider === "cloudflare" ? process.env.SPECTRA_CLOUDFLARE_COLLAB_URL?.trim() : "") ||
-    process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL?.trim();
+export function collaborationGatewayUrl() {
+  const configured = process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL?.trim();
   if (configured) return configured;
   if (process.env.NODE_ENV !== "production")
-    return provider === "cloudflare" ? "ws://localhost:8787" : "ws://localhost:1234";
+    return "ws://localhost:1234";
   throw new Error(
-    provider === "cloudflare"
-      ? "COLLABORATION_GATEWAY_CONFIG_MISSING: Configure SPECTRA_CLOUDFLARE_COLLAB_URL."
-      : "COLLABORATION_GATEWAY_CONFIG_MISSING: Configure NEXT_PUBLIC_SPECTRA_COLLAB_URL.",
+    "COLLABORATION_GATEWAY_CONFIG_MISSING: Configure NEXT_PUBLIC_SPECTRA_COLLAB_URL.",
   );
 }

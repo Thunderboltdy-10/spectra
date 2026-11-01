@@ -1,8 +1,21 @@
 import { createServer } from "node:http";
-import { readFileSync } from "node:fs";
+import { strToU8, zipSync } from "fflate";
 
 const DEFAULT_TOKEN = "spectra-managebac-fixture-token";
 const SUBMITTED_TEXT = "Sequences essay. An arithmetic sequence adds the same difference each step.\n";
+
+// This download fixture exercises provider transport, not Office fidelity. A
+// small generated XLSX keeps those tests independent of the external corpus.
+function officeDownloadBytes() {
+  const parts = {
+    "[Content_Types].xml": '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>',
+    "_rels/.rels": '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+    "xl/workbook.xml": '<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Resources" sheetId="1" r:id="rId1"/></sheets></workbook>',
+    "xl/_rels/workbook.xml.rels": '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>',
+    "xl/worksheets/sheet1.xml": '<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Reference material</t></is></c></row></sheetData></worksheet>',
+  };
+  return zipSync(Object.fromEntries(Object.entries(parts).map(([name, xml]) => [name, strToU8(xml)])));
+}
 
 function json(value) {
   return JSON.stringify(value);
@@ -136,7 +149,7 @@ export function createManageBacProviderFixture({
   let currentResourceState = resourceState;
   let currentResourceFormat = resourceFormat;
   let currentRedirectResource = redirectResource;
-  const officeBytes = readFileSync(new URL("../../fixtures/office/xlsx/representative.xlsm", import.meta.url));
+  const officeBytes = officeDownloadBytes();
   const pdfBytes = (nextRevision) => Buffer.from(`%PDF-1.4\n% Spectra fixture revision ${nextRevision}\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n`, "ascii");
   function sendBytes(response, status, bytes, contentType) {
     response.writeHead(status, {

@@ -24,11 +24,6 @@ import {
   MAX_CHANGE_GROUP_SINGLE_SNAPSHOT_JSON_CHARS,
 } from "./collaboration-durable-capacity.mjs";
 import {
-  MAX_DURABLE_UPDATE_BYTES as WORKER_MAX_DURABLE,
-  MAX_UPDATE_BYTES as WORKER_MAX_UPDATE,
-  MAX_REALTIME_MESSAGE_BYTES as WORKER_MAX_REALTIME,
-} from "../workers/collaboration/src/protocol.ts";
-import {
   MAX_DURABLE_UPDATE_BYTES as SHARED_MAX_DURABLE,
   MAX_REALTIME_MESSAGE_BYTES as SHARED_MAX_REALTIME,
   MAX_PROJECTION_JSON_CHARS as SHARED_MAX_CHARS,
@@ -53,9 +48,6 @@ describe("collaboration durable capacity", () => {
     expect(SHARED_MAX_UTF8).toBe(MAX_PROJECTION_JSON_UTF8_BYTES);
     expect(SHARED_MAX_SV).toBe(MAX_COMPACTION_STATE_VECTOR_BYTES);
     expect(DURABLE_PAYLOAD_MANIFEST_VERSION).toBe(1);
-    expect(WORKER_MAX_DURABLE).toBe(MAX_DURABLE_UPDATE_BYTES);
-    expect(WORKER_MAX_UPDATE).toBe(MAX_DURABLE_UPDATE_BYTES);
-    expect(WORKER_MAX_REALTIME).toBe(1024 * 1024);
   });
 
   it("creates digest-verified manifests and rejects tampering", () => {

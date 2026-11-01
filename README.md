@@ -15,8 +15,8 @@ Start with the [engineering overview](docs/README.md) for the architecture, deve
 | [`src/`](src/) | Next.js app, product features, components and styles |
 | [`convex/`](convex/), [`shared/`](shared/) | Backend functions and shared contracts |
 | [`bridge/`](bridge/) | Rust/Tauri desktop Bridge for native Office files |
-| [`scripts/`](scripts/), [`fixtures/`](fixtures/) | Development tools, verification harnesses and test fixtures |
-| [`deploy/`](deploy/), [`workers/`](workers/) | Collaboration gateway deployment and optional Cloudflare realtime provider |
+| [`scripts/`](scripts/) | Development tools, checks and verification harnesses |
+| [`deploy/`](deploy/) | Fly.io collaboration gateway and local Docker Compose configuration |
 | [`docs/`](docs/) | Engineering, product and design docs, launch audits and archived plans |
 
 ## Quick start
@@ -26,11 +26,12 @@ npm ci
 cp .env.example .env.local # configure keys and model settings using the environment guide
 npm run convex:dev         # in one terminal
 npm run dev                # web app and collaboration gateway, in another terminal
-npx vitest run <files>     # focused tests
+npx vitest run <files>     # focused tests; see docs/TESTING.md for the local Office corpus
 ```
 
 ## Local files
 
 Local instances and data live in `.spectra-local/`; review captures live in `.shots/`.
+The external Office integration corpus stays local in `fixtures/office/`; see the [testing guide](docs/TESTING.md).
 Local film projects and recording assets also stay on disk and are ignored by Git.
 Historical audit reports may refer to local captures that are unavailable in a fresh clone.

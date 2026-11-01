@@ -1,5 +1,9 @@
 # PPTX N5 corpus
 
+This directory preserves provenance, expected-behavior metadata and historical
+evaluation results for the optional local Office corpus. Binary test packages
+are kept locally under `fixtures/office/`; see [the testing guide](../../../TESTING.md).
+
 `transition-law.pptx` is authored and saved by desktop Microsoft PowerPoint, then checked into this corpus as the validity authority. It contains a native title placeholder, a subtitle text object, and PowerPoint's Fade transition (including its `mc:AlternateContent` Choice/Fallback wrapper). The harness applies title, unrelated text, and add-object mutations without regenerating or overwriting this source, and compares the transition XML after every mutation. `animation-timing.pptx` is a real Open XML animation corpus fixture with `p:timing` trees, a transition, layouts, and media; it asserts that a title edit preserves an unsupported timing tree.
 
 Additional Microsoft Open XML SDK corpus files provide feature-level preservation coverage:

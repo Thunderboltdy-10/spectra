@@ -6,7 +6,7 @@ the experimental worker, and Bridge release CI. Uncomment these only in their
 intended runtime. Do not copy all development settings into production.
 
 This inventory was checked against the working tree on 2026-10-22: Next.js,
-Convex, Node scripts, the Rust Bridge, the Cloudflare worker, tests, and GitHub
+Convex, Node scripts, the Rust Bridge, tests, and GitHub
 workflows. It covers direct reads, dynamic model configuration, and the local
 instance environment. Values supplied by operating systems and platforms, or
 generated internally by launchers, are listed separately at the end.
@@ -83,7 +83,6 @@ of provider availability. If you change embedding configuration, reindex with
 | `NEXT_PUBLIC_SPECTRA_COLLAB_URL` | Browser-reachable gateway WebSocket URL: current root setup `ws://localhost:1234`; local-instance harness uses `ws://localhost:<web-port>/_spectra/realtime`; production uses `wss://...`. |
 | `SPECTRA_COLLAB_HOST` | Gateway bind address: `127.0.0.1` for local-only access, `0.0.0.0` for external access. Existing local value preserved. |
 | `SPECTRA_COLLAB_PORT` | Gateway port, `1234` for the root setup; instance harness assigns web port plus one. |
-| `NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME` | Keep `false` for supported collaboration. The production deploy gate rejects `true` because the experimental worker has no Convex projection receiver. |
 | `MANAGEBAC_BASE_URL` | `https://api.managebac.com` unless testing another approved API endpoint. |
 | `MANAGEBAC_API_KEY` | Optional development-only fallback when an administrator leaves the connection token blank. Production administrators enter their own token in `/managebac`; remove this env value from production. |
 | `SMTP_HOST` | SMTP server for invitations, e.g. existing `smtp.gmail.com`. |
@@ -120,22 +119,6 @@ and ports. Its managed values override the corresponding template values.
 | `SPECTRA_LOCAL_PORT_STRIDE` | Optional instance port-block size, default `20`, integer at least `4`. |
 | `CONVEX_SELF_HOSTED_URL` | Optional self-hosted Convex URL used by the student-resource rehearsal. Leave unset for normal CLI-managed local/cloud use. |
 | `SPECTRA_LOCAL_SELF_HOSTED` | `1` enables local self-hosted rehearsal helpers in Convex. Leave unset normally; prohibited in production. |
-
-## Experimental worker
-
-These belong in the worker's bindings/secrets or its app-side experiment
-configuration, not the normal root development environment.
-
-| Key | Value |
-| --- | --- |
-| `SPECTRA_CLOUDFLARE_COLLAB_URL` | App-side experimental worker WebSocket URL. Leave unset with the standard gateway. |
-| `CONVEX_PROJECTION_URL` | Worker projection receiver URL; the project currently has no compatible Convex receiver. |
-| `CONVEX_PROJECTION_TOKEN` | Optional worker projection Authorization bearer token. |
-
-The worker also uses `SPECTRA_COLLAB_TOKEN_SECRET` (same signer secret as the
-app). `COLLABORATION_ROOMS` is a Durable Object binding, not a dotenv string.
-`SPECTRA_COLLAB_PROTOCOL_VERSION=1` is already declared in `wrangler.toml` and
-currently has no runtime read.
 
 ## Evaluation and test-only controls
 

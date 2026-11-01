@@ -656,8 +656,5 @@ describe("gateway shutdown drain", () => {
     const compose = readFileSync("deploy/collaboration-gateway/compose.yml", "utf8");
     const composeSeconds = Number(compose.match(/stop_grace_period:\s*(\d+)s/)?.[1]);
     expect(composeSeconds * 1_000).toBeGreaterThan(GATEWAY_SHUTDOWN_GRACE_MS);
-    const railway = readFileSync("deploy/collaboration-gateway/railway.toml", "utf8");
-    const railwaySeconds = Number(railway.match(/drainingSeconds\s*=\s*(\d+)/)?.[1]);
-    expect(railwaySeconds * 1_000).toBeGreaterThan(GATEWAY_SHUTDOWN_GRACE_MS);
   });
 });

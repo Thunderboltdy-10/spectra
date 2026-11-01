@@ -94,14 +94,6 @@ export async function POST(request: NextRequest) {
           ? ["view", "edit", "interact", "ai_mutate"]
           : ["view", "interact"],
     });
-    const requestedProvider =
-      body.realtimeProvider === "cloudflare" ||
-      body.realtimeProvider === "hocuspocus"
-        ? body.realtimeProvider
-        : null;
-    const cloudflareRealtime = requestedProvider
-      ? requestedProvider === "cloudflare"
-      : process.env.NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME === "true";
     const requestHost = request.headers.get("host")?.trim() ?? "";
     const isLocalRequestHost = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(
       requestHost,
@@ -110,19 +102,17 @@ export async function POST(request: NextRequest) {
       ? requestHost
       : `localhost:${process.env.SPECTRA_WEB_PORT ?? "3000"}`;
     const localGatewayUrl = `${request.nextUrl.protocol === "https:" ? "wss" : "ws"}://${safeDevelopmentHost}/_spectra/realtime`;
-    const collaborationUrl = cloudflareRealtime
-      ? collaborationGatewayUrl("cloudflare")
-      : isLocalRequestHost
-        ? localGatewayUrl
-        : collaborationGatewayUrl("hocuspocus");
+    const collaborationUrl = isLocalRequestHost
+      ? localGatewayUrl
+      : collaborationGatewayUrl();
     logger.info("Collaboration session issued", {
-      provider: cloudflareRealtime ? "cloudflare" : "hocuspocus",
+      provider: "hocuspocus",
       url: collaborationUrl,
     });
     return ok({
       token,
       documentName,
-      provider: cloudflareRealtime ? "cloudflare_durable_object" : "self_hosted_yjs",
+      provider: "self_hosted_yjs",
       url: collaborationUrl,
       expiresInMs: COLLABORATION_SESSION_TTL_MS,
       level: access.level,

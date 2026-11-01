@@ -37,14 +37,17 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts",
     ".next-local/*/types/**/*.ts",
-    ".next-local/*/dev/types/**/*.ts",
-    ".next-local/8/types/**/*.ts",
-    ".next-local/8/dev/types/**/*.ts"
+    ".next-local/*/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
     "ai-education-workspace-landing-page",
     "film",
+    ".spectra-local",
+    ".backups",
+    ".shots",
+    ".tmp*",
+    "tmp",
     ".next/dev/types",
     ".next-local/*/dev/types"
   ]

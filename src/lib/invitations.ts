@@ -1,4 +1,3 @@
-import nodemailer from "nodemailer";
 import { EMAIL_INK, EMAIL_SANS, emailAction, emailPage, emailParagraph, escapeHtml } from "./email-layout";
 
 type InviteEmailParams = {
@@ -16,39 +15,6 @@ export type InviteEmailResult =
   | { status: "sent"; providerId?: string; envelopeFrom?: string; accepted?: string[]; rejected?: string[]; response?: string }
   | { status: "skipped"; reason: string }
   | { status: "failed"; reason: string };
-
-/** Connect, greeting and idle-socket limits for one invitation delivery. */
-export const SMTP_TIMEOUTS = {
-  connectionTimeout: 10_000,
-  greetingTimeout: 10_000,
-  socketTimeout: 20_000,
-} as const;
-
-function normalizeMailbox(value?: string | null) {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : null;
-}
-
-function normalizeSmtpSecret(value?: string | null) {
-  const trimmed = value?.trim();
-  if (!trimmed) return null;
-  return trimmed.replace(/^['"]|['"]$/g, "");
-}
-
-function resolveEnvelopeFrom() {
-  const smtpUser = normalizeMailbox(process.env.SMTP_USER);
-  const configuredFrom = normalizeMailbox(process.env.SMTP_FROM_EMAIL);
-  if (!smtpUser) return null;
-  if (!configuredFrom) return smtpUser;
-  if (configuredFrom.toLowerCase() !== smtpUser.toLowerCase()) {
-    console.warn("[invite-email] SMTP_FROM_EMAIL differs from SMTP_USER; using authenticated mailbox as sender", {
-      smtpUser,
-      configuredFrom,
-    });
-    return smtpUser;
-  }
-  return configuredFrom;
-}
 
 type Invitee = "student" | "teacher" | "admin";
 
@@ -141,71 +107,54 @@ export function invitationEmail(params: InviteEmailParams) {
 }
 
 export async function sendInvitationEmail(params: InviteEmailParams): Promise<InviteEmailResult> {
-  const smtpHost = process.env.SMTP_HOST;
-  const smtpPort = parseInt(process.env.SMTP_PORT || "587", 10);
-  const smtpUser = normalizeMailbox(process.env.SMTP_USER);
-  const smtpPass = normalizeSmtpSecret(process.env.SMTP_PASS);
-  const smtpFrom = resolveEnvelopeFrom();
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  const fromEmail = process.env.INVITE_FROM_EMAIL?.trim();
 
-  if (!smtpHost || !smtpUser || !smtpPass || !smtpFrom) {
+  if (!apiKey || !fromEmail) {
     return {
       status: "skipped",
-      reason: "SMTP email environment is not configured.",
+      reason: "Resend email environment is not configured.",
     };
   }
 
   try {
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: smtpPort === 465, // true for 465, false for other ports
-      auth: {
-        user: smtpUser,
-        pass: smtpPass,
-      },
-      // The invite request waits for this. Nodemailer's defaults allow two
-      // minutes to connect and ten minutes of socket silence, far past the
-      // route's own limit, so a stalled SMTP host hung the invite instead of
-      // reporting a failed delivery the admin can retry.
-      ...SMTP_TIMEOUTS,
-    });
-
-    await transporter.verify();
-
     const message = invitationEmail(params);
-    const info = await transporter.sendMail({
-      from: smtpFrom,
-      to: params.to,
-      subject: message.subject,
-      html: message.html,
-      text: message.text,
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: fromEmail,
+        to: [params.to],
+        subject: message.subject,
+        html: message.html,
+        text: message.text,
+      }),
+      signal: AbortSignal.timeout(20_000),
     });
-
-    const accepted = Array.isArray(info.accepted) ? info.accepted.map(String) : [];
-    const rejected = Array.isArray(info.rejected) ? info.rejected.map(String) : [];
-    if (accepted.length === 0 || rejected.length > 0) {
-      return {
-        status: "failed",
-        // Counts, not addresses: the reason travels in the response and may be logged on the way.
-        reason: `SMTP delivery not accepted. accepted=${accepted.length} rejected=${rejected.length} response=${(info.response || "none").replace(/[^\s<>@"']+@[^\s<>@"']+/g, "[address]")}`,
-      };
-    }
+    const info = await response.json() as { id?: string; message?: string };
+    if (!response.ok)
+      throw new Error(`Resend delivery not accepted (HTTP ${response.status}): ${info.message || "Unknown error"}`);
+    if (!info.id) throw new Error("Resend did not return an email id.");
 
     return {
       status: "sent",
-      providerId: "smtp",
-      envelopeFrom: smtpFrom,
-      accepted,
-      rejected,
-      response: info.response,
+      providerId: "resend",
+      envelopeFrom: fromEmail,
+      accepted: [params.to],
+      rejected: [],
+      response: info.id,
     };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "Unknown email transport failure";
+    const reason = (error instanceof Error ? error.message : "Unknown email transport failure")
+      .replace(/[^\s<>@"']+@[^\s<>@"']+/g, "[address]");
     // Invitees are often minors: the log names the invitation, never the
-    // address, and SMTP errors that echo the address are redacted.
-    console.warn("[invite-email] smtp delivery threw", {
+    // address, and provider errors that echo the address are redacted.
+    console.warn("[invite-email] resend delivery threw", {
       invitationId: params.invitationId ?? "unknown",
-      reason: reason.replace(/[^\s<>@"']+@[^\s<>@"']+/g, "[address]"),
+      reason,
     });
     return {
       status: "failed",

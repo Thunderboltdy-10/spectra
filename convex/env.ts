@@ -1,5 +1,4 @@
 const openRouterKey = (process.env.OPENROUTER_API_KEY ?? "").trim();
-const artificialAnalysisKey = (process.env.ARTIFICIAL_ANALYSIS_API_KEY ?? "").trim();
 const hasOpenRouterKey = openRouterKey.length > 0;
 
 const warnedScopes = new Set<string>();
@@ -21,10 +20,6 @@ export function getEmbeddingModelSetting(): { model: string; provider: string | 
   const model = (process.env.SPECTRA_EMBEDDING_MODEL ?? "").trim();
   const provider = (process.env.SPECTRA_EMBEDDING_PROVIDER ?? "").trim();
   return model ? { model, provider: provider || null } : null;
-}
-
-export function getArtificialAnalysisApiKey() {
-  return artificialAnalysisKey.length > 0 ? artificialAnalysisKey : null;
 }
 
 export function isOpenRouterConfigured() {

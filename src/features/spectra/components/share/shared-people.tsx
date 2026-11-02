@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
@@ -79,7 +80,7 @@ export function SharedPeopleButton({
           {people.people.map((person) => (
             <li key={person.accountId}>
               <span className="shared-people-face" aria-hidden>
-                {person.avatarUrl ? <img src={person.avatarUrl} alt="" /> : <Users className="size-3.5" />}
+                {person.avatarUrl ? <Image src={person.avatarUrl} alt="" width={26} height={26} unoptimized /> : <Users className="size-3.5" />}
               </span>
               <span className="shared-people-who">
                 <span className="shared-people-name">{person.name}</span>

@@ -1215,7 +1215,8 @@ function insertListParagraph(document: Document, list: NonNullable<Extract<DocxS
   const paragraph = document.addParagraph(text);
   const properties = head.element.find(WML_NAMESPACE, "pPr");
   if (properties) {
-    paragraph.element.find(WML_NAMESPACE, "pPr") && paragraph.element.removeChild(paragraph.element.find(WML_NAMESPACE, "pPr")!);
+    const existing = paragraph.element.find(WML_NAMESPACE, "pPr");
+    if (existing) paragraph.element.removeChild(existing);
     const copy = properties.clone();
     copy.find(WML_NAMESPACE, "numPr")?.find(WML_NAMESPACE, "ilvl")?.setAttributeNs(WML_NAMESPACE, "val", String(list.level));
     paragraph.element.insertBefore(copy, paragraph.element.children[0] ?? null);

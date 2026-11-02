@@ -51,7 +51,6 @@ export function withLocalConvexCliEnv(env = {}) {
 }
 
 export const CONVEX_ENV_KEYS = [
-  "ARTIFICIAL_ANALYSIS_API_KEY",
   "CLERK_JWT_ISSUER_DOMAIN",
   "OPENROUTER_API_KEY",
   "SPECTRA_AGENT_EVAL_BRIDGE_KEY",

@@ -1415,7 +1415,7 @@ function HistoryComparisonOverlay({
                   role="tab"
                   aria-selected={view === key}
                   onClick={() => setView(key)}
-                  className={`h-7 rounded-[calc(var(--radius-control)-2px)] px-2.5 text-micro font-medium transition ${view === key ? "bg-[var(--bg-secondary)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`}
+                  className={`h-7 rounded-chip px-2.5 text-micro font-medium transition ${view === key ? "bg-[var(--bg-secondary)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`}
                 >
                   {label}
                 </button>

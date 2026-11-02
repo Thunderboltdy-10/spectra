@@ -17,7 +17,7 @@ deploys on its own. Order matters: each tier needs the addresses and keys of the
 ## Before you start
 
 - A Convex production deployment, a Vercel project, a Fly app (`spectra-collaboration-gateway`), a Clerk production
-  instance with your domain, an OpenRouter key with credit, and SMTP for invitation emails.
+  instance with your domain, an OpenRouter key with credit, and a Resend key with a verified sender.
 - Fresh random secrets of 32 or more characters, one per name, never reused between names:
   `SPECTRA_MASTER_ENCRYPTION_KEY`, `SPECTRA_SECRET_BRIDGE_KEY`, `SPECTRA_COLLAB_BRIDGE_KEY`,
   `SPECTRA_COLLAB_TOKEN_SECRET`, `SPECTRA_CONNECTOR_BRIDGE_KEY`, and optionally `SPECTRA_AGENT_EVAL_BRIDGE_KEY`,
@@ -33,7 +33,7 @@ deploys on its own. Order matters: each tier needs the addresses and keys of the
      (the three keys identical to Vercel's).
    - **Search:** `SPECTRA_EMBEDDING_MODEL` (an OpenRouter embedding model returning 256 dimensions) and optionally
      `SPECTRA_EMBEDDING_PROVIDER`. Unset, search runs on exact words only and says so.
-   - **Optional:** `SPECTRA_AGENT_EVAL_BRIDGE_KEY`, `ARTIFICIAL_ANALYSIS_API_KEY`.
+   - **Optional:** `SPECTRA_AGENT_EVAL_BRIDGE_KEY`.
    - **Must be absent:** `SPECTRA_LOCAL_SELF_HOSTED`, `SPECTRA_ALLOW_LOCAL_MANAGEBAC_FIXTURE`, and every
      `SPECTRA_*_EVIDENCE` flag.
 3. Fill the search index once embeddings are set: `npx convex run semanticIndex:startBackfill --prod` and
@@ -45,11 +45,16 @@ deploys on its own. Order matters: each tier needs the addresses and keys of the
 
 ## 2. Collaboration gateway (Fly)
 
-1. Secrets: `fly secrets set CONVEX_URL=<convex url> SPECTRA_COLLAB_TOKEN_SECRET=… SPECTRA_COLLAB_BRIDGE_KEY=…`.
+1. Secrets: `fly secrets set -a spectra-collaboration-gateway CONVEX_URL=<convex url> SPECTRA_COLLAB_TOKEN_SECRET=… SPECTRA_COLLAB_BRIDGE_KEY=…`.
 2. From the repository root:
-   `fly deploy . -c deploy/collaboration-gateway/fly.toml --dockerfile deploy/collaboration-gateway/Dockerfile --ha=false`.
-3. Keep exactly one machine (`fly scale count 1`); scale the VM up, never out. Its `wss://` address is
+   `fly deploy . -c deploy/collaboration-gateway/fly.toml --ha=false`.
+3. Keep exactly one machine (`fly scale count 1 -a spectra-collaboration-gateway`); scale the VM up, never out. Its `wss://` address is
    `NEXT_PUBLIC_SPECTRA_COLLAB_URL` below.
+4. Check `https://spectra-collaboration-gateway.fly.dev/_spectra/health`: both the overall `status` and
+   `dependencies.convex.status` must be `ready`. HTTP 200 alone does not prove readiness.
+
+The production gateway uses Paris (`cdg`), because Fly no longer accepts new machines in Madrid (`mad`).
+Its public WebSocket URL is `wss://spectra-collaboration-gateway.fly.dev`.
 
 ## 3. Web app (Vercel)
 
@@ -61,7 +66,7 @@ deploys on its own. Order matters: each tier needs the addresses and keys of the
    - Secrets: the keys listed under "Before you start", plus `NEXT_PUBLIC_SPECTRA_COLLAB_URL`.
    - Models: `OPENROUTER_API_KEY`, `SPECTRA_MODEL_ID`, `SPECTRA_REASONING_PROFILE`, `SPECTRA_MODEL_PROVIDER`, and the
      optional fallback and judge settings. `OPENROUTER_APP_NAME`, `OPENROUTER_SITE_URL`.
-   - Email: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM_EMAIL`. `SUPER_ADMIN_EMAILS`, `LOG_LEVEL`.
+   - Email: `RESEND_API_KEY`, `INVITE_FROM_EMAIL`. `SUPER_ADMIN_EMAILS`, `LOG_LEVEL`.
    - **Must be absent:** `MANAGEBAC_API_KEY` and every development-only name in `scripts/check-deploy-env.mjs`.
 2. Deploy. `prebuild` runs `check:deploy-env`, which fails a production build on a missing model setting, a localhost
    URL, a development Clerk key or a short secret.

@@ -9,10 +9,10 @@
 # SPECTRA_COLLAB_BRIDGE_KEY.
 #
 # Deploy from the repository root (Docker context must include package.json):
-#   fly deploy . -c deploy/collaboration-gateway/fly.toml --dockerfile deploy/collaboration-gateway/Dockerfile --ha=false
+#   fly deploy . -c deploy/collaboration-gateway/fly.toml --ha=false
 
 app = "spectra-collaboration-gateway"
-primary_region = "mad"
+primary_region = "cdg"
 # On deploy or restart the gateway stops taking edits, then stores every
 # accepted update in Convex before it exits (up to 20 s; the launcher allows
 # 25 s). Fly's default 5 s SIGKILL would cut that drain short.
@@ -20,7 +20,7 @@ kill_signal = "SIGTERM"
 kill_timeout = "30s"
 
 [build]
-  dockerfile = "deploy/collaboration-gateway/Dockerfile"
+  dockerfile = "Dockerfile"
 
 [env]
   SPECTRA_COLLAB_PORT = "1234"

@@ -33,7 +33,7 @@ async function fixture() {
 }
 
 describe("Document studio projection ownership", () => {
-  it.each([false, true])("never authors an AI preview into a collaborative tree (native=%s)", async (native) => {
+  it.each([false, true])("never authors an AI preview into a collaborative tree (native=%s)", async (_native) => {
     const { room, editor, admitted } = await fixture();
     const state = Y.encodeStateVector(room);
     applyDocumentStudioProjection(editor, after, { collaborative: true });

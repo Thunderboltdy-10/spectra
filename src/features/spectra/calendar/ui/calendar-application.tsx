@@ -570,6 +570,7 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
     });
   }, [days, overview, daySpan]);
 
+  const overviewUnavailable = overview === null;
   useEffect(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
@@ -591,7 +592,7 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
     const observer = new ResizeObserver(measure);
     observer.observe(scroller);
     return () => observer.disconnect();
-  }, [daySpan, days.length, error, overview === null]);
+  }, [daySpan, days.length, error, overviewUnavailable]);
 
   // The grid opens on working hours (SHELL.md): 07:00 just under the day heads,
   // before its first paint, so it never shows the night while the week loads.

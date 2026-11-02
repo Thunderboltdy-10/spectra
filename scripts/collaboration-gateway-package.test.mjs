@@ -30,12 +30,18 @@ describe("hosted gateway package startup", () => {
     for (const source of Object.keys(result.metafile.inputs)) {
       expect(copied.get(source), `Docker package omits or relocates ${source}`).toBe(source);
     }
+    expect(copied.get(".npmrc")).toBe(".npmrc");
+    expect(await readFile(resolve(root, ".dockerignore"), "utf8")).toMatch(/^!\.npmrc$/m);
     expect([...copied.keys()].some((path) => path.includes(".env"))).toBe(false);
   });
 
   it("deploys one right-sized machine because rooms live in process memory", async () => {
-    const fly = await readFile(resolve(root, "deploy/collaboration-gateway/fly.toml"), "utf8");
+    const flyPath = resolve(root, "deploy/collaboration-gateway/fly.toml");
+    const fly = await readFile(flyPath, "utf8");
     const setting = (name) => fly.match(new RegExp(`^\\s*${name}\\s*=\\s*"?([^"\\r\\n]+)"?`, "m"))?.[1];
+    // Fly resolves this path relative to the config, while the build context stays at the repository root.
+    expect(await readFile(resolve(dirname(flyPath), setting("dockerfile")), "utf8"))
+      .toContain('CMD ["node", "scripts/serve-collaboration-gateway.mjs"]');
     // A second machine would split a room; `fly deploy` adds one unless told not to.
     expect(fly).toMatch(/fly deploy [^\n]*--ha=false/);
     expect(fly).toContain("fly scale count 1");

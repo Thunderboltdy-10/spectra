@@ -135,10 +135,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "The request did not go through. Please try again." }, { status: 500 });
   }
 
-  // The request is kept; an email to the team is a courtesy, when email is set up.
+  // The request is kept; notify only the first configured platform operator.
   const apiKey = process.env.RESEND_API_KEY;
   const fromEmail = process.env.INVITE_FROM_EMAIL;
-  if (!apiKey || !fromEmail) return NextResponse.json({ status: "sent" });
+  const recipient = (process.env.SUPER_ADMIN_EMAILS ?? "")
+    .split(",").map((email) => email.trim()).find(Boolean);
+  if (!apiKey || !fromEmail || !recipient) return NextResponse.json({ status: "sent" });
 
   try {
     const response = await fetch("https://api.resend.com/emails", {
@@ -149,7 +151,7 @@ export async function POST(request: NextRequest) {
       },
       body: JSON.stringify({
         from: fromEmail,
-        to: ["pablo.martinez.dovale@gmail.com"],
+        to: [recipient],
         reply_to: safeEmail,
         subject,
         html: contactEmailHtml({

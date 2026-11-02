@@ -1,26 +1,23 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ sendMail: vi.fn() }));
-vi.mock("nodemailer", () => ({
-  default: {
-    createTransport: () => ({ verify: vi.fn().mockResolvedValue(true), sendMail: mocks.sendMail }),
-  },
-}));
+const send = vi.fn();
 import { sendInvitationEmail } from "@/lib/invitations";
 
 beforeEach(() => {
-  vi.stubEnv("SMTP_HOST", "smtp.example.test");
-  vi.stubEnv("SMTP_USER", "school@example.test");
-  vi.stubEnv("SMTP_PASS", "fixture");
+  vi.stubEnv("RESEND_API_KEY", "re_fixture");
+  vi.stubEnv("INVITE_FROM_EMAIL", "Spectra <invites@example.test>");
+  vi.stubGlobal("fetch", send);
 });
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  send.mockReset();
 });
 
-it("logs the invitation id, not the invitee's address, when SMTP delivery throws", async () => {
+it("logs the invitation id, not the invitee's address, when Resend delivery throws", async () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-  mocks.sendMail.mockRejectedValue(new Error("550 5.1.1 <pupil.name@school.test>: Recipient address rejected"));
+  send.mockRejectedValue(new Error("<pupil.name@school.test>: Recipient address rejected"));
   const result = await sendInvitationEmail({
     to: "pupil.name@school.test", role: "student", joinUrl: "https://example.test/join?token=t", invitationId: "inv_123",
   });
@@ -31,10 +28,11 @@ it("logs the invitation id, not the invitee's address, when SMTP delivery throws
   expect(logged).not.toContain("pupil.name@school.test");
 });
 
-it("reports a refused delivery by count, not by the invitee's address", async () => {
-  mocks.sendMail.mockResolvedValue({ accepted: [], rejected: ["pupil.name@school.test"], response: "550 <pupil.name@school.test> unknown" });
+it("redacts the invitee's address from a refused delivery", async () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  send.mockResolvedValue(Response.json({ message: "<pupil.name@school.test> unknown" }, { status: 422 }));
   const result = await sendInvitationEmail({
     to: "pupil.name@school.test", role: "student", joinUrl: "https://example.test/join?token=t", invitationId: "inv_123",
   });
-  expect(result).toEqual({ status: "failed", reason: "SMTP delivery not accepted. accepted=0 rejected=1 response=550 <[address]> unknown" });
+  expect(result).toEqual({ status: "failed", reason: "Resend delivery not accepted (HTTP 422): <[address]> unknown" });
 });

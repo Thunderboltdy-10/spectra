@@ -1185,7 +1185,7 @@ function FeedbackSurface({ operatorSessionId, busy, mutate, refreshKey, readOnly
       >
         {selected ? (
           <div className="space-y-4">
-            <p className="whitespace-pre-wrap rounded-control bg-[var(--card-paper)] p-3 text-ui leading-6 shadow-[0_0_0_1px_var(--card-border-soft)]">{selected.message}</p>
+            <p className="whitespace-pre-wrap rounded-control bg-[var(--card-paper)] p-3 text-ui leading-6 ring-1 ring-[var(--card-border-soft)]">{selected.message}</p>
             <FeedbackEvidence key={selected.feedbackId} feedbackId={selected.feedbackId} operatorSessionId={operatorSessionId} />
             <SelectField
               label="Where it stands"

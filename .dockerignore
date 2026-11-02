@@ -4,6 +4,7 @@
 **
 !package.json
 !package-lock.json
+!.npmrc
 !scripts
 scripts/**
 !scripts/*.mjs

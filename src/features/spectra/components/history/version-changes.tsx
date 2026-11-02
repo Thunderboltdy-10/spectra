@@ -78,7 +78,7 @@ function ChangeText({ change, color }: { change: VersionChange; color: string })
         ) : (
           <ins
             key={index}
-            className="rounded-[2px] px-[1px] no-underline"
+            className="rounded-xs px-[1px] no-underline"
             style={{
               background: `color-mix(in oklab, ${color} 16%, transparent)`,
               boxShadow: `inset 0 -1.5px 0 ${color}`,

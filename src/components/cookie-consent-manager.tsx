@@ -99,9 +99,9 @@ export function CookieConsentManager() {
         // there until it is answered, and the page stays usable meanwhile.
         <section
           aria-label="Cookies"
-          className="fixed bottom-4 left-4 z-toast w-[min(calc(100vw-2rem),21rem)] rounded-[14px] border border-[var(--card-border)] bg-[var(--card-paper)] px-4 pb-3 pt-3.5 shadow-[var(--shadow-card)] max-sm:bottom-24"
+          className="fixed bottom-4 left-4 z-toast w-[min(calc(100vw-2rem),21rem)] rounded-surface border border-[var(--card-border)] bg-[var(--card-paper)] px-4 pb-3 pt-3.5 shadow-[var(--shadow-card)] max-sm:bottom-24"
         >
-          <p className="text-[13px] leading-[1.5] text-[var(--text-secondary)]">
+          <p className="text-caption leading-[1.5] text-[var(--text-secondary)]">
             Spectra uses the cookies it needs to work. Optional ones remember your settings and show us how it is used.{" "}
             <Link href="/legal/cookies" className="underline decoration-[var(--border-strong)] underline-offset-2 hover:text-[var(--text-primary)]">
               Cookie policy

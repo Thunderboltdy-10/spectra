@@ -256,7 +256,7 @@ async function inheritedArtifactAccess(
   ctx: AuthorityCtx,
   actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
   artifactId: Id<"spectraArtifacts">,
-  ownerAccountId: Id<"accounts">,
+  _ownerAccountId: Id<"accounts">,
 ) {
   const override = await ctx.db.query("artifactAccessOverrides").withIndex("by_artifact_account", (q) => q.eq("artifactId", artifactId).eq("accountId", actor.accountId)).unique();
   if (override?.effect === "deny") return { level: null, denied: true, sources: [] as Array<{ kind: "workspace"; workspaceId: Id<"spectraWorkspaces">; grantId: Id<"accessGrants">; level: AccessLevel }> };

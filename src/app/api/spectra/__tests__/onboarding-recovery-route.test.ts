@@ -21,7 +21,7 @@ beforeEach(() => {
 });
 
 describe("school onboarding invitation delivery", () => {
-  it("always returns the initial link even when SMTP accepts the email", async () => {
+  it("always returns the initial link even when the email provider accepts the email", async () => {
     mocks.send.mockResolvedValue({ status: "sent" });
     const response = await POST(request({ action: "createSchool", name: "School", timezone: "Europe/Madrid", initialAdminEmail: "admin@example.test" }));
     expect(response.status).toBe(200);

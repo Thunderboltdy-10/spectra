@@ -2,7 +2,7 @@
 #   docker build -f deploy/collaboration-gateway/Dockerfile .
 FROM node:22-alpine AS deps
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 RUN npm ci --omit=dev
 
 FROM node:22-alpine

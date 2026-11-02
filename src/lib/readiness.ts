@@ -167,6 +167,10 @@ export async function probeGatewayDependency(
 }
 
 export function collaborationHealthUrlFromEnv(env: NodeJS.ProcessEnv) {
+  const publicUrl = env.NEXT_PUBLIC_SPECTRA_COLLAB_URL?.trim();
+  if (publicUrl?.startsWith("wss://")) {
+    return `https://${new URL(publicUrl).host}`;
+  }
   const host = env.SPECTRA_COLLAB_HOST || "127.0.0.1";
   const port = env.SPECTRA_COLLAB_PORT || "1234";
   return `http://${host}:${port}`;

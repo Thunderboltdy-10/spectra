@@ -42,7 +42,7 @@ generated internally by launchers, are listed separately at the end.
 | `SPECTRA_AGENT_EVAL_BRIDGE_KEY` | Optional independent secret of at least 32 characters, matching Next.js and Convex. **Leave unset/commented**, rather than assigning an empty value, to fall back to `SPECTRA_SECRET_BRIDGE_KEY`. The current code uses `??`, so an empty string blocks the fallback. |
 | `SPECTRA_AGENT_MANIFEST_SIGNING_KEY` | Optional independent secret of at least 32 characters; unset uses `SPECTRA_SECRET_BRIDGE_KEY`. |
 | `SPECTRA_MANAGEBAC_WORKER_HTTP_KEY` | Optional independent secret of at least 32 characters; unset derives a key from `SPECTRA_CONNECTOR_BRIDGE_KEY`. |
-| `SUPER_ADMIN_EMAILS` | Comma-separated platform operator emails; same list in Next.js and Convex. |
+| `SUPER_ADMIN_EMAILS` | Comma-separated platform operator emails; same list in Next.js and Convex. Only the first nonempty address receives contact-form notifications. |
 | `ADMIN_EMAILS` | Optional comma-separated legacy admin list. The helper is still present; leave blank if unused. |
 
 Generate a new secret only when needed with
@@ -65,7 +65,6 @@ preserved during consolidation.
 | `SPECTRA_DAILY_MODEL_ID` | Optional daily-brief model ID; blank uses the primary model. |
 | `SPECTRA_SEARCH_MODEL_ID` | Optional web-search model ID; blank uses the primary model. |
 | `SPECTRA_MODEL_CONTEXT_TOKENS` | Optional numeric context-window override, greater than `8000`; blank queries model metadata and falls back to `128000` tokens. |
-| `ARTIFICIAL_ANALYSIS_API_KEY` | Optional Artificial Analysis key for the Convex model catalog integration. |
 | `SPECTRA_EMBEDDING_MODEL` | Optional Convex embedding model supporting 256-dimensional output; the previous template used `openai/text-embedding-3-small`. Blank disables vectors and keeps full-text retrieval. |
 | `SPECTRA_EMBEDDING_PROVIDER` | Optional pinned OpenRouter embedding provider; the previous template paired the model above with `OpenAI`. Blank permits normal routing. |
 | `OPENROUTER_APP_NAME` | Legacy metadata setting accepted by the env schema and evaluation loader. No current request path uses it to choose the request title. Safe to omit; existing value preserved. |
@@ -85,14 +84,13 @@ of provider availability. If you change embedding configuration, reindex with
 | `SPECTRA_COLLAB_PORT` | Gateway port, `1234` for the root setup; instance harness assigns web port plus one. |
 | `MANAGEBAC_BASE_URL` | `https://api.managebac.com` unless testing another approved API endpoint. |
 | `MANAGEBAC_API_KEY` | Optional development-only fallback when an administrator leaves the connection token blank. Production administrators enter their own token in `/managebac`; remove this env value from production. |
-| `SMTP_HOST` | SMTP server for invitations, e.g. existing `smtp.gmail.com`. |
-| `SMTP_PORT` | SMTP port, normally `587` for STARTTLS or `465` for implicit TLS. |
-| `SMTP_USER` | SMTP login mailbox. |
-| `SMTP_PASS` | SMTP password or provider-issued app password. |
-| `SMTP_FROM_EMAIL` | Sender mailbox permitted by the SMTP account; defaults to `SMTP_USER`. |
-| `RESEND_API_KEY` | Resend API key used specifically by `/api/contact`. SMTP credentials do not fill this role. |
-| `INVITE_FROM_EMAIL` | Despite the name, this is the contact form's Resend sender: an address authorized by your Resend account, optionally `Spectra <address@your-domain>`. Required alongside the Resend key. |
+| `RESEND_API_KEY` | Resend API key for invitation and contact-form emails. |
+| `INVITE_FROM_EMAIL` | Sender authorized by your Resend account, optionally `Spectra <address@your-domain>`. Used for invitations and the contact form; required alongside the Resend key. |
 | `LOG_LEVEL` | `debug`, `info`, `warn`, or `error`; default `info`. |
+
+Leave `RESEND_API_KEY` and `INVITE_FROM_EMAIL` empty locally to skip email
+delivery during testing. Invitations still provide a manual join link, and
+contact requests are still saved in Convex.
 
 ## Native Bridge
 
@@ -179,7 +177,7 @@ selected Convex deployment when their feature is enabled:
 - `SPECTRA_SECRET_BRIDGE_KEY`, `SPECTRA_COLLAB_BRIDGE_KEY`, `SPECTRA_CONNECTOR_BRIDGE_KEY`.
 - `SPECTRA_APP_URL` for scheduled work.
 - `SPECTRA_AGENT_EVAL_BRIDGE_KEY` only if choosing an explicit independent key.
-- `ARTIFICIAL_ANALYSIS_API_KEY`, `SPECTRA_EMBEDDING_MODEL`, `SPECTRA_EMBEDDING_PROVIDER` when enabled.
+- `SPECTRA_EMBEDDING_MODEL`, `SPECTRA_EMBEDDING_PROVIDER` when enabled.
 - Local fixture/rehearsal controls only in the corresponding local deployment.
 
 The local-instance harness mirrors the first five groups through

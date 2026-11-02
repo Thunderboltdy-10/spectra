@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  collaborationHealthUrlFromEnv,
   composeReadinessStatus,
   isWebHealthBody,
   probeConvexDependency,
@@ -11,6 +12,29 @@ afterEach(() => {
 });
 
 describe("web readiness", () => {
+  it("probes the hosted gateway over HTTPS instead of Vercel's localhost", () => {
+    expect(collaborationHealthUrlFromEnv({
+      NODE_ENV: "production",
+      NEXT_PUBLIC_SPECTRA_COLLAB_URL: "wss://gateway.example.test/realtime",
+    })).toBe("https://gateway.example.test");
+  });
+
+  it("preserves a hosted gateway's explicit port", () => {
+    expect(collaborationHealthUrlFromEnv({
+      NODE_ENV: "production",
+      NEXT_PUBLIC_SPECTRA_COLLAB_URL: "wss://gateway.example.test:8443/realtime",
+    })).toBe("https://gateway.example.test:8443");
+  });
+
+  it("keeps probing the separate local gateway when the browser uses the local web proxy", () => {
+    expect(collaborationHealthUrlFromEnv({
+      NODE_ENV: "development",
+      NEXT_PUBLIC_SPECTRA_COLLAB_URL: "ws://localhost:3000/_spectra/realtime",
+      SPECTRA_COLLAB_HOST: "127.0.0.1",
+      SPECTRA_COLLAB_PORT: "3001",
+    })).toBe("http://127.0.0.1:3001");
+  });
+
   it("is not ready when Convex or the gateway is missing", () => {
     const payload = webHealthPayload({
       mode: "production",

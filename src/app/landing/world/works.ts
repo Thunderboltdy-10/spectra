@@ -1,3 +1,4 @@
+/* eslint-disable spectra/no-raw-hex-in-styles -- Authored slide content stores portable colors, independent of the app theme. */
 import type { SpectraArtifact, SpectraBlueprintKey } from "@/features/spectra/data/api";
 import { normalizePresentationContent } from "@/features/spectra/presentation/model";
 import { dayAt } from "./story";

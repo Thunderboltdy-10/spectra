@@ -185,14 +185,20 @@ const ACTION_COPY = { created: "Created", edited: "Edited", referenced: "Used" }
 export function WorkTouchCards({
   touches,
   onOpen,
+  currentTitles,
 }: {
   touches: readonly HarnessArtifactTouchView[];
   onOpen?: (artifactId: string) => void;
+  /** Names as they are now, when known: a work renamed since keeps its new name here. */
+  currentTitles?: ReadonlyMap<string, string>;
 }) {
-  const unique = dedupeTouches(touches);
+  const unique = dedupeTouches(touches).map((touch) => {
+    const title = currentTitles?.get(touch.id);
+    return title && title !== touch.title ? { ...touch, title } : touch;
+  });
   if (unique.length === 0) return null;
   return (
-    <ul className="mt-4 grid gap-2" aria-label="Work from this response">
+    <ul className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-2" aria-label="Work from this response">
       {unique.map((touch) => {
         const meta = (workTypeMeta as Record<string, (typeof workTypeMeta)[keyof typeof workTypeMeta] | undefined>)[touch.type] ?? workTypeMeta.document;
         const action = ACTION_COPY[touch.action];

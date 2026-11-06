@@ -180,7 +180,7 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
         <button type="button" onClick={() => setIndex(Math.min(questions.length - 1, at + 1))} disabled={last} aria-label="Next question">
           <ChevronRight className="size-4" />
         </button>
-        {canPractice && last ? (
+        {canPractice && (last || Object.keys(responses).length > 0) ? (
           <button type="button" className="work-embed-quiz-check" onClick={() => void check()} disabled={busy !== null}>
             {busy === "submit" ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : null}
             Check answers

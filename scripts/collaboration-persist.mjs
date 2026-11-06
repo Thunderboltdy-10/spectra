@@ -56,7 +56,7 @@ export function collaborationRetryDelayMs(
   return Math.min(maxMs, start * 2 ** Math.min(Math.max(attempt, 0), 6));
 }
 
-export const COLLABORATION_AUTHORIZE_CACHE_MS = 15_000;
+export const COLLABORATION_AUTHORIZE_CACHE_MS = 90_000;
 export const COLLABORATION_AUTHORIZE_TIMEOUT_MS = 5_000;
 
 /** A last-success lease bounds quiet subscribers as well as incoming writers. */

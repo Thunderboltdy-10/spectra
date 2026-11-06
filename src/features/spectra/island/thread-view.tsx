@@ -59,7 +59,7 @@ export const ThreadView = forwardRef<
   const moving = tab.status === "working" || tab.state === "needs_input";
   const card = runTabCard(tab.source);
   const canUndo = Boolean(card?.actions?.some((action) => action.key === "revert")) && !model.undone;
-  const caption = live?.steps.at(-1)?.title ?? (live?.content?.trim() ? "Writing the answer" : tab.caption);
+  const caption = live?.steps.at(-1)?.title.replace(/\*/g, "") ?? (live?.content?.trim() ? "Writing the answer" : tab.caption);
 
   // Following this run: the app opens and shows whatever Spectra works on, until the user does something themselves.
   const follow = useFollowAi();
@@ -111,7 +111,7 @@ export const ThreadView = forwardRef<
       }}
       style={{ transform: `translateX(${offset}px)` }}
       className={cn(
-        "box-border flex max-h-[70vh] w-[min(600px,calc(100vw-var(--spectra-rail-width,0px)-var(--spectra-lead-width,0px)-32px))] flex-col overflow-hidden rounded-surface border border-[var(--card-border)] bg-[var(--card-paper)] shadow-[var(--shadow-lg)]",
+        "box-border flex max-h-[70vh] w-[min(680px,calc(100vw-var(--spectra-rail-width,0px)-var(--spectra-lead-width,0px)-var(--spectra-side-width,0px)-32px))] flex-col overflow-hidden rounded-surface border border-[var(--card-border)] bg-[var(--card-paper)] shadow-[var(--shadow-lg)]",
         "transition-[opacity,transform] duration-200 ease-[var(--ease-standard)]",
         visible ? "opacity-100 delay-[110ms]" : "pointer-events-none opacity-0",
       )}

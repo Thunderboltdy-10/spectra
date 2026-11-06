@@ -1,5 +1,6 @@
 "use client";
 
+import { closeLocalRunStream, localRunStream, publishLocalRunEvent, subscribeLocalRunStreams } from "./local-run-streams";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import { uniqueToken } from "@/lib/unique-token";
@@ -174,6 +175,7 @@ export type SpectraLiveExchange = Omit<HarnessExchangeFields, "steps"> & {
     id: string;
     title: string;
     summary?: string;
+    kind?: "thinking";
     status: "running" | "done" | "error";
     createdAt: number;
   }>;
@@ -434,6 +436,8 @@ export function useSpectraRun({
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const promptByRun = useRef(new Map<string, string>());
   const streamCoveredRuns = useRef(new Set<string>());
+  const engineIdentity = useRef({});
+  const localStreamPositions = useRef(new Map<string, number>());
   const dismissedCardIds = useRef(new Set<string>());
   const activeRequests = useRef(
     new Map<AbortController, { runId: string | null; exchangeId?: string }>(),
@@ -558,6 +562,141 @@ export function useSpectraRun({
       tab.run.executionId &&
       eventCursors.current.get(tab.runId)?.settledExecutionId === tab.run.executionId,
     );
+    const applyObserved = (
+      tab: SpectraRunTab,
+      observedRun: SpectraRunTab["run"],
+      event: ReturnType<typeof parseSpectraStreamEvent>,
+      sequence?: number,
+    ) => {
+      feedLedger(event);
+      if (
+        event.type === "run_created" ||
+        event.type === "result_card" ||
+        event.type === "confirmation_required" ||
+        event.type === "final"
+      )
+        upsert(event.card);
+      if (event.type === "input_required" && event.card) upsert(event.card);
+      if (event.type === "thread_title") spectraBus.emit("threads.changed", {});
+      if (event.type === "artifact_touched") void onDataChanged?.();
+      if (
+        event.type === "text_delta" ||
+        event.type === "text_replace" ||
+        event.type === "progress" ||
+        event.type === "operation_preview" ||
+        event.type === "status" ||
+        isExchangeEvent(event)
+      ) {
+        setLiveExchange((current) => {
+          const base =
+            current?.runId === tab.runId
+              ? current
+              : {
+                  id: `durable:${tab.runId}`,
+                  runId: tab.runId,
+                  threadId: tab.threadId,
+                  prompt: observedRun.userPrompt,
+                  content: "",
+                  steps: [],
+                  status: "streaming" as const,
+                  startedAt: observedRun.createdAt,
+                };
+          if (event.type === "text_delta")
+            return {
+              ...base,
+              content: base.content + event.content,
+              status: "streaming",
+            };
+          if (event.type === "text_replace")
+            return {
+              ...base,
+              content: event.content,
+              status: "streaming",
+            };
+          if (event.type === "progress")
+            return appendStep(
+              base,
+              event.detail
+                ? `${event.title} · ${event.detail}`
+                : event.title,
+            );
+          if (event.type === "status")
+            return appendStep(
+              { ...base, status: "streaming" },
+              event.message,
+            );
+          if (event.type === "operation_preview" && event.preview)
+            return appendStep(
+              base,
+              operationPreviewMessage(event.preview),
+            );
+          return applyExchangeEvent(base, event);
+        });
+      }
+      if (event.type === "artifact_patch")
+        dispatchArtifactPatch(event.artifactId, event.patch);
+      if (
+        event.type === "run_created" ||
+        event.type === "thread_ready" ||
+        event.type === "agent_routed" ||
+        event.type === "operation_preview" ||
+        event.type === "operation_result" ||
+        event.type === "confirmation_required" ||
+        event.type === "approval_accepted" ||
+        event.type === "approval_rejected" ||
+        event.type === "choice_selected" ||
+        event.type === "interrupted" ||
+        event.type === "final"
+      )
+        void onDataChanged?.();
+      // Durable history can replay an older attempt's terminal event
+      // while a retry is already active. Its card keeps the history;
+      // only the live request path raises a toast for a current failure.
+      // A stopped run keeps its live view until the saved reply replaces it.
+      if (event.type === "error" || event.type === "interrupted")
+        setLiveExchange((current) =>
+          current?.runId === tab.runId ? null : current,
+        );
+      if (
+        event.type === "error" ||
+        event.type === "stopped" ||
+        event.type === "interrupted" ||
+        event.type === "final"
+      ) {
+        eventCursors.current.set(tab.runId, {
+            sequence: sequence ?? eventCursors.current.get(tab.runId)?.sequence ?? 0,
+            settledExecutionId: observedRun.executionId,
+          });
+        setObservedContinuationRunId((current) =>
+          current === tab.runId ? null : current,
+        );
+      }
+      if (event.type === "confirmation_required")
+        setLiveExchange((current) =>
+          current?.runId === tab.runId ? null : current,
+        );
+      if (event.type === "final") {
+        setLiveExchange((current) =>
+          current?.runId === tab.runId ? null : current,
+        );
+        void onFinal?.({
+          runId: tab.runId,
+          summary: event.summary,
+          prompt:
+            promptByRun.current.get(tab.runId) ?? observedRun.userPrompt,
+        });
+      }
+    };
+    /** Another engine on this page holds the run's stream: read what it received. */
+    const followLocalStream = (tab: SpectraRunTab) => {
+      const stream = localRunStream(tab.runId);
+      if (!stream || stream.origin === engineIdentity.current) return false;
+      let next = localStreamPositions.current.get(tab.runId) ?? 0;
+      for (; next < stream.events.length; next += 1)
+        applyObserved(tab, tab.run, stream.events[next]!);
+      localStreamPositions.current.set(tab.runId, next);
+      return true;
+    };
     const poll = async () => {
       if (polling) {
         pollAgain = true;
@@ -628,7 +767,7 @@ export function useSpectraRun({
         // A locally owned stream can still be retrying; it retains authority.
         for (const tab of relevant) {
           if (
-            (tab.run.status !== "failed" && tab.run.status !== "cancelled") ||
+            (tab.run.status !== "failed" && tab.run.status !== "cancelled" && tab.run.status !== "completed") ||
             !tab.run.executionId ||
             activeRunIds.current.has(tab.runId) ||
             hasSettledExecution(tab) ||
@@ -664,7 +803,10 @@ export function useSpectraRun({
             (eventCursors.current.has(tab.runId) &&
               !hasSettledExecution(tab)),
         );
+        for (const tab of relevant)
+          if (hasSettledExecution(tab)) streamCoveredRuns.current.delete(tab.runId);
         for (const tab of observed) {
+          if (followLocalStream(tab)) continue;
           // The initial POST is only an acknowledgement; the worker may finish
           // after that response closes. Let durable polling take over as soon
           // as a run reaches a user-input state even if the initiating request
@@ -714,121 +856,7 @@ export function useSpectraRun({
             } catch {
               continue;
             }
-            feedLedger(event);
-            if (
-              event.type === "run_created" ||
-              event.type === "result_card" ||
-              event.type === "confirmation_required" ||
-              event.type === "final"
-            )
-              upsert(event.card);
-            if (event.type === "input_required" && event.card) upsert(event.card);
-            if (event.type === "thread_title") spectraBus.emit("threads.changed", {});
-            if (event.type === "artifact_touched") void onDataChanged?.();
-            if (
-              event.type === "text_delta" ||
-              event.type === "text_replace" ||
-              event.type === "progress" ||
-              event.type === "operation_preview" ||
-              event.type === "status" ||
-              isExchangeEvent(event)
-            ) {
-              setLiveExchange((current) => {
-                const base =
-                  current?.runId === tab.runId
-                    ? current
-                    : {
-                        id: `durable:${tab.runId}`,
-                        runId: tab.runId,
-                        threadId: tab.threadId,
-                        prompt: observedRun.userPrompt,
-                        content: "",
-                        steps: [],
-                        status: "streaming" as const,
-                        startedAt: observedRun.createdAt,
-                      };
-                if (event.type === "text_delta")
-                  return {
-                    ...base,
-                    content: base.content + event.content,
-                    status: "streaming",
-                  };
-                if (event.type === "text_replace")
-                  return {
-                    ...base,
-                    content: event.content,
-                    status: "streaming",
-                  };
-                if (event.type === "progress")
-                  return appendStep(
-                    base,
-                    event.detail
-                      ? `${event.title} · ${event.detail}`
-                      : event.title,
-                  );
-                if (event.type === "status")
-                  return appendStep(
-                    { ...base, status: "streaming" },
-                    event.message,
-                  );
-                if (event.type === "operation_preview" && event.preview)
-                  return appendStep(
-                    base,
-                    operationPreviewMessage(event.preview),
-                  );
-                return applyExchangeEvent(base, event);
-              });
-            }
-            if (event.type === "artifact_patch")
-              dispatchArtifactPatch(event.artifactId, event.patch);
-            if (
-              event.type === "run_created" ||
-              event.type === "thread_ready" ||
-              event.type === "agent_routed" ||
-              event.type === "operation_preview" ||
-              event.type === "operation_result" ||
-              event.type === "confirmation_required" ||
-              event.type === "approval_accepted" ||
-              event.type === "approval_rejected" ||
-              event.type === "choice_selected" ||
-              event.type === "interrupted" ||
-              event.type === "final"
-            )
-              void onDataChanged?.();
-            // Durable history can replay an older attempt's terminal event
-            // while a retry is already active. Its card keeps the history;
-            // only the live request path raises a toast for a current failure.
-            // A stopped run keeps its live view until the saved reply replaces it.
-            if (event.type === "error" || event.type === "interrupted")
-              setLiveExchange((current) =>
-                current?.runId === tab.runId ? null : current,
-              );
-            if (
-              event.type === "error" ||
-              event.type === "stopped" ||
-              event.type === "interrupted" ||
-              event.type === "final"
-            ) {
-              eventCursors.current.set(tab.runId, { sequence: row.sequence, settledExecutionId: observedRun.executionId });
-              setObservedContinuationRunId((current) =>
-                current === tab.runId ? null : current,
-              );
-            }
-            if (event.type === "confirmation_required")
-              setLiveExchange((current) =>
-                current?.runId === tab.runId ? null : current,
-              );
-            if (event.type === "final") {
-              setLiveExchange((current) =>
-                current?.runId === tab.runId ? null : current,
-              );
-              void onFinal?.({
-                runId: tab.runId,
-                summary: event.summary,
-                prompt:
-                  promptByRun.current.get(tab.runId) ?? observedRun.userPrompt,
-              });
-            }
+            applyObserved(tab, observedRun, event, row.sequence);
           }
           // Retain the sequence and settled execution through refreshes. The
           // next attempt resumes after this cursor; this one is no longer polled.
@@ -847,7 +875,7 @@ export function useSpectraRun({
             poll,
             document.visibilityState === "visible"
               ? observedActive
-                ? 750
+                ? 4_000
                 : 180_000
               : 60_000,
           );
@@ -867,11 +895,21 @@ export function useSpectraRun({
       "threads.changed",
       requestDurablePoll,
     );
+    const removeLocalStreams = subscribeLocalRunStreams((runId, closed) => {
+      if (!localStreamPositions.current.has(runId)) return;
+      const tab = tabSnapshot.find((candidate) => candidate.runId === runId);
+      if (tab) followLocalStream(tab);
+      if (!closed) return;
+      localStreamPositions.current.delete(runId);
+      // Everything up to here was shown, so the durable log picks up after it.
+      streamCoveredRuns.current.add(runId);
+    });
     void poll();
     return () => {
       disposed = true;
       if (timer) window.clearTimeout(timer);
       removeThreadsChanged();
+      removeLocalStreams();
     };
   }, [
     artifactId,
@@ -924,6 +962,7 @@ export function useSpectraRun({
       let buffer = "";
       let changed = false;
       let sawInput = false;
+      try {
       while (true) {
         const { value, done } = await reader.read();
         buffer += decoder.decode(value, { stream: !done });
@@ -935,6 +974,8 @@ export function useSpectraRun({
           if (!line.trim()) continue;
           const event = parseSpectraStreamEvent(JSON.parse(line));
           feedLedger(event);
+          if (event.type === "run_created") requestRunId = event.runId;
+          if (requestRunId) publishLocalRunEvent(engineIdentity.current, requestRunId, event);
           if (
             event.type === "error" ||
             event.type === "stopped" ||
@@ -1207,7 +1248,16 @@ export function useSpectraRun({
         }
         if (done) break;
       }
-      if (changed) await onDataChanged?.();
+      } finally {
+        if (requestRunId) closeLocalRunStream(requestRunId);
+      }
+      // Give the page a moment to bring the saved answer in, so the live one
+      // does not blink out; a slow refresh must never hold the run open.
+      if (changed)
+        await Promise.race([
+          Promise.resolve(onDataChanged?.()).catch(() => undefined),
+          new Promise((resolve) => setTimeout(resolve, 1_200)),
+        ]);
       if (requestReachedTerminal)
         setLiveExchange((current) =>
           current && (!liveExchangeId || current.id === liveExchangeId)
@@ -1605,7 +1655,8 @@ export function useSpectraRun({
                 signedOut: "Sign in again to undo this run.",
               }),
             );
-          toast.success("Restored the earlier copy of this work.");
+          const undone = (await response.json().catch(() => ({}))) as { summary?: string; notes?: string[] };
+          toast.success(undone.summary ?? "Undone.", undone.notes?.length ? { description: undone.notes.join(" ") } : undefined);
           spectraBus.emit("threads.changed", {});
           await onDataChanged?.();
         } catch (error) {
@@ -1902,6 +1953,7 @@ export function useSpectraRun({
           exchangeId,
         );
       } catch (error) {
+        setLiveExchange((current) => (current?.id === exchangeId ? null : current));
         toast.error(
           error instanceof Error ? error.message : "Could not retry run.",
         );

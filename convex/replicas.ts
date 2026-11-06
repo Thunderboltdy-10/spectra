@@ -3,6 +3,7 @@ import { deleteUnboundDurableStorage } from "./durableStorageBindings";
 import { v } from "convex/values";
 import { query } from "./functions";
 import { internalMutation, mutation } from "./orgNodeMutation";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { getAuthenticatedActor, getOptionalAuthenticatedActor } from "./identityShared";
@@ -12,7 +13,7 @@ import {
   activeReplicaWriteTarget,
   chooseLiveBridgeDeviceId,
 } from "./bridgeIdentity";
-import { bumpPolicyVersion, evaluateAccessForActor, requireActorArtifactCapability } from "./authorityShared";
+import { bumpPolicyVersion, evaluateAccessForActor, evaluateArtifactAccessForActor, requireActorArtifactCapability } from "./authorityShared";
 import { computeEffectivePolicy } from "./syncPolicy";
 import { POLICY_PRESETS, type SyncPolicyPreset } from "../shared/sync-policy";
 import { planStorageStrategyTransition } from "../shared/storage-strategy";
@@ -431,7 +432,7 @@ export const forWork = query({
   args: { workId: v.id("spectraArtifacts") },
   handler: async (ctx, { workId }) => {
     const actor = await getAuthenticatedActor(ctx); if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
-    const access = await evaluateAccessForActor(ctx, actor, "artifact", workId);
+    const access = await evaluateArtifactAccessForActor(ctx, actor, workId);
     // Unavailability is a normal state of a live metadata subscription.
     if (!access.allowed || !access.capabilities.includes("read")) return null;
     const replicas = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", workId)).take(20);
@@ -2044,6 +2045,8 @@ export const reconcileReplicaTruthMigration = internalMutation({
       conflicts: migration.conflicts + conflicts,
       updatedAt: Date.now(),
     });
+    // The cron only starts it; once running, it carries itself to the end.
+    if (!page.isDone) await ctx.scheduler.runAfter(60_000, internal.replicas.reconcileReplicaTruthMigration, {});
     return { state: page.isDone ? "complete" as const : "running" as const, scanned: page.page.length, repaired, conflicts };
   },
 });

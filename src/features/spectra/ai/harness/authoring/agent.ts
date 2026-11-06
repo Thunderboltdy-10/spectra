@@ -1,5 +1,6 @@
 import { normalizeFoundryContent, projectFoundryToLegacy, type AgentFoundryContent } from "../../../agents/foundry";
 import { agentConfigurationIssues, normalizeAgentContent, type AgentContent } from "../../../agents/model";
+import { notFoundMessage } from "./locate";
 import { AuthoringError, type IdFactory, defaultIdFactory, truncate } from "./shared";
 
 /*
@@ -137,7 +138,7 @@ export function applyAgentEdits(content: unknown, ops: AgentEditOp[], ids: IdFac
       const source = agent.instructions.text;
       if (!op.find) throw new AuthoringError(`${label}: \`find\` is empty.`);
       const count = source.split(op.find).length - 1;
-      if (!count) throw new AuthoringError(`${label}: \`find\` text is not in the instructions.`);
+      if (!count) throw new AuthoringError(notFoundMessage(label, "find", op.find, source, "the instructions"));
       if (count > 1 && !op.all)
         throw new AuthoringError(`${label}: \`find\` appears ${count} times. Include more text, or set "all": true.`);
       agent.instructions.text = op.all ? source.split(op.find).join(op.replace) : source.replace(op.find, () => op.replace);

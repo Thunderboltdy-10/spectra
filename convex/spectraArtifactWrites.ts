@@ -7,6 +7,7 @@ import { getAuthenticatedActor } from "./identityShared";
 import { requireActorArtifactCapability } from "./authorityShared";
 import { validateDurablePayload } from "./collaborationDurablePayload";
 import { isDurableContentRef } from "../shared/durable-content";
+import { unpackOperationInput } from "../shared/operation-content";
 import { classifyArtifactContentWipe } from "../src/features/spectra/operations/artifact-content-wipe";
 import { canonicalArtifactWriteContent, resolveArtifactWriteInput } from "../src/features/spectra/operations/artifact-write-content";
 import { isArtifactTypeKey } from "../src/features/spectra/artifacts/registry";
@@ -131,7 +132,7 @@ export const preparePlan = action({
     const prepared = [];
     const resolvedTargets = new Map(context.operationTargets.map(target => [target.operationId, target.artifactId]));
     for (const operation of context.operations) {
-      const input = artifactOutput(operation.input);
+      const input = artifactOutput(unpackOperationInput(operation.input));
       const target = targets.get(String(resolvedTargets.get(operation._id)));
       if (!target) throw new Error("AI_ARTIFACT_TARGET_NOT_RESOLVED");
       const type = target.artifact.blueprintKey;

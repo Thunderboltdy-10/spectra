@@ -106,7 +106,7 @@ const CONCEPTS: readonly (readonly string[])[] = [
   ["schedule", "calendar", "event", "meeting", "appointment", "book", "plan", "block", "agenda"],
   ["share", "invite", "access", "collaborate", "permission", "send"],
   ["setting", "preference", "option", "theme", "dark", "light", "appearance", "mode", "density"],
-  ["remember", "memory", "note", "forget", "keep"],
+  ["update_memory", "memory", "remember", "note", "forget", "keep"],
   ["folder", "organize", "organise", "move", "rename", "sort", "tidy", "file"],
   ["sync", "refresh", "update", "pull", "storage", "mirror", "offline"],
   ["school", "managebac", "class", "deadline", "cas", "timetable"],

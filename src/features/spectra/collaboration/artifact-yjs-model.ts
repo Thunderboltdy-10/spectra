@@ -50,7 +50,8 @@ export function overlayLiveArtifactRecord<T extends Record<string, unknown>>(
   if (!live) return baseline;
   return {
     ...baseline,
-    title: live.title,
+    // A rename the live document hasn't caught up with yet still stands.
+    title: baseline.renamedFromTitle === live.title ? baseline.title : live.title,
     summary: live.summary ?? baseline.summary,
     tags: live.tags,
     content: live.content,

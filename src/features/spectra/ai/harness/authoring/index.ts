@@ -83,6 +83,10 @@ export type AuthoredContent = {
   problems: string[];
   /** For the user: "6 slides", "Added 2 cards". Never an id. */
   summary: string;
+  /** Edits that could not be applied, while the others were. */
+  failures?: string[];
+  /** How many operations an edit was given. */
+  attempted?: number;
 };
 
 function plural(count: number, noun: string) {
@@ -239,63 +243,108 @@ export function authorNew(type: AuthoredType, spec: unknown, context: AuthoringC
   return { content, readback: withProblems(readback, problems, listed), problems, summary: summarise(type, content) };
 }
 
-/** Applies edit operations to a copy. Throws an AuthoringError naming the operation. */
+/** Whatever each type's edits carry from one operation to the next. */
+function editor(type: AuthoredType, before: unknown, context: AuthoringContext, ids: IdFactory) {
+  type Ops<T> = T[];
+  if (type === "document") {
+    let markdown = documentToMarkdown(before);
+    return {
+      apply: (op: unknown) => {
+        markdown = applyDocumentEdits(markdown, [op] as Ops<DocumentEditOp>);
+      },
+      finish: () => {
+        const content = documentFromMarkdown(markdown, before, ids);
+        return { content, readback: documentReadback(content, before), listed: false };
+      },
+    };
+  }
+  if (type === "sheets") {
+    let content: unknown = before;
+    const touched: NonNullable<Parameters<typeof sheetsReadback>[1]> = new Map();
+    return {
+      apply: (op: unknown) => {
+        const result = applySheetsEdits(content, [op] as Ops<SheetsEditOp>, ids);
+        content = result.content;
+        for (const [sheet, ranges] of result.touched) touched.set(sheet, [...(touched.get(sheet) ?? []), ...ranges]);
+      },
+      finish: () => ({ content: content as Record<string, unknown>, readback: sheetsReadback(content, touched), listed: true }),
+    };
+  }
+  let content: Record<string, unknown> =
+    type === "planner_task" ? { timezone: context.timeZone, ...record(before) } : (before as Record<string, unknown>);
+  const step: (op: unknown) => unknown = (op) => {
+    switch (type) {
+      case "presentation":
+        return applyPresentationEdits(content, [op] as Ops<PresentationEditOp>, ids);
+      case "whiteboard":
+        return applyWhiteboardEdits(content, [op] as Ops<WhiteboardEditOp>, ids);
+      case "flashcard_deck":
+      case "quiz":
+      case "timetable":
+        return applyListEdits(type, content, [op] as Ops<ListEditOp>, ids);
+      case "planner_task":
+        return applyPlannerTaskEdits(content, [op] as Ops<PlannerTaskOp>, ids);
+      case "code":
+        return applyCodeEdits(content, [op] as Ops<CodeEditOp>, ids);
+      case "agent":
+        return applyAgentEdits(content, [op] as Ops<AgentEditOp>, ids);
+    }
+  };
+  return {
+    apply: (op: unknown) => {
+      content = step(op) as Record<string, unknown>;
+    },
+    finish: () => {
+      switch (type) {
+        case "presentation":
+          return { content, readback: presentationReadback(content, before), listed: true };
+        case "whiteboard":
+          return { content, readback: whiteboardReadback(content, before), listed: true };
+        case "planner_task":
+          return { content, readback: plannerTaskOutline(content), listed: false };
+        case "code":
+          return { content, readback: codeReadback(content, before), listed: false };
+        case "agent":
+          return { content, readback: agentOutline(content), listed: false };
+        default:
+          return { content, readback: listReadback(type as ListType, content, before), listed: true };
+      }
+    },
+  };
+}
+
+type ListType = Parameters<typeof listReadback>[0];
+
+/**
+ * Applies edit operations to a copy, each on the result of the last. An
+ * operation that fails is set aside and named while the rest still apply, so
+ * the model repairs that one instead of writing them all again. Only when
+ * every operation fails does this throw.
+ */
 export function authorEdit(type: AuthoredType, before: unknown, ops: unknown, context: AuthoringContext): AuthoredContent {
   const ids = context.ids ?? defaultIdFactory();
   const operations = asArray<Record<string, unknown>>(ops, "operations");
-  let content: Record<string, unknown>;
-  let readback: string;
-  let listed = true;
-  switch (type) {
-    case "document": {
-      const markdown = applyDocumentEdits(documentToMarkdown(before), operations as unknown as DocumentEditOp[]);
-      content = documentFromMarkdown(markdown, before, ids);
-      readback = documentReadback(content, before);
-      listed = false;
-      break;
+  const edit = editor(type, before, context, ids);
+  const failures: string[] = [];
+  operations.forEach((op, index) => {
+    try {
+      edit.apply(op);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failures.push(message.replace(/^Edit 1\b/, `Edit ${index + 1}`));
     }
-    case "presentation":
-      content = applyPresentationEdits(before, operations as unknown as PresentationEditOp[], ids);
-      readback = presentationReadback(content, before);
-      break;
-    case "sheets": {
-      const result = applySheetsEdits(before, operations as unknown as SheetsEditOp[], ids);
-      content = result.content as unknown as Record<string, unknown>;
-      readback = sheetsReadback(content, result.touched);
-      break;
-    }
-    case "whiteboard":
-      content = applyWhiteboardEdits(before, operations as unknown as WhiteboardEditOp[], ids) as unknown as Record<string, unknown>;
-      readback = whiteboardReadback(content, before);
-      break;
-    case "flashcard_deck":
-    case "quiz":
-    case "timetable":
-      content = applyListEdits(type, before, operations as unknown as ListEditOp[], ids);
-      readback = listReadback(type, content, before);
-      break;
-    case "planner_task":
-      content = applyPlannerTaskEdits(
-        { timezone: context.timeZone, ...record(before) },
-        operations as unknown as PlannerTaskOp[],
-        ids,
-      );
-      readback = plannerTaskOutline(content);
-      listed = false;
-      break;
-    case "code":
-      content = applyCodeEdits(before, operations as unknown as CodeEditOp[], ids) as unknown as Record<string, unknown>;
-      readback = codeReadback(content, before);
-      listed = false;
-      break;
-    case "agent":
-      content = applyAgentEdits(before, operations as unknown as AgentEditOp[], ids) as unknown as Record<string, unknown>;
-      readback = agentOutline(content);
-      listed = false;
-      break;
-  }
+  });
+  if (failures.length === operations.length)
+    throw new AuthoringError(`${failures.join("\n")}${operations.length > 1 ? "\nNone of the edits applied." : ""}`);
+  const { content, readback, listed } = edit.finish();
   const problems = problemsOf(type, content);
-  return { content, readback: withProblems(readback, problems, listed), problems, summary: summarise(type, content, before) };
+  return {
+    content,
+    readback: withProblems(readback, problems, listed),
+    problems,
+    summary: summarise(type, content, before),
+    ...(failures.length ? { failures, attempted: operations.length } : {}),
+  };
 }
 
 export type ReadRange = {

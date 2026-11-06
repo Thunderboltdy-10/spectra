@@ -38,8 +38,6 @@ const cases: Array<{ command: string; args: Record<string, unknown>; mutation?: 
   { command: "delete_library_items", args: { targetIds: ["node"] }, mutation: "orgTree:trash" },
   { command: "change_spectra_settings", args: { patch: { appearance: { density: "compact" } } }, mutation: "accountPreferences:writeLayer" },
   { command: "change_sync_policy", args: { targetIds: ["node"], patch: {} }, mutation: "syncPolicy:patchItems" },
-  { command: "write_memory", args: { action: "create", content: "Prefers short examples" }, mutation: "memory:remember" },
-  { command: "write_memory", args: { action: "forget", memoryId: "memory" }, mutation: "memory:forget", event: "memory_written" },
   { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "revoke", grantId: "grant" }, mutation: "authority:revoke" },
   { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "withdraw_invitation", invitationId: "invitation" }, mutation: "authority:revokePendingInvitation", event: "sharing_changed" },
   { command: "change_sharing", args: { resourceType: "artifact", resourceId: "work", action: "set_exception", accountId: "member", effect: "restrict" }, mutation: "authority:setArtifactException", event: "sharing_changed" },
@@ -140,8 +138,8 @@ describe("application action contract matrix (stubbed persistence)", () => {
     await executeApplicationCommand("actor", "run", "attempt", "navigate_spectra", { destination: "calendar", region: "slide-3" },
       undefined, (event) => events.push(event), undefined, "operation");
     expect(events.map((event) => event.payload)).toEqual([
-      { destination: "artifact", targetId: "work", region: "slide-3", note: "Opening artifact" },
-      { destination: "calendar", note: "Opening calendar" },
+      { destination: "artifact", targetId: "work", region: "slide-3", note: "Opening artifact", requestedAt: expect.any(Number) },
+      { destination: "calendar", note: "Opening calendar", requestedAt: expect.any(Number) },
     ]);
   });
 

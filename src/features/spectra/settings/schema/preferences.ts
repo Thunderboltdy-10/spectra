@@ -30,6 +30,15 @@ const aiSchema = z.object({
   parallelSafeReads: z.boolean().default(true),
   researchDepth: z.enum(["automatic", "quick", "verified", "deep"]).default("automatic"),
   reasoningProfile: z.enum(["configured_maximum", "balanced", "fast"]).default("configured_maximum"),
+  /** Whose inference runs this person's work: Spectra's, or their own Codex or Claude Code. */
+  runtime: z.enum(["spectra", "codex", "claude"]).default("spectra"),
+  /** Empty is the CLI's default for this account. */
+  codexModel: z.string().max(120).default(""),
+  claudeModel: z.string().max(120).default(""),
+  thinking: z.enum(["medium", "high"]).default("high"),
+  /** How fast the work plays on this person's screen. The edit is saved either way. */
+  workSpeed: z.enum(["slow", "medium", "fast"]).default("fast"),
+  followSpeed: z.enum(["slow", "medium", "fast"]).default("slow"),
   reversibleLowRiskAutonomy: z.boolean().default(true),
   notifyRequiredInput: z.boolean().default(true),
   notifyRunCompletion: z.boolean().default(true),

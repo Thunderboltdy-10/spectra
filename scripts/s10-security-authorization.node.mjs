@@ -49,6 +49,7 @@ function fixture(authorize = async () => ({ allowed: true, canModify: true })) {
   const guard = createCollaborationAuthorizationGuard({
     authorize,
     now: () => time,
+    maxAgeMs: 15_000,
     closeConnection: (peer, code) => calls.push({ peer, code }),
   });
   guard.watch(connection);
@@ -145,6 +146,7 @@ test("the real connected hook expires a quiet socket while the real policy sweep
   const connection = { context, document: {}, onClose: () => {}, webSocket: { close: code => closed.push(code) } };
   const guard = createCollaborationAuthorizationGuard({
     authorize: () => new Promise(() => {}),
+    maxAgeMs: 15_000,
     closeConnection: (peer, code) => { activeConnections.delete(peer); peer.webSocket.close(code); },
   });
   const connectedStart = source.indexOf("  async connected({ connection })");
@@ -200,7 +202,7 @@ test("a hanging refresh is coalesced, times out, and its late reply cannot exten
     await Promise.resolve();
     await Promise.resolve();
     assert.equal(context.authorizationCheckedAt, 1_000);
-    t.mock.timers.tick(10_000);
+    t.mock.timers.tick(85_000);
     assert.deepEqual(closed, [1013]);
     await assert.rejects(guard.require(context), /AUTHORIZATION_UNAVAILABLE/);
   } finally { guard.dispose(); }

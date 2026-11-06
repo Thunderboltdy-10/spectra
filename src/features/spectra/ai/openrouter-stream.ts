@@ -26,7 +26,29 @@ export type OpenRouterAgentToolCall = {
 export type OpenRouterAgentTurn = OpenRouterPlanResult & {
   toolCalls: OpenRouterAgentToolCall[];
   finishReason?: string;
+  /** The provider's own record of its reasoning, some of it encrypted. */
+  reasoningDetails?: Array<Record<string, unknown>>;
 };
+
+/** Streamed reasoning details arrive in pieces; these are the whole blocks. */
+export function mergeReasoningDetail(blocks: Array<Record<string, unknown>>, detail: Record<string, unknown>) {
+  const open =
+    typeof detail.index === "number"
+      ? blocks.find((block) => block.index === detail.index && block.type === detail.type)
+      : blocks[blocks.length - 1]?.type === detail.type && detail.type !== "reasoning.encrypted"
+        ? blocks[blocks.length - 1]
+        : undefined;
+  if (!open) {
+    blocks.push({ ...detail });
+    return;
+  }
+  for (const [key, value] of Object.entries(detail)) {
+    if (value === null || value === undefined) continue;
+    if ((key === "text" || key === "summary" || key === "data") && typeof value === "string")
+      open[key] = `${typeof open[key] === "string" ? open[key] : ""}${value}`;
+    else open[key] = value;
+  }
+}
 
 function decodePartialJsonString(source: string, start: number) {
   let value = "";
@@ -430,6 +452,7 @@ export async function readOpenRouterAgentTurn(
   providerLabelHint = "OpenAI",
 ): Promise<OpenRouterAgentTurn> {
   const startedAt = Date.now();
+  const reasoningDetails: Array<Record<string, unknown>> = [];
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("text/event-stream")) {
     const payload = (await response.json()) as Record<string, unknown>;
@@ -569,6 +592,7 @@ export async function readOpenRouterAgentTurn(
       }
       if (Array.isArray(delta.reasoning_details)) {
         for (const detail of delta.reasoning_details) {
+          if (detail && typeof detail === "object") mergeReasoningDetail(reasoningDetails, detail as Record<string, unknown>);
           if (
             detail &&
             typeof detail === "object" &&
@@ -646,6 +670,7 @@ export async function readOpenRouterAgentTurn(
     finishReason,
     model,
     provider,
+    ...(reasoningDetails.length ? { reasoningDetails } : {}),
     usage,
   };
 }

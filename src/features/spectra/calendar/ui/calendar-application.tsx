@@ -1028,7 +1028,9 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
     setDaySpanState(span);
     const scroller = scrollerRef.current;
     const anchor = around === undefined ? -1 : daysRef.current.indexOf(startOfLocalDay(around));
-    const index = anchor >= 0 ? Math.max(0, anchor - (span > 1 ? 1 : 0)) : daysRef.current.findIndex((day) => day === focusedStartRef.current);
+    const near = anchor >= 0 ? Math.max(0, anchor - (span > 1 ? 1 : 0)) : daysRef.current.findIndex((day) => day === focusedStartRef.current);
+    const monday = span === 7 && near >= 0 ? daysRef.current.indexOf(startOfLocalWeek(daysRef.current[near]!)) : -1;
+    const index = monday >= 0 ? monday : near;
     // The resize that follows realigns on the focused day, so it must already be the new one.
     const start = daysRef.current[index];
     if (start !== undefined) {

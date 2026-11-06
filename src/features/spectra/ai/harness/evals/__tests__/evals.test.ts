@@ -37,7 +37,7 @@ function scripted(steps: Step[]) {
 }
 
 function deps(callModel: ModelCaller): EvalDeps {
-  return { callModel, captionWriter: null, summarise: async () => "Earlier: the dog is Biscuit; the essay is on Versailles." };
+  return { callModel, titleWriter: null, summarise: async () => "Earlier: the dog is Biscuit; the essay is on Versailles." };
 }
 
 const scenario = (name: string) => EVAL_SCENARIOS.find((entry) => entry.name === name)!;
@@ -81,13 +81,13 @@ describe("eval runner", () => {
     let time = 0;
     const clock = () => time;
     const caller: ModelCaller = async ({ onText }) => {
-      time += 2_000;
+      time += 3_000;
       onText("Hi!");
       return { text: "Hi!", toolCalls: [] };
     };
     const row = await playScenario(scenario("hello"), { ...deps(caller), clock });
     expect(row.pass).toBe(false);
-    expect(row.problems).toContain("first output 2000 ms at p50, target under 1500 ms");
+    expect(row.problems).toContain("first output 3000 ms at p50, target under 1500 ms");
   });
 
   it("records a pause, answers it and checks the change", async () => {
@@ -203,7 +203,6 @@ describe("eval report", () => {
         turns: 1,
         modelCalls: 1,
         steps: [],
-        captions: [],
         reply: "Hi <script>alert(1)</script>",
         artifacts: [],
       },
@@ -219,7 +218,6 @@ describe("eval report", () => {
         turns: 2,
         modelCalls: 2,
         steps: ["Creating *Guide*"],
-        captions: [],
         reply: "",
         artifacts: [{ id: "wx1", type: "document", title: "Guide", action: "created", shape: "120 words", preview: "# Guide <b>" }],
       },

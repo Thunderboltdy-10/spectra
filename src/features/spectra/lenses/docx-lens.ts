@@ -720,6 +720,8 @@ function mergeRichText(content: DocxRichInline[]) {
   return merged;
 }
 
+const BULLET_FONT = /^(?:symbol|wingdings(?: d)?|webdings)$/i;
+
 function compactRunFormat(run: Run): DocxRunFormat | undefined {
   const resolved = run.format();
   const format: DocxRunFormat = {
@@ -727,7 +729,9 @@ function compactRunFormat(run: Run): DocxRunFormat | undefined {
     ...(resolved.italic ? { italic: true } : {}),
     ...(resolved.strike ? { strike: true } : {}),
     ...(resolved.underline !== null ? { underline: true } : {}),
-    ...(resolved.font ? { fontFamily: resolved.font } : {}),
+    // A list level's bullet font (Symbol, Wingdings) resolves onto its runs.
+    ...(resolved.font && !(BULLET_FONT.test(resolved.font) && !run.element.find(WML_NAMESPACE, "rPr")?.find(WML_NAMESPACE, "rFonts"))
+      ? { fontFamily: resolved.font } : {}),
     ...(resolved.sizePt ? { fontSizePoints: resolved.sizePt } : {}),
     ...(resolved.color ? { color: resolved.color } : {}),
     ...(resolved.highlight ? { highlight: resolved.highlight } : {}),
@@ -3456,6 +3460,71 @@ export async function docxProjectionSemanticDigest(projection: Pick<DocxProjecti
  * of the digest.
  */
 const INHERITED_RUN_FORMAT = new Set(["fontFamily", "fontSizePoints", "color"]);
+/**
+ * An equation as Word reads it back, ignoring spacing. Word holds its own form
+ * of an equation (`\\hat{x}` is an accented x, `\\quad` is a space), so the
+ * two sides are compared after both have been through that form.
+ */
+function equationForm(latex: string) {
+  const equation = latexToEquation(latex, "inline");
+  const form = equation.supported ? ommlToLatex(parseXml(equation.xml).root) : latex;
+  return form
+    .replace(/\\(?:mathrm|operatorname|text)\b/g, "")
+    .replace(/\\(?=(?:lim|sin|cos|tan|log|ln|exp|min|max|sup|inf|det|gcd)\b)/g, "")
+    .replace(/\\[,;:!]/g, "")
+    .replace(/[{}\s\u2003\u2002\u2009]+/g, "");
+}
+
+/** A named paragraph style, like a heading, can also make its text bold or italic. */
+const STYLE_RUN_FORMAT = new Set(["bold", "italic"]);
+
+const isBlankFormat = (value: unknown) => value === undefined || value === null || value === false;
+
+/**
+ * Word merges and resolves runs when it reopens them: a bold word followed by
+ * plain words in a heading comes back as one bold run, because the style is
+ * bold. Compare what each character of the request asked for against what
+ * Word shows there. Anything the request set must hold; anything it left out
+ * may be resolved from the style, and only that.
+ */
+function runsAgree(
+  readback: DocxRichInline[],
+  requested: DocxRichInline[],
+  requestedRunFormat: Record<string, unknown>,
+  styled: boolean,
+) {
+  const spans = (items: DocxRichInline[]) => items.flatMap((item) =>
+    item.kind === "text"
+      ? item.text ? [{ text: item.text, format: (item.format ?? {}) as Record<string, unknown>, href: item.href ?? null, object: null as string | null }] : []
+      : [{ text: "", format: {} as Record<string, unknown>, href: null as string | null, object: item.kind === "equation" ? `equation:${item.display}:${equationForm(item.latex)}` : JSON.stringify(authoredSemanticValue(item)) }]);
+  const read = spans(readback);
+  const want = spans(requested);
+  let readIndex = 0, wantIndex = 0, readAt = 0, wantAt = 0;
+  const trimmedEnd = (list: typeof read, index: number, at: number) =>
+    list.slice(index).every((span, offset) => !span.object && !span.text.slice(offset ? 0 : at).replace(/ +$/u, ""));
+  while (readIndex < read.length && wantIndex < want.length) {
+    const got = read[readIndex]!;
+    const asked = want[wantIndex]!;
+    if (got.object || asked.object) {
+      if (got.object !== asked.object) return false;
+      readIndex += 1; wantIndex += 1;
+      continue;
+    }
+    const length = Math.min(got.text.length - readAt, asked.text.length - wantAt);
+    if (got.text.slice(readAt, readAt + length) !== asked.text.slice(wantAt, wantAt + length) || got.href !== asked.href) return false;
+    for (const key of new Set([...Object.keys(got.format), ...Object.keys(asked.format), ...Object.keys(requestedRunFormat)])) {
+      const shown = got.format[key];
+      const wanted = asked.format[key] ?? requestedRunFormat[key];
+      if (shown === wanted || (isBlankFormat(shown) && isBlankFormat(wanted))) continue;
+      if (isBlankFormat(wanted) && (INHERITED_RUN_FORMAT.has(key) || (styled && STYLE_RUN_FORMAT.has(key)))) continue;
+      return false;
+    }
+    readAt += length; wantAt += length;
+    if (readAt === got.text.length) { readIndex += 1; readAt = 0; }
+    if (wantAt === asked.text.length) { wantIndex += 1; wantAt = 0; }
+  }
+  return trimmedEnd(read, readIndex, readAt) && trimmedEnd(want, wantIndex, wantAt);
+}
 
 /** Name the first block whose Word readback differs from the request, so a
  * failed write tells the writer what Word could not represent. */
@@ -3552,10 +3621,23 @@ export async function docxProjectionReadbackDigest(
       inlineContent: _readbackInlineContent,
       ...semanticBlock
     } = block;
+    const plainRuns = block.inlineContent?.every((item) => item.kind === "text");
+    const textMatchesRuns = !plainRuns
+      || block.inlineContent!.map((item) => ("text" in item ? item.text : "")).join("").replace(/ +$/u, "") === block.text.replace(/ +$/u, "");
+    const agreed = block.inlineContent && textMatchesRuns && block.type !== "table" && block.type === intent.type && runsAgree(
+      block.inlineContent,
+      intent.inlineContent ?? [{ kind: "text", text: intent.text }],
+      requestedRunFormat,
+      block.type === "heading",
+    );
     return {
       ...semanticBlock,
+      // Agreed text is the same text, however Word spells an equation in it.
+      ...(agreed ? { text: intent.text, ...(intent.latex !== undefined ? { latex: intent.latex } : {}) } : {}),
       ...(attrs && Object.keys(attrs).length ? { attrs } : {}),
-      ...(!mirroredText && inlineContent ? { inlineContent } : {}),
+      ...(agreed
+        ? intent.inlineContent ? { inlineContent: intent.inlineContent } : {}
+        : !mirroredText && inlineContent ? { inlineContent } : {}),
     };
   });
   return docxProjectionSemanticDigest({ ...readback, blocks });

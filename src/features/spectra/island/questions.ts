@@ -73,7 +73,6 @@ export function pendingQuestions(engine: SpectraRunEngine | null, tabs: readonly
     if (!request || model.state !== "needs_input") continue;
     const base = { key: `tab:${tab.runId}`, runId: tab.runId, threadId: tab.threadId, threadTitle: model.title };
     if (request.kind === "approval") {
-      if (!tab.card) continue;
       const targets = model.targetNames.length ? ` (${model.targetNames.join(", ")})` : "";
       list.push({ ...base, kind: "approval", prompt: `${request.prompt}${targets}`, options: [], allowText: true });
     } else if (request.kind === "choice") {
@@ -150,8 +149,8 @@ export async function answerQuestion(
   };
 
   if (request?.kind === "approval") {
-    const card = runTabCard(tab);
-    if (!card) return false;
+    // A run can be waiting before its result card has reached this tab.
+    const card = runTabCard(tab) ?? ({ runId: tab.runId } as ResultCardStreamView);
     if (answer.kind === "allow") {
       await engine.onCardAction(card, "confirm");
       return true;

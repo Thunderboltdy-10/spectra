@@ -759,8 +759,17 @@ export async function GET(request: NextRequest) {
     }
 
     if (action === "memoryExport") {
-      const result = await spectraQuery("memory:exportMine", {});
-      return ok(result);
+      const [notes, earlier] = await Promise.all([
+        spectraQuery("spectraMemory:exportFiles", {}),
+        spectraQuery("memory:exportMine", {}),
+      ]);
+      return ok({ notes, earlier });
+    }
+
+    if (action === "memoryFiles") return ok(await spectraQuery("spectraMemory:head", {}));
+
+    if (action === "memoryTopic") {
+      return ok(await spectraQuery("spectraMemory:readTopic", { slug: params.get("slug") ?? "" }));
     }
 
     if (action === "overview") {
@@ -915,7 +924,25 @@ export async function POST(request: NextRequest) {
       const result = await spectraMutation("memory:clearAll", {
         confirmation: requireString(body.confirmation, "confirmation"),
       });
+      await spectraMutation("spectraMemory:clear", {});
       return ok(result);
+    }
+
+    if (action === "updateMemoryFile") {
+      const text = (key: string) => optionalString(body[key]);
+      return ok(
+        await spectraMutation("spectraMemory:update", {
+          file: requireString(body.file, "file"),
+          slug: text("slug"),
+          title: text("title"),
+          summary: text("summary"),
+          add: text("add"),
+          find: text("find"),
+          replace: typeof body.replace === "string" ? body.replace : undefined,
+          rewrite: typeof body.rewrite === "string" ? body.rewrite : undefined,
+          remove: body.remove === true ? true : undefined,
+        }),
+      );
     }
 
     if (action === "selectRunTab") {

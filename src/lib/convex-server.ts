@@ -9,6 +9,19 @@ import { auth } from "@clerk/nextjs/server";
 import { getConvexUrl } from "@/lib/env";
 import { getWorkerConvexToken } from "@/lib/convex-worker-context";
 import { rethrowWorded } from "../../shared/convex-error.mjs";
+import { getFunctionName } from "convex/server";
+import { jsonSize, runTraceEnabled, traceSpan } from "@/features/spectra/ai/harness/run-trace";
+
+function traced<T>(kind: string, reference: unknown, args: unknown, call: () => Promise<T>) {
+  if (!runTraceEnabled()) return call();
+  let name = "unknown";
+  try {
+    name = getFunctionName(reference as never);
+  } catch {
+    // Unnamed references still get timed.
+  }
+  return traceSpan(`convex.${kind}`, { name, argBytes: jsonSize(args) }, call);
+}
 
 /* Route code branches on `error.message` ("CODE: sentence"). Production Convex
    redacts that message to "Server Error" and keeps the words only in the
@@ -18,21 +31,21 @@ class WordedConvexHttpClient extends ConvexHttpClient {
     query: Query,
     ...args: OptionalRestArgs<Query>
   ) {
-    return super.query(query, ...args).catch(rethrowWorded);
+    return traced("query", query, args[0], () => super.query(query, ...args)).catch(rethrowWorded);
   }
 
   override mutation<Mutation extends FunctionReference<"mutation">>(
     mutation: Mutation,
     ...args: ArgsAndOptions<Mutation, HttpMutationOptions>
   ) {
-    return super.mutation(mutation, ...args).catch(rethrowWorded);
+    return traced("mutation", mutation, args[0], () => super.mutation(mutation, ...args)).catch(rethrowWorded);
   }
 
   override action<Action extends FunctionReference<"action">>(
     action: Action,
     ...args: OptionalRestArgs<Action>
   ) {
-    return super.action(action, ...args).catch(rethrowWorded);
+    return traced("action", action, args[0], () => super.action(action, ...args)).catch(rethrowWorded);
   }
 }
 

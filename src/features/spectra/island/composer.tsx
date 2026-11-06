@@ -25,6 +25,9 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
@@ -34,6 +37,9 @@ import { readCommandAttachment, type CommandAttachment } from "../components/com
 import { getSpectraInstalledAgents, searchSpectra, type SpectraArtifact, type SpectraInstalledAgent } from "../data/api";
 import { useLifeArrival, useLifeDeparture } from "../life/use-life";
 import { useDictation } from "./dictation";
+import { PROVIDER_LABEL, providerProblem, useAgentRuntime } from "../ai/use-agent-runtime";
+import { useSpectraPreferences } from "../settings/preference-store";
+import { applyRuntimeChoice } from "../settings/ui/runtime-settings";
 
 /*
  * The island's composer (ISLAND.md, "The composer"): Spectra's only one.
@@ -84,13 +90,15 @@ export const IslandComposer = forwardRef<
     /** The thread it writes into, for its draft and placeholder. */
     draftKey: string;
     placeholder: string;
+    /** A run started from here is still going, out of sight. */
+    working?: boolean;
     visible: boolean;
     busy?: boolean;
     onSend: (send: ComposerSend) => void;
     onStop?: () => void;
     onCancel: () => void;
   }
->(function IslandComposer({ draftKey, placeholder, visible, busy, onSend, onStop, onCancel }, forwarded) {
+>(function IslandComposer({ draftKey, placeholder, visible, busy, working, onSend, onStop, onCancel }, forwarded) {
   const rootRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -275,7 +283,7 @@ export const IslandComposer = forwardRef<
       data-island-composer
       onDragOver={(event) => event.dataTransfer.types.includes("Files") && event.preventDefault()}
       onDrop={onDrop}
-      className="relative box-border flex w-[min(600px,calc(100vw-var(--spectra-rail-width,0px)-var(--spectra-lead-width,0px)-32px))] flex-col rounded-surface border border-[var(--card-border)] bg-[var(--card-paper)] shadow-[var(--shadow-lg)]"
+      className="relative box-border flex w-[min(680px,calc(100vw-var(--spectra-rail-width,0px)-var(--spectra-lead-width,0px)-var(--spectra-side-width,0px)-32px))] flex-col rounded-surface border border-[var(--card-border)] bg-[var(--card-paper)] shadow-[var(--shadow-lg)]"
     >
       {chips.length ? (
         <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
@@ -313,7 +321,7 @@ export const IslandComposer = forwardRef<
         </div>
       ) : null}
       <div className="flex items-end gap-1.5 p-2">
-        <AgentSwitch label={agentLabel} agent={agent} agentIndex={agentIndex} agents={agents} sends={sends} onChoose={setAgentIndex} />
+        <AgentSwitch label={agentLabel} agent={agent} agentIndex={agentIndex} agents={agents} sends={sends} working={working} onChoose={setAgentIndex} />
         <textarea
           ref={fieldRef}
           data-composer-text
@@ -398,9 +406,11 @@ function AgentSwitch({
   agentIndex,
   agents,
   sends,
+  working,
   onChoose,
 }: {
   label: string;
+  working?: boolean;
   agent: SpectraInstalledAgent | null;
   /** Which agent is chosen; below zero (or none) is Auto. */
   agentIndex: number | undefined;
@@ -417,7 +427,7 @@ function AgentSwitch({
       </span>
     </span>
   ) : (
-    <PrismLoader size={24} optics="dormant" interactive turns={sends} />
+    <PrismLoader size={24} optics={working ? "working" : "dormant"} interactive turns={sends} />
   );
   const chosen = agentIndex === undefined || agentIndex < 0 ? "auto" : String(agentIndex);
   // The mark is the switch: pressing it opens the agents to choose from, Auto first.
@@ -449,6 +459,8 @@ function AgentSwitch({
           ))}
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
+        <RuntimeControls />
+        <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
           <Link href="/agents" className="text-[var(--text-secondary)]">
             <Icon name="agents" size={13} />
@@ -457,6 +469,113 @@ function AgentSwitch({
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+const SPEED_STOPS = ["slow", "medium", "fast"] as const;
+
+/** Three stops in the prism menu. Its arrow keys stay with the slider rather than moving the menu. */
+function SpeedSlider({ label, value, onChange }: { label: string; value: (typeof SPEED_STOPS)[number]; onChange: (value: (typeof SPEED_STOPS)[number]) => void }) {
+  return (
+    <label className="block px-2 py-1.5" onKeyDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+      <span className="flex items-baseline justify-between text-caption">
+        <span className="text-[var(--text-primary)]">{label}</span>
+        <span className="text-micro capitalize text-[var(--text-tertiary)]">{value}</span>
+      </span>
+      <input
+        type="range"
+        min={0}
+        max={2}
+        step={1}
+        aria-label={label}
+        aria-valuetext={value}
+        value={SPEED_STOPS.indexOf(value)}
+        onChange={(event) => onChange(SPEED_STOPS[Number(event.target.value)])}
+        className="mt-1 block h-4 w-full cursor-pointer accent-[var(--text-primary)]"
+      />
+    </label>
+  );
+}
+
+/** The model, how hard it thinks, and how fast its work plays. */
+function RuntimeControls() {
+  const { preferences, update } = useSpectraPreferences();
+  const { status } = useAgentRuntime();
+  const ai = preferences.ai;
+  const patch = (next: Partial<typeof ai>) => update("ai", next);
+  const models = (provider: "codex" | "claude") => status?.[provider]?.models ?? [];
+  const chosenModel = ai.runtime === "codex" ? ai.codexModel : ai.runtime === "claude" ? ai.claudeModel : "";
+  const value = ai.runtime === "spectra" ? "spectra" : `${ai.runtime}:${chosenModel}`;
+  const modelLabel = ai.runtime === "spectra"
+    ? "Spectra default"
+    : models(ai.runtime).find((item) => item.id === chosenModel)?.label ?? PROVIDER_LABEL[ai.runtime];
+  const choose = (next: string) => {
+    if (next === "spectra") return applyRuntimeChoice("spectra", patch);
+    const [provider, ...rest] = next.split(":");
+    const model = rest.join(":");
+    if (provider === "codex") {
+      patch({ codexModel: model });
+      applyRuntimeChoice("codex", patch);
+    } else if (provider === "claude") {
+      patch({ claudeModel: model });
+      applyRuntimeChoice("claude", patch);
+    }
+  };
+  return (
+    <>
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+          <span className="flex-1">Model</span>
+          <span className="max-w-[9rem] truncate text-micro text-[var(--text-tertiary)]">{modelLabel}</span>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent layer="toast">
+          <DropdownMenuRadioGroup value={value} onValueChange={choose}>
+            <DropdownMenuRadioItem value="spectra">Spectra default</DropdownMenuRadioItem>
+            {(["codex", "claude"] as const).map((provider) => {
+              const entry = status?.[provider];
+              const problem = entry ? providerProblem(provider, entry.state) : "Checking this computer…";
+              return (
+                <div key={provider} className="mt-1.5 border-t border-[var(--border-subtle)] pt-1.5">
+                  <div className="px-2 pb-1 text-micro font-medium text-[var(--text-tertiary)]">{PROVIDER_LABEL[provider]}</div>
+                  {problem ? (
+                    <p className="px-2 pb-1 text-micro leading-[18px] text-[var(--text-secondary)]">{problem}</p>
+                  ) : (
+                    <>
+                      <DropdownMenuRadioItem value={`${provider}:`}>Its default</DropdownMenuRadioItem>
+                      {entry?.models.map((item) => (
+                        <DropdownMenuRadioItem key={item.id} value={`${provider}:${item.id}`}>{item.label}</DropdownMenuRadioItem>
+                      ))}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+      <div className="flex items-center justify-between gap-3 px-2 py-1.5 text-caption" onKeyDown={(event) => event.stopPropagation()}>
+        <span className="text-[var(--text-primary)]">Thinking</span>
+        <span role="radiogroup" aria-label="Thinking" className="inline-flex rounded-control bg-[var(--bg-secondary)] p-0.5">
+          {(["medium", "high"] as const).map((level) => (
+            <button
+              key={level}
+              type="button"
+              role="radio"
+              aria-checked={ai.thinking === level}
+              onClick={() => patch({ thinking: level })}
+              className={cn(
+                "rounded-control px-2 py-0.5 text-micro capitalize transition-colors",
+                ai.thinking === level ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+              )}
+            >
+              {level}
+            </button>
+          ))}
+        </span>
+      </div>
+      <SpeedSlider label="Work speed" value={ai.workSpeed} onChange={(workSpeed) => patch({ workSpeed })} />
+      <SpeedSlider label="While following" value={ai.followSpeed} onChange={(followSpeed) => patch({ followSpeed })} />
+    </>
   );
 }
 

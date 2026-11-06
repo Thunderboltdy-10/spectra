@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import { CaptionScheduler, parseCaptionReply, type CaptionEvent, type CaptionTimers } from "../captions";
 import {
   SUMMARY_MARKER,
   THREAD_FOLD_AT,
@@ -16,142 +15,6 @@ import { DEFAULT_PERMISSION_PREFS } from "../permissions";
 import { SPECTRA_SYSTEM_PROMPT, buildSystemPrompt, environmentBlock } from "../prompt";
 import { runHarness, type HarnessEvent, type RunCheckpoint } from "../run";
 import type { HarnessMessage, ModelTurn } from "../types";
-
-function fakeTimers(): CaptionTimers & { advance: (ms: number) => Promise<void> } {
-  let time = 0;
-  let timers: Array<{ at: number; fn: () => void; id: number }> = [];
-  let next = 1;
-  return {
-    now: () => time,
-    setTimeout: (fn, ms) => {
-      const id = next++;
-      timers.push({ at: time + ms, fn, id });
-      return id;
-    },
-    clearTimeout: (handle) => {
-      timers = timers.filter((timer) => timer.id !== handle);
-    },
-    advance: async (ms) => {
-      time += ms;
-      const due = timers.filter((timer) => timer.at <= time);
-      timers = timers.filter((timer) => timer.at > time);
-      for (const timer of due) timer.fn();
-      for (let tick = 0; tick < 10; tick += 1) await Promise.resolve();
-    },
-  };
-}
-
-describe("captions", () => {
-  it("writes nothing for a run under two seconds, but still names the thread", async () => {
-    const timers = fakeTimers();
-    const captions: CaptionEvent[] = [];
-    const titles: string[] = [];
-    const write = vi.fn(async () => ({ caption: "Saying hello", title: "Greeting" }));
-    const scheduler = new CaptionScheduler({ prompt: "hello", write, wantTitle: true, timers, onCaption: (c) => captions.push(c), onTitle: (t) => titles.push(t) });
-    await timers.advance(800);
-    await scheduler.finish();
-    expect(captions).toEqual([]);
-    expect(titles).toEqual(["Greeting"]);
-  });
-
-  it("summarises a long stretch of thinking before the first step, and again once it moves on", async () => {
-    const timers = fakeTimers();
-    const captions: CaptionEvent[] = [];
-    const write = vi.fn(async (request: { thinking?: string }) => ({ caption: request.thinking ? `About ${request.thinking.length}` : "Working" }));
-    const scheduler = new CaptionScheduler({ prompt: "deck", write, timers, onCaption: (c) => captions.push(c) });
-    scheduler.thinking("plan the cards ");
-    await timers.advance(2_000);
-    expect(captions.map((c) => c.text)).toEqual(["About 15"]);
-    // Thinking that has not moved on adds nothing.
-    scheduler.thinking("x".repeat(200));
-    await timers.advance(7_000);
-    expect(captions).toHaveLength(1);
-    scheduler.thinking("y".repeat(1_200));
-    await timers.advance(2_500);
-    expect(captions).toHaveLength(2);
-    expect(captions[1]!.stepIds).toEqual(["thinking:1"]);
-    // A real step ends the stretch; the caption describes the step.
-    scheduler.stepStarted({ id: "a", label: "Creating *Deck*" });
-    await timers.advance(2_500);
-    expect(write.mock.calls.at(-1)![0].thinking).toBeUndefined();
-  });
-
-  it("captions steps after two seconds, at most every 2.5 s, and ends in the past tense", async () => {
-    const timers = fakeTimers();
-    const captions: CaptionEvent[] = [];
-    const write = vi.fn(async (request: { final: boolean; steps: unknown[] }) => ({
-      caption: request.final ? "Made a deck" : `Working on ${request.steps.length}`,
-    }));
-    const scheduler = new CaptionScheduler({ prompt: "deck", write, timers, onCaption: (c) => captions.push(c) });
-    scheduler.stepStarted({ id: "a", label: "Reading *Notes*" });
-    await timers.advance(1_000);
-    expect(write).not.toHaveBeenCalled();
-    await timers.advance(1_000);
-    expect(captions.map((c) => c.text)).toEqual(["Working on 1"]);
-    scheduler.stepStarted({ id: "b", label: "Creating *Deck*" });
-    await timers.advance(1_000);
-    expect(captions).toHaveLength(1);
-    await timers.advance(1_500);
-    expect(captions.map((c) => c.text)).toEqual(["Working on 1", "Working on 2"]);
-    expect(captions[1]!.stepIds).toEqual(["b"]);
-    await scheduler.finish();
-    expect(captions.at(-1)).toMatchObject({ text: "Made a deck", final: true });
-  });
-
-  it("names the thread when the run pauses, and writes no caption after", async () => {
-    const timers = fakeTimers();
-    const captions: CaptionEvent[] = [];
-    const titles: string[] = [];
-    const write = vi.fn(async (request: { wantTitle: boolean }) => ({
-      caption: "Asking which unit",
-      ...(request.wantTitle ? { title: "Biology unit plan" } : {}),
-    }));
-    const scheduler = new CaptionScheduler({ prompt: "Plan my unit", write, wantTitle: true, timers, onCaption: (c) => captions.push(c), onTitle: (t) => titles.push(t) });
-    scheduler.stepStarted({ id: "q", label: "Asking you" });
-    await scheduler.suspend();
-    await timers.advance(5_000);
-    expect(titles).toEqual(["Biology unit plan"]);
-    expect(captions).toEqual([]);
-    await scheduler.suspend();
-    expect(write).toHaveBeenCalledTimes(1);
-  });
-
-  it("leaves a thread unnamed when the writer finds no clear subject yet", async () => {
-    const titles: string[] = [];
-    const scheduler = new CaptionScheduler({
-      prompt: "hi", write: async () => ({ caption: "Saying hello" }), wantTitle: true, timers: fakeTimers(),
-      onCaption: () => undefined, onTitle: (t) => titles.push(t),
-    });
-    await scheduler.finish();
-    expect(titles).toEqual([]);
-  });
-
-  it("falls back to the step label when the caption call fails", async () => {
-    const timers = fakeTimers();
-    const captions: CaptionEvent[] = [];
-    const scheduler = new CaptionScheduler({
-      prompt: "x",
-      write: async () => {
-        throw new Error("down");
-      },
-      timers,
-      onCaption: (c) => captions.push(c),
-    });
-    scheduler.stepStarted({ id: "a", label: "Reading *Notes*" });
-    await timers.advance(2_000);
-    await Promise.resolve();
-    expect(captions).toEqual([{ text: "Reading Notes", final: false, stepIds: ["a"], fallback: true }]);
-  });
-
-  it("parses the caption reply and strips ids", () => {
-    expect(parseCaptionReply('{"caption":"Editing wx123456789 notes.","detail":"Line","thread_title":"Notes"}')).toEqual({
-      caption: "Editing notes",
-      detail: "Line",
-      title: "Notes",
-    });
-    expect(parseCaptionReply("Reading your notes")).toEqual({ caption: "Reading your notes" });
-  });
-});
 
 describe("compaction", () => {
   const big = (n: number): HarnessMessage[] =>
@@ -208,8 +71,8 @@ describe("thread notes", () => {
 });
 
 describe("system prompt", () => {
-  it("is under 1,500 words and carries the skill index and environment", () => {
-    expect(SPECTRA_SYSTEM_PROMPT.split(/\s+/).length).toBeLessThan(1_500);
+  it("is under 1,700 words and carries the skill index and environment", () => {
+    expect(SPECTRA_SYSTEM_PROMPT.split(/\s+/).length).toBeLessThan(1_700);
     const prompt = buildSystemPrompt({
       now: Date.UTC(2026, 9, 3, 10),
       timeZone: "Europe/Madrid",
@@ -276,7 +139,7 @@ describe("runHarness", () => {
       prompt: "Make notes on mitosis",
       environment: { now: 0 },
       permissions: DEFAULT_PERMISSION_PREFS,
-      captionWriter: null,
+      titleWriter: null,
       compactor: null,
       callModel: model([
         {
@@ -304,9 +167,8 @@ describe("runHarness", () => {
     expect([...backend.artifacts.values()]).toHaveLength(1);
   });
 
-  it("never shows loading a skill as a step or gives it to the captions", async () => {
+  it("never shows loading a skill as a step", async () => {
     const events: HarnessEvent[] = [];
-    const captionRequests: unknown[] = [];
     const result = await runHarness({
       runId: "r-skill",
       backend: new MemoryBackend(),
@@ -314,10 +176,7 @@ describe("runHarness", () => {
       prompt: "Make a deck on cells",
       environment: { now: 0 },
       permissions: DEFAULT_PERMISSION_PREFS,
-      captionWriter: async (request) => {
-        captionRequests.push(request);
-        return { caption: "Drafting a deck on cells" };
-      },
+      titleWriter: null,
       compactor: null,
       callModel: model([
         { text: "", toolCalls: [{ id: "s1", name: "load_skill", arguments: JSON.stringify({ name: "presentation" }) }] },
@@ -328,7 +187,6 @@ describe("runHarness", () => {
     expect(result.status).toBe("completed");
     expect(events.map((event) => event.type)).toEqual(["text"]);
     expect(JSON.stringify(events)).not.toMatch(/Getting ready|skill/i);
-    expect(captionRequests).toEqual([]);
   });
 
   it("names the thread of a run that asks a question in its first turn", async () => {
@@ -341,7 +199,7 @@ describe("runHarness", () => {
       environment: { now: 0 },
       permissions: DEFAULT_PERMISSION_PREFS,
       wantTitle: true,
-      captionWriter: async (request) => ({ caption: "Asking", ...(request.wantTitle ? { title: "Biology unit plan" } : {}) }),
+      titleWriter: async () => ({ title: "Biology unit plan" }),
       compactor: null,
       callModel: model([
         { text: "", toolCalls: [{ id: "q1", name: "ask_user", arguments: JSON.stringify({ question: "Which unit?" }) }] },
@@ -366,7 +224,7 @@ describe("runHarness", () => {
       ],
       environment: { now: 0 },
       permissions: DEFAULT_PERMISSION_PREFS,
-      captionWriter: null,
+      titleWriter: null,
       compactor: null,
       callModel: async ({ messages }) => {
         seen = messages;

@@ -2,6 +2,7 @@ import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 
 type SourceCalendarInput = {
+  seriesId?: string;
   ownerAccountId: Id<"accounts">;
   schoolId: Id<"schools">;
   sourceRecordId: Id<"externalRecords">;
@@ -202,6 +203,7 @@ export async function upsertSourceCalendarItem(
     sourceHash: input.sourceHash,
     sourceUrl: input.sourceUrl,
     sourceFreshAt: input.fetchedAt,
+    ...(input.seriesId ? { seriesId: input.seriesId } : {}),
     sourceCapabilityState:
       time.precision === "unknown" ? ("partial" as const) : ("available" as const),
     location: text(normalized.location ?? normalized.room, 300) || undefined,

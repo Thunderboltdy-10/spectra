@@ -28,6 +28,61 @@ export function shouldCompactRoom({
   return false;
 }
 
+const ROOM_LOAD_CACHE_ROOMS = 32;
+const ROOM_LOAD_MAX_BYTES = 8 * 1024 * 1024;
+const ROOM_LOAD_TTL_MS = 30 * 60_000;
+
+function roomLoadBytes(stored) {
+  const size = (entry) => entry?.update?.byteLength ?? entry?.update?.length ?? 0;
+  return size(stored?.snapshot) + (stored?.updates ?? []).reduce((total, entry) => total + size(entry), 0);
+}
+
+/** Recently read rooms, so reopening one costs the updates since, not the whole document. */
+export function createRoomLoadCache({ now = Date.now } = {}) {
+  const rooms = new Map();
+  const keyOf = (artifactId, partitionKey) => `${artifactId}\u0000${partitionKey}`;
+  return {
+    get(artifactId, partitionKey, policyVersion) {
+      const key = keyOf(artifactId, partitionKey);
+      const entry = rooms.get(key);
+      if (!entry) return null;
+      if (entry.policyVersion !== policyVersion) {
+        rooms.delete(key);
+        return null;
+      }
+      if (now() - entry.at > ROOM_LOAD_TTL_MS) {
+        rooms.delete(key);
+        return null;
+      }
+      return entry.stored;
+    },
+    put(artifactId, partitionKey, policyVersion, stored) {
+      const key = keyOf(artifactId, partitionKey);
+      rooms.delete(key);
+      // A room with more to page through is read whole each time, as it always was.
+      if (!stored?.roomId || stored.nextSequence <= 1 || stored.hasMore || stored.initialProjection || roomLoadBytes(stored) > ROOM_LOAD_MAX_BYTES) return stored;
+      rooms.set(key, { stored, policyVersion, at: now() });
+      while (rooms.size > ROOM_LOAD_CACHE_ROOMS) rooms.delete(rooms.keys().next().value);
+      return stored;
+    },
+    forget(artifactId, partitionKey) {
+      rooms.delete(keyOf(artifactId, partitionKey));
+    },
+  };
+}
+
+/** The earlier read plus what came after it, or null when they aren't the same room any more. */
+export function mergeRoomLoad(known, delta) {
+  if (!delta?.roomId || delta.roomId !== known.roomId || delta.schemaVersion !== known.schemaVersion) return null;
+  if (delta.hasMore || delta.initialProjection || delta.nextSequence < known.nextSequence) return null;
+  // A reset room restarts its sequence and drops its snapshot time.
+  if ((known.lastSnapshotAt ?? 0) > (delta.lastSnapshotAt ?? 0)) return null;
+  const expected = known.nextSequence - 1;
+  const first = delta.updates?.[0]?.sequence;
+  if (first !== undefined && first !== expected + 1) return null;
+  return { ...delta, snapshot: known.snapshot, updates: [...(known.updates ?? []), ...(delta.updates ?? [])] };
+}
+
 export function storedRoomUpdates(stored) {
   const updates = [];
   if (stored?.snapshot?.update)

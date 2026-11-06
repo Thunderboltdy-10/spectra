@@ -138,6 +138,16 @@ function codePreview(content: Json): WorkPreview | null {
   const files = list(content.files).map(record);
   const entry = files.find((file) => file.id === content.entryFileId && text(file.source)) ?? files.find((file) => typeof file.source === "string" && file.source.trim());
   if (!entry || typeof entry.source !== "string") return null;
+  // A page is shown by the words on it, not by its markup.
+  if (/\.html?$/i.test(String(entry.path ?? "")) || /^\s*<!doctype html/i.test(entry.source)) {
+    const body = /<body[^>]*>([\s\S]*)<\/body>/i.exec(entry.source)?.[1] ?? entry.source;
+    const words = body
+      .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
+      .split(/<[^>]+>/)
+      .map((part) => part.replace(/&[a-z#0-9]+;/gi, " ").replace(/\s+/g, " ").trim())
+      .filter((part) => part.length > 1);
+    if (words.length) return { kind: "text", heading: words[0]!.slice(0, 90), lines: words.slice(1, 5).map((part) => part.slice(0, 120)) };
+  }
   const lines = entry.source.split("\n").map((line) => line.replace(/\t/g, "  ").slice(0, 80)).filter((line, index, all) => line.trim() || (index > 0 && all[index - 1].trim()));
   return lines.length ? { kind: "code", path: String(entry.path ?? ""), lines: lines.slice(0, 6) } : null;
 }

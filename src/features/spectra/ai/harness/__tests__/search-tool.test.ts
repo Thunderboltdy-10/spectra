@@ -72,7 +72,7 @@ describe("search tool", () => {
 
   it("refuses places that do not exist", () => {
     const { byName } = tools(seeded());
-    expect(() => byName.get("search")!.parse!({ query: "x", in: ["everywhere"] })).toThrow(/in must list some of work, chats, calendar, school, memory/);
+    expect(() => byName.get("search")!.parse!({ query: "x", in: ["everywhere"] })).toThrow(/in must list some of work, chats, calendar, school/);
   });
 
   it("is honest when only words matched", async () => {

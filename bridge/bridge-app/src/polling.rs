@@ -8,6 +8,11 @@ pub const MAX_POLL_DELAY: Duration = Duration::from_secs(15);
 /// bounded by this interval even while local wakes are instantaneous.
 pub const REMOTE_DISCOVERY_BOUND: Duration = MAX_POLL_DELAY;
 
+/// With the work signal live, nothing new arrives unannounced: this is only a safety net.
+pub const SIGNALLED_IDLE_DELAY: Duration = Duration::from_secs(60 * 60);
+/// Queued work that a claim passed over, such as a retry not yet due.
+pub const SIGNALLED_BUSY_DELAY: Duration = Duration::from_secs(5 * 60);
+
 const IDLE_BASE: Duration = Duration::from_millis(500);
 const FAILURE_BASE: Duration = Duration::from_secs(1);
 const MAX_BASE_DELAY: Duration = Duration::from_secs(13);
@@ -125,6 +130,14 @@ impl PollScheduler {
     #[cfg(test)]
     pub fn failure_cycles(&self) -> u32 {
         self.failure_cycles
+    }
+
+    /// The wait while the work signal is live; `busy` is what it last said.
+    pub fn next_delay_signalled(&self, busy: bool) -> Duration {
+        if self.state != PollState::Idle {
+            return self.next_delay();
+        }
+        if busy { SIGNALLED_BUSY_DELAY } else { SIGNALLED_IDLE_DELAY }
     }
 
     pub fn next_delay(&self) -> Duration {

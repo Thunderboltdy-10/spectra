@@ -10,6 +10,7 @@ import { useShowcaseTime } from "../showcase/showcase-time";
 import { dayPart } from "./day-sky";
 import type { TodayAgenda } from "./today-model";
 import { useBriefActions } from "./use-brief-actions";
+import { spectraBus } from "../events";
 import type { BriefState } from "./use-daily-brief";
 
 /*
@@ -47,6 +48,26 @@ export function TodayBrief({ brief, agenda }: { brief: BriefState; agenda: Today
         <p className="morning-writing">
           <WorkingMark />
           Spectra is getting your morning ready.
+        </p>
+      </section>
+    );
+  if (brief.status === "quiet")
+    return (
+      <section aria-label="Your morning" className="morning" data-writing>
+        <p className="morning-writing">
+          There's nothing to catch up on this morning.{" "}
+          <button
+            type="button"
+            className="cursor-pointer underline underline-offset-2"
+            onClick={() =>
+              spectraBus.emit("island.compose", {
+                fresh: true,
+                text: "Help me plan ahead: look at what's coming up in my calendar and tasks, and suggest what to do this week.",
+              })
+            }
+          >
+            Plan ahead
+          </button>
         </p>
       </section>
     );

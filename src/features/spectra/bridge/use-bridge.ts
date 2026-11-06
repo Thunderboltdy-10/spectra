@@ -12,6 +12,7 @@ import {
   clearBridgeStatusCache,
   disableBridgeDiscovery,
   discoverBridge,
+  loadBridgeSession,
   loadBridgeStatusCache,
   persistBridgeStatusCache,
   presentBridgeReachability,
@@ -88,6 +89,7 @@ export function useBridgeHealth() {
   useEffect(() => {
     let disposed = false;
     let misses = 0;
+    let wasRunning = false;
     let timer: number | null = null;
     let nextDueAt = 0;
     const cached = loadBridgeStatusCache();
@@ -117,12 +119,20 @@ export function useBridgeHealth() {
       if (disposed) return;
       misses = next.discovery.kind === "running" ? 0 : misses + 1;
       if (next.discovery.kind === "not-set-up") misses = 0;
-      setDiscovery(next.discovery);
-      setHealth(next.discovery.kind === "running" ? next.discovery.health : null);
+      // Bridge is busy, not gone: one slow answer doesn't disconnect anything.
+      const running = next.discovery.kind === "running";
+      const session = Boolean(loadBridgeSession());
+      const slow = session && (running ? !next.status : wasRunning && misses <= 2);
+      if (running) wasRunning = true;
+      else if (!slow) wasRunning = false;
+      if (running || !slow) {
+        setDiscovery(next.discovery);
+        setHealth(running && next.discovery.kind === "running" ? next.discovery.health : null);
+      }
       if (next.status) {
         persistBridgeStatusCache(next.status);
         setStatus(next.status);
-      } else unpair();
+      } else if (!slow) unpair();
       setChecked(true);
       schedule();
     };

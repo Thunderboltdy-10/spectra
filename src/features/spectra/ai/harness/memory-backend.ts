@@ -1,3 +1,4 @@
+import { MEMORY_CAPS, applyMemoryText, memorySlug, type MemoryChange, type MemoryChangeResult } from "../../../../../shared/memory-files";
 import type { ArtifactTypeKey } from "../../artifacts/types";
 import type { AgentBenchState } from "./agent-bench";
 import type { AgentCompilationState } from "./agent-compilation";
@@ -61,6 +62,8 @@ export type MemoryBackendOptions = {
 };
 
 export class MemoryBackend implements HarnessBackend {
+  memoryFiles = { about: "", preferences: "" };
+  memoryTopics = new Map<string, { title: string; summary: string; content: string }>();
   readonly timeZone: string;
   readonly artifacts = new Map<string, MemoryArtifact>();
   readonly commands: CommandRequest[] = [];
@@ -159,11 +162,6 @@ export class MemoryBackend implements HarnessBackend {
       for (const item of this.options.calendar ?? [])
         if (words.some((word) => item.title.toLowerCase().includes(word)))
           hits.push({ kind: "event", id: item.id, title: item.title, typeLabel: "Calendar event", subtype: item.kind, timeAt: item.start });
-    if (wanted("memory"))
-      this.memories.forEach((memory, index) => {
-        if (words.some((word) => memory.toLowerCase().includes(word)))
-          hits.push({ kind: "memory", id: `memory-${index + 1}`, title: memory.slice(0, 60), typeLabel: "Memory", snippet: memory });
-      });
     return {
       hits: hits.slice(0, input.limit),
       mode: this.options.searchMode ?? "hybrid",
@@ -202,6 +200,31 @@ export class MemoryBackend implements HarnessBackend {
     const items = (this.options.calendar ?? []).filter((item) => item.start >= input.from && item.start < input.to);
     if (!items.length) return "Nothing on the calendar in that range.";
     return items.map((item) => `- ${item.title} (${item.kind}, id ${item.id}) ${new Date(item.start).toISOString()}`).join("\n");
+  }
+
+  async readMemoryTopic(slug: string) {
+    return this.memoryTopics.get(slug) ?? null;
+  }
+
+  async updateMemory(change: MemoryChange): Promise<MemoryChangeResult> {
+    if (change.file === "topic") {
+      const slug = memorySlug(change.slug ?? change.title ?? "");
+      if (change.remove) {
+        this.memoryTopics.delete(slug);
+        return { ok: true, message: `Erased the topic ${slug}.` };
+      }
+      const existing = this.memoryTopics.get(slug);
+      const applied = applyMemoryText(existing?.content ?? "", change, MEMORY_CAPS.topic, `The topic ${slug}`);
+      if (!applied.ok) return { ok: false, message: applied.message };
+      this.memoryTopics.set(slug, { title: change.title ?? existing?.title ?? slug, summary: change.summary ?? existing?.summary ?? "", content: applied.text });
+      return { ok: true, message: "Saved." };
+    }
+    const current = this.memoryFiles[change.file];
+    const applied = applyMemoryText(current, change, MEMORY_CAPS[change.file], `The ${change.file} file`);
+    if (!applied.ok) return { ok: false, message: applied.message };
+    this.memoryFiles[change.file] = applied.text;
+    this.memories.push(change.add ?? change.replace ?? change.rewrite ?? "");
+    return { ok: true, message: "Saved." };
   }
 
   async readComments(input: { artifactId: string; includeResolved?: boolean }) {
@@ -253,14 +276,15 @@ export class MemoryBackend implements HarnessBackend {
       for (const [section, values] of Object.entries(patch)) this.settings[section] = { ...this.settings[section], ...values };
       return { ok: true, content: "Settings saved.", uiEvents: [{ key: "settings_changed", payload: { targetId: Object.keys(patch)[0] } }] };
     }
-    if (request.command === "write_memory") {
-      if (request.args.action === "forget") {
-        const index = Number(String(request.args.memoryId).replace(/^memory-/, "")) - 1;
-        if (index >= 0 && index < this.memories.length) this.memories.splice(index, 1, "");
-        return { ok: true, content: "Forgot that." };
+    if (request.command === "organize_library" && request.args?.action === "rename") {
+      const args = request.args as { targetIds?: string[]; name?: string };
+      for (const id of args.targetIds ?? []) {
+        const artifact = this.artifacts.get(id);
+        if (artifact && args.name) {
+          artifact.title = args.name;
+          artifact.revisions += 1;
+        }
       }
-      this.memories.push(String(request.args.content));
-      return { ok: true, content: "Saved to memory." };
     }
     if (request.command === "navigate_spectra")
       return { ok: true, content: "Opened.", uiEvents: [{ key: "navigate", payload: request.args }] };

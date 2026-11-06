@@ -264,6 +264,18 @@ export const spectraStreamEventSchema = z.discriminatedUnion("type", [
     .strict(),
   z
     .object({
+      type: z.literal("reasoning_delta"),
+      runId: z.string(),
+      /** One stretch of reasoning: one part of the trace. */
+      id: z.string(),
+      content: z.string(),
+      /** The stretch has ended. */
+      done: z.boolean().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      /** Runs from before reasoning was shown; nothing writes these now. */
       type: z.literal("caption"),
       runId: z.string(),
       text: z.string(),

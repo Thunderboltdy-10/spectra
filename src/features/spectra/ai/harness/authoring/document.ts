@@ -12,6 +12,7 @@ import {
   type PmMark,
   type PmNode,
 } from "./markdown";
+import { closestText, locateAll, resolveRanges, spliceRanges } from "./locate";
 import { AuthoringError, type IdFactory, defaultIdFactory, record, truncate } from "./shared";
 
 /*
@@ -181,7 +182,7 @@ export function documentFromMarkdown(
 // ---------------------------------------------------------------- edits
 
 export type DocumentEditOp =
-  | { op: "replace"; find: string; replace: string; all?: boolean }
+  | { op: "replace"; find?: string; from?: string; to?: string; replace?: string; all?: boolean }
   | { op: "insert"; markdown: string; after?: string; before?: string; position?: "start" | "end" }
   | { op: "move_section"; heading: string; after?: string; before?: string; position?: "start" | "end" }
   | { op: "delete_section"; heading: string }
@@ -246,13 +247,34 @@ export function documentSectionMarkdown(markdown: string, heading: string) {
   return markdown.slice(section.start, section.end).trim();
 }
 
+/** Where a place named by a heading, or failing that by unique text, begins and ends. */
+function anchored(markdown: string, anchor: string, label: string) {
+  const all = sections(markdown);
+  const wanted = normaliseTitle(anchor);
+  const exact = all.filter((section) => normaliseTitle(section.title) === wanted);
+  const headed = exact.length ? exact : all.filter((section) => normaliseTitle(section.title).includes(wanted));
+  if (headed.length === 1) return headed[0]!;
+  const found = locateAll(markdown, anchor, "prose");
+  if (found.length === 1) {
+    const before = markdown.lastIndexOf("\n\n", found[0]!.start);
+    const after = markdown.indexOf("\n\n", found[0]!.end);
+    return { start: before < 0 ? 0 : before + 2, end: after < 0 ? markdown.length : after };
+  }
+  if (headed.length > 1 || found.length > 1)
+    throw new AuthoringError(`${label}: "${anchor}" matches more than one place. Quote more of the text, or the full heading.`);
+  const closest = closestText(markdown, anchor);
+  throw new AuthoringError(
+    `${label}: "${anchor}" is neither a heading nor text in the document.${closest ? ` The closest text is: "${closest}".` : ""} Headings: ${all.map((section) => `"${section.title}"`).join(", ") || "none"}.`,
+  );
+}
+
 function insertionPoint(
   markdown: string,
   target: { after?: string; before?: string; position?: "start" | "end" },
   label: string,
 ) {
-  if (target.after) return findSection(markdown, target.after, label).end;
-  if (target.before) return findSection(markdown, target.before, label).start;
+  if (target.after) return anchored(markdown, target.after, label).end;
+  if (target.before) return anchored(markdown, target.before, label).start;
   if (target.position === "start") return 0;
   return markdown.length;
 }
@@ -263,16 +285,6 @@ function spliceBlock(markdown: string, at: number, block: string) {
   return [head, block.trim(), tail].filter(Boolean).join("\n\n");
 }
 
-function countOccurrences(haystack: string, needle: string) {
-  let count = 0;
-  let index = haystack.indexOf(needle);
-  while (index >= 0) {
-    count += 1;
-    index = haystack.indexOf(needle, index + needle.length);
-  }
-  return count;
-}
-
 /** Applies edits to the document's Markdown. Throws naming the failing op. */
 export function applyDocumentEdits(markdown: string, ops: DocumentEditOp[]) {
   let text = markdown;
@@ -280,17 +292,7 @@ export function applyDocumentEdits(markdown: string, ops: DocumentEditOp[]) {
     const label = `Edit ${index + 1} (${op.op})`;
     switch (op.op) {
       case "replace": {
-        if (!op.find) throw new AuthoringError(`${label}: \`find\` is empty.`);
-        const count = countOccurrences(text, op.find);
-        if (!count)
-          throw new AuthoringError(
-            `${label}: \`find\` text was not found. It must match the document's Markdown exactly, including formatting marks. Read the document if unsure.`,
-          );
-        if (count > 1 && !op.all)
-          throw new AuthoringError(
-            `${label}: \`find\` text appears ${count} times. Include more surrounding text, or set "all": true to replace every one.`,
-          );
-        text = op.all ? text.split(op.find).join(op.replace) : text.replace(op.find, () => op.replace);
+        text = spliceRanges(text, resolveRanges(text, op, label, "prose", "the document"), op.replace ?? "");
         break;
       }
       case "insert": {

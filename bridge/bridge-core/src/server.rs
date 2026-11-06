@@ -108,9 +108,9 @@ impl ServerState {
     pub fn mark_cloud_seen(&self) {
         self.cloud_seen_at.store(unix_ms(), Ordering::Relaxed);
     }
-    /// Whether a cloud request succeeded in the last 15 seconds.
+    /// Whether the cloud answered in the last 45 seconds.
     pub fn cloud_connected(&self) -> bool {
-        self.cloud_seen_within(15_000)
+        self.cloud_seen_within(45_000)
     }
     pub fn cloud_seen_within(&self, window_ms: u64) -> bool {
         let seen = self.cloud_seen_at.load(Ordering::Relaxed);
@@ -308,10 +308,13 @@ pub fn router(state: Arc<ServerState>) -> Router {
         .route("/v1/file/open", post(open_file))
         .route("/v1/file/reveal", post(reveal_file))
         .route("/v1/unpair", post(unpair))
+        .route("/v1/agent/hub", post(set_agent_hub))
         .route_layer(middleware::from_fn_with_state(state.clone(), authenticate));
     let cors_state = state.clone();
     Router::new()
         .route("/v1/health", get(health))
+        .route("/v1/agent/connect", get(crate::agent_relay::connect))
+        .route("/v1/agent/mcp/{id}", post(crate::agent_relay::mcp))
         .route("/v1/pair", post(pair_offer))
         .route("/v1/pair/status", post(pair_status))
         .route("/v1/session/resume", post(resume))
@@ -326,7 +329,9 @@ pub fn router(state: Arc<ServerState>) -> Router {
                     })
                 }))
                 .allow_methods([http::Method::GET, http::Method::POST])
-                .allow_headers([http::header::AUTHORIZATION, http::header::CONTENT_TYPE]),
+                .allow_headers([http::header::AUTHORIZATION, http::header::CONTENT_TYPE])
+                // A hosted page reaching this computer: browsers ask first.
+                .allow_private_network(true),
         )
         .with_state(state)
 }
@@ -433,6 +438,19 @@ async fn pause_mount(
         control.set_mount_paused(&input.grant_id, input.paused).await
     })
     .await
+}
+
+#[derive(serde::Deserialize)]
+struct AgentHubChoice {
+    enabled: bool,
+}
+
+/// The user picked their own runtime in Spectra, on this computer.
+async fn set_agent_hub(Json(input): Json<AgentHubChoice>) -> Response {
+    match crate::agent_relay::set_hub_enabled(input.enabled) {
+        Ok(()) => Json(serde_json::json!({ "enabled": input.enabled })).into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
 }
 
 async fn pause_sync(
@@ -594,6 +612,7 @@ fn unix_ms() -> u64 {
 }
 
 pub async fn serve(state: Arc<ServerState>) -> anyhow::Result<()> {
+    crate::agent_relay::prepare();
     let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), crate::BRIDGE_PORT);
     let listener = match tokio::net::TcpListener::bind(address).await {
         Ok(listener) => listener,

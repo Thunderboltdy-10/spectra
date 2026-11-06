@@ -86,6 +86,13 @@
    border and lives on its background alone.
    --------------------------------------------------------------------------- */
 
+.presentation-shape[data-has-text] {
+  overflow: hidden;
+  padding: 1.6cqw;
+  line-height: 1.22;
+  white-space: pre-line;
+}
+
 .presentation-shape[data-shape="rectangle"] {
   border-radius: 0;
 }

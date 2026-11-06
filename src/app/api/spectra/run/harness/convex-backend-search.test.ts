@@ -49,12 +49,12 @@ beforeEach(() => {
 });
 
 describe("search on the semantic layer", () => {
-  it("asks semantic.search for every kind, memory included, with what is open as a hint", async () => {
+  it("asks semantic.search for every kind with what is open as a hint", async () => {
     answer = { results: [slide], mode: "hybrid", tookMs: 12 };
     const response = await backend({ openItemIds: ["art-1", "thread-1"] }).search({ query: "  how cells make energy ", limit: 50 });
     expect(calls[0]).toMatchObject({
       name: "semantic:search",
-      args: { query: "how cells make energy", kinds: ["artifact", "thread", "event", "school", "memory"], limit: 30, hints: { openItemIds: ["art-1", "thread-1"] } },
+      args: { query: "how cells make energy", kinds: ["artifact", "thread", "event", "school"], limit: 30, hints: { openItemIds: ["art-1", "thread-1"] } },
     });
     expect((calls[0]!.args.hints as { timezoneOffsetMinutes: number }).timezoneOffsetMinutes).toBe(timezoneOffsetMinutes("Europe/Madrid"));
     expect(response).toEqual({

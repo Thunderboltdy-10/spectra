@@ -546,9 +546,15 @@ export function buildSpectraSandboxDocument({
   let guardLastTickAt = guardStartedAt;
   let guardTicks = 0;
   const resetGuard = () => { guardStartedAt = performance.now(); guardLastTickAt = guardStartedAt; guardTicks = 0; };
+  // A message only arrives once the code running now has yielded, so frames of an
+  // animation each start afresh and only a loop that never yields runs out of time.
+  const guardYield = typeof MessageChannel === 'function' ? new MessageChannel() : null;
+  let guardYieldPending = false;
+  if (guardYield) guardYield.port1.onmessage = () => { guardYieldPending = false; resetGuard(); };
   Object.defineProperty(window, '__spectraResetGuard', { value: resetGuard, configurable: false });
   Object.defineProperty(window, '__spectraGuard', { value: () => {
     const now = performance.now();
+    if (guardYield && !guardYieldPending) { guardYieldPending = true; guardYield.port2.postMessage(0); }
     if (now - guardLastTickAt > 50) { guardStartedAt = now; guardTicks = 0; }
     guardLastTickAt = now;
     guardTicks += 1;

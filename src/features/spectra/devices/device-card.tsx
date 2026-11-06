@@ -1,9 +1,12 @@
 "use client";
 
-import { useRef, type CSSProperties } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
+import { toast } from "@/components/ui/toast";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { treeFailureMessage, useTreeActions, useTreeContainers } from "../organization/tree-client";
 import { useLifeArrival, useLifeDeparture, useLifeJoin } from "../life/use-life";
 import type { LocalDeviceRequest } from "./actions";
 import { timeAgo, type DeviceTone, type DeviceView, type FolderView } from "./devices-model";
@@ -158,6 +161,54 @@ export function DeviceCard({
   );
 }
 
+/** One folder can stand in several workspaces; it still syncs once. */
+function AddToWorkspaces({ nodeId, name }: { nodeId: string; name: string }) {
+  const [open, setOpen] = useState(false);
+  const [added, setAdded] = useState<ReadonlySet<string>>(new Set());
+  const { nodes, status } = useTreeContainers(null, open);
+  const { createReference } = useTreeActions();
+  const workspaces = nodes.filter((node) => node.kind === "workspace" && node.nodeId !== nodeId);
+  const add = async (workspaceNodeId: string, title: string) => {
+    try {
+      await createReference(nodeId, workspaceNodeId);
+      setAdded((current) => new Set(current).add(workspaceNodeId));
+      toast.success(`${name} is in ${title}.`);
+    } catch (error) {
+      toast.error(treeFailureMessage(error, `Couldn't add ${name} to ${title}.`));
+    }
+  };
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <IconButton icon="workspace" label={`Add ${name} to a workspace`} size="compact" />
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64 p-1">
+        {workspaces.length === 0 ? (
+          <p className="px-2 py-1.5 text-caption text-[var(--text-secondary)]">
+            {status === "LoadingFirstPage" ? "Loading workspaces" : "No workspaces yet."}
+          </p>
+        ) : (
+          workspaces.map((workspace) => {
+            const done = added.has(workspace.nodeId);
+            return (
+              <button
+                key={workspace.nodeId}
+                type="button"
+                disabled={done}
+                onClick={() => void add(workspace.nodeId, workspace.name)}
+                className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-control px-2 py-1.5 text-left text-ui text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:cursor-default"
+              >
+                <span className="min-w-0 truncate">{workspace.name}</span>
+                {done ? <Icon name="done" size={14} /> : null}
+              </button>
+            );
+          })
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function FolderTile({
   folder,
   ink,
@@ -195,20 +246,25 @@ function FolderTile({
           <span style={{ width: `${(progress.synced / Math.max(1, progress.total)) * 100}%` }} />
         </span>
       ) : null}
-      {act ? (
+      {act || folder.rootNodeId ? (
         <span className="device-folder-actions" data-visible={working || undefined}>
-          {folder.tone === "attention" ? (
+          {folder.rootNodeId ? <AddToWorkspaces nodeId={folder.rootNodeId} name={folder.name} /> : null}
+          {act && folder.tone === "attention" ? (
             <IconButton icon="syncing" label={`Retry ${folder.name}`} size="compact" disabled={working} onClick={() => onAction({ action: "retry_folder", grantId: folder.id })} />
           ) : null}
-          <IconButton
-            icon={folder.paused ? "play" : "pause"}
-            label={folder.paused ? `Resume ${folder.name}` : `Pause ${folder.name}`}
-            size="compact"
-            pressed={folder.paused}
-            disabled={working}
-            onClick={() => onAction({ action: folder.paused ? "resume_folder" : "pause_folder", grantId: folder.id })}
-          />
-          <IconButton icon="trash" label={`Remove ${folder.name}`} size="compact" disabled={working} onClick={() => onAction({ action: "remove_folder", grantId: folder.id })} />
+          {act ? (
+            <>
+              <IconButton
+                icon={folder.paused ? "play" : "pause"}
+                label={folder.paused ? `Resume ${folder.name}` : `Pause ${folder.name}`}
+                size="compact"
+                pressed={folder.paused}
+                disabled={working}
+                onClick={() => onAction({ action: folder.paused ? "resume_folder" : "pause_folder", grantId: folder.id })}
+              />
+              <IconButton icon="trash" label={`Stop syncing ${folder.name}`} size="compact" disabled={working} onClick={() => onAction({ action: "remove_folder", grantId: folder.id })} />
+            </>
+          ) : null}
         </span>
       ) : null}
     </li>

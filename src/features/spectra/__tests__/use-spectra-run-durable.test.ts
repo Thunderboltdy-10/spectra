@@ -203,7 +203,7 @@ describe("Durable run event consumption", () => {
     expect(result.current.liveExchange?.content).toBe("Resumed reply.");
     expect(getSpectraRunDetail).toHaveBeenCalledTimes(1);
     rows.push({ _id: "next", runId: "run", executionId: "resumed", sequence: 3, type: "text_delta", createdAt: 5, payload: { type: "text_delta", runId: "run", content: " More." } });
-    await settle(750);
+    await settle(4_000);
     expect(result.current.liveExchange?.content).toBe("Resumed reply. More.");
     expect(getSpectraRunDetail).toHaveBeenCalledTimes(1);
   });

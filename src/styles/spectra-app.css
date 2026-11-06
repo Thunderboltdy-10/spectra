@@ -5616,11 +5616,12 @@ button[data-spectra-context-trigger="true"]::after {
   border-collapse: collapse;
   color: inherit;
   font-size: 0.85cqw;
+  line-height: 1.25;
 }
 
 .presentation-table td {
   border: 1px solid color-mix(in oklab, currentColor 18%, transparent);
-  padding: 5%;
+  padding: 0.35em 0.6em;
 }
 
 .presentation-object-handle {
@@ -14501,4 +14502,35 @@ html[data-spectra-carrying] .spectra-presence-actor[data-actor-kind="ai"] {
   .spectra-artifact-main .spectra-ai-placed {
     animation: none;
   }
+}
+
+/* One stretch of Spectra's reasoning in the trace: a few lines tall, the rest a scroll away. */
+.spectra-thinking-mark {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  background: radial-gradient(circle, var(--text-tertiary) 0 1.5px, transparent 2px);
+}
+.spectra-thinking-body {
+  margin: 2px 0 2px 22px;
+  max-height: 5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  font-size: var(--text-micro, 0.75rem);
+  line-height: 1rem;
+  color: var(--text-tertiary);
+}
+.spectra-thinking-body[data-streaming] {
+  overflow-y: hidden;
+  mask-image: linear-gradient(to bottom, transparent, #000 1.25rem);
+}
+.spectra-thinking-body:focus-visible {
+  outline: 1px solid var(--border-strong, currentColor);
+  outline-offset: 2px;
+}
+.spectra-trace-list {
+  scrollbar-width: thin;
 }

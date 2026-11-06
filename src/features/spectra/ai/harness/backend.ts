@@ -1,3 +1,4 @@
+import type { MemoryChange, MemoryChangeResult } from "../../../../../shared/memory-files";
 import type { ArtifactTypeKey } from "../../artifacts/types";
 import type { AgentBenchState } from "./agent-bench";
 import type { AgentCompilationState } from "./agent-compilation";
@@ -40,7 +41,7 @@ export type LibraryItem = {
 };
 
 /** What a search hit is: a piece of work, a chat, a calendar item, a school record or a memory. */
-export type SearchKind = "artifact" | "thread" | "event" | "school" | "memory";
+export type SearchKind = "artifact" | "thread" | "event" | "school";
 
 export type SearchHit = {
   kind: SearchKind;
@@ -69,7 +70,7 @@ export type SearchHit = {
 
 export type SearchRequest = {
   query: string;
-  /** Leave out to search everything, memory included. */
+  /** Leave out to search everything. */
   kinds?: SearchKind[];
   limit: number;
 };
@@ -167,6 +168,10 @@ export interface HarnessBackend {
   readAgentCompilation(input: { agentId: string }, signal: AbortSignal): Promise<AgentCompilationState | null>;
   /** School records: deadlines, resources, timetable, classes, past tasks, grades, CAS, or one task or CAS experience by recordId. */
   readSchoolData(input: { purpose: string; classId?: string; recordId?: string }, signal: AbortSignal): Promise<string>;
+  /** One of the agent's longer notes about the user; null when there is no such topic. */
+  readMemoryTopic(slug: string, signal: AbortSignal): Promise<{ title: string; summary: string; content: string } | null>;
+  /** Change the agent's notes about the user. Why it could not is in the result. */
+  updateMemory(change: MemoryChange, signal: AbortSignal): Promise<MemoryChangeResult>;
   runCommand(request: CommandRequest, signal: AbortSignal): Promise<CommandResult>;
   /**
    * Record a command before the run pauses to ask, so the user's approval

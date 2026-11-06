@@ -9,6 +9,7 @@ import {
   type CodeFile,
   type CodeRuntime,
 } from "../../../code/model";
+import { resolveRanges, spliceRanges } from "./locate";
 import { AuthoringError, type IdFactory, defaultIdFactory, truncate } from "./shared";
 
 /*
@@ -18,7 +19,7 @@ import { AuthoringError, type IdFactory, defaultIdFactory, truncate } from "./sh
  */
 
 export type CodeEditOp =
-  | { op: "replace"; file?: string; find: string; replace: string; all?: boolean }
+  | { op: "replace"; file?: string; find?: string; from?: string; to?: string; replace?: string; all?: boolean }
   | { op: "write_file"; path: string; source: string; language?: string }
   | { op: "delete_file"; path: string }
   | { op: "rename_file"; path: string; to: string }
@@ -70,13 +71,7 @@ export function applyCodeEdits(content: unknown, ops: CodeEditOp[], ids: IdFacto
     switch (op?.op) {
       case "replace": {
         const file = findFile(files, op.file, label);
-        if (!op.find) throw new AuthoringError(`${label}: \`find\` is empty.`);
-        const count = file.source.split(op.find).length - 1;
-        if (!count)
-          throw new AuthoringError(`${label}: \`find\` text is not in ${file.path}. It must match exactly, including indentation.`);
-        if (count > 1 && !op.all)
-          throw new AuthoringError(`${label}: \`find\` text appears ${count} times in ${file.path}. Include more surrounding lines, or set "all": true.`);
-        const source = op.all ? file.source.split(op.find).join(op.replace) : file.source.replace(op.find, () => op.replace);
+        const source = spliceRanges(file.source, resolveRanges(file.source, op, label, "code", file.path), op.replace ?? "");
         files = files.map((entry) => (entry.id === file.id ? withSource(entry, source) : entry));
         break;
       }

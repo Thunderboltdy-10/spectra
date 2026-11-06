@@ -113,7 +113,7 @@ describe("harness tools", () => {
       { text: "Could not find it.", toolCalls: [] },
     ]);
     const outcome = await run(model.caller);
-    expect(lastTool(outcome.state.messages)).toMatch(/Edit 1 \(replace\): `find` text was not found/);
+    expect(lastTool(outcome.state.messages)).toMatch(/Edit 1 \(replace\): `find` text "Goodbye" is not in the document/);
     expect(JSON.stringify(backend.artifacts.get("doc1")!.content)).toBe(before);
   });
 
@@ -295,9 +295,6 @@ describe("harness tools", () => {
     ["release_agent", { agentId: "ag1", action: "publish" }, { command: "release_agent", args: { agentId: "ag1", action: "publish" } }],
     ["release_agent", { agentId: "ag1", action: "rollback", releaseId: "r2" }, { command: "release_agent", args: { agentId: "ag1", action: "rollback", releaseId: "r2" } }],
     ["release_agent", { agentId: "ag1", action: "suspend", releaseId: "r3" }, { command: "release_agent", args: { agentId: "ag1", action: "suspend", releaseId: "r3" } }],
-    ["remember", { content: "Prefers short answers." }, { command: "write_memory", args: { action: "create", content: "Prefers short answers." } }],
-    ["remember", { content: "Prefers worked examples.", memoryId: "m1" }, { command: "write_memory", args: { action: "revise", content: "Prefers worked examples.", memoryId: "m1" } }],
-    ["forget_memory", { memoryId: "m1" }, { command: "write_memory", args: { action: "forget", memoryId: "m1" } }],
     ["run_agent_checks", { agentId: "ag1" }, { command: "run_agent_checks", args: { agentId: "ag1" } }],
     ["run_agent_bench", { agentId: "ag1", prompt: "Mark my essay" }, { command: "run_agent_bench", args: { agentId: "ag1", prompt: "Mark my essay" } }],
     ["compile_agent", { agentId: "ag1" }, { command: "compile_agent", args: { agentId: "ag1" } }],

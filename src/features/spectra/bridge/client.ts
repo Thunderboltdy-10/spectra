@@ -137,7 +137,7 @@ export function disableBridgeDiscovery() {
 
 /** First wait between automatic checks, and the longest wait after failures. */
 export const BRIDGE_DISCOVERY_INTERVAL_MS = 15_000;
-export const BRIDGE_DISCOVERY_MAX_INTERVAL_MS = 5 * 60_000;
+export const BRIDGE_DISCOVERY_MAX_INTERVAL_MS = 60_000;
 
 /**
  * How long to wait before the next automatic check. A running Bridge is
@@ -486,6 +486,11 @@ async function bridgeControl(path: string, body: unknown, missing: string) {
     body: JSON.stringify(body ?? {}),
   });
   if (!response) throw new Error(missing);
+}
+
+/** Lets Spectra's server start this computer's own Codex or Claude Code, or stops it. */
+export function setBridgeAgentHub(enabled: boolean) {
+  return bridgeControl("/v1/agent/hub", { enabled }, "Connect this computer first.");
 }
 
 /** Pause or resume syncing for every folder on this computer. */

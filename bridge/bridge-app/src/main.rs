@@ -27,7 +27,7 @@ use spectra_bridge_core::sync::{
     WriteCompletion, claim_fs_request, claim_pending_payload_upload, claim_write,
     complete_fs_request_with_claim, complete_write_with_claim, detach_mount,
     discover_resources_page, drain_cloud_queue_holding, exchange_pairing, inspect_write_target,
-    migrate_cloud_replica_page, reconcile_missing_resources, refresh_structure_claim,
+    migrate_cloud_replica_page, report_missing_resources, refresh_structure_claim,
     refresh_write_claim, register_mount, report_health, resume_pairing, set_mount_availability,
     upload_resource_payload,
 };
@@ -567,7 +567,7 @@ fn unpair_this_computer(
 
 /* ---------------------------------------------------------------- health */
 
-const HEALTH_REPORT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+const HEALTH_REPORT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
 /// What this computer tells Spectra about itself, so the Devices page on any
 /// other device can show it. The problem is a stable code; Spectra words it.
@@ -1584,6 +1584,9 @@ fn enqueue_stable_change(
     hash: &str,
     generation: u64,
 ) -> anyhow::Result<bool> {
+    if !carries_native_payload(&native_format(path)) {
+        return Ok(false);
+    }
     let snapshot = stable_file_snapshot(path)?
         .ok_or_else(|| anyhow::anyhow!("file writer is still active"))?;
     anyhow::ensure!(
@@ -2054,6 +2057,8 @@ struct LocalScan {
     online_only: usize,
     /// Files whose bytes this pass read and hashed.
     hashed: usize,
+    /// Unchanged files the cloud already has at this content.
+    reported: HashSet<String>,
 }
 
 /// The recorded hash of a file that has not moved since it was hashed: same
@@ -2109,8 +2114,13 @@ fn scan_local_files(
         if entry.is_directory {
             continue;
         }
-        local.double_sync_risk |= entry.double_sync_risk;
         let native_format = native_format(std::path::Path::new(&entry.relative_path));
+        // Spectra works with Office files. Anything else in the folder is never
+        // read, hashed or sent.
+        if !carries_native_payload(&native_format) {
+            continue;
+        }
+        local.double_sync_risk |= entry.double_sync_risk;
         let entry_path = grant.device_root().join(&entry.relative_path);
         if file_held_by_office(&entry_path) {
             local.held.push(entry.relative_path);
@@ -2125,6 +2135,9 @@ fn scan_local_files(
         let (record, size, content_hash, stat) = match reused {
             Some((mut record, hash)) => {
                 record.last_seen_generation = generation;
+                if record.revision.as_deref() == Some(hash.as_str()) {
+                    local.reported.insert(record.local_resource_id.clone());
+                }
                 (record, entry.size, hash, None)
             }
             None => {
@@ -2181,6 +2194,8 @@ fn scan_local_files(
     }
     Ok(local)
 }
+
+const FULL_VERIFY_EVERY_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 
 /// How a pass treats a file the cloud declined to register.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2374,6 +2389,7 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
         complete,
         double_sync_risk,
         online_only,
+        reported,
         ..
     } = scan_local_files(grant, journal, generation)?;
     let mut pass = MountPass {
@@ -2413,11 +2429,33 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
     )
     .await
     .map_err(|error| error.to_string())?;
+    let same_mount = journal
+        .config(&format!("cloud_mount:{}", grant.id))
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some(mount_id.as_str());
     journal
         .set_config(&format!("cloud_mount:{}", grant.id), &mount_id)
         .map_err(|error| error.to_string())?;
-    let mut processed = 0usize;
-    for page in files.chunks(100) {
+    // An unchanged file costs the cloud nothing. Once a week everything is sent
+    // anyway, so a difference that crept in some other way still gets repaired.
+    let verified_key = format!("mount_verified_at:{}", grant.id);
+    let verified_recently = journal
+        .config(&verified_key)
+        .ok()
+        .flatten()
+        .and_then(|value| value.parse::<u64>().ok())
+        .is_some_and(|at| current_time_ms().saturating_sub(at) < FULL_VERIFY_EVERY_MS);
+    let trust_reported = same_mount && verified_recently;
+    let total = files.len();
+    let to_report = files
+        .iter()
+        .filter(|file| !trust_reported || !reported.contains(&file.local_resource_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut processed = total - to_report.len();
+    for page in to_report.chunks(100) {
         let registrations =
             discover_resources_page_with_timeout_split(&deployment, &credential, &mount_id, page)
                 .await
@@ -2448,6 +2486,10 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
                 // A repair retry cannot shrink the file; say so once instead
                 // of re-reading it on every repair scan.
                 pass.oversized += 1;
+                let _ = journal.mark_resource_reported(
+                    &resource.local_resource_id,
+                    resource.content_hash.as_deref(),
+                );
             } else if upload_discovered_resource(
                 &deployment,
                 &credential,
@@ -2479,14 +2521,35 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
                 "syncing",
                 "Making files available in Spectra…",
                 processed,
-                files.len(),
+                total,
             )?;
         }
     }
-    if pass.complete {
-        reconcile_missing_resources(&deployment, &credential, &mount_id, &scan_id)
-            .await
-            .map_err(|error| error.to_string())?;
+    // Only a full look at the folder can say a file is gone. Online-only files
+    // are skipped by the scan, so they would look deleted.
+    if pass.complete && pass.online_only == 0 {
+        let missing = journal
+            .resources_for_grant(&grant.id)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .filter(|record| {
+                record.available
+                    && record.last_seen_generation < generation
+                    && carries_native_payload(&native_format(std::path::Path::new(&record.path_key)))
+            })
+            .map(|record| record.local_resource_id)
+            .collect::<Vec<_>>();
+        for page in missing.chunks(100) {
+            report_missing_resources(&deployment, &credential, &mount_id, page)
+                .await
+                .map_err(|error| error.to_string())?;
+            for id in page {
+                let _ = journal.mark_resource_unavailable(id, "missing-on-disk", generation);
+            }
+        }
+    }
+    if pass.complete && !trust_reported {
+        let _ = journal.set_config(&verified_key, &current_time_ms().to_string());
     }
     let repair_delay_ms = if pass.needs_repair() {
         Some(record_mount_repair_retry(journal, &grant.id)?)
@@ -3466,6 +3529,10 @@ fn spawn_grant_watcher(
             let mut generation = None;
             let mut failed_paths: Vec<std::path::PathBuf> = Vec::new();
             for path in pending_files.clone() {
+                if !carries_native_payload(&native_format(&path)) {
+                    pending_files.remove(&path);
+                    continue;
+                }
                 if grant.selected_file().is_some()
                     && path
                         .canonicalize()
@@ -3782,6 +3849,27 @@ async fn request_bridge_update(app: &tauri::AppHandle) -> Result<String, String>
         }
         Ok(None) | Err(_) => Ok(tray_sentence.into()),
     }
+}
+
+/// Keeps an installed Bridge current without asking. A build from source is never replaced.
+fn start_update_checks(app: tauri::AppHandle) {
+    let from_source = std::env::current_exe()
+        .map(|path| path.components().any(|part| part.as_os_str() == "target"))
+        .unwrap_or(true);
+    if from_source {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        loop {
+            if let Ok(updater) = app.updater() {
+                if let Ok(Some(update)) = updater.check().await {
+                    let _ = update.download_and_install(|_, _| {}, || {}).await;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(12 * 60 * 60)).await;
+        }
+    });
 }
 
 fn should_repair_pairing(error: &str) -> bool {
@@ -4544,12 +4632,81 @@ async fn run_sync_iteration(
     }
 }
 
+async fn agent_hub_ticket_for(
+    journal: &Journal,
+) -> anyhow::Result<Option<spectra_bridge_core::agent_relay::HubTicket>> {
+    let deployment = journal
+        .config("deployment_url")?
+        .ok_or_else(|| anyhow::anyhow!("not paired"))?;
+    let device_id = journal
+        .config("device_id")?
+        .ok_or_else(|| anyhow::anyhow!("not paired"))?;
+    let credential = HostPlatform
+        .read_credential(&device_id)?
+        .ok_or_else(|| anyhow::anyhow!("no device credential"))?;
+    spectra_bridge_core::sync::agent_hub_ticket(&deployment, &credential).await
+}
+
+#[derive(Default)]
+struct WorkSignal {
+    live: std::sync::atomic::AtomicBool,
+    busy: std::sync::atomic::AtomicBool,
+}
+
+const CLOUD_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Subscribes to this computer's work signal, which replaces asking Spectra for
+/// work on a timer, and keeps "connected" true without running any function.
+async fn run_work_signal(journal: Arc<Journal>, state: Arc<ServerState>, wake: PollWake, signal: Arc<WorkSignal>) {
+    use std::sync::atomic::Ordering;
+    loop {
+        if wake.is_shutdown() {
+            break;
+        }
+        let device_id = journal.config("device_id").ok().flatten();
+        let deployment = journal.config("deployment_url").ok().flatten();
+        let credential = device_id
+            .as_deref()
+            .and_then(|id| HostPlatform.read_credential(id).ok().flatten());
+        if let (Some(device_id), Some(deployment), Some(credential)) = (device_id, deployment, credential) {
+            let watched = spectra_bridge_core::sync::watch_work_signal(&deployment, &credential, |busy, changed| {
+                signal.live.store(true, Ordering::Relaxed);
+                signal.busy.store(busy, Ordering::Relaxed);
+                if changed {
+                    wake.wake();
+                }
+            });
+            let watching = async {
+                loop {
+                    if spectra_bridge_core::sync::cloud_reachable(&deployment).await {
+                        state.mark_cloud_seen();
+                    }
+                    tokio::time::sleep(CLOUD_CHECK_EVERY).await;
+                    if wake.is_shutdown()
+                        || journal.config("device_id").ok().flatten().as_deref() != Some(device_id.as_str())
+                    {
+                        break;
+                    }
+                }
+            };
+            tokio::select! {
+                _ = watched => {}
+                _ = watching => {}
+            }
+            signal.live.store(false, Ordering::Relaxed);
+            wake.wake();
+        }
+        tokio::time::sleep(CLOUD_CHECK_EVERY).await;
+    }
+}
+
 async fn run_sync_worker(
     grants: Arc<GrantRegistry>,
     journal: Arc<Journal>,
     state: Arc<ServerState>,
     wake: PollWake,
     active_mount_syncs: ActiveMountSyncs,
+    signal: Arc<WorkSignal>,
 ) {
     // UUID v4 supplies an independent per-process component. The scheduler
     // folds the persisted device ID into it once pairing is available.
@@ -4597,7 +4754,12 @@ async fn run_sync_worker(
             restored_grants_reconciled.clear();
         }
         scheduler.record(result);
-        match wake.wait(scheduler.next_delay()).await {
+        let delay = if signal.live.load(std::sync::atomic::Ordering::Relaxed) {
+            scheduler.next_delay_signalled(signal.busy.load(std::sync::atomic::Ordering::Relaxed))
+        } else {
+            scheduler.next_delay()
+        };
+        match wake.wait(delay).await {
             WaitResult::Shutdown => break,
             WaitResult::Woken => {
                 // A wake may represent pairing, a credential/config change,
@@ -4633,6 +4795,7 @@ fn main() {
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
+            start_update_checks(app.handle().clone());
             let sync_wake = sync_wake.clone();
             // Debug and release binaries must share the same per-user journal
             // by default. Test isolation is opt-in through the explicit
@@ -4756,12 +4919,25 @@ fn main() {
             let sync_journal = app.state::<BridgeRuntime>().journal.clone();
             let sync_grants = app.state::<BridgeRuntime>().grants.clone();
             let sync_state = state.clone();
+            let hub_journal = sync_journal.clone();
+            tauri::async_runtime::spawn(spectra_bridge_core::agent_relay::run_hub(move || {
+                let journal = hub_journal.clone();
+                async move { agent_hub_ticket_for(&journal).await }
+            }));
+            let work_signal = Arc::new(WorkSignal::default());
+            tauri::async_runtime::spawn(run_work_signal(
+                sync_journal.clone(),
+                sync_state.clone(),
+                sync_wake.clone(),
+                work_signal.clone(),
+            ));
             tauri::async_runtime::spawn(run_sync_worker(
                 sync_grants,
                 sync_journal,
                 sync_state,
                 sync_wake.clone(),
                 active_mount_syncs,
+                work_signal,
             ));
             let server_journal = journal.clone();
             tauri::async_runtime::spawn(async move {
@@ -5601,7 +5777,8 @@ mod tests {
         fn a_repair_pass_reuses_the_hash_of_every_file_that_has_not_moved() {
             let folder = Folder::new();
             folder.settled("essay.docx", b"first draft");
-            folder.settled("notes.txt", b"notes");
+            folder.settled("notes.xlsx", b"notes");
+            folder.settled("photo.jpg", b"never read");
             let grant = folder.grant();
             let journal = Journal::in_memory().unwrap();
             let first = scan_local_files(&grant, &journal, 1).unwrap();
@@ -5612,7 +5789,7 @@ mod tests {
             let second = scan_local_files(&grant, &journal, 2).unwrap();
             assert_eq!(second.hashed, 0);
             assert_eq!(second.files.len(), 2);
-            for name in ["essay.docx", "notes.txt"] {
+            for name in ["essay.docx", "notes.xlsx"] {
                 assert_eq!(hash_of(&second.files, name), hash_of(&first.files, name));
             }
             let ids = |files: &[DiscoveredResource]| {
@@ -5633,7 +5810,7 @@ mod tests {
         fn a_moved_stat_or_a_missing_hash_is_read_again() {
             let folder = Folder::new();
             let essay = folder.settled("essay.docx", b"first draft");
-            folder.settled("notes.txt", b"notes");
+            folder.settled("notes.xlsx", b"notes");
             let grant = folder.grant();
             let journal = Journal::in_memory().unwrap();
             let first = scan_local_files(&grant, &journal, 1).unwrap();
@@ -5653,15 +5830,15 @@ mod tests {
                 .resources_for_grant(&grant.id)
                 .unwrap()
                 .into_iter()
-                .find(|resource| resource.path_key.ends_with("notes.txt"))
+                .find(|resource| resource.path_key.ends_with("notes.xlsx"))
                 .unwrap();
             notes.content_hash = None;
             journal.upsert_resource(&notes).unwrap();
             let unhashed = scan_local_files(&grant, &journal, 3).unwrap();
             assert_eq!(unhashed.hashed, 1);
             assert_eq!(
-                hash_of(&unhashed.files, "notes.txt"),
-                hash_of(&first.files, "notes.txt")
+                hash_of(&unhashed.files, "notes.xlsx"),
+                hash_of(&first.files, "notes.xlsx")
             );
         }
 

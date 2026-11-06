@@ -62,7 +62,6 @@ function scenarioDetails(row: EvalRow) {
 ${row.problems.length ? `<p><b>Problems</b></p>${list(row.problems, "")}` : ""}
 <p><b>Reply</b></p><pre>${escapeHtml(row.reply || "(no reply)")}</pre>
 <p><b>Steps</b></p>${list(row.steps, "No steps.")}
-${row.captions.length ? `<p><b>Captions</b></p>${list(row.captions, "")}` : ""}
 ${row.title ? `<p><b>Thread title.</b> ${escapeHtml(row.title)}</p>` : ""}
 <p><b>Latency.</b> First output ${ms(row.firstOutputMs)}, total ${ms(row.totalMs)}${row.samples.length > 1 ? ` (median of ${row.samples.length} runs: ${row.samples.map((sample) => ms(sample.firstOutputMs)).join(", ")})` : ""}.</p>
 ${artifacts ? `<p><b>Work it made or changed</b></p>${artifacts}` : ""}

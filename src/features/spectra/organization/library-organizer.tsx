@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import { useNow } from "@/hooks/use-now";
 import { presentSync, replicaHasNativeLock } from "../bridge/status";
 import { useProductOnline } from "../bridge/use-product-online";
+import { LibrarySyncStrip } from "../bridge/library-sync-strip";
 import { useFolderSync } from "../bridge/use-folder-sync";
 import type { StatusTone } from "@/components/ui/badge";
 import {
@@ -1130,6 +1131,7 @@ function LibraryOrganizerContent({
       <IsolatedErrorBoundary>
         <ReplicaPresentationLoader onRows={setReplicaRows} />
       </IsolatedErrorBoundary>
+      <LibrarySyncStrip />
       <input
         ref={importRef}
         type="file"

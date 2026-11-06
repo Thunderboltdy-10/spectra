@@ -1,3 +1,4 @@
+import { runUndoSummary, type RunUndoCounts } from "../../../../../shared/run-undo";
 import { getSpectraModelId } from "@/features/spectra/ai/model-config";
 import { applyAiArtifactMutation } from "@/features/spectra/ai/yjs-artifact-operation";
 import { withSpectraRequestLog } from "@/features/spectra/ai/run-log";
@@ -665,12 +666,15 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
     } catch (error) {
       return new Response(publicError(error), { status: errorStatus(error) });
     }
-    if (plan.restored.length === 0)
-      return new Response(
-        plan.blocked[0]?.reason ??
-          "This run did not keep a snapshot that can be undone. Archive created work from Library if you want to remove it.",
-        { status: 409 },
-      );
+    // Everything with a lasting effect goes back: new works, the calendar, the Library, settings.
+    let reversal: { counts: Partial<RunUndoCounts>; left: string[]; kept: string[]; trashedWorks: string[] };
+    try {
+      reversal = await mutate<{ runId: string }, typeof reversal>("spectraRunUndo:reverseWrites", { runId });
+    } catch (error) {
+      return new Response(publicError(error), { status: errorStatus(error) });
+    }
+    const gone = new Set(reversal.trashedWorks);
+    plan.restored = plan.restored.filter((item) => !gone.has(item.artifactId));
     const restored: string[] = [];
     const failed: string[] = [];
     for (const item of plan.restored) {
@@ -696,21 +700,30 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
         failed.push(error instanceof Error ? publicError(error) : "Spectra could not restore that earlier copy.");
       }
     }
-    if (restored.length === 0)
-      return new Response(failed[0] ?? plan.blocked[0]?.reason ?? "Spectra could not undo this run.", { status: 409 });
+    const counts = { ...reversal.counts, restored: restored.length };
+    const reversedAnything = Object.values(counts).some(Boolean);
+    if (!reversedAnything && (failed.length || plan.blocked.length || reversal.kept.length))
+      return new Response(failed[0] ?? plan.blocked[0]?.reason ?? reversal.kept[0] ?? "Spectra could not undo this run.", { status: 409 });
+    const summary = runUndoSummary(counts);
+    const notes = [
+      ...plan.blocked.map((item) => item.reason),
+      ...reversal.kept,
+      ...failed,
+      ...(reversal.left.length ? [`Still in place: ${reversal.left.join(", ")}.`] : []),
+    ];
     await Promise.all(
       state.cards.map((card) =>
         mutate("spectraRuns:patchResultCard", {
           resultCardId: card._id,
           executionId: expectedExecutionId,
-          summary: "Restored the earlier copy of this work.",
+          summary,
           actions: [...card.actions.filter((entry) => entry.key !== "revert"), { key: "undone", label: "Undone" }].filter(
             (entry, index, all) => all.findIndex((candidate) => candidate.key === entry.key) === index,
           ),
         }).catch(() => null),
       ),
     );
-    return Response.json({ restored: restored.length, blocked: plan.blocked, failed });
+    return Response.json({ restored: restored.length, blocked: plan.blocked, failed, summary, notes });
   }
 
   return new Response("Unknown action", { status: 400 });

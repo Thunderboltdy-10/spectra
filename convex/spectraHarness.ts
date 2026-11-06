@@ -49,6 +49,13 @@ async function stateRow(ctx: QueryCtx | MutationCtx, runId: Id<"spectraAiRuns">)
     .unique();
 }
 
+async function checkpointRow(ctx: QueryCtx | MutationCtx, runId: Id<"spectraAiRuns">) {
+  return ctx.db
+    .query("spectraHarnessCheckpoints")
+    .withIndex("by_run", (q) => q.eq("runId", runId))
+    .unique();
+}
+
 /** The operations recorded for one tool call. */
 function operationIdsFor(row: Doc<"spectraHarnessStates"> | null, toolCallId: string) {
   const entry = record(row?.toolOperations)[toolCallId];
@@ -63,9 +70,10 @@ export const load = query({
     await ownedRun(ctx, args.runId);
     const row = await stateRow(ctx, args.runId);
     if (!row) return null;
+    const checkpoint = await checkpointRow(ctx, args.runId);
     return {
       executionId: row.executionId,
-      state: row.state,
+      state: checkpoint?.executionId === row.executionId ? checkpoint.state : row.state,
       toolOperations: row.toolOperations ?? {},
       pending: row.pending ?? null,
       answer: row.answer ?? null,
@@ -75,8 +83,10 @@ export const load = query({
 });
 
 /**
- * The checkpoint at a tool boundary: about one write per tool call. Returns
- * (and clears) the messages the user sent meanwhile; they join the next turn.
+ * The checkpoint: the attempt saves one every few seconds of work, and whenever
+ * it pauses, yields or fails. Returns (and clears) the messages the user sent
+ * meanwhile; they join the next turn. The bookkeeping row is only written when
+ * something in it changed.
  */
 export const saveCheckpoint = mutation({
   args: {
@@ -93,9 +103,21 @@ export const saveCheckpoint = mutation({
     const now = Date.now();
     const row = await stateRow(ctx, args.runId);
     const steers = row?.executionId === args.executionId ? (row.steers ?? []) : [];
+    const checkpoint = await checkpointRow(ctx, args.runId);
+    if (checkpoint) await ctx.db.patch(checkpoint._id, { executionId: args.executionId, state: args.state, updatedAt: now });
+    else await ctx.db.insert("spectraHarnessCheckpoints", { runId: args.runId, executionId: args.executionId, state: args.state, updatedAt: now });
+    const unchanged =
+      row &&
+      row.executionId === args.executionId &&
+      !row.state &&
+      !steers.length &&
+      args.toolOperations === undefined &&
+      args.pending === undefined &&
+      !args.clearPending;
+    if (unchanged) return { steers: [], active: ACTIVE.has(run.status) };
     const patch = {
       executionId: args.executionId,
-      state: args.state,
+      state: null,
       ...(args.toolOperations !== undefined
         ? { toolOperations: args.toolOperations }
         : row && row.executionId !== args.executionId
@@ -117,6 +139,32 @@ export const saveCheckpoint = mutation({
       steers: steers.map((steer) => ({ text: steer.text, ...(steer.attachmentIds?.length ? { attachmentIds: steer.attachmentIds } : {}) })),
       active: ACTIVE.has(run.status),
     };
+  },
+});
+
+/** The messages the user sent meanwhile, without saving a checkpoint. */
+export const takeSteers = mutation({
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string() },
+  handler: async (ctx, args) => {
+    const { run } = await ownedRun(ctx, args.runId);
+    const row = await stateRow(ctx, args.runId);
+    const steers = row?.executionId === args.executionId ? (row.steers ?? []) : [];
+    if (row && steers.length) await ctx.db.patch(row._id, { steers: [], updatedAt: Date.now() });
+    return {
+      steers: steers.map((steer) => ({ text: steer.text, ...(steer.attachmentIds?.length ? { attachmentIds: steer.attachmentIds } : {}) })),
+      active: ACTIVE.has(run.status),
+    };
+  },
+});
+
+/** A finished run's transcript is in its thread; the checkpoint has done its job. */
+export const discardCheckpoint = mutation({
+  args: { runId: v.id("spectraAiRuns") },
+  handler: async (ctx, args) => {
+    await ownedRun(ctx, args.runId);
+    const checkpoint = await checkpointRow(ctx, args.runId);
+    if (checkpoint) await ctx.db.delete(checkpoint._id);
+    return null;
   },
 });
 

@@ -20,6 +20,7 @@ import type {
 import { readInteractionState } from "./interaction-model";
 import { readPerformances } from "./performance";
 import { committedPerformancesFor, subscribeCommittedPerformances } from "./committed-performances";
+import { currentWorkSpeed } from "./work-speed";
 import { PerformanceStage } from "./performance-stage";
 import { readArtifactYjsDocument } from "./artifact-yjs-model";
 import { readNativeArtifactYjsDocument } from "../work/models/yjs/native-artifact-model";
@@ -348,6 +349,8 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       readNativeArtifactYjsDocument(this.document, performance.typeKey) ??
       readArtifactYjsDocument(this.document, performance.typeKey),
     () => this.publishPresence(),
+    undefined,
+    currentWorkSpeed,
   );
   private readonly stopCommittedPerformances = subscribeCommittedPerformances(() => this.playCommittedPerformances());
   private playCommittedPerformances() {

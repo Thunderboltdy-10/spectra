@@ -5,7 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { getAuthenticatedActor, getOptionalAuthenticatedActor } from "./identityShared";
 import { z } from "zod";
-import { createFolderNode } from "./orgTreeShared";
+import { createFolderNode, findNodesForSource, trashNode } from "./orgTreeShared";
 import type { SyncPolicyValues } from "../shared/sync-policy";
 import { syncOperationForBridgeWrite } from "./bridgeWriteOperations";
 
@@ -334,6 +334,29 @@ export const sweepRevokedDevice = internalMutation({
   },
 });
 
+/** What this computer brought into Spectra goes to the Trash, where it can still be restored. */
+async function trashDeviceFiles(ctx: MutationCtx, accountId: Id<"accounts">, deviceId: Id<"bridgeDevices">) {
+  const mounts = await ctx.db.query("bridgeMounts")
+    .withIndex("by_device_state", (q) => q.eq("deviceId", deviceId).eq("state", "active"))
+    .take(200);
+  for (const mount of mounts) {
+    if (!mount.selectedFile && mount.rootOrgNodeId) {
+      const root = await ctx.db.get(mount.rootOrgNodeId);
+      if (root && root.accountId === accountId) await trashNode(ctx, root);
+      continue;
+    }
+    // Single files share General, so only their own works go.
+    const replicas = await ctx.db.query("workReplicas")
+      .withIndex("by_device_mount_path", (q) => q.eq("deviceId", deviceId).eq("mountId", mount._id))
+      .take(50);
+    for (const replica of replicas) {
+      for (const node of await findNodesForSource(ctx, "work", String(replica.workId))) {
+        if (node.accountId === accountId) await trashNode(ctx, node);
+      }
+    }
+  }
+}
+
 /**
  * Revokes a device: its credential stops working at once and its folders,
  * replicas and queued requests are swept in batches.
@@ -353,8 +376,8 @@ async function retireDevice(ctx: MutationCtx, deviceId: Id<"bridgeDevices">, now
 }
 
 export const revokeDevice = mutation({
-  args: { deviceId: v.id("bridgeDevices") },
-  handler: async (ctx, { deviceId }) => {
+  args: { deviceId: v.id("bridgeDevices"), removeFiles: v.optional(v.boolean()) },
+  handler: async (ctx, { deviceId, removeFiles }) => {
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
     const device = await ctx.db.get(deviceId);
@@ -362,6 +385,7 @@ export const revokeDevice = mutation({
       throw new Error("BRIDGE_DEVICE_INVALID");
     if (device.state === "revoked")
       return { deviceId, cleanupQueued: false, alreadyRevoked: true };
+    if (removeFiles) await trashDeviceFiles(ctx, actor.accountId, deviceId);
     await retireDevice(ctx, deviceId, Date.now());
     return { deviceId, cleanupQueued: true, alreadyRevoked: false };
   },

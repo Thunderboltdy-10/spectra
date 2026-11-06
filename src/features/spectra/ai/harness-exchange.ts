@@ -1,21 +1,20 @@
 import type { HarnessArtifactTouchView, HarnessInputView, SpectraStreamEvent } from "./stream-events";
 
 /*
- * How the thread shows a harness run while it works: the captions are the
- * trace (one plain sentence per stretch of work, the tool steps behind it as
- * detail), the final caption names what was done, and artifact cards are the
- * work the run created, edited or referenced, each once.
+ * How the thread shows a harness run while it works: the trace is what it
+ * thought and did in the order it happened, and artifact cards are the work the
+ * run created, edited or referenced, each once.
  */
 
 export type LiveStep = {
   id: string;
   title: string;
+  /** A stretch of reasoning: `summary` holds its words. */
+  kind?: "thinking";
   summary?: string;
   status: "running" | "done" | "error";
   createdAt: number;
 };
-
-export type LiveTool = { id: string; label: string; status: "running" | "done" | "error" };
 
 export type LiveWidget = { id: string; title: string; html: string };
 
@@ -33,9 +32,6 @@ export type AnsweredInput = { toolCallId: string; kind: HarnessInputView["kind"]
 
 export type HarnessExchangeFields = {
   steps: LiveStep[];
-  /** The past-tense caption once the run finished. */
-  caption?: string;
-  tools?: LiveTool[];
   artifacts?: HarnessArtifactTouchView[];
   widgets?: LiveWidget[];
   todos?: LiveTodo[];
@@ -46,12 +42,13 @@ export type HarnessExchangeFields = {
   answers?: AnsweredInput[];
 };
 
-const MAX_STEPS = 12;
+const MAX_STEPS = 120;
+const MAX_THINKING = 12_000;
 
 type HarnessEvent = Extract<
   SpectraStreamEvent,
   {
-    type: "step" | "caption" | "artifact_touched" | "widget" | "todos" | "sources" | "compacted" | "input_required" | "input_answered";
+    type: "step" | "reasoning_delta" | "caption" | "artifact_touched" | "widget" | "todos" | "sources" | "compacted" | "input_required" | "input_answered";
   }
 >;
 
@@ -60,6 +57,7 @@ export function isHarnessExchangeEvent(event: SpectraStreamEvent): event is Harn
     event.type === "input_required" ||
     event.type === "input_answered" ||
     event.type === "step" ||
+    event.type === "reasoning_delta" ||
     event.type === "caption" ||
     event.type === "artifact_touched" ||
     event.type === "widget" ||
@@ -84,59 +82,47 @@ export function mergeTouch(list: readonly HarnessArtifactTouchView[], touch: Har
   return list.map((entry, position) => (position === index ? merged : entry));
 }
 
-function toolDetail(tools: readonly LiveTool[] | undefined, stepIds: readonly string[]) {
-  const labels = (tools ?? [])
-    .filter((tool) => stepIds.includes(tool.id))
-    .map((tool) => tool.label.trim())
-    .filter(Boolean);
-  return [...new Set(labels)].slice(0, 6).join("\n") || undefined;
+/** Whatever was thinking stops when something else starts. */
+function settleThinking(steps: readonly LiveStep[]) {
+  return steps.map((step) => (step.kind === "thinking" && step.status === "running" ? { ...step, status: "done" as const } : step));
 }
 
 export function applyHarnessEvent<T extends HarnessExchangeFields>(exchange: T, event: HarnessEvent, now = Date.now()): T {
   switch (event.type) {
     case "step": {
-      const tools = exchange.tools ?? [];
-      const known = tools.some((tool) => tool.id === event.id);
-      const next = known
-        ? tools.map((tool) => (tool.id === event.id ? { ...tool, label: event.label, status: event.status } : tool))
-        : [...tools, { id: event.id, label: event.label, status: event.status }];
-      // A step that failed marks the caption describing it.
-      const steps =
-        event.status === "error"
-          ? exchange.steps.map((step) =>
-              step.id === `caption:${event.id}` ? { ...step, status: "error" as const } : step,
-            )
-          : exchange.steps;
-      return { ...exchange, tools: next.slice(-40), steps };
+      const known = exchange.steps.some((step) => step.id === event.id);
+      const steps = known
+        ? exchange.steps.map((step) => (step.id === event.id ? { ...step, title: event.label, status: event.status } : step))
+        : [...settleThinking(exchange.steps), { id: event.id, title: event.label, status: event.status, createdAt: now }];
+      return { ...exchange, steps: steps.slice(-MAX_STEPS) };
     }
-    case "caption": {
-      const text = event.text.trim();
-      if (!text) return exchange;
-      if (event.final) {
+    case "reasoning_delta": {
+      const part = exchange.steps.find((step) => step.id === event.id);
+      if (part) {
+        const summary = `${part.summary ?? ""}${event.content}`.slice(-MAX_THINKING);
         return {
           ...exchange,
-          caption: text,
-          steps: exchange.steps.map((step) => (step.status === "running" ? { ...step, status: "done" as const } : step)),
-        };
-      }
-      const last = exchange.steps.at(-1);
-      const detail = event.detail?.trim() || toolDetail(exchange.tools, event.stepIds);
-      if (last && last.title === text)
-        return {
-          ...exchange,
-          steps: exchange.steps.map((step, index) =>
-            index === exchange.steps.length - 1 ? { ...step, ...(detail ? { summary: detail } : {}) } : step,
+          steps: exchange.steps.map((step) =>
+            step.id === event.id ? { ...step, summary, status: event.done ? ("done" as const) : step.status } : step,
           ),
         };
-      const id = `caption:${event.stepIds[0] ?? `${now}:${exchange.steps.length}`}`;
-      if (exchange.steps.some((step) => step.id === id)) return exchange;
+      }
+      if (!event.content) return exchange;
       return {
         ...exchange,
         steps: [
-          ...exchange.steps.map((step) => (step.status === "running" ? { ...step, status: "done" as const } : step)),
-          { id, title: text, ...(detail ? { summary: detail } : {}), status: "running" as const, createdAt: now },
+          ...settleThinking(exchange.steps),
+          { id: event.id, kind: "thinking" as const, title: "Thinking", summary: event.content, status: event.done ? ("done" as const) : ("running" as const), createdAt: now },
         ].slice(-MAX_STEPS),
       };
+    }
+    case "caption": {
+      // A run from before reasoning was shown: its captions are its trace.
+      const text = event.text.trim();
+      if (!text || event.final) return exchange;
+      const id = `caption:${event.stepIds[0] ?? `${now}:${exchange.steps.length}`}`;
+      if (exchange.steps.some((step) => step.id === id || step.title === text)) return exchange;
+      return { ...exchange, steps: [...exchange.steps, { id, title: text, status: "done" as const, createdAt: now }].slice(-MAX_STEPS) };
     }
     case "artifact_touched":
       return { ...exchange, artifacts: mergeTouch(exchange.artifacts ?? [], event.artifact) };

@@ -359,6 +359,8 @@ const ACCOUNT_TABLES: TableStep[] = [
   drain((ctx, id, n) => ctx.db.query("spectraAnalyticsRunSummaries").withIndex("by_account_created", (q) => q.eq("ownerAccountId", id)).take(n)),
   drain((ctx, id, n) => ctx.db.query("spectraThreads").withIndex("by_account_status", (q) => q.eq("ownerAccountId", id)).take(n), (ctx, row) => drainThread(ctx, row)),
   // Memory, including claim embeddings.
+  drain((ctx, id, n) => ctx.db.query("spectraMemoryHeads").withIndex("by_account", (q) => q.eq("accountId", id)).take(n)),
+  drain((ctx, id, n) => ctx.db.query("spectraMemoryTopics").withIndex("by_account_slug", (q) => q.eq("accountId", id)).take(n)),
   drain((ctx, id, n) => ctx.db.query("memoryRelations").withIndex("by_account_from", (q) => q.eq("accountId", id)).take(n)),
   drain((ctx, id, n) => ctx.db.query("memoryEvidence").withIndex("by_account_created", (q) => q.eq("accountId", id)).take(n)),
   drain((ctx, id, n) => ctx.db.query("memoryClaims").withIndex("by_account_status_updated", (q) => q.eq("accountId", id)).take(n)),

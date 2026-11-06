@@ -10,7 +10,7 @@ export const AUTHORING_FORMATS: Record<AuthoredType, { create: string; edit: str
   document: {
     create: '{"markdown": "# Title\\n\\nThe document in Markdown: headings, lists, tables, **bold**, $math$, > quotes, - [ ] checklists."}',
     edit:
-      'replace {find, replace, all?} (exact Markdown text) | insert {markdown, after?: heading, before?: heading, position?: "start"|"end"} | move_section {heading, after?|before?|position?} | delete_section {heading} | rewrite {markdown}',
+      'replace {find, replace, all?} or {from, to, replace}: find quotes the text; for a longer passage, from and to quote only its first and last words and all of it is replaced, so never write out what is going away. Formatting marks need not match; no replace deletes | insert {markdown, after?, before?, position?: "start"|"end"}: after and before take a heading or any unique text | move_section {heading, after?|before?|position?} | delete_section {heading} | rewrite {markdown} (the whole document, only when nearly all of it changes)',
     read: "section: a heading, to read only that section",
   },
   presentation: {
@@ -60,7 +60,7 @@ export const AUTHORING_FORMATS: Record<AuthoredType, { create: string; edit: str
   code: {
     create:
       '{"files": [{"path": "index.html", "source": "..."}], "runtime"?: "browser"|"react"|"python"|"none", "entry"?: "index.html", "title"?, "description"?}',
-    edit: "replace {file, find, replace, all?} (exact text, including indentation) | write_file {path, source} | delete_file {path} | rename_file {path, to} | set_entry {path} | set_accessibility {title, description, reducedMotion?} (required metadata before publishing a visualisation; HTML labels alone do not set it)",
+    edit: "replace {file, find, replace, all?} or {file, from, to, replace}: from and to quote only the first and last lines of a passage, and all of it is replaced | write_file {path, source} | delete_file {path} | rename_file {path, to} | set_entry {path} | set_accessibility {title, description, reducedMotion?} (required metadata before publishing a visualisation; HTML labels alone do not set it)",
     read: "file, and from/to line numbers",
   },
   agent: {

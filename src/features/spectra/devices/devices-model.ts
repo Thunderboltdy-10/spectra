@@ -17,7 +17,8 @@ import type { ContentDirection } from "../../../../shared/sync-policy";
 import { permissionChoice, type StoredPermissionPreferences } from "../settings/schema/ai-permissions";
 
 /** A computer counts as online when it reported within this window. */
-export const DEVICE_ONLINE_MS = 5 * 60_000;
+/** Bridge reports in every 15 minutes, or at once when something about it changes. */
+export const DEVICE_ONLINE_MS = 20 * 60_000;
 
 export type CloudDeviceHealth = {
   paused: boolean;
@@ -44,6 +45,7 @@ export type CloudMount = {
   grantId: string;
   deviceId: string;
   rootLabel: string;
+  rootOrgNodeId?: string;
   state: string;
   fileCount: number;
 };
@@ -71,6 +73,8 @@ export type FolderView = {
   paused: boolean;
   /** Folder actions run only on the computer that holds the folder. */
   actionable: boolean;
+  /** The folder as it stands in the Library. */
+  rootNodeId?: string;
 };
 
 export type DeviceView = {
@@ -132,7 +136,7 @@ export function problemSentence(code: string | undefined, folder?: string): stri
   return "Something on this computer needs attention. Show logs to see what happened.";
 }
 
-function liveFolder(mount: BridgeMount, allPaused: boolean): FolderView {
+export function liveFolder(mount: BridgeMount, allPaused: boolean): FolderView {
   const path = mount.friendlyPath || mount.label;
   const base = { id: mount.id, name: mount.label, path, actionable: true, kind: mount.selectionKind ?? "folder" };
   const paused = allPaused || mount.paused;
@@ -166,6 +170,7 @@ function remoteFolder(mount: CloudMount, actionable: boolean, offlineLabel: stri
     detail: files,
     paused: false,
     actionable,
+    rootNodeId: mount.selectedFile ? undefined : mount.rootOrgNodeId,
   };
 }
 
@@ -181,7 +186,10 @@ function thisComputerView(local: LocalBridge, cloud: CloudDevice | undefined, mo
   const liveIds = new Set(liveMounts.map((mount) => mount.id));
   const allPaused = Boolean(live && status?.paused);
   const folders = [
-    ...liveMounts.map((mount) => liveFolder(mount, allPaused)),
+    ...liveMounts.map((mount) => ({
+      ...liveFolder(mount, allPaused),
+      rootNodeId: mount.selectionKind === "file" ? undefined : mounts.find((row) => row.grantId === mount.id)?.rootOrgNodeId,
+    })),
     ...mounts.filter((mount) => !liveIds.has(mount.grantId)).map((mount) => remoteFolder(mount, false, "Not connected")),
   ];
   const problemFolder = folders.find((folder) => folder.tone === "attention" && !folder.paused);

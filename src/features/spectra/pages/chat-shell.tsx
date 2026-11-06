@@ -585,6 +585,12 @@ export function ChatShell() {
   );
 
   const studioBeside = studio.isOpen && studio.mode !== "tab";
+  useEffect(() => {
+    if (!studioBeside) return;
+    const root = document.documentElement;
+    root.style.setProperty("--spectra-side-width", `${Math.round(studioPanelWidth)}px`);
+    return () => void root.style.removeProperty("--spectra-side-width");
+  }, [studioBeside, studioPanelWidth]);
   const column = useThreadColumn(studioBeside);
   // Home is this page before a thread: the day lifts away once one is sent or opened, and comes back with a new one.
   const started = Boolean(threadId || detail || runEngine.liveExchange || loading);
@@ -700,6 +706,7 @@ export function ChatShell() {
         ) : null}
         <ConversationSurface
           detail={detail}
+          artifacts={artifacts}
           threadId={threadId ?? undefined}
           loading={loading}
           lead={
@@ -813,7 +820,7 @@ export function ChatShell() {
           executeApplicationCommand={applicationCommandDispatcher}
         />
       ) : null}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-chrome bg-transparent px-5 pb-24 pt-2 sm:px-8">
+      <div className="pointer-events-none absolute bottom-0 left-0 right-[var(--spectra-side-width,0px)] z-chrome bg-transparent px-5 pb-24 pt-2 sm:px-8">
         <div className="pointer-events-auto mx-auto max-w-[820px] spectra-live-stack">
           <ComposerArtifactDock
             artifacts={artifacts}

@@ -6,7 +6,7 @@ const root = process.cwd();
 
 const checkedRoots = [
   join(root, "src/features/spectra"),
-  join(root, "src/app/workspace/page.tsx"),
+  join(root, "src/app/(app)/workspace/page.tsx"),
   join(root, "src/app/artifacts/page.tsx"),
 ];
 

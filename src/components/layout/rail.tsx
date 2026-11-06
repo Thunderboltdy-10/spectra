@@ -68,6 +68,25 @@ export const RAIL_DESTINATIONS: RailDestination[] = [
 ];
 
 /** The destinations this person can open: the admin pages only for those who hold them. */
+const LIBRARY_PLACE_KEY = "spectra:library-place";
+
+/** Called before any press in the app, so leaving the Library knows where it was. */
+export function rememberLibraryPlace() {
+  const { pathname, search } = window.location;
+  if (pathname !== "/library" && !pathname.startsWith("/library/") && !pathname.startsWith("/workspace")) return;
+  try {
+    window.sessionStorage.setItem(LIBRARY_PLACE_KEY, pathname + search);
+  } catch {}
+}
+
+function libraryPlace() {
+  try {
+    return window.sessionStorage.getItem(LIBRARY_PLACE_KEY);
+  } catch {
+    return null;
+  }
+}
+
 function destinationsFor(identity: AdministrationIdentity | null) {
   return RAIL_DESTINATIONS.filter(
     (destination) =>
@@ -271,7 +290,6 @@ export function Rail() {
               <Tooltip key={destination.key} label={destination.label} side="right" disabled={!collapsed} className="flex w-full">
                 <Link
                   href={destination.href}
-                  prefetch={false}
                   data-rail-item={destination.key}
                   // The page it opens grows out of it; the page already open stays as it is.
                   data-life-launch={current ? undefined : ""}
@@ -279,6 +297,12 @@ export function Rail() {
                   onMouseEnter={(event) => placeMarker(event.currentTarget)}
                   onClick={(event) => {
                     pulseFrom(event.currentTarget);
+                    // The Library opens where it was left.
+                    const place = destination.key === "library" && !current ? libraryPlace() : null;
+                    if (place && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+                      event.preventDefault();
+                      router.push(place);
+                    }
                   }}
                   className={itemClass}
                 >

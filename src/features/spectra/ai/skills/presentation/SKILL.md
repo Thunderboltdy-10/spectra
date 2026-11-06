@@ -56,6 +56,8 @@ later edits, and a slide the readback flags is left alone until its problem is f
 - Titles say the point, not the topic: "Renewables overtook coal in 2024", not "Energy data".
 - Body copy is short: at most four bullets of a few words, or two short sentences.
 - If a slide is too full, split it rather than cramming it.
+- Slides can't draw yet: never type a diagram in characters. When a drawing is the point, say so
+  and make it on a whiteboard, or carry the idea in words, a table or a chart.
 - Numbers from a source go in a real chart (`chartType`, `categories`, named `series` with
   units in the names) or a table, with values checked against the source. Never draw data as
   labelled shapes. Say what the chart shows without claiming causes the data does not

@@ -9,6 +9,48 @@ use std::path::Path;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+/// Whether Spectra's cloud answers at all. It runs no function, so it costs nothing.
+pub async fn cloud_reachable(deployment_url: &str) -> bool {
+    let Ok(client) = cloud_client() else { return false };
+    client
+        .get(format!("{}/version", deployment_url.trim_end_matches('/')))
+        .send()
+        .await
+        .is_ok_and(|response| response.status().is_success())
+}
+
+/// Waits on this computer's work signal for as long as the subscription lasts,
+/// calling back with each change. `on_signal(busy, changed)`: `busy` says queued
+/// work is waiting here, `changed` that there is something new to claim.
+pub async fn watch_work_signal(
+    deployment_url: &str,
+    credential: &str,
+    mut on_signal: impl FnMut(bool, bool),
+) -> anyhow::Result<()> {
+    use futures_util::StreamExt;
+    let mut client = convex::ConvexClient::new(deployment_url).await?;
+    let args = BTreeMap::from([("credential".to_string(), convex::Value::from(credential.to_string()))]);
+    let mut subscription = client.subscribe("bridgeSync:workSignal", args).await?;
+    let mut last: Option<convex::Value> = None;
+    while let Some(result) = subscription.next().await {
+        let value = match result {
+            convex::FunctionResult::Value(value) => value,
+            convex::FunctionResult::ErrorMessage(message) => anyhow::bail!(message),
+            convex::FunctionResult::ConvexError(error) => anyhow::bail!(error.message),
+        };
+        let field = |name: &str| match &value {
+            convex::Value::Object(fields) => fields.get(name).cloned().unwrap_or(convex::Value::Null),
+            _ => convex::Value::Null,
+        };
+        let busy = matches!(field("busy"), convex::Value::Boolean(true));
+        let has_work = ["write", "fs", "transition"].iter().any(|name| field(name) != convex::Value::Null);
+        let changed = has_work && last.as_ref() != Some(&value);
+        last = Some(value);
+        on_signal(busy, changed);
+    }
+    Ok(())
+}
+
 const CLOUD_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const CLOUD_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 fn cloud_client() -> anyhow::Result<reqwest::Client> {
@@ -430,6 +472,29 @@ pub struct ReplicaMigrationPage {
     pub local_only: f64,
 }
 
+#[derive(Deserialize)]
+struct AgentHubTicketResponse {
+    url: Option<String>,
+    ticket: Option<String>,
+}
+
+/// A short-lived ticket for this device's account, or nothing when the deployment has no hub.
+pub async fn agent_hub_ticket(
+    deployment_url: &str,
+    credential: &str,
+) -> anyhow::Result<Option<crate::agent_relay::HubTicket>> {
+    let response: AgentHubTicketResponse = mutation(
+        deployment_url,
+        "bridgeSync:agentHubTicket",
+        serde_json::json!({ "credential": credential }),
+    )
+    .await?;
+    Ok(match (response.url, response.ticket) {
+        (Some(url), Some(ticket)) => Some(crate::agent_relay::HubTicket { url, ticket }),
+        _ => None,
+    })
+}
+
 pub async fn migrate_cloud_replica_page(
     deployment_url: &str,
     credential: &str,
@@ -518,41 +583,24 @@ pub async fn report_changes(
     Ok(response.results)
 }
 
-pub async fn reconcile_missing_resources(
+/// Tells the cloud these files are gone from the folder. Only they are touched:
+/// a pass over a folder where nothing went missing writes nothing.
+pub async fn report_missing_resources(
     deployment_url: &str,
     credential: &str,
     mount_id: &str,
-    scan_id: &str,
+    local_resource_ids: &[String],
 ) -> anyhow::Result<()> {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct ReconcilePage {
-        continue_cursor: Option<String>,
-        is_done: bool,
-    }
-    let mut cursor: Option<String> = None;
-    loop {
-        let mut args = serde_json::json!({
+    let _: serde_json::Value = mutation(
+        deployment_url,
+        "bridgeSync:reportMissingResources",
+        serde_json::json!({
             "credential": credential,
             "mountId": mount_id,
-            "scanId": scan_id,
-        });
-        if let Some(value) = cursor.as_ref() {
-            args.as_object_mut()
-                .expect("reconcile args are an object")
-                .insert("cursor".into(), serde_json::Value::String(value.clone()));
-        }
-        let page: ReconcilePage =
-            mutation(deployment_url, "bridgeSync:reconcileMissingResources", args).await?;
-        if page.is_done {
-            break;
-        }
-        cursor = page.continue_cursor;
-        anyhow::ensure!(
-            cursor.is_some(),
-            "missing-resource reconciliation did not advance"
-        );
-    }
+            "localResourceIds": local_resource_ids,
+        }),
+    )
+    .await?;
     Ok(())
 }
 

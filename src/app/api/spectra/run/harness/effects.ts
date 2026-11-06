@@ -557,51 +557,10 @@ export async function executeApplicationCommand(
         ...(targetId ? { targetId } : {}),
         ...(region ? { region } : {}),
         note: `Opening ${destination}`,
+        requestedAt: Date.now(),
       },
     });
     return { ok: true, status: "requested", destination, ...(targetId ? { targetId } : {}), message: "Navigation requested. The destination view reports its own readiness." };
-  }
-  if (command === "write_memory") {
-    const action = String(parsed.action ?? "create");
-    if (action === "forget") {
-      const memoryId = typeof parsed.memoryId === "string" ? parsed.memoryId : "";
-      if (!memoryId) throw new Error("MEMORY_ID_REQUIRED");
-      const memory = await applyMutation("memory:forget", { actorClerkId, claimId: memoryId });
-      onUiEvent?.({
-        key: "memory_written",
-        payload: { targetId: memoryId, note: "Forgot a private memory" },
-      });
-      return { ok: true, memory };
-    }
-    const content = String(parsed.content ?? "").trim();
-    if (!content) throw new Error("MEMORY_CONTENT_REQUIRED");
-    if (action === "create") {
-      const memory = await applyMutation("memory:remember", {
-        actorClerkId,
-        proposition: content,
-        scope: "private_global",
-        claimType: "inferred_preference",
-        sourceType: "user_statement",
-        captureReason: "You explicitly asked Spectra to remember this.",
-      });
-      onUiEvent?.({
-        key: "memory_written",
-        payload: { targetId: "memory", note: "Saved a private memory" },
-      });
-      return { ok: true, memory };
-    }
-    const memoryId = typeof parsed.memoryId === "string" ? parsed.memoryId : "";
-    if (!memoryId) throw new Error("MEMORY_ID_REQUIRED");
-    const memory = await applyMutation("memory:correct", {
-      actorClerkId,
-      claimId: memoryId,
-      proposition: content,
-    });
-    onUiEvent?.({
-      key: "memory_written",
-      payload: { targetId: memoryId, note: "Revised a private memory" },
-    });
-    return { ok: true, memory };
   }
   if (command === "change_sharing") {
     const resourceType = String(parsed.resourceType ?? "artifact");
@@ -1183,24 +1142,44 @@ export async function executeOperation(
       resolveDesired: () => ({ title: input.title, summary, content: input.content, tags: input.tags }),
     });
     await markArtifactEffect(actorClerkId, runId, pending.artifactId, context, "create", mutationResult.changedRegionIds ?? [], ["/"]);
-    // The Yjs acknowledgement can arrive before the Convex projection is
-    // written. Wait briefly so a saved creation is not reported as failed.
-    const deadline = Date.now() + 10_000;
+    // The work is saved from here on: the Yjs acknowledgement just arrives before
+    // the Convex projection is written. Telling the model it failed now would
+    // only make it write a second copy, so a slow projection finishes behind the run.
+    const finalize = () =>
+      mutate("spectraArtifacts:finalizePendingLive", {
+        actorClerkId,
+        artifactId: pending.artifactId,
+        runId,
+        executionId: context.executionId,
+        summary,
+      }) as Promise<Record<string, unknown>>;
+    const stillSyncing = (error: unknown) =>
+      /has not finished synchronizing|synchronized AI version is unavailable/i.test(error instanceof Error ? error.message : String(error));
+    const startedFinalizing = Date.now();
+    let wait = 300;
     for (;;) {
       try {
-        output = (await mutate("spectraArtifacts:finalizePendingLive", {
-          actorClerkId,
-          artifactId: pending.artifactId,
-          runId,
-          executionId: context.executionId,
-          summary,
-        })) as Record<string, unknown>;
+        output = await finalize();
         break;
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const waiting = /has not finished synchronizing|synchronized AI version is unavailable/i.test(message);
-        if (!waiting || Date.now() >= deadline) throw error;
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        if (!stillSyncing(error)) throw error;
+        if (Date.now() - startedFinalizing >= 4_000) {
+          output = { artifactId: pending.artifactId };
+          void (async () => {
+            while (Date.now() - startedFinalizing < 90_000) {
+              await new Promise((resolve) => setTimeout(resolve, 2_000));
+              try {
+                await finalize();
+                return;
+              } catch (late) {
+                if (!stillSyncing(late)) return;
+              }
+            }
+          })();
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        wait = Math.min(wait * 1.5, 1_200);
       }
     }
     if ("performance" in mutationResult && mutationResult.performance) {
@@ -1252,8 +1231,12 @@ export async function executeOperation(
         content: input.content ?? current.content,
       }),
     });
-    const { performance, ...receipt } = mutationResult as typeof mutationResult & { performance?: unknown };
-    output = receipt as Record<string, unknown>;
+    const { performance, acceptedFrontier, ...receipt } = mutationResult as typeof mutationResult & {
+      performance?: unknown;
+      acceptedFrontier?: { sequence: number };
+    };
+    // The journal keeps that the edit was admitted, not two more copies of the document.
+    output = { ...receipt, ...(acceptedFrontier ? { acceptedSequence: acceptedFrontier.sequence } : {}) } as Record<string, unknown>;
     if (performance) await context.onUiEvent?.({ key: "artifact_performance", payload: { performance, committedAt: Date.now() } });
     const changedPaths =
       input.content !== null
@@ -1314,12 +1297,15 @@ export async function executeOperation(
   } else {
     throw new Error(`The harness does not apply ${operation.type} operations.`);
   }
+  // The effect has happened; a receipt that cannot be written does not undo it.
   await mutate("spectraOperations:markExecuted", {
     actorClerkId,
     operationId,
     executionId: context.executionId,
     output,
     affected,
+  }).catch((error) => {
+    console.error("spectra.operation.receipt", { operationId, error: error instanceof Error ? error.message : String(error) });
   });
   return { affected, output };
 }

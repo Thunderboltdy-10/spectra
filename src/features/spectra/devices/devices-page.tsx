@@ -71,6 +71,7 @@ export function DevicesPage() {
   const [notice, setNotice] = useState<string>();
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [removeFiles, setRemoveFiles] = useState(false);
   const [justPaired, setJustPaired] = useState(false);
   const [wantTick, setWantTick] = useState(0);
   const connectParam = useRef(false);
@@ -186,19 +187,24 @@ export function DevicesPage() {
         const outcome = await runLocalDeviceAction({ action: "remove_folder", grantId: confirm.grantId });
         setNotice(outcome.message);
       } else if (confirm.device.id) {
-        await revokeDevice({ deviceId: confirm.device.id as Id<"bridgeDevices"> });
+        await revokeDevice({ deviceId: confirm.device.id as Id<"bridgeDevices">, removeFiles });
         if (confirm.device.isThisComputer) {
           await unpairBridge();
           local.forgetSession();
           void local.refresh();
         }
-        setNotice(`Removed ${confirm.device.name}. Its files stay on the computer.`);
+        setNotice(
+          removeFiles
+            ? `Removed ${confirm.device.name}. Its files are in Spectra's Trash and still on the computer.`
+            : `Removed ${confirm.device.name}. Its files stay in Spectra and on the computer.`,
+        );
       }
     } catch (error) {
       setNotice(confirm.kind === "remove-device" ? pairingFailureMessage(error, local.discovery, local.online) : failureSentence(error));
     } finally {
       setBusy(null);
       setConfirming(false);
+      setRemoveFiles(false);
       setConfirm(null);
     }
   }
@@ -341,10 +347,21 @@ export function DevicesPage() {
               : "Spectra may save changes back to the files on your computers, and Spectra AI asks first. This applies to every device."
             : confirm?.kind === "remove-folder"
               ? `${confirm.name} stops syncing. ${confirm.selection === "file" ? "The file stays" : "Its files stay"} on this computer.`
-              : "It stops syncing and Spectra forgets it. Its files stay on the computer; you can connect it again later."
+              : (
+                <span className="flex flex-col gap-3">
+                  <span>It stops syncing. Files stay on the computer, and you can connect it again later.</span>
+                  <label className="flex cursor-pointer items-center gap-2 text-[var(--text-primary)]">
+                    <input type="checkbox" checked={removeFiles} onChange={(event) => setRemoveFiles(event.target.checked)} />
+                    Also move its files in Spectra to the Trash
+                  </label>
+                </span>
+              )
         }
         confirmLabel={confirm?.kind === "native-writes" ? "Allow writes" : confirm?.kind === "remove-folder" ? "Stop using it" : "Remove"}
-        onCancel={() => setConfirm(null)}
+        onCancel={() => {
+          setRemoveFiles(false);
+          setConfirm(null);
+        }}
         onConfirm={() => void confirmAction()}
       />
     </div>

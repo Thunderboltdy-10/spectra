@@ -73,7 +73,7 @@ export function listLibraryTool(session: HarnessSession): HarnessTool<ListArgs> 
 }
 
 /** Friendly names for what search can look in, and the semantic kind each one is. */
-const SEARCH_KINDS = { work: "artifact", chats: "thread", calendar: "event", school: "school", memory: "memory" } as const;
+const SEARCH_KINDS = { work: "artifact", chats: "thread", calendar: "event", school: "school" } as const;
 type SearchIn = keyof typeof SEARCH_KINDS;
 
 type SearchArgs = { query: string; in?: SearchIn[] };
@@ -131,7 +131,7 @@ export function searchTool(session: HarnessSession): HarnessTool<SearchArgs> {
         in: {
           type: "array",
           items: { type: "string", enum: Object.keys(SEARCH_KINDS) },
-          description: "Where to look. Default: everywhere, memory included.",
+          description: "Where to look. Default: everywhere.",
         },
       },
       required: ["query"],

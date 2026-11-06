@@ -38,8 +38,6 @@ describe("staging an application command", () => {
     ["save_version", { artifactId: "wx1", name: "Draft" }, false],
     ["release_agent", { agentId: "ag1", action: "release_private" }, false],
     ["release_agent", { agentId: "ag1", action: "suspend", releaseId: "r1" }, true],
-    ["write_memory", { action: "create", content: "Prefers short answers." }, false],
-    ["write_memory", { action: "forget", memoryId: "m1" }, true],
     ["run_agent_checks", { agentId: "ag1" }, false],
     ["run_agent_bench", { agentId: "ag1", prompt: "Mark my essay" }, false],
     ["compile_agent", { agentId: "ag1" }, false],

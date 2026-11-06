@@ -1,4 +1,5 @@
 import { contrastRatio, estimateTextHeight, estimateTextOverflow, resolvePaint } from "./audit";
+import { fitTableToFrame } from "./layouts";
 import {
   presentationObjectText,
   type PresentationContent,
@@ -287,6 +288,7 @@ class Sheet {
     if (!object) return;
     Object.assign(object, frame);
     if (PICTURES.has(object.type)) object.style = { ...object.style, fit: "cover" };
+    if (object.type === "table") fitTableToFrame(object);
     if (bleed) this.behind.add(object.id);
   }
 

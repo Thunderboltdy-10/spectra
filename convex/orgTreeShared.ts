@@ -171,6 +171,7 @@ export function artifactSummaryProjection(
     compatibilityProfile: artifact.compatibilityProfile,
     blueprintKey: artifact.blueprintKey,
     title: artifact.title.slice(0, ARTIFACT_SUMMARY_TITLE_CHARS),
+    ...(artifact.renamedFromTitle ? { renamedFromTitle: artifact.renamedFromTitle.slice(0, ARTIFACT_SUMMARY_TITLE_CHARS) } : {}),
     summary: boundedSummaryText(
       artifact.summary,
       ARTIFACT_SUMMARY_DESCRIPTION_CHARS,
@@ -1304,8 +1305,15 @@ export async function renameNode(
       const artifact = await ctx.db.get(artifactId);
       // A personal placement is its owner's name. Only the artifact owner
       // controls the shared artifact title; a reader may rename their node.
-      if (artifact?.ownerAccountId === node.accountId)
-        await ctx.db.patch(artifactId, { title: name, updatedAt: now });
+      if (artifact?.ownerAccountId === node.accountId) {
+        // A native file's listing name is its own thing; see listingNameForNativeWork.
+        const from = artifact.renamedFromTitle ?? artifact.title;
+        await ctx.db.patch(artifactId, {
+          title: name,
+          updatedAt: now,
+          ...(artifact.nativeFormat ? {} : { renamedFromTitle: from === name ? undefined : from }),
+        });
+      }
     }
   }
   if (node.kind === "thread" && node.sourceId) {

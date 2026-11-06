@@ -95,7 +95,7 @@ function inlinesToMarkdown(content: readonly RichInline[]): string {
         break;
       }
       case "citation":
-        output += `[[cite:${inline.sourceId}:${inline.evidenceIds.join(",") || "source"}${inline.label ? `|${inline.label}` : ""}]]`;
+        output += `[[cite:${inline.sourceId}${inline.evidenceIds.length ? `:${inline.evidenceIds.join(",")}` : ""}${inline.label ? `|${inline.label}` : ""}]]`;
         break;
       case "reference":
         output += `[[ref:${inline.workId}${inline.label ? `|${inline.label}` : ""}]]`;

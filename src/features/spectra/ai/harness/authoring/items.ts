@@ -1,5 +1,6 @@
 import { plannerTaskBlueprint } from "../../../artifacts/schema/planner-task";
 import { validateQuizForPublishing } from "../../../quiz/interchange";
+import { notFoundMessage } from "./locate";
 import { AuthoringError, type IdFactory, defaultIdFactory, isPlaceholder, list, record, text, truncate } from "./shared";
 
 /*
@@ -333,7 +334,7 @@ export function applyListEdits(type: string, content: unknown, ops: ListEditOp[]
         let count = 0;
         for (const item of items)
           for (const field of kind.textFields) count += text(item[field]).split(op.find).length - 1;
-        if (!count) throw new AuthoringError(`${label}: \`find\` text was not found.`);
+        if (!count) throw new AuthoringError(notFoundMessage(label, "find", op.find, items.flatMap((item) => kind.textFields.map((field) => text(item[field]))).join("\n"), "any item"));
         if (count > 1 && !op.all) throw new AuthoringError(`${label}: \`find\` text appears ${count} times. Set "all": true or include more text.`);
         items = items.map((item) => {
           const copy = { ...item };
@@ -368,6 +369,14 @@ export function applyListEdits(type: string, content: unknown, ops: ListEditOp[]
 }
 
 /** A new quiz or deck from items plus optional settings. */
+/** A complete quiz, open for attempts. One with problems stays closed until they are fixed. */
+export function openQuizForPractice(content: unknown): Record<string, unknown> | null {
+  const next = { ...record(content) };
+  if (quiz.problems(next).length || !list(next.questions).length) return null;
+  quiz.publish!(next, true);
+  return next;
+}
+
 export function listFromSpec(type: string, spec: { items: Record<string, unknown>[]; settings?: Record<string, unknown> }, ids: IdFactory = defaultIdFactory()) {
   const kind = LIST_KINDS[type];
   if (!kind) throw new AuthoringError(`${type} is not a list artifact.`);

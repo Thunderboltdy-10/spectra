@@ -1,5 +1,6 @@
 "use client";
 
+import { shortAnswerMatches } from "../../../../shared/quiz-answer-match";
 import { useMissingAssets } from "./use-missing-assets";
 import { currentTimeMs } from "@/lib/unique-token";
 import { readConvexError } from "../../../../shared/convex-error.mjs";
@@ -466,7 +467,7 @@ export function QuizStudio({
   );
   const [view, setView] = useState<
     "builder" | "settings" | "preview" | "responses" | "summary"
-  >(readOnly ? "preview" : "builder");
+  >(readOnly || record(content).published === true ? "preview" : "builder");
   const [quizSettings, setQuizSettings] = useState<QuizSettings>(() =>
     quizSettingsFromContent(content),
   );
@@ -623,10 +624,10 @@ export function QuizStudio({
     // Authoring surfaces exist only for someone the capability model lets edit.
     if (!canEditQuiz && (view === "builder" || view === "settings"))
       setView("preview");
-    if (quizWasReadOnly.current && canEditQuiz && !practiceAttempt)
+    if (quizWasReadOnly.current && canEditQuiz && !practiceAttempt && !published)
       setView("builder");
     quizWasReadOnly.current = !canEditQuiz;
-  }, [canEditQuiz, practiceAttempt, view]);
+  }, [canEditQuiz, practiceAttempt, published, view]);
 
   useEffect(() => {
     const openPreview = ({ workId }: { workId: string }) => {
@@ -1422,10 +1423,7 @@ export function QuizStudio({
         .some((answer) => answer!.trim().toLocaleLowerCase() === actual);
     }
     if (question.type === "long_response") return false;
-    return (
-      (answers[question.id] ?? "").trim().toLocaleLowerCase() ===
-      (question.correctAnswer ?? "").trim().toLocaleLowerCase()
-    );
+    return shortAnswerMatches(answers[question.id], question.correctAnswer);
   }
 
   function publishQuiz() {
@@ -1580,7 +1578,7 @@ export function QuizStudio({
             }
           : {
               id: "build",
-              label: "Back to build",
+              label: "Edit questions",
               icon: Pencil,
               priority: "essential",
               keepLabel: true,
@@ -1750,7 +1748,7 @@ export function QuizStudio({
                   Published
                 </strong>
                 {publishedAt ? ` on ${formatShortDate(publishedAt)}.` : "."}{" "}
-                Learners can attempt it now.
+                Only people you share it with can take it.
                 {" "}
                 <button
                   type="button"
@@ -1864,7 +1862,7 @@ export function QuizStudio({
                       ? practiceAttempt.status === "submitted"
                         ? practiceAttempt.timeElapsed
                           ? "Submitted when the clock ran out. Everything you had answered was kept."
-                          : "This result is yours. It is pinned to the version you answered."
+                          : "Only you can see this result."
                         : "Answers save as you write them. Reconnect before submitting if that is interrupted."
                       : "Preview stays local. Attempt creates a private attempt pinned to this quiz version; preview does not, and does not spend one of yours."}
                   </p>
@@ -1886,8 +1884,8 @@ export function QuizStudio({
                       {attemptPercentage !== undefined ? (
                         <span className="mt-0.5 block text-micro font-medium text-[var(--text-secondary)]">
                           {attemptPercentage >= quizSettings.targetScore
-                            ? `At or above your ${quizSettings.targetScore}% practice target`
-                            : `${quizSettings.targetScore - attemptPercentage} points below your ${quizSettings.targetScore}% practice target`}
+                            ? `You reached your ${quizSettings.targetScore}% goal`
+                            : `Your goal is ${quizSettings.targetScore}%`}
                         </span>
                       ) : null}
                     </div>
@@ -1933,7 +1931,7 @@ export function QuizStudio({
                       onClick={() => openQuizMode("build")}
                       className="h-9 shrink-0 whitespace-nowrap rounded-control border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 text-caption font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                     >
-                      Back to build
+                      Edit questions
                     </button>
                   ) : null}
                 </div>
@@ -1976,7 +1974,7 @@ export function QuizStudio({
                     className="h-9 shrink-0 whitespace-nowrap rounded-control bg-[var(--text-primary)] px-3 text-caption font-medium text-[var(--bg-primary)]"
                     onClick={() => setInspectAttempt(true)}
                   >
-                    Inspect answers
+                    Check your answers
                   </button>
                 </div>
               ) : (
@@ -2146,7 +2144,14 @@ export function QuizStudio({
                             key={`${question.id}-${optionIndex}`}
                             className={`flex w-full items-center gap-2 rounded-control border px-3 py-2 text-left text-ui transition ${answers[question.id] === option ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
                           >
-                            <Radio className="h-3.5 w-3.5" />
+                            <span
+                              aria-hidden
+                              className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border ${answers[question.id] === option ? "border-[var(--accent-cyan)]" : "border-[var(--border-strong)]"}`}
+                            >
+                              {answers[question.id] === option ? (
+                                <span className="h-2 w-2 rounded-full bg-[var(--accent-cyan)]" />
+                              ) : null}
+                            </span>
                             <SpectraStoredText
                               inline
                               value={option}

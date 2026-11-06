@@ -3,6 +3,7 @@ import { internalMutation, mutation } from "./orgNodeMutation";
 import type { MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
+import { commandCanBeReversed } from "../shared/run-undo";
 import { normalizeMediaType, normalizeSha256 } from "../shared/intake-integrity";
 import { MAX_ATTACHMENT_BYTES, MAX_RUN_ATTACHMENTS } from "../shared/intake-limits";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -201,13 +202,17 @@ const vResultAction = v.object({
 });
 
 function eventStep(type: string, payload: unknown) {
-  if (!["progress", "checkpoint", "operation_result", "caption"].includes(type))
+  if (!["progress", "checkpoint", "operation_result", "caption", "step"].includes(type))
     return undefined;
   const record =
     payload && typeof payload === "object" && !Array.isArray(payload)
       ? (payload as Record<string, unknown>)
       : {};
-  // The AI harness narrates its work as captions; they are the Dock's steps.
+  // What the AI harness is doing now is the Dock's step.
+  if (type === "step")
+    return record.status === "running" && typeof record.label === "string" && record.label.trim()
+      ? record.label.replace(/\*/g, "").trim().slice(0, 240)
+      : undefined;
   if (type === "caption")
     return typeof record.text === "string" && record.text.trim()
       ? record.text.trim().slice(0, 240)
@@ -460,6 +465,7 @@ function durableArtifactWritesArmRunUndo(
   operations: ReadonlyArray<{
     type: string;
     status: string;
+    input?: unknown;
     affected: Array<{ type: string; id: string }>;
     pendingArtifactId?: string;
   }>,
@@ -467,11 +473,13 @@ function durableArtifactWritesArmRunUndo(
   return operations.some(
     (operation) =>
       operation.status === "executed" &&
-      (operation.type === "artifact.create" ||
+      (((operation.type === "artifact.create" ||
         operation.type === "artifact.update") &&
-      operation.affected.some(
-        (item) => item.type === "artifact" && Boolean(item.id),
-      ),
+        operation.affected.some(
+          (item) => item.type === "artifact" && Boolean(item.id),
+        )) ||
+        (operation.type === "app.command" &&
+          commandCanBeReversed((operation.input as { command?: unknown } | undefined)?.command))),
   );
 }
 
@@ -481,6 +489,7 @@ async function durableArtifactWritesArmRunUndoIncludingPending(
   operations: ReadonlyArray<{
     type: string;
     status: string;
+    input?: unknown;
     affected: Array<{ type: string; id: string }>;
     pendingArtifactId?: string;
   }>,
@@ -1688,8 +1697,14 @@ export const appendEvents = mutation({
   },
   handler: async (ctx, args) => {
     const { run } = await requireOwnedRun(ctx, args.runId);
+    // The worker learns Stop and new messages from its event writes.
+    const stopped = run.executionId !== args.executionId || isTerminalRunStatus(run.status);
+    const harness = stopped
+      ? null
+      : await ctx.db.query("spectraHarnessStates").withIndex("by_run", (q) => q.eq("runId", args.runId)).unique();
+    const signals = { stopped, steerWaiting: Boolean(harness?.steers?.length) };
     if (run.executionId !== args.executionId || args.events.length === 0)
-      return { ignored: true, sequence: run.eventSequence ?? 0, count: 0 };
+      return { ignored: true, sequence: run.eventSequence ?? 0, count: 0, ...signals };
     const terminalTypes = new Set([
       "final",
       "error",
@@ -1707,7 +1722,7 @@ export const appendEvents = mutation({
         ? args.events.filter((event) => terminalTypes.has(event.type))
         : args.events;
     if (allowed.length === 0)
-      return { ignored: true, sequence: run.eventSequence ?? 0, count: 0 };
+      return { ignored: true, sequence: run.eventSequence ?? 0, count: 0, ...signals };
     // Streaming writes many non-terminal batches; only a batch carrying a
     // terminal event needs the run's history to stay idempotent.
     const needsTerminalCheck = allowed.some((event) =>
@@ -1734,7 +1749,7 @@ export const appendEvents = mutation({
         !existingTerminalTypes.has(event.type),
     );
     if (unique.length === 0)
-      return { ignored: true, sequence: run.eventSequence ?? 0, count: 0 };
+      return { ignored: true, sequence: run.eventSequence ?? 0, count: 0, ...signals };
     const now = Date.now();
     let sequence = run.eventSequence ?? 0;
     for (const event of unique) {
@@ -1756,7 +1771,7 @@ export const appendEvents = mutation({
         ? { dockSummary: dockSummaryAfterEvents(run, unique) }
         : {}),
     });
-    return { ignored: false, sequence, count: unique.length };
+    return { ignored: false, sequence, count: unique.length, ...signals };
   },
 });
 
@@ -3147,7 +3162,7 @@ export const resetForRetry = mutation({
       )
     ) {
       throw new Error(
-        "This run may have partially applied changes. Review its details and use a follow-up command instead of retrying.",
+        "Part of this run is already saved, so it can't start over. Send a message to carry on from there.",
       );
     }
     const now = Date.now();

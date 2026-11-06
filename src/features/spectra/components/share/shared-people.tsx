@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
+import { useCalmQuery } from "../../data/use-calm-query";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { Copy, Share2, Users } from "@/components/icons/glyph-icons";
@@ -32,7 +33,7 @@ export function SharedPeopleButton({
   onShare?: () => void;
   onCopy?: () => void;
 }) {
-  const people = useQuery(api.sharingPeople.forArtifact, useAuthedArgs({ artifactId: artifactId as Id<"spectraArtifacts"> }));
+  const people = useCalmQuery(api.sharingPeople.forArtifact, useAuthedArgs({ artifactId: artifactId as Id<"spectraArtifacts"> }));
   const setEveryone = useMutation(api.sharingPeople.setEveryoneCanEdit);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);

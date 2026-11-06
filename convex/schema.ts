@@ -1444,6 +1444,8 @@ export default defineSchema({
     pendingProvider: v.optional(providerProjectionIntent),
     providerReceipt: v.optional(providerProjectionReceipt),
     overlayHash: v.optional(v.string()),
+    /** A timetable slot's lessons exist up to `through` for this version of the slot. */
+    lessonWindow: v.optional(v.object({ hash: v.string(), through: v.string() })),
     state: v.union(
       v.literal("active"),
       v.literal("detached"),
@@ -1661,6 +1663,8 @@ export default defineSchema({
     officialDeadlineItemId: v.optional(v.id("calendarItems")),
     linkedArtifactIds: v.array(v.id("spectraArtifacts")),
     recurrence: v.optional(v.string()),
+    /** Shared by the events of one repeating lesson. Each is a real event, so one can move or go alone. */
+    seriesId: v.optional(v.string()),
     legacyArtifactId: v.optional(v.id("spectraArtifacts")),
     legacyEventId: v.optional(v.string()),
     /** Caller-owned identity for retrying one scheduled work-block request. */
@@ -1689,7 +1693,8 @@ export default defineSchema({
     .index("by_plan_task", ["planArtifactId", "planTaskId"])
     .index("by_task_item", ["taskItemId"])
     .index("by_legacy_event", ["legacyArtifactId", "legacyEventId"])
-    .index("by_schedule_idempotency", ["ownerAccountId", "idempotencyKey"]),
+    .index("by_schedule_idempotency", ["ownerAccountId", "idempotencyKey"])
+    .index("by_account_series", ["ownerAccountId", "seriesId"]),
 
   // Calendar discovery never needs the payload-bearing planner/timetable
   // artifact or the canonical calendar row. These two compact tables are
@@ -2065,6 +2070,8 @@ export default defineSchema({
     .index("by_phase_updated", ["phase", "updatedAt"]),
 
   spectraArtifacts: defineTable({
+    // Set by a rename until the live document says something else.
+    renamedFromTitle: v.optional(v.string()),
     ownerAccountId: v.id("accounts"),
     schoolId: v.optional(v.id("schools")),
     resourceClass: v.optional(
@@ -2892,6 +2899,34 @@ export default defineSchema({
     .index("by_account_updated", ["accountId", "updatedAt"])
     .index("by_artifact_updated", ["artifactId", "updatedAt"])
     .index("by_kind_updated", ["kind", "updatedAt"]),
+
+  // The notes Spectra keeps about a user (shared/memory-files.ts). This row is
+  // everything always loaded, so a run start reads one small document.
+  spectraMemoryHeads: defineTable({
+    accountId: v.id("accounts"),
+    schoolId: v.id("schools"),
+    about: v.string(),
+    preferences: v.string(),
+    topics: v.array(
+      v.object({
+        slug: v.string(),
+        title: v.string(),
+        summary: v.string(),
+        chars: v.number(),
+        updatedAt: v.number(),
+      }),
+    ),
+    updatedAt: v.number(),
+  }).index("by_account", ["accountId"]),
+
+  spectraMemoryTopics: defineTable({
+    accountId: v.id("accounts"),
+    slug: v.string(),
+    title: v.string(),
+    summary: v.string(),
+    content: v.string(),
+    updatedAt: v.number(),
+  }).index("by_account_slug", ["accountId", "slug"]),
 
   memoryPreferences: defineTable({
     accountId: v.id("accounts"),
@@ -5126,6 +5161,15 @@ export default defineSchema({
    * open question or approval, the user's answer, and messages the user sent
    * while the run worked. One row per run (spectraHarness.ts).
    */
+  // The loop's transcript at its last checkpoint: large, so it lives apart from
+  // the small bookkeeping row, which every tool call and steer touches.
+  spectraHarnessCheckpoints: defineTable({
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+    state: v.any(),
+    updatedAt: v.number(),
+  }).index("by_run", ["runId"]),
+
   spectraHarnessStates: defineTable({
     runId: v.id("spectraAiRuns"),
     ownerAccountId: v.id("accounts"),

@@ -9,6 +9,7 @@ import { isArtifactTypeKey } from "../src/features/spectra/artifacts/registry";
 import { withoutDerivedNativeBinding, withoutFileOwnedFields } from "../src/features/spectra/artifacts/native-binding";
 import { assertPlannerSourceEdit } from "../shared/planner-source.mjs";
 import { isDurableContentRef } from "../shared/durable-content";
+import { unpackOperationInput } from "../shared/operation-content";
 
 export type ArtifactWriteScope = {
   version: 1;
@@ -219,7 +220,7 @@ async function artifactAdmissionContext(ctx: MutationCtx, args: AdmissionIdentit
   const access = await requireActorArtifactCapability(ctx, actor, args.artifactId, "modify");
   const artifact = access.loaded!.resource as Doc<"spectraArtifacts">;
   const scope = preparedArtifactScope(operation);
-  const input = artifactOutput(operation.input);
+  const input = artifactOutput(unpackOperationInput(operation.input));
   if (!scope || !["artifact.create", "artifact.update"].includes(operation.type) ||
       await artifactOperationTarget(ctx, operation) !== args.artifactId ||
       scope.artifactId !== args.artifactId || scope.runId !== run._id || scope.executionId !== run.executionId ||
@@ -270,6 +271,25 @@ export async function assertAiArtifactWriteAdmission(ctx: MutationCtx, args: Adm
   return assertAdmissionEvidence(ctx, admission, evidence);
 }
 
+/** Where a saved result left what was asked for, to make the refusal debuggable. */
+function firstContentDifference(want: unknown, got: unknown, path = ""): string {
+  if (JSON.stringify(want) === JSON.stringify(got)) return "";
+  if (want && got && typeof want === "object" && typeof got === "object") {
+    for (const key of new Set([...Object.keys(want), ...Object.keys(got)])) {
+      const found = firstContentDifference((want as Record<string, unknown>)[key], (got as Record<string, unknown>)[key], `${path}/${key}`);
+      if (found) return found;
+    }
+    return path || "/";
+  }
+  if (typeof want === "string" && typeof got === "string") {
+    let at = 0;
+    while (at < want.length && want[at] === got[at]) at += 1;
+    const near = Math.max(0, at - 30);
+    return `${path || "/"}: wanted "${want.slice(near, at + 50)}", got "${got.slice(near, at + 50)}"`;
+  }
+  return `${path || "/"}: wanted ${JSON.stringify(want)?.slice(0, 80)}, got ${JSON.stringify(got)?.slice(0, 80)}`;
+}
+
 /** Shared content calculation for direct admission and the trusted Node signer.
  * This is data, not authority. The caller supplies verified hydrated bytes and
  * server-read operation/source identities, then binds the result in its existing
@@ -293,8 +313,10 @@ export async function buildAiArtifactContentEvidence(args: {
   const expected = resolveArtifactWriteInput(type, before, args.input, args.prompt);
   const afterDigest = await artifactScopeDigest(after);
   const comparable = (content: unknown) => withoutFileOwnedFields(withoutDerivedNativeBinding(content));
-  if (await artifactScopeDigest(comparable(after)) !== await artifactScopeDigest(comparable(expected.content)))
-    throw new Error("AI_ARTIFACT_RESULT_SCOPE_MISMATCH");
+  const comparableAfter = comparable(after);
+  const comparableExpected = comparable(expected.content);
+  if (await artifactScopeDigest(comparableAfter) !== await artifactScopeDigest(comparableExpected))
+    throw new Error(`AI_ARTIFACT_RESULT_SCOPE_MISMATCH: ${firstContentDifference(comparableExpected, comparableAfter)}`);
   return {
     version: 1, operationDigest: args.operationDigest, sourceContentIdentity: args.sourceContentIdentity,
     baseContentDigest: await artifactScopeDigest(before), resultContentDigest: afterDigest,

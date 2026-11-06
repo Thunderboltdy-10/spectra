@@ -1,5 +1,5 @@
 /*
- * npm run eval:ai [-- --only "hello,small document edit"] [-- --group create]
+ * npm run eval:ai [-- --only "hello,small document edit"] [-- --group create] [-- --runtime codex]
  *
  * Plays the Spectra AI eval scenarios against the real model (OpenRouter,
  * with the model, provider and reasoning from the environment) and an
@@ -27,9 +27,36 @@ async function main() {
   const { EVAL_SCENARIOS } = await import("../src/features/spectra/ai/harness/evals/scenarios");
   const { runEvals } = await import("../src/features/spectra/ai/harness/evals/runner");
   const { writeEvalReport } = await import("../src/features/spectra/ai/harness/evals/report");
-  const { modelCaptionWriter } = await import("../src/features/spectra/ai/harness/captions");
+  const { modelThreadTitleWriter } = await import("../src/features/spectra/ai/harness/thread-title");
   const { openRouterModelCaller } = await import("../src/features/spectra/ai/harness/model");
   const { modelSummariser } = await import("../src/features/spectra/ai/harness/run");
+  const { subscriptionModelCaller, runtimeStatus } = await import("../src/features/spectra/ai/harness/subscription-runtime");
+  const { withRuntimeFallback } = await import("../src/features/spectra/ai/harness/subscription-runtime");
+  const { ProviderUnavailableError } = await import("../src/features/spectra/ai/harness/types");
+  const mode = option("runtime")?.[0];
+  const model = option("model")?.[0];
+  const runtime = mode === "codex" || mode === "claude" ? mode : undefined;
+  const statuses = mode ? await runtimeStatus(undefined) : null;
+  if (statuses) console.log(`[eval:ai] codex ${statuses.codex.state} [${statuses.codex.models.map((row: { id: string }) => row.id).join(", ")}], claude ${statuses.claude.state}`);
+  type Caller = typeof openRouterModelCaller;
+  // Each new message in a thread goes to the next runtime, on the plain transcript.
+  const switching = (): Caller => {
+    const order: Caller[] = [subscriptionModelCaller("codex"), subscriptionModelCaller("claude"), openRouterModelCaller];
+    return (input) => order[Math.min(input.messages.filter((message) => message.role === "user").length, order.length) - 1]!(input);
+  };
+  // The subscription stops answering after a turn: the run carries on with OpenRouter.
+  const failingOver = (): Caller => {
+    const codex = subscriptionModelCaller("codex");
+    let calls = 0;
+    const flaky: Caller = (input) => {
+      calls += 1;
+      if (calls >= 2) throw new ProviderUnavailableError("simulated: Codex went away");
+      return codex(input);
+    };
+    return withRuntimeFallback(flaky as never, openRouterModelCaller, (reason) => console.log(`[eval:ai] fell back: ${reason}`));
+  };
+  const callModel: Caller =
+    mode === "switch" ? switching() : mode === "fallback" ? failingOver() : runtime ? subscriptionModelCaller(runtime, model ? { model } : {}) : openRouterModelCaller;
 
   const only = option("only");
   const groups = option("group");
@@ -41,10 +68,15 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`[eval:ai] ${scenarios.length} scenarios with ${process.env.SPECTRA_MODEL_ID}`);
+  console.log(`[eval:ai] ${scenarios.length} scenarios with ${mode ? `${mode}${model ? ` ${model}` : ""}` : process.env.SPECTRA_MODEL_ID}`);
   const results = await runEvals(
     scenarios,
-    { callModel: openRouterModelCaller, captionWriter: modelCaptionWriter, summarise: modelSummariser },
+    {
+      callModel,
+      subscription: Boolean(mode),
+      titleWriter: modelThreadTitleWriter,
+      summarise: modelSummariser,
+    },
     {
       model: process.env.SPECTRA_MODEL_ID,
       onRow: (row) =>

@@ -39,8 +39,7 @@ export function protocolItemForLegacyEvent(
       type: (event.input as { kind?: string } | undefined)?.kind === "approval" ? "approval" : "question",
       request: event,
     };
-  if (type === "caption")
-    return { type: "progress", summary: String(event.text ?? "Working").slice(0, 240) };
+  if (type === "reasoning_delta") return { type: "progress", summary: "Thinking" };
   if (type === "waiting" || type === "interrupted")
     return { type: "wait", reason: event };
   if (type === "final") return { type: "final", result: event };
@@ -65,14 +64,22 @@ export function coalesceTextDeltas(events: readonly QueuedRunEvent[]) {
   for (const event of events) {
     const previous = merged.at(-1);
     const content = `${String(previous?.payload.content ?? "")}${String(event.payload.content ?? "")}`;
-    if (event.type !== "text_delta" || previous?.type !== "text_delta" || content.length > MAX_COALESCED_DELTA) {
+    const continues =
+      previous?.type === event.type &&
+      (event.type === "text_delta" || (event.type === "reasoning_delta" && previous.payload.id === event.payload.id));
+    if (!continues || content.length > MAX_COALESCED_DELTA) {
       merged.push(event);
       continue;
     }
     const runItem = previous.payload.runItem as Record<string, unknown> | undefined;
     merged[merged.length - 1] = {
-      type: "text_delta",
-      payload: { ...previous.payload, content, ...(runItem ? { runItem: { ...runItem, text: content } } : {}) },
+      type: event.type,
+      payload: {
+        ...previous.payload,
+        content,
+        ...(event.payload.done ? { done: true } : {}),
+        ...(runItem && event.type === "text_delta" ? { runItem: { ...runItem, text: content } } : {}),
+      },
     };
   }
   return merged;
@@ -152,8 +159,6 @@ export async function saveAssistantMessage(params: {
   choices?: SpectraPlan["choices"];
   /** The work this run created, edited or referenced: one card each. */
   artifacts?: Array<{ id: string; type: string; title: string; action: string; change?: string }>;
-  /** The past-tense caption naming what the run did. */
-  caption?: string;
   /** Widgets the run showed, so the saved reply shows them again. */
   widgets?: Array<{ id: string; title: string; html: string }>;
   /** The sources the reply cites, so its citations open them. */
@@ -177,7 +182,6 @@ export async function saveAssistantMessage(params: {
       usage: params.usage,
       choices: params.choices ?? null,
       ...(params.artifacts?.length ? { artifacts: params.artifacts } : {}),
-      ...(params.caption ? { caption: params.caption } : {}),
       ...(params.widgets?.length ? { widgets: params.widgets } : {}),
       ...(params.sources?.length ? { sources: params.sources } : {}),
     },

@@ -142,15 +142,6 @@ const COMMANDS: Record<string, ApplicationCommand> = {
     input: z.object({ targetIds: z.array(z.string()).min(1).max(100), patch: z.record(z.string(), z.unknown()) }),
     authority: "local_file",
   },
-  write_memory: {
-    input: z
-      .object({ action: z.enum(["create", "revise", "forget"]), content: z.string().min(1).max(10_000).optional(), memoryId: z.string().optional() })
-      .superRefine((value, ctx) => {
-        if (value.action !== "forget" && !value.content) ctx.addIssue({ code: "custom", path: ["content"], message: "What to remember is required." });
-        if (value.action !== "create" && !value.memoryId) ctx.addIssue({ code: "custom", path: ["memoryId"], message: "A memory id is required." });
-      }),
-    authority: "memory",
-  },
   change_sharing: {
     input: z
       .object({
@@ -299,6 +290,7 @@ const COMMANDS: Record<string, ApplicationCommand> = {
       notes: z.string().max(20_000).optional(),
       allDay: z.boolean().optional(),
       linkedArtifactIds: z.array(z.string()).max(24).optional(),
+      alsoAtLocal: z.array(z.object({ startLocal: z.string(), endLocal: z.string().optional() })).max(200).optional(),
     }),
   },
   move_calendar_block: {
@@ -316,7 +308,7 @@ const COMMANDS: Record<string, ApplicationCommand> = {
   },
   // Finishing or removing an item is the user's own reversible calendar work.
   complete_calendar_block: { input: z.object({ itemId: z.string().min(1), expectedRevision: z.number() }), authority: "content" },
-  remove_calendar_event: { input: z.object({ itemId: z.string().min(1) }), authority: "content" },
+  remove_calendar_event: { input: z.object({ itemId: z.string().min(1), andFollowing: z.boolean().optional() }), authority: "content" },
 };
 
 export const APPLICATION_COMMAND_NAMES = Object.keys(COMMANDS);

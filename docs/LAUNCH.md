@@ -64,6 +64,8 @@ Its public WebSocket URL is `wss://spectra-collaboration-gateway.fly.dev`.
    - Clerk: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` (production `pk_live`/`sk_live`),
      `CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECRET`.
    - Secrets: the keys listed under "Before you start", plus `NEXT_PUBLIC_SPECTRA_COLLAB_URL`.
+   - Codex and Claude Code through the Bridge: `SPECTRA_AGENT_HUB_URL`, on Vercel and Convex, the collaboration
+     gateway's `wss://` address ending in `/_spectra/agent-hub`.
    - Models: `OPENROUTER_API_KEY`, `SPECTRA_MODEL_ID`, `SPECTRA_REASONING_PROFILE`, `SPECTRA_MODEL_PROVIDER`, and the
      optional fallback and judge settings. `OPENROUTER_APP_NAME`, `OPENROUTER_SITE_URL`.
    - Email: `RESEND_API_KEY`, `INVITE_FROM_EMAIL`. `SUPER_ADMIN_EMAILS`, `LOG_LEVEL`.

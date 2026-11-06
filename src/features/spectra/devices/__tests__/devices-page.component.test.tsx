@@ -151,7 +151,7 @@ describe("Devices page", () => {
     render(<DevicesPage />);
     fireEvent.click(screen.getAllByRole("button", { name: "Add files" }).at(-1)!);
     await waitFor(() => expect(h.runLocalDeviceAction).toHaveBeenCalledWith({ action: "add_files" }));
-    fireEvent.click(screen.getByRole("button", { name: "Remove Essay.docx" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop syncing Essay.docx" }));
     expect(screen.getByText("Stop using this file in Spectra?")).toBeTruthy();
     expect(screen.getByText(/The file stays on this computer/)).toBeTruthy();
   });
@@ -170,7 +170,7 @@ describe("Devices page", () => {
 
   it("asks before it stops using a folder", async () => {
     render(<DevicesPage />);
-    fireEvent.click(screen.getByRole("button", { name: "Remove Biology" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop syncing Biology" }));
     expect(h.runLocalDeviceAction).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole("button", { name: "Stop using it" }));
     await waitFor(() => expect(h.runLocalDeviceAction).toHaveBeenCalledWith({ action: "remove_folder", grantId: "grant_a" }));
@@ -219,7 +219,7 @@ describe("Devices page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove this device" }));
     const dialog = await screen.findByRole("alertdialog");
     fireEvent.click(Array.from(dialog.querySelectorAll("button")).find((button) => button.textContent === "Remove")!);
-    await waitFor(() => expect(h.revokeDevice).toHaveBeenCalledWith({ deviceId: "device-here" }));
+    await waitFor(() => expect(h.revokeDevice).toHaveBeenCalledWith({ deviceId: "device-here", removeFiles: false }));
     await waitFor(() => expect(h.local.forgetSession).toHaveBeenCalled());
     expect(h.unpairBridge).toHaveBeenCalled();
   });

@@ -80,7 +80,7 @@ describe("School page", () => {
     expect(screen.getByRole("heading", { level: 1, name: "School" })).toBeTruthy();
     expect(screen.getByText("Lab report")).toBeTruthy();
     expect(screen.queryByText(/CAS/)).toBeNull();
-    expect(screen.getByText(/Up to date. Synced/)).toBeTruthy();
+    expect(screen.getByText(/^Synced (?!from)/)).toBeTruthy();
     // Admin-only connection settings stay hidden for a student.
     await waitFor(() => expect(mocks.identity).toHaveBeenCalled());
     expect(screen.queryByRole("button", { name: "Connection" })).toBeNull();

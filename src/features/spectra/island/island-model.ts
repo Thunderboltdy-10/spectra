@@ -76,6 +76,24 @@ function orderSide(tabs: IslandTab[], saved: readonly string[] | undefined) {
 }
 
 /** The island's tabs, in display order on each side (left to right). */
+/** The tab a sent message shows until the server lists its run. */
+export function pendingRunTab(live: { id: string; runId?: string; threadId?: string | null; prompt: string; startedAt: number }): SpectraRunTab {
+  const key = `pending:${live.id}`;
+  const title = live.prompt.split("\n")[0].slice(0, 80);
+  return {
+    _id: key,
+    runId: live.runId ?? key,
+    threadId: live.threadId ?? key,
+    surface: "chat",
+    createdAt: live.startedAt,
+    updatedAt: live.startedAt,
+    run: { _id: key, status: "running", createdAt: live.startedAt, updatedAt: live.startedAt },
+    thread: { _id: live.threadId ?? key, title },
+  } as unknown as SpectraRunTab;
+}
+
+export const isPendingTab = (runId: string) => runId.startsWith("pending:");
+
 export function arrangeTabs(
   tabs: readonly SpectraRunTab[],
   {

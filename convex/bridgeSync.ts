@@ -1,10 +1,11 @@
 import { v } from "convex/values";
 import { query } from "./functions";
+import { internal } from "./_generated/api";
 import { internalMutation, mutation } from "./orgNodeMutation";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
-import { createFolderNode, placeSourceNode, purgeSourceNodes, trashNode, findPrimaryNode, moveNode, renameNode, restoreTrashedNode, ensureGeneralNode } from "./orgTreeShared";
+import { createFolderNode, placeSourceNode, purgeNode, purgeSourceNodes, trashNode, findPrimaryNode, moveNode, renameNode, restoreTrashedNode, ensureGeneralNode } from "./orgTreeShared";
 import { z } from "zod";
 import {
   activeReplicaWriteTarget,
@@ -91,6 +92,57 @@ async function requireDevice(ctx: Parameters<typeof getActorForAccountId>[0], cr
   if (!actor) throw new Error("BRIDGE_ACCOUNT_UNAVAILABLE");
   return { device, actor };
 }
+
+/**
+ * What a Bridge waits on. A live subscription costs nothing while nothing
+ * changes, so the Bridge only claims work when there is some. `busy` means
+ * this computer has queued work to retry; a pending transition only wakes it,
+ * since another computer may be the one holding that file.
+ */
+export const workSignal = query({
+  args: { credential: v.string() },
+  handler: async (ctx, args) => {
+    const credentialHash = await digest(z.string().min(32).max(256).parse(args.credential));
+    const device = await ctx.db.query("bridgeDevices").withIndex("by_credential_hash", (q) => q.eq("credentialHash", credentialHash)).unique();
+    if (!device || device.state !== "active") throw new Error("BRIDGE_CREDENTIAL_INVALID");
+    const [write, fs, transition] = await Promise.all([
+      ctx.db.query("bridgeWriteRequests").withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "pending")).first(),
+      ctx.db.query("bridgeFsRequests").withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "pending")).first(),
+      ctx.db.query("storageStrategyTransitions").withIndex("by_account_state", (q) => q.eq("accountId", device.accountId).eq("state", "pending")).first(),
+    ]);
+    return {
+      busy: Boolean(write || fs),
+      write: write?._id ?? null,
+      fs: fs?._id ?? null,
+      transition: transition?._id ?? null,
+    };
+  },
+});
+
+const AGENT_HUB_TICKET_MS = 10 * 60_000;
+
+/**
+ * A short-lived ticket for the agent hub, for the Bridge that holds this
+ * device's credential. It names the account the hub may route to this computer.
+ */
+export const agentHubTicket = mutation({
+  args: { credential: v.string() },
+  handler: async (ctx, args) => {
+    const { device } = await requireDevice(ctx, args.credential);
+    const url = process.env.SPECTRA_AGENT_HUB_URL?.trim();
+    const secret = process.env.SPECTRA_COLLAB_BRIDGE_KEY;
+    if (!url || !secret) return { url: null, ticket: null };
+    const base64url = (bytes: Uint8Array) =>
+      btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const encoder = new TextEncoder();
+    const body = base64url(
+      encoder.encode(JSON.stringify({ sub: String(device.accountId), exp: Date.now() + AGENT_HUB_TICKET_MS, aud: "spectra-agent-hub" })),
+    );
+    const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(body));
+    return { url, ticket: `${body}.${base64url(new Uint8Array(signature))}` };
+  },
+});
 
 type BridgeActor = NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>;
 
@@ -333,6 +385,115 @@ export const registerMount = mutation({
 });
 
 /** Reconcile resources absent from a completed scan without deleting bytes. */
+/** A file the Bridge can no longer find in its folder: restore it or mark it gone. */
+async function markReplicaMissing(
+  ctx: MutationCtx,
+  actor: BridgeActor,
+  mountId: Id<"bridgeMounts">,
+  replica: Doc<"workReplicas">,
+) {
+    if (!(await hasArtifactModify(ctx, actor, replica.workId))) return "skipped" as const;
+    const policy = await computeEffectivePolicy(ctx, actor.accountId, { account: String(actor.accountId), mount: String(mountId), item: String(replica.workId) });
+    const cloud = await ctx.db.query("workReplicas")
+      .withIndex("by_work_kind", (q) => q.eq("workId", replica.workId).eq("kind", "cloud"))
+      .unique();
+    const action = decideMissingResourceAction(policy.structure, Boolean(cloud?.payloadRef && cloud.contentHash));
+    if (action === "restore-to-disk" && cloud?.payloadRef && cloud.contentHash && replica.deviceId && replica.mountId && replica.localResourceId && replica.relativePath) {
+      const idempotencyKey = await deriveSyncIdempotencyKey({
+        workId: String(replica.workId),
+        target: localMaterializationTarget(String(replica.mountId), replica.relativePath),
+        baseRevision: replica.revision,
+        targetRevision: cloud.contentHash,
+        direction: "cloud-to-local",
+      });
+      const existing = await bridgeWriteForTarget(ctx, {
+        accountId: actor.accountId,
+        idempotencyKey,
+        replicaId: replica._id,
+        workId: replica.workId,
+        baseRevision: replica.revision,
+        targetRevision: cloud.revision,
+      });
+      if (!existing) {
+        const now = Date.now();
+        await ctx.db.insert("bridgeWriteRequests", {
+          accountId: actor.accountId,
+          workId: replica.workId,
+          replicaId: replica._id,
+          deviceId: replica.deviceId,
+          mountId: replica.mountId,
+          localResourceId: replica.localResourceId,
+          relativePath: replica.relativePath,
+          payloadRef: cloud.payloadRef,
+          baseRevision: replica.revision,
+          targetRevision: cloud.revision,
+          contentHash: cloud.contentHash,
+          idempotencyKey,
+          regionIds: [],
+          partNames: [],
+          projectionBaseContent: cloud.projectionBaseContent,
+          projectionBaseContentHash: cloud.projectionBaseContentHash,
+          projectionBaseTextIndex: cloud.projectionBaseTextIndex,
+          projectionBaseFidelityMap: cloud.projectionBaseFidelityMap,
+          state: "pending",
+          retryAt: now,
+          attemptCount: 0,
+          expiresAt: now + BRIDGE_WRITE_EXPIRES_MS,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await ctx.db.insert("syncOperations", {
+          accountId: actor.accountId,
+          workId: replica.workId,
+          replicaId: replica._id,
+          idempotencyKey,
+          direction: "cloud-to-local",
+          revisionBefore: replica.revision,
+          revisionAfter: cloud.revision,
+          state: "pending",
+          actorKind: "restore",
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      await ctx.db.patch(replica._id, { state: "pending", unavailableReason: "restoring-from-cloud", updatedAt: Date.now() });
+      return "restoring" as const;
+    }
+    const reason = action === "ask" ? "missing-awaiting-decision" : "missing-on-disk";
+    await ctx.db.patch(replica._id, { state: "unavailable", unavailableReason: reason, updatedAt: Date.now() });
+    return "unavailable" as const;
+}
+
+/** The Bridge names what went missing; files still there are not touched. */
+export const reportMissingResources = mutation({
+  args: {
+    credential: v.string(),
+    mountId: v.id("bridgeMounts"),
+    localResourceIds: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { device, actor } = await requireDevice(ctx, args.credential);
+    const mount = await ctx.db.get(args.mountId);
+    if (!mount || mount.deviceId !== device._id || mount.accountId !== actor.accountId) throw new Error("MOUNT_NOT_ACTIVE");
+    if (args.localResourceIds.length > 100) throw new Error("DISCOVERY_PAGE_SIZE_INVALID");
+    let unavailable = 0;
+    let restoring = 0;
+    for (const localResourceId of args.localResourceIds) {
+      const replicas = await ctx.db.query("workReplicas")
+        .withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", localResourceId))
+        .take(10);
+      for (const replica of replicas) {
+        if (replica.mountId !== mount._id || replica.kind !== "local" || replica.state === "unavailable") continue;
+        const result = await markReplicaMissing(ctx, actor, mount._id, replica);
+        if (result === "unavailable") unavailable += 1;
+        if (result === "restoring") restoring += 1;
+      }
+    }
+    return { unavailable, restoring };
+  },
+});
+
+/** A Bridge from before reportMissingResources still calls this; it finds nothing to do. */
 export const reconcileMissingResources = mutation({
   args: {
     credential: v.string(),
@@ -340,97 +501,63 @@ export const reconcileMissingResources = mutation({
     scanId: v.string(),
     cursor: v.optional(v.string()),
   },
+  handler: async () => ({ unavailable: 0, restoring: 0, continueCursor: "", isDone: true }),
+});
+
+const OFFICE_FORMATS = new Set(["docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm", "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam", "spectra-pkg"]);
+const isOfficeFormat = (format: string) => OFFICE_FORMATS.has(format.toLowerCase());
+const formatOfPath = (path: string) => path.split(".").pop()?.toLowerCase() ?? "";
+
+/**
+ * Takes out what folders imported before sync became Office-only. The files on
+ * the computer are untouched: this removes Spectra's listing of them, and any
+ * folder that held nothing else. Run once per deployment:
+ *   npx convex run bridgeSync:purgeNonOfficeResources
+ */
+export const purgeNonOfficeResources = internalMutation({
+  args: { cursor: v.optional(v.union(v.string(), v.null())), removed: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    const { device, actor } = await requireDevice(ctx, args.credential);
-    const mount = await ctx.db.get(args.mountId);
-    if (!mount || mount.deviceId !== device._id || mount.accountId !== actor.accountId || mount.lastScanId !== args.scanId) throw new Error("MOUNT_SCAN_NOT_CURRENT");
-    const page = await ctx.db.query("workReplicas")
-      .withIndex("by_mount", (q) => q.eq("mountId", mount._id))
-      .paginate({ cursor: args.cursor ?? null, numItems: 100 });
-    let unavailable = 0;
-    let restoring = 0;
+    const page = await ctx.db.query("workReplicas").paginate({ cursor: args.cursor ?? null, numItems: 100 });
+    let removed = args.removed ?? 0;
+    const parents = new Set<Id<"orgNodes">>();
     for (const replica of page.page) {
-      if (replica.kind !== "local" || replica.lastSeenScanId === args.scanId || replica.state === "unavailable") continue;
-      if (!(await hasArtifactModify(ctx, actor, replica.workId))) continue;
-      const policy = await computeEffectivePolicy(ctx, actor.accountId, { account: String(actor.accountId), mount: String(mount._id), item: String(replica.workId) });
-      const cloud = await ctx.db.query("workReplicas")
-        .withIndex("by_work_kind", (q) => q.eq("workId", replica.workId).eq("kind", "cloud"))
-        .unique();
-      const action = decideMissingResourceAction(policy.structure, Boolean(cloud?.payloadRef && cloud.contentHash));
-      if (action === "restore-to-disk" && cloud?.payloadRef && cloud.contentHash && replica.deviceId && replica.mountId && replica.localResourceId && replica.relativePath) {
-        const idempotencyKey = await deriveSyncIdempotencyKey({
-          workId: String(replica.workId),
-          target: localMaterializationTarget(String(replica.mountId), replica.relativePath),
-          baseRevision: replica.revision,
-          targetRevision: cloud.contentHash,
-          direction: "cloud-to-local",
-        });
-        const existing = await bridgeWriteForTarget(ctx, {
-          accountId: actor.accountId,
-          idempotencyKey,
-          replicaId: replica._id,
-          workId: replica.workId,
-          baseRevision: replica.revision,
-          targetRevision: cloud.revision,
-        });
-        if (!existing) {
-          const now = Date.now();
-          await ctx.db.insert("bridgeWriteRequests", {
-            accountId: actor.accountId,
-            workId: replica.workId,
-            replicaId: replica._id,
-            deviceId: replica.deviceId,
-            mountId: replica.mountId,
-            localResourceId: replica.localResourceId,
-            relativePath: replica.relativePath,
-            payloadRef: cloud.payloadRef,
-            baseRevision: replica.revision,
-            targetRevision: cloud.revision,
-            contentHash: cloud.contentHash,
-            idempotencyKey,
-            regionIds: [],
-            partNames: [],
-            projectionBaseContent: cloud.projectionBaseContent,
-            projectionBaseContentHash: cloud.projectionBaseContentHash,
-            projectionBaseTextIndex: cloud.projectionBaseTextIndex,
-            projectionBaseFidelityMap: cloud.projectionBaseFidelityMap,
-            state: "pending",
-            retryAt: now,
-            attemptCount: 0,
-            expiresAt: now + BRIDGE_WRITE_EXPIRES_MS,
-            createdAt: now,
-            updatedAt: now,
-          });
-          await ctx.db.insert("syncOperations", {
-            accountId: actor.accountId,
-            workId: replica.workId,
-            replicaId: replica._id,
-            idempotencyKey,
-            direction: "cloud-to-local",
-            revisionBefore: replica.revision,
-            revisionAfter: cloud.revision,
-            state: "pending",
-            actorKind: "restore",
-            createdAt: now,
-            updatedAt: now,
-          });
-        }
-        await ctx.db.patch(replica._id, { state: "pending", unavailableReason: "restoring-from-cloud", updatedAt: Date.now() });
-        restoring += 1;
-        continue;
+      if (replica.kind !== "local" || !replica.relativePath || isOfficeFormat(formatOfPath(replica.relativePath))) continue;
+      const work = await ctx.db.get(replica.workId);
+      if (work && (work.resourceClass !== "resource" || isOfficeFormat(work.nativeFormat ?? ""))) continue;
+      if (work) {
+        const node = await findPrimaryNode(ctx, work.ownerAccountId, "work", String(work._id));
+        if (node?.parentId) parents.add(node.parentId);
+        await purgeSourceNodes(ctx, "work", String(work._id));
+        await ctx.db.delete(work._id);
       }
-      const reason = action === "ask" ? "missing-awaiting-decision" : "missing-on-disk";
-      await ctx.db.patch(replica._id, { state: "unavailable", unavailableReason: reason, updatedAt: Date.now() });
-      unavailable += 1;
+      await ctx.db.delete(replica._id);
+      removed += 1;
     }
-    return {
-      unavailable,
-      restoring,
-      continueCursor: page.continueCursor,
-      isDone: page.isDone,
-    };
+    for (const parentId of parents) await removeEmptyImportedFolders(ctx, parentId);
+    if (page.isDone) return { removed };
+    await ctx.scheduler.runAfter(0, internal.bridgeSync.purgeNonOfficeResources, { cursor: page.continueCursor, removed });
+    return { removed, continuing: true };
   },
 });
+
+async function removeEmptyImportedFolders(ctx: MutationCtx, start: Id<"orgNodes">) {
+  let current: Id<"orgNodes"> | null = start;
+  while (current) {
+    const folder: Doc<"orgNodes"> | null = await ctx.db.get(current);
+    if (!folder || folder.kind !== "folder" || (folder.childCount ?? 1) > 0) return;
+    const child = await ctx.db.query("orgNodes")
+      .withIndex("by_account_parent_order", (q) => q.eq("accountId", folder.accountId).eq("parentId", folder._id))
+      .first();
+    if (child) return;
+    const isMountRoot = await ctx.db.query("bridgeMounts")
+      .withIndex("by_account_state", (q) => q.eq("accountId", folder.accountId))
+      .filter((q) => q.eq(q.field("rootOrgNodeId"), folder._id))
+      .first();
+    if (isMountRoot) return;
+    current = folder.parentId;
+    await purgeNode(ctx, folder);
+  }
+}
 
 /** Re-drive structure claims. Replica byte writes are compensated by
  * replicas:sweepReplicaTruth so there is exactly one owner for that machine. */
@@ -453,6 +580,9 @@ export const sweepStaleBridgeWork = internalMutation({
   },
 });
 
+/** How long an unchanged file's replica goes between writes of its last-verified time. */
+const REPLICA_VERIFY_REFRESH_MS = 24 * 60 * 60 * 1000;
+
 const discoveredResourceSchema = z.object({
   localResourceId: z.string().regex(/^lr_[a-f0-9]+$/),
   relativePath: z.string().min(1).max(1024).refine((value) => !value.startsWith("/") && !/^[A-Za-z]:/.test(value) && !value.split(/[\\/]/).includes("..")),
@@ -468,6 +598,7 @@ async function discoverResourceForMount(
   mount: Doc<"bridgeMounts"> & { rootOrgNodeId: Id<"orgNodes"> },
   input: z.infer<typeof discoveredResourceSchema>,
 ) {
+    if (!isOfficeFormat(input.nativeFormat)) return { skipped: true as const, reason: "filtered" as const };
     if (mount.selectedFile && input.relativePath !== mount.selectedFile) throw new Error("BRIDGE_FILE_SELECTION_PATH_NOT_ALLOWED");
     const isOfficeOwnerLock = input.relativePath.replaceAll("\\", "/").split("/").pop()?.startsWith("~$") ?? false;
     if (isOfficeOwnerLock) {
@@ -555,7 +686,15 @@ async function discoverResourceForMount(
               : nativePayloadAllowed
                 ? "ahead" as const
                 : "current" as const;
-      await ctx.db.patch(existingReplica._id, {
+      const unchanged =
+        !changed &&
+        existingReplica.mountId === mount._id &&
+        existingReplica.localResourceId === input.localResourceId &&
+        existingReplica.relativePath === input.relativePath &&
+        existingReplica.state === nextState &&
+        existingReplica.errorCode !== "office-locked" &&
+        verifiedAt - (existingReplica.lastVerifiedAt ?? 0) < REPLICA_VERIFY_REFRESH_MS;
+      if (!unchanged) await ctx.db.patch(existingReplica._id, {
         mountId: mount._id,
         localResourceId: input.localResourceId,
         relativePath: input.relativePath,
@@ -571,7 +710,6 @@ async function discoverResourceForMount(
           ? { unavailableReason: undefined, errorCode: undefined, errorMessage: undefined, errorAt: undefined }
           : {}),
         lastVerifiedAt: input.contentHash ? verifiedAt : existingReplica.lastVerifiedAt,
-        lastSeenScanId: mount.lastScanId,
         updatedAt: verifiedAt,
       });
       if (
@@ -705,7 +843,7 @@ async function discoverResourceForMount(
     const parentId = await ensureFolderPath(ctx, actor.accountId, actor.schoolId, base, parts);
     const now = Date.now();
     const workId = await ctx.db.insert("spectraArtifacts", { ownerAccountId: actor.accountId, schoolId: actor.schoolId, blueprintKey: "resource", resourceClass: "resource", nativeFormat: input.nativeFormat, compatibilityProfile: "strict-native", title, summary: formatByteCount(input.size), content: null, schemaVersion: 1, contentHash: input.contentHash, tags: [], status: "active", createdFrom: { source: "manual" }, createdAt: now, updatedAt: now });
-    const replicaId = await ctx.db.insert("workReplicas", { accountId: actor.accountId, workId, kind: "local", deviceId: device._id, mountId: mount._id, localResourceId: input.localResourceId, relativePath: input.relativePath, nativeFormat: input.nativeFormat, revision: input.contentHash ?? `discovered:${input.localResourceId}`, contentHash: input.contentHash, state: input.contentHash && mountPolicy.cloudContent !== "full" ? "current" : "ahead", lastVerifiedAt: input.contentHash ? now : undefined, lastSeenScanId: mount.lastScanId, updatedAt: now });
+    const replicaId = await ctx.db.insert("workReplicas", { accountId: actor.accountId, workId, kind: "local", deviceId: device._id, mountId: mount._id, localResourceId: input.localResourceId, relativePath: input.relativePath, nativeFormat: input.nativeFormat, revision: input.contentHash ?? `discovered:${input.localResourceId}`, contentHash: input.contentHash, state: input.contentHash && mountPolicy.cloudContent !== "full" ? "current" : "ahead", lastVerifiedAt: input.contentHash ? now : undefined, updatedAt: now });
     await placeSourceNode(ctx, { accountId: actor.accountId, schoolId: actor.schoolId, kind: "work", sourceId: String(workId), name: title, target: { parentId }, typeKey: "resource", placedByAccountId: actor.accountId });
     if (discoveryRequest) await ctx.db.delete(discoveryRequest._id);
     return {

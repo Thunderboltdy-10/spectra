@@ -1,3 +1,4 @@
+import { traceEvent, traceSpan } from "@/features/spectra/ai/harness/run-trace";
 import "server-only";
 import { runLog } from "./run-log";
 
@@ -1319,6 +1320,7 @@ async function applyAiArtifactMutationAttempt(params: {
       () =>
         `AI_ARTIFACT_CONNECT_TIMEOUT: The live artifact could not be synchronized within 12s (status=${connectionStatus}, opened=${opened}, authenticated=${authenticated || provider.isAuthenticated}, syncEvent=${syncEventReceived}, synced=${provider.synced}, elapsedMs=${Date.now() - connectStartedAt}). Fast-fail so pending shells can be discarded instead of pulsing indefinitely.`,
     );
+    traceEvent("yjs.connect", { ms: Date.now() - connectStartedAt });
     runLog().info("spectra.ai.artifact.connect", {
       artifactId: params.artifactId,
       runId: params.runId,
@@ -1379,7 +1381,7 @@ async function applyAiArtifactMutationAttempt(params: {
     // Give the gateway one bounded paint window to fan out the AI collaborator
     // before a fast Yjs transaction can finish and tear down the provider.
     if (claimActorKind === "ai") {
-      await new Promise<void>((resolve) => setTimeout(resolve, 350));
+      await traceSpan("yjs.ai_wait", {}, () => new Promise<void>((resolve) => setTimeout(resolve, 350)));
     }
 
     let current = readLiveYjsDocument(document, typeKey);

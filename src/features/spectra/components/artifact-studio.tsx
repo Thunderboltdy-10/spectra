@@ -12,6 +12,7 @@ import { useWorkAvailability } from "./use-work-availability";
 import { Tooltip } from "@/components/ui/tooltip";
 import { DismissibleArtifactNotice } from "./dismissible-artifact-notice";
 import { useQuery } from "convex/react";
+import { useCalmQuery } from "../data/use-calm-query";
 import { toast } from "@/components/ui/toast";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
@@ -2933,7 +2934,7 @@ function ArtifactStudioEditor({
     () => ({ artifactId: artifact._id, onReady: setEditorReady }),
     [artifact._id],
   );
-  const replicaTruth = useQuery(
+  const replicaTruth = useCalmQuery(
     api.replicas.forWork,
     useAuthedArgs({
       workId: artifact._id as never,
@@ -3480,13 +3481,14 @@ function ArtifactStudioEditor({
   const incomingLiveTagDraft = live.liveValue.tags.join(", ");
   const incomingReactBody = nativeBodyBinding ? null : content;
   const incomingLiveSummary = humanSummary(live.liveValue.summary);
+  const incomingTitle = artifact.renamedFromTitle === live.liveValue.title ? artifact.title : live.liveValue.title;
   const incomingSummary =
     workType &&
     isGeneratedArtifactSummary(incomingLiveSummary, workType) &&
     isGeneratedArtifactSummary(humanSummary(artifact.summary), workType)
       ? refreshGeneratedArtifactSummary({
           blueprintKey: workType,
-          title: live.liveValue.title,
+          title: incomingTitle,
           content: live.liveValue.content,
           currentSummary: incomingLiveSummary,
           nextSummary: artifact.summary,
@@ -3494,7 +3496,7 @@ function ArtifactStudioEditor({
       : incomingLiveSummary;
   const incomingSnapshot = useMemo(
     () => ({
-      title: live.liveValue.title,
+      title: incomingTitle,
       summary: incomingSummary,
       tagDraft: incomingLiveTagDraft,
       // Native document/code editors already consume their Yjs types directly.
@@ -3510,7 +3512,7 @@ function ArtifactStudioEditor({
       incomingLiveTagDraft,
       incomingReactBody,
       incomingSummary,
-      live.liveValue.title,
+      incomingTitle,
       nativeBodyBinding,
       nativeProjectionOverrideRef,
       nativeProjectionReady,

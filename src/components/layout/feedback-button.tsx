@@ -167,7 +167,7 @@ export function FeedbackButton({ collapsed }: { collapsed: boolean }) {
           onClick={() => void begin()}
           disabled={capturing}
         >
-          <Icon name="conversations" size={16} aria-hidden="true" />
+          <Icon name="mail" size={16} aria-hidden="true" />
         </button>
       </Tooltip>
       <Dialog open={open} onOpenChange={(next) => (next ? setOpen(true) : sending ? undefined : close())}>

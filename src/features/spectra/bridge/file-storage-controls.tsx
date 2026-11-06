@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
+import { useCalmQuery } from "../data/use-calm-query";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { humanizePublicFailure } from "./humanize";
@@ -31,7 +32,7 @@ export function FileStorageControls({
   artifactTitle: string;
   embedded?: boolean;
 }) {
-  const truth = useQuery(
+  const truth = useCalmQuery(
     api.replicas.forWork,
     useAuthedArgs({
       workId: artifactId as never,

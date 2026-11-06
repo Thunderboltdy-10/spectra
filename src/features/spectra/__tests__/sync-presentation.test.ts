@@ -191,13 +191,15 @@ describe("sync presentation (P1.I3)", () => {
       path.join(root, "src/features/spectra/pages/spectra-shell.tsx"),
       "utf8",
     );
+    const appLayout = fs.readFileSync(path.join(root, "src/app/(app)/layout.tsx"), "utf8");
     const settings = fs.readFileSync(
-      path.join(root, "src/app/settings/page.tsx"),
+      path.join(root, "src/app/(app)/settings/page.tsx"),
       "utf8",
     );
     expect(appShell).toContain("<ProductOfflineBanner");
     expect(workbench).not.toContain("ProductOfflineBanner");
-    expect(settings).toContain("<AppShell");
+    expect(appLayout).toContain("<AppShell");
+    expect(settings).not.toContain("<AppShell");
     const settingsApp = fs.readFileSync(
       path.join(root, "src/features/spectra/settings/ui/settings-application.tsx"),
       "utf8",

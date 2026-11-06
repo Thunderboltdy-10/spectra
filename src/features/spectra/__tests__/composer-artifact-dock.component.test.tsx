@@ -89,9 +89,8 @@ describe("composer artifact membership and pending requests", () => {
     mocks.memberships.set("a", [source._id]);
     host.rerender(dock());
     await act(async () => request.resolve());
-    expect(
-      screen.getByLabelText("Research notes is in this conversation"),
-    ).toBeInTheDocument();
+    // Kept work sits in the thread itself, so its row leaves the dock.
+    expect(screen.queryByLabelText("Work from this conversation")).toBeNull();
     mocks.memberships.set("a", []);
     host.rerender(dock());
     expect(keep()).toBeEnabled();
@@ -136,9 +135,7 @@ describe("composer artifact membership and pending requests", () => {
     mocks.memberships.set("b", [source._id]);
     host.rerender(dock("b"));
     await act(async () => next.resolve());
-    expect(
-      screen.getByLabelText("Research notes is in this conversation"),
-    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Work from this conversation")).toBeNull();
   });
 
   it("lets independent sources finish without clearing each other's pending state", async () => {

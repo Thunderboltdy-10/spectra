@@ -1,3 +1,5 @@
+import { commandCanBeReversed } from "../../../../../../shared/run-undo";
+import type { MemoryChange, MemoryChangeResult } from "../../../../../../shared/memory-files";
 import type {
   ArtifactSnapshot,
   CommandRequest,
@@ -5,6 +7,7 @@ import type {
   HarnessBackend,
   LibraryItem,
   SearchHit,
+  SearchKind,
   SearchRequest,
   SearchResponse,
   ThreadReadRequest,
@@ -23,6 +26,7 @@ import { overlayLiveArtifactRecord } from "@/features/spectra/collaboration/arti
 import { parseModelOperation, type ModelOperation } from "@/features/spectra/operations/schema";
 import { conductParallelResearch } from "@/features/spectra/sources/research/parallel-search";
 import { applicationCommandCategory, LOCAL_FILE_COMMANDS } from "../../../../../../shared/ai-application-approval";
+import { unpackOperationInput } from "../../../../../../shared/operation-content";
 import { SEMANTIC_KINDS, type SemanticResult, type SemanticSearchResponse } from "../../../../../../shared/semantic-types";
 import { loadAgent } from "./agents";
 import { localFileCountForApplicationCommand } from "./authority";
@@ -57,6 +61,8 @@ export type ConvexBackendInput = {
 };
 
 const text = (value: unknown) => (typeof value === "string" ? value : "");
+/** Commands that act on Library rows rather than on the work behind them. */
+const LIBRARY_ROW_COMMANDS = new Set(["organize_library", "delete_library_items", "restore_library_items", "pin_library_item"]);
 const VERSION_SOURCES = new Set<string>(["manual", "ai", "revert", "import", "restore", "migration", "checkpoint"]);
 const EMBED_STATES = new Set<string>(["ready", "no_access", "deleted", "archived", "version_unavailable", "removed"]);
 
@@ -105,7 +111,7 @@ export function timezoneOffsetMinutes(timeZone: string, at = Date.now()) {
 export function searchHit(result: SemanticResult): SearchHit {
   const anchor = result.anchor;
   return {
-    kind: result.kind,
+    kind: result.kind as SearchKind,
     id: result.itemId,
     title: result.title || "Untitled",
     typeLabel: result.typeLabel,
@@ -127,6 +133,36 @@ export function degradedNote(mode: SemanticSearchResponse["mode"], reason?: Sear
   if (mode === "words_only" || reason)
     return "\n(Search matched exact words only right now, not meaning: try the words the item would contain, or list_library.)";
   return "";
+}
+
+/** Repeating lessons read as one line with their other dates, not one line per week. */
+function calendarLines(items: Array<Record<string, unknown>>, timeZone: string) {
+  const series = new Map<string, Array<Record<string, unknown>>>();
+  for (const item of items) {
+    const id = text(item.seriesId);
+    if (id) series.set(id, [...(series.get(id) ?? []), item]);
+  }
+  const lines: string[] = [];
+  const shown = new Set<string>();
+  for (const item of items) {
+    const id = text(item.seriesId);
+    const group = id ? (series.get(id) ?? []) : [];
+    if (group.length < 3) {
+      lines.push(calendarItemLine(item, timeZone));
+      continue;
+    }
+    if (shown.has(id)) continue;
+    shown.add(id);
+    const dates = group.slice(1).map((other) => {
+      try {
+        return new Intl.DateTimeFormat("en-GB", { timeZone, weekday: "short", day: "numeric", month: "short" }).format(new Date(Number(other.startAt)));
+      } catch {
+        return new Date(Number(other.startAt)).toISOString().slice(0, 10);
+      }
+    });
+    lines.push(`${calendarItemLine(item, timeZone)}; repeats, also on ${dates.join(", ")} (read one date for that date's itemId)`);
+  }
+  return lines;
 }
 
 function calendarItemLine(item: Record<string, unknown>, timeZone: string) {
@@ -164,6 +200,8 @@ export class ConvexHarnessBackend implements HarnessBackend {
   readonly toolOperations: Map<string, string[]>;
   /** Something changed in the user's world this run (for the run outcome). */
   executedAny = false;
+  /** A calendar, Library, settings or sharing change that "Undo this run" can reverse. */
+  changedWorkspace = false;
   readonly affected: Array<{ type: string; id: string }> = [];
 
   constructor(private readonly input: ConvexBackendInput) {
@@ -201,13 +239,7 @@ export class ConvexHarnessBackend implements HarnessBackend {
         input: operation.input,
         requiresConfirmation,
       })),
-    });
-    await mutate("spectraHarness:recordToolOperations", {
-      actorClerkId: this.actorClerkId,
-      runId: this.input.runId,
-      executionId: this.input.executionId,
       toolCallId,
-      operationIds,
     });
     this.toolOperations.set(toolCallId, operationIds);
     return operationIds;
@@ -236,7 +268,8 @@ export class ConvexHarnessBackend implements HarnessBackend {
       "spectraRuns:get",
       { actorClerkId: this.actorClerkId, runId: this.input.runId },
     );
-    return detail.operations.find((operation) => operation._id === operationId) ?? null;
+    const operation = detail.operations.find((entry) => entry._id === operationId);
+    return operation ? { ...operation, input: unpackOperationInput(operation.input) } : null;
   }
 
   async getArtifact(id: string, signal: AbortSignal): Promise<ArtifactSnapshot | null> {
@@ -389,6 +422,7 @@ export class ConvexHarnessBackend implements HarnessBackend {
     const args = { ...request.args };
     // "This conversation" is the one the run belongs to.
     if (request.command === "manage_conversation" && !args.threadId && this.input.threadId) args.threadId = this.input.threadId;
+    await this.resolveLibraryTargets(request.command, args);
     let localFiles = 0;
     if (LOCAL_FILE_COMMANDS.has(request.command)) {
       const count = await localFileCountForApplicationCommand(this.actorClerkId, request.command, args);
@@ -399,6 +433,16 @@ export class ConvexHarnessBackend implements HarnessBackend {
     const operation = parseModelOperation({ type: "app.command", input: { command: request.command, args } });
     const requiresConfirmation = applicationCommandCategory(request.command, args) !== null || localFiles > 0;
     return { operation, requiresConfirmation, localFiles };
+  }
+
+  /** The model knows a work by its id; the Library moves, pins and trashes the row that places it. */
+  private async resolveLibraryTargets(command: string, args: Record<string, unknown>) {
+    if (!LIBRARY_ROW_COMMANDS.has(command)) return;
+    const ids = [...(Array.isArray(args.targetIds) ? args.targetIds : []), args.targetId].filter((id): id is string => typeof id === "string" && id.length > 0);
+    if (!ids.length) return;
+    const rows = await query<{ ids: string[] }, Record<string, string>>("orgTree:rowsForWorks", { ids });
+    if (Array.isArray(args.targetIds)) args.targetIds = args.targetIds.map((id) => rows[String(id)] ?? id);
+    if (typeof args.targetId === "string" && args.destination === undefined) args.targetId = rows[args.targetId] ?? args.targetId;
   }
 
   /** Record a command before the run pauses to ask, so approval binds to it. */
@@ -453,6 +497,7 @@ export class ConvexHarnessBackend implements HarnessBackend {
         },
       });
       this.executedAny = true;
+      if (commandCanBeReversed(request.command)) this.changedWorkspace = true;
       this.affected.push(...affected);
       return {
         ok: true,
@@ -535,7 +580,7 @@ export class ConvexHarnessBackend implements HarnessBackend {
   async search(input: SearchRequest): Promise<SearchResponse> {
     const response = await act<unknown & object, SemanticSearchResponse>("semantic:search", {
       query: input.query.trim().slice(0, 500),
-      kinds: input.kinds?.length ? input.kinds : [...SEMANTIC_KINDS],
+      kinds: input.kinds?.length ? input.kinds : SEMANTIC_KINDS.filter((kind): kind is SearchKind => kind !== "memory"),
       limit: Math.max(1, Math.min(30, input.limit)),
       hints: this.searchHints(),
     });
@@ -632,6 +677,17 @@ export class ConvexHarnessBackend implements HarnessBackend {
       snippet: result.content.slice(0, 900),
       ...(result.publishedAt ? { publishedAt: result.publishedAt } : {}),
     }));
+  }
+
+  async readMemoryTopic(slug: string) {
+    return query<unknown & object, { title: string; summary: string; content: string } | null>("spectraMemory:readTopic", {
+      actorClerkId: this.actorClerkId,
+      slug,
+    });
+  }
+
+  async updateMemory(change: MemoryChange) {
+    return mutate<unknown & object, MemoryChangeResult>("spectraMemory:update", { actorClerkId: this.actorClerkId, ...change });
   }
 
   async readComments(input: { artifactId: string; includeResolved?: boolean }): Promise<CommentRow[] | null> {
@@ -854,10 +910,10 @@ export class ConvexHarnessBackend implements HarnessBackend {
     const targeted = rows(overview.targetedItems);
     const unscheduled = rows(overview.unscheduledTasks);
     const lines = [
-      items.length ? `In this range:\n${items.slice(0, 120).map((item) => calendarItemLine(item, timeZone)).join("\n")}` : "Nothing in this range.",
+      items.length ? `In this range:\n${calendarLines(items, timeZone).slice(0, 120).join("\n")}` : "Nothing in this range.",
       targeted.length ? `Matching "${input.title}":\n${targeted.map((item) => calendarItemLine(item, timeZone)).join("\n")}` : "",
       unscheduled.length ? `Tasks without a time:\n${unscheduled.slice(0, 40).map((item) => calendarItemLine(item, timeZone)).join("\n")}` : "",
-      items.length > 120 ? "(More items exist; read a shorter range.)" : "",
+      calendarLines(items, timeZone).length > 120 ? "(More items exist; read a shorter range.)" : "",
     ];
     return clip(lines.filter(Boolean).join("\n\n"));
   }
@@ -872,7 +928,11 @@ export class ConvexHarnessBackend implements HarnessBackend {
     return agent ? { title: agent.title, instructions: agent.instructions } : null;
   }
 
+  /** Not connected, or not verified: it stays true for the rest of the run, so it is read once. */
+  private schoolUnavailable: string | null = null;
+
   async readSchoolData(input: { purpose: string; classId?: string; recordId?: string }): Promise<string> {
+    if (this.schoolUnavailable) return this.schoolUnavailable;
     // Past tasks, grades, CAS and single records come from the School page's own queries.
     if (input.recordId || isSchoolApiPurpose(input.purpose))
       return clip(await readSchoolApi((name, args) => query(name, args), input, this.timeZone));
@@ -883,9 +943,10 @@ export class ConvexHarnessBackend implements HarnessBackend {
     }).catch(() => null);
     if (!result) return "School records could not be read right now.";
     if (result.connected === false)
-      return "ManageBac is not connected for this school, so there are no school records. Do not treat this as the user having no classes or deadlines.";
+      return (this.schoolUnavailable = "ManageBac is not connected for this school, so there are no school records. That doesn't mean they have no classes or deadlines. Don't try again, and say nothing about it unless they asked about ManageBac or their school records.");
     if (result.identityRequired === true)
-      return "ManageBac is connected, but the user's ManageBac identity is not verified yet. They can finish this in Settings.";
+      return (this.schoolUnavailable =
+        "School records aren't available in this conversation. Don't try again and carry on with what you have. Say nothing about it unless they asked about ManageBac or their school records; if they did, they can finish verifying their account in Settings.");
     const records = Array.isArray(result.records) ? result.records : [];
     if (!records.length)
       return `No ${input.purpose.replace(/_/g, " ")} records yet. A ManageBac sync (managebac tool, action sync) may be needed; the user approves it.`;

@@ -26,8 +26,8 @@ vi.mock("./io", async (importOriginal) => {
         return { messages: [] };
       case "spectraThreads:getSummary":
         return { needsTitle };
-      case "memory:listMine":
-        return { claims: [] };
+      case "spectraMemory:head":
+        return { enabled: true, about: "", preferences: "", topics: [] };
       case "bridge:devices":
       case "accountPreferences:layers":
         return [];

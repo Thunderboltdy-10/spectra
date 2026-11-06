@@ -138,7 +138,9 @@ describe("P6.I1 UX debt closure", () => {
     expect(appShell).not.toContain("window.location.assign");
     expect(appShell).not.toContain("window.location.href");
     expect(appShell).toContain("<SignedInContinue");
-    expect(rail).not.toContain("window.location");
+    // The rail reads where you are to remember it, but never navigates by hand.
+    expect(rail).not.toContain("window.location.assign");
+    expect(rail).not.toContain("window.location.href");
     expect(rail).toContain('data-sidebar-recents=""');
     expect(rail).toContain("prefetch={false}");
     // Workspace discovery reads the shared paged catalog: focus reuses a warm

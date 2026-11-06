@@ -33,7 +33,7 @@ export function rememberCommittedArtifactResult(event: {
 
 const SHOWN_LINKS_KEY = "spectra.ai.shownPublicLinks";
 
-/** True the first time this computer shows a link's notice: run events replay
+/** True the first time this computer acts on a run event: run events replay
  * after a reload and reach every tab watching the run. */
 function claimPublicLinkNotice(operationId: string): boolean {
   try {
@@ -371,6 +371,7 @@ function rememberEvent(event: SpectraAiUiEvent): void {
   if (event.key !== "navigate" && event.key !== "navigate_spectra") return;
   const destination = event.payload?.destination;
   const targetId = event.payload?.targetId;
+  showRequestedPlace(event, destination, targetId);
   if (destination === "artifact" && typeof targetId === "string" && targetId) {
     const region = workRegionFrom(event.payload?.region);
     noteAiLocation({
@@ -388,6 +389,22 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     ...(typeof targetId === "string" && targetId ? { target: targetId } : {}),
     note: `Opening ${destination}`,
   });
+}
+
+/** The AI was asked to show something: it opens now, once, on this computer. Replays of older runs do nothing. */
+function showRequestedPlace(event: SpectraAiUiEvent, destination: unknown, targetId: unknown): void {
+  const requestedAt = event.payload?.requestedAt;
+  if (typeof requestedAt !== "number" || Date.now() - requestedAt > 120_000) return;
+  if (!isFollowRoute(destination)) return;
+  const target = typeof targetId === "string" && targetId ? targetId : undefined;
+  if (!claimPublicLinkNotice(`show:${event.runId ?? ""}:${destination}:${target ?? ""}`)) return;
+  if (destination === "artifact") {
+    if (!target) return;
+    const region = workRegionFrom(event.payload?.region);
+    void spectraBus.command("work.open", { workId: target, surface: "panel", ...(region ? { region } : {}) });
+    return;
+  }
+  void spectraBus.command("navigation.show", { route: destination, intent: "explicit", ...(target ? { target } : {}) });
 }
 
 /** Remember durable outcomes without replaying actions that already happened.

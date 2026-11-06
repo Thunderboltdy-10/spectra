@@ -1,7 +1,9 @@
 "use client";
 
+import { useArtifactAiActivity } from "../collaboration/artifact-ai-activity";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { useMutation, useQuery } from "convex/react";
+import { useCalmQuery } from "../data/use-calm-query";
 import { useRef, useState, type ReactNode } from "react";
 import { toast } from "@/components/ui/toast";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -21,9 +23,10 @@ export function useArtifactEmbedContainer(
   containerId: string,
   enabled = true,
 ) {
-  return useQuery(
+  return useCalmQuery(
     api.artifactEmbeds.listForContainer,
     enabled && containerId ? { containerType, containerId } : "skip",
+    { peekMs: 15_000 },
   ) as { embeds: SpectraArtifactEmbed[]; canConfigure: boolean } | undefined;
 }
 
@@ -63,9 +66,15 @@ export function ArtifactEmbedById({
   /** Take the work shown out of its stack, onto a card of its own. */
   onUnstack?: () => void;
 }) {
-  const embed = useQuery(api.artifactEmbeds.getProjection, {
+  const projection = useQuery(api.artifactEmbeds.getProjection, {
     embedId: embedId as Id<"artifactEmbeds">,
   }) as SpectraArtifactEmbed | null | undefined;
+  // While Spectra works on the source, the card keeps its last settled face and
+  // refreshes once when the work is done.
+  const sourceBusy = Boolean(useArtifactAiActivity(projection?.source?.artifactId ?? ""));
+  const settled = useRef(projection);
+  if (!sourceBusy && projection !== undefined) settled.current = projection;
+  const embed = sourceBusy && settled.current ? settled.current : projection;
   const update = useMutation(api.artifactEmbeds.update);
   const remove = useMutation(api.artifactEmbeds.remove);
   const [busy, setBusy] = useState(false);

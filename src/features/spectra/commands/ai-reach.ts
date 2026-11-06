@@ -903,8 +903,8 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     description: "Save or correct something lasting about the user.",
     keywords: ["note", "keep in mind", "preference"],
     ui: ["app.memory.write"],
-    server: ["memory:remember", "memory:correct"],
-    reach: tool("remember", { appCommand: "write_memory", example: { content: "Prefers short answers." } }),
+    server: ["spectraMemory:update"],
+    reach: tool("update_memory", { example: { file: "preferences", add: "Everywhere: prefers short answers." } }),
   },
   {
     id: "memory.forget",
@@ -912,8 +912,8 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     title: "Forget a memory",
     description: "Erase one saved memory for good when the user asks Spectra to forget it.",
     keywords: ["forget", "erase memory", "delete memory"],
-    server: ["memory:forget"],
-    reach: tool("forget_memory", { appCommand: "write_memory", example: { memoryId: "memory-1" } }),
+    server: ["spectraMemory:update"],
+    reach: tool("update_memory", { example: { file: "topic", slug: "mit-interview", remove: true } }),
   },
   {
     id: "memory.manage",
@@ -1050,6 +1050,17 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
  * run machinery, uploads and housekeeping. Each says why.
  */
 export const SERVER_PLUMBING: Readonly<Record<string, string>> = {
+  "landingRequests:submit": "The public landing page's request form; nobody is signed in there.",
+  "landingRequests:setStatus": "Operators triage landing page requests from the admin page.",
+  "memory:remember": "The older memory store, kept for settings; the AI writes its notes through update_memory.",
+  "memory:correct": "The older memory store, kept for settings; the AI writes its notes through update_memory.",
+  "memory:forget": "The older memory store, kept for settings; the AI writes its notes through update_memory.",
+  "spectraHarness:takeSteers": "The run loop collects messages the user sent while it worked.",
+  "spectraHarness:discardCheckpoint": "The run loop drops a resume checkpoint it no longer needs.",
+  "spectraRunUndo:reverseWrites": "The user's own Undo this run button; the AI never undoes itself.",
+  "spectraRunUndo:bringBackCalendarItem": "Undo puts back calendar events the run removed.",
+  "spectraRunUndo:restoreSettingsLayer": "Undo puts back settings the run changed.",
+  "spectraMemory:clear": "Settings clears the AI's notes on the user's own request.",
   "artifactAssets:*": "Upload protocol for work assets.",
   "artifactContent:*": "Upload protocol for work content.",
   "artifactEmbeds:confirmPlacement": "Confirms a provisional placement against the saved version that holds it; the change-group writer does this for Spectra's own placements.",

@@ -214,7 +214,7 @@ export function Overview({
           ) : (
             <p className="flex items-center gap-2.5 text-ui text-[var(--text-secondary)]">
               <Icon name="saved" size={16} accent="var(--success)" />
-              {connection.lastSyncAt ? `Up to date. Synced ${ago(connection.lastSyncAt, now)}.` : "Connected. Nothing synced yet."}
+              {connection.lastSyncAt ? `Synced ${ago(connection.lastSyncAt, now)}.` : connection.problem ? "Nothing has synced yet." : "Connected. Nothing synced yet."}
             </p>
           )}
           <p className="mt-4 text-caption text-[var(--text-tertiary)]">

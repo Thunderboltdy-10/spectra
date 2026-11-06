@@ -1,3 +1,4 @@
+pub mod agent_relay;
 pub mod fs;
 pub mod identity;
 pub mod journal;

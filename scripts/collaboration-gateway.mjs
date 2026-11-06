@@ -1,6 +1,7 @@
 import { Server } from "@hocuspocus/server";
 import { artifactProjection } from "./collaboration-artifact-projection.mjs";
 import { createHash } from "node:crypto";
+import { installAgentHub } from "./agent-hub.mjs";
 import { MAX_ASSEMBLED_BYTES, installServerFraming, selectFrameProtocol } from "../shared/collaboration-framing.mjs";
 import { jwtVerify } from "jose";
 import * as Y from "yjs";
@@ -23,6 +24,8 @@ import {
   shouldCompactRoom,
   shouldRepairNativeProjection,
   shouldRecoverNativeRoom,
+  createRoomLoadCache,
+  mergeRoomLoad,
 } from "./collaboration-room-state.mjs";
 import {
   MAX_DURABLE_UPDATE_BYTES,
@@ -102,6 +105,8 @@ const GATEWAY_PROTOCOL_VERSION = 1;
 const PERSISTENCE_RETRY_MAX_MS = 5_000;
 const PERSISTENCE_REBASE_MAX_ATTEMPTS = 8;
 const GATEWAY_STARTED_AT = Date.now();
+const POLICY_SWEEP_MS = 30_000;
+const roomLoads = createRoomLoadCache();
 const activeConnections = new Set();
 const authorizationGuard = createCollaborationAuthorizationGuard({
   authorize: context => bridge("authorize", {
@@ -223,7 +228,7 @@ function checkpointScheduler(document) {
     maxMs: Number.POSITIVE_INFINITY,
     persist: async (payload) => {
       try {
-        const stored = await bridge("load", payload);
+        const stored = await loadRoom(payload);
         if (!stored || (stored.lastProjectionSequence ?? 0) >= stored.nextSequence - 1) return;
         const canonical = applyStoredRoomUpdates(Y, stored);
         try {
@@ -906,6 +911,19 @@ function extractYjsUpdate(frame) {
   return decoding.readVarUint8Array(decoder);
 }
 
+/** A room this gateway has read before only fetches the updates since then. */
+async function loadRoom(payload) {
+  const { artifactId, partitionKey, policyVersion } = payload;
+  const known = roomLoads.get(artifactId, partitionKey, policyVersion);
+  if (known) {
+    const merged = mergeRoomLoad(known, await bridge("load", { ...payload, afterSequence: known.nextSequence - 1 }));
+    if (merged) return roomLoads.put(artifactId, partitionKey, policyVersion, merged);
+    // The room was reset behind this copy: read it whole.
+    roomLoads.forget(artifactId, partitionKey);
+  }
+  return roomLoads.put(artifactId, partitionKey, policyVersion, await bridge("load", payload));
+}
+
 async function refreshAuthorization(context) {
   return authorizationGuard.refresh(context);
 }
@@ -1367,7 +1385,7 @@ const server = new Server({
 
   async onLoadDocument({ context }) {
     await reauthorize(context);
-    let stored = await bridge("load", {
+    let stored = await loadRoom({
       artifactId: context.artifactId,
       partitionKey: context.partitionKey,
       accountId: context.accountId,
@@ -1412,6 +1430,7 @@ const server = new Server({
             const projectionForBridge = observedProjectionJson;
             const spilledRef = null;
             if (shouldRecover) {
+              roomLoads.forget(context.artifactId, context.partitionKey);
               await bridge("recover", {
                 artifactId: context.artifactId,
                 partitionKey: context.partitionKey,
@@ -1554,6 +1573,7 @@ const server = new Server({
         bootstrapPayload.update = Buffer.from(update).toString("base64");
       }
       bootstrapPayload.projectionJson = projectionJson;
+      roomLoads.forget(context.artifactId, context.partitionKey);
       await bridge("bootstrap", bootstrapPayload);
     }
     await reauthorize(context);
@@ -1561,7 +1581,8 @@ const server = new Server({
   },
 
   async onStoreDocument({ lastContext }) {
-    if (!lastContext) return;
+    // A change the gateway applied itself has no connection behind it: no actor to reauthorize.
+    if (!lastContext?.artifactId) return;
     await reauthorize(lastContext);
     await compactStoredRoom(lastContext, { countAppend: false });
   },
@@ -1649,11 +1670,15 @@ async function enforceActivePolicyVersions() {
 
 const policySweep = setInterval(() => {
   void enforceActivePolicyVersions();
-}, 5_000);
+}, POLICY_SWEEP_MS);
 policySweep.unref?.();
 
 installServerFraming(server, request => authenticatedRequests.has(request));
 await server.listen();
+const agentHub = installAgentHub(server.httpServer, {
+  serverKey: process.env.SPECTRA_COLLAB_TOKEN_SECRET,
+  bridgeKey: process.env.SPECTRA_COLLAB_BRIDGE_KEY,
+});
 process.stdout.write(
   `Spectra collaboration gateway listening on ${process.env.SPECTRA_COLLAB_PORT || 1234}\n`,
 );
@@ -1662,6 +1687,7 @@ async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   clearInterval(policySweep);
+  agentHub.close();
   authorizationGuard.dispose();
   const { unflushed } = await drainGatewayForShutdown({
     stopAccepting: () => server.httpServer.close(),

@@ -20,6 +20,8 @@
  * place keeps the original node exactly; deleting it removes the node.
  */
 
+import { normalizeMath } from "../../../rich-content/markdown";
+
 export type PmMark = { type: string; attrs?: Record<string, unknown> };
 export type PmNode = {
   type: string;
@@ -284,8 +286,32 @@ function parseList(lines: string[], start: number): { node: PmNode; next: number
   };
 }
 
+/** Dollars for maths written with backslash brackets, which Markdown would read as escapes. Code fences stay as written. */
+function normalizeMathOutsideFences(markdown: string) {
+  const parts: string[] = [];
+  let prose: string[] = [];
+  let fence: string | null = null;
+  const flush = () => {
+    if (prose.length) parts.push(normalizeMath(prose.join("\n")));
+    prose = [];
+  };
+  for (const line of markdown.split("\n")) {
+    const opening = FENCE.exec(line)?.[1] ?? null;
+    if (fence) {
+      parts.push(line);
+      if (line.trim().startsWith(fence)) fence = null;
+    } else if (opening) {
+      flush();
+      fence = opening;
+      parts.push(line);
+    } else prose.push(line);
+  }
+  flush();
+  return parts.join("\n");
+}
+
 export function parseBlocks(markdown: string): PmNode[] {
-  const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
+  const lines = normalizeMathOutsideFences(markdown.replace(/\r\n?/g, "\n")).split("\n");
   const nodes: PmNode[] = [];
   let index = 0;
   while (index < lines.length) {

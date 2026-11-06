@@ -28,6 +28,7 @@ import {
   type PresentationSlide,
   type PresentationTextRun,
 } from "../../../presentation/model";
+import { notFoundMessage } from "./locate";
 import { AuthoringError, type IdFactory, defaultIdFactory, isPlaceholder, record, truncate } from "./shared";
 
 /*
@@ -136,9 +137,16 @@ function newObject(type: PresentationObjectType, ordinal: number, ids: IdFactory
   return { ...createPresentationObject(type, ordinal), id: ids("object") };
 }
 
+/** A text box with no size of its own: the layout sets its words at what fits. */
+function unsizedText(ordinal: number, ids: IdFactory): PresentationObject {
+  const object = newObject("text", ordinal, ids);
+  const { fontSize: _fontSize, fontWeight: _fontWeight, ...style } = object.style ?? {};
+  return { ...object, style };
+}
+
 function textObject(value: string, ordinal: number, ids: IdFactory, asCard = false): PresentationObject {
   const paragraphs = bodyParagraphs(value);
-  const object = newObject(asCard ? "shape" : "text", ordinal, ids);
+  const object = asCard ? newObject("shape", ordinal, ids) : unsizedText(ordinal, ids);
   object.content = asCard
     ? { shape: "rounded-rectangle", text: paragraphsText(paragraphs) }
     : { text: paragraphsText(paragraphs), paragraphs };
@@ -146,7 +154,7 @@ function textObject(value: string, ordinal: number, ids: IdFactory, asCard = fal
 }
 
 function titleObject(value: string, ordinal: number, ids: IdFactory) {
-  const object = newObject("text", ordinal, ids);
+  const object = unsizedText(ordinal, ids);
   object.content = { text: value.trim() };
   return object;
 }
@@ -344,7 +352,10 @@ function replaceAcrossDeck(deck: PresentationContent, op: { find: string; replac
     for (const object of slide.objects) total += countIn(presentationObjectText(object), op.find);
     total += countIn(slide.speakerNotes ?? "", op.find);
   }
-  if (!total) throw new AuthoringError(`${label}: \`find\` text was not found on any slide or in the notes.`);
+  if (!total)
+    throw new AuthoringError(
+      notFoundMessage(label, "find", op.find, deck.slides.flatMap((slide) => [...slide.objects.map(presentationObjectText), slide.speakerNotes ?? ""]).join("\n"), "any slide or the notes"),
+    );
   if (total > 1 && !op.all)
     throw new AuthoringError(`${label}: \`find\` text appears ${total} times. Include more text, or set "all": true.`);
   for (const slide of deck.slides) {
@@ -497,6 +508,8 @@ export function presentationOutline(content: unknown, options: { max?: number; s
   return truncate(lines.join("\n"), options.max ?? 6_000);
 }
 
+const CHARACTER_DRAWING = /[─━│┃┌┐└┘├┤┬┴┼═║╭╮╯╰]{3,}/;
+
 /** Slides that are empty, hold placeholder copy, overflow or miss a layout role. */
 /** What is wrong with one slide, in the model's words. */
 function slideProblems(slide: PresentationSlide, index: number) {
@@ -514,6 +527,8 @@ function slideProblems(slide: PresentationSlide, index: number) {
       problems.push(`${label} has an empty or placeholder ${object.type === "text" ? "text box" : "shape"}`);
     else if (object.type === "text" && estimateTextOverflow(object))
       problems.push(`${label}: "${truncate(presentationObjectText(object), 40)}" overflows its box; shorten it or split the slide`);
+    else if (CHARACTER_DRAWING.test(value))
+      problems.push(`${label}: a diagram typed in characters does not read on a slide; say it in words, a table or a chart`);
   }
   for (const issue of presentationLayoutRoleIssues(slide)) problems.push(`${label}: ${issue}`);
   return problems;

@@ -1,3 +1,4 @@
+import { describeToolFailure } from "./failures";
 import { deniedResult } from "./permissions";
 import { mergeSources, type RunSource } from "./sources";
 import {
@@ -90,7 +91,7 @@ export type ModelCaller = (input: {
   onRetry: () => void;
   /** A tool call is being written: its id, name and the arguments so far. */
   onToolDraft?: (draft: { id: string; name: string; arguments: string }) => void;
-  /** The model's private reasoning, streamed only to summarise it in captions. */
+  /** The model's reasoning (or its summary, where a provider gives only that). */
   onReasoning?: (delta: string) => void;
 }) => Promise<ModelTurn>;
 
@@ -116,7 +117,7 @@ export type LoopHooks = {
    * document): the step is named early so the turn never looks frozen.
    */
   onToolDraft?: (draft: { id: string; tool: AnyHarnessTool; label: string }) => void;
-  /** Private reasoning while the model thinks; never shown or stored as is. */
+  /** Reasoning while the model thinks, for the trace. */
   onReasoning?: (delta: string) => void;
   onToolEnd?: (
     step: ToolStepInfo & { outcome: ToolOutcome; durationMs: number },
@@ -135,6 +136,7 @@ export type LoopHooks = {
    */
   checkpoint?: (
     state: LoopState,
+    info?: { ending: boolean },
   ) => Promise<{ steers?: Steer[] } | void> | { steers?: Steer[] } | void;
 };
 
@@ -371,10 +373,10 @@ export async function runHarnessLoop(
   const baseElapsed = state.elapsedMs;
   const elapsed = () => baseElapsed + (now() - segmentStartedAt);
 
-  const checkpoint = async () => {
+  const checkpoint = async (ending = false) => {
     state.elapsedMs = elapsed();
     try {
-      const result = await hooks.checkpoint?.(state);
+      const result = await hooks.checkpoint?.(state, { ending });
       return result && Array.isArray(result.steers) ? result.steers : [];
     } catch {
       return [];
@@ -482,7 +484,7 @@ export async function runHarnessLoop(
           ? { ok: false, content: STOPPED_RESULT }
           : {
               ok: false,
-              content: `${prepared.tool.name} failed: ${error instanceof Error ? error.message : String(error)}`,
+              content: describeToolFailure(prepared.tool.name, error),
             };
       }
     }
@@ -564,7 +566,7 @@ export async function runHarnessLoop(
             hooks.onToolStart?.({ call, tool: prepared.tool, args: prepared.args, label: prepared.label, effect: prepared.effect });
             const outcome: ToolOutcome = isAbort(error, deps.signal)
               ? { ok: false, content: STOPPED_RESULT }
-              : { ok: false, content: `${prepared.tool.name} failed: ${error instanceof Error ? error.message : String(error)}` };
+              : { ok: false, content: describeToolFailure(prepared.tool.name, error) };
             finishStep(prepared, outcome, startedAt);
             state.messages.push(toolMessage(call, outcome));
             state.pendingCalls.shift();
@@ -763,7 +765,7 @@ export async function runHarnessLoop(
         : {}),
     });
     if (!calls.length) {
-      const steers = budgetSpent ? [] : await checkpoint();
+      const steers = budgetSpent ? [] : await checkpoint(true);
       if (steers.length) {
         appendSteers(steers);
         continue;

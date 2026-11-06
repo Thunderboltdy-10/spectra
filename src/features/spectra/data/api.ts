@@ -1,3 +1,4 @@
+import type { MemoryChange, MemoryChangeResult, MemoryHead } from "../../../../shared/memory-files";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import type { CompilerStageState as FoundryCompilerStageState } from "../agents/foundry/compiler";
 import type { CompiledAgentResult } from "../agents/foundry/foundry-document";
@@ -358,6 +359,8 @@ export type SpectraWorkspaceManifestReport = {
 
 export type SpectraArtifact = {
   _id: string;
+  /** Set after a rename until the live document catches up: this title in the document is out of date. */
+  renamedFromTitle?: string;
   blueprintKey: SpectraBlueprintKey;
   resourceClass?: "artifact" | "resource" | "thread_reference";
   nativeFormat?: string;
@@ -1247,6 +1250,20 @@ export async function forgetSpectraMemory(claimId: string) {
     action: "forgetMemory",
     claimId,
   });
+}
+
+export async function getSpectraMemoryFiles() {
+  return readJson<MemoryHead>(await requestSpectra("/api/spectra?action=memoryFiles", { cache: "no-store" }));
+}
+
+export async function getSpectraMemoryTopic(slug: string) {
+  return readJson<{ title: string; summary: string; content: string } | null>(
+    await requestSpectra(`/api/spectra?action=memoryTopic&slug=${encodeURIComponent(slug)}`, { cache: "no-store" }),
+  );
+}
+
+export async function updateSpectraMemoryFile(change: MemoryChange) {
+  return postSpectra<MemoryChangeResult>({ action: "updateMemoryFile", ...change });
 }
 
 export async function clearSpectraMemory(confirmation: string) {

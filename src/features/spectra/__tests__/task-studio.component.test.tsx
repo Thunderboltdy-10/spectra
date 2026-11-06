@@ -121,6 +121,8 @@ describe("a planner task", () => {
   });
 
   it("keeps a school deadline as the school wrote it, beside the student's own target", () => {
+    // The day picker opens on this month, so the test holds the clock in the deadline's month.
+    vi.useFakeTimers({ toFake: ["Date"], now: taskInstant("2026-10-08", null, ZONE) });
     const fromSchool = {
       ...base,
       dueAt: taskInstant("2026-10-16", null, ZONE),
@@ -137,6 +139,7 @@ describe("a planner task", () => {
     fireEvent.click(screen.getByRole("button", { name: "Set" }));
     expect(taskInputs((latest.personalOverlay as { targetDueAt: number }).targetDueAt, ZONE).date).toBe("2026-10-12");
     expect(latest.dueAt).toBe(fromSchool.dueAt);
+    vi.useRealTimers();
   });
 });
 

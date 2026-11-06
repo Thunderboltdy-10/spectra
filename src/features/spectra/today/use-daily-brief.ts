@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
@@ -19,9 +19,11 @@ import { nextDay, zonedDay, zonedInstant, type BriefSuggestion } from "./daily-b
  */
 
 const RETRY_AFTER_MS = 15 * 60_000;
+/** How long Home says it is writing before it stops promising a brief and offers to plan instead. */
+const WRITING_AT_MOST_MS = 45_000;
 
 export type BriefState =
-  | { status: "off" | "waiting" | "failed" }
+  | { status: "off" | "waiting" | "failed" | "quiet" }
   | { status: "writing"; wakeTime: string }
   | {
       status: "ready";
@@ -56,6 +58,7 @@ export function useDailyBrief(now: number | null): BriefState {
   const row = useQuery(api.dailyBriefs.today, useAuthedArgs(on && day ? { day } : "skip", "account"));
   const setSchedule = useMutation(api.dailyBriefs.setSchedule);
   const asked = useRef<string | null>(null);
+  const [gaveUp, setGaveUp] = useState<string | null>(null);
 
   // The schedule follows the reader's setting and their zone as Home last saw it.
   useEffect(() => {
@@ -75,8 +78,19 @@ export function useDailyBrief(now: number | null): BriefState {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ timeZone }),
-    }).catch(() => undefined);
+    })
+      .then((response) => {
+        if (!response.ok) setGaveUp(day);
+      })
+      .catch(() => setGaveUp(day));
   }, [due, day, missing, on, showcase, timeZone]);
+
+  const writing = Boolean(on && !showcase && due && day && row !== undefined && row?.state !== "ready" && !row?.previous && row?.state !== "failed");
+  useEffect(() => {
+    if (!writing || !day) return;
+    const timer = window.setTimeout(() => setGaveUp(day), WRITING_AT_MOST_MS);
+    return () => window.clearTimeout(timer);
+  }, [day, writing]);
 
   return useMemo((): BriefState => {
     if (!on) return { status: "off" };
@@ -96,6 +110,7 @@ export function useDailyBrief(now: number | null): BriefState {
         earlier: true,
       };
     if (!due) return { status: "waiting" };
-    return row?.state === "failed" ? { status: "failed" } : { status: "writing", wakeTime };
-  }, [due, day, on, row, showcase, wakeTime]);
+    if (row?.state === "failed" || gaveUp === day) return { status: "quiet" };
+    return { status: "writing", wakeTime };
+  }, [due, day, gaveUp, on, row, showcase, wakeTime]);
 }

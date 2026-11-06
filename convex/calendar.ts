@@ -794,9 +794,12 @@ export const createPersonalItem = mutation({
     linkedArtifactIds: v.optional(v.array(v.id("spectraArtifacts"))),
     actorKind: v.optional(v.union(v.literal("human"), v.literal("ai"))),
     idempotencyKey: v.optional(v.string()),
+    /** Later occurrences of a repeating lesson, each its own event. */
+    alsoAt: v.optional(v.array(v.object({ startAt: v.number(), endAt: v.optional(v.number()) }))),
   },
   handler: async (ctx, args) => {
     const actor = await actorOrThrow(ctx);
+    if ((args.alsoAt?.length ?? 0) > 200) throw new Error("CALENDAR_SERIES_TOO_LONG: A series holds at most 200 events.");
     // A task's time is a moment (due then): it starts and ends together.
     if (
       args.startAt !== undefined &&
@@ -838,8 +841,16 @@ export const createPersonalItem = mutation({
       idempotencyKey,
       createdAt: now,
       updatedAt: now,
+      ...(args.alsoAt?.length ? { seriesId: crypto.randomUUID() } : {}),
     });
-    return itemWire((await ctx.db.get(itemId))!);
+    const first = (await ctx.db.get(itemId))!;
+    for (const occurrence of args.alsoAt ?? []) {
+      if (occurrence.endAt !== undefined && occurrence.endAt <= occurrence.startAt)
+        throw new Error("CALENDAR_TIME_INVALID: End must be after start.");
+      const { _id, _creationTime, idempotencyKey: _key, ...rest } = first;
+      await ctx.db.insert("calendarItems", { ...rest, startAt: occurrence.startAt, endAt: occurrence.endAt });
+    }
+    return itemWire(first);
   },
 });
 
@@ -1005,7 +1016,8 @@ export const moveWorkBlock = mutation({
   args: {
     itemId: v.id("calendarItems"),
     startAt: v.number(),
-    endAt: v.number(),
+    // Without an end the block keeps its length.
+    endAt: v.optional(v.number()),
     expectedRevision: v.number(),
   },
   handler: async (ctx, args) => {
@@ -1021,12 +1033,15 @@ export const moveWorkBlock = mutation({
       throw new Error(
         "CALENDAR_GESTURE_CONFLICT: Re-resolve the block before moving it.",
       );
+    const endAt = args.endAt ?? (typeof item.startAt === "number" && typeof item.endAt === "number"
+      ? args.startAt + (item.endAt - item.startAt)
+      : args.startAt);
     // A task is due at a moment, so it may start and end together.
-    if (args.endAt < args.startAt || (args.endAt === args.startAt && item.kind !== "task"))
+    if (endAt < args.startAt || (endAt === args.startAt && item.kind !== "task"))
       throw new Error("CALENDAR_TIME_INVALID: End must be after start.");
     await ctx.db.patch(item._id, {
       startAt: args.startAt,
-      endAt: args.endAt,
+      endAt,
       revision: item.revision + 1,
       updatedAt: Date.now(),
     });
@@ -1096,7 +1111,7 @@ export const completeWorkBlock = mutation({
 });
 
 export const removePersonalItem = mutation({
-  args: { itemId: v.id("calendarItems") },
+  args: { itemId: v.id("calendarItems"), andFollowing: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
     const actor = await actorOrThrow(ctx);
     const item = await ctx.db.get(args.itemId);
@@ -1111,6 +1126,14 @@ export const removePersonalItem = mutation({
       revision: item.revision + 1,
       updatedAt: Date.now(),
     });
+    if (args.andFollowing && item.seriesId) {
+      const rest = await ctx.db.query("calendarItems")
+        .withIndex("by_account_series", (q) => q.eq("ownerAccountId", actor.accountId).eq("seriesId", item.seriesId))
+        .take(400);
+      for (const other of rest)
+        if (other.status === "active" && (other.startAt ?? 0) >= (item.startAt ?? 0))
+          await ctx.db.patch(other._id, { status: "removed", revision: other.revision + 1, updatedAt: Date.now() });
+    }
     return { itemId: item._id };
   },
 });

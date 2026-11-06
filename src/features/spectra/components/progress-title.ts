@@ -14,6 +14,14 @@ const IRREGULAR_PROGRESS_VERBS: Record<string, string> = {
   writing: "wrote",
 };
 
+/** A step that failed never reads as done: "Moving X to the Trash" stays unfinished. */
+export function failedProgressTitle(title: string): string {
+  const plain = pastTenseProgressTitle(title, false);
+  const [first = "", ...rest] = plain.split(" ");
+  if (!/ing$/i.test(first)) return `Couldn't finish: ${plain}`;
+  return `Couldn't finish ${[first.toLowerCase(), ...rest].join(" ")}`;
+}
+
 /**
  * Completed progress traces use a human past-tense title. Keep this bounded to
  * leading progress verbs so synthetic words like "Readed" never reach the UI.

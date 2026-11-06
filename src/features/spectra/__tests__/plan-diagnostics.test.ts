@@ -420,7 +420,7 @@ describe("plan diagnostics and schema slip recovery", () => {
           'ArgumentValidationError: Value does not match validator.\nPath: .operationId\nValidator: v.id("spectraOperations")',
         ),
       ),
-    ).toContain("could not apply that change");
+    ).toContain("could not finish that change");
     expect(
       formatPlanApplicationPublicError(
         new Error("REGION_CLAIM_RUN_INVALID: The AI run is no longer active."),

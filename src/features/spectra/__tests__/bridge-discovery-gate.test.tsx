@@ -108,7 +108,7 @@ describe("Bridge discovery gate (LV-012)", () => {
     });
     expect(healthCalls(fetchMock)).toBe(1);
     expect(result.current.reachability).toBe("not-running");
-    // Misses wait 30 s, 60 s, 120 s ... instead of a probe every 15 s.
+    // Misses wait 30 s, then 60 s, instead of a probe every 15 s.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
@@ -126,8 +126,8 @@ describe("Bridge discovery gate (LV-012)", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10 * 60_000);
     });
-    // 120 s, 240 s, then the 5-minute cap: far fewer than forty 15 s polls.
-    expect(healthCalls(fetchMock)).toBeLessThanOrEqual(6);
+    // Held at the one-minute cap: far fewer than forty 15 s polls.
+    expect(healthCalls(fetchMock)).toBeLessThanOrEqual(13);
   });
 
   it("shares one probe between surfaces mounted together", async () => {
@@ -153,11 +153,11 @@ describe("Bridge discovery gate (LV-012)", () => {
     expect(window.localStorage.getItem(BRIDGE_DISCOVERY_STORAGE_KEY)).toBe("enabled");
   });
 
-  it("doubles the wait per miss up to five minutes", () => {
+  it("doubles the wait per miss up to a minute", () => {
     expect(bridgeDiscoveryDelay(0)).toBe(15_000);
     expect(bridgeDiscoveryDelay(1)).toBe(30_000);
-    expect(bridgeDiscoveryDelay(3)).toBe(120_000);
-    expect(bridgeDiscoveryDelay(5)).toBe(300_000);
-    expect(bridgeDiscoveryDelay(50)).toBe(300_000);
+    expect(bridgeDiscoveryDelay(3)).toBe(60_000);
+    expect(bridgeDiscoveryDelay(5)).toBe(60_000);
+    expect(bridgeDiscoveryDelay(50)).toBe(60_000);
   });
 });

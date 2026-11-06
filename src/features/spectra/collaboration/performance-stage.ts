@@ -1,6 +1,7 @@
 import type { ArtifactLiveValue } from "./artifact-yjs-model";
 import { valueAtPath } from "./artifact-live-preview";
 import type { AiStreamBeat } from "./interaction-choreography";
+import { beatsAtSpeed, type WorkSpeed } from "./work-speed";
 import {
   beatPresence,
   performanceBeats,
@@ -21,6 +22,7 @@ import {
  */
 
 const SETTLE_MS = 300;
+const FAST_SETTLE_MS = 60;
 /** How long the last frame may wait for the commit to reach this document. */
 const COMMIT_WAIT_MS = 4_000;
 const SEEN_LIMIT = 400;
@@ -52,6 +54,7 @@ export class PerformanceStage {
     private readonly readLive: (performance: AiPerformance) => ArtifactLiveValue | null,
     private readonly onChange: () => void,
     private readonly now: () => number = () => Date.now(),
+    private readonly speed: () => WorkSpeed = () => "slow",
   ) { stages.add(this); }
 
   hasRun(runId: string): boolean {
@@ -135,9 +138,10 @@ export class PerformanceStage {
       this.playing.delete(key);
       return;
     }
-    // The hand waits for its previous gesture to finish, and for the moment the
-    // server gave, whichever comes later.
-    const startAt = Math.max(performance.startAt, this.ends.get(key) ?? 0);
+    // The hand waits for its previous gesture to finish. At the slow speed it also
+    // waits for the moment the server gave; otherwise the work starts as it arrives.
+    const speed = this.speed();
+    const startAt = Math.max(speed === "slow" ? performance.startAt : this.now(), this.ends.get(key) ?? 0);
     const wait = startAt - this.now();
     const begin = () => {
       if (this.destroyed) return;
@@ -145,7 +149,7 @@ export class PerformanceStage {
       const live = this.readLive(performance);
       if (!live) return this.next(key);
       const { base } = performanceSides(performance, live);
-      const beats = performanceBeats(performance, live);
+      const beats = beatsAtSpeed(performanceBeats(performance, live), speed);
       if (!beats.length) return this.next(key);
       const playing: Playing = { performance, beats, base, index: 0 };
       this.playing.set(key, playing);
@@ -194,7 +198,8 @@ export class PerformanceStage {
     if (!landed) return this.release(key, performance);
     this.records.set(performance.actor.clientId, settlePresence(performance, beats));
     this.onChange();
-    this.ends.set(key, this.now() + SETTLE_MS);
+    const settle = this.speed() === "fast" ? FAST_SETTLE_MS : SETTLE_MS;
+    this.ends.set(key, this.now() + settle);
     playing.timer = setTimeout(() => {
       if (this.destroyed) return;
       const waiting = this.queues.get(key)?.length ?? 0;
@@ -204,7 +209,7 @@ export class PerformanceStage {
       }
       this.playing.delete(key);
       this.next(key);
-    }, SETTLE_MS);
+    }, settle);
   }
 }
 

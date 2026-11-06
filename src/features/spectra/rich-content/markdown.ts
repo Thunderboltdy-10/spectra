@@ -27,7 +27,7 @@ import {
 
 const PUNCTUATION = /[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/;
 const WORD = /[\p{L}\p{N}]/u;
-const CITATION = /^\[\[cite:([^:\]|]+):([^\]|]+)(?:\|([^\]]+))?\]\]/;
+const CITATION = /^\[\[cite:([^:\]|]+)(?::([^\]|]+))?(?:\|([^\]]+))?\]\]/;
 const REFERENCE = /^\[\[ref:([^\]|]+)(?:\|([^\]]+))?\]\]/;
 const FOOTNOTE_REF = /^\[\^([^\]\s]+)\]/;
 const AUTOLINK = /^<(https?:\/\/[^\s>]+)>/;
@@ -209,7 +209,7 @@ export function parseMarkdownInlines(text: string, marks: readonly RichMark[] = 
       const citation = rest.match(CITATION);
       if (citation) {
         flush();
-        output.push({ type: "citation", sourceId: citation[1]!, evidenceIds: citation[2]!.split(",").map((item) => item.trim()).filter(Boolean), ...(citation[3] ? { label: citation[3] } : {}) });
+        output.push({ type: "citation", sourceId: citation[1]!, evidenceIds: (citation[2] ?? "").split(",").map((item) => item.trim()).filter(Boolean), ...(citation[3] ? { label: citation[3] } : {}) });
         index += citation[0].length;
         continue;
       }
@@ -558,7 +558,7 @@ function parseBlockDrafts(lines: string[]): RichBlockDraft[] {
  * Models write display math as `\[…\]` and inline math as `\(…\)` as often
  * as with dollars. Balanced pairs become dollars before parsing.
  */
-function normalizeMath(source: string) {
+export function normalizeMath(source: string) {
   let value = source;
   // An escaped backslash (`\\[`) is text, never a delimiter.
   const blockOpen = (value.match(/(?<!\\)\\\[/g) ?? []).length;

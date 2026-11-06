@@ -4,6 +4,7 @@ import { useWorkAvailability } from "../components/use-work-availability";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { useMutation, useQuery } from "convex/react";
+import { useCalmQuery } from "../data/use-calm-query";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { Download, ExternalLink, Eye, FileText, FolderOpen, Loader2, Settings, X } from "@/components/icons/glyph-icons";
@@ -50,7 +51,7 @@ export function ResourceSurface({
     "download" | "materialize" | null
   >(null);
   const [viewing, setViewing] = useState<ViewedFile | null>(null);
-  const truth = useQuery(
+  const truth = useCalmQuery(
     api.replicas.forWork,
     useAuthedArgs({
       workId: artifact._id as never,

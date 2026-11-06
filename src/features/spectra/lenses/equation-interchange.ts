@@ -55,7 +55,8 @@ const operatorNames = new Map(Object.entries(operators).map(([name, value]) => [
 
 const functions = new Set([
   "sin", "cos", "tan", "cot", "sec", "csc", "sinh", "cosh", "tanh",
-  "log", "ln", "exp", "min", "max", "det", "gcd",
+  "log", "ln", "exp", "min", "max", "det", "gcd", "lim", "arcsin", "arccos", "arctan",
+  "coth", "sup", "inf", "arg", "deg", "dim", "ker", "Pr",
 ]);
 
 const symbols: Readonly<Record<string, string>> = {
@@ -71,6 +72,12 @@ const symbols: Readonly<Record<string, string>> = {
   land: "∧", lor: "∨", Rightarrow: "⇒", Leftrightarrow: "⇔", to: "→", rightarrow: "→",
   leftarrow: "←", longrightarrow: "⟶", longleftarrow: "⟵", longleftrightarrow: "⟷", mapsto: "↦",
   pm: "±", mp: "∓", times: "×", div: "÷", cdot: "⋅", ldots: "…", dots: "…", circ: "∘",
+  infty: "∞", partial: "∂", nabla: "∇", ne: "≠", ll: "≪", gg: "≫", sim: "∼", simeq: "≃",
+  cong: "≅", propto: "∝", perp: "⊥", parallel: "∥", angle: "∠", triangle: "△", therefore: "∴",
+  because: "∵", leftrightarrow: "↔", Leftarrow: "⇐", uparrow: "↑", downarrow: "↓",
+  rightleftharpoons: "⇌", ast: "∗", star: "⋆", bullet: "∙", prime: "′", hbar: "ℏ", ell: "ℓ",
+  Re: "ℜ", Im: "ℑ", aleph: "ℵ", wedge: "∧", vee: "∨", oplus: "⊕", otimes: "⊗", setminus: "∖",
+  cdots: "⋯", vdots: "⋮", ddots: "⋱", lt: "<", gt: ">", degree: "°", dagger: "†",
 };
 
 const escapedSymbols: Readonly<Record<string, string>> = {
@@ -159,6 +166,21 @@ function toOmml(node: EquationNode): string {
 }
 
 type Stop = "group" | "degree" | "cell" | "row" | "right" | "environment";
+
+/** Accents travel as the combining mark Unicode has for each. */
+const ACCENTS: Readonly<Record<string, string>> = {
+  hat: "\u0302", widehat: "\u0302", bar: "\u0304", overline: "\u0305", underline: "\u0332", vec: "\u20D7",
+  overrightarrow: "\u20D7", dot: "\u0307", ddot: "\u0308", tilde: "\u0303", widetilde: "\u0303", acute: "\u0301", grave: "\u0300",
+};
+
+function accented(node: EquationNode, mark: string): EquationNode {
+  if (node.kind === "text") return { kind: "text", value: [...node.value].map((char) => (/\s/u.test(char) ? char : char + mark)).join("") };
+  if (node.kind === "sequence") return { kind: "sequence", children: node.children.map((child) => accented(child, mark)) };
+  return node;
+}
+
+const NO_EFFECT_COMMANDS = new Set(["displaystyle", "textstyle", "scriptstyle", "scriptscriptstyle", "limits", "nolimits", "displaylimits", "big", "Big", "bigg", "Bigg", "bigl", "bigr", "Bigl", "Bigr", "biggl", "biggr", "Biggl", "Biggr", "mathstrut", "strut", "nonumber"]);
+const STYLE_COMMANDS = new Set(["mathbf", "mathit", "mathsf", "mathtt", "mathbb", "mathcal", "mathfrak", "mathscr", "boldsymbol", "bm", "textbf", "textit", "textsf", "texttt", "boxed"]);
 
 class EquationParseError extends Error {
   constructor(message: string) {
@@ -479,6 +501,13 @@ class LatexParser {
     }
     if (name === "," || name === ";" || name === ":" || name === "!" || name === " ")
       return { kind: "text", value: " " };
+    if (name === "quad") return { kind: "text", value: "\u2003" };
+    if (name === "qquad") return { kind: "text", value: "\u2003\u2003" };
+    // Word sets these itself or has no equal: the symbols they dress still read true.
+    if (NO_EFFECT_COMMANDS.has(name)) return { kind: "text", value: "" };
+    if (STYLE_COMMANDS.has(name)) return this.peek() === "{" ? this.group() : this.atom();
+    if (ACCENTS[name]) return accented(this.peek() === "{" ? this.group() : this.atom(), ACCENTS[name]!);
+    if (name === "dfrac" || name === "tfrac") return { kind: "fraction", numerator: this.group(), denominator: this.group() };
     if (escapedSymbols[name] !== undefined) return { kind: "text", value: escapedSymbols[name]! };
     if (symbols[name]) return { kind: "text", value: symbols[name]! };
     this.diagnostics.push(`unsupported command \\${name}`);
@@ -602,8 +631,8 @@ export function equationNodeToLatex(node: EquationNode): string {
     case "fraction": return `\\frac{${equationNodeToLatex(node.numerator)}}{${equationNodeToLatex(node.denominator)}}`;
     case "root": return node.degree ? `\\sqrt[${equationNodeToLatex(node.degree)}]{${equationNodeToLatex(node.body)}}` : `\\sqrt{${equationNodeToLatex(node.body)}}`;
     case "script": return `{${equationNodeToLatex(node.base)}}${node.sub ? `_{${equationNodeToLatex(node.sub)}}` : ""}${node.sup ? `^{${equationNodeToLatex(node.sup)}}` : ""}`;
-    case "operator": return `${operatorNames.get(node.value) ?? node.value}${node.sub ? `_{${equationNodeToLatex(node.sub)}}` : ""}${node.sup ? `^{${equationNodeToLatex(node.sup)}}` : ""}${node.body ? `{${equationNodeToLatex(node.body)}}` : ""}`;
-    case "function": return `\\${node.name}${node.argument ? `{${equationNodeToLatex(node.argument)}}` : ""}`;
+    case "operator": return `${operatorNames.has(node.value) ? `\\${operatorNames.get(node.value)}${node.sub || node.sup ? "" : " "}` : node.value}${node.sub ? `_{${equationNodeToLatex(node.sub)}}` : ""}${node.sup ? `^{${equationNodeToLatex(node.sup)}}` : ""}${node.body ? `{${equationNodeToLatex(node.body)}}` : ""}`;
+    case "function": return `\\${node.name}${node.argument ? `{${equationNodeToLatex(node.argument)}}` : " "}`;
     case "delimiter": return `\\left${latexDelimiterToken(node.left || ".")}${equationNodeToLatex(node.body)}\\right${latexDelimiterToken(node.right || ".")}`;
     case "matrix": {
       const environment = node.aligned ? "aligned" : node.delimiter?.left === "(" ? "pmatrix" : node.delimiter?.left === "[" ? "bmatrix" : "matrix";

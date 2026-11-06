@@ -464,14 +464,15 @@ export function CodeStudio({
   // as it was; that is not a reason to put it back.
   const seenIncomingKeyRef = useRef(codeContentKey(incoming));
   const [activeFileId, setActiveFileId] = useState(incoming.entryFileId);
-  // Code and what it makes open side by side unless the work asked otherwise.
-  const [surface, setSurface] = useState<CodeSurface>(
-    incoming.visualisation.openMode === "preview"
-      ? "preview"
-      : incoming.visualisation.openMode === "source"
-        ? "code"
-        : "split",
-  );
+  // Full screen shows code and what it makes side by side. The panel has room for
+  // one, so it opens on what the code makes, when it makes something.
+  const [surface, setSurface] = useState<CodeSurface>(() => {
+    const mode = incoming.visualisation.openMode;
+    if (mode === "preview" || mode === "source") return mode === "preview" ? "preview" : "code";
+    const makesSomething =
+      incoming.runtime !== "none" && incoming.runtime !== "python" && incoming.visualisation.enabled !== false;
+    return contract.surface === "full" || !makesSomething ? "split" : "preview";
+  });
   const [sourceMode, setSourceMode] = useState<"code" | "parameters">("code");
   const [fileQuery, setFileQuery] = useState("");
   const [pendingSearchTarget, setPendingSearchTarget] = useState<{
@@ -2356,10 +2357,6 @@ export function CodeStudio({
   const selectSurface = (next: CodeSurface) => {
     setSurface(next);
     setSettingsOpen(false);
-    mutate((draft) => {
-      draft.visualisation.openMode =
-        next === "code" ? "source" : next === "preview" ? "preview" : "split";
-    });
   };
   const panelModes: WorkbarModeSpec[] = [
     {
@@ -2692,7 +2689,7 @@ export function CodeStudio({
             />
           ) : undefined
         }
-        primary={{
+        primary={surface === "preview" && running ? undefined : {
           label: running ? "Stop" : "Run",
           icon: running ? CircleStop : Play,
           requires: "execute",

@@ -15,7 +15,7 @@ is never a graded or high-stakes test.
 | `multiple_choice` | One right answer among plausible options |
 | `select_all` | Several correct options; say "Select all that apply" |
 | `true_false` | Quick checks of a single claim; use sparingly |
-| `short_answer` / `fill_blank` | Recall of a term without options to lean on |
+| `short_answer` / `fill_blank` | Recall of a term without options to lean on. `correctAnswer` is the shortest right answer ("36 cm"); the reasoning goes in `explanation` |
 | `numeric` | Calculations; state the unit in the prompt |
 | `ordering` | Sequences: stages, events, steps |
 | `matching` | Pairs: terms and definitions, causes and effects |

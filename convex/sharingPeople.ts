@@ -5,12 +5,13 @@ import type { Id } from "./_generated/dataModel";
 import {
   bumpPolicyVersion,
   capabilitiesForLevel,
-  evaluateAccess,
+  evaluateArtifactAccessForActor,
   loadResource,
   requireCapability,
 } from "./authorityShared";
 import { writeAuditEvent } from "./auditShared";
 import { findNodesForSource, sharesWithWorkspace } from "./orgTreeShared";
+import { getAuthenticatedActor } from "./identityShared";
 
 /*
  * Who a shared work is with, kept to what people expect from shared documents:
@@ -78,10 +79,11 @@ type Person = {
 export const forArtifact = query({
   args: { artifactId: v.id("spectraArtifacts") },
   handler: async (ctx, args) => {
-    const decision = await evaluateAccess(ctx, "artifact", args.artifactId);
-    if (!decision.allowed) return null;
-    const artifact = await ctx.db.get(args.artifactId);
-    if (!artifact) return null;
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_NO_SCHOOL: An active school membership is required.");
+    const decision = await evaluateArtifactAccessForActor(ctx, actor, args.artifactId);
+    if (!decision.allowed || !decision.loaded) return null;
+    const artifact = decision.loaded.resource;
     const now = Date.now();
     const levels = new Map<string, { level: "read" | "modify"; through?: string }>();
     const raise = (accountId: string, level: "read" | "modify", through?: string) => {
@@ -117,7 +119,8 @@ export const forArtifact = query({
 
     // Who changed it is the author's to see, as History is.
     const isOwner = decision.reason === "owner";
-    const versions = isOwner
+    // Nobody else has it: the header shows nothing, so skip the heaviest rows in the database.
+    const versions = isOwner && (levels.size > 0 || schoolWide)
       ? await ctx.db
           .query("spectraArtifactVersions")
           .withIndex("by_artifact_created", (q) => q.eq("artifactId", artifact._id))

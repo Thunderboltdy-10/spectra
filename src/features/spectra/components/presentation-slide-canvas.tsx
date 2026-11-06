@@ -356,10 +356,12 @@ function PresentationObjectView({
     }
     const frame = window.requestAnimationFrame(() => {
       const element = textRef.current;
+      // A line's last sliver past the frame isn't lost text: the same give the audit allows.
+      const give = element ? Math.max(1, (parseFloat(getComputedStyle(element).fontSize) || 0) * 0.35) : 1;
       setTextOverflow(
         Boolean(
           element &&
-          (element.scrollHeight > element.clientHeight + 1 ||
+          (element.scrollHeight > element.clientHeight + give ||
             element.scrollWidth > element.clientWidth + 1),
         ),
       );
@@ -497,7 +499,9 @@ function PresentationObjectView({
           data-shape={String(
             styleValue(object, "shape", "rounded-rectangle"),
           )}
+          data-has-text={presentationObjectText(object) ? "true" : undefined}
           style={{
+            ...textStyle,
             background: String(styleValue(object, "fill", "#dfeee4")),
             borderColor: String(styleValue(object, "stroke", "#82b79b")),
             borderWidth: `${Number(styleValue(object, "strokeWidth", 1))}px`,
@@ -583,7 +587,10 @@ function PresentationObjectView({
           ) : null}
         </div>
       ) : object.type === "table" ? (
-        <table className="presentation-table">
+        <table
+          className="presentation-table"
+          style={{ fontSize: `${Number(styleValue(object, "fontSize", 21)) / 10}cqw` }}
+        >
           <tbody>
             {tableRows(object).map((row, rowIndex) => (
               <tr key={rowIndex}>

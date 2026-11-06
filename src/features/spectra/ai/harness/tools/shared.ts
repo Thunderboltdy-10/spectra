@@ -15,6 +15,14 @@ export type HarnessSession = {
   agents: Array<{ id: string; title: string }>;
   /** Web searches this run has made; each one is a paid provider call. */
   webSearches: number;
+  /** The workspaces offered to the model; only these can be filed into. */
+  places?: Array<{ id: string }>;
+  /** What this run has created, so a repeat never makes a second copy. */
+  created: Map<string, string>;
+  /** A student, whose own quizzes are for answering rather than for handing out. */
+  learner?: boolean;
+  /** The agent changed its notes itself, so they need no second look after the run. */
+  memoryWritten?: boolean;
 };
 
 export function createSession(input: {
@@ -23,6 +31,8 @@ export function createSession(input: {
   workspaceId?: string;
   known?: Array<{ id: string; title: string; type: string }>;
   agents?: Array<{ id: string; title: string }>;
+  places?: Array<{ id: string }>;
+  learner?: boolean;
 }): HarnessSession {
   return {
     backend: input.backend,
@@ -32,6 +42,9 @@ export function createSession(input: {
     todos: [],
     agents: input.agents ?? [],
     webSearches: 0,
+    ...(input.places ? { places: input.places } : {}),
+    ...(input.learner ? { learner: true } : {}),
+    created: new Map(),
   };
 }
 

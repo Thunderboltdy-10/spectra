@@ -29,6 +29,8 @@ export type TodayAgenda = {
   today: CalendarItem[];
   /** Deadlines and plans after today, within AGENDA_DAYS. */
   upcoming: CalendarItem[];
+  /** Everything after today within AGENDA_DAYS: lessons and study time as well as what is due. */
+  week?: CalendarItem[];
   /** Tasks with no date yet. */
   open: CalendarItem[];
 };
@@ -43,6 +45,7 @@ export function splitAgenda(items: CalendarItem[], unscheduled: CalendarItem[], 
   return {
     today: live.filter((item) => item.startAt! >= dayStart && item.startAt! < tomorrow),
     upcoming: live.filter((item) => DUE_KINDS.has(item.kind) && item.startAt! >= tomorrow && item.startAt! < horizon),
+    week: live.filter((item) => item.startAt! >= tomorrow && item.startAt! < horizon),
     open: unscheduled.filter((item) => item.status === "active"),
   };
 }

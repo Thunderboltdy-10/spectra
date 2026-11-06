@@ -967,7 +967,12 @@ export function documentContentToProseMirrorJson(contentValue) {
       const emittedReferenceIds = new Set();
       const rebuilt = blocks.map((block, index) => {
         const node = existingById.get(block.id);
-        if (!referenceNodes.has(node)) return blockToJson(block, index, content.nativeBinding);
+        if (!referenceNodes.has(node)) {
+          // One block with no node here must not cost the others their structure:
+          // a mirror cannot describe a list's items, so a rebuild would run them together.
+          if (node && !duplicateIds.has(block.id) && blockMirrorsNode(block, node)) return node;
+          return blockToJson(block, index, content.nativeBinding);
+        }
         if (emittedReferenceIds.has(block.id))
           throw new Error("DOCUMENT_REFERENCE_IDENTITY: A block mirror cannot duplicate a retained reference.");
         emittedReferenceIds.add(block.id);

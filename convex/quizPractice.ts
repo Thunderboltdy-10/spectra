@@ -1,3 +1,4 @@
+import { shortAnswerMatches } from "../shared/quiz-answer-match";
 import { mutation, query } from "./functions";
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
@@ -296,7 +297,7 @@ function questionResult(question: QuizQuestion, response: unknown) {
                   actualArray.every(
                     (value, index) => value === expectedArray[index],
                   )
-                : normalized(response) === normalized(question.correctAnswer);
+                : shortAnswerMatches(response, question.correctAnswer);
   return {
     questionId: question.id,
     correct,

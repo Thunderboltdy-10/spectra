@@ -15,6 +15,7 @@ import { artifactOperationDigest, artifactOperationTarget, artifactOutput, artif
 import { nativeAiRequestDigest, nativeAiUpdateIdentity } from "../shared/native-ai-commit";
 import { validateNativeSaveReceipt } from "../shared/native-office-contract";
 import { fitsConvexNesting } from "../shared/convex-nesting.mjs";
+import { unpackOperationInput } from "../shared/operation-content";
 import type { AdmittedAiCommit } from "../src/features/spectra/ai/admitted-ai-update";
 
 /** Authenticated physical head for cold Node preparation. Reading this head
@@ -39,7 +40,7 @@ export const head = query({
     const room = receipt ? null : await ctx.db.query("collaborationRooms")
       .withIndex("by_artifact_partition", q => q.eq("artifactId", artifact._id).eq("partitionKey", "root")).unique();
     return { accountId: actor.accountId, artifact, operationDigest, prompt: run.userPrompt,
-      operation: { id: operation._id, type: operation.type, input: operation.input, writeScope: preparedArtifactScope(operation) },
+      operation: { id: operation._id, type: operation.type, input: unpackOperationInput(operation.input), writeScope: preparedArtifactScope(operation) },
       sourceContentIdentity: await artifactSourceIdentity(artifact), room,
       committedResult: receipt?.result ?? null };
   },

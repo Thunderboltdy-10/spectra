@@ -5,6 +5,7 @@ import {
   type WhiteboardEdge,
   type WhiteboardNode,
 } from "../../../whiteboard/model";
+import { notFoundMessage } from "./locate";
 import { AuthoringError, type IdFactory, defaultIdFactory, isPlaceholder, record, truncate } from "./shared";
 
 /*
@@ -374,7 +375,10 @@ export function applyWhiteboardEdits(content: unknown, ops: WhiteboardEditOp[], 
         const hits = board.nodes.filter((node) => whiteboardNodeText(node).includes(op.find));
         const count = hits.reduce((sum, node) => sum + whiteboardNodeText(node).split(op.find).length - 1, 0) +
           board.edges.reduce((sum, edge) => sum + (edge.label?.split(op.find).length ?? 1) - 1, 0);
-        if (!count) throw new AuthoringError(`${label}: \`find\` text is not on the board.`);
+        if (!count)
+          throw new AuthoringError(
+            notFoundMessage(label, "find", op.find, [...board.nodes.map(whiteboardNodeText), ...board.edges.map((edge) => edge.label ?? "")].join("\n"), "the board"),
+          );
         if (count > 1 && !op.all) throw new AuthoringError(`${label}: \`find\` text appears ${count} times. Set "all": true or include more text.`);
         for (const node of board.nodes) {
           const content = record(node.content);

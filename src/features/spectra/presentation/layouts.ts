@@ -1,5 +1,5 @@
 import type { CommandControlOption } from "../commands/types";
-import { contrastRatio, estimateTextOverflow } from "./audit";
+import { contrastRatio, estimateTextHeight, estimateTextOverflow } from "./audit";
 import {
   createPresentationObject,
   normalizePresentationContent,
@@ -99,7 +99,8 @@ function fittedFontSize(object: PresentationObject, role: "title" | "body") {
   while (low <= high) {
     const mid = Math.floor((low + high) / 2);
     object.style = { ...object.style, fontSize: mid };
-    if (estimateTextOverflow(object)) high = mid - 1;
+    // A text box keeps a little inner room, and the check on screen counts it.
+    if (estimateTextHeight(object) > object.height - 8) high = mid - 1;
     else {
       best = mid;
       low = mid + 1;
@@ -536,6 +537,35 @@ function hydrateGeneratedRoles(
   }
 }
 
+/** How tall a table stands at a size: each row as tall as its longest wrapped cell. */
+function tableHeight(object: PresentationObject, size: number) {
+  const rows = (object.content as { rows?: unknown[][] } | undefined)?.rows ?? [];
+  const columns = Math.max(1, ...rows.map((row) => row.length));
+  const charsPerLine = Math.max(4, Math.floor((object.width / columns - size * 1.2) / (size * 0.52)));
+  return rows.reduce<number>((total, row) => {
+    const lines = Math.max(1, ...row.map((cell) => Math.ceil(String((cell as { text?: unknown } | null)?.text ?? cell ?? "").length / charsPerLine)));
+    return total + lines * size * 1.25 + size * 0.7;
+  }, 0);
+}
+
+/** A table given a new frame sets again from its full size, so a tight earlier layout doesn't stay small. */
+export function fitTableToFrame(object: PresentationObject) {
+  let size = 21;
+  while (size > 12 && tableHeight(object, size) > object.height) size -= 1;
+  object.style = { ...object.style, fontSize: size };
+}
+
+/** A table starts under the words above it, stays on the slide, and its type comes down when it must. */
+function fitTable(object: PresentationObject, wordsEnd: number, slideHeight: number) {
+  object.y = Math.max(object.y, wordsEnd + 12);
+  const room = Math.max(40, slideHeight - object.y - 16);
+  // From the full size each time: an earlier, tighter layout doesn't keep it small.
+  let size = 21;
+  while (size > 12 && tableHeight(object, size) > room) size -= 1;
+  object.style = { ...object.style, fontSize: size };
+  object.height = Math.min(room, Math.max(object.height, tableHeight(object, size)));
+}
+
 export function fitGeneratedSlide(
   deck: PresentationContent,
   slide: PresentationSlide,
@@ -571,6 +601,13 @@ export function fitGeneratedSlide(
     if (NEEDS_ALT_TEXT.has(object.type) && !object.altText?.trim())
       object.altText = `${object.type} on ${slide.title || "this slide"}`;
   });
+  for (const table of visibleObjects(slide).filter((object) => object.type === "table")) {
+    // Only words directly above it: a column beside it leaves it where it is.
+    const above = visibleObjects(slide).filter(
+      (object) => object.type === "text" && object.y < table.y && object.x < table.x + table.width && table.x < object.x + object.width,
+    );
+    fitTable(table, Math.max(0, ...above.map((object) => object.y + Math.min(object.height, estimateTextHeight(object) + 8))), height);
+  }
 }
 
 function ensureGeneratedTheme(deck: PresentationContent) {

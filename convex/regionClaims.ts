@@ -1,6 +1,6 @@
 import { mutation, query } from "./functions";
 import { v } from "convex/values";
-import { requireArtifactCapability } from "./spectraShared";
+import { requireArtifactAuthority } from "./spectraShared";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 
@@ -86,7 +86,7 @@ export const acquire = mutation({
     actorKind: v.union(v.literal("human"), v.literal("ai")), runId: v.optional(v.id("spectraAiRuns")), operationId: v.optional(v.id("spectraOperations")), proposedStateRef: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { actor, artifact } = await requireArtifactCapability(ctx, args.artifactId, "modify");
+    const { actor, artifact } = await requireArtifactAuthority(ctx, args.artifactId, "modify");
     const clientId = args.clientId.trim().slice(0, 180);
     const regionId = args.regionId.trim().slice(0, 240);
     const overlapDomains = [...new Set(args.overlapDomains.map((domain) => domain.trim().slice(0, 240)).filter(Boolean))];
@@ -143,7 +143,7 @@ export const renew = mutation({
   handler: async (ctx, args) => {
     const claim = await ctx.db.get(args.claimId);
     if (!claim || (claim.status !== "active" && claim.status !== "queued")) throw new Error("REGION_CLAIM_UNAVAILABLE: Reacquire the region.");
-    const { actor } = await requireArtifactCapability(ctx, claim.artifactId, "modify");
+    const { actor } = await requireArtifactAuthority(ctx, claim.artifactId, "modify");
     if (claim.actorAccountId !== actor.accountId || claim.clientId !== args.clientId) throw new Error("REGION_CLAIM_FORBIDDEN: This claim belongs to another collaborator.");
     const now = Date.now();
     if (claim.leaseExpiresAt <= now) {
@@ -162,7 +162,7 @@ export const release = mutation({
   handler: async (ctx, args) => {
     const claim = await ctx.db.get(args.claimId);
     if (!claim) return { released: false, promoted: [] };
-    const { actor } = await requireArtifactCapability(ctx, claim.artifactId, "modify");
+    const { actor } = await requireArtifactAuthority(ctx, claim.artifactId, "modify");
     if (claim.actorAccountId !== actor.accountId || claim.clientId !== args.clientId) throw new Error("REGION_CLAIM_FORBIDDEN: This claim belongs to another collaborator.");
     const now = Date.now();
     await ctx.db.patch(claim._id, { status: args.resolution === "cancel" ? "rejected" : "released", resolution: args.resolution ?? "apply", releasedAt: now, updatedAt: now });
@@ -174,7 +174,7 @@ export const release = mutation({
 export const listForArtifact = query({
   args: { artifactId: v.id("spectraArtifacts"), includeResolved: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
-    await requireArtifactCapability(ctx, args.artifactId, "read");
+    await requireArtifactAuthority(ctx, args.artifactId, "read");
     const now = Date.now();
     const statuses = args.includeResolved ? ["active", "queued", "released", "rejected"] as const : ["active", "queued"] as const;
     const groups = await Promise.all(statuses.map((status) => ctx.db.query("regionClaims").withIndex("by_artifact_status", (q) => q.eq("artifactId", args.artifactId).eq("status", status)).collect()));

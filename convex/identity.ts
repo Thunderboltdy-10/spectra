@@ -2,6 +2,8 @@ import { mutation, query } from "./functions";
 import { v } from "convex/values";
 import { getAccountByClerkId, getAuthenticatedAccount, getAuthenticatedActor, getAuthenticatedIdentity, isPlatformOperatorEmail } from "./identityShared";
 import { writeAuditEvent } from "./auditShared";
+import { internal } from "./_generated/api";
+import { SCHOOL_SYNC_IDLE_AFTER_MS } from "../shared/school-sync-rest";
 
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
 const normalizeName = (value: string) => value.trim().replace(/\s+/g, " ").slice(0, 120) || "Spectra user";
@@ -73,6 +75,9 @@ export const registerSelf = mutation({
         lastSeenAt: now,
         updatedAt: now,
       });
+      // Back after a while away: school syncs that rested start again now.
+      if (now - (existing.lastSeenAt ?? 0) > SCHOOL_SYNC_IDLE_AFTER_MS)
+        await ctx.scheduler.runAfter(0, internal.managebac.resumeRestedSyncs, { accountId: existing._id });
       return existing._id;
     }
     const accountId = await ctx.db.insert("accounts", {

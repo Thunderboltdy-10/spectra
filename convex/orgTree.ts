@@ -605,7 +605,7 @@ export const quickViewPage = query({
       if (scopeId && !ancestors.some((node) => node._id === scopeId)) continue;
       const view = (await hydrateNodes(ctx, [row], { withChildCounts: true, withSource: true, accountId: actor.accountId }))[0];
       if (!view || (args.view === "shared" && view.source?.shared !== true)) continue;
-      if (row.kind === "work" && row.sourceId) {
+      if (row.kind === "work" && row.sourceId && !(view.source?.available && view.source.owned)) {
         const artifactId = normalizeArtifactId(ctx, row.sourceId);
         const access = artifactId
           ? await evaluateArtifactAccessForActor(ctx, actor, artifactId)
@@ -620,6 +620,21 @@ export const quickViewPage = query({
       page.push({ ...view, parentPath: ancestors.map((node) => node.name) });
     }
     return paging.result({ ...result, page });
+  },
+});
+
+/** The Library row that places each named work; ids that are not works are left out. */
+export const rowsForWorks = query({
+  args: { ids: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    const rows: Record<string, string> = {};
+    for (const id of new Set(args.ids.slice(0, 200))) {
+      const workId = ctx.db.normalizeId("spectraArtifacts", id);
+      const node = workId ? await findPrimaryNode(ctx, actor.accountId, "work", workId) : null;
+      if (node) rows[id] = node._id;
+    }
+    return rows;
   },
 });
 

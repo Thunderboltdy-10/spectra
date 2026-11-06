@@ -293,6 +293,20 @@ describe("Calendar personal events", () => {
     expect(resized.endAt).toBe(1_790_343_000_000);
   });
 
+  it("keeps a block's length when it is moved with no end given", async () => {
+    const t = setupTest();
+    await seedCalendarTask(t);
+    const user = t.withIdentity(identity);
+    const created = await user.mutation(api.calendar.createPersonalItem, {
+      kind: "personal_event", title: "Dentist", startAt: 1_790_330_400_000, endAt: 1_790_334_000_000,
+      timezone: "Europe/Madrid", actorKind: "human", idempotencyKey: "human:dentist-02",
+    });
+    const moved = await user.mutation(api.calendar.moveWorkBlock, {
+      itemId: created.id as Id<"calendarItems">, startAt: 1_790_337_600_000, expectedRevision: created.revision,
+    });
+    expect(moved).toMatchObject({ startAt: 1_790_337_600_000, endAt: 1_790_341_200_000 });
+  });
+
   it("keeps official source events where the school put them", async () => {
     const t = setupTest();
     const seeded = await seedCalendarTask(t);

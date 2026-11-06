@@ -184,7 +184,7 @@ function shutdownHarness(h, { connections = [] } = {}) {
   const checkpoint = { flush: vi.fn(async () => undefined), dispose: vi.fn() };
   const server = { httpServer: { close: vi.fn() },
     hocuspocus: { documents: new Map([["room", { getConnections: () => connections }]]) } };
-  const deps = { shuttingDown: false, clearInterval: vi.fn(), policySweep: null, authorizationGuard: { dispose: vi.fn() },
+  const deps = { shuttingDown: false, agentHub: { close: vi.fn() }, clearInterval: vi.fn(), policySweep: null, authorizationGuard: { dispose: vi.fn() },
     drainGatewayForShutdown, server, activeConnections: new Set(connections), GATEWAY_RESTARTING_CLOSE,
     persistenceDocuments: h.persistenceDocuments, persistenceDirty: h.persistenceDirty,
     flushPersistence: h.flushPersistence, checkpointSchedulers: new Set([checkpoint]),

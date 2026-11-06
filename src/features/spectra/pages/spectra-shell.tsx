@@ -75,10 +75,12 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import {
   ArtifactDeleteDialog,
   WorkspaceDeleteDialog,
+  WorkspaceColorPicker,
   WorkspaceEditDialog,
   workspaceIconChoices,
 } from "../components/shell-dialogs";
 import { LibraryOrganizer } from "../organization/library-organizer";
+import { WORKSPACE_INKS, workspaceInk } from "../organization/node-identity";
 import { LibraryShelfSkeleton } from "../organization/library-shelf";
 import { LoadingRows } from "@/components/ui/page-state";
 import {
@@ -939,10 +941,12 @@ export function SpectraShell({
   const [newWorkspaceTitle, setNewWorkspaceTitle] = useState("");
   const [newWorkspaceDescription, setNewWorkspaceDescription] = useState("");
   const [newWorkspaceIcon, setNewWorkspaceIcon] = useState("Sparkles");
+  const [newWorkspaceColor, setNewWorkspaceColor] = useState<string>(WORKSPACE_INKS[0][0]);
   const [workspaceEditOpen, setWorkspaceEditOpen] = useState(false);
   const [workspaceEditTitle, setWorkspaceEditTitle] = useState("");
   const [workspaceEditDescription, setWorkspaceEditDescription] = useState("");
   const [workspaceEditIcon, setWorkspaceEditIcon] = useState("Sparkles");
+  const [workspaceEditColor, setWorkspaceEditColor] = useState<string>(WORKSPACE_INKS[0][0]);
   const [workspaceEditClass, setWorkspaceEditClass] = useState(false);
   const [hubTabs, setHubTabs] = useState<WorkspaceHubTab[]>(() => [
     { id: "workspace-home-default", label: LIBRARY_TAB_LABEL },
@@ -3723,6 +3727,7 @@ export function SpectraShell({
         title,
         description: newWorkspaceDescription.trim() || undefined,
         icon: newWorkspaceIcon,
+        color: newWorkspaceColor,
         parentNodeId: workspaceCreateParentNodeId ?? undefined,
       });
       toast.success("Workspace created.");
@@ -3864,6 +3869,7 @@ export function SpectraShell({
     setWorkspaceEditTitle(workspaceHeader.title);
     setWorkspaceEditDescription(workspaceHeader.description ?? "");
     setWorkspaceEditIcon(workspaceHeader.icon ?? "Sparkles");
+    setWorkspaceEditColor(workspaceInk(workspaceHeader.color));
     setWorkspaceEditClass(workspaceIsClass(workspaceHeader));
     setWorkspaceEditOpen(true);
   }
@@ -3878,6 +3884,7 @@ export function SpectraShell({
         title: workspaceEditTitle.trim(),
         description: workspaceEditDescription.trim(),
         icon: workspaceEditIcon,
+        color: workspaceEditColor,
         ...(workspaceEditClass !== workspaceIsClass(workspaceHeader) ? { isClass: workspaceEditClass } : {}),
       });
       setWorkspaceEditOpen(false);
@@ -4070,6 +4077,8 @@ export function SpectraShell({
             open={workspaceEditOpen && !!workspaceHeader}
             icon={workspaceEditIcon}
             onIconChange={setWorkspaceEditIcon}
+            color={workspaceEditColor}
+            onColorChange={setWorkspaceEditColor}
             title={workspaceEditTitle}
             onTitleChange={setWorkspaceEditTitle}
             description={workspaceEditDescription}
@@ -4141,6 +4150,9 @@ export function SpectraShell({
                     </button>
                   ))}
                 </div>
+              </div>
+              <div className="mt-3">
+                <WorkspaceColorPicker value={newWorkspaceColor} onChange={setNewWorkspaceColor} />
               </div>
               <div className="mt-3 flex justify-end gap-2">
                 <Button

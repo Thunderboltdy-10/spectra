@@ -36,6 +36,10 @@ const ALL_KEYFRAMES = [
 /** Properties keyframes may animate: composite or paint only, never layout. */
 const ALLOWED_PROPS = new Set([
   "transform",
+  // The landing page's name sweep: a registered property on one word of type.
+  "--sweep",
+  // The sign-in frame's turning light: a registered angle on one border.
+  "--auth-turn",
   // The individual transform properties are composited like transform. A
   // keyframe on `scale` lifts a board node without overriding the transform
   // that places it.

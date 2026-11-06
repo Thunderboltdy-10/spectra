@@ -142,6 +142,40 @@ export function describePatch(patch: Record<string, unknown>, prefix = ""): stri
 }
 
 const LOCAL_TIME = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2})?$/;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_REPEATS = 200;
+
+/** A local date moved by whole days; the wall-clock time stays, so summer time cannot shift a lesson. */
+function shiftLocal(local: string, days: number) {
+  const [date, time] = local.split("T");
+  const moved = new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
+  return time ? `${moved}T${time}` : moved;
+}
+
+/** The later dates of a repeating event, as {alsoAtLocal}; the first date is the event itself. */
+function repeatOf(raw: Record<string, unknown>) {
+  const repeat = raw.repeat as { everyWeeks?: unknown; until?: unknown; except?: unknown } | undefined;
+  if (repeat === undefined || repeat === null) return {};
+  if (typeof repeat !== "object") throw new ToolInputError("repeat must be {everyWeeks, until, except?}.");
+  const everyWeeks = repeat.everyWeeks;
+  if (typeof everyWeeks !== "number" || !Number.isInteger(everyWeeks) || everyWeeks < 1 || everyWeeks > 8)
+    throw new ToolInputError("repeat.everyWeeks must be a whole number of weeks from 1 to 8.");
+  if (typeof repeat.until !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(repeat.until))
+    throw new ToolInputError("repeat.until must be a date, YYYY-MM-DD.");
+  const except = new Set(Array.isArray(repeat.except) ? repeat.except.map(String).map((date) => date.slice(0, 10)) : []);
+  const start = String(raw.start);
+  const end = typeof raw.end === "string" ? raw.end : undefined;
+  const alsoAtLocal: Array<{ startLocal: string; endLocal?: string }> = [];
+  for (let step = 1; ; step += 1) {
+    const startLocal = shiftLocal(start, step * everyWeeks * 7);
+    if (startLocal.slice(0, 10) > repeat.until) break;
+    if (except.has(startLocal.slice(0, 10))) continue;
+    alsoAtLocal.push({ startLocal, ...(end ? { endLocal: shiftLocal(end, step * everyWeeks * 7) } : {}) });
+    if (alsoAtLocal.length > MAX_REPEATS)
+      throw new ToolInputError(`That is more than ${MAX_REPEATS} dates. Use a nearer repeat.until.`);
+  }
+  return alsoAtLocal.length ? { alsoAtLocal } : {};
+}
 
 function localTime(raw: Record<string, unknown>, key: string, required: boolean) {
   const value = optionalString(raw, key, 40);
@@ -156,6 +190,14 @@ function localTime(raw: Record<string, unknown>, key: string, required: boolean)
 /* Devices: Spectra Bridge on the user's computers (docs/product/DEVICES.md). */
 
 const CALENDAR_ACTIONS = ["add_event", "schedule_task", "move_block", "resize_block", "complete_block", "remove_event"] as const;
+const CALENDAR_WORDS: Record<string, [string, string]> = {
+  schedule_task: ["Booking time in your calendar", "Booked time in your calendar"],
+  move_block: ["Moving something in your calendar", "Moved something in your calendar"],
+  resize_block: ["Changing how long something takes", "Changed how long something takes"],
+  complete_block: ["Marking something as done", "Marked something as done"],
+  remove_event: ["Taking something off your calendar", "Took something off your calendar"],
+};
+
 const LIBRARY_ACTIONS = ["create_folder", "create_workspace", "rename", "move", "link", "pin", "unpin"] as const;
 const MANAGEBAC_ACTIONS = ["sync", "select_classes", "set_sync_mode", "create_class_workspaces", "release_class_workspaces", "import_resource"] as const;
 type ManageBacAction = (typeof MANAGEBAC_ACTIONS)[number];
@@ -278,7 +320,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     }),
     commandTool(session, {
       name: "calendar",
-      description: `Change the user's calendar. action add_event: a personal event {title, start, end?, allDay?, notes?}. action schedule_task: a work block for a planner task {taskId (the task's artifact id), start, end}. action move_block {itemId, start, end?, expectedRevision} and resize_block {itemId, end, expectedRevision} for work blocks from read_calendar. complete_block {itemId, expectedRevision} marks a work block done; remove_event {itemId} takes a personal event or work block off the calendar. Times are YYYY-MM-DDTHH:mm in the user's time zone (${timeZone}). Official school deadlines cannot be moved.`,
+      description: `Change the user's calendar. action add_event: a personal event {title, start, end?, allDay?, notes?}. A lesson or anything else that repeats takes repeat {everyWeeks, until (YYYY-MM-DD), except? (dates it does not happen)} on one add_event, instead of one call per date: a timetable lives here, not in a document. In a two-week cycle give each lesson everyWeeks 2 and start it in its own week, and say which week in notes. action schedule_task: a work block for a planner task {taskId (the task's artifact id), start, end}. When the user names a task, find it first and use it; make a new task only if none matches. action move_block {itemId, start, end?, expectedRevision} and resize_block {itemId, end, expectedRevision} for work blocks from read_calendar. complete_block {itemId, expectedRevision} marks a work block done; remove_event {itemId, andFollowing?} takes a personal event or work block off the calendar; andFollowing also takes every later event of its repeating lesson. To change one date of a repeating lesson, remove that event and add its replacement. Times are YYYY-MM-DDTHH:mm in the user's time zone (${timeZone}). Official school deadlines cannot be moved.`,
       parameters: {
         type: "object",
         properties: {
@@ -288,6 +330,17 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
           end: { type: "string" },
           allDay: { type: "boolean" },
           notes: { type: "string" },
+          repeat: {
+            type: "object",
+            properties: {
+              everyWeeks: { type: "number" },
+              until: { type: "string" },
+              except: { type: "array", items: { type: "string" } },
+            },
+            required: ["everyWeeks", "until"],
+            additionalProperties: false,
+          },
+          andFollowing: { type: "boolean" },
           taskId: { type: "string" },
           itemId: { type: "string" },
           expectedRevision: { type: "number" },
@@ -297,12 +350,13 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       },
       effect: "write",
       label: (args: { action: string; title?: string }) =>
-        args.action === "add_event" ? `Adding *${args.title}* to your calendar` : "Updating your calendar",
+        args.action === "add_event" ? `Adding *${args.title}* to your calendar` : CALENDAR_WORDS[args.action]?.[0] ?? "Updating your calendar",
       doneLabel: (args: { action: string; title?: string }) =>
-        args.action === "add_event" ? `Added *${args.title}* to your calendar` : "Updated your calendar",
+        args.action === "add_event" ? `Added *${args.title}* to your calendar` : CALENDAR_WORDS[args.action]?.[1] ?? "Updated your calendar",
       parse: (raw) => {
         const action = oneOf(raw, "action", CALENDAR_ACTIONS);
-        if (action === "remove_event") return { action, itemId: requireString(raw, "itemId", 200) };
+        if (action === "remove_event")
+          return { action, itemId: requireString(raw, "itemId", 200), ...(raw.andFollowing === true ? { andFollowing: true } : {}) };
         if (action === "add_event")
           return {
             action,
@@ -311,6 +365,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
             end: localTime(raw, "end", false),
             allDay: raw.allDay === true,
             notes: optionalString(raw, "notes"),
+            ...repeatOf(raw),
           };
         if (action === "schedule_task")
           return { action, taskId: requireString(raw, "taskId", 200), start: localTime(raw, "start", true), end: localTime(raw, "end", true) };
@@ -333,13 +388,15 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
               timezone: timeZone,
               ...(args.allDay ? { allDay: true } : {}),
               ...(args.notes ? { notes: args.notes } : {}),
+              ...(args.alsoAtLocal ? { alsoAtLocal: args.alsoAtLocal } : {}),
             },
           };
         if (action === "schedule_task")
           return { command: "schedule_calendar_task", args: { planArtifactId: args.taskId, startLocal: args.start, endLocal: args.end, timezone: timeZone } };
         if (action === "complete_block")
           return { command: "complete_calendar_block", args: { itemId: args.itemId, expectedRevision: args.expectedRevision } };
-        if (action === "remove_event") return { command: "remove_calendar_event", args: { itemId: args.itemId } };
+        if (action === "remove_event")
+          return { command: "remove_calendar_event", args: { itemId: args.itemId, ...(args.andFollowing ? { andFollowing: true } : {}) } };
         if (action === "move_block")
           return {
             command: "move_calendar_block",
@@ -644,41 +701,6 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       },
     }),
     commandTool(session, {
-      name: "remember",
-      description:
-        "Save something lasting about the user that will help later (a preference, their level, a goal), or revise a saved memory by memoryId. Only when the user states it or clearly wants it kept; never secrets.",
-      parameters: {
-        type: "object",
-        properties: { content: { type: "string" }, memoryId: { type: "string" } },
-        required: ["content"],
-        additionalProperties: false,
-      },
-      effect: "write",
-      label: () => "Remembering that",
-      doneLabel: () => "Remembered that",
-      parse: (raw) => ({ content: requireString(raw, "content", 2_000), memoryId: optionalString(raw, "memoryId", 200) }),
-      command: (args) => ({
-        command: "write_memory",
-        args: args.memoryId ? { action: "revise", content: args.content, memoryId: args.memoryId } : { action: "create", content: args.content },
-      }),
-    }),
-    commandTool(session, {
-      name: "forget_memory",
-      description:
-        "Erase a saved memory about the user for good, by memoryId (find it with search in [\"memory\"]). Only when the user asks to forget it; to fix a wrong memory, revise it with remember instead.",
-      parameters: {
-        type: "object",
-        properties: { memoryId: { type: "string" } },
-        required: ["memoryId"],
-        additionalProperties: false,
-      },
-      effect: "irreversible",
-      label: () => "Forgetting that",
-      doneLabel: () => "Forgot that",
-      parse: (raw) => ({ memoryId: requireString(raw, "memoryId", 200) }),
-      command: (args) => ({ command: "write_memory", args: { action: "forget", memoryId: args.memoryId } }),
-    }),
-    commandTool(session, {
       name: "add_comment",
       description:
         "Leave a visible, AI-attributed comment on a piece of work, for feedback the user asked for without changing the work. regionId is a block, slide or cell region from the content; omit it to comment on the whole item. replyTo (a comment id from read_comments) answers that comment in its thread.",
@@ -736,7 +758,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "open_in_spectra",
       description:
-        "Show the user a place in Spectra: library, calendar, settings, devices, agents (targetId: an agent to open its page), school, analytics, a workspace or an artifact (targetId; region: the region a search result gives, to open it at that slide, range, block or card). Use it when they ask to see something; whether their view follows depends on their Follow AI setting.",
+        "Show the user a place in Spectra: library, calendar, settings, devices, agents (targetId: an agent to open its page), school, analytics, a workspace or an artifact (targetId; region: the region a search result gives, to open it at that slide, range, block or card). Use it only when they ask to see something; it opens straight away.",
       parameters: {
         type: "object",
         properties: {

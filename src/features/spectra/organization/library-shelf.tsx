@@ -21,7 +21,7 @@ import { startOfDay } from "../school/school-model";
 import { classWorkspaceIdentity, isClassWorkspace } from "./class-shelf";
 import { DueTask } from "./due-task";
 import { PlaceRow, type WorkPicking } from "./library-note";
-import { relativeTime } from "./node-identity";
+import { relativeTime, workspaceInk } from "./node-identity";
 import { groupByWhen } from "./shelf-model";
 import { ShelfNotes, useShelfStacks } from "./shelf-stacks";
 import { useShelfGather } from "./shelf-gather";
@@ -62,7 +62,7 @@ function places(nodes: readonly TreeNode[], book: ClassBook) {
       ? classWorkspaceIdentity(node, book)
       : {
           ...classIdentity({ providerClassId: node.nodeId, title: node.name }),
-          ink: node.workspace?.color ?? "var(--ink-violet)",
+          ink: workspaceInk(node.workspace?.color),
         };
     const subject = isClass && identity.subject;
     (subject ? subjects : others).push({ node, identity, subject });

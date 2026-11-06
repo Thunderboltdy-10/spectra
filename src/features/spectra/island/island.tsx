@@ -19,10 +19,13 @@ import { refreshComposerBands, registerComposerBand } from "../components/compos
 import { useSpectraRouter } from "../hooks/use-spectra-router";
 import { useSpectraMotion } from "../motion";
 import { useSpectraPreferences } from "../settings/preference-store";
+import { useFollowAi } from "../collaboration/follow-ai";
+import { useTreeActions, useTreePlacement } from "../organization/tree-client";
+import { setWorkSpeeds } from "../collaboration/work-speed";
 import { IslandComposer, type ComposerHandle, type ComposerSend } from "./composer";
 import { useIslandEngine } from "./engine";
 import { forgetThread, placeThread, useArrangement } from "./arrange";
-import { arrangeTabs, dropTab, islandStatus, statusLight, stepTab, type IslandSide, type IslandTab } from "./island-model";
+import { arrangeTabs, dropTab, isPendingTab, islandStatus, pendingRunTab, statusLight, stepTab, type IslandSide, type IslandTab } from "./island-model";
 import { IslandRail, RAIL_DONE, RailGhost, useRailSeat, type RailHandlers } from "./island-rail";
 import { boxOf, morphShape } from "./shape-morph";
 import { NOTICE_COLOUR } from "./notice";
@@ -100,11 +103,23 @@ export function Island() {
   const engine = slot?.engine ?? null;
   const router = useSpectraRouter();
   const { preferences } = useSpectraPreferences();
+  const followingAi = useFollowAi().following;
+  setWorkSpeeds({ speed: preferences.ai.workSpeed, followSpeed: preferences.ai.followSpeed, following: followingAi });
   const motion = useSpectraMotion();
 
   const live = engine?.liveExchange ?? null;
   const demand = live && (live.status === "starting" || live.status === "streaming") ? `island:${live.runId ?? live.threadId ?? "new"}:${live.status}` : null;
-  const tabs = useRunTabs({ demand });
+  const serverTabs = useRunTabs({ demand });
+  // A sent message has its tab at once; the server's takes its place when it arrives.
+  const tabs = useMemo(() => {
+    if (!live || (live.status !== "starting" && live.status !== "streaming")) return serverTabs;
+    if (live.runId && serverTabs.some((tab) => tab.runId === live.runId)) return serverTabs;
+    return [...serverTabs, pendingRunTab(live)];
+  }, [live, serverTabs]);
+  const liveRunId = live?.runId;
+  useEffect(() => {
+    if (liveRunId) void refreshRunTabs(true);
+  }, [liveRunId]);
   const [seen, markSeen] = useSeenRuns();
   const arrangement = useArrangement();
 
@@ -253,7 +268,11 @@ export function Island() {
     if (questions.length || live?.status === "waiting") return "needs";
     const fromTabs = islandStatus(allTabs);
     if (fromTabs === "problem") return fromTabs;
-    if (live && (live.status === "starting" || live.status === "streaming")) return "working";
+    // The tab comes from the server. Once it says the run has ended, a live view
+    // that never heard the end does not keep the island working.
+    const liveTab = live?.runId ? allTabs.find((tab) => tab.runId === live.runId) : undefined;
+    const liveEnded = Boolean(liveTab && liveTab.status !== "working" && liveTab.status !== "needs");
+    if (live && !liveEnded && (live.status === "starting" || live.status === "streaming")) return "working";
     if (live?.status === "failed") return "problem";
     return fromTabs;
   }, [allTabs, live, questions.length]);
@@ -440,6 +459,7 @@ export function Island() {
 
   const openView = useCallback(
     (runId: string, pinned: boolean) => {
+      if (isPendingTab(runId)) return;
       window.clearTimeout(viewTimer.current);
       setView((current) => (current?.pinned && !pinned && current.runId !== runId ? current : { runId, pinned: pinned || Boolean(current?.pinned && current.runId === runId) }));
       markSeen(runId);
@@ -751,7 +771,13 @@ export function Island() {
     composerRef.current?.focus();
   }, [composerVisible]);
   // One line whatever the thread is called: a long name is shortened, never wrapped or cut mid-word.
-  const placeholder = focus ? `Reply to ${shortTitle(focus.title)}` : "Ask Spectra anything";
+  // A message sent from here goes on working out of sight, so the box it left says so.
+  const workingElsewhere = allTabs.find((tab) => tab.status === "working" && tab.threadId !== focus?.threadId);
+  const placeholder = focus
+    ? `Reply to ${shortTitle(focus.title)}`
+    : workingElsewhere
+      ? `Working on ${shortTitle(workingElsewhere.title)}. Ask something else?`
+      : "Ask Spectra anything";
 
   /* ------------------------------------------------------------ rail */
 
@@ -836,7 +862,7 @@ export function Island() {
     },
     onMenu: (tab, x, y) => {
       window.clearTimeout(viewTimer.current);
-      setMenu({ tab, x, y });
+      if (!isPendingTab(tab.runId)) setMenu({ tab, x, y });
     },
     onPointerDown: tabDrag.onPointerDown,
   };
@@ -973,6 +999,7 @@ export function Island() {
             placeholder={placeholder}
             visible={composerVisible}
             busy={Boolean(focus && engine?.submitting)}
+            working={Boolean(workingElsewhere)}
             onStop={engine ? () => void engine.stop() : undefined}
             onSend={send}
             onCancel={() => {
@@ -1015,11 +1042,13 @@ export function Island() {
               </DropdownMenuItem>
             )}
             {menu.tab.status !== "working" && menu.tab.status !== "needs" ? (
-              <DropdownMenuItem onSelect={() => void dismiss(menu.tab.runId)}>
-                <MenuGlyph name="close" />
-                Move to history
-                {menu.tab.side === "done" ? <span className="ml-auto pl-4 text-micro text-[var(--text-tertiary)]">Delete</span> : null}
-              </DropdownMenuItem>
+              <>
+                <DropdownMenuItem onSelect={() => void dismiss(menu.tab.runId)}>
+                  <MenuGlyph name="clock" />
+                  Move to history
+                </DropdownMenuItem>
+                {menu.tab.threadId ? <DeleteThreadItem threadId={menu.tab.threadId} onDeleted={() => void dismiss(menu.tab.runId)} /> : null}
+              </>
             ) : null}
           </DropdownMenuContent>
         ) : null}
@@ -1030,6 +1059,39 @@ export function Island() {
         <div aria-hidden className="pointer-events-auto absolute bottom-0 left-1/2 h-7 w-[360px] -translate-x-1/2" onPointerEnter={() => void go("composer")} />
       ) : null}
     </div>
+  );
+}
+
+/** Sends the thread to the Trash, with an undo. Moving it to history only takes it off the island. */
+function DeleteThreadItem({ threadId, onDeleted }: { threadId: string; onDeleted: () => void }) {
+  const placement = useTreePlacement("thread", threadId);
+  const tree = useTreeActions();
+  const nodeId = placement?.node.nodeId;
+  if (!nodeId) return null;
+  return (
+    <DropdownMenuItem
+      className="text-[var(--danger)]"
+      onSelect={() => {
+        void tree.trash([nodeId]).then(
+          () => {
+            spectraBus.emit("threads.changed", {});
+            onDeleted();
+            toast.success("Thread moved to Trash.", {
+              action: {
+                label: "Undo",
+                onClick: () => void tree.restore([nodeId]).then(() => spectraBus.emit("threads.changed", {})),
+              },
+            });
+          },
+          () => toast.error("Could not delete this thread. Try again."),
+        );
+      }}
+    >
+      <span className="grid size-4 shrink-0 place-items-center">
+        <Icon name="trash" size={16} />
+      </span>
+      Delete
+    </DropdownMenuItem>
   );
 }
 

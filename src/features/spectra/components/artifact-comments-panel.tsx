@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, UserPlus, Bell, Check, MessageSquare, Search, Send, Trash2, X, CornerUpLeft, MapPin, Reply } from "@/components/icons/glyph-icons";
+import { Loader2, Bell, Check, MessageSquare, Send, Trash2, X, CornerUpLeft, Reply } from "@/components/icons/glyph-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toast";
@@ -60,15 +60,26 @@ function CommentFrame({ id, arrival, children }: { id: string; arrival?: Arrival
   const ref = useRef<HTMLDivElement>(null);
   useLifeArrival(ref, id, arrival, { bars: "[data-comment-author], [data-comment-body]" });
   return (
-    <div ref={ref} data-comment-id={id} className="group rounded-card border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3.5">
+    <div ref={ref} data-comment-id={id} className="group">
       {children}
     </div>
   );
 }
 
+/** Comments on the work as a whole carry one of these instead of a region. */
+const WHOLE_WORK = new Set(["work:root", "artifact:structure"]);
+
 function regionLabel(regions: readonly ArtifactCommentRegion[], regionId: string) {
-  return regions.find((region) => region.regionId === regionId)?.label ?? regionId;
+  return regions.find((region) => region.regionId === regionId)?.label ?? (WHOLE_WORK.has(regionId) ? "Whole work" : regionId);
 }
+
+function regionGone(regions: readonly ArtifactCommentRegion[], comment: SpectraArtifactComment) {
+  if (comment.status === "orphaned") return true;
+  return !WHOLE_WORK.has(comment.anchor.regionId) && !regions.some((region) => region.regionId === comment.anchor.regionId);
+}
+
+/** The name being typed after an @ at the end of the text. */
+const MENTION_BEING_TYPED = /(?:^|\s)@([^\s@]{0,40})$/;
 
 export function ArtifactCommentsPanel({
   open,
@@ -218,8 +229,8 @@ export function ArtifactCommentsPanel({
   }, [comments]);
   const rootComments = comments.filter((comment) => !comment.parentCommentId);
   const orderedRootComments = [...rootComments].sort((left, right) => {
-    const leftOrphaned = left.status === "orphaned" || !regions.some((region) => region.regionId === left.anchor.regionId);
-    const rightOrphaned = right.status === "orphaned" || !regions.some((region) => region.regionId === right.anchor.regionId);
+    const leftOrphaned = regionGone(regions, left);
+    const rightOrphaned = regionGone(regions, right);
     return Number(rightOrphaned) - Number(leftOrphaned) || left.createdAt - right.createdAt;
   });
 
@@ -333,51 +344,76 @@ export function ArtifactCommentsPanel({
 
   function addMention(member: SpectraSchoolMember) {
     if (!mentions.some((entry) => entry.accountId === member.accountId)) setMentions((current) => [...current, member]);
-    setBody((current) => `${current}${current && !current.endsWith(" ") ? " " : ""}@${member.name} `);
+    setBody((current) => `${current.replace(/@[^\s@]*$/, "")}@${member.name} `);
     setMentionSearch("");
     setMentionResults([]);
   }
 
   function renderComment(comment: SpectraArtifactComment, nested = false) {
     const own = Boolean(currentAccountId && comment.authorAccountId === currentAccountId);
-    const orphaned = comment.status === "orphaned" || !regions.some((region) => region.regionId === comment.anchor.regionId);
+    const orphaned = regionGone(regions, comment);
+    const live = comment.status !== "deleted";
+    const action = "inline-flex h-6 cursor-pointer items-center gap-1 rounded-chip px-1.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]";
     return (
-      <article key={comment._id} className={nested ? "ml-10 border-l border-[var(--border-default)] pl-3" : ""}>
+      <article key={comment._id} className={nested ? "mt-3" : ""}>
         <CommentFrame id={comment._id} arrival={arrivals.current.get(comment._id)}>
           <div className="flex items-start gap-2.5">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--bg-secondary)] text-micro font-bold text-[var(--text-secondary)]">{initials(comment.author?.name)}</span>
+            <span className={`flex shrink-0 items-center justify-center rounded-full bg-[var(--bg-secondary)] font-semibold text-[var(--text-secondary)] ${nested ? "size-5 text-[10px]" : "size-6 text-micro"}`}>{initials(comment.author?.name)}</span>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
+              <div className="flex items-baseline gap-2">
                 <span data-comment-author className="truncate text-caption font-semibold text-[var(--text-primary)]">{comment.author?.name ?? "Former collaborator"}</span>
-                <span className="text-micro text-[var(--text-tertiary)]">{formatRelativeTime(comment.createdAt)}</span>
-                {comment.updatedAt > comment.createdAt + 1_000 ? <span className="text-micro text-[var(--text-tertiary)]">edited</span> : null}
+                <span className="shrink-0 text-micro text-[var(--text-tertiary)]">{formatRelativeTime(comment.createdAt)}{comment.updatedAt > comment.createdAt + 1_000 ? ", edited" : ""}</span>
               </div>
-              {comment.status === "deleted" ? <p className="mt-1.5 text-micro italic text-[var(--text-tertiary)]">Comment removed</p> : editingId === comment._id ? (
+              {!live ? <p className="mt-1 text-micro italic text-[var(--text-tertiary)]">Comment removed</p> : editingId === comment._id ? (
                 <div className="mt-2">
                   <textarea autoFocus value={editingBody} onChange={(event) => setEditingBody(event.target.value)} className="min-h-20 w-full resize-y rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-caption leading-5 text-[var(--text-primary)] outline-none focus:border-[var(--border-strong)]" />
-                  <div className="mt-2 flex justify-end gap-2"><button type="button" onClick={() => setEditingId(null)} className="rounded-chip px-2 py-1 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">Cancel</button><button type="button" disabled={!editingBody.trim() || busy === `edit:${comment._id}`} onClick={() => void saveEdit(comment)} className={buttonVariants({ variant: "primary" })}>Save</button></div>
+                  <div className="mt-2 flex justify-end gap-2"><button type="button" onClick={() => setEditingId(null)} className={action}>Cancel</button><button type="button" disabled={!editingBody.trim() || busy === `edit:${comment._id}`} onClick={() => void saveEdit(comment)} className={buttonVariants({ variant: "primary" })}>Save</button></div>
                 </div>
-              ) : <div data-comment-body><SpectraRichContent content={comment.body} className="mt-1.5 text-caption leading-5 text-[var(--text-primary)]" /></div>}
-              <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                {comment.status !== "deleted" ? <button type="button" onClick={() => { setReplyTo(comment); setRegionId(comment.anchor.regionId); }} className="inline-flex h-6 items-center gap-1 rounded-chip px-1.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Reply className="h-3 w-3" />Reply</button> : null}
-                {comment.status !== "deleted" ? <button type="button" data-life-done={comment.status === "resolved" ? undefined : ""} onClick={() => void setResolved(comment, comment.status !== "resolved")} className="inline-flex h-6 items-center gap-1 rounded-chip px-1.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Check className="h-3 w-3" />{comment.status === "resolved" ? "Reopen" : "Resolve"}</button> : null}
-                {own && comment.status !== "deleted" ? <button type="button" onClick={() => { setEditingId(comment._id); setEditingBody(comment.body); }} className="h-6 rounded-chip px-1.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">Edit</button> : null}
-                {own && comment.status !== "deleted" ? <button type="button" aria-label="Remove comment" onClick={() => void remove(comment)} className="flex h-6 w-6 items-center justify-center rounded-chip text-[var(--text-tertiary)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-primary))] hover:text-[var(--danger)]"><Trash2 className="h-3 w-3" /></button> : null}
-              </div>
+              ) : <div data-comment-body><SpectraRichContent content={comment.body} className="mt-0.5 text-caption leading-5 text-[var(--text-primary)]" /></div>}
+              {live && editingId !== comment._id ? (
+                <div className="-ml-1.5 mt-1 flex flex-wrap items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
+                  <button type="button" onClick={() => { setReplyTo(comment); setRegionId(comment.anchor.regionId); }} className={action}><Reply className="size-3" />Reply</button>
+                  {nested ? null : <button type="button" data-life-done={comment.status === "resolved" ? undefined : ""} onClick={() => void setResolved(comment, comment.status !== "resolved")} className={action}><Check className="size-3" />{comment.status === "resolved" ? "Reopen" : "Resolve"}</button>}
+                  {own ? <button type="button" onClick={() => { setEditingId(comment._id); setEditingBody(comment.body); }} className={action}>Edit</button> : null}
+                  {own ? <button type="button" aria-label="Remove comment" onClick={() => void remove(comment)} className="flex size-6 cursor-pointer items-center justify-center rounded-chip text-[var(--text-tertiary)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-primary))] hover:text-[var(--danger)]"><Trash2 className="size-3" /></button> : null}
+                </div>
+              ) : null}
             </div>
           </div>
-          {comment.status !== "deleted" ? <div className={`mt-3 rounded-control border px-2.5 py-2 ${orphaned ? "border-[color-mix(in_oklab,var(--accent-gold)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-gold)_6%,var(--bg-elevated))]" : "border-[var(--border-subtle)] bg-[var(--bg-elevated)]"}`}>
-            <div className="flex items-center gap-1.5 text-micro text-[var(--text-secondary)]"><MapPin className="h-3 w-3" /><span className="min-w-0 flex-1 truncate">{orphaned ? "Original region changed or was removed" : regionLabel(regions, comment.anchor.regionId)}</span>{orphaned ? <button type="button" onClick={() => { setReanchoringId(comment._id); setReanchorRegionId(regions[0]?.regionId ?? ""); }} className="font-semibold text-[var(--text-primary)]">Reattach</button> : null}</div>
-            {reanchoringId === comment._id ? <div className="mt-2 flex gap-1.5"><SelectField ariaLabel="Reattach to region" value={reanchorRegionId} onChange={setReanchorRegionId} options={regions.map((region) => ({ value: region.regionId, label: region.label }))} size="sm" className="min-w-0 flex-1" triggerClassName="w-full" /><button type="button" disabled={!reanchorRegionId || busy === `anchor:${comment._id}`} onClick={() => void reanchor(comment)} className={buttonVariants({ variant: "primary" })}>Attach</button></div> : null}
-          </div> : null}
+          {live && orphaned ? (
+            <div className="mt-2 pl-[34px] text-micro text-[var(--text-secondary)]">
+              <span>The part this was about has changed.</span>{" "}
+              <button type="button" onClick={() => { setReanchoringId(comment._id); setReanchorRegionId(regions[0]?.regionId ?? ""); }} className="cursor-pointer font-semibold text-[var(--text-primary)]">Reattach</button>
+              {reanchoringId === comment._id ? <div className="mt-2 flex gap-1.5"><SelectField ariaLabel="Reattach to region" value={reanchorRegionId} onChange={setReanchorRegionId} options={regions.map((region) => ({ value: region.regionId, label: region.label }))} size="sm" className="min-w-0 flex-1" triggerClassName="w-full" /><button type="button" disabled={!reanchorRegionId || busy === `anchor:${comment._id}`} onClick={() => void reanchor(comment)} className={buttonVariants({ variant: "primary" })}>Attach</button></div> : null}
+            </div>
+          ) : null}
         </CommentFrame>
       </article>
     );
   }
 
-  function renderThread(comment: SpectraArtifactComment, depth = 0): React.ReactNode {
-    const replies = repliesByParent.get(comment._id) ?? [];
-    return <div key={comment._id} className="space-y-2">{renderComment(comment, depth > 0)}{replies.map((reply) => renderThread(reply, depth + 1))}</div>;
+  function renderReplies(parentId: string): React.ReactNode {
+    return (repliesByParent.get(parentId) ?? []).map((reply) => (
+      <div key={reply._id}>
+        {renderComment(reply, true)}
+        {renderReplies(reply._id)}
+      </div>
+    ));
+  }
+
+  /** One thread: what it is about, the comment, then its replies. */
+  function renderThread(comment: SpectraArtifactComment): React.ReactNode {
+    const resolved = comment.status === "resolved";
+    const about = regionGone(regions, comment) ? null : regionLabel(regions, comment.anchor.regionId);
+    return (
+      <section key={comment._id} className={`rounded-card border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3 ${resolved ? "opacity-70" : ""}`}>
+        {about || resolved ? (
+          <p className="mb-2 truncate text-micro text-[var(--text-tertiary)]">{[about, resolved ? "Resolved" : null].filter(Boolean).join(", ")}</p>
+        ) : null}
+        {renderComment(comment)}
+        {renderReplies(comment._id)}
+      </section>
+    );
   }
 
   // The shared Dialog owns the focus trap, focus return and Escape, so Escape
@@ -391,9 +427,9 @@ export function ArtifactCommentsPanel({
         aria-describedby={undefined}
         className="spectra-sheet left-auto right-0 top-0 flex h-dvh max-w-[410px] translate-x-0 translate-y-0 flex-col gap-0 !rounded-none border-y-0 border-r-0 border-l bg-[var(--bg-elevated)] p-0"
       >
-        <header className="flex shrink-0 items-start justify-between border-b border-[var(--border-default)] px-4 py-4">
-          <div className="flex min-w-0 items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-card bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-secondary))] text-[var(--accent-cyan)]"><MessageSquare className="h-4 w-4" /></span><div className="min-w-0"><DialogTitle className="font-display">Comments</DialogTitle><p className="mt-0.5 truncate text-micro text-[var(--text-tertiary)]">{artifactTitle}</p></div></div>
-          <div className="flex items-center gap-1"><OverflowMenu label="Comment notifications" icon={Bell} items={NOTIFICATION_MODE_ITEMS} value={notificationMode} onSelect={(next) => void changeNotifications(next)} size={32} /><button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-label="Close comments"><X className="h-4 w-4" /></button></div>
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-4 py-3">
+          <div className="min-w-0"><DialogTitle className="font-display">Comments</DialogTitle><p className="truncate text-micro text-[var(--text-tertiary)]">{artifactTitle}</p></div>
+          <div className="flex items-center gap-1"><OverflowMenu label="Comment notifications" icon={Bell} items={NOTIFICATION_MODE_ITEMS} value={notificationMode} onSelect={(next) => void changeNotifications(next)} size={32} /><button type="button" onClick={onClose} className="flex size-8 cursor-pointer items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-label="Close comments"><X className="size-4" /></button></div>
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col">
@@ -422,26 +458,29 @@ export function ArtifactCommentsPanel({
                 ) : null}
                 {orderedRootComments.length === 0 ? (
                   wordComments.length ? null : (
-                    <div className="mx-auto flex max-w-[260px] flex-col items-center py-14 text-center"><span className="flex h-11 w-11 items-center justify-center rounded-full border border-dashed border-[var(--border-strong)] text-[var(--text-tertiary)]"><MessageSquare className="h-4 w-4" /></span><h3 className="mt-3 text-caption font-semibold text-[var(--text-primary)]">No comments here yet</h3><p className="mt-1 text-micro leading-5 text-[var(--text-secondary)]">Anchor a thought to a block, field, card, cell, object, or other semantic region.</p></div>
+                    <div className="mx-auto flex max-w-[260px] flex-col items-center py-14 text-center"><MessageSquare className="size-4 text-[var(--text-tertiary)]" /><h3 className="mt-3 text-caption font-semibold text-[var(--text-primary)]">No comments yet</h3><p className="mt-1 text-micro leading-5 text-[var(--text-secondary)]">Add one below, or ask Spectra to leave you feedback here.</p></div>
                   )
                 ) : orderedRootComments.map((comment) => renderThread(comment))}
               </div>
             )}
           </div>
 
-          <div className="shrink-0 border-t border-[var(--border-default)] bg-[var(--bg-primary)] p-3">
-            {replyTo ? <div className="mb-2 flex items-center gap-2 rounded-control bg-[var(--bg-secondary)] px-2.5 py-2 text-micro text-[var(--text-secondary)]"><CornerUpLeft className="h-3 w-3" /><span className="min-w-0 flex-1 truncate">Replying to {replyTo.author?.name ?? "comment"}</span><button type="button" onClick={() => setReplyTo(null)} aria-label="Cancel reply"><X className="h-3 w-3" /></button></div> : null}
-            <div className="rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] focus-within:border-[var(--border-strong)]">
-              <LocalAutocompleteTextarea surface="comment" value={body} onValueChange={setBody} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") void createComment(); }} placeholder={replyTo ? "Write a reply…" : "Add a comment…"} className="min-h-[76px] w-full" textareaClassName="min-h-[76px] w-full resize-none px-3 pt-2.5 text-caption leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" />
-              {mentions.length ? <div className="flex flex-wrap gap-1 px-3 pb-2">{mentions.map((member) => <button type="button" key={member.accountId} onClick={() => setMentions((current) => current.filter((entry) => entry.accountId !== member.accountId))} className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-secondary)] px-2 py-1 text-micro text-[var(--text-secondary)]">@{member.name}<X className="h-2.5 w-2.5" /></button>)}</div> : null}
-              <div className="flex items-center gap-1.5 border-t border-[var(--border-subtle)] px-2 py-2">
-                <div className="relative min-w-0 flex-1"><MapPin className="pointer-events-none absolute left-2 top-1/2 z-chrome h-3 w-3 -translate-y-1/2 text-[var(--text-tertiary)]" /><SelectField ariaLabel="Region this comment is about" value={replyTo?.anchor.regionId ?? regionId} disabled={Boolean(replyTo)} onChange={setRegionId} options={regions.length ? regions.map((region) => ({ value: region.regionId, label: region.label })) : [{ value: "artifact:structure", label: "Whole work" }]} size="sm" triggerClassName="w-full border-0 bg-[var(--bg-secondary)] pl-7 font-normal text-[var(--text-secondary)]" /></div>
-                <div className="relative"><button type="button" className="flex h-8 w-8 items-center justify-center rounded-chip text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-label="Mention a collaborator" onClick={() => document.getElementById(`comment-mention-${artifactId}`)?.focus()}><UserPlus className="h-3.5 w-3.5" /></button></div>
-                <button type="button" disabled={!body.trim() || busy === "create"} onClick={() => void createComment()} className={buttonVariants({ variant: "primary", size: "icon" })} aria-label="Post comment">{busy === "create" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}</button>
+          <div className="relative shrink-0 border-t border-[var(--border-subtle)] p-3">
+            {mentionSearch.trim().length >= 2 ? (
+              <div className="absolute inset-x-3 bottom-full z-chrome mb-1 max-h-40 overflow-y-auto rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-hover">
+                {mentionResults.filter((member) => !mentions.some((entry) => entry.accountId === member.accountId)).map((member) => <button type="button" key={member.accountId} onClick={() => addMention(member)} className="flex w-full cursor-pointer items-center gap-2 rounded-chip px-2 py-1.5 text-left hover:bg-[var(--bg-hover)]"><span className="flex size-6 items-center justify-center rounded-full bg-[var(--bg-secondary)] text-micro font-semibold text-[var(--text-secondary)]">{initials(member.name)}</span><span className="min-w-0 flex-1 truncate text-micro font-medium text-[var(--text-primary)]">{member.name}</span></button>)}
+                {searching ? <p className="px-2 py-2 text-micro text-[var(--text-tertiary)]">Searching…</p> : mentionResults.length === 0 ? <p className="px-2 py-2 text-micro text-[var(--text-tertiary)]">Nobody at your school by that name.</p> : null}
+              </div>
+            ) : null}
+            {replyTo ? <div className="mb-2 flex items-center gap-2 px-1 text-micro text-[var(--text-secondary)]"><CornerUpLeft className="size-3" /><span className="min-w-0 flex-1 truncate">Replying to {replyTo.author?.name ?? "this comment"}</span><button type="button" className="cursor-pointer" onClick={() => setReplyTo(null)} aria-label="Cancel reply"><X className="size-3" /></button></div> : null}
+            <div className="rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] focus-within:border-[var(--border-strong)]">
+              <LocalAutocompleteTextarea surface="comment" value={body} onValueChange={(next) => { setBody(next); setMentionSearch(next.match(MENTION_BEING_TYPED)?.[1] ?? ""); }} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") void createComment(); }} placeholder={replyTo ? "Write a reply" : "Add a comment. Type @ to mention someone."} className="min-h-[52px] w-full" textareaClassName="min-h-[52px] w-full resize-none bg-transparent px-3 pt-2.5 text-caption leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" />
+              {mentions.length ? <div className="flex flex-wrap gap-1 px-3 pb-1">{mentions.map((member) => <button type="button" key={member.accountId} onClick={() => setMentions((current) => current.filter((entry) => entry.accountId !== member.accountId))} className="inline-flex cursor-pointer items-center gap-1 rounded-full bg-[var(--bg-secondary)] px-2 py-0.5 text-micro text-[var(--text-secondary)]">@{member.name}<X className="size-2.5" /></button>)}</div> : null}
+              <div className="flex items-center gap-1.5 px-1.5 pb-1.5">
+                {replyTo ? <span className="min-w-0 flex-1" /> : <SelectField ariaLabel="What this comment is about" value={regionId} onChange={setRegionId} options={regions.length ? regions.map((region) => ({ value: region.regionId, label: region.label })) : [{ value: "artifact:structure", label: "Whole work" }]} size="sm" className="min-w-0 flex-1" triggerClassName="w-fit max-w-full border-0 bg-transparent font-normal text-[var(--text-secondary)]" />}
+                <button type="button" disabled={!body.trim() || busy === "create"} onClick={() => void createComment()} className={buttonVariants({ variant: "primary", size: "icon" })} aria-label="Post comment">{busy === "create" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}</button>
               </div>
             </div>
-            <div className="relative mt-2"><Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" /><input id={`comment-mention-${artifactId}`} value={mentionSearch} onChange={(event) => setMentionSearch(event.target.value)} placeholder="Mention a collaborator" className="h-8 w-full rounded-control border border-[var(--border-subtle)] bg-[var(--bg-elevated)] pl-8 pr-8 text-micro text-[var(--text-primary)] outline-none focus:border-[var(--border-default)]" />{searching ? <Loader2 className="absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-[var(--text-tertiary)]" /> : null}{mentionSearch.trim().length >= 2 ? <div className="absolute bottom-10 left-0 right-0 z-chrome max-h-40 overflow-y-auto rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-hover">{mentionResults.filter((member) => !mentions.some((entry) => entry.accountId === member.accountId)).map((member) => <button type="button" key={member.accountId} onClick={() => addMention(member)} className="flex w-full items-center gap-2 rounded-chip px-2 py-2 text-left hover:bg-[var(--bg-hover)]"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--bg-secondary)] text-micro font-bold text-[var(--text-secondary)]">{initials(member.name)}</span><span className="min-w-0 flex-1 truncate text-micro font-medium text-[var(--text-primary)]">{member.name}</span></button>)}{!searching && mentionResults.length === 0 ? <p className="px-2 py-3 text-center text-micro text-[var(--text-tertiary)]">No school member found.</p> : null}</div> : null}</div>
-            <p className="mt-2 text-right text-micro text-[var(--text-tertiary)]">Ctrl/⌘ + Enter to post</p>
           </div>
         </div>
       </DialogContent>

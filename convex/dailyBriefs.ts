@@ -18,7 +18,7 @@ import { schoolSetupForAccount } from "./schoolSyncShared";
  *
  * Each student's wake-up time is kept as a schedule; a cron hands the due
  * ones to the app a little before they wake, so the brief is waiting. A
- * reader away for four days stops getting them: their schedule rests, out of
+ * reader away for three days stops getting them: their schedule rests, out of
  * the cron's way, until Home opens again, writes that day's brief there and
  * sets the schedule going.
  */
@@ -31,7 +31,7 @@ export const BRIEF_LEAD_MS = 30 * 60_000;
 const STALE_AFTER_MS = 3 * 60 * 60_000;
 const DISPATCH_BATCH = 50;
 /** Days without opening Home after which the briefs stop. */
-const IDLE_AFTER_MS = 4 * DAY_MS;
+const IDLE_AFTER_MS = 3 * DAY_MS;
 /** Home tells the schedule it was seen at most this often. */
 const SEEN_EVERY_MS = 6 * 60 * 60_000;
 /** Where a resting schedule waits: past any morning the cron will reach before Home sets it again. */

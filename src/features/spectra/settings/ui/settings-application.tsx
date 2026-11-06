@@ -21,6 +21,8 @@ import { useSpectraPreferences } from "../preference-store";
 import { preferenceSaveStatus } from "../preference-save-status";
 import type { PreferenceSection, SpectraPreferences } from "../schema";
 import { clearSpectraMemory, exportSpectraMemory } from "../../data/api";
+import { MemoryFilesSettings } from "./memory-files-settings";
+import { RuntimeSettings } from "./runtime-settings";
 import { downloadDocumentBlob } from "../../components/artifact-studio-file-utils";
 import { COMMAND_TABS } from "../../commands";
 import { SMART_COMPLETION_TARGET } from "../../actions/protocol/semantic-action";
@@ -38,6 +40,7 @@ import { registerSettingsToggleControl } from "../../collaboration/settings-togg
 
 const SECTIONS = [
   { id: "ai", label: "Spectra AI", icon: "agent" },
+  { id: "subscriptions", label: "AI subscriptions", icon: "agents" },
   { id: "writing", label: "Writing", icon: "edit" },
   { id: "day", label: "Your day", icon: "clock" },
   { id: "appearance", label: "Appearance", icon: "theme" },
@@ -325,11 +328,16 @@ function PrivacySettings() {
     }
   }
   return (
+    <>
+    <SettingGroup title="What Spectra knows" description="The notes Spectra keeps about you. It writes these itself, and you can change or remove anything.">
+      <MemoryFilesSettings />
+    </SettingGroup>
     <SettingGroup title="Personal context" description="Inspectable controls for the private context Spectra can use across conversations.">
       <SettingRow label="Class shelves" description="Choose which ManageBac classes get their own workspace. Unchosen class work stays in General." control={<Button size="sm" variant="secondary" asChild><Link href="/school">Open School</Link></Button>} />
       <SettingRow label="Export personal context" description="Download a JSON copy for review." control={<Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void exportContext()}>{busy === "export" ? "Preparing…" : "Export"}</Button>} />
       <SettingRow label="Clear personal context" description={confirmClear ? "This removes the private retrieval context Spectra has learned. Your work stays intact." : "Remove retrieval evidence without deleting your work."} control={confirmClear ? <div className="flex items-center gap-1"><Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setConfirmClear(false)}>Cancel</Button><Button size="sm" variant="destructive" disabled={busy !== null} onClick={() => void clearContext()}>{busy === "clear" ? "Clearing…" : "Clear now"}</Button></div> : <Button size="sm" variant="destructive" disabled={busy !== null} onClick={() => setConfirmClear(true)}>Clear context</Button>} />
     </SettingGroup>
+    </>
   );
 }
 
@@ -382,6 +390,7 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
         <PermissionSettings p={preferences.ai} update={updateSection("ai")} />
       </div>
     ),
+    subscriptions: <RuntimeSettings />,
     writing: <WritingSettings p={preferences.writing} update={updateSection("writing")} refreshConfirmedPreferences={refreshConfirmedPreferences} />,
     day: <DaySettings p={preferences.notifications} update={updateSection("notifications")} />,
     appearance: <AppearanceSettings p={preferences.appearance} update={updateSection("appearance")} />,

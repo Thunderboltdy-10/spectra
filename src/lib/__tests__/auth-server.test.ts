@@ -16,6 +16,7 @@ vi.mock("@/lib/clerk-config", () => ({
 vi.mock("@/lib/convex-server", () => ({
   convexMutation: convex.mutation,
   convexQuery: convex.query,
+  forgetConvexTokens: vi.fn(),
 }));
 
 import {

@@ -13,6 +13,7 @@ import { replyEmbedRegion } from "../shared/artifact-embed";
 import { applicationCommandCategory, LOCAL_FILE_COMMANDS } from "../shared/ai-application-approval";
 import { vUiObservationFence } from "./spectraUiObservationSchema";
 import { assertUiObservationFence } from "./spectraUiObservation";
+import { undoStateFor } from "./spectraRunUndo";
 
 type Row = Record<string, unknown>;
 const row = (value: unknown): Row => value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
@@ -104,11 +105,6 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
     case "save_version": return { name: "changeGroups:createNamedCheckpoint", args: { artifactId: String(args.artifactId ?? ""), name: String(args.name ?? "") } };
     case "remove_device": return { name: "bridge:revokeDevice", args: { deviceId: String(args.deviceId ?? "") } };
     case "change_sync_policy": return { name: "syncPolicy:patchItems", args: { itemIds: targetIds, patch: row(args.patch), actorKind: "ai", idempotencyKey: `ai:${runId}:${operationId}` } };
-    case "write_memory": switch (args.action) {
-      case "create": return { name: "memory:remember", args: { proposition: String(args.content ?? "").trim(), scope: "private_global", claimType: "inferred_preference", sourceType: "user_statement", captureReason: "You explicitly asked Spectra to remember this." } };
-      case "forget": return { name: "memory:forget", args: { claimId: args.memoryId } };
-      default: return { name: "memory:correct", args: { claimId: args.memoryId, proposition: String(args.content ?? "").trim() } };
-    }
     case "change_sharing": {
       const resourceType = String(args.resourceType ?? "artifact");
       const resourceId = String(args.resourceId ?? "");
@@ -191,14 +187,24 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
       const time = normalizeCalendarTimeInput(args);
       return { name: "calendar:createPersonalItem", args: {
         kind: "personal_event", title: args.title, ...(typeof args.notes === "string" ? { notes: args.notes } : {}),
+        ...(Array.isArray(args.alsoAtLocal) ? { alsoAt: args.alsoAtLocal.map((at: { startLocal: string; endLocal?: string }) => {
+          const later = normalizeCalendarTimeInput({ ...at, timezone: args.timezone });
+          return { startAt: later.startAt as number, ...(later.endAt !== undefined ? { endAt: later.endAt as number } : {}) };
+        }) } : {}),
         startAt: time.startAt, endAt: time.endAt, allDay: args.allDay === true, timezone: args.timezone, actorKind: "ai", idempotencyKey: `ai:${runId}:${operationId}`,
         ...(Array.isArray(args.linkedArtifactIds) ? { linkedArtifactIds: args.linkedArtifactIds } : {}),
       } };
     }
-    case "move_calendar_block": return { name: "calendar:moveWorkBlock", args: { itemId: args.itemId, startAt: args.startAt, endAt: args.endAt, expectedRevision: args.expectedRevision } };
-    case "resize_calendar_block": return { name: "calendar:resizeWorkBlock", args: { itemId: args.itemId, endAt: args.endAt, expectedRevision: args.expectedRevision } };
+    case "move_calendar_block": {
+      const time = normalizeCalendarTimeInput(args);
+      return { name: "calendar:moveWorkBlock", args: { itemId: args.itemId, startAt: time.startAt, ...(time.endAt !== undefined ? { endAt: time.endAt } : {}), expectedRevision: args.expectedRevision } };
+    }
+    case "resize_calendar_block": {
+      const time = normalizeCalendarTimeInput(args);
+      return { name: "calendar:resizeWorkBlock", args: { itemId: args.itemId, endAt: time.endAt, expectedRevision: args.expectedRevision } };
+    }
     case "complete_calendar_block": return { name: "calendar:completeWorkBlock", args: { itemId: args.itemId, expectedRevision: args.expectedRevision } };
-    case "remove_calendar_event": return { name: "calendar:removePersonalItem", args: { itemId: args.itemId } };
+    case "remove_calendar_event": return { name: "calendar:removePersonalItem", args: { itemId: args.itemId, ...(args.andFollowing === true ? { andFollowing: true } : {}) } };
   }
   throw new Error("AI_APPLICATION_WRITE_NOT_REGISTERED");
 }
@@ -270,6 +276,8 @@ export const execute = mutation({
     // MutationCtx.runMutation executes inside this transaction. Its permission
     // checks, the effect, this run/operation read set and receipt commit together.
     // A concurrent Stop/steer conflicts with these reads and retries the guard.
+    // What this write replaces, kept so "Undo this run" can put it back.
+    const undoState = await undoStateFor(ctx, actor._id, String(input.command), row(input.args));
     const result = await ctx.runMutation(makeFunctionReference<"mutation">(spec.name), spec.args);
     if (spec.name === "authority:createPublicLink") {
       // Remembers which step made the link, so its owner can copy it later from
@@ -278,7 +286,7 @@ export const execute = mutation({
       if (!linkId) throw new Error("AI_PUBLIC_LINK_NOT_RECORDED");
       await ctx.db.patch(linkId, { aiOrigin: { runId: run._id, operationId: operation._id } });
     }
-    await ctx.db.patch(operation._id, { output: { ...row(operation.output), applicationWriteReceipt: { scope, result } } });
+    await ctx.db.patch(operation._id, { output: { ...row(operation.output), applicationWriteReceipt: { scope, result }, ...(undoState ? { undoState } : {}) } });
     return result;
   },
 });

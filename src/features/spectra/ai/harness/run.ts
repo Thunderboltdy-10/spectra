@@ -1,5 +1,13 @@
+import { jsonSize, traceEvent, traceSpan } from "./run-trace";
+import {
+  runtimeFallbackLabel,
+  subscriptionModelCaller,
+  subscriptionProviderFrom,
+  withRuntimeFallback,
+  type RuntimeTarget,
+} from "./subscription-runtime";
 import type { HarnessBackend } from "./backend";
-import { CaptionScheduler, modelCaptionWriter, type CaptionEvent, type CaptionWriter } from "./captions";
+import { modelThreadTitleWriter, type ThreadTitleWriter } from "./thread-title";
 import { createCompactor } from "./compaction";
 import {
   emptyLoopState,
@@ -10,7 +18,7 @@ import {
   type LoopState,
   type ModelCaller,
 } from "./loop";
-import { callSpectraModel, openRouterModelCaller, spectraModelContextWindow } from "./model";
+import { callSpectraModel, createOpenRouterCaller, spectraModelContextWindow } from "./model";
 import { permissionDecision, permissionSummary, type PermissionPrefs } from "./permissions";
 import { buildSystemPrompt, type EnvironmentInput } from "./prompt";
 import { SUMMARY_INSTRUCTIONS } from "./compaction";
@@ -31,7 +39,7 @@ import type {
 
 /*
  * One Spectra run: the system prompt and environment, this thread's history,
- * the loop, captions, compaction and durable bookkeeping, wired together.
+ * the loop, thread naming, compaction and durable bookkeeping, wired together.
  * Storage and transport arrive as a sink, so the same driver serves the app
  * (Convex) and the evals (in memory).
  */
@@ -41,7 +49,7 @@ export type HarnessEvent =
   | { type: "text_reset"; text: string }
   | { type: "step_start"; id: string; label: string; effect: ToolEffect; work?: string }
   | { type: "step_end"; id: string; ok: boolean; label: string; durationMs: number }
-  | ({ type: "caption" } & CaptionEvent)
+  | { type: "reasoning"; id: string; delta: string; done?: boolean }
   | { type: "artifact"; artifact: ArtifactTouch }
   /** Everything the run has read that its reply may cite, so far. */
   | { type: "sources"; sources: RunSource[] }
@@ -55,6 +63,8 @@ export type HarnessEvent =
 export type RunCheckpoint = {
   state: LoopState;
   status: "running" | "paused" | "completed" | "stopped" | "failed" | "yielded";
+  /** The loop has nothing left to do unless the user sent something. */
+  ending?: boolean;
 };
 
 export type HarnessSink = {
@@ -90,7 +100,9 @@ export type HarnessRunInput = {
   /** Continue after a crash or reload from the last checkpoint. */
   restore?: LoopState;
   callModel?: ModelCaller;
-  captionWriter?: CaptionWriter | null;
+  /** The user's own choice of who runs the work. Unset is Spectra's model. */
+  runtime?: RuntimeTarget & { provider?: unknown };
+  titleWriter?: ThreadTitleWriter | null;
   compactor?: Compactor | null;
   budgets?: LoopBudgets;
   now?: () => number;
@@ -107,6 +119,8 @@ export type HarnessRunResult = LoopOutcome & {
    * held back. Await it before the worker ends.
    */
   titling: Promise<void>;
+  /** The agent changed its notes itself during this run. */
+  memoryWritten: boolean;
 };
 
 function userMessage(prompt: string, attachments?: HarnessContentPart[]): HarnessMessage {
@@ -150,11 +164,13 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
     prompt: input.prompt,
     workspaceId: input.workspaceId,
     agents: input.environment.agent ? [] : input.environment.agents,
+    places: input.environment.places,
+    learner: input.environment.user?.role === "student",
   });
   const tools = buildHarnessTools(session);
   // Labels name what the user pointed at from the first step, without a read.
   const environment = input.environment;
-  for (const item of [...(environment.open ?? []), ...(environment.references ?? []), ...(environment.selection?.in ? [environment.selection.in] : [])])
+  for (const item of [...(environment.recent ?? []), ...(environment.open ?? []), ...(environment.references ?? []), ...(environment.selection?.in ? [environment.selection.in] : [])])
     rememberTitle(session, item.id, item.title, item.type);
   const systemPrompt = buildSystemPrompt({
     ...input.environment,
@@ -170,18 +186,29 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
     }
   };
 
-  const writer = input.captionWriter === undefined ? modelCaptionWriter : input.captionWriter;
-  const captions = writer
-    ? new CaptionScheduler({
-        prompt: input.prompt,
-        write: writer,
-        wantTitle: input.wantTitle,
-        // An unfiled thread is filed with its title, in the one place it is clearly about.
-        ...(input.environment.here ? {} : { places: input.environment.places }),
-        onCaption: (caption) => emit({ type: "caption", ...caption }),
-        onTitle: (title, placeId) => emit({ type: "thread_title", title, ...(placeId ? { placeId } : {}) }),
-      })
-    : null;
+  // A new thread is named beside the run; nothing waits for it. An unfiled one
+  // is filed with its title, in the one place it is clearly about.
+  const writeTitle = input.titleWriter === undefined ? modelThreadTitleWriter : input.titleWriter;
+  const places = input.environment.here ? undefined : input.environment.places;
+  const titling: Promise<void> =
+    writeTitle && input.wantTitle
+      ? writeTitle({ prompt: input.prompt, ...(places?.length ? { places } : {}) }, AbortSignal.timeout(45_000))
+          .then((named) => {
+            if (!named?.title) return;
+            const placeId = places?.some((place) => place.id === named.placeId) ? named.placeId : undefined;
+            emit({ type: "thread_title", title: named.title, ...(placeId ? { placeId } : {}) });
+          })
+          .catch(() => undefined)
+      : Promise.resolve();
+
+  // One stretch of reasoning is one part of the trace; anything else ends it.
+  let thinkingCount = 0;
+  let thinkingPart: string | null = null;
+  const endThinking = () => {
+    if (!thinkingPart) return;
+    emit({ type: "reasoning", id: thinkingPart, delta: "", done: true });
+    thinkingPart = null;
+  };
 
   // Text flushes at most every ~250 ms; the client also gets every delta live.
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -209,23 +236,105 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
     emit({ type: "sources", sources });
   };
 
+  const provider = input.callModel ? null : subscriptionProviderFrom(input.runtime?.provider);
+  const subscriptionCaller = provider ? subscriptionModelCaller(provider, input.runtime) : null;
+  const openRouter = createOpenRouterCaller(input.runtime?.reasoning);
+  const baseCaller =
+    input.callModel ??
+    (subscriptionCaller
+      ? withRuntimeFallback(subscriptionCaller, openRouter, (reason) => {
+          // Said once, in the trace, in words that tell the user what happened.
+          const id = "runtime-fallback";
+          const label = runtimeFallbackLabel(reason);
+          emit({ type: "step_start", id, label, effect: "read" });
+          emit({ type: "step_end", id, ok: true, label, durationMs: 0 });
+        })
+      : openRouter);
+  traceEvent("run.harness_start", {
+    runtime: provider ?? "openrouter",
+    systemChars: systemPrompt.length,
+    toolCount: tools.length,
+    priorMessages: state.messages.length,
+    resumed: Boolean(input.resume || input.restore),
+    promptChars: input.prompt.length,
+  });
+  let modelCallIndex = 0;
+  const tracedCaller: ModelCaller = async (call) => {
+    const index = ++modelCallIndex;
+    const started = Date.now();
+    let firstText: number | undefined;
+    let firstReasoning: number | undefined;
+    let firstDraft: number | undefined;
+    let reasoningChars = 0;
+    traceEvent("model.send", {
+      index,
+      messages: call.messages.length,
+      promptChars: jsonSize(call.messages),
+      toolSchemaChars: jsonSize(call.tools),
+      toolChoice: call.toolChoice,
+    });
+    try {
+      const turn = await baseCaller({
+        ...call,
+        onText: (delta) => {
+          firstText ??= Date.now() - started;
+          call.onText(delta);
+        },
+        onReasoning: (delta) => {
+          firstReasoning ??= Date.now() - started;
+          reasoningChars += delta.length;
+          call.onReasoning?.(delta);
+        },
+        onToolDraft: (draft) => {
+          firstDraft ??= Date.now() - started;
+          call.onToolDraft?.(draft);
+        },
+      });
+      traceEvent("model.end", {
+        index,
+        ms: Date.now() - started,
+        firstText,
+        firstReasoning,
+        firstDraft,
+        reasoningChars,
+        textChars: turn.text.length,
+        toolCalls: turn.toolCalls.map((tool) => ({ name: tool.name, argChars: tool.arguments.length })),
+        finishReason: turn.finishReason,
+        model: turn.model,
+        provider: turn.provider,
+        usage: turn.usage,
+      });
+      return turn;
+    } catch (error) {
+      traceEvent("model.error", {
+        index,
+        ms: Date.now() - started,
+        error: error instanceof Error ? error.message.slice(0, 300) : "unknown",
+      });
+      throw error;
+    }
+  };
+
+  const baseCompactor = input.compactor === undefined ? defaultCompactor() : (input.compactor ?? undefined);
   const outcome = await runHarnessLoop(
     state,
     {
       systemPrompt,
       tools,
-      callModel: input.callModel ?? openRouterModelCaller,
+      callModel: tracedCaller,
       policy: (effect, category) => permissionDecision(effect, category, input.permissions),
       runId: input.runId,
       signal: input.signal,
       budgets: input.budgets,
-      compact: input.compactor === undefined ? defaultCompactor() : (input.compactor ?? undefined),
+      compact: baseCompactor
+        ? (request) => traceSpan("compact.check", { messages: request.messages.length }, () => baseCompactor(request))
+        : undefined,
       now,
       shouldYield: input.shouldYield,
       hooks: {
         onText: (delta) => {
           latestText += delta;
-          captions?.text(delta);
+          endThinking();
           emit({ type: "text", delta });
           scheduleFlush();
         },
@@ -235,35 +344,55 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
           scheduleFlush();
         },
         onToolStart: (step) => {
+          traceEvent("tool.start", { id: step.call.id, name: step.call.name, argChars: step.call.arguments.length, effect: step.effect });
           if (step.tool?.quiet) return;
+          endThinking();
           const work = step.args ? step.tool?.shows?.(step.args) : undefined;
           emit({ type: "step_start", id: step.call.id, label: step.label, effect: step.effect, ...(work ? { work } : {}) });
-          captions?.stepStarted({ id: step.call.id, label: step.label });
         },
-        ...(captions ? { onReasoning: (delta: string) => captions.thinking(delta) } : {}),
+        onReasoning: (delta: string) => {
+          if (!delta) return;
+          if (!thinkingPart) {
+            thinkingCount += 1;
+            thinkingPart = `thinking:${started}:${thinkingCount}`;
+          }
+          emit({ type: "reasoning", id: thinkingPart, delta });
+        },
         onToolDraft: (draft) => {
+          endThinking();
           emit({ type: "step_start", id: draft.id, label: draft.label, effect: "write" });
-          captions?.stepStarted({ id: draft.id, label: draft.label });
         },
         onToolEnd: (step) => {
+          traceEvent("tool.end", {
+            id: step.call.id,
+            name: step.call.name,
+            ok: step.outcome.ok,
+            ms: step.durationMs,
+            code: (step.outcome as { code?: unknown }).code,
+            resultChars: jsonSize(step.outcome),
+          });
           if (step.tool?.quiet) return;
           const label = step.outcome.doneLabel ?? step.label;
           emit({ type: "step_end", id: step.call.id, ok: step.outcome.ok, label, durationMs: step.durationMs });
-          captions?.stepEnded({ id: step.call.id, ok: step.outcome.ok, doneLabel: step.outcome.doneLabel });
         },
         onTodos: (todos) => emit({ type: "todos", todos }),
         onWidget: (widget, step) => emit({ type: "widget", id: step.call.id, widget }),
         onUiEvents: (events) => {
           for (const event of events) emit({ type: "ui_event", key: event.key, payload: event.payload });
         },
-        onCompacted: (summary) => emit({ type: "compacted", summary }),
+        onCompacted: (summary) => {
+          traceEvent("compact.done", { summaryChars: summary.length });
+          emit({ type: "compacted", summary });
+        },
         onPause: (pending) => emit({ type: "input_required", pending }),
-        checkpoint: async (current) => {
+        checkpoint: async (current, info) => {
           for (const touch of current.artifacts.slice(artifactsSeen)) emit({ type: "artifact", artifact: touch });
           // Later touches of a known artifact update its card in place.
           artifactsSeen = current.artifacts.length;
           emitSources(current);
-          const result = await quietly(() => input.sink.checkpoint({ state: current, status: "running" }));
+          const result = await traceSpan("checkpoint", { stateChars: jsonSize(current) }, () =>
+            quietly(() => input.sink.checkpoint({ state: current, status: "running", ...(info?.ending ? { ending: true } : {}) })),
+          );
           return result ?? undefined;
         },
       },
@@ -271,6 +400,8 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
     input.resume?.answer,
   );
 
+  subscriptionCaller?.dispose?.();
+  traceEvent("run.loop_end", { status: outcome.status, turns: outcome.state.turns, modelCalls: modelCallIndex });
   if (flushTimer) {
     clearTimeout(flushTimer);
     flushTimer = null;
@@ -282,10 +413,10 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
 
   const status: RunCheckpoint["status"] =
     outcome.status === "paused" ? "paused" : outcome.status;
-  let titling: Promise<void> = Promise.resolve();
-  if (outcome.status === "paused" || outcome.status === "yielded")
-    titling = captions ? captions.suspend().catch(() => undefined) : titling;
-  else await quietly(() => captions?.finish({ stopped: outcome.status !== "completed" }));
-  await quietly(() => input.sink.checkpoint({ state: outcome.state, status }));
-  return { ...outcome, durationMs: now() - started, titling };
+  endThinking();
+  await traceSpan("checkpoint.final", { stateChars: jsonSize(outcome.state) }, () =>
+    quietly(() => input.sink.checkpoint({ state: outcome.state, status })),
+  );
+  traceEvent("run.harness_end", { status: outcome.status, ms: now() - started });
+  return { ...outcome, durationMs: now() - started, titling, memoryWritten: session.memoryWritten === true };
 }

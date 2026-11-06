@@ -10,7 +10,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { Code2, Loader2, ShieldCheck, AlertCircle, Bot, Check, ChevronDown, ExternalLink, FileText, FolderPlus, MessageSquare, ArrowDown, CircleDot, GitCompareArrows, Undo2, Wrench } from "@/components/icons/glyph-icons";
+import { Code2, Loader2, ShieldCheck, AlertCircle, Bot, Check, ChevronDown, ExternalLink, FileText, FolderPlus, MessageSquare, Star, ArrowDown, CircleDot, GitCompareArrows, Undo2, Wrench } from "@/components/icons/glyph-icons";
 import { toast } from "@/components/ui/toast";
 import { SpectraMark } from "@/components/spectra-mark";
 import { PrismLoader, type PrismOptics } from "@/components/spectra-prism-optic";
@@ -172,15 +172,13 @@ function RunDetailsDisclosure({
   run,
   state,
   onLoad,
-  caption,
 }: {
   run?: Pick<SpectraRun, "status" | "phase">;
   state?: TraceLoadState;
   onLoad: () => void;
-  caption?: string;
 }) {
   if (state?.trace) return null;
-  const status = state?.error ?? caption ?? runDetailsStatusCopy(run);
+  const status = state?.error ?? runDetailsStatusCopy(run);
   return (
     <div className="mt-3 flex flex-wrap items-center gap-2">
       {status ? (
@@ -754,11 +752,13 @@ function ReplyWork({
   runId,
   touches,
   onOpen,
+  currentTitles,
 }: {
   threadId?: string;
   runId?: string;
   touches: readonly HarnessArtifactTouchView[];
   onOpen?: (artifactId: string) => void;
+  currentTitles?: ReadonlyMap<string, string>;
 }) {
   const region = runId ? replyEmbedRegion(runId) : undefined;
   const container = useArtifactEmbedContainer("thread", threadId ?? "", Boolean(threadId && region));
@@ -776,7 +776,7 @@ function ReplyWork({
           region={(regionId) => regionId === region}
         />
       ) : null}
-      <WorkTouchCards touches={shown.size ? touches.filter((touch) => !shown.has(touch.id)) : touches} onOpen={onOpen} />
+      <WorkTouchCards touches={shown.size ? touches.filter((touch) => !shown.has(touch.id)) : touches} onOpen={onOpen} currentTitles={currentTitles} />
     </>
   );
 }
@@ -1100,7 +1100,7 @@ function harnessTraceFields(trace: SpectraThreadTrace): HarnessExchangeFields | 
   const events = (trace.events ?? []).filter(
     (event) => !trace.run.executionId || event.executionId === trace.run.executionId,
   );
-  if (!events.some((event) => event.type === "caption" || event.type === "step")) return null;
+  if (!events.some((event) => event.type === "caption" || event.type === "step" || event.type === "reasoning_delta")) return null;
   let fields: HarnessExchangeFields = { steps: [] };
   for (const row of [...events].sort((a, b) => a.sequence - b.sequence)) {
     try {
@@ -1122,7 +1122,6 @@ function PersistedProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
     return (
       <ProgressTrace
         steps={harness.steps}
-        caption={harness.caption}
         answers={harness.answers}
         active={trace.run.status === "queued" || trace.run.status === "running"}
         hasOutput={Boolean(trace.run.finalSummary) || !["queued", "running"].includes(trace.run.status)}
@@ -1402,7 +1401,7 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
             {feedbackSent ? (
               <Check className="h-2.5 w-2.5" />
             ) : (
-              <MessageSquare className="h-2.5 w-2.5" />
+              <Star className="h-2.5 w-2.5" />
             )}
             {feedbackSent ? "Feedback sent" : "Rate"}
           </button>
@@ -1695,8 +1694,11 @@ function LiveContentReveal({
   );
 }
 
+const NO_ARTIFACTS: readonly SpectraArtifact[] = [];
+
 export function ConversationSurface({
   detail,
+  artifacts = NO_ARTIFACTS,
   threadId,
   loading = false,
   loadError,
@@ -1716,6 +1718,8 @@ export function ConversationSurface({
   onAnswer,
 }: {
   detail: SpectraThreadDetail | null;
+  /** The catalog, when the host has one: result slips name works as they are now. */
+  artifacts?: readonly SpectraArtifact[];
   threadId?: string;
   loading?: boolean;
   /** A retryable refresh notice that must remain visible beside old messages. */
@@ -1743,7 +1747,10 @@ export function ConversationSurface({
   const actionableCards = (activeCards ?? []).filter(
     (card) =>
       card.actions.some((action) => DECISION_ACTIONS.has(action.key)) &&
-      !(liveExchange?.input && card.runId === liveExchange.runId),
+      !(liveExchange?.input && card.runId === liveExchange.runId) &&
+      // A failed run already says so, with its own retry, in the thread above.
+      !(card.actions.every((action) => action.key === "retry" || !DECISION_ACTIONS.has(action.key)) &&
+        detail?.traces.some((trace) => trace.run._id === card.runId && trace.run.status === "failed")),
   );
   const observedActiveExecution = useQuery(
     api.spectraThreads.getActiveExecution,
@@ -1753,6 +1760,7 @@ export function ConversationSurface({
         : "skip",
     ),
   );
+  const currentTitles = useMemo(() => new Map(artifacts.map((artifact) => [artifact._id, artifact.title] as const)), [artifacts]);
   const renderedDetail = useMemo(() => {
     if (!detail || observedActiveExecution === undefined) return detail;
     return {
@@ -2100,8 +2108,6 @@ export function ConversationSurface({
                     !persistedAssistantRunIds.has(message.runId)),
               );
               const touches = message.role === "assistant" ? messageTouches(message.metadata) : [];
-              const savedCaption =
-                typeof message.metadata?.caption === "string" ? message.metadata.caption : undefined;
               const conversationCards = (trace?.cards ?? []).flatMap((card) => {
                 const repeatsAnswer = Boolean(message.content.trim()) &&
                   card.summary?.trim() === message.content.trim();
@@ -2227,7 +2233,6 @@ export function ConversationSurface({
                         <RunDetailsDisclosure
                           run={activeRun}
                           state={traceState}
-                          caption={savedCaption}
                           onLoad={() => void requestRunTrace(message.runId!)}
                         />
                       ) : null}
@@ -2239,6 +2244,7 @@ export function ConversationSurface({
                         runId={message.role === "assistant" ? message.runId : undefined}
                         touches={touches}
                         onOpen={onOpenArtifact}
+                        currentTitles={currentTitles}
                       />
                       {(() => {
                         const choices = messageChoices(
@@ -2408,7 +2414,6 @@ export function ConversationSurface({
                     <ReplyMark optics={LIVE_OPTICS[liveExchange.status]} />
                     <ProgressTrace
                       steps={liveExchange.steps}
-                      caption={liveExchange.caption}
                       answers={liveExchange.answers}
                       active={liveExchange.status !== "failed" && liveExchange.status !== "waiting" && liveExchange.status !== "stopped"}
                       hasOutput={
@@ -2531,10 +2536,10 @@ export function ConversationSurface({
               behavior: "smooth",
             });
           }}
-          className="absolute bottom-28 left-1/2 z-chrome flex h-9 -translate-x-1/2 items-center gap-1.5 rounded-chip bg-[var(--bg-elevated)] px-3 text-micro font-medium text-[var(--text-secondary)] shadow-card hover:text-[var(--text-primary)]"
+          aria-label="Go to the latest message"
+          className="absolute bottom-28 right-4 z-chrome grid size-8 place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] shadow-card transition-colors hover:text-[var(--text-primary)]"
         >
           <ArrowDown className="h-3.5 w-3.5" />
-          Latest
         </button>
       ) : null}
     </div>

@@ -280,7 +280,13 @@ async function materializeDocxArtifactAttempt(
     baseRevision: truth.revision,
     resultRevision: hash,
     targets: { regionIds, partNames: changedPartNames },
-    semantic: { baseDigest: opened.projection.nativeBinding.semanticDigest, resultDigest: requestedDigest, readbackDigest },
+    // The request is proven above, allowing for what only Word holds. What the
+    // receipt attests from here on is the file itself, which is what gets stored.
+    semantic: {
+      baseDigest: opened.projection.nativeBinding.semanticDigest,
+      resultDigest: nextProjection.nativeBinding.semanticDigest,
+      readbackDigest: nextProjection.nativeBinding.semanticDigest,
+    },
     preservedPartNames: comparison.parts.filter((part) => part.verdict === "identical").map((part) => `/${part.name}`),
     state: local ? "pending" : "cloud_saved",
   };

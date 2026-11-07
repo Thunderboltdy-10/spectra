@@ -3181,14 +3181,13 @@ export const discardPendingForRun = mutation({
       throw new Error("This run attempt is no longer active.");
     const artifacts = await ctx.db
       .query("spectraArtifacts")
-      .withIndex("by_account_status", (q) =>
-        q.eq("ownerAccountId", actor._id).eq("status", "active"),
-      )
+      .withIndex("by_ai_run", (q) => q.eq("aiRunId", args.runId))
       .collect();
     const pending = artifacts.filter(
       (artifact) =>
+        artifact.ownerAccountId === actor._id &&
+        artifact.status === "active" &&
         artifact.schoolId === actor.schoolId &&
-        artifact.aiRunId === args.runId &&
         artifact.aiExecutionId === args.executionId &&
         (artifact.aiState === "creating" ||
           (artifact.createdFrom?.runId === args.runId &&
@@ -3217,14 +3216,13 @@ export const pausePendingForApproval = mutation({
       throw new Error("This run is not waiting for approval.");
     const artifacts = await ctx.db
       .query("spectraArtifacts")
-      .withIndex("by_account_status", (q) =>
-        q.eq("ownerAccountId", actor._id).eq("status", "active"),
-      )
+      .withIndex("by_ai_run", (q) => q.eq("aiRunId", args.runId))
       .collect();
     const pending = artifacts.filter(
       (artifact) =>
+        artifact.ownerAccountId === actor._id &&
+        artifact.status === "active" &&
         artifact.schoolId === actor.schoolId &&
-        artifact.aiRunId === args.runId &&
         artifact.aiExecutionId === args.executionId &&
         artifact.createdFrom?.runId === args.runId &&
         !artifact.currentVersionId,
@@ -3260,14 +3258,13 @@ export const failPendingForRun = mutation({
       throw new Error("This run attempt is no longer active.");
     const artifacts = await ctx.db
       .query("spectraArtifacts")
-      .withIndex("by_account_status", (q) =>
-        q.eq("ownerAccountId", actor._id).eq("status", "active"),
-      )
+      .withIndex("by_ai_run", (q) => q.eq("aiRunId", args.runId))
       .collect();
     const pending = artifacts.filter(
       (artifact) =>
+        artifact.ownerAccountId === actor._id &&
+        artifact.status === "active" &&
         artifact.schoolId === actor.schoolId &&
-        artifact.aiRunId === args.runId &&
         artifact.aiExecutionId === args.executionId &&
         artifact.aiState === "creating",
     );
@@ -3327,9 +3324,7 @@ export const settleStagedForRun = mutation({
     const [ownedArtifacts, operations] = await Promise.all([
       ctx.db
         .query("spectraArtifacts")
-        .withIndex("by_account_status", (q) =>
-          q.eq("ownerAccountId", actor._id).eq("status", "active"),
-        )
+        .withIndex("by_ai_run", (q) => q.eq("aiRunId", args.runId))
         .collect(),
       ctx.db
         .query("spectraOperations")

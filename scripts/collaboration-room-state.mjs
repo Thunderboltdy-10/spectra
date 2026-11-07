@@ -83,6 +83,29 @@ export function mergeRoomLoad(known, delta) {
   return { ...delta, snapshot: known.snapshot, updates: [...(known.updates ?? []), ...(delta.updates ?? [])] };
 }
 
+/**
+ * A room this gateway has read before only fetches the updates since then.
+ * The copy can fall behind what is stored: the room may have been folded into
+ * a snapshot, which removes the updates the copy was going to ask for, or been
+ * reset. Neither is the room's fault, so any trouble with the shortcut means
+ * reading the room whole, never refusing to open it.
+ */
+export async function loadRoomThroughCache(cache, load, payload) {
+  const { artifactId, partitionKey, policyVersion } = payload;
+  const known = cache.get(artifactId, partitionKey, policyVersion);
+  if (known) {
+    let merged = null;
+    try {
+      merged = mergeRoomLoad(known, await load({ ...payload, afterSequence: known.nextSequence - 1 }));
+    } catch (error) {
+      if (!String(error).includes("COLLABORATION_REPLAY_GENERATION_CHANGED")) throw error;
+    }
+    if (merged) return cache.put(artifactId, partitionKey, policyVersion, merged);
+    cache.forget(artifactId, partitionKey);
+  }
+  return cache.put(artifactId, partitionKey, policyVersion, await load(payload));
+}
+
 export function storedRoomUpdates(stored) {
   const updates = [];
   if (stored?.snapshot?.update)

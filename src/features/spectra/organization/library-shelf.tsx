@@ -25,6 +25,8 @@ import { relativeTime, workspaceInk } from "./node-identity";
 import { groupByWhen } from "./shelf-model";
 import { ShelfNotes, useShelfStacks } from "./shelf-stacks";
 import { useShelfGather } from "./shelf-gather";
+import { applyOrder, useDragReorder } from "@/components/ui/use-drag-reorder";
+import { useSpectraPreferences } from "../settings/preference-store";
 import { treeFailureMessage, useTreeActions, useTreeQuickView, useWorkspaceTallies, type TreeNode } from "./tree-client";
 import { useLoadOnApproach } from "./use-load-on-approach";
 
@@ -143,11 +145,22 @@ export function LibraryShelf({
   const comingUp = useComingUp(now);
   const [allWorkspaces, setAllWorkspaces] = useState(false);
   const [allLoose, setAllLoose] = useState(false);
-  const workspaces = places(nodes, book);
+  const { preferences, update: updatePreferences } = useSpectraPreferences();
+  const workspaces = applyOrder(places(nodes, book), (place) => place.node.nodeId, preferences.appearance.workspaceOrder);
+  const tileOrder = useDragReorder({
+    ids: workspaces.map((place) => place.node.nodeId),
+    onReorder: (workspaceOrder) => updatePreferences("appearance", { workspaceOrder }),
+    disabled: Boolean(picking),
+    attribute: "data-workspace-tile",
+  });
   const tallies = useWorkspaceTallies(
     workspaces.flatMap(({ node }) => (node.workspace?.workspaceId ? [node.workspace.workspaceId] : [])),
   );
-  const shownPlaces = allWorkspaces ? workspaces : workspaces.slice(0, WORKSPACES_SHOWN);
+  const placeOf = new Map(workspaces.map((place) => [place.node.nodeId, place]));
+  const shownPlaces = (allWorkspaces ? tileOrder.order : tileOrder.order.slice(0, WORKSPACES_SHOWN)).flatMap((nodeId) => {
+    const place = placeOf.get(nodeId);
+    return place ? [place] : [];
+  });
   const actions = useTreeActions();
   const moveInto = (nodeId: string, placeId: string) => {
     if (nodeId === placeId) return;
@@ -182,6 +195,7 @@ export function LibraryShelf({
     <button
       key={node.nodeId}
       type="button"
+      {...tileOrder.itemProps(node.nodeId)}
       data-node-row={node.nodeId}
       data-shelf-place={node.nodeId}
       data-life-launch
@@ -216,7 +230,7 @@ export function LibraryShelf({
               Workspaces{" "}
               <span className="school-heading-count">{workspaces.length}</span>
             </h2>
-            <div className="school-tiles">
+            <div ref={(node) => void (tileOrder.containerRef.current = node)} className="school-tiles">
               {shownPlaces.map((place) => tile(place))}
               {onNewWorkspace ? (
                 <button

@@ -23,6 +23,8 @@ import { AuthoringError, type IdFactory, defaultIdFactory, record, truncate } fr
  * Markdown cannot express survive untouched sections.
  */
 
+const BLOCK_GAP = "\n\n";
+
 export type DocumentChunk = { id: string; node: PmNode; markdown: string };
 
 function blockIdOf(node: PmNode, index: number) {
@@ -93,6 +95,49 @@ function withWholeMarks(node: PmNode, marks: readonly PmMark[]): PmNode {
   return node.content ? { ...node, content: node.content.map((child) => withWholeMarks(child, marks)) } : node;
 }
 
+const unwrittenMarks = (marks: readonly PmMark[] | undefined) =>
+  (marks ?? []).filter((mark) => !WRITTEN_MARKS.has(mark.type));
+
+/**
+ * A small edit to a block with several looks, like a heading in two colours.
+ * The words that stayed keep exactly the look they had, and new words take the
+ * look of the words just before them, the way typing does.
+ */
+function withLookOfOldWords(next: PmNode, old: PmNode): PmNode {
+  const isPlainRun = (node: PmNode) => node.type === "text";
+  if (!next.content?.every(isPlainRun) || !old.content?.every(isPlainRun)) return next;
+  const looks: Array<readonly PmMark[]> = [];
+  for (const run of old.content) for (const _ of Array.from(run.text ?? "")) looks.push(unwrittenMarks(run.marks));
+  const oldChars = old.content.flatMap((run) => Array.from(run.text ?? ""));
+  const newChars = next.content.flatMap((run) => Array.from(run.text ?? ""));
+  if (!oldChars.length || !newChars.length) return next;
+  let prefix = 0;
+  while (prefix < oldChars.length && prefix < newChars.length && oldChars[prefix] === newChars[prefix]) prefix += 1;
+  let suffix = 0;
+  while (
+    suffix < oldChars.length - prefix && suffix < newChars.length - prefix &&
+    oldChars[oldChars.length - 1 - suffix] === newChars[newChars.length - 1 - suffix]
+  ) suffix += 1;
+  const lookAt = (at: number): readonly PmMark[] => {
+    if (at < prefix) return looks[at]!;
+    if (at >= newChars.length - suffix) return looks[oldChars.length - (newChars.length - at)]!;
+    return looks[Math.max(0, prefix - 1)]!;
+  };
+  const content: PmNode[] = [];
+  let at = 0;
+  for (const run of next.content) {
+    const written = (run.marks ?? []).filter((mark) => WRITTEN_MARKS.has(mark.type));
+    for (const char of Array.from(run.text ?? "")) {
+      const marks = [...written, ...lookAt(at)];
+      at += 1;
+      const last = content[content.length - 1];
+      if (last && JSON.stringify(last.marks ?? []) === JSON.stringify(marks)) last.text = `${last.text}${char}`;
+      else content.push({ type: "text", text: char, ...(marks.length ? { marks } : {}) });
+    }
+  }
+  return { ...next, content };
+}
+
 /** Builds document content from Markdown, reusing unchanged nodes of `previous`. */
 export function documentFromMarkdown(
   markdown: string,
@@ -100,18 +145,30 @@ export function documentFromMarkdown(
   ids: IdFactory = defaultIdFactory(),
 ) {
   const before = previous ? documentChunks(previous) : [];
+  // Markdown does not always read back as it was written: a trailing line break
+  // or a Word table comes back reworded, or as several blocks. Each block is
+  // known by how its own Markdown reads back, so one nobody touched is always
+  // recognised, and stays exactly as it was.
+  const readsBackAs = (markdown: string) => parseBlocks(markdown).map(serializeBlock);
   const byMarkdown = new Map<string, DocumentChunk[]>();
+  let widest = 1;
   for (const chunk of before) {
-    const list = byMarkdown.get(chunk.markdown) ?? [];
-    list.push(chunk);
-    byMarkdown.set(chunk.markdown, list);
+    const pieces = KEEP_MARKER.test(chunk.markdown) ? [chunk.markdown] : readsBackAs(chunk.markdown);
+    widest = Math.max(widest, pieces.length);
+    for (const key of new Set([chunk.markdown, pieces.join(BLOCK_GAP)])) {
+      const list = byMarkdown.get(key) ?? [];
+      list.push(chunk);
+      byMarkdown.set(key, list);
+    }
   }
   const byId = new Map(before.map((chunk) => [chunk.id, chunk]));
   const oldIndex = new Map(before.map((chunk, index) => [chunk.id, index]));
   const used = new Set<string>();
   // Unchanged blocks are reused whole; the rest are written fresh for now.
   const entries: Array<{ node: PmNode; reused?: string }> = [];
-  for (const parsed of parseBlocks(markdown)) {
+  const parsedBlocks = parseBlocks(markdown);
+  for (let at = 0; at < parsedBlocks.length; at += 1) {
+    const parsed = parsedBlocks[at]!;
     if (parsed.type === "__keep") {
       const kept = byId.get(String(parsed.attrs?.id));
       if (!kept)
@@ -124,11 +181,17 @@ export function documentFromMarkdown(
       }
       continue;
     }
-    const text = serializeBlock(parsed);
-    const reusable = byMarkdown.get(text)?.find((chunk) => !used.has(chunk.id));
+    let reusable: DocumentChunk | undefined;
+    let span = 1;
+    for (let width = Math.min(widest, parsedBlocks.length - at); width >= 1 && !reusable; width -= 1) {
+      const key = parsedBlocks.slice(at, at + width).map(serializeBlock).join(BLOCK_GAP);
+      reusable = byMarkdown.get(key)?.find((chunk) => !used.has(chunk.id));
+      if (reusable) span = width;
+    }
     if (reusable) {
       used.add(reusable.id);
       entries.push({ node: reusable.node, reused: reusable.id });
+      at += span - 1;
       continue;
     }
     entries.push({ node: parsed });
@@ -154,12 +217,8 @@ export function documentFromMarkdown(
     if (replaced) {
       used.add(replaced.id);
       lastAnchor = oldIndex.get(replaced.id) ?? lastAnchor;
-      nodes.push(
-        withWholeMarks(
-          { ...entry.node, attrs: { ...(replaced.node.attrs ?? {}), ...(entry.node.attrs ?? {}), blockId: replaced.id } },
-          wholeUnwrittenMarks(replaced.node),
-        ),
-      );
+      const rewritten = { ...entry.node, attrs: { ...(replaced.node.attrs ?? {}), ...(entry.node.attrs ?? {}), blockId: replaced.id } };
+      nodes.push(withWholeMarks(withLookOfOldWords(rewritten, replaced.node), wholeUnwrittenMarks(replaced.node)));
       return;
     }
     let id = ids("block");

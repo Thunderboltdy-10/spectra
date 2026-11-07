@@ -47,7 +47,7 @@ type ArtifactTileSurfaceProps = {
   onArchive?: (artifact: SpectraArtifact) => Promise<void> | void;
   onDirtyChange: (artifactId: string, dirty: boolean) => void;
   onContinueThread?: (threadId: string, title: string) => void;
-  onOpenChats?: () => void;
+  onOpenThread?: (thread: { id: string; title: string }) => void;
   executeApplicationCommand?: ApplicationCommandDispatcher;
 };
 
@@ -72,7 +72,7 @@ export function ArtifactTileSurface({
   onArchive,
   onDirtyChange,
   onContinueThread,
-  onOpenChats,
+  onOpenThread,
   executeApplicationCommand,
 }: ArtifactTileSurfaceProps) {
   const uniqueArtifacts = useMemo(
@@ -350,7 +350,7 @@ export function ArtifactTileSurface({
                     onArchive={onArchive}
                     onDirtyChange={onDirtyChange}
                   onContinueThread={onContinueThread}
-                  onOpenChats={onOpenChats}
+                  onOpenThread={onOpenThread}
                     continuedThreadId={continuedThreadId}
                     executeApplicationCommand={executeApplicationCommand}
                   />

@@ -290,6 +290,12 @@ function placed(
 function foundationBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
   const bindings: CommandBinding[] = [
     ...historyBindings(handlers.history),
+    // General is the document's Home: the formatting used every few seconds
+    // comes first on it, as well as on Format.
+    ...textFormatBindings("document", {
+      ...handlers.format,
+      generalPins: ["fontFamily", "fontSize", "bold", "italic", "underline", "strike", "color", "highlight", "alignment"],
+    }),
     ...findBindings(handlers.find),
     {
       id: "navigate.outline",
@@ -310,12 +316,6 @@ function foundationBindings(handlers: DocumentCommandHandlers): CommandBinding[]
     // linked file carries Word comments the adapter says so in the hint, which
     // is the honest statement — not a disabled button.
     { ...commentsBinding(handlers.comments), touches: undefined },
-    // General is the document's Home: the formatting used every few seconds is
-    // on it as well as on Format.
-    ...textFormatBindings("document", {
-      ...handlers.format,
-      generalPins: ["fontFamily", "fontSize", "bold", "italic", "underline", "strike", "color", "highlight", "alignment"],
-    }),
   ];
   return placed(bindings, {
     "format.underline": { priority: "secondary" },

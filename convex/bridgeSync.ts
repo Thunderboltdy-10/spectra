@@ -298,6 +298,38 @@ async function failWriteForMissingWork(
   await failStorageTransitionForRequest(ctx, request, DELETED_WORK_ERROR, now);
 }
 
+/**
+ * A replica moving to the folder that now covers it. The earlier selection
+ * retires once nothing is left in it, so Devices lists the file in one place.
+ */
+async function takeOverFromMount(
+  ctx: MutationCtx,
+  actor: { accountId: Id<"accounts">; schoolId: Id<"schools"> },
+  deviceId: Id<"bridgeDevices">,
+  replica: Doc<"workReplicas">,
+  mount: Doc<"bridgeMounts">,
+  relativePath: string,
+  node: Doc<"orgNodes"> | null,
+) {
+  const previous = replica.mountId ? await ctx.db.get(replica.mountId) : null;
+  if (!previous || previous.deviceId !== deviceId) return;
+  const now = Date.now();
+  await ctx.db.patch(replica._id, { mountId: mount._id, relativePath, updatedAt: now });
+  if (node && node.deletedAt === undefined && node.parentId === previous.rootOrgNodeId && mount.rootOrgNodeId) {
+    const parts = relativePath.replaceAll("\\", "/").split("/").filter(Boolean);
+    parts.pop();
+    const base = await mountPathBase(ctx, actor.accountId, mount.rootOrgNodeId, parts);
+    const parent = await ensureFolderPath(ctx, actor.accountId, actor.schoolId, base, parts);
+    if (node.parentId !== parent) await moveNode(ctx, node, { parentId: parent });
+  }
+  if (previous.state === "active") {
+    const left = await ctx.db.query("workReplicas")
+      .withIndex("by_device_mount_path", (q) => q.eq("deviceId", deviceId).eq("mountId", previous._id))
+      .first();
+    if (!left) await ctx.db.patch(previous._id, { state: "revoked", updatedAt: now });
+  }
+}
+
 export const registerMount = mutation({
   args: { credential: v.string(), rootLabel: v.string(), selectedFile: v.optional(v.string()), grantId: v.string(), rootKey: v.string(), scanId: v.string(), fileCount: v.number(), doubleSyncRisk: v.boolean(), ownerLockPaths: v.array(v.string()) },
   handler: async (ctx, args) => {
@@ -657,6 +689,12 @@ async function discoverResourceForMount(
         existingReplica._id,
       );
       const nativePayloadAllowed = policy.cloudContent === "full";
+      // One file on this computer is one work, however it first came in. When a
+      // folder takes over a file chosen alone or a smaller folder, the work comes
+      // along: it joins its neighbours unless it was filed somewhere on purpose.
+      if (existingReplica.mountId && existingReplica.mountId !== mount._id) {
+        await takeOverFromMount(ctx, actor, device._id, existingReplica, mount, input.relativePath, existingNode);
+      }
       const changed = Boolean(input.contentHash && input.contentHash !== existingReplica.contentHash);
       const previousPath = existingReplica.relativePath;
       const verifiedAt = Date.now();

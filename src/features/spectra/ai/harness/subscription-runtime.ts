@@ -1157,6 +1157,30 @@ function withinStatusTime<T>(work: Promise<T>) {
   return Promise.race([work, late]).finally(() => clearTimeout(timer));
 }
 
+/**
+ * Only the newest of each model family: GPT-6.1-Sol stands for GPT-6-Sol and
+ * GPT-5.6-Sol. A family is the name with its version numbers taken out, and
+ * the newest has the highest numbers, read left to right. Order is kept.
+ */
+export function newestInEachFamily<T extends { id: string }>(models: readonly T[]): T[] {
+  const version = (id: string) => (id.match(/\d+(?:\.\d+)*/g) ?? []).flatMap((run) => run.split(".").map(Number));
+  const family = (id: string) => id.toLowerCase().replace(/\d+(?:\.\d+)*/g, "#");
+  const newer = (a: number[], b: number[]) => {
+    for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+      const difference = (a[index] ?? 0) - (b[index] ?? 0);
+      if (difference) return difference > 0;
+    }
+    return false;
+  };
+  const newest = new Map<string, T>();
+  for (const model of models) {
+    const kept = newest.get(family(model.id));
+    if (!kept || newer(version(model.id), version(kept.id))) newest.set(family(model.id), model);
+  }
+  const shown = new Set(newest.values());
+  return models.filter((model) => shown.has(model));
+}
+
 async function codexStatus(accountId: string | undefined): Promise<RuntimeProviderStatus> {
   const relay = new RelaySocket("codex", { args: ["app-server"] }, accountId);
   const waiting = new Map<number, Deferred<Record<string, unknown>>>();
@@ -1186,15 +1210,24 @@ async function codexStatus(accountId: string | undefined): Promise<RuntimeProvid
         const read = await request("account/read", { refreshToken: false });
         const account = read.account as { email?: string; planType?: string } | null | undefined;
         if (!account) return { state: "signed-out", models: [] };
-        const list = await request("model/list", {}).catch(() => ({}) as Record<string, unknown>);
-        const rows = (list.data ?? []) as Array<{ id?: string; model?: string; displayName?: string; hidden?: boolean }>;
+        const rows: Array<{ id?: string; model?: string; displayName?: string; hidden?: boolean }> = [];
+        let cursor: unknown;
+        // The list comes in pages; a model on a later one is still theirs to pick.
+        for (let page = 0; page < 6; page += 1) {
+          const list = await request("model/list", cursor ? { cursor } : {}).catch(() => ({}) as Record<string, unknown>);
+          rows.push(...((list.data ?? []) as typeof rows));
+          cursor = list.nextCursor;
+          if (!cursor) break;
+        }
         return {
           state: "ready",
           account: account.email,
           plan: account.planType,
-          models: rows
-            .filter((row) => !row.hidden && !/luna/i.test(String(row.model ?? row.id)))
-            .map((row) => ({ id: String(row.model ?? row.id), label: row.displayName || String(row.model ?? row.id) })),
+          models: newestInEachFamily(
+            rows
+              .filter((row) => !row.hidden)
+              .map((row) => ({ id: String(row.model ?? row.id), label: row.displayName || String(row.model ?? row.id) })),
+          ),
         };
       })(),
     );

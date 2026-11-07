@@ -34,7 +34,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("Platform page", () => {
+describe("Superadmin page", () => {
   function directory(load: (search: string) => Promise<unknown>) {
     navigation.tab = "schools";
     api.getAdministration.mockImplementation(async (kind: string, args?: { search?: string }) => {
@@ -92,8 +92,8 @@ describe("Platform page", () => {
   it("keeps the header while loading, then says plainly that it did not load, with a way to try again", async () => {
     api.getAdministration.mockRejectedValueOnce(new Error("[CONVEX Q(administration:platformOverview)] Server Error"));
     render(<SuperadminShell />);
-    expect(screen.getByRole("heading", { level: 1, name: "Platform" })).toBeTruthy();
-    expect(screen.getByRole("status", { name: "Opening the platform" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Superadmin" })).toBeTruthy();
+    expect(screen.getByRole("status", { name: "Opening superadmin" })).toBeTruthy();
 
     const retry = await screen.findByRole("button", { name: "Try again" });
     expect(screen.getByText("This didn’t load")).toBeTruthy();

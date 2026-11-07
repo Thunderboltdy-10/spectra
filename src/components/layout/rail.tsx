@@ -19,6 +19,9 @@ import { life } from "@/features/spectra/life/life";
 import { useLifeEntrance } from "@/features/spectra/life/use-life";
 import { isActiveRunStatus, useRunTabs } from "@/features/spectra/island/run-tabs";
 import { useTreeQuickView } from "@/features/spectra/organization/tree-client";
+import { useSpectraPreferences } from "@/features/spectra/settings/preference-store";
+import { applyOrder, useDragReorder } from "@/components/ui/use-drag-reorder";
+import { RailRecentWorks } from "./rail-recent-works";
 import { useClassBook } from "@/features/spectra/school/use-class-book";
 import { threadName } from "@/features/spectra/threads/threads-model";
 import { cn } from "@/lib/utils";
@@ -65,7 +68,7 @@ export const RAIL_DESTINATIONS: RailDestination[] = [
   { key: "devices", href: "/devices", label: "Devices", glyph: "devices", routes: ["/devices"] },
   // Shown only to those who hold them: a school's administrators, and the platform's operator.
   { key: "admin", href: "/admin", label: "School admin", glyph: "shield", routes: ["/admin"] },
-  { key: "platform", href: "/superadmin", label: "Platform", glyph: "globe", routes: ["/superadmin"] },
+  { key: "platform", href: "/superadmin", label: "Superadmin", glyph: "globe", routes: ["/superadmin"] },
 ];
 
 /** The destinations this person can open: the admin pages only for those who hold them. */
@@ -124,6 +127,7 @@ function pulseFrom(element: Element, strength = 0.7) {
 export function Rail() {
   const pathname = usePathname();
   const router = useSpectraRouter();
+  const { preferences, update: updatePreferences } = useSpectraPreferences();
 
   /* Geometry. The user's preference is stored; a crowded page
      (`shell.sidebarCrowd`) and a narrow window collapse the rail without
@@ -207,6 +211,21 @@ export function Rail() {
   /* The marker glides to whatever the pointer is over, and home again. */
   const navRef = useRef<HTMLElement>(null);
   const [marker, setMarker] = useState({ top: 0, height: 20, visible: false });
+  const destinations = useMemo(() => destinationsFor(identity), [identity]);
+  const destinationOrder = useDragReorder({
+    ids: useMemo(
+      () => applyOrder(destinations, (destination) => destination.key, preferences.appearance.railOrder).map((destination) => destination.key),
+      [destinations, preferences.appearance.railOrder],
+    ),
+    onReorder: (railOrder) => updatePreferences("appearance", { railOrder }),
+  });
+  const railNavRef = useCallback(
+    (node: HTMLElement | null) => {
+      navRef.current = node;
+      destinationOrder.containerRef.current = node;
+    },
+    [destinationOrder.containerRef],
+  );
   const placeMarker = useCallback((element: Element | null) => {
     const nav = navRef.current;
     if (!nav || !element) return setMarker((current) => ({ ...current, visible: false }));
@@ -216,7 +235,7 @@ export function Rail() {
     setMarker({ top: box.top - navBox.top + (box.height - height) / 2, height, visible: true });
   }, []);
   const settleMarker = useCallback(() => placeMarker(navRef.current?.querySelector("[aria-current='page']") ?? null), [placeMarker]);
-  useLayoutEffect(() => settleMarker(), [active, collapsed, settleMarker]);
+  useLayoutEffect(() => settleMarker(), [active, collapsed, settleMarker, destinationOrder.order]);
 
   return (
     <>
@@ -266,14 +285,16 @@ export function Rail() {
           )}
         </div>
 
-        <nav ref={navRef} aria-label="Main destinations" className="spectra-shell-nav relative flex flex-col gap-px px-2" onMouseLeave={settleMarker}>
+        <nav ref={railNavRef} aria-label="Main destinations" className="spectra-shell-nav relative flex flex-col gap-px px-2" onMouseLeave={settleMarker}>
           <span
             aria-hidden="true"
             className="spectra-shell-rail-marker"
             data-visible={marker.visible || undefined}
             style={{ height: marker.height, transform: `translateY(${marker.top}px)` }}
           />
-          {destinationsFor(identity).map((destination) => {
+          {destinationOrder.order.map((key) => {
+            const destination = destinations.find((item) => item.key === key);
+            if (!destination) return null;
             const current = active === destination.key;
             const itemClass = cn(
               "relative flex h-9 w-full items-center gap-2.5 rounded-control text-ui font-medium outline-none transition-colors duration-[var(--motion-fast)]",
@@ -290,6 +311,7 @@ export function Rail() {
             return (
               <Tooltip key={destination.key} label={destination.label} side="right" disabled={!collapsed} className="flex w-full">
                 <Link
+                  {...destinationOrder.itemProps(destination.key)}
                   href={destination.href}
                   data-rail-item={destination.key}
                   // The page it opens grows out of it; the page already open stays as it is.
@@ -316,6 +338,7 @@ export function Rail() {
 
         {collapsed ? <div className="flex-1" /> : (
           <div className="spectra-thin-scrollbar mt-4 min-h-0 flex-1 overflow-y-auto px-2 pb-2" data-sidebar-recents="">
+            <RailRecentWorks />
             <RailThreads />
             <PinnedWorks />
           </div>

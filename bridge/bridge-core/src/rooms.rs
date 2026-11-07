@@ -505,6 +505,8 @@ impl Rooms {
                 .version(&text("artifactId")?, params["id"].as_i64().ok_or_else(|| anyhow!("id is missing"))?)?
                 .unwrap_or(Value::Null),
             "summary" => self.store.summary()?,
+            // Names only, one level, in the ordinary places: nothing is opened or changed.
+            "computerNames" => crate::computer_names::list(params["path"].as_str().unwrap_or(""))?,
             "backup" => {
                 let (bundle, works) = self.store.backup_bundle(params["full"].as_bool().unwrap_or(false))?;
                 json!({ "bundleBase64": base64_of(&bundle), "works": works, "bytes": bundle.len() })

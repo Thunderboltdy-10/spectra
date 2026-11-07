@@ -31,7 +31,7 @@ vi.mock("@/features/spectra/island/run-tabs", () => ({ useRunTabs: () => [], isA
 vi.mock("@/features/spectra/data/use-catalog-pages", () => ({ useWorkspaceCatalog: () => ({ items: [] }) }));
 vi.mock("@/features/spectra/components/catalog-progress", () => ({ CatalogProgress: () => null }));
 const pinned = vi.hoisted(() => ({ nodes: [] as Array<Record<string, unknown>> }));
-vi.mock("convex/react", () => ({ useConvexAuth: () => ({ isAuthenticated: false, isLoading: false }), useQuery: () => undefined, useMutation: () => vi.fn() }));
+vi.mock("convex/react", () => ({ useConvex: () => ({ query: async () => [], mutation: async () => null }), useConvexAuth: () => ({ isAuthenticated: false, isLoading: false }), useQuery: () => undefined, useMutation: () => vi.fn() }));
 vi.mock("@/features/spectra/organization/tree-client", () => ({ useTreeQuickView: () => ({ nodes: pinned.nodes }) }));
 
 beforeEach(() => {
@@ -46,7 +46,7 @@ afterEach(() => cleanup());
 
 describe("the rail", () => {
   it("lists the six destinations in SHELL.md's order, then the admin pages for those who hold them", () => {
-    expect(RAIL_DESTINATIONS.map((destination) => destination.label)).toEqual(["Home", "Library", "Calendar", "School", "Agents", "Devices", "School admin", "Platform"]);
+    expect(RAIL_DESTINATIONS.map((destination) => destination.label)).toEqual(["Home", "Library", "Calendar", "School", "Agents", "Devices", "School admin", "Superadmin"]);
   });
 
   it("marks the current destination", () => {

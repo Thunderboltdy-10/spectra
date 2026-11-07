@@ -14,6 +14,8 @@ export type LiveStep = {
   summary?: string;
   status: "running" | "done" | "error";
   createdAt: number;
+  /** How much of the reply was written when this began: where it sits among the words. */
+  textAt?: number;
 };
 
 export type LiveWidget = { id: string; title: string; html: string };
@@ -40,7 +42,46 @@ export type HarnessExchangeFields = {
   /** The open question or approval, while the run waits for it. */
   input?: HarnessInputView;
   answers?: AnsweredInput[];
+  /** Characters of the reply so far, for a trace rebuilt from saved events. */
+  written?: number;
 };
+
+const writtenSoFar = (exchange: HarnessExchangeFields & { content?: unknown }) =>
+  typeof exchange.content === "string" ? exchange.content.length : (exchange.written ?? 0);
+
+export type ReplyBlock<T> = { kind: "work"; steps: T[] } | { kind: "text"; text: string };
+
+/**
+ * A reply in the order it happened: the work before the first words, then words,
+ * then whatever was done after them, and so on. Always starts with a work block,
+ * which is where the run's time is shown, even when nothing was done before writing.
+ */
+export function replyBlocks<T extends { textAt?: number }>(content: string, steps: readonly T[]): ReplyBlock<T>[] {
+  const positionOf = (step: T) => {
+    const at = Math.min(step.textAt ?? 0, content.length);
+    // A turn's words end where the next turn's blank line starts. Anything else
+    // (a saved reply that was tidied up) moves to the paragraph's end, never mid-sentence.
+    if (at === 0 || at === content.length || /^\s/.test(content.slice(at, at + 1))) return at;
+    const next = content.indexOf("\n\n", at);
+    return next < 0 ? content.length : next;
+  };
+  const stops = [...new Set(steps.map(positionOf))].sort((a, b) => a - b);
+  const blocks: ReplyBlock<T>[] = [{ kind: "work", steps: steps.filter((step) => positionOf(step) === 0) }];
+  let from = 0;
+  for (const stop of stops) {
+    if (stop === 0) continue;
+    const text = content.slice(from, stop).trim();
+    if (text) blocks.push({ kind: "text", text });
+    from = stop;
+    const work = steps.filter((step) => positionOf(step) === stop);
+    const last = blocks[blocks.length - 1]!;
+    if (last.kind === "work") last.steps.push(...work);
+    else blocks.push({ kind: "work", steps: work });
+  }
+  const rest = content.slice(from).trim();
+  if (rest) blocks.push({ kind: "text", text: rest });
+  return blocks;
+}
 
 const MAX_STEPS = 120;
 const MAX_THINKING = 12_000;
@@ -93,7 +134,7 @@ export function applyHarnessEvent<T extends HarnessExchangeFields>(exchange: T, 
       const known = exchange.steps.some((step) => step.id === event.id);
       const steps = known
         ? exchange.steps.map((step) => (step.id === event.id ? { ...step, title: event.label, status: event.status } : step))
-        : [...settleThinking(exchange.steps), { id: event.id, title: event.label, status: event.status, createdAt: now }];
+        : [...settleThinking(exchange.steps), { id: event.id, title: event.label, status: event.status, createdAt: now, textAt: writtenSoFar(exchange) }];
       return { ...exchange, steps: steps.slice(-MAX_STEPS) };
     }
     case "reasoning_delta": {
@@ -112,7 +153,7 @@ export function applyHarnessEvent<T extends HarnessExchangeFields>(exchange: T, 
         ...exchange,
         steps: [
           ...settleThinking(exchange.steps),
-          { id: event.id, kind: "thinking" as const, title: "Thinking", summary: event.content, status: event.done ? ("done" as const) : ("running" as const), createdAt: now },
+          { id: event.id, kind: "thinking" as const, title: "Thinking", summary: event.content, status: event.done ? ("done" as const) : ("running" as const), createdAt: now, textAt: writtenSoFar(exchange) },
         ].slice(-MAX_STEPS),
       };
     }
@@ -122,7 +163,7 @@ export function applyHarnessEvent<T extends HarnessExchangeFields>(exchange: T, 
       if (!text || event.final) return exchange;
       const id = `caption:${event.stepIds[0] ?? `${now}:${exchange.steps.length}`}`;
       if (exchange.steps.some((step) => step.id === id || step.title === text)) return exchange;
-      return { ...exchange, steps: [...exchange.steps, { id, title: text, status: "done" as const, createdAt: now }].slice(-MAX_STEPS) };
+      return { ...exchange, steps: [...exchange.steps, { id, title: text, status: "done" as const, createdAt: now, textAt: writtenSoFar(exchange) }].slice(-MAX_STEPS) };
     }
     case "artifact_touched":
       return { ...exchange, artifacts: mergeTouch(exchange.artifacts ?? [], event.artifact) };

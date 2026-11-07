@@ -55,6 +55,9 @@ import { useSpectraMotion } from "../../motion";
 const STALE_AFTER_MS = 20_000;
 /** Settled chrome lingers this long, then fades out completely. */
 const SETTLE_FADE_MS = 480;
+
+/** How far an AI's hand follows its writing directly before it has to travel. */
+const HAND_STEP_PX = 96;
 /** Activity bucket that restarts the presence-label lifecycle while moving. */
 const PRESENCE_LABEL_BUCKET_MS = 800;
 /** Window in which the completion ring plays after an act completes. */
@@ -359,8 +362,23 @@ export const InteractionLayer = memo(function InteractionLayer({
           const isCaretAct =
             cursorModeForAct(state.act) === "caret" ||
             cursorModeForAct(state.act) === "selection";
+          // A hand writing fast must not flick back across the page at every
+          // line end: past a short step it travels, at its own pace, to wherever
+          // the words have got to.
+          const handAt = runtime.travel.position;
+          const handLeftBehind =
+            state.actor.kind === "ai" &&
+            writing &&
+            !settled &&
+            Boolean(
+              handAt && Math.hypot(point.left - handAt.x, point.top - handAt.y) > HAND_STEP_PX,
+            );
           if (quietRef.current || reducedRef.current || effectsMutedRef.current) {
             runtime.travel.snapTo(point.left, point.top);
+          } else if (handLeftBehind) {
+            runtime.travel.moveTo(point.left, point.top, now, travel.crossesScope);
+          } else if (state.actor.kind === "ai" && writing && !settled && runtime.travel.travelling) {
+            // Still on its way; the next frame says where to.
           } else if (
             settled ||
             writing ||

@@ -559,7 +559,9 @@ function parseBlockDrafts(lines: string[]): RichBlockDraft[] {
  * as with dollars. Balanced pairs become dollars before parsing.
  */
 export function normalizeMath(source: string) {
-  let value = source;
+  // `\\[1\\]` is a citation marker with its brackets escaped, never an equation
+  // that is just a number: it would sit alone, centred, between the paragraphs.
+  let value = source.replace(/(?<!\\)\\\[\s*(\d{1,3})\s*(?<!\\)\\\]/g, "[$1]");
   // An escaped backslash (`\\[`) is text, never a delimiter.
   const blockOpen = (value.match(/(?<!\\)\\\[/g) ?? []).length;
   if (blockOpen > 0 && blockOpen === (value.match(/(?<!\\)\\\]/g) ?? []).length) {

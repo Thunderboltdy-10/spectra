@@ -1,9 +1,11 @@
 ﻿"use client";
 
+import { StudioToolPane } from "./studio-pane";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { uniqueToken } from "@/lib/unique-token";
 import type { Editor, JSONContent } from "@tiptap/core";
 import Collaboration from "@tiptap/extension-collaboration";
+import { LocalTrailingParagraph } from "../editor/local-trailing-paragraph";
 import { isLocalCollaborativeDocumentChange } from "../editor/collaboration-change";
 import { applyDocumentStudioProjection } from "../editor/document-studio-projection";
 import Highlight from "@tiptap/extension-highlight";
@@ -40,11 +42,12 @@ import {
   AlertCircle,
   ChevronDown,
   Highlighter,
-  History,
   ListOrdered,
   Pencil,
   Search,
   X,
+  Trash2,
+  Link2,
 } from "lucide-react";
 import {
   useCallback,
@@ -56,6 +59,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { useStudioContextItems, useLatest, type StudioMenuGroup } from "./studio-context-menu";
 import type * as Y from "yjs";
 import { toast } from "@/components/ui/toast";
 import { SpectraTiptapAutocomplete } from "../compute/autocomplete";
@@ -915,6 +919,7 @@ export function DocumentStudio({
   const editorReadyForUserChanges = useRef(false);
   const lastDecorationKeyRef = useRef<string>("");
   const editorJsonKeyRef = useRef(JSON.stringify(initialContent));
+  const lastBoundJsonRef = useRef<JSONContent | null>(null);
   /** Filled once the command set exists; the slash menu reads it on each open. */
   const slashDispatchRef = useRef<SlashCommandDispatcher>({
     run: () => undefined,
@@ -997,7 +1002,9 @@ export function DocumentStudio({
           link: false,
           underline: false,
           undoRedo: collaborationDocument ? false : undefined,
+          trailingNode: false,
         }),
+        LocalTrailingParagraph,
         ...(collaborationDocument
           ? [
               Collaboration.configure({
@@ -1105,7 +1112,9 @@ export function DocumentStudio({
         // TipTap packages resolve through mixed @tiptap/core versions in this
         // workspace; cast keeps the editor API usable under production typecheck.
       ] as never[],
-      content: collaborationDocument ? undefined : initialContent,
+      // Away from the room it shows the newest thing this page saw, never the
+      // version it first opened with.
+      content: collaborationDocument ? undefined : (lastBoundJsonRef.current ?? initialContent),
       editable: !readOnly,
       immediatelyRender: false,
       editorProps: {
@@ -1182,7 +1191,8 @@ export function DocumentStudio({
         );
         if (
           (!editorReadyForUserChanges.current && !referenceMigration) ||
-          readOnly
+          readOnly ||
+          !transaction.docChanged
         )
           return;
         const localChange =
@@ -1535,9 +1545,17 @@ export function DocumentStudio({
   );
 
   useEffect(() => {
+    if (!editor || !collaborationDocument) return;
+    return () => {
+      if (!editor.isDestroyed) lastBoundJsonRef.current = editor.getJSON();
+    };
+  }, [collaborationDocument, editor]);
+
+  useEffect(() => {
     // Read is a mode, not a permission: it puts the document down without
     // pretending the reader lost access to it.
-    editor?.setEditable(!readOnly && !binding && docMode !== "read");
+    // Quietly: changing whether it can be edited is not an edit to the document.
+    editor?.setEditable(!readOnly && !binding && docMode !== "read", false);
   }, [binding, docMode, editor, readOnly]);
 
   // Binding the room builds a new editor. A writer who clicked in while it
@@ -3171,6 +3189,40 @@ export function DocumentStudio({
       studioContract.role,
     ],
   );
+  const runDocumentCommandLatest = useLatest((id: string) => void runDocumentCommand(id));
+  useStudioContextItems(({ target, selection }) => {
+    if (target.closest("[data-reference-id]") || !target.closest(".ProseMirror")) return null;
+    const run = (id: string) => () => runDocumentCommandLatest.current(id);
+    const groups: StudioMenuGroup[] = [];
+    if (canEdit && target.closest("td, th")) {
+      groups.push([
+        { key: "row-before", label: "Insert row above", onSelect: run("document.table.row.before") },
+        { key: "row-after", label: "Insert row below", onSelect: run("document.table.row.after") },
+        { key: "column-before", label: "Insert column left", onSelect: run("document.table.column.before") },
+        { key: "column-after", label: "Insert column right", onSelect: run("document.table.column.after") },
+      ]);
+      groups.push([
+        { key: "merge", label: "Merge cells", disabled: !editor?.can().mergeCells(), onSelect: run("document.table.merge") },
+        { key: "split", label: "Split cell", disabled: !editor?.can().splitCell(), onSelect: run("document.table.split") },
+        { key: "row-delete", label: "Delete row", icon: Trash2, onSelect: run("document.table.row.delete") },
+        { key: "column-delete", label: "Delete column", icon: Trash2, onSelect: run("document.table.column.delete") },
+      ]);
+    }
+    // Formatting is on the floating bar that opens with this menu.
+    if (canEdit && target.closest("a[href]")) {
+      groups.push([
+        { key: "link-edit", label: "Edit link", icon: Link2, onSelect: run("insert.link") },
+        { key: "unlink", label: "Remove link", onSelect: run("insert.link.remove") },
+      ]);
+    } else if (canEdit && !selection && !target.closest("td, th")) {
+      groups.push([
+        { key: "insert-table", label: "Insert table", onSelect: run("insert.table") },
+        { key: "insert-image", label: "Insert image", onSelect: run("insert.image") },
+        { key: "insert-divider", label: "Insert divider", onSelect: run("insert.divider") },
+      ]);
+    }
+    return groups;
+  });
   const runDocumentCommand = async (id: string, value?: CommandParam) => {
     const entry = documentCommandMap.get(id);
     if (!entry) return false;
@@ -3768,13 +3820,8 @@ export function DocumentStudio({
             </aside>
           ) : null}
           {sourcesOpen ? (
-            <aside className="spectra-document-sources spectra-panel-enter">
-              <header>
-                <strong>Sources</strong>
-                <button type="button" aria-label="Close sources" onClick={() => setSourcesOpen(false)}>
-                  <X className="h-4 w-4" />
-                </button>
-              </header>
+            <StudioToolPane id="document-sources" title="Sources" onClose={() => setSourcesOpen(false)}>
+            <div className="spectra-document-sources" data-in-pane>
               {sourceNavigator.unresolved.length ? (
                 <div className="spectra-document-sources-problem" role="alert">
                   <AlertCircle className="h-3.5 w-3.5" />
@@ -3834,17 +3881,12 @@ export function DocumentStudio({
                   Insert references
                 </button>
               )}
-            </aside>
+            </div>
+            </StudioToolPane>
           ) : null}
           {revisionsOpen ? (
-            <aside className="spectra-document-revisions spectra-panel-enter" aria-label="Word review">
-              <header>
-                <History className="h-3.5 w-3.5" />
-                <strong>Tracked changes</strong>
-                <button type="button" aria-label="Close Word review" onClick={() => setRevisionsOpen(false)}>
-                  <X className="h-4 w-4" />
-                </button>
-              </header>
+            <StudioToolPane id="document-revisions" title="Tracked changes" onClose={() => setRevisionsOpen(false)}>
+            <div className="spectra-document-revisions" data-in-pane aria-label="Word review">
               {editableRevisions.map(({ block, item }) => (
                 <div key={`${block.id}:${item.revisionId}:${item.revisionKind}`}>
                   <strong>{item.revisionKind === "ins" ? "Insertion" : "Deletion"} · {item.author || "Word"}</strong>
@@ -3926,7 +3968,8 @@ export function DocumentStudio({
                   ))}
                 </div>
               ) : null}
-            </aside>
+            </div>
+            </StudioToolPane>
           ) : null}
           {/* The document is a page on the desk (EDITORS.md, "Document"):
               the running head and foot are printed on the paper, and the one

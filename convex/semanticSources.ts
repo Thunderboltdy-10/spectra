@@ -240,9 +240,9 @@ const artifactSource = defineSource({
       artifactSummaryFor(ctx, id),
     ]);
     return [
-      ...outgoing.map((link) => ({ kind: "artifact" as const, itemId: String(link.targetArtifactId),
+      ...outgoing.filter((link) => !link.dismissedAt).map((link) => ({ kind: "artifact" as const, itemId: String(link.targetArtifactId),
         reason: { type: "link" as const, relation: link.relationType, direction: "outgoing" as const, label: link.label } })),
-      ...incoming.map((link) => ({ kind: "artifact" as const, itemId: String(link.sourceArtifactId),
+      ...incoming.filter((link) => !link.dismissedAt).map((link) => ({ kind: "artifact" as const, itemId: String(link.sourceArtifactId),
         reason: { type: "link" as const, relation: link.relationType, direction: "incoming" as const, label: link.label } })),
       ...(summary?.createdFromThreadId ? [{ kind: "thread" as const, itemId: String(summary.createdFromThreadId), reason: { type: "made_in_thread" as const } }] : []),
       ...threads.filter((thread) => ownedBy(thread, actor) && thread.status !== "deleted")

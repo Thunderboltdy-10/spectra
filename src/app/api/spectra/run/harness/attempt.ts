@@ -1,3 +1,4 @@
+import { openRunRelay } from "@/features/spectra/ai/harness/run-relay";
 import { modelMemoryReflector, worthReflecting, type ReflectionRequest } from "@/features/spectra/ai/harness/memory-reflection";
 import type { MemoryChangeResult } from "../../../../../../shared/memory-files";
 import { traceEvent, withRunTrace } from "@/features/spectra/ai/harness/run-trace";
@@ -71,6 +72,8 @@ async function reflectOnRun(actorClerkId: string, runId: string, request: Omit<R
  */
 const STEP_FLUSH_MS = 1_500;
 const TEXT_FLUSH_MS = 4_000;
+/** With the live relay open the page already has it all, so the log can wait longer. */
+const RELAYED_FLUSH_MS = 10_000;
 /** Reasoning kept in the durable log; the live stream always has all of it. */
 const STORED_REASONING_PER_PART = 6_000;
 const STORED_REASONING_PER_RUN = 40_000;
@@ -338,6 +341,8 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     return eventWrite;
   };
   const IMMEDIATE = new Set(["final", "error", "stopped", "input_required", "artifact_touched", "compacted", "thread_title"]);
+  // A scheduled worker has no stream to the page. The relay is that stream.
+  const relay = params.scheduled ? openRunRelay(runId, executionId) : null;
   const publish = (event: Record<string, unknown>) => {
     const runItem = createRunItem(runId, sequence++, protocolItemForLegacyEvent(event));
     const wire = legacyEventForRunItem(runItem, event);
@@ -346,6 +351,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     } catch {
       // The client went away; the durable log still has everything.
     }
+    relay?.send(wire);
     const type = String(event.type);
     if (type === "reasoning_delta") {
       const id = String(event.id);
@@ -360,12 +366,13 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     // run) at once; later text is batched.
     const firstText = type === "text_delta" && !wroteText;
     if (firstText) wroteText = true;
-    if (firstText || IMMEDIATE.has(type)) {
+    const relayed = Boolean(relay?.connected());
+    if ((firstText && !relayed) || IMMEDIATE.has(type)) {
       void persist();
       return;
     }
     // A step brings a waiting batch of words forward; words never delay a step.
-    const delay = type === "text_delta" || type === "reasoning_delta" ? TEXT_FLUSH_MS : STEP_FLUSH_MS;
+    const delay = relayed ? RELAYED_FLUSH_MS : type === "text_delta" || type === "reasoning_delta" ? TEXT_FLUSH_MS : STEP_FLUSH_MS;
     const dueAt = Date.now() + delay;
     if (flushTimer && flushDueAt <= dueAt) return;
     if (flushTimer) clearTimeout(flushTimer);
@@ -416,6 +423,11 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       })
       .catch(() => null);
   }, SPECTRA_RUN_HEARTBEAT_INTERVAL_MS);
+
+  // Whatever this attempt touched stops saying it is being written. An artifact
+  // left marked would show Spectra's writing band until somebody refreshed.
+  const settleArtifacts = (outcome: "clear" | "failed") =>
+    mutate("spectraArtifacts:settleStagedForRun", { actorClerkId, runId, executionId, outcome }).catch(() => null);
 
   try {
     const { loaded, agents, preferences, environment, history, threadSummary } = await reads;
@@ -597,6 +609,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     if (result.status === "paused") {
       const pending = result.pending;
       await flushEvents();
+      await settleArtifacts("clear");
       await mutate("spectraRuns:updateStatus", {
         actorClerkId,
         runId,
@@ -666,6 +679,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       runLog().error("spectra.harness.provider_unreachable", result.error);
       const message = "Spectra could not reach the AI model just now. Your work so far is kept; try again in a moment.";
       await flushEvents();
+      await settleArtifacts("clear");
       await mutate("spectraRuns:updateStatus", {
         actorClerkId,
         runId,
@@ -697,6 +711,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     ];
     const content = reply || (touches.length ? "Done." : "I could not put an answer together. Please try again.");
     await flushEvents();
+    await settleArtifacts("clear");
     await mutate("spectraRuns:updateStatus", {
       actorClerkId,
       runId,
@@ -763,6 +778,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     const agentGone = error instanceof AgentUnavailableError;
     const message = agentGone ? error.message : publicError(error);
     await flushEvents().catch(() => null);
+    await settleArtifacts("clear");
     await mutate("spectraRuns:updateStatus", {
       actorClerkId,
       runId,
@@ -785,5 +801,6 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     clearInterval(heartbeat);
     await Promise.all(titleWrites);
     if (flushTimer) clearTimeout(flushTimer);
+    relay?.close();
   }
 }

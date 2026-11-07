@@ -42,6 +42,12 @@ export type TravelSample = {
 const MIN_JOURNEY_MS = 140;
 const MAX_JOURNEY_MS = 560;
 const HOP_DISTANCE_PX = 96;
+/**
+ * The least time between two long moves of an AI's hand. The work can arrive
+ * far quicker than a hand moves, and a pointer darting across the page several
+ * times a second reads as a glitch, so it goes straight to the newest place.
+ */
+const JOURNEY_DWELL_MS = 360;
 
 /** Travel time by Fitts's law, as a hand moves a mouse: quick for a short hop,
  * growing ever more slowly with distance, so a full-pane sweep still lands in
@@ -100,6 +106,8 @@ export class CursorTravel {
   private lastX = 0;
   private lastY = 0;
   private speed = 0;
+  private lastJourneyAt = Number.NEGATIVE_INFINITY;
+  private heldMove: { x: number; y: number; crossesScope: boolean } | null = null;
 
   private readonly random?: Random;
 
@@ -150,6 +158,12 @@ export class CursorTravel {
     const current = this.sample(now);
     const distance = Math.hypot(x - current.x, y - current.y);
     const kind = travelKindFor(distance, crossesScope);
+    if (this.random && kind === "journey" && now - this.lastJourneyAt < JOURNEY_DWELL_MS) {
+      this.heldMove = { x, y, crossesScope };
+      return;
+    }
+    this.heldMove = null;
+    if (kind === "journey") this.lastJourneyAt = now;
     if (kind === "stay") {
       // Sub-pixel corrections must not start a visible journey.
       this.x = x;
@@ -181,12 +195,18 @@ export class CursorTravel {
   /** Interrupt any journey and settle exactly where told. */
   snapTo(x: number, y: number): void {
     this.journey = null;
+    this.heldMove = null;
     this.x = x;
     this.y = y;
     this.placed = true;
   }
 
   sample(now: number): TravelSample {
+    if (this.heldMove && now - this.lastJourneyAt >= JOURNEY_DWELL_MS) {
+      const held = this.heldMove;
+      this.heldMove = null;
+      this.moveTo(held.x, held.y, now, held.crossesScope);
+    }
     let kind: TravelKind = "stay";
     let progress = 1;
     if (this.journey) {

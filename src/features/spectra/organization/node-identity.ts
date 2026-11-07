@@ -78,7 +78,8 @@ export function nodeIdentity(node: TreeNode, open = false): NodeIdentity {
       : WORKSPACE;
   }
   if (node.kind === "thread") return THREAD;
-  if (node.kind === "link") return REFERENCE;
+  if (node.kind === "link")
+    return node.target?.kind === "folder" || node.target?.kind === "workspace" ? FOLDER : REFERENCE;
   const key = node.source?.blueprintKey as
     | ArtifactCardView["blueprintKey"]
     | undefined;

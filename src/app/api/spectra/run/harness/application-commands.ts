@@ -55,14 +55,17 @@ const COMMANDS: Record<string, ApplicationCommand> = {
     authority: "content",
   },
   read_devices: { input: z.object({}), authority: "navigation" },
+  read_computer_names: { input: z.object({ path: z.string().trim().max(1000).default("") }), authority: "navigation" },
   control_device: {
     input: z
       .object({
         action: z.enum(LOCAL_DEVICE_ACTIONS),
         grantId: z.string().trim().min(1).max(200).optional(),
         deviceId: z.string().trim().min(1).max(200).optional(),
+        path: z.string().trim().min(1).max(1000).optional(),
       })
       .superRefine((value, ctx) => {
+        if (value.action === "sync_path" && !value.path) ctx.addIssue({ code: "custom", path: ["path"], message: "path is required." });
         if (FOLDER_ACTIONS.has(value.action) && !value.grantId) ctx.addIssue({ code: "custom", path: ["grantId"], message: "A folder grant id is required." });
       }),
     authority: "navigation",

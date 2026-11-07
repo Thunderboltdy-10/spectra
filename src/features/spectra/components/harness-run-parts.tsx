@@ -16,6 +16,31 @@ import type { HarnessArtifactTouchView, HarnessInputView } from "../ai/stream-ev
  * each). Widgets it drew render in thread-widget.tsx.
  */
 
+/** What was asked and what was said, once it has been answered. */
+export function AnsweredInputs({ answers }: { answers: ReadonlyArray<{ key: string; question: string; label: string }> }) {
+  if (!answers.length) return null;
+  return (
+    <div className="mt-4 grid gap-2.5" data-conversation-action="input-answered">
+      {answers.map((answer) => (
+        <section
+          key={answer.key}
+          aria-label="Answered"
+          className="border-l-2 border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] pl-3"
+        >
+          {answer.question ? (
+            <p className="whitespace-pre-wrap text-caption font-semibold leading-5 text-[var(--text-primary)]">
+              <InlineEmphasis text={answer.question} />
+            </p>
+          ) : null}
+          <p className="mt-0.5 text-micro text-[var(--text-secondary)]">
+            {answer.label === "Allowed" || answer.label === "Not allowed" || answer.label === "Skipped" ? answer.label : `Answered: ${answer.label}`}
+          </p>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 export function HarnessInputPanel({
   input,
   onAnswer,

@@ -39,12 +39,14 @@ vi.mock("../../../../../convex/_generated/api", () => {
   const ref = (name: string) => ({ _name: name });
   return {
     api: {
-      bridge: { overview: ref("bridge:overview"), requestPairing: ref("bridge:requestPairing"), revokeDevice: ref("bridge:revokeDevice") },
+      bridge: { syncedNodes: ref("bridge:syncedNodes"), overview: ref("bridge:overview"), requestPairing: ref("bridge:requestPairing"), revokeDevice: ref("bridge:revokeDevice") },
+      catalogGraph: { identity: ref("catalogGraph:identity") },
       syncPolicy: { effective: ref("syncPolicy:effective"), overrideAccount: ref("syncPolicy:overrideAccount") },
       deviceWorks: { settings: ref("deviceWorks:settings"), counts: ref("deviceWorks:counts"), onThisComputer: ref("deviceWorks:onThisComputer"), movable: ref("deviceWorks:movable"), backupsToRestore: ref("deviceWorks:backupsToRestore"), choose: ref("deviceWorks:choose"), backupUploadUrl: ref("deviceWorks:backupUploadUrl"), recordBackup: ref("deviceWorks:recordBackup"), adoptRestored: ref("deviceWorks:adoptRestored"), deleteBackups: ref("deviceWorks:deleteBackups") },
     },
   };
 });
+vi.mock("../place-in-menu", () => ({ PlaceInMenu: ({ children }: { children: unknown }) => children }));
 vi.mock("../../bridge/use-bridge", () => ({ useBridgeHealth: () => h.local }));
 vi.mock("../../bridge/client", async (original) => ({
   ...(await original<typeof import("../../bridge/client")>()),

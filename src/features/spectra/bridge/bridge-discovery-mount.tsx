@@ -102,16 +102,16 @@ export function BridgeConnection() {
     });
   }, [isAuthenticated, rejoinable, requestPairing]);
   // The choice stays with the person; Bridge hears it whenever it's here to listen.
-  const wantsOwnAgent = preferences.ai.runtime !== "spectra";
   const joined = Boolean(status?.paired);
   const workSettings = useQuery(api.deviceWorks.settings, isAuthenticated ? {} : "skip");
-  const keepsWorkHere = workSettings !== undefined && workSettings.storage !== "cloud";
   useEffect(() => {
     if (!joined || !hydrated) return;
-    void setBridgeAgentHub(wantsOwnAgent || keepsWorkHere)
+    // Connected computers stay reachable by the person's own Spectra, so its AI
+    // can see file names and offer to sync them even when the server is hosted.
+    void setBridgeAgentHub(true)
       .catch(() => undefined)
       .then(() => recheckAgentRuntime());
-  }, [hydrated, joined, keepsWorkHere, wantsOwnAgent]);
+  }, [hydrated, joined]);
   useEffect(() => {
     if (workSettings) publishDeviceState({ storage: workSettings.storage });
   }, [workSettings]);

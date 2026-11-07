@@ -92,7 +92,7 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
       }
       break;
     }
-    case "delete_library_items": return { name: "orgTree:trash", args: { nodeIds: targetIds } };
+    case "delete_library_items": return { name: "orgTree:trash", args: { nodeIds: targetIds, leaveFiles: true } };
     case "restore_library_items": return { name: "orgTree:restore", args: { nodeIds: targetIds } };
     case "pin_library_item": return { name: "orgTree:setPinned", args: { nodeId: String(args.targetId ?? ""), pinned: args.pinned === true } };
     case "manage_conversation": return { name: "spectraThreads:update", args: {

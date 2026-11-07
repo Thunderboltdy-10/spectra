@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { aiWorking } from "../artifacts/ai-working";
 import { useWorkPreviews } from "../artifacts/use-work-previews";
 import { meaningfulSummary } from "../artifacts/work-preview";
@@ -17,6 +17,11 @@ import { useDailyBrief } from "./use-daily-brief";
 import { TodayThreads } from "./today-threads";
 import { TodayWeek } from "./today-week";
 import { useToday } from "./use-today";
+import { editedWorks, subscribeEditedWorks } from "./recent-edits";
+
+/** One row of cards, then another row each time. */
+const WORKS_SHOWN = 3;
+const WORKS_MORE = 6;
 
 /*
  * Home's day (docs/product/HOME.md): the week at a glance, then the work to
@@ -33,7 +38,17 @@ export function HomeDay({ onAllThreads }: { onAllThreads: () => void }) {
   const brief = useDailyBrief(today.now);
   const tabs = useRunTabs();
   const moving = useMemo(() => new Set(tabs.filter((tab) => isActiveRunStatus(tab.run.status)).map((tab) => tab.threadId)), [tabs]);
-  const previewOf = useWorkPreviews(works);
+  const edited = useSyncExternalStore(subscribeEditedWorks, editedWorks, editedWorks);
+  const [worksShown, setWorksShown] = useState(WORKS_SHOWN);
+  // The server hears of an edit at its next checkpoint; what this device touched last leads now.
+  const touched = (work: SpectraArtifact) => Math.max(work.updatedAt, edited[work._id] ?? 0);
+  const recent = useMemo(
+    () => (works ? [...works].sort((a, b) => touched(b) - touched(a)) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [edited, works],
+  );
+  const shownWorks = recent?.slice(0, worksShown) ?? null;
+  const previewOf = useWorkPreviews(shownWorks);
   const book = useClassBook();
 
   // Moving threads lead, then the most recent.
@@ -77,7 +92,7 @@ export function HomeDay({ onAllThreads }: { onAllThreads: () => void }) {
             <p className="text-caption text-[var(--text-secondary)]">Documents, decks and quizzes you make or open appear here.</p>
           ) : (
             <div className="work-desk grid grid-cols-[repeat(auto-fill,minmax(min(100%,232px),1fr))] gap-x-4 gap-y-6">
-              {(works ?? Array.from({ length: 3 }, () => null)).map((work, index) =>
+              {(shownWorks ?? Array.from({ length: WORKS_SHOWN }, () => null)).map((work, index) =>
                 work ? (
                   <WorkCard
                     key={work._id}
@@ -88,7 +103,7 @@ export function HomeDay({ onAllThreads }: { onAllThreads: () => void }) {
                     summary={meaningfulSummary(work.blueprintKey, work.summary)}
                     place={placeOf(work)}
                     ink={book.named(placeOf(work))?.ink}
-                    when={formatRelativeTime(work.updatedAt)}
+                    when={formatRelativeTime(touched(work))}
                     href={`/library/${encodeURIComponent(work._id)}`}
                     onOpen={() => openWorkInSide(work._id)}
                     live={aiWorking(work)}
@@ -99,6 +114,15 @@ export function HomeDay({ onAllThreads }: { onAllThreads: () => void }) {
               )}
             </div>
           )}
+          {recent && recent.length > WORKS_SHOWN ? (
+            <button
+              type="button"
+              className="today-more"
+              onClick={() => setWorksShown((count) => (count >= recent.length ? WORKS_SHOWN : count + WORKS_MORE))}
+            >
+              {worksShown >= recent.length ? "Show less" : "Show more"}
+            </button>
+          ) : null}
         </section>
 
         <section aria-labelledby="today-threads" className="today-threads">

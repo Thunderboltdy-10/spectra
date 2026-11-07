@@ -2,7 +2,6 @@
 
 import { Eye, Users, X, CornerUpLeft, EyeOff, MousePointer2 } from "@/components/icons/glyph-icons";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { SpectraMark } from "@/components/spectra-mark";
 import {
   Popover,
   PopoverContent,
@@ -646,9 +645,6 @@ export function CollaborationCursorLayer({
                 className="ml-2 -mt-0.5 inline-flex max-w-48 items-center gap-1.5 whitespace-nowrap rounded-chip px-2 py-1 text-micro font-semibold text-white shadow-card"
                 style={{ backgroundColor: color }}
               >
-                {person.actorKind === "ai" ? (
-                  <SpectraMark mono size={11} />
-                ) : null}
                 {name}
               </span>
             )}
@@ -813,7 +809,7 @@ export function CollaborationPresenceIndicator({
                   )}
                 >
                   {person.actorKind === "ai" ? (
-                    <SpectraMark mono size={13} />
+                    "AI"
                   ) : (
                     initials(person.name)
                   )}
@@ -904,7 +900,7 @@ export function CollaborationPresenceIndicator({
                       style={{ backgroundColor: presenceColor(person) }}
                     >
                       {person.actorKind === "ai" ? (
-                        <SpectraMark mono size={15} />
+                        "AI"
                       ) : (
                         initials(person.name)
                       )}

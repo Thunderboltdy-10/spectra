@@ -26,6 +26,8 @@ const aiSchema = z.object({
   showLiveDockProgress: z.boolean().default(true),
   /** The island at rest: the prism (default), or nothing until the pointer reaches the bottom edge. */
   islandWake: z.enum(["prism", "edge"]).default("prism"),
+  /** The middle the island keeps to: of the page between the columns, or of the whole screen. */
+  islandCentre: z.enum(["page", "screen"]).default("page"),
   autoRouteSpecialists: z.boolean().default(true),
   parallelSafeReads: z.boolean().default(true),
   researchDepth: z.enum(["automatic", "quick", "verified", "deep"]).default("automatic"),
@@ -37,10 +39,10 @@ const aiSchema = z.object({
   /** Empty is the CLI's default for this account. */
   codexModel: z.string().max(120).default(""),
   claudeModel: z.string().max(120).default(""),
-  thinking: z.enum(["medium", "high"]).default("high"),
+  thinking: z.enum(["low", "medium", "high"]).default("high"),
   /** How fast the work plays on this person's screen. The edit is saved either way. */
   workSpeed: z.enum(["slow", "medium", "fast"]).default("fast"),
-  followSpeed: z.enum(["slow", "medium", "fast"]).default("slow"),
+  followSpeed: z.enum(["slow", "medium", "fast"]).default("fast"),
   reversibleLowRiskAutonomy: z.boolean().default(true),
   notifyRequiredInput: z.boolean().default(true),
   notifyRunCompletion: z.boolean().default(true),
@@ -94,6 +96,10 @@ const appearanceSchema = z.object({
   streamingReveal: z.boolean().default(true),
   activeTailShimmer: z.boolean().default(true),
   sidebarDefault: z.enum(["remember", "expanded", "collapsed"]).default("remember"),
+  /** The sidebar's destinations in the order this person dragged them to; empty is Spectra's order. */
+  railOrder: z.array(z.string().max(32)).max(20).default([]),
+  /** Library's workspace tiles, the same way. */
+  workspaceOrder: z.array(z.string().max(64)).max(300).default([]),
 });
 
 const computeSchema = z.object({

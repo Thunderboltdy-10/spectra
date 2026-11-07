@@ -1,5 +1,6 @@
 "use client";
 
+import { useLatest, useStudioContextItems } from "./studio-context-menu";
 import CodeMirror from "@uiw/react-codemirror";
 import { indentWithTab } from "@codemirror/commands";
 import { css } from "@codemirror/lang-css";
@@ -1006,6 +1007,27 @@ export function CodeStudio({
     }
   }
 
+  const fileVerbs = useLatest({ duplicateFile, files: workbook.files });
+  useStudioContextItems(({ target }) => {
+    const fileId = target.closest("[data-studio-item]")?.getAttribute("data-studio-item");
+    if (!fileId || readOnly) return null;
+    const only = fileVerbs.current.files.length === 1;
+    return [[
+      {
+        key: "file-rename",
+        label: "Rename",
+        icon: Pencil,
+        onSelect: () => {
+          const file = fileVerbs.current.files.find((entry) => entry.id === fileId);
+          if (!file) return;
+          setRenameDraft(file.path);
+          setRenamingFileId(fileId);
+        },
+      },
+      { key: "file-copy", label: "Duplicate", icon: Copy, onSelect: () => fileVerbs.current.duplicateFile(fileId) },
+      { key: "file-delete", label: "Delete", icon: Trash2, danger: true, disabled: only, onSelect: () => setDeleteFileId(fileId) },
+    ]];
+  });
   function deleteFile() {
     if (!deleteFileId || workbook.files.length === 1) return;
     const nextFiles = workbook.files.filter((file) => file.id !== deleteFileId);

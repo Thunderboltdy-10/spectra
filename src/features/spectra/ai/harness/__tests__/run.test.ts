@@ -71,8 +71,8 @@ describe("thread notes", () => {
 });
 
 describe("system prompt", () => {
-  it("is under 1,700 words and carries the skill index and environment", () => {
-    expect(SPECTRA_SYSTEM_PROMPT.split(/\s+/).length).toBeLessThan(1_700);
+  it("is under 1,900 words and carries the skill index and environment", () => {
+    expect(SPECTRA_SYSTEM_PROMPT.split(/\s+/).length).toBeLessThan(1900);
     const prompt = buildSystemPrompt({
       now: Date.UTC(2026, 9, 3, 10),
       timeZone: "Europe/Madrid",

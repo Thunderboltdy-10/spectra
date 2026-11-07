@@ -16,7 +16,8 @@ import { AGENDA_DAYS, splitAgenda, type TodayAgenda } from "./today-model";
  * page. `null` means still loading.
  */
 
-const RECENT_WORKS = 3;
+/** Enough to show more without asking again. */
+const RECENT_WORKS = 24;
 const RECENT_THREADS = 12;
 
 export type TodayData = {

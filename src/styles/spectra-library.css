@@ -443,6 +443,8 @@
 .surface-bar-tools {
   display: flex;
   flex: 0 1 auto;
+  /* Without this the search keeps its input's own width and pushes New out. */
+  min-width: 0;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
@@ -468,6 +470,14 @@
     padding-inline: 0;
     width: 2rem;
     justify-content: center;
+  }
+
+  .surface-bar-tools > * {
+    flex-shrink: 0;
+  }
+
+  .surface-bar-tools > .surface-bar-search {
+    flex-shrink: 6;
   }
 }
 

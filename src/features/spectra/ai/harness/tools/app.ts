@@ -225,6 +225,8 @@ export const OPEN_IN_SPECTRA_DESTINATIONS = [
 
 export const DEVICES_TOOL_ACTIONS = [
   "status",
+  "list_names",
+  "sync_path",
   "pair",
   "add_folder",
   "add_files",
@@ -238,10 +240,12 @@ export const DEVICES_TOOL_ACTIONS = [
 ] as const;
 
 type DevicesAction = (typeof DEVICES_TOOL_ACTIONS)[number];
-export type DevicesArgs = { action: DevicesAction; grantId?: string; deviceId?: string; paused?: boolean };
+export type DevicesArgs = { action: DevicesAction; grantId?: string; deviceId?: string; paused?: boolean; path?: string };
 
 const DEVICES_LABELS: Record<DevicesAction, [string, string]> = {
   status: ["Checking your devices", "Checked your devices"],
+  list_names: ["Looking through file names on your computer", "Looked through file names on your computer"],
+  sync_path: ["Asking to sync it from your computer", "Asked to sync it from your computer"],
   pair: ["Connecting this computer", "Started connecting this computer"],
   add_folder: ["Opening the folder picker", "Opened the folder picker"],
   add_files: ["Opening the file picker", "Opened the file picker"],
@@ -261,7 +265,7 @@ function devicesLabel(action: string): [string, string] {
 }
 
 export function devicesToolEffect(action: DevicesAction): ToolEffect {
-  if (action === "status") return "read";
+  if (action === "status" || action === "list_names") return "read";
   if (action === "pair" || action === "remove_folder" || action === "remove_device") return "settings";
   return "write";
 }
@@ -273,8 +277,10 @@ function parseDevicesArgs(raw: Record<string, unknown>): DevicesArgs {
   if ((action === "retry_folder" || action === "pause_folder" || action === "remove_folder") && !grantId)
     throw new ToolInputError(`${action} needs grantId; read it with action status.`);
   if (action === "remove_device" && !deviceId) throw new ToolInputError("remove_device needs deviceId; read it with action status.");
+  const path = optionalString(raw, "path", 1000);
+  if (action === "sync_path" && !path) throw new ToolInputError("sync_path needs path; read it with action list_names.");
   const paused = action === "pause_folder" || action === "pause_syncing" ? raw.paused !== false : undefined;
-  return { action, ...(grantId ? { grantId } : {}), ...(deviceId ? { deviceId } : {}), ...(paused === undefined ? {} : { paused }) };
+  return { action, ...(grantId ? { grantId } : {}), ...(deviceId ? { deviceId } : {}), ...(paused === undefined ? {} : { paused }), ...(path ? { path } : {}) };
 }
 
 function controlDeviceArgs(args: DevicesArgs): Record<string, unknown> {
@@ -284,7 +290,7 @@ function controlDeviceArgs(args: DevicesArgs): Record<string, unknown> {
       : args.action === "pause_syncing"
         ? args.paused === false ? "resume_syncing" : "pause_syncing"
         : args.action;
-  return { action, ...(args.grantId ? { grantId: args.grantId } : {}), ...(args.deviceId ? { deviceId: args.deviceId } : {}) };
+  return { action, ...(args.grantId ? { grantId: args.grantId } : {}), ...(args.deviceId ? { deviceId: args.deviceId } : {}), ...(args.path ? { path: args.path } : {}) };
 }
 
 export function appTools(session: HarnessSession): AnyHarnessTool[] {
@@ -792,7 +798,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "devices",
       description:
-        "The user's computers connected through Spectra Bridge. status: read each computer's state, folders (grantId), last sync and any problem, with deviceIds. pair: connect the computer the user has Spectra open on; Spectra offers the download if Bridge is missing and the user confirms a code on the computer. add_folder opens the folder picker on that computer. add_files opens its native picker for one or more individual files without syncing their parent folder. retry_folder {grantId}, pause_folder {grantId, paused (false resumes)}, remove_folder {grantId} (files stay). pause_syncing {paused (false resumes)} for every folder. show_logs opens Bridge's log file. update installs a ready Bridge update. remove_device {deviceId} unpairs a computer; its files stay. Actions on a computer run there through the user's open Spectra; pass deviceId to aim at one computer. pair, remove_folder and remove_device ask first.",
+        "The user's computers connected through Spectra Bridge. Files already synced are ordinary artifacts: find them with search and read them like any other. list_names {path}: read the names of files and folders on the computer the user has Bridge on, one level at a time, in Documents, Desktop, Downloads and OneDrive; start with no path. You only ever get names, never contents. When the user's request would be helped by something you can see there and it is not in Spectra yet, say what you found and ask whether to sync it; on yes, sync_path {path} opens a prompt on the computer and it comes in only if they agree there. You cannot run commands on the computer or delete its files, and trashing a synced artifact leaves its file alone. status: read each computer's state, folders (grantId), last sync and any problem, with deviceIds. pair: connect the computer the user has Spectra open on; Spectra offers the download if Bridge is missing and the user confirms a code on the computer. add_folder opens the folder picker on that computer. add_files opens its native picker for one or more individual files without syncing their parent folder. retry_folder {grantId}, pause_folder {grantId, paused (false resumes)}, remove_folder {grantId} (files stay). pause_syncing {paused (false resumes)} for every folder. show_logs opens Bridge's log file. update installs a ready Bridge update. remove_device {deviceId} unpairs a computer; its files stay. Actions on a computer run there through the user's open Spectra; pass deviceId to aim at one computer. pair, remove_folder and remove_device ask first.",
       parameters: {
         type: "object",
         properties: {
@@ -800,6 +806,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
           grantId: { type: "string" },
           deviceId: { type: "string" },
           paused: { type: "boolean" },
+          path: { type: "string", description: "list_names and sync_path: where on the computer, such as Documents/IB. Empty lists the places." },
         },
         required: ["action"],
         additionalProperties: false,
@@ -817,6 +824,8 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       command: (args) =>
         args.action === "status"
           ? { command: "read_devices", args: {} }
+          : args.action === "list_names"
+            ? { command: "read_computer_names", args: { path: args.path ?? "" } }
           : args.action === "pair"
             ? { command: "pair_device", args: {} }
             : args.action === "remove_device"

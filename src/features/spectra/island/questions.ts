@@ -19,6 +19,8 @@ export type QuestionOption = { key: string; label: string; description?: string 
 export type PendingQuestion = {
   key: string;
   runId: string;
+  /** The saved message that asks it, when a saved run does. */
+  messageId?: string;
   threadId: string | null;
   /** The thread's title, for "Open thread" and the screen reader. */
   threadTitle: string;
@@ -41,6 +43,27 @@ export type QuestionAnswer =
   | { kind: "batch"; selections: Record<string, string> }
   | { kind: "text"; text: string; attachments?: CommandAttachment[] }
   | { kind: "skip" };
+
+/** The answer in the words shown afterwards. */
+export function questionAnswerLabel(question: PendingQuestion, answer: QuestionAnswer) {
+  switch (answer.kind) {
+    case "allow":
+      return "Allowed";
+    case "deny":
+      return answer.text?.trim() || "Not allowed";
+    case "choice":
+      return answer.label;
+    case "text":
+      return answer.text.trim();
+    case "skip":
+      return "Skipped";
+    case "batch":
+      return (question.batch ?? [])
+        .map((item) => item.options.find((option) => option.key === answer.selections[item.id])?.label)
+        .filter(Boolean)
+        .join("; ") || "Answered";
+  }
+}
 
 /** "Always allow sharing" → { label: "Always allow", description: "Sharing" }. */
 export function splitAlwaysAllow(label: string) {
@@ -71,7 +94,8 @@ export function pendingQuestions(engine: SpectraRunEngine | null, tabs: readonly
     const model = deriveLiveDockTab(runTabSource(tab));
     const request = model.inputRequest;
     if (!request || model.state !== "needs_input") continue;
-    const base = { key: `tab:${tab.runId}`, runId: tab.runId, threadId: tab.threadId, threadTitle: model.title };
+    const messageId = "messageId" in request && typeof request.messageId === "string" ? request.messageId : undefined;
+    const base = { key: `tab:${tab.runId}`, runId: tab.runId, messageId, threadId: tab.threadId, threadTitle: model.title };
     if (request.kind === "approval") {
       const targets = model.targetNames.length ? ` (${model.targetNames.join(", ")})` : "";
       list.push({ ...base, kind: "approval", prompt: `${request.prompt}${targets}`, options: [], allowText: true });

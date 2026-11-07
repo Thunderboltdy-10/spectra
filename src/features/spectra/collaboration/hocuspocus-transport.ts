@@ -1,5 +1,6 @@
 "use client";
 
+import { noteWorkEdited } from "../today/recent-edits";
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import * as Y from "yjs";
 import { framedWebSocket } from "../../../../shared/collaboration-framing.mjs";
@@ -19,7 +20,7 @@ import type {
 } from "./types";
 import { readInteractionState } from "./interaction-model";
 import { readPerformances } from "./performance";
-import { committedPerformancesFor, subscribeCommittedPerformances } from "./committed-performances";
+import { committedPerformancesFor, forgetCommittedPerformance, subscribeCommittedPerformances } from "./committed-performances";
 import { currentWorkSpeed } from "./work-speed";
 import { PerformanceStage } from "./performance-stage";
 import { readArtifactYjsDocument } from "./artifact-yjs-model";
@@ -366,7 +367,9 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     if (this.destroyed || !this.level) return;
     for (const performance of committedPerformancesFor(this.artifactId)) {
       const live = readNativeArtifactYjsDocument(this.document, performance.typeKey) ?? readArtifactYjsDocument(this.document, performance.typeKey);
-      if (live) this.performanceStage.ingest([performance]);
+      if (!live) continue;
+      this.performanceStage.ingest([performance]);
+      forgetCommittedPerformance(performance.id);
     }
   }
   private presenceSignature = "[]";
@@ -388,6 +391,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     this.scheduleDeviceProjection();
     this.localDurabilityPending = true;
     if (origin !== this.provider && this.connectionStarted) {
+      noteWorkEdited(this.artifactId);
       if (!this.provider?.synced) {
         this.quarantined = true;
         this.localRecoveryPending = true;

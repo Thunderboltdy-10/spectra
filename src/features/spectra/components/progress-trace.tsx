@@ -133,6 +133,8 @@ export function ProgressTrace({
   answers,
   startedAt,
   endedAt,
+  continuation = false,
+  current = true,
 }: {
   steps: SpectraLiveExchange["steps"];
   active: boolean;
@@ -149,6 +151,10 @@ export function ProgressTrace({
   startedAt?: number;
   /** When the run settled, if known; otherwise the moment this trace saw it finish. */
   endedAt?: number;
+  /** Work done after the reply began: sits among the words and carries no clock. */
+  continuation?: boolean;
+  /** False once the reply has moved on past this work, so it folds where it is. */
+  current?: boolean;
 }) {
   /* The trace is run feedback, so it runs on the completion/reveal grammar:
      steps entering are `reveal`, the group opening is `morph`, and the whole
@@ -160,7 +166,7 @@ export function ProgressTrace({
   // The steps and the thinking show for as long as Spectra works, written
   // replies between them included, then fold away. A choice the user made holds.
   const [chosenOpen, setChosenOpen] = useState(() => (persistKey ? groupOpenByKey.get(persistKey) : undefined));
-  const groupOpen = chosenOpen ?? active;
+  const groupOpen = chosenOpen ?? (active && current);
   const finished = !active && (steps.length > 0 || hasOutput);
   const [now, setNow] = useState(() => Date.now());
   // The clock runs for the whole turn, writing included, so a long silent
@@ -195,15 +201,24 @@ export function ProgressTrace({
   }, [active, compact, steps]);
 
   const settledAt = endedAt ?? sawFinish;
-  const timed = startedAt !== undefined && (active || settledAt !== undefined);
+  const timed = !continuation && startedAt !== undefined && (active || settledAt !== undefined);
   if (!active && !timed && steps.length === 0 && !summary?.trim() && !answers?.length) return null;
 
   const visibleSteps = visibleTraceSteps(steps, active);
+  if (continuation && !visibleSteps.length) return null;
   const expandable = steps.length > 0;
   const showTraceToggle = active || expandable || timed;
   // The header says what Spectra is doing now, then what it did.
   const runningStep = [...steps].reverse().find((step) => step.status === "running");
-  const headline = timed
+  const headline = continuation
+    ? active && current && runningStep
+      ? runningStep.title
+      : visibleSteps.every((step) => step.kind === "thinking")
+        ? "Thought"
+        : visibleSteps.length === 1
+          ? pastTenseProgressTitle(visibleSteps[0]!.title, true)
+          : `${visibleSteps.length} steps`
+    : timed
     ? finished
       ? "Worked for"
       : "Working for"
@@ -214,7 +229,7 @@ export function ProgressTrace({
 
   return (
     <div
-      className={cn(compact ? "py-0.5" : "mb-3 py-1")}
+      className={cn(compact ? "py-0.5" : continuation ? "my-3 py-0.5" : "mb-3 py-1")}
       aria-label="Spectra progress"
     >
       {showTraceToggle ? (
@@ -233,7 +248,7 @@ export function ProgressTrace({
             className={cn(
               "min-w-0 truncate text-caption font-medium tracking-[-0.01em] text-[var(--text-secondary)] opacity-70",
               // While Spectra works, the skeleton's band of light passes along the header.
-              !finished && "thinking-wave",
+              !finished && current && "thinking-wave",
             )}
           >
             {/* Present tense becomes past tense with a quick cross-fade. */}

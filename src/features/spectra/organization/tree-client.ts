@@ -103,6 +103,12 @@ export function useWorkspaceTallies(workspaceIds: readonly string[]) {
   return useQuery(api.orgTree.workspaceTallies, ids.length ? { workspaceIds: ids } : "skip") ?? null;
 }
 
+/** A place to go into: a folder or workspace, or a reference to one. */
+export function isPlaceNode(node: TreeNode): boolean {
+  if (node.kind === "folder" || node.kind === "workspace") return true;
+  return node.kind === "link" && (node.target?.kind === "folder" || node.target?.kind === "workspace");
+}
+
 /** The children of one folder, paginated so a 2k-item folder still opens fast. */
 export function useTreeChildren(
   parentId: string | null,

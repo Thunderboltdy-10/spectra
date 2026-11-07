@@ -46,7 +46,6 @@ import { createShellArtifactAccess } from "../components/shell-artifact-access";
 import { SelectionActionBar } from "../components/context-controls";
 import { InvitationStrip } from "../components/invitation-strip";
 import { WorkbenchInspectorTabs } from "../components/workbench-inspector-tabs";
-import { CompanionSheet, WorkCompanionPanel, type CompanionTab } from "../components/work-companion";
 import { RunDetailPanel } from "../components/run-detail-panel";
 import { LiveThreadPanel } from "../components/live-thread-panel";
 import { ChatBrowserPanel } from "../components/chat-browser-panel";
@@ -1549,11 +1548,6 @@ export function SpectraShell({
   );
   const chatBrowserArtifactId = studio.activeArtifactId ?? requestedArtifactId;
   const chatBrowserScope = chatBrowserArtifactId ? "artifact" : selectedWorkspaceId ? "workspace" : "library";
-  /* The companion (SHELL.md): beside fullscreen work it is a collapsible Side
-     panel; for work held in the Side it is an inner sheet over that work. */
-  const [companionTab, setCompanionTab] = useState<CompanionTab>("details");
-  const [companionReveal, setCompanionReveal] = useState(0);
-  const [companionSheetFor, setCompanionSheetFor] = useState<string | null>(null);
   const applicationCommandDispatcher = useMemo(
     () =>
       createApplicationCommandDispatcher({
@@ -1761,6 +1755,15 @@ export function SpectraShell({
       chatBrowserWidth,
     ],
   );
+  // The island centres on what is left of the stage (ISLAND.md, "Placement").
+  const studioBesideWidth =
+    studio.mode === "split" && studio.activeArtifact && !paneOverlay.studio ? (paneWidths.studio ?? studioPanelWidth) : 0;
+  useEffect(() => {
+    if (!studioBesideWidth) return;
+    const root = document.documentElement;
+    root.style.setProperty("--spectra-side-width", `${Math.round(studioBesideWidth)}px`);
+    return () => void root.style.removeProperty("--spectra-side-width");
+  }, [studioBesideWidth]);
 
   useEffect(() => {
     const removeSettings = spectraBus.handle("settings.change", ({ patch }) => {
@@ -1938,7 +1941,6 @@ export function SpectraShell({
       if (thread) {
         // The Side holds one pane: a conversation takes the chat browser's place.
         setChatBrowserOpen(false);
-        setCompanionSheetFor(null);
         openObject({
           type: "thread",
           id: thread.id,
@@ -3018,18 +3020,6 @@ export function SpectraShell({
     setActiveRunPanelId(null);
     setLiveThread(null);
     setChatBrowserOpen(true);
-  }
-
-  /** Conversations about open work live in its companion. */
-  function openWorkConversations() {
-    const work = studio.activeArtifact;
-    if (!work) return openChatBrowser();
-    setCompanionTab("conversations");
-    setChatBrowserOpen(false);
-    setActiveRunPanelId(null);
-    setLiveThread(null);
-    if (studio.mode === "tab") setCompanionReveal((value) => value + 1);
-    else setCompanionSheetFor(work._id);
   }
 
   function openArtifactTab(artifact: SpectraArtifact) {
@@ -4223,7 +4213,7 @@ export function SpectraShell({
                   onContinueThread={(threadId, title) =>
                     toggleContinuedThread(threadId, title)
                   }
-                  onOpenChats={openChatBrowser}
+                  onOpenThread={setLiveThread}
                   executeApplicationCommand={applicationCommandDispatcher}
                 />
               ) : studio.mode === "tab" && studio.activeArtifact ? (
@@ -4250,22 +4240,10 @@ export function SpectraShell({
                       : undefined
                   }
                   onDirtyChange={studio.setDirty}
-                  onOpenChats={openWorkConversations}
+                  onOpenThread={setLiveThread}
                   executeApplicationCommand={applicationCommandDispatcher}
                   compact={false}
                 />
-                {/* A conversation, a run or the chat browser takes the companion's place for a while. */}
-                {liveThread || activeRunPanelId || chatBrowserOpen ? null : (
-                  <WorkCompanionPanel
-                    work={studio.activeArtifact}
-                    artifacts={allArtifacts}
-                    tab={companionTab}
-                    onTabChange={setCompanionTab}
-                    revealKey={companionReveal || null}
-                    onOpenWork={openArtifactTab}
-                    onOpenThread={setLiveThread}
-                  />
-                )}
                 </div>
               ) : (
                 <section
@@ -4441,27 +4419,9 @@ export function SpectraShell({
                             : undefined
                         }
                         onDirtyChange={studio.setDirty}
-                        onOpenChats={openWorkConversations}
+                        onOpenThread={setLiveThread}
                         executeApplicationCommand={applicationCommandDispatcher}
                         compact={false}
-                      />
-                    ) : null}
-                    {studio.mode === "split" &&
-                    studio.activeArtifact &&
-                    companionSheetFor === studio.activeArtifact._id ? (
-                      <CompanionSheet
-                        rootRef={workbenchRowRef}
-                        work={studio.activeArtifact}
-                        artifacts={allArtifacts}
-                        tab={companionTab}
-                        onTabChange={setCompanionTab}
-                        onClose={() => setCompanionSheetFor(null)}
-                        onOpenFull={() => {
-                          setCompanionSheetFor(null);
-                          if (studio.activeArtifact) openArtifactTab(studio.activeArtifact);
-                        }}
-                        onOpenWork={(work) => openArtifactPanel(work)}
-                        onOpenThread={setLiveThread}
                       />
                     ) : null}
                     {!workSetIsolated && tiledArtifacts.length > 0 ? (

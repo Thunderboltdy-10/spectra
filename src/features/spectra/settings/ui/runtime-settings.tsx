@@ -12,12 +12,6 @@ import type { SpectraPreferences } from "../schema";
 
 type Ai = SpectraPreferences["ai"];
 
-const SPEED_OPTIONS = [
-  { value: "fast", label: "Fast" },
-  { value: "medium", label: "Medium" },
-  { value: "slow", label: "Slow" },
-];
-
 /** BridgeConnection tells this computer's Bridge about the choice, now or when it next opens. */
 export function applyRuntimeChoice(runtime: Ai["runtime"], update: (patch: Partial<Ai>) => void) {
   update({ runtime, runtimeChosen: true });
@@ -79,7 +73,7 @@ function ProviderRow({ provider, model, onModel }: {
           ariaLabel={`${name} model`}
           value={model}
           onChange={onModel}
-          options={[{ value: "", label: `${provider === "claude" ? "Claude" : "Codex"} default` }, ...entry.models.map((item) => ({ value: item.id, label: item.label }))]}
+          options={[{ value: "", label: "Preferred" }, ...entry.models.map((item) => ({ value: item.id, label: item.label }))]}
         />
       }
     />
@@ -117,10 +111,8 @@ export function RuntimeSettings() {
         <ProviderRow provider="claude" model={ai.claudeModel} onModel={(claudeModel) => patch({ claudeModel })} />
         <Row label="Logged in just now?" description="Spectra checks again whenever you come back to this window." control={<Button size="sm" variant="secondary" onClick={() => void recheck()}>Check again</Button>} />
       </Group>
-      <Group title="Thinking and speed" description="How hard the model thinks, and how quickly its work plays on your screen. Edits are saved at the same moment at any speed.">
-        <Row label="Thinking" control={<SelectField ariaLabel="Thinking" value={ai.thinking} onChange={(thinking) => patch({ thinking: thinking as Ai["thinking"] })} options={[{ value: "medium", label: "Medium" }, { value: "high", label: "High" }]} />} />
-        <Row label="Work speed" description="Fast shows the work as it arrives." control={<SelectField ariaLabel="Work speed" value={ai.workSpeed} onChange={(workSpeed) => patch({ workSpeed: workSpeed as Ai["workSpeed"] })} options={SPEED_OPTIONS} />} />
-        <Row label="Speed while following" description="Used while Follow AI moves you to what it's working on." control={<SelectField ariaLabel="Speed while following" value={ai.followSpeed} onChange={(followSpeed) => patch({ followSpeed: followSpeed as Ai["followSpeed"] })} options={SPEED_OPTIONS} />} />
+      <Group title="Thinking" description="How hard the model thinks before it answers. Low is quickest, High takes longer on hard work.">
+        <Row label="Thinking" control={<SelectField ariaLabel="Thinking" value={ai.thinking} onChange={(thinking) => patch({ thinking: thinking as Ai["thinking"] })} options={[{ value: "low", label: "Low" }, { value: "medium", label: "Medium" }, { value: "high", label: "High" }]} />} />
       </Group>
     </div>
   );

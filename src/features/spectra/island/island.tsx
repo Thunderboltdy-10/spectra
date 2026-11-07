@@ -29,8 +29,9 @@ import { arrangeTabs, dropTab, isPendingTab, islandStatus, pendingRunTab, status
 import { IslandRail, RAIL_DONE, RailGhost, useRailSeat, type RailHandlers } from "./island-rail";
 import { boxOf, morphShape } from "./shape-morph";
 import { NOTICE_COLOUR } from "./notice";
-import { QuestionCard } from "./question-card";
-import { answerQuestion, pendingQuestions, type QuestionAnswer } from "./questions";
+import { AnsweredCard, QuestionCard } from "./question-card";
+import { forgetAnswered, noteAnswered, useAnsweredNotes } from "../ai/answered-inputs";
+import { answerQuestion, pendingQuestions, questionAnswerLabel, type QuestionAnswer } from "./questions";
 import { refreshRunTabs, useRunTabs } from "./run-tabs";
 import { settleFirstVisit, useSeenRuns } from "./seen";
 import { ThreadSwitcher } from "./thread-switcher";
@@ -52,6 +53,7 @@ type Shape = "composer";
 type ReplyTo = { runId: string; threadId: string; title: string } | "new" | null;
 
 /** Leaving the island: it settles back quickly, so it never lingers over the page. */
+const ANSWERED_NOTE_MS = 1400;
 const CLOSE_DELAY = 220;
 /** A hand resting still on a tab this long means to look; passing over it does not. */
 const VIEW_DELAY = 560;
@@ -104,7 +106,7 @@ export function Island() {
   const router = useSpectraRouter();
   const { preferences } = useSpectraPreferences();
   const followingAi = useFollowAi().following;
-  setWorkSpeeds({ speed: preferences.ai.workSpeed, followSpeed: preferences.ai.followSpeed, following: followingAi });
+  setWorkSpeeds({ speed: "fast", followSpeed: "fast", following: followingAi });
   const motion = useSpectraMotion();
 
   const live = engine?.liveExchange ?? null;
@@ -262,7 +264,14 @@ export function Island() {
 
   const questionsAll = useMemo(() => pendingQuestions(engine, tabs), [engine, tabs]);
   const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
-  const questions = useMemo(() => questionsAll.filter((question) => !answered.has(question.key)), [answered, questionsAll]);
+  const answeredNotes = useAnsweredNotes();
+  // Answered anywhere counts: the thread may have taken the answer this card was waiting for.
+  const questions = useMemo(() => {
+    const keys = new Set(answeredNotes.map((note) => note.key));
+    return questionsAll.filter(
+      (question) => !answered.has(question.key) && !keys.has(question.key) && !(question.messageId && keys.has(`message:${question.messageId}`)),
+    );
+  }, [answered, answeredNotes, questionsAll]);
 
   const status: PrismStatus | null = useMemo(() => {
     if (questions.length || live?.status === "waiting") return "needs";
@@ -406,14 +415,25 @@ export function Island() {
     };
   }, [question]);
 
+  const [justAnswered, setJustAnswered] = useState<{ question: string; label: string } | null>(null);
+  const justAnsweredTimer = useRef<number | undefined>(undefined);
   const answer = useCallback(
     async (value: QuestionAnswer) => {
       if (!engine || !question) return false;
+      const label = questionAnswerLabel(question, value);
+      noteAnswered({ key: question.key, runId: question.runId, question: question.prompt, label });
+      setJustAnswered({ question: question.prompt, label });
+      window.clearTimeout(justAnsweredTimer.current);
+      justAnsweredTimer.current = window.setTimeout(() => setJustAnswered(null), ANSWERED_NOTE_MS);
       const accepted = await answerQuestion(engine, question, value, tabs);
-      if (!accepted) return false;
+      if (!accepted) {
+        forgetAnswered(question.key);
+        window.clearTimeout(justAnsweredTimer.current);
+        setJustAnswered(null);
+        return false;
+      }
       markSeen(question.runId);
       setAnswered((current) => new Set(current).add(question.key));
-      setQuestionShown(false);
       return true;
     },
     [engine, markSeen, question, tabs],
@@ -886,8 +906,11 @@ export function Island() {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null) && !pointerInside.current) scheduleClose();
       }}
       className={cn(
-        // The island floats at the bottom centre of the stage: between the rail and the Side, gliding as they change.
-        "pointer-events-none fixed bottom-0 left-[calc(var(--spectra-rail-width,0px)+var(--spectra-lead-width,0px))] right-[calc(var(--spectra-side-width,0px)+8px)] z-composer-dock flex flex-col items-center gap-2",
+        // The island floats at the bottom centre: of the page between the columns, gliding as they change, or of the screen, staying put.
+        "pointer-events-none fixed bottom-0 z-composer-dock flex flex-col items-center gap-2",
+        preferences.ai.islandCentre === "screen"
+          ? "left-0 right-0"
+          : "left-[calc(var(--spectra-rail-width,0px)+var(--spectra-lead-width,0px))] right-[calc(var(--spectra-side-width,0px)+8px)]",
         "transition-[opacity,left,right] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)]",
       )}
     >
@@ -897,7 +920,11 @@ export function Island() {
       {/* The island's paper while it changes shape (shape-morph.ts). */}
       <div ref={frameRef} aria-hidden className="island-morph" />
 
-      {question ? (
+      {justAnswered ? (
+        <div className="pointer-events-auto">
+          <AnsweredCard question={justAnswered.question} label={justAnswered.label} />
+        </div>
+      ) : question ? (
         <div className="pointer-events-auto">
           <QuestionCard
             ref={questionRef}

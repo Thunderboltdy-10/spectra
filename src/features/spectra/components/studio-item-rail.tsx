@@ -81,6 +81,7 @@ export function StudioItemRail({
         {items.map((item, index) => (
           <li
             key={item.id}
+            data-studio-item={item.id}
             draggable={canDrag}
             onDragStart={(event) => {
               skipClickRef.current = true;

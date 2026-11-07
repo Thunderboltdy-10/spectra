@@ -27,6 +27,7 @@ import { mutate, query } from "./harness/io";
 import { latestCard, publicError, streamCard } from "./harness/report";
 import { handleUiObserverRequest, uiObserverSchema } from "./harness/ui-observer-request";
 
+import { runRelayInvite } from "@/features/spectra/ai/harness/run-relay";
 /*
  * The Spectra run route. One harness loop does the work (harness/attempt.ts);
  * this file admits requests, owns the run lifecycle actions (run, answer,
@@ -163,7 +164,12 @@ async function dispatch(input: {
       executionId: input.executionId,
       payload: { ...input.payload, ...(input.attachments ? { withAttachments: input.attachments.length > 0 } : {}) },
     });
-    return ndjson(async (emit) => input.prelude(emit));
+    return ndjson(async (emit) => {
+      input.prelude(emit);
+      // The worker's events go past this response: the page listens for them.
+      const invite = runRelayInvite(input.runId, input.executionId);
+      if (invite) emit(invite);
+    });
   }
   return ndjson(async (emit) => {
     input.prelude(emit);

@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use polling::{PollResult, PollScheduler, PollWake, WaitResult};
 use pairing_work::PairingWork;
 use spectra_bridge_core::fs::{
-    FsError, Grant, GrantRegistry, SafeWriter, WriteRequest, resolve_write_target,
+    FsError, Grant, GrantRegistry, SafeWriter, WriteRequest, resolve_write_target, SyncedFile,
 };
 use spectra_bridge_core::identity::{AdoptionCandidate, adopt, local_resource_id};
 use spectra_bridge_core::journal::{Journal, NativeAckItem, OpState, ResourceRecord};
@@ -19,7 +19,7 @@ use spectra_bridge_core::protocol::{
     LocalControlSnapshot, LocalMountStatus, LocalOfficeFile, PairingOffer,
 };
 use spectra_bridge_core::retry::bridge_mount_repair_delay_ms;
-use spectra_bridge_core::server::{LocalBridgeControl, ServerState, serve};
+use spectra_bridge_core::server::{FilesSelected, LocalBridgeControl, ServerState, serve};
 use spectra_bridge_core::sync::{
     Backoff, ClaimPrecondition, ClaimedFsRequest, ClaimedPayloadUpload, ClaimedWrite, CloudRefused,
     DeliveredChange, DeviceHealthReport, DiscoveredRegistration, DiscoveredResource,
@@ -215,7 +215,7 @@ impl LocalBridgeControl for SpectraLocalControl {
         control_snapshot(&self.grants, &self.journal)
     }
 
-    async fn select_mount(&self) -> Result<(), String> {
+    async fn select_mount(&self) -> Result<Option<String>, String> {
         let _selection = self.selection_gate.try_lock().map_err(|_| {
             "Finish the current connection or file selection first.".to_string()
         })?;
@@ -227,16 +227,33 @@ impl LocalBridgeControl for SpectraLocalControl {
             &self.active_mount_syncs,
         )
         .await
-        .map(|_| ());
+        .map(|selected| selected.map(|(grant_id, _)| grant_id));
         refresh_tray(&self.app);
         result
     }
 
-    async fn select_files(&self) -> Result<usize, String> {
+    async fn select_files(&self) -> Result<FilesSelected, String> {
         let _selection = self.selection_gate.try_lock().map_err(|_| {
             "Finish the current connection or file selection first.".to_string()
         })?;
         let result = select_files_impl(
+            &self.app,
+            &self.grants,
+            &self.journal,
+            &self.wake,
+            &self.active_mount_syncs,
+        )
+        .await;
+        refresh_tray(&self.app);
+        result
+    }
+
+    async fn sync_named(&self, path: &str) -> Result<Option<String>, String> {
+        let _selection = self.selection_gate.try_lock().map_err(|_| {
+            "Finish the current connection or file selection first.".to_string()
+        })?;
+        let result = sync_named_impl(
+            path,
             &self.app,
             &self.grants,
             &self.journal,
@@ -3990,17 +4007,84 @@ async fn select_mount_impl(
         return Ok(None);
     };
     let path = selection.into_path().map_err(|error| error.to_string())?;
+    add_folder_at(&path, grants, journal, wake, active_mount_syncs).map(Some)
+}
+
+/// Spectra AI named something on this computer. It only comes in if the person
+/// says so here: the app, a tab or a server cannot answer this prompt for them.
+async fn sync_named_impl(
+    relative: &str,
+    app: &tauri::AppHandle,
+    grants: &Arc<GrantRegistry>,
+    journal: &Arc<Journal>,
+    wake: &PollWake,
+    active_mount_syncs: &ActiveMountSyncs,
+) -> Result<Option<String>, String> {
+    let path = spectra_bridge_core::computer_names::resolve(relative).map_err(|error| error.to_string())?;
+    let (answer_tx, answer_rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .message(format!(
+            "Spectra AI asked to sync this with your Spectra Library:
+
+{relative}
+
+It stays on this computer and stays in step with Spectra. Spectra AI can't run anything on this computer or delete your files."
+        ))
+        .title("Sync with Spectra")
+        .buttons(MessageDialogButtons::OkCancelCustom("Sync".into(), "Not now".into()))
+        .show(move |confirmed| {
+            let _ = answer_tx.send(confirmed);
+        });
+    if !matches!(answer_rx.await, Ok(true)) {
+        return Ok(None);
+    }
+    if path.is_dir() {
+        return add_folder_at(&path, grants, journal, wake, active_mount_syncs)
+            .map(|(grant_id, _)| Some(grant_id));
+    }
+    let files = add_files_at(&[path], grants, journal, wake, active_mount_syncs)?;
+    Ok(files
+        .added
+        .into_iter()
+        .chain(files.existing)
+        .next()
+        .map(|file| file.grant_id))
+}
+
+fn add_folder_at(
+    path: &std::path::Path,
+    grants: &Arc<GrantRegistry>,
+    journal: &Arc<Journal>,
+    wake: &PollWake,
+    active_mount_syncs: &ActiveMountSyncs,
+) -> Result<(String, String), String> {
     let label = path
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("Selected folder")
         .to_owned();
+    let already_synced = grants
+        .device_grants()
+        .into_iter()
+        .map(|grant| grant.id)
+        .collect::<HashSet<_>>();
     let grant = grants
-        .add_native_selection(label.clone(), &path)
+        .add_native_selection(label.clone(), path)
         .map_err(|error| error.to_string())?;
+    // Already here: the same folder, or a folder inside one. Its watcher runs.
+    if already_synced.contains(&grant.id) {
+        wake.wake();
+        return Ok((grant.id, grant.label));
+    }
     if let Err(error) = persist_folder_grant(journal, &grant) {
         grants.remove(&grant.id);
         return Err(error.to_string());
+    }
+    // Anything chosen earlier inside this folder now comes through it: their
+    // grants retire here, and the scan carries each work over by file identity
+    // rather than bringing a second copy in.
+    for taken in grants.take_over_selections_within(&grant) {
+        forget_mount_config(journal, &taken.id)?;
     }
     // Persist and expose the grant before doing any network or payload work.
     // Selection must remain responsive even when Cloud is slow/offline; the
@@ -4021,7 +4105,7 @@ async fn select_mount_impl(
         active_mount_syncs.clone(),
     );
     wake.wake();
-    Ok(Some((grant.id, label)))
+    Ok((grant.id, label))
 }
 
 fn persist_file_grant(journal: &Journal, grant: &Grant) -> anyhow::Result<()> {
@@ -4105,7 +4189,7 @@ async fn select_files_impl(
     journal: &Arc<Journal>,
     wake: &PollWake,
     active_mount_syncs: &ActiveMountSyncs,
-) -> Result<usize, String> {
+) -> Result<FilesSelected, String> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog().file().pick_files(move |selection| {
         let _ = tx.send(selection);
@@ -4114,60 +4198,66 @@ async fn select_files_impl(
         .await
         .map_err(|_| "File picker closed before returning a selection".to_string())?
     else {
-        return Ok(0);
+        return Ok(FilesSelected::default());
     };
     let paths = selection
         .into_iter()
         .map(|path| path.into_path().map_err(|error| error.to_string()))
         .collect::<Result<Vec<_>, _>>()?;
-    let existing = grants
-        .device_grants()
-        .into_iter()
-        .map(|grant| grant.id)
-        .collect::<HashSet<_>>();
-    let selected = grants
-        .add_native_file_selections(&paths)
+    add_files_at(&paths, grants, journal, wake, active_mount_syncs)
+}
+
+fn add_files_at(
+    paths: &[std::path::PathBuf],
+    grants: &Arc<GrantRegistry>,
+    journal: &Arc<Journal>,
+    wake: &PollWake,
+    active_mount_syncs: &ActiveMountSyncs,
+) -> Result<FilesSelected, String> {
+    let selection = grants
+        .add_native_file_selections(paths)
         .map_err(|error| error.to_string())?;
     // Persist the whole selection before starting watchers. Failed persistence
     // revokes only newly-created grants and leaves existing selections alone.
-    for grant in selected
-        .iter()
-        .filter(|grant| !existing.contains(&grant.id))
-    {
+    for grant in &selection.added {
         if let Err(error) = persist_file_grant(journal, grant) {
-            for added in selected
-                .iter()
-                .filter(|grant| !existing.contains(&grant.id))
-            {
+            for added in &selection.added {
                 grants.remove(&added.id);
                 let _ = journal.delete_config(&format!("file-mount:{}", added.id));
             }
             return Err(error.to_string());
         }
     }
-    for grant in &selected {
-        if existing.contains(&grant.id) {
-            retry_mount_impl(&grant.id, grants, journal, wake, active_mount_syncs).await?;
-        } else {
-            set_mount_status(
-                journal,
-                &grant.id,
-                "scanning",
-                "Reading selected file…",
-                0,
-                1,
-            )?;
-            spawn_grant_watcher(
-                grant.clone(),
-                grants.clone(),
-                journal.clone(),
-                wake.clone(),
-                active_mount_syncs.clone(),
-            );
-        }
+    for grant in &selection.added {
+        set_mount_status(
+            journal,
+            &grant.id,
+            "scanning",
+            "Reading selected file…",
+            0,
+            1,
+        )?;
+        spawn_grant_watcher(
+            grant.clone(),
+            grants.clone(),
+            journal.clone(),
+            wake.clone(),
+            active_mount_syncs.clone(),
+        );
     }
     wake.wake();
-    Ok(selected.len())
+    Ok(FilesSelected {
+        selected: selection.added.len(),
+        added: selection
+            .added
+            .iter()
+            .map(|grant| SyncedFile {
+                grant_id: grant.id.clone(),
+                relative_path: grant.label.clone(),
+            })
+            .collect(),
+        existing: selection.already_synced,
+    })
 }
 
 async fn retry_mount_impl(

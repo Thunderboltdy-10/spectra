@@ -2,7 +2,6 @@
 
 import { Loader2, Bell, Check, MessageSquare, Send, Trash2, X, CornerUpLeft, Reply } from "@/components/icons/glyph-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toast";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -84,26 +83,22 @@ const MENTION_BEING_TYPED = /(?:^|\s)@([^\s@]{0,40})$/;
 export function ArtifactCommentsPanel({
   open,
   artifactId,
-  artifactTitle,
   regions,
   preferredRegionId,
   currentAccountId,
   relativePosition,
   requestedComment,
   onRequestedCommentResult,
-  onClose,
   wordComments = [],
 }: {
   open: boolean;
   artifactId: string;
-  artifactTitle: string;
   regions: readonly ArtifactCommentRegion[];
   preferredRegionId?: string;
   currentAccountId?: string;
   relativePosition?: Uint8Array;
   requestedComment?: { id: string; body: string; regionId?: string; submit?: boolean } | null;
   onRequestedCommentResult?: (error?: unknown) => void;
-  onClose: () => void;
   wordComments?: readonly WordImportedComment[];
 }) {
   const [comments, setComments] = useState<SpectraArtifactComment[]>([]);
@@ -416,24 +411,9 @@ export function ArtifactCommentsPanel({
     );
   }
 
-  // The shared Dialog owns the focus trap, focus return and Escape, so Escape
-  // in a menu or list opened inside the panel closes only that list, and
-  // those lists open over the panel rather than under it.
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
-      <DialogContent
-        layer="panel"
-        hideCloseButton
-        aria-describedby={undefined}
-        className="spectra-sheet left-auto right-0 top-0 flex h-dvh max-w-[410px] translate-x-0 translate-y-0 flex-col gap-0 !rounded-none border-y-0 border-r-0 border-l bg-[var(--bg-elevated)] p-0"
-      >
-        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-4 py-3">
-          <div className="min-w-0"><DialogTitle className="font-display">Comments</DialogTitle><p className="truncate text-micro text-[var(--text-tertiary)]">{artifactTitle}</p></div>
-          <div className="flex items-center gap-1"><OverflowMenu label="Comment notifications" icon={Bell} items={NOTIFICATION_MODE_ITEMS} value={notificationMode} onSelect={(next) => void changeNotifications(next)} size={32} /><button type="button" onClick={onClose} className="flex size-8 cursor-pointer items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-label="Close comments"><X className="size-4" /></button></div>
-        </header>
-
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-4 py-2"><span className="text-micro text-[var(--text-tertiary)]">{comments.filter((comment) => comment.status !== "resolved").length} open</span><label className="flex cursor-pointer items-center gap-2 text-micro text-[var(--text-secondary)]"><input type="checkbox" checked={includeResolved} onChange={(event) => setIncludeResolved(event.target.checked)} className="h-3.5 w-3.5 accent-[var(--accent-cyan)]" />Show resolved</label></div>
+          <div className="flex shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-4 py-2"><span className="text-micro text-[var(--text-tertiary)]">{comments.filter((comment) => comment.status !== "resolved").length} open</span><span className="flex items-center gap-2"><label className="flex cursor-pointer items-center gap-2 text-micro text-[var(--text-secondary)]"><input type="checkbox" checked={includeResolved} onChange={(event) => setIncludeResolved(event.target.checked)} className="h-3.5 w-3.5 accent-[var(--accent-cyan)]" />Show resolved</label><OverflowMenu label="Comment notifications" icon={Bell} items={NOTIFICATION_MODE_ITEMS} value={notificationMode} onSelect={(next) => void changeNotifications(next)} size={28} /></span></div>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
             {loading ? <div className="flex h-32 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-[var(--text-tertiary)]" /></div> : (
               <div className="space-y-3">
@@ -483,8 +463,6 @@ export function ArtifactCommentsPanel({
             </div>
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
   );
 }
 

@@ -41,7 +41,7 @@ export type WorkCardContent = {
  */
 export function workCardStyle(type: PresentedWorkType, ink?: string | null) {
   if (ink) return { "--work-hue": ink, "--work-tint": `color-mix(in oklab, ${ink} 16%, var(--card-paper))` } as CSSProperties;
-  const meta = workTypeMeta[type];
+  const meta = workTypeMeta[type] ?? workTypeMeta.resource;
   return { "--work-hue": meta.color, "--work-tint": meta.soft } as CSSProperties;
 }
 

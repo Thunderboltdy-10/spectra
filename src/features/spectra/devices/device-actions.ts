@@ -12,7 +12,10 @@ import {
   requestBridgeUpdate,
   retryBridgeFolder,
   selectBridgeFolder,
+  syncBridgeNamedPath,
   selectBridgeFiles,
+  type BridgeFile,
+  type BridgeFilesSelected,
 } from "../bridge/client";
 import { humanizePublicFailure } from "../bridge/humanize";
 import { spectraBus } from "../events";
@@ -24,6 +27,7 @@ export { FOLDER_ACTIONS, LOCAL_DEVICE_ACTIONS, isLocalDeviceAction, type LocalDe
 const DONE: Record<LocalDeviceAction, string> = {
   add_folder: "The folder picker is open on this computer.",
   add_files: "The file picker is open on this computer.",
+  sync_path: "Syncing it from this computer.",
   retry_folder: "Retrying the folder.",
   pause_folder: "Paused the folder.",
   resume_folder: "Resumed the folder.",
@@ -33,6 +37,17 @@ const DONE: Record<LocalDeviceAction, string> = {
   show_logs: "Opened Bridge's logs on this computer.",
   update: "Updating Spectra Bridge.",
 };
+
+function filesChosenMessage(files: BridgeFilesSelected) {
+  const name = (file: BridgeFile) => file.relativePath.split("/").pop() ?? file.relativePath;
+  const added = files.selected === 1 ? "The selected file is syncing." : `${files.selected} selected files are syncing.`;
+  if (!files.existing.length) return added;
+  const here =
+    files.existing.length === 1
+      ? `${name(files.existing[0]!)} was already synced.`
+      : `${files.existing.length} of them were already synced.`;
+  return files.selected ? `${added} ${here}` : here;
+}
 
 /** Whether this browser can reach the paired Bridge on this computer. */
 export function thisComputerId(): string | null {
@@ -52,15 +67,28 @@ export async function runLocalDeviceAction(request: LocalDeviceRequest): Promise
     let message = DONE[request.action].replaceAll("folder", noun);
     switch (request.action) {
       case "add_files": {
-        const selected = await selectBridgeFiles();
-        if (!selected) return { status: "pending", message: "No files were selected." };
-        message = selected === 1 ? "The selected file is syncing." : `${selected} selected files are syncing.`;
-        break;
+        const files = await selectBridgeFiles();
+        const chosen = files.selected + files.existing.length;
+        if (!chosen) return { status: "pending", message: "No files were selected." };
+        message = filesChosenMessage(files);
+        spectraBus.emit("devices.changed", {});
+        return { status: "completed", message, data: files };
       }
-      case "add_folder":
-        await selectBridgeFolder();
+      case "sync_path": {
+        const path = request.path?.trim();
+        if (!path) return { status: "failed", message: "Say which file or folder." };
+        const grantId = await syncBridgeNamedPath(path);
+        if (!grantId) return { status: "pending", message: "It wasn't synced: not now was chosen on the computer." };
+        spectraBus.emit("devices.changed", {});
+        return { status: "completed", message, data: { grantId } };
+      }
+      case "add_folder": {
+        const grantId = await selectBridgeFolder();
+        if (grantId === null) return { status: "pending", message: "No folder was selected." };
         message = "Added the folder you chose.";
-        break;
+        spectraBus.emit("devices.changed", {});
+        return { status: "completed", message, data: { grantId } };
+      }
       case "retry_folder":
         await retryBridgeFolder(grantId);
         break;
@@ -111,7 +139,7 @@ export function claimDeviceAction(actionId: string): boolean {
   }
 }
 
-export type AiDeviceAction = { action: string; actionId?: string; grantId?: string; deviceId?: string };
+export type AiDeviceAction = { action: string; actionId?: string; grantId?: string; deviceId?: string; path?: string };
 
 /**
  * Run an action Spectra AI asked for, when it is meant for this computer.
@@ -131,7 +159,7 @@ export async function runAiDeviceAction(
   if (!isLocalDeviceAction(request.action)) return null;
   const here = thisComputerId();
   if (!here || (request.deviceId && request.deviceId !== here)) return null;
-  const outcome = await runLocalDeviceAction({ action: request.action, ...(request.grantId ? { grantId: request.grantId } : {}) });
+  const outcome = await runLocalDeviceAction({ action: request.action, ...(request.grantId ? { grantId: request.grantId } : {}), ...(request.path ? { path: request.path } : {}) });
   openDevices(false);
   return outcome;
 }

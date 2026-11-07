@@ -1,5 +1,6 @@
 "use client";
 
+import { useLatest, useStudioContextItems } from "./studio-context-menu";
 import { useMissingAssets } from "./use-missing-assets";
 import { currentTimeMs, shuffleInPlace, uniqueToken } from "@/lib/unique-token";
 import {
@@ -24,6 +25,10 @@ import {
   RefreshCw,
   Search,
   X,
+  Copy,
+  ArrowUp,
+  ArrowDown,
+  Trash2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -778,6 +783,44 @@ export function FlashcardStudio({
     });
   }
 
+  const cardVerbs = useLatest({ addCard, nudgeCard, commit, cards, activeSection });
+  useStudioContextItems(({ target }) => {
+    const cardId = target.closest("[data-studio-item]")?.getAttribute("data-studio-item");
+    if (!cardId || !canEdit) return null;
+    return [[
+      { key: "card-new", label: "New card", icon: Plus, onSelect: () => cardVerbs.current.addCard() },
+      {
+        key: "card-copy",
+        label: "Duplicate card",
+        icon: Copy,
+        onSelect: () => {
+          const { cards: current, commit: save } = cardVerbs.current;
+          const at = current.findIndex((card) => card.id === cardId);
+          if (at < 0) return;
+          const copy = { ...structuredClone(current[at]!), id: id("card") };
+          const next = [...current];
+          next.splice(at + 1, 0, copy);
+          save(next);
+          setActiveCardId(copy.id);
+        },
+      },
+      { key: "card-up", label: "Move up", icon: ArrowUp, onSelect: () => cardVerbs.current.nudgeCard(cardId, -1) },
+      { key: "card-down", label: "Move down", icon: ArrowDown, onSelect: () => cardVerbs.current.nudgeCard(cardId, 1) },
+      {
+        key: "card-delete",
+        label: "Delete card",
+        icon: Trash2,
+        danger: true,
+        onSelect: () => {
+          const { cards: current, commit: save, activeSection: section } = cardVerbs.current;
+          const next = current.filter((card) => card.id !== cardId);
+          const replacement = next.length ? next : [{ id: id("card"), front: "", back: "", hint: "", section, confidence: 0 }];
+          save(replacement as typeof current);
+          setActiveCardId((active) => (active === cardId ? replacement[0]!.id : active));
+        },
+      },
+    ]];
+  });
   function addCard(section = activeSection) {
     const card = {
       id: id("card"),

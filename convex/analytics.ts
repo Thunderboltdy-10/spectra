@@ -1,5 +1,7 @@
 import { internalMutation, query } from "./functions";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
+import type { MutationCtx } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
 import { ANALYTICS_MIGRATIONS, analyticsMigration, upsertAnalyticsRun } from "./analyticsReadModels";
 import { upsertArtifactSummary } from "./orgTreeShared";
@@ -26,6 +28,23 @@ function metricState(
         details: `The range exceeded the ${ROW_LIMIT.toLocaleString()}-record aggregation bound. Narrow the date filter for an exact result.`,
       })
     : ({ kind: "available" as const, updatedAt: computedAt, detail });
+}
+
+/** Each day something happened, from the rows the overview has already read. */
+function daySeries(
+  work: ReadonlyArray<{ createdAt?: number }>,
+  runs: ReadonlyArray<{ createdAt: number }>,
+) {
+  const days = new Map<string, { day: string; work: number; runs: number }>();
+  const at = (timestamp: number) => {
+    const key = day(timestamp);
+    const row = days.get(key) ?? { day: key, work: 0, runs: 0 };
+    days.set(key, row);
+    return row;
+  };
+  for (const item of work) if (item.createdAt) at(item.createdAt).work += 1;
+  for (const item of runs) at(item.createdAt).runs += 1;
+  return [...days.values()].sort((left, right) => left.day.localeCompare(right.day));
 }
 
 export const personalOverview = query({
@@ -169,6 +188,7 @@ export const personalOverview = query({
         },
       },
       byType: byType.sort((left, right) => right.value - left.value),
+      series: daySeries(work, runs),
       runOutcomes,
       recentWork: work
         .slice()
@@ -203,42 +223,67 @@ export const backfillReadModels = internalMutation({
     cursor: v.optional(v.union(v.string(), v.null())),
     limit: v.optional(v.number()),
   },
-  handler: async (ctx, args) => {
-    const definition = ANALYTICS_MIGRATIONS[args.source];
-    const migration = await analyticsMigration(ctx, args.source);
-    const currentVersion = migration?.version === definition.version;
-    if (args.cursor === undefined && currentVersion && migration.state === "complete")
-      return { processed: 0, cursor: null, done: true };
-    // A supplied continuation must follow the stored progress. An arbitrary
-    // tail cursor cannot establish completion without visiting earlier rows.
-    if (args.cursor && (!currentVersion || migration.state !== "running" || migration.cursor !== args.cursor))
-      throw new Error("ANALYTICS_BACKFILL_CURSOR_STALE: Resume without a cursor to use current progress.");
-    const cursor = args.cursor === undefined
-      ? (currentVersion ? migration.cursor ?? null : null)
-      : args.cursor;
-    const options = {
-      cursor,
-      numItems: Math.min(25, Math.max(1, Math.floor(args.limit ?? 25))),
-      maximumBytesRead: 2_000_000,
-    };
-    const page = args.source === "artifacts"
-      ? await ctx.db.query("spectraArtifacts").paginate(options)
-      : await ctx.db.query("spectraAiRuns").paginate(options);
-    for (const row of page.page) {
-      if ("blueprintKey" in row) await upsertArtifactSummary(ctx, row);
-      else await upsertAnalyticsRun(ctx, row);
+  handler: (ctx, args) => backfillPage(ctx, args),
+});
+
+/**
+ * The rollout finishes itself, so no deployment can leave Analytics saying its
+ * history is being prepared for ever. Convex allows one paginated query in a
+ * function, so each call takes one page of the first unfinished source and
+ * books the next. Once both are done the daily check reads two rows and stops.
+ */
+export const advanceReadModels = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    for (const source of ["artifacts", "runs"] as const) {
+      const definition = ANALYTICS_MIGRATIONS[source];
+      const migration = await analyticsMigration(ctx, source);
+      if (migration?.version === definition.version && migration.state === "complete") continue;
+      await backfillPage(ctx, { source });
+      await ctx.scheduler.runAfter(250, internal.analytics.advanceReadModels, {});
+      return;
     }
-    const now = Date.now();
-    const scanned = (cursor === null ? 0 : migration?.scanned ?? 0) + page.page.length;
-    const value = {
-      key: definition.key, version: definition.version,
-      state: page.isDone ? "complete" as const : "running" as const,
-      cursor: page.isDone ? undefined : page.continueCursor,
-      scanned, repaired: scanned,
-      createdAt: migration?.createdAt ?? now, updatedAt: now,
-    };
-    if (migration) await ctx.db.patch(migration._id, value);
-    else await ctx.db.insert("spectraReadModelMigrations", value);
-    return { processed: page.page.length, cursor: page.isDone ? null : page.continueCursor, done: page.isDone };
   },
 });
+
+async function backfillPage(
+  ctx: MutationCtx,
+  args: { source: "artifacts" | "runs"; cursor?: string | null; limit?: number },
+) {
+  const definition = ANALYTICS_MIGRATIONS[args.source];
+  const migration = await analyticsMigration(ctx, args.source);
+  const currentVersion = migration?.version === definition.version;
+  if (args.cursor === undefined && currentVersion && migration.state === "complete")
+    return { processed: 0, cursor: null, done: true };
+  // A supplied continuation must follow the stored progress. An arbitrary
+  // tail cursor cannot establish completion without visiting earlier rows.
+  if (args.cursor && (!currentVersion || migration.state !== "running" || migration.cursor !== args.cursor))
+    throw new Error("ANALYTICS_BACKFILL_CURSOR_STALE: Resume without a cursor to use current progress.");
+  const cursor = args.cursor === undefined
+    ? (currentVersion ? migration.cursor ?? null : null)
+    : args.cursor;
+  const options = {
+    cursor,
+    numItems: Math.min(25, Math.max(1, Math.floor(args.limit ?? 25))),
+    maximumBytesRead: 2_000_000,
+  };
+  const page = args.source === "artifacts"
+    ? await ctx.db.query("spectraArtifacts").paginate(options)
+    : await ctx.db.query("spectraAiRuns").paginate(options);
+  for (const row of page.page) {
+    if ("blueprintKey" in row) await upsertArtifactSummary(ctx, row);
+    else await upsertAnalyticsRun(ctx, row);
+  }
+  const now = Date.now();
+  const scanned = (cursor === null ? 0 : migration?.scanned ?? 0) + page.page.length;
+  const value = {
+    key: definition.key, version: definition.version,
+    state: page.isDone ? "complete" as const : "running" as const,
+    cursor: page.isDone ? undefined : page.continueCursor,
+    scanned, repaired: scanned,
+    createdAt: migration?.createdAt ?? now, updatedAt: now,
+  };
+  if (migration) await ctx.db.patch(migration._id, value);
+  else await ctx.db.insert("spectraReadModelMigrations", value);
+  return { processed: page.page.length, cursor: page.isDone ? null : page.continueCursor, done: page.isDone };
+}

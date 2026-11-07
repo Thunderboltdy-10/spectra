@@ -5,7 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { getAuthenticatedActor, getOptionalAuthenticatedActor } from "./identityShared";
 import { z } from "zod";
-import { createFolderNode, findNodesForSource, trashNode } from "./orgTreeShared";
+import { createFolderNode, findNodesForSource, findPrimaryNode, trashNode } from "./orgTreeShared";
 import type { SyncPolicyValues } from "../shared/sync-policy";
 import { syncOperationForBridgeWrite } from "./bridgeWriteOperations";
 
@@ -213,6 +213,36 @@ export const overview = query({ args: {}, handler: async (ctx) => {
   const mounts = await ctx.db.query("bridgeMounts").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId)).filter((q) => q.neq(q.field("state"), "revoked")).take(200);
   return { devices: devices.map(({ credentialHash: _credentialHash, ...device }) => device), mounts };
 } });
+
+/**
+ * Where files from this account's computers stand in the Library. An empty
+ * path asks for the synced folder itself. A file still arriving has no answer
+ * yet, so it reads as null.
+ */
+export const syncedNodes = query({
+  args: { items: v.array(v.object({ grantId: v.string(), relativePath: v.string() })) },
+  handler: async (ctx, args) => {
+    const actor = await getOptionalAuthenticatedActor(ctx);
+    if (!actor) return [];
+    const mounts = await ctx.db.query("bridgeMounts")
+      .withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "active"))
+      .take(100);
+    const byGrant = new Map(mounts.map((mount) => [mount.grantId, mount]));
+    return Promise.all(args.items.slice(0, 100).map(async ({ grantId, relativePath }) => {
+      const mount = byGrant.get(grantId);
+      if (!mount) return null;
+      if (!relativePath) {
+        const root = !mount.selectedFile && mount.rootOrgNodeId ? await ctx.db.get(mount.rootOrgNodeId) : null;
+        return root && root.deletedAt === undefined ? { grantId, relativePath, nodeId: root._id, name: root.name } : null;
+      }
+      const replica = await ctx.db.query("workReplicas")
+        .withIndex("by_device_mount_path", (q) => q.eq("deviceId", mount.deviceId).eq("mountId", mount._id).eq("relativePath", relativePath))
+        .first();
+      const node = replica ? await findPrimaryNode(ctx, actor.accountId, "work", String(replica.workId)) : null;
+      return node && node.deletedAt === undefined ? { grantId, relativePath, nodeId: node._id, name: node.name } : null;
+    }));
+  },
+});
 
 export const activeMounts = query({
   args: {},

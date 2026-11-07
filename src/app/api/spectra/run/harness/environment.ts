@@ -91,7 +91,7 @@ export function normalizePointers(value: unknown): RunPointers {
 
 export type RunPreferences = {
   permissions: PermissionPrefs;
-  runtime: { provider: unknown; model?: string; reasoning?: "medium" | "high" };
+  runtime: { provider: unknown; model?: string; reasoning?: "low" | "medium" | "high" };
 };
 
 /** The account's settings a run obeys: one read for all of them. */
@@ -110,7 +110,7 @@ export async function readRunPreferences(actorClerkId: string): Promise<RunPrefe
     runtime: {
       provider,
       ...(typeof model === "string" && model ? { model } : {}),
-      ...(ai.thinking === "medium" || ai.thinking === "high" ? { reasoning: ai.thinking } : {}),
+      ...(ai.thinking === "low" || ai.thinking === "medium" || ai.thinking === "high" ? { reasoning: ai.thinking } : {}),
     },
   };
 }

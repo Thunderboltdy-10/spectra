@@ -2,6 +2,7 @@ import { Server } from "@hocuspocus/server";
 import { artifactProjection } from "./collaboration-artifact-projection.mjs";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { installAgentHub } from "./agent-hub.mjs";
+import { installRunRelay } from "./run-relay.mjs";
 import { MAX_ASSEMBLED_BYTES, installServerFraming, selectFrameProtocol } from "../shared/collaboration-framing.mjs";
 import { jwtVerify } from "jose";
 import * as Y from "yjs";
@@ -25,7 +26,7 @@ import {
   shouldRepairNativeProjection,
   shouldRecoverNativeRoom,
   createRoomLoadCache,
-  mergeRoomLoad,
+  loadRoomThroughCache,
 } from "./collaboration-room-state.mjs";
 import {
   MAX_DURABLE_UPDATE_BYTES,
@@ -914,17 +915,8 @@ function extractYjsUpdate(frame) {
   return decoding.readVarUint8Array(decoder);
 }
 
-/** A room this gateway has read before only fetches the updates since then. */
-async function loadRoom(payload) {
-  const { artifactId, partitionKey, policyVersion } = payload;
-  const known = roomLoads.get(artifactId, partitionKey, policyVersion);
-  if (known) {
-    const merged = mergeRoomLoad(known, await bridge("load", { ...payload, afterSequence: known.nextSequence - 1 }));
-    if (merged) return roomLoads.put(artifactId, partitionKey, policyVersion, merged);
-    // The room was reset behind this copy: read it whole.
-    roomLoads.forget(artifactId, partitionKey);
-  }
-  return roomLoads.put(artifactId, partitionKey, policyVersion, await bridge("load", payload));
+function loadRoom(payload) {
+  return loadRoomThroughCache(roomLoads, (request) => bridge("load", request), payload);
 }
 
 async function refreshAuthorization(context) {
@@ -1593,7 +1585,14 @@ const server = new Server({
   async onStoreDocument({ lastContext }) {
     // A change the gateway applied itself has no connection behind it: no actor to reauthorize.
     if (!lastContext?.artifactId) return;
-    await reauthorize(lastContext);
+    // Everything accepted is already stored; this only compacts. The last
+    // person has left, so their lapsed session is no reason to keep the room in
+    // memory for ever, which is what Hocuspocus does when this hook throws.
+    try {
+      await reauthorize(lastContext);
+    } catch {
+      return;
+    }
     await compactStoredRoom(lastContext, { countAppend: false });
   },
   async onDisconnect({ document, clientsCount }) {
@@ -1724,6 +1723,7 @@ const agentHub = installAgentHub(server.httpServer, {
   serverKey: process.env.SPECTRA_COLLAB_TOKEN_SECRET,
   bridgeKey: process.env.SPECTRA_COLLAB_BRIDGE_KEY,
 });
+const runRelay = installRunRelay(server.httpServer, { key: process.env.SPECTRA_COLLAB_TOKEN_SECRET });
 process.stdout.write(
   `Spectra collaboration gateway listening on ${process.env.SPECTRA_COLLAB_PORT || 1234}\n`,
 );
@@ -1733,6 +1733,7 @@ async function shutdown() {
   shuttingDown = true;
   clearInterval(policySweep);
   agentHub.close();
+  runRelay.close();
   authorizationGuard.dispose();
   const { unflushed } = await drainGatewayForShutdown({
     stopAccepting: () => server.httpServer.close(),

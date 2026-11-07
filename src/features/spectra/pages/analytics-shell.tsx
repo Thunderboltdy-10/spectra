@@ -1,36 +1,41 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Clock3, ShieldCheck, BarChart3, RefreshCw, Activity, DatabaseZap, Layers3 } from "@/components/icons/glyph-icons";
 import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { PageBody, PageHeader } from "@/components/ui/page-header";
 import { Segmented } from "@/components/ui/segmented";
+import {
+  AdminSectionHeader,
+  ErrorPanel,
+  formatBytes,
+  formatCompact,
+  formatRelative,
+  LoadingPanel,
+  MetricCard,
+  PrivacyNotice,
+  TallySheet,
+} from "@/features/spectra/administration/shared";
+import { metricDefinition } from "@/features/spectra/administration/metric-registry";
 import { workTypeMeta } from "@/features/spectra/components/artifact-card";
 import type { CapabilityState } from "@/features/spectra/core/capability-truth";
-import {
-  CapabilityTruthBadge,
-  CapabilityTruthState,
-} from "@/features/spectra/integrations/status/capability-truth";
-import {
-  metricDefinition,
-  metricSourceLabel,
-  type SpectraMetricDefinition,
-} from "@/features/spectra/administration/metric-registry";
 
-type MetricValue = { value: number | null; state: CapabilityState };
+type MetricReading = { value: number | null; state: CapabilityState };
+type DayCount = { day: string; work: number; runs: number };
 type AnalyticsPayload = {
   range: { from: number; to: number; fromDay: string; toDay: string };
   computedAt: number;
   privacy: string;
   metrics: {
-    workCreated: MetricValue;
-    activeWorkspaces: MetricValue;
-    aiRuns: MetricValue;
-    completionRate: MetricValue;
-    modelTokens: MetricValue;
-    collaborationBytes: MetricValue;
+    workCreated: MetricReading;
+    activeWorkspaces: MetricReading;
+    aiRuns: MetricReading;
+    completionRate: MetricReading;
+    modelTokens: MetricReading;
+    collaborationBytes: MetricReading;
   };
   byType: Array<{ key: string; value: number }>;
+  series?: DayCount[];
   runOutcomes: Record<"completed" | "active" | "failed" | "cancelled", number>;
   recentWork: Array<{
     id: string;
@@ -48,8 +53,30 @@ type AnalyticsPayload = {
 };
 
 const WINDOWS = [7, 30, 90] as const;
-const RANGE_OPTIONS = WINDOWS.map((value) => ({ value: String(value) as `${(typeof WINDOWS)[number]}`, label: `${value} days` }));
+type Window = (typeof WINDOWS)[number];
+const RANGE_OPTIONS = WINDOWS.map((value) => ({
+  value: String(value) as `${Window}`,
+  label: `${value} days`,
+}));
 const BAR_PLAN: readonly CollapseStep[] = [{ toMenu: "refresh" }];
+const RANGE_WORDS: Record<Window, string> = {
+  7: "this week",
+  30: "this month",
+  90: "these three months",
+};
+const RUN_WORDS: Record<string, string> = {
+  completed: "Finished",
+  queued: "Waiting to start",
+  running: "Still going",
+  awaiting_confirmation: "Waiting on you",
+  awaiting_resolution: "Waiting on you",
+  failed: "Didn't finish",
+  cancelled: "Stopped",
+};
+const CHART_KINDS = [
+  { key: "work", label: "Work made", one: "piece of work", many: "pieces of work" },
+  { key: "runs", label: "Asked Spectra", one: "request", many: "requests" },
+] as const;
 
 async function loadAnalytics(from: number, to: number) {
   const response = await fetch(
@@ -66,8 +93,39 @@ async function loadAnalytics(from: number, to: number) {
   return payload.data;
 }
 
+function typeOf(key: string) {
+  const meta = workTypeMeta[key as keyof typeof workTypeMeta];
+  return {
+    label: meta?.label ?? key.replaceAll("_", " ").replace(/^\w/, (letter) => letter.toUpperCase()),
+    color: meta?.color ?? "var(--text-tertiary)",
+  };
+}
+
+/** A request is named by what Spectra said it did, which may carry markdown or say little. */
+function requestTitle(title: string) {
+  const plain = title.replace(/[*_`#]+/g, "").trim();
+  return !plain || /^(done|ok|okay)\.?$/i.test(plain) ? "A short request" : plain;
+}
+
+function counted(count: number, one: string, many: string) {
+  return `${count.toLocaleString()} ${count === 1 ? one : many}`;
+}
+
+/** The range said once, in words: what the numbers below add up to. */
+function leadLine(payload: AnalyticsPayload, days: Window) {
+  const work = payload.metrics.workCreated.value;
+  const runs = payload.metrics.aiRuns.value;
+  const when = RANGE_WORDS[days];
+  if (work === null && runs === null) return `Your counts for ${when} are still being prepared.`;
+  if (!work && !runs) return `Nothing new ${when} yet.`;
+  if (work && runs)
+    return `You made ${counted(work, "piece of work", "pieces of work")} and asked Spectra ${counted(runs, "time", "times")} ${when}.`;
+  if (work) return `You made ${counted(work, "piece of work", "pieces of work")} ${when}.`;
+  return `You asked Spectra ${counted(runs ?? 0, "time", "times")} ${when}.`;
+}
+
 export function AnalyticsShell() {
-  const [days, setDays] = useState<(typeof WINDOWS)[number]>(30);
+  const [days, setDays] = useState<Window>(30);
   const [payload, setPayload] = useState<AnalyticsPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -90,38 +148,6 @@ export function AnalyticsShell() {
     void refresh();
   }, [refresh]);
 
-  const overallState: CapabilityState = error
-    ? { kind: "unavailable", retryable: true, message: error }
-    : loading && payload
-      ? { kind: "refreshing", previous: payload }
-      : payload
-        ? { kind: "available", updatedAt: payload.computedAt }
-        : { kind: "refreshing" };
-
-  const byType = useMemo(
-    () =>
-      (payload?.byType ?? []).map((row) => ({
-        ...row,
-        label:
-          workTypeMeta[row.key as keyof typeof workTypeMeta]?.label ??
-          row.key.replaceAll("_", " "),
-        color:
-          workTypeMeta[row.key as keyof typeof workTypeMeta]?.color ?? "var(--text-tertiary)",
-      })),
-    [payload?.byType],
-  );
-
-  const metricCards = payload
-    ? [
-        ["account.work_created", payload.metrics.workCreated, Layers3, "number"],
-        ["account.active_workspaces", payload.metrics.activeWorkspaces, BarChart3, "number"],
-        ["account.ai_runs", payload.metrics.aiRuns, Activity, "number"],
-        ["account.ai_completion_rate", payload.metrics.completionRate, ShieldCheck, "percent"],
-        ["account.model_tokens", payload.metrics.modelTokens, DatabaseZap, "compact"],
-        ["account.collaboration_bytes", payload.metrics.collaborationBytes, RefreshCw, "bytes"],
-      ] as const
-    : [];
-
   const commands: BarCommand[] = [
     {
       id: "range",
@@ -132,145 +158,274 @@ export function AnalyticsShell() {
         <Segmented
           label="Range"
           size="compact"
-          value={String(days) as `${(typeof WINDOWS)[number]}`}
+          value={String(days) as `${Window}`}
           options={RANGE_OPTIONS}
-          onChange={(next) => setDays(Number(next) as (typeof WINDOWS)[number])}
+          onChange={(next) => setDays(Number(next) as Window)}
         />
       ),
     },
-    { id: "refresh", icon: "retry", label: loading ? "Refreshing…" : "Refresh analytics", labelPolicy: "never", disabled: loading, onSelect: () => void refresh() },
+    {
+      id: "refresh",
+      icon: "retry",
+      label: loading ? "Refreshing…" : "Refresh analytics",
+      labelPolicy: "never",
+      disabled: loading,
+      onSelect: () => void refresh(),
+    },
   ];
+
   return (
     <main className="spectra-wave-y relative isolate h-full min-h-0 flex-1 overflow-y-auto" data-spectra-app-surface="true">
       <PageBody>
-        <PageHeader
-          title="Analytics"
-          commands={commands}
-          plan={BAR_PLAN}
-          barLabel="Analytics commands"
-          description={
-            payload
-              ? `Your work and Spectra AI activity from ${payload.range.fromDay} to ${payload.range.toDay}, worked out without reading what you wrote. Updated ${formatDate(payload.computedAt)}.`
-              : "Your work and Spectra AI activity over time, worked out without reading what you wrote."
-          }
-        />
-      <div className="mt-6">
-        {error ? (
-          <CapabilityTruthState state={overallState} title="Personal analytics" onRetry={() => void refresh()} />
-        ) : null}
-
-        <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-3">
-          {metricCards.map(([id, metric, Icon, format]) => (
-            <MetricCard
-              key={id}
-              definition={metricDefinition(id)}
-              metric={metric}
-              icon={<Icon className="size-4" />}
-              format={format}
-            />
-          ))}
-          {!payload
-            ? Array.from({ length: 6 }, (_, index) => (
-                <div data-life-ghost key={index} className="h-28 animate-pulse rounded-card bg-[var(--bg-secondary)]" />
-              ))
-            : null}
+        <PageHeader title="Analytics" commands={commands} plan={BAR_PLAN} barLabel="Analytics commands" />
+        <div className="admin-page mt-6">
+          {error && !payload ? (
+            <ErrorPanel message={error} retry={() => void refresh()} />
+          ) : payload ? (
+            <AnalyticsBody payload={payload} days={days} />
+          ) : (
+            <LoadingPanel label="Loading your analytics" />
+          )}
         </div>
-
-        {payload ? (
-          <>
-            <div className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,.85fr)]">
-              <section className="p-2">
-                <SectionHeading title="Work created by type" detail="New work in this account and date range" />
-                <div className="mt-5 space-y-3">
-                  {payload.metrics.workCreated.value === null ? <CapabilityTruthState state={payload.metrics.workCreated.state} title="Work history" /> : byType.length ? byType.map((row) => {
-                    const maximum = byType[0]?.value ?? 1;
-                    return (
-                      <div key={row.key} className="grid grid-cols-[112px_1fr_32px] items-center gap-3">
-                        <span className="truncate text-caption font-medium text-[var(--text-secondary)]">{row.label}</span>
-                        <div className="h-2 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
-                          <div className="h-full rounded-full" style={{ width: `${Math.max(5, (row.value / maximum) * 100)}%`, background: row.color }} />
-                        </div>
-                        <span className="text-right text-caption font-semibold tabular-nums">{row.value}</span>
-                      </div>
-                    );
-                  }) : <EmptyLine label="No work was created in this range." />}
-                </div>
-              </section>
-
-              <section className="p-2">
-                <SectionHeading title="AI run outcomes" detail="Settled and still-active runs remain distinct" />
-                {payload.metrics.aiRuns.value === null ? <div className="mt-4"><CapabilityTruthState state={payload.metrics.aiRuns.state} title="AI run history" /></div> : <div className="mt-4 grid grid-cols-2 gap-1">
-                  {([
-                    ["Completed", payload.runOutcomes.completed, "var(--success)"],
-                    ["Active", payload.runOutcomes.active, "var(--accent-cyan)"],
-                    ["Failed", payload.runOutcomes.failed, "var(--warning)"],
-                    ["Cancelled", payload.runOutcomes.cancelled, "var(--text-tertiary)"],
-                  ] as const).map(([label, value, color]) => (
-                    <div key={label} className="rounded-card p-4 transition-colors hover:bg-[var(--bg-secondary)]">
-                      <p className="text-caption font-medium text-[var(--text-secondary)]">{label}</p>
-                      <p className="mt-2 font-display text-metric font-semibold tabular-nums" style={{ color }}>{value}</p>
-                    </div>
-                  ))}
-                </div>}
-              </section>
-            </div>
-
-            <div className="mt-7 grid gap-7 xl:grid-cols-2">
-              <RecentList title="Recent work" detail="Created in this range" empty={payload.metrics.workCreated.value === null ? "Work history is still being prepared." : "No recent work."} rows={payload.recentWork.map((item) => ({ id: item.id, title: item.title, detail: `${item.blueprintKey.replaceAll("_", " ")} · ${item.status}`, timestamp: item.createdAt }))} />
-              <RecentList title="Recent AI runs" detail="Titles and status only; prompts are not queried" empty={payload.metrics.aiRuns.value === null ? "AI run history is still being prepared." : "No recent AI runs."} rows={payload.recentRuns.map((item) => ({ id: item.id, title: item.title, detail: item.status, timestamp: item.createdAt }))} />
-            </div>
-
-            <section className="mt-8 p-2">
-              <div className="flex items-start gap-3">
-                <ShieldCheck className="mt-0.5 size-5 shrink-0 text-[var(--success)]" />
-                <div>
-                  <h2 className="text-ui font-semibold text-[var(--text-primary)]">Privacy and source boundary</h2>
-                  <p className="mt-1 max-w-3xl text-caption leading-6 text-[var(--text-secondary)]">{payload.privacy}</p>
-                  <p className="mt-2 text-micro text-[var(--text-tertiary)]">Indexed sources: work created, workspace activity, AI run metadata, and daily account usage meters.</p>
-                </div>
-              </div>
-            </section>
-          </>
-        ) : null}
-      </div>
       </PageBody>
     </main>
   );
 }
 
-function MetricCard({ definition, metric, icon, format }: { definition: SpectraMetricDefinition; metric: MetricValue; icon: React.ReactNode; format: "number" | "percent" | "compact" | "bytes" }) {
+function AnalyticsBody({ payload, days }: { payload: AnalyticsPayload; days: Window }) {
+  const { metrics, runOutcomes } = payload;
+  const workTotal = payload.byType.reduce((sum, row) => sum + row.value, 0);
+  const outcomes = [
+    { key: "completed", label: "Finished", value: runOutcomes.completed, color: "var(--success)" },
+    { key: "active", label: "Still going", value: runOutcomes.active, color: "var(--accent-cyan)" },
+    { key: "failed", label: "Didn't finish", value: runOutcomes.failed, color: "var(--warning)" },
+    { key: "cancelled", label: "Stopped", value: runOutcomes.cancelled, color: "var(--text-tertiary)" },
+  ];
+  const runTotal = outcomes.reduce((sum, row) => sum + row.value, 0);
   return (
-    <article className="rounded-card p-4 transition-colors hover:bg-[var(--bg-secondary)]" title={`Source: ${metricSourceLabel(definition)}. ${definition.aggregation}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2 text-[var(--text-secondary)]">{icon}<span className="text-micro font-medium">{definition.label}</span></div>
-        {metric.state.kind !== "available" ? <CapabilityTruthBadge state={metric.state} className="min-h-5 px-2 text-micro" /> : null}
+    <>
+      <p className="analytics-lead">{leadLine(payload, days)}</p>
+
+      <TallySheet>
+        <MetricCard
+          label="Work made"
+          value={formatCompact(metrics.workCreated.value)}
+          detail="New in this range"
+          state={metrics.workCreated.state}
+          source={metricDefinition("account.work_created").source}
+        />
+        <MetricCard
+          label="Workspaces in use"
+          value={formatCompact(metrics.activeWorkspaces.value)}
+          detail="Something changed in them"
+          state={metrics.activeWorkspaces.state}
+          source={metricDefinition("account.active_workspaces").source}
+        />
+        <MetricCard
+          label="Asked Spectra"
+          value={formatCompact(metrics.aiRuns.value)}
+          detail="Every request, however it ended"
+          state={metrics.aiRuns.state}
+          source={metricDefinition("account.ai_runs").source}
+        />
+        <MetricCard
+          label="Finished"
+          value={metrics.completionRate.value === null ? formatCompact(null) : `${metrics.completionRate.value}%`}
+          detail="Of the requests that ended"
+          state={metrics.completionRate.state}
+          source={metricDefinition("account.ai_completion_rate").source}
+        />
+        <MetricCard
+          label="AI use"
+          value={formatCompact(metrics.modelTokens.value)}
+          detail="Tokens read and written"
+          state={metrics.modelTokens.state}
+          source={metricDefinition("account.model_tokens").source}
+        />
+        <MetricCard
+          label="Live editing"
+          value={formatBytes(metrics.collaborationBytes.value)}
+          detail="Changes sent while editing"
+          state={metrics.collaborationBytes.state}
+          source={metricDefinition("account.collaboration_bytes").source}
+        />
+      </TallySheet>
+
+      <section>
+        <AdminSectionHeader title="Day by day" />
+        <DayChart series={payload.series ?? []} fromDay={payload.range.fromDay} toDay={payload.range.toDay} />
+      </section>
+
+      <div className="admin-columns">
+        <section>
+          <AdminSectionHeader title="What you made" count={workTotal || undefined} />
+          {workTotal ? (
+            <>
+              <div className="analytics-mix" aria-hidden>
+                {payload.byType.map((row) => (
+                  <span
+                    key={row.key}
+                    style={{ flexGrow: row.value, "--mix-color": typeOf(row.key).color } as React.CSSProperties}
+                  />
+                ))}
+              </div>
+              <dl className="admin-facts">
+                {payload.byType.map((row) => (
+                  <div key={row.key}>
+                    <dt className="analytics-row-label">
+                      <i style={{ "--mix-color": typeOf(row.key).color } as React.CSSProperties} aria-hidden />
+                      {typeOf(row.key).label}
+                    </dt>
+                    <dd>{row.value.toLocaleString()}</dd>
+                  </div>
+                ))}
+              </dl>
+            </>
+          ) : (
+            <p className="admin-ledger-empty">
+              {metrics.workCreated.value === null ? "Your work history is still being prepared." : "No new work in this range."}
+            </p>
+          )}
+        </section>
+
+        <section>
+          <AdminSectionHeader title="How your requests ended" count={runTotal || undefined} />
+          {runTotal ? (
+            <>
+              <div className="analytics-mix" aria-hidden>
+                {outcomes.filter((row) => row.value > 0).map((row) => (
+                  <span key={row.key} style={{ flexGrow: row.value, "--mix-color": row.color } as React.CSSProperties} />
+                ))}
+              </div>
+              <dl className="admin-facts">
+                {outcomes.map((row) => (
+                  <div key={row.key}>
+                    <dt className="analytics-row-label">
+                      <i style={{ "--mix-color": row.color } as React.CSSProperties} aria-hidden />
+                      {row.label}
+                    </dt>
+                    <dd>{row.value.toLocaleString()}</dd>
+                  </div>
+                ))}
+              </dl>
+            </>
+          ) : (
+            <p className="admin-ledger-empty">
+              {metrics.aiRuns.value === null ? "Your request history is still being prepared." : "You didn't ask Spectra anything in this range."}
+            </p>
+          )}
+        </section>
       </div>
-      <p className="mt-3 font-display text-display font-semibold tabular-nums text-[var(--text-primary)]">{formatMetric(metric.value, format)}</p>
-      {metric.state.kind === "partial" || metric.value === 0 || metric.value === null ? <p className="mt-2 text-micro leading-4 text-[var(--text-secondary)]">{metric.state.kind === "partial" ? metric.state.details : definition.zeroMeaning}</p> : null}
-    </article>
+
+      <div className="admin-columns">
+        <section>
+          <AdminSectionHeader title="Latest work" />
+          {payload.recentWork.length ? (
+            <ul className="admin-ledger">
+              {payload.recentWork.map((item) => (
+                <li key={item.id}>
+                  <Link className="admin-line" href={`/library?artifactId=${encodeURIComponent(item.id)}`}>
+                    <span className="admin-line-main">
+                      <strong>{item.title}</strong>
+                      <span>{typeOf(item.blueprintKey).label}</span>
+                    </span>
+                    <span className="admin-line-meta">{formatRelative(item.createdAt)}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="admin-ledger-empty">Nothing new in this range.</p>
+          )}
+        </section>
+
+        <section>
+          <AdminSectionHeader title="Latest requests" />
+          {payload.recentRuns.length ? (
+            <ul className="admin-ledger">
+              {payload.recentRuns.map((item) => (
+                <li key={item.id} className="admin-line">
+                  <span className="admin-line-main">
+                    <strong>{requestTitle(item.title)}</strong>
+                    <span>{RUN_WORDS[item.status] ?? item.status.replaceAll("_", " ")}</span>
+                  </span>
+                  <span className="admin-line-meta">{formatRelative(item.createdAt)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="admin-ledger-empty">No requests in this range.</p>
+          )}
+        </section>
+      </div>
+
+      <PrivacyNotice>
+        Only you see this page. It counts titles, types and dates; what you wrote and what you asked Spectra are not read to make it.
+      </PrivacyNotice>
+    </>
   );
 }
 
-function SectionHeading({ title, detail }: { title: string; detail: string }) {
-  return <div><h2 className="font-display text-title font-semibold text-[var(--text-primary)]">{title}</h2><p className="mt-1 text-micro text-[var(--text-tertiary)]">{detail}</p></div>;
-}
+const chartDay = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", timeZone: "UTC" });
+const dayWords = (day: string) => chartDay.format(new Date(`${day}T00:00:00Z`));
 
-function RecentList({ title, detail, empty, rows }: { title: string; detail: string; empty: string; rows: Array<{ id: string; title: string; detail: string; timestamp: number }> }) {
-  return <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5"><SectionHeading title={title} detail={detail} /><div className="mt-3 divide-y divide-[var(--border-subtle)]">{rows.length ? rows.map((row) => <div key={row.id} className="flex items-start gap-3 py-3"><Clock3 className="mt-0.5 size-3.5 shrink-0 text-[var(--text-tertiary)]" /><div className="min-w-0 flex-1"><p className="truncate text-caption font-semibold text-[var(--text-primary)]">{row.title}</p><p className="mt-1 text-micro capitalize text-[var(--text-tertiary)]">{row.detail} · {formatDate(row.timestamp)}</p></div></div>) : <EmptyLine label={empty} />}</div></section>;
-}
-
-function EmptyLine({ label }: { label: string }) {
-  return <p className="py-6 text-center text-micro text-[var(--text-tertiary)]">{label}</p>;
-}
-
-function formatMetric(value: number | null, format: "number" | "percent" | "compact" | "bytes") {
-  if (value === null) return "Not measured";
-  if (format === "percent") return `${value}%`;
-  if (format === "bytes") return value < 1_024 ? `${value} B` : value < 1_048_576 ? `${(value / 1_024).toFixed(1)} KB` : `${(value / 1_048_576).toFixed(1)} MB`;
-  if (format === "compact") return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(value);
-  return value.toLocaleString();
-}
-
-function formatDate(timestamp: number) {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(timestamp);
+function DayChart({ series, fromDay, toDay }: { series: DayCount[]; fromDay: string; toDay: string }) {
+  const [kindKey, setKindKey] = useState<(typeof CHART_KINDS)[number]["key"]>("work");
+  const kind = CHART_KINDS.find((item) => item.key === kindKey) ?? CHART_KINDS[0];
+  const days = useMemo(() => {
+    const byDay = new Map(series.map((row) => [row.day, row]));
+    const out: DayCount[] = [];
+    const last = Date.parse(`${toDay}T00:00:00Z`);
+    for (let at = Date.parse(`${fromDay}T00:00:00Z`); at <= last; at += 86_400_000) {
+      const day = new Date(at).toISOString().slice(0, 10);
+      out.push(byDay.get(day) ?? { day, work: 0, runs: 0 });
+    }
+    return out;
+  }, [fromDay, series, toDay]);
+  const values = days.map((row) => row[kind.key]);
+  const most = Math.max(0, ...values);
+  // Rounded up to even, so the middle line of the scale is a whole count too.
+  const peak = most > 1 && most % 2 ? most + 1 : most;
+  return (
+    <>
+      <div className="admin-chart-choice" role="group" aria-label="What the chart shows">
+        {CHART_KINDS.map((item) => (
+          <button key={item.key} type="button" aria-pressed={item.key === kindKey} onClick={() => setKindKey(item.key)}>
+            {item.label}
+          </button>
+        ))}
+      </div>
+      <figure className="admin-chart" aria-label={`${kind.label} each day`}>
+        <div className="admin-chart-scale" aria-hidden>
+          <span>{peak ? peak.toLocaleString() : ""}</span>
+          <span>{peak > 1 ? (peak / 2).toLocaleString() : ""}</span>
+          <span>0</span>
+        </div>
+        {peak ? (
+          <div className="admin-chart-bars analytics-chart-bars" data-few={days.length <= 14 ? "" : undefined}>
+            {days.map((row, index) => {
+              const label = `${dayWords(row.day)}: ${counted(values[index], kind.one, kind.many)}`;
+              return (
+                <span
+                  key={row.day}
+                  className="admin-chart-bar"
+                  tabIndex={0}
+                  role="img"
+                  aria-label={label}
+                  title={label}
+                  style={{ height: `${(values[index] / peak) * 100}%` }}
+                />
+              );
+            })}
+          </div>
+        ) : (
+          <p className="analytics-chart-empty">Nothing on any day in this range.</p>
+        )}
+        <div className="admin-chart-days" aria-hidden>
+          <span>{dayWords(days[0]?.day ?? fromDay)}</span>
+          <span>{dayWords(days[days.length - 1]?.day ?? toDay)}</span>
+        </div>
+      </figure>
+    </>
+  );
 }

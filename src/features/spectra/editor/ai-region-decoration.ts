@@ -45,7 +45,7 @@ function leaveUnseen(doc: ProseMirrorNode, unseen: DecorationSet, written: Decor
 
 function applyUnseen(doc: ProseMirrorNode, unseen: DecorationSet, action: UnseenAction) {
   if (action.unseen === "clear") return unseen.remove(unseen.find(undefined, undefined, (spec) => spec.unseen === "fading"));
-  const marks = unseen.find(action.pos, action.pos, (spec) => spec.unseen === "true");
+  const marks = unseen.find(action.pos, action.pos, (spec) => spec.unseen === "true").filter(Boolean);
   return unseen.remove(marks).add(doc, marks.map((mark) => unseenMark(mark.from, mark.to, "fading")));
 }
 

@@ -4,7 +4,7 @@ import { authorNew } from "../authoring";
 import { openQuizForPractice } from "../authoring/items";
 import { parseBlocks } from "../authoring/markdown";
 import { sheetsFromSpec } from "../authoring/sheets";
-import { mergeRoomLoad } from "../../../../../../scripts/collaboration-room-state.mjs";
+import { createRoomLoadCache, loadRoomThroughCache, mergeRoomLoad } from "../../../../../../scripts/collaboration-room-state.mjs";
 
 const nodeTypes = (nodes: Array<{ type: string; content?: unknown[] }>): string[] =>
   nodes.flatMap((node) => [node.type, ...nodeTypes((node.content ?? []) as Array<{ type: string; content?: unknown[] }>)]);
@@ -81,6 +81,29 @@ describe("a gateway room copy", () => {
     const merged = mergeRoomLoad(known, { roomId: "r", schemaVersion: 1, nextSequence: 4, lastSnapshotAt: 5, updates: [{ sequence: 3 }] });
     expect(merged?.updates).toHaveLength(3);
     expect(merged?.snapshot).toEqual({ update: "s" });
+  });
+
+  it("never keeps a room shut when its copy has fallen behind a snapshot", async () => {
+    const cache = createRoomLoadCache();
+    const payload = { artifactId: "a", partitionKey: "root", policyVersion: 1 };
+    cache.put("a", "root", 1, known);
+    const whole = { roomId: "r", schemaVersion: 1, nextSequence: 18, snapshot: { update: "folded", throughSequence: 11 }, updates: [] };
+    const asked: Array<number | undefined> = [];
+    const load = async (request: { afterSequence?: number }) => {
+      asked.push(request.afterSequence);
+      // The rows the copy wanted were folded away, so the read refuses.
+      if (request.afterSequence) throw new Error("COLLABORATION_REPLAY_GENERATION_CHANGED");
+      return whole;
+    };
+    await expect(loadRoomThroughCache(cache, load, payload)).resolves.toBe(whole);
+    expect(asked).toEqual([2, undefined]);
+  });
+
+  it("passes on any other trouble reading a room", async () => {
+    const cache = createRoomLoadCache();
+    cache.put("a", "root", 1, known);
+    const load = async () => { throw new Error("COLLABORATION_ACCESS_REVOKED"); };
+    await expect(loadRoomThroughCache(cache, load, { artifactId: "a", partitionKey: "root", policyVersion: 1 })).rejects.toThrow("REVOKED");
   });
 
   it("is dropped when the room was reset or a piece is missing", () => {

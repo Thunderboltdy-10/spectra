@@ -28,6 +28,10 @@ const KNOWN: Array<{ match: RegExp; say: (detail: string) => string }> = [
     say: () => `This work changed while you were editing it. ${NOTHING_SAVED} Read it again and repeat only your edit.`,
   },
   {
+    match: /(?:AI_NATIVE_[A-Z_]+|NATIVE_RECEIPT_[A-Z_]+|DOCX_[A-Z_]+|OFFICE_[A-Z_]+)/,
+    say: () => `The original file refused this edit. ${NOTHING_SAVED} Sending the same call again will not help: say plainly that this file could not take the change, and offer another way to do what was asked.`,
+  },
+  {
     match: /COLLABORATION_REGION_HELD/,
     say: () => `Someone is editing that part right now. ${NOTHING_SAVED} Try a different part, or try again shortly.`,
   },

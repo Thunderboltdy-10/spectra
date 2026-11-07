@@ -346,6 +346,7 @@ export function describeDevicesForAi(cloud: CloudOverview | null | undefined, no
   });
   return [
     ...described,
+    "Everything synced from these computers is already in Spectra: find it with search. To see what else is on a computer, use devices list_names, and offer to sync what would help.",
     "Folder, pause, logs and update actions run on the computer where the user has Spectra open with Bridge.",
   ].join("\n\n");
 }

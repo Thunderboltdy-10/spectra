@@ -1,5 +1,6 @@
 "use client";
 
+import { useLatest, useStudioContextItems } from "./studio-context-menu";
 import { readIdentity } from "../administration/identity";
 import { shortAnswerMatches } from "../../../../shared/quiz-answer-match";
 import { useMissingAssets } from "./use-missing-assets";
@@ -24,6 +25,9 @@ import {
   Radio,
   SlidersHorizontal,
   X,
+  ArrowUp,
+  ArrowDown,
+  Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LifeForm, LifeVerdict } from "@/components/ui/life-moments";
@@ -842,6 +846,24 @@ export function QuizStudio({
     setActiveQuestionId(moved.id);
   }
 
+  const questionVerbs = useLatest({ addQuestion, removeQuestion, moveQuestion, questions });
+  useStudioContextItems(({ target }) => {
+    const questionId = target.closest("[data-studio-item]")?.getAttribute("data-studio-item");
+    if (!questionId || !canEditQuiz) return null;
+    const at = () => questionVerbs.current.questions.findIndex((question) => question.id === questionId);
+    return [[
+      { key: "question-new", label: "New question", icon: Plus, onSelect: () => questionVerbs.current.addQuestion() },
+      { key: "question-up", label: "Move up", icon: ArrowUp, disabled: at() <= 0, onSelect: () => questionVerbs.current.moveQuestion(at(), at() - 1) },
+      {
+        key: "question-down",
+        label: "Move down",
+        icon: ArrowDown,
+        disabled: at() >= questionVerbs.current.questions.length - 1,
+        onSelect: () => questionVerbs.current.moveQuestion(at(), at() + 1),
+      },
+      { key: "question-delete", label: "Delete question", icon: Trash2, danger: true, onSelect: () => questionVerbs.current.removeQuestion(questionId) },
+    ]];
+  });
   function addQuestion() {
     const questionId = id("question");
     const question = {

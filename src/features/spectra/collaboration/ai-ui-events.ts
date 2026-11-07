@@ -191,7 +191,7 @@ function rememberEvent(event: SpectraAiUiEvent): void {
     const actorId = event.runId;
     const note = text(payload.note) ?? "Working on your devices";
     void runAiDeviceAction(
-      { action, actionId: text(payload.actionId), grantId: text(payload.grantId), deviceId: text(payload.deviceId) },
+      { action, actionId: text(payload.actionId), grantId: text(payload.grantId), deviceId: text(payload.deviceId), path: text(payload.path) },
       (connect) => {
         if (!connect) {
           noteAiSurface({ ...(actorId ? { actorId } : {}), route: "devices", note });

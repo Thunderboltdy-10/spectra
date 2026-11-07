@@ -70,7 +70,7 @@ describe("layering contract", () => {
     const appCss = readFileSync(APP_CSS_PATH, "utf8");
     expect(appCss).toMatch(/body:has\(\[role="dialog"\]\[aria-modal="true"\]\) \[data-island-root\],/);
     expect(appCss).toMatch(/body:has\(\[role="dialog"\]\[aria-modal="true"\]\) \[data-island-root\] \*/);
-    expect(appCss).toMatch(/body:has\(\[aria-label="Version history comparison"\]\) \[data-island-root\]/);
+    expect(appCss).toMatch(/body:has\(\.version-stage\) \[data-island-root\]/);
     expect(appCss).not.toContain("spectra-workbench-live-stack");
     const adminDialog = readFileSync(
       join(process.cwd(), "src/features/spectra/administration/shared.tsx"),

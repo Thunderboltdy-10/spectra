@@ -110,6 +110,40 @@ describe("AI edits to an imported Word file", () => {
     expect(result.readbackProblem).toBeNull();
   }, 60_000);
 
+  /*
+   * The save receipt attests the file that gets stored, while the request is
+   * proven allowing for what only Word holds. Comparing the two is what made
+   * "Add an extra paragraph" fail on a real synced document after minutes of
+   * retries, so nothing a file carries may be able to break a plain addition.
+   */
+  describe("adding a paragraph", () => {
+    const addParagraph = () => [{ op: "insert", position: "end", markdown: "A brand new extra paragraph about hope." }];
+
+    for (const name of ["python-docx-notes.docx"]) {
+      it(`stays provable on ${name}`, async () => {
+        const bytes = new Uint8Array(readFileSync(join(process.cwd(), "fixtures", "office", "docx", name)));
+        const result = await runEdit(bytes, addParagraph);
+        expect(result.readbackProblem).toBeNull();
+        const reopened = await docxLens.open(new Uint8Array(result.output), "strict-native");
+        expect(reopened.projection.blocks.some((block) => block.text.includes("about hope"))).toBe(true);
+      }, 60_000);
+    }
+
+    it("still works once the file has been through a first edit", async () => {
+      const first = await runEdit(payload(), addParagraph);
+      const second = await runEdit(new Uint8Array(first.output), () => [{ op: "insert", position: "start", markdown: "An opening line." }]);
+      expect(second.readbackProblem).toBeNull();
+    }, 60_000);
+
+    it("leaves every other block as it was", async () => {
+      const before = await docxLens.open(payload(), "strict-native");
+      const result = await runEdit(payload(), addParagraph);
+      const after = await docxLens.open(new Uint8Array(result.output), "strict-native");
+      const texts = (blocks: typeof before.projection.blocks) => blocks.map((block) => block.text);
+      expect(texts(after.projection.blocks).slice(0, before.projection.blocks.length)).toEqual(texts(before.projection.blocks));
+    }, 60_000);
+  });
+
   it("reads list text in its own font, not the bullet's", async () => {
     const opened = await docxLens.open(payload(), "strict-native");
     const fonts = opened.projection.blocks.filter((block) => block.type === "list")

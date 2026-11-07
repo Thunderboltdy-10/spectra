@@ -4408,6 +4408,8 @@ export default defineSchema({
       runId: v.optional(v.id("spectraAiRuns")),
       reason: v.optional(v.string()),
     }),
+    /** Taken away by someone: an automatic link is not offered again. */
+    dismissedAt: v.optional(v.number()),
     createdBy: v.union(v.literal("user"), v.literal("ai"), v.literal("system")),
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     createdAt: v.number(),

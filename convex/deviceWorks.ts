@@ -180,7 +180,8 @@ export const touch = mutation({
       ...(args.tags ? { tags: args.tags.slice(0, 80) } : {}),
       updatedAt: Date.now(),
     });
-    if (retitled && title) await syncSourceNodes(ctx, "work", args.artifactId, title);
+    // The node carries the activity the sidebar and Library sort by, so an edit stamps it even with the same title.
+    await syncSourceNodes(ctx, "work", args.artifactId, title || artifact.title);
     return { touched: true };
   },
 });

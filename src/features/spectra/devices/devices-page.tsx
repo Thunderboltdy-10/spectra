@@ -18,6 +18,7 @@ import {
   DEVICES_HREF,
   pairingFailureMessage,
   unpairBridge,
+  type BridgeFile,
   type BridgeReachability,
 } from "../bridge/client";
 import { Icon } from "@/components/icons";
@@ -26,6 +27,7 @@ import { spectraBus } from "../events";
 import { permissionChoicePatch } from "../settings/schema/ai-permissions";
 import { useSpectraPreferences } from "../settings/preference-store";
 import type { LocalDeviceRequest } from "./actions";
+import { AlreadySyncedNotice } from "./already-synced-notice";
 import { DeviceCard } from "./device-card";
 import { runLocalDeviceAction } from "./device-actions";
 import { devicesModel, nativeWritesChoice, nativeWritesPlan, type CloudOverview, type DeviceView, type NativeWrites } from "./devices-model";
@@ -70,6 +72,7 @@ export function DevicesPage() {
 
   const [now, setNow] = useState(() => Date.now());
   const [busy, setBusy] = useState<string | null>(null);
+  const [alreadySynced, setAlreadySynced] = useState<BridgeFile[] | null>(null);
   const [notice, setNotice] = useState<string>();
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -146,6 +149,7 @@ export function DevicesPage() {
     void runLocalDeviceAction({ action: "add_files" }).then((outcome) => {
       setBusy(null);
       setNotice(outcome.message);
+      noteAlreadySynced(outcome);
     });
   }, [here?.live]);
 
@@ -159,6 +163,12 @@ export function DevicesPage() {
     const outcome = await runLocalDeviceAction(request);
     setBusy(null);
     setNotice(outcome.message);
+    if (request.action === "add_files") noteAlreadySynced(outcome);
+  }
+
+  function noteAlreadySynced(outcome: { data?: unknown }) {
+    const existing = (outcome.data as { existing?: BridgeFile[] } | undefined)?.existing ?? [];
+    setAlreadySynced(existing.length ? existing : null);
   }
 
   function chooseNativeWrites(choice: NativeWrites) {
@@ -280,6 +290,7 @@ export function DevicesPage() {
               <h2 id="devices-list" className="device-section-heading">
                 Your computers
               </h2>
+              {alreadySynced ? <AlreadySyncedNotice files={alreadySynced} onDismiss={() => setAlreadySynced(null)} /> : null}
               <PairingPanel state={pairingState} onCancel={() => pairing.cancel()} onRetry={connect} />
               {here ? (
                 deviceCard(here)

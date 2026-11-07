@@ -255,8 +255,27 @@ const VIEW_CHOICES = [
 /** What a quick view of the Library lists: never threads. */
 const PLACES_AND_WORK: TreeNode["kind"][] = ["folder", "workspace", "work"];
 
+/** Tried once by itself, since most failures here pass; then it asks. */
+function LibraryFailure({ onRetry, attempt }: { onRetry: () => void; attempt: number }) {
+  useEffect(() => {
+    if (attempt > 0) return;
+    const timer = window.setTimeout(onRetry, 1_200);
+    return () => window.clearTimeout(timer);
+  }, [attempt, onRetry]);
+  if (attempt === 0) return <p role="status" className="p-4 text-body text-[var(--text-secondary)]">Opening the Library again.</p>;
+  return (
+    <div role="alert" className="p-4 text-body text-[var(--text-secondary)]">
+      <p>The Library didn&apos;t load. Your work is safe.</p>
+      <Button className="mt-3" onClick={onRetry}>
+        Try again
+      </Button>
+    </div>
+  );
+}
+
 export function LibraryOrganizer(props: LibraryOrganizerProps) {
   const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt((value) => value + 1), []);
   return (
     <IsolatedErrorBoundary
       key={`${props.scope?.nodeId ?? "root"}:${attempt}`}
@@ -266,12 +285,7 @@ export function LibraryOrganizer(props: LibraryOrganizerProps) {
             This device is offline. The Library comes back when it reconnects.
           </p>
         ) : (
-          <div role="alert" className="p-4 text-body text-[var(--text-secondary)]">
-            <p>The Library didn&apos;t load.</p>
-            <Button className="mt-3" onClick={() => setAttempt((value) => value + 1)}>
-              Try again
-            </Button>
-          </div>
+          <LibraryFailure onRetry={retry} attempt={attempt} />
         )
       }
     >
@@ -1233,9 +1247,9 @@ function LibraryOrganizerContent({
             onSyncFolder={{
               // Not connected yet, the same row connects this computer first.
               label: "Sync a computer folder",
-              run: () => void folderSync.sync(),
+              run: () => void folderSync.sync(currentParentId),
             }}
-            onSyncFiles={{ label: "Sync computer files", run: () => void folderSync.syncFiles() }}
+            onSyncFiles={{ label: "Sync computer files", run: () => void folderSync.syncFiles(currentParentId) }}
           />
           )}
           {onToggleSelect && location.kind !== "trash" ? (

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { committedPerformancesFor, rememberCommittedPerformance, subscribeCommittedPerformances } from "../collaboration/committed-performances";
+import { committedPerformancesFor, forgetCommittedPerformance, rememberCommittedPerformance, subscribeCommittedPerformances } from "../collaboration/committed-performances";
 import { performancePatches, type AiPerformance } from "../collaboration/performance";
 import { PerformanceStage } from "../collaboration/performance-stage";
 
@@ -28,6 +28,12 @@ it("keeps a committed creation for its opening studio after the writer disconnec
   expect(committedPerformancesFor("another-work")).toEqual([]);
   vi.advanceTimersByTime(30_000);
   expect(stage.presence().size).toBe(0);
+  // Opened again a while behind the run, it still plays, once.
+  expect(committedPerformancesFor("revision")).toHaveLength(1);
+  forgetCommittedPerformance("committed-create");
+  expect(committedPerformancesFor("revision")).toEqual([]);
+  rememberCommittedPerformance(performance, Date.now());
+  vi.advanceTimersByTime(10 * 60_000 + 1);
   expect(committedPerformancesFor("revision")).toEqual([]);
   expect(rememberCommittedPerformance({ ...performance, id: "history" }, 1)).toBeUndefined();
   expect(rememberCommittedPerformance({ ...performance, id: "refused", withdrawn: true }, Date.now())).toBeUndefined();

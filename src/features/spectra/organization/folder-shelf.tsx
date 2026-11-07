@@ -5,7 +5,7 @@ import { LibraryShelfSkeleton } from "./library-shelf";
 import { groupByWhen } from "./shelf-model";
 import { ShelfNotes, useShelfStacks } from "./shelf-stacks";
 import { SharedWorkGroups, useSharedWorks } from "./shared-works";
-import { useTreeChildren, type TreeNode } from "./tree-client";
+import { isPlaceNode, useTreeChildren, type TreeNode } from "./tree-client";
 import { useLoadOnApproach } from "./use-load-on-approach";
 
 /*
@@ -38,8 +38,8 @@ export function FolderShelf({
   const mark = useLoadOnApproach(children.status, children.loadMore);
   const shared = useSharedWorks(workspaceId);
   const sharedCount = shared.reduce((sum, group) => sum + group.works.length, 0);
-  const places = children.nodes.filter((node) => node.kind === "folder" || node.kind === "workspace");
-  const work = children.nodes.filter((node) => node.kind !== "folder" && node.kind !== "workspace");
+  const places = children.nodes.filter(isPlaceNode);
+  const work = children.nodes.filter((node) => !isPlaceNode(node));
   const items = useShelfStacks(work);
   if (children.isLoading) return <LibraryShelfSkeleton />;
   const groups = groupByWhen(items, (item) => item.node.activityAt, now);

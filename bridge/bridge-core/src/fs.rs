@@ -64,6 +64,21 @@ impl Grant {
     }
 }
 
+/// A file someone chose that already syncs through `grant_id`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncedFile {
+    pub grant_id: String,
+    pub relative_path: String,
+}
+
+/// What choosing files came to: those newly synced and those already here.
+#[derive(Debug, Clone, Default)]
+pub struct FileSelection {
+    pub added: Vec<Grant>,
+    pub already_synced: Vec<SyncedFile>,
+}
+
 #[derive(Default)]
 pub struct GrantRegistry {
     grants: RwLock<HashMap<String, Grant>>,
@@ -106,23 +121,15 @@ impl GrantRegistry {
         if !root.is_dir() {
             return Err(FsError::Other(anyhow::anyhow!("Choose a folder to sync")));
         }
-        if self
-            .grants
-            .read()
-            .unwrap()
-            .values()
-            .any(|grant| grant.selected_file.is_some() && grant.selection_path().starts_with(&root))
-        {
-            return Err(FsError::Other(anyhow::anyhow!(
-                "Stop syncing the individual files in this folder before adding the whole folder."
-            )));
-        }
+        // A folder already synced, or one inside a folder already synced, is
+        // already here. Nothing about choosing it again should fail.
         if let Some(existing) = self
             .grants
             .read()
             .unwrap()
             .values()
-            .find(|grant| grant.root == root && grant.selected_file.is_none())
+            .filter(|grant| grant.selected_file.is_none() && root.starts_with(&grant.root))
+            .min_by_key(|grant| grant.root.components().count())
             .cloned()
         {
             return Ok(existing);
@@ -166,13 +173,36 @@ impl GrantRegistry {
         )
     }
 
-    pub fn add_native_file_selections(&self, paths: &[PathBuf]) -> Result<Vec<Grant>, FsError> {
+    /// What the whole of `grant`, a folder, now takes over: anything chosen
+    /// earlier that sits inside it. One copy of a file on this computer is one
+    /// work in Spectra, however it was first brought in, so these grants retire
+    /// and the folder's next scan carries their works forward by file identity.
+    pub fn take_over_selections_within(&self, grant: &Grant) -> Vec<Grant> {
+        if grant.selected_file.is_some() {
+            return Vec::new();
+        }
+        let mut grants = self.grants.write().unwrap();
+        let within = grants
+            .values()
+            .filter(|other| other.id != grant.id && other.selection_path().starts_with(&grant.root))
+            .cloned()
+            .collect::<Vec<_>>();
+        for other in &within {
+            grants.remove(&other.id);
+        }
+        within
+    }
+
+    /// Validates the entire native selection before creating any grants.
+    /// Choosing a file that already syncs is not a mistake, whether it was
+    /// chosen alone before or came through a folder: it is reported back so
+    /// the person can place the work they already have.
+    pub fn add_native_file_selections(&self, paths: &[PathBuf]) -> Result<FileSelection, FsError> {
         if paths.len() > 100 {
             return Err(FsError::Other(anyhow::anyhow!(
                 "Choose up to 100 files at a time."
             )));
         }
-        // Validate the entire native selection before creating any grants.
         let mut selected = std::collections::BTreeSet::new();
         for path in paths {
             let path = path.canonicalize()?;
@@ -184,23 +214,40 @@ impl GrantRegistry {
                     "Choose regular files, without Office lock or temporary files."
                 )));
             }
-            if self
-                .grants
-                .read()
-                .unwrap()
-                .values()
-                .any(|grant| grant.selected_file.is_none() && path.starts_with(&grant.root))
-            {
-                return Err(FsError::Other(anyhow::anyhow!(
-                    "A selected file is already syncing through a folder. Choose files outside that folder."
-                )));
-            }
             selected.insert(path);
         }
-        selected
-            .iter()
-            .map(|path| self.add_native_file_selection(path))
-            .collect()
+        let mut selection = FileSelection::default();
+        for path in &selected {
+            if let Some(file) = self.synced_file(path) {
+                selection.already_synced.push(file);
+            } else {
+                selection.added.push(self.add_native_file_selection(path)?);
+            }
+        }
+        Ok(selection)
+    }
+
+    /// Which grant already carries this file, and where it sits within it.
+    fn synced_file(&self, path: &Path) -> Option<SyncedFile> {
+        let grants = self.grants.read().unwrap();
+        let grant = grants
+            .values()
+            .find(|grant| grant.selected_file.is_some() && grant.selection_path() == path)
+            .or_else(|| {
+                grants
+                    .values()
+                    .filter(|grant| grant.selected_file.is_none() && path.starts_with(&grant.root))
+                    .min_by_key(|grant| grant.root.components().count())
+            })?;
+        let relative = path.strip_prefix(&grant.root).ok()?;
+        Some(SyncedFile {
+            grant_id: grant.id.clone(),
+            relative_path: relative
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/"),
+        })
     }
 
     pub fn restore_file_grant(
@@ -878,11 +925,18 @@ mod tests {
         assert!(grants.resolve(&grant.id, Path::new("chosen.txt")).is_ok());
         fs::write(&file, b"replacement").unwrap();
         assert!(grants.resolve(&grant.id, Path::new("chosen.txt")).is_ok());
-        assert!(
+        let parent = grants
+            .add_native_selection("Parent".into(), dir.path())
+            .unwrap();
+        assert_eq!(
             grants
-                .add_native_selection("Parent".into(), dir.path())
-                .is_err()
+                .take_over_selections_within(&parent)
+                .into_iter()
+                .map(|taken| taken.id)
+                .collect::<Vec<_>>(),
+            vec![grant.id.clone()]
         );
+        assert_eq!(grants.device_grants().len(), 1);
         let restored = GrantRegistry::default()
             .restore_file_grant(
                 grant.id.clone(),
@@ -917,21 +971,89 @@ mod tests {
         let first = grants
             .add_native_file_selections(&[a.clone(), b.clone(), a.clone()])
             .unwrap();
-        assert_eq!(first.len(), 2);
-        assert_eq!(
-            grants
-                .add_native_file_selections(&[a.clone(), b])
-                .unwrap()
-                .len(),
-            2
-        );
+        assert_eq!(first.added.len(), 2);
+        assert!(first.already_synced.is_empty());
+        // Choosing them again adds nothing and refuses nothing.
+        let again = grants
+            .add_native_file_selections(&[a.clone(), b.clone()])
+            .unwrap();
+        assert!(again.added.is_empty());
+        assert_eq!(again.already_synced.len(), 2);
         assert_eq!(grants.device_grants().len(), 2);
-        let folder_grants = GrantRegistry::default();
-        folder_grants
+    }
+
+    #[test]
+    fn a_file_is_the_same_file_however_it_was_first_brought_in() {
+        let dir = tempdir().unwrap();
+        let nested = dir.path().join("unit 1");
+        fs::create_dir(&nested).unwrap();
+        let inside = nested.join("essay.docx");
+        fs::write(&inside, b"a").unwrap();
+        let outside_dir = tempdir().unwrap();
+        let outside = outside_dir.path().join("loose.docx");
+        fs::write(&outside, b"b").unwrap();
+
+        let grants = GrantRegistry::default();
+        let folder = grants
             .add_native_selection("Folder".into(), dir.path())
             .unwrap();
-        assert!(folder_grants.add_native_file_selections(&[a]).is_err());
-        assert_eq!(folder_grants.device_grants().len(), 1);
+        // Part folder, part new: the new one is added, the other reported back.
+        let selection = grants
+            .add_native_file_selections(&[inside.clone(), outside.clone()])
+            .unwrap();
+        assert_eq!(selection.added.len(), 1);
+        assert_eq!(selection.already_synced.len(), 1);
+        assert_eq!(selection.already_synced[0].grant_id, folder.id);
+        assert_eq!(selection.already_synced[0].relative_path, "unit 1/essay.docx");
+        // A folder inside a synced folder is already here too.
+        assert_eq!(
+            grants
+                .add_native_selection("Unit 1".into(), &nested)
+                .unwrap()
+                .id,
+            folder.id
+        );
+        assert_eq!(grants.device_grants().len(), 2);
+    }
+
+    #[test]
+    fn a_parent_folder_takes_over_what_was_chosen_inside_it() {
+        let dir = tempdir().unwrap();
+        let nested = dir.path().join("unit 1");
+        fs::create_dir(&nested).unwrap();
+        let file = dir.path().join("essay.docx");
+        fs::write(&file, b"a").unwrap();
+        let elsewhere = tempdir().unwrap();
+
+        let grants = GrantRegistry::default();
+        let chosen = grants.add_native_file_selection(&file).unwrap();
+        let inner = grants
+            .add_native_selection("Unit 1".into(), &nested)
+            .unwrap();
+        let other = grants
+            .add_native_selection("Other".into(), elsewhere.path())
+            .unwrap();
+        let parent = grants
+            .add_native_selection("All".into(), dir.path())
+            .unwrap();
+        let mut taken = grants
+            .take_over_selections_within(&parent)
+            .into_iter()
+            .map(|grant| grant.id)
+            .collect::<Vec<_>>();
+        taken.sort();
+        let mut expected = vec![chosen.id, inner.id];
+        expected.sort();
+        assert_eq!(taken, expected);
+        let mut left = grants
+            .device_grants()
+            .into_iter()
+            .map(|grant| grant.id)
+            .collect::<Vec<_>>();
+        left.sort();
+        let mut expected = vec![parent.id, other.id];
+        expected.sort();
+        assert_eq!(left, expected);
     }
 
     #[test]

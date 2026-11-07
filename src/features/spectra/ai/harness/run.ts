@@ -253,6 +253,7 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
       : openRouter);
   traceEvent("run.harness_start", {
     runtime: provider ?? "openrouter",
+    preference: input.runtime?.provider,
     systemChars: systemPrompt.length,
     toolCount: tools.length,
     priorMessages: state.messages.length,
@@ -370,6 +371,7 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
             ok: step.outcome.ok,
             ms: step.durationMs,
             code: (step.outcome as { code?: unknown }).code,
+            ...(step.outcome.ok ? {} : { error: String((step.outcome as { content?: unknown }).content ?? "").slice(0, 600) }),
             resultChars: jsonSize(step.outcome),
           });
           if (step.tool?.quiet) return;

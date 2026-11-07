@@ -1,5 +1,6 @@
 "use client";
 
+import { followRunRelay, isRunRelayInvite, type RunRelayInvite } from "./run-relay-client";
 import { closeLocalRunStream, localRunStream, publishLocalRunEvent, subscribeLocalRunStreams } from "./local-run-streams";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
@@ -29,7 +30,7 @@ import {
 import { publishArtifactAiActivity } from "../collaboration/artifact-ai-activity";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { spectraBus } from "../events";
-import { refreshRunTabs } from "../island/run-tabs";
+import { getRunTabs, isActiveRunStatus, refreshRunTabs } from "../island/run-tabs";
 import { isRetryableRunStatus } from "./run-lifecycle";
 import { observeUiRun, stopObservingUiRun, uiObserverForRun } from "../collaboration/settings-observation-client";
 
@@ -179,6 +180,7 @@ export type SpectraLiveExchange = Omit<HarnessExchangeFields, "steps"> & {
     kind?: "thinking";
     status: "running" | "done" | "error";
     createdAt: number;
+    textAt?: number;
   }>;
   /** "waiting": the run asked a question or for approval and is paused. "stopped": the user stopped it; what it showed stays. */
   status: "starting" | "streaming" | "waiting" | "failed" | "stopped";
@@ -963,17 +965,15 @@ export function useSpectraRun({
       let buffer = "";
       let changed = false;
       let sawInput = false;
-      try {
-      while (true) {
-        const { value, done } = await reader.read();
-        buffer += decoder.decode(value, { stream: !done });
-        const lines = buffer.split("\n");
-        // Process a final NDJSON event even when the response closes without a
-        // trailing newline; otherwise the terminal card/final event is lost.
-        buffer = done ? "" : lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          const event = parseSpectraStreamEvent(JSON.parse(line));
+      let relayInvite: RunRelayInvite | null = null;
+      /** True once the run has reached a point where this request is finished. */
+      const handleLine = (line: string): boolean => {
+          const raw: unknown = JSON.parse(line);
+          if (isRunRelayInvite(raw)) {
+            relayInvite = raw;
+            return false;
+          }
+          const event = parseSpectraStreamEvent(raw);
           feedLedger(event);
           if (event.type === "run_created") requestRunId = event.runId;
           if (requestRunId) publishLocalRunEvent(engineIdentity.current, requestRunId, event);
@@ -1246,9 +1246,24 @@ export function useSpectraRun({
           }
           if (event.type === "final" || event.type === "confirmation_required")
             changed = requestReachedTerminal = true;
+          return requestReachedTerminal || sawInput ||
+            event.type === "error" || event.type === "stopped" || event.type === "interrupted";
+      };
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          buffer += decoder.decode(value, { stream: !done });
+          const lines = buffer.split("\n");
+          // Process a final NDJSON event even when the response closes without a
+          // trailing newline; otherwise the terminal card/final event is lost.
+          buffer = done ? "" : lines.pop() ?? "";
+          for (const line of lines) if (line.trim()) handleLine(line);
+          if (done) break;
         }
-        if (done) break;
-      }
+        // The POST only acknowledged a scheduled worker. Its events arrive here
+        // as they happen, and the saved log takes over if this ever ends early.
+        if (relayInvite && !requestReachedTerminal && !sawInput)
+          await followRunRelay(relayInvite, controller.signal, handleLine);
       } finally {
         if (requestRunId) closeLocalRunStream(requestRunId);
       }
@@ -1720,7 +1735,7 @@ export function useSpectraRun({
         const exchangeId = shown?.runId === runId ? shown.id : `answer:${uniqueToken()}`;
         setLiveExchange((current) =>
           current?.runId === runId
-            ? { ...current, id: exchangeId, status: "streaming" }
+            ? { ...current, id: exchangeId, status: "streaming", input: current.input?.toolCallId === toolCallId ? undefined : current.input }
             : {
                 id: exchangeId,
                 runId,
@@ -1965,6 +1980,49 @@ export function useSpectraRun({
     },
     [consume, resolveDisplayedRunVersion],
   );
+
+  /*
+   * The server has the last word on whether a run is going. The observer above
+   * only follows runs that belong to this page's thread or surface, so a run
+   * begun here and finished under another thread would otherwise count up with
+   * a Stop button for ever. The shared tabs are already being read, so they
+   * answer first, and the run itself is asked only now and then.
+   */
+  const watchedRunId = liveExchange && liveExchange.status !== "stopped" && liveExchange.status !== "failed"
+    ? liveExchange.runId ?? observedContinuationRunId
+    : observedContinuationRunId;
+  useEffect(() => {
+    if (!watchedRunId) return;
+    let stopped = false;
+    let checks = 0;
+    let timer: number | undefined;
+    const settle = () => {
+      setLiveExchange((current) => (current?.runId === watchedRunId ? null : current));
+      setObservedContinuationRunId((current) => (current === watchedRunId ? null : current));
+      activeRunIds.current.delete(watchedRunId);
+      publishActiveRuns();
+      stopObservingUiRun(watchedRunId, true);
+      clearRunFeedActivity(watchedRunId);
+      void onDataChanged?.();
+    };
+    const check = async () => {
+      checks += 1;
+      const tab = getRunTabs().find((candidate) => candidate.runId === watchedRunId);
+      if (tab && !isActiveRunStatus(tab.run.status)) {
+        if (!activeRunIds.current.has(watchedRunId)) return settle();
+      } else if (!tab || checks % 4 === 0) {
+        const detail = await getSpectraRunDetail(watchedRunId).catch(() => null);
+        if (stopped) return;
+        if (detail && !isActiveRunStatus(detail.run.status) && !activeRunIds.current.has(watchedRunId)) return settle();
+      }
+      if (!stopped) timer = window.setTimeout(() => void check(), 5_000);
+    };
+    timer = window.setTimeout(() => void check(), 5_000);
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+    };
+  }, [onDataChanged, publishActiveRuns, watchedRunId]);
 
   const submitting =
     !stopSuppressed &&

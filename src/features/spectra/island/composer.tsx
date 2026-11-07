@@ -21,6 +21,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuDisclosure,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
@@ -403,6 +404,19 @@ export const IslandComposer = forwardRef<
   );
 });
 
+const AGENTS_SHOWN = 3;
+
+function AgentOption({ item, index }: { item: SpectraInstalledAgent; index: number }) {
+  return (
+    <DropdownMenuRadioItem value={String(index)}>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate font-medium">{item.title}</span>
+        {item.summary ? <span className="line-clamp-1 text-micro text-[var(--text-tertiary)]">{item.summary}</span> : null}
+      </span>
+    </DropdownMenuRadioItem>
+  );
+}
+
 function AgentSwitch({
   label,
   agent,
@@ -433,6 +447,11 @@ function AgentSwitch({
     <PrismLoader size={24} optics={working ? "working" : "dormant"} interactive turns={sends} />
   );
   const chosen = agentIndex === undefined || agentIndex < 0 ? "auto" : String(agentIndex);
+  // A long list folds; the chosen agent always stays in view.
+  const indexed = agents.map((item, index) => ({ item, index }));
+  const foldable = indexed.length > AGENTS_SHOWN + 1;
+  const shownAgents = foldable ? indexed.filter(({ index }) => index < AGENTS_SHOWN || index === agentIndex) : indexed;
+  const foldedAgents = foldable ? indexed.filter((entry) => !shownAgents.includes(entry)) : [];
   // The mark is the switch: pressing it opens the agents to choose from, Auto first.
   return (
     <DropdownMenu>
@@ -448,86 +467,38 @@ function AgentSwitch({
       </Tooltip>
       <DropdownMenuContent align="start" side="top" layer="toast" className="min-w-[16rem]">
         <DropdownMenuRadioGroup value={chosen} onValueChange={(value) => onChoose(value === "auto" ? -1 : Number(value))}>
-          <DropdownMenuLabel>Agent</DropdownMenuLabel>
+          <div className="flex items-center justify-between gap-2">
+            <DropdownMenuLabel>Agent</DropdownMenuLabel>
+            <DropdownMenuItem asChild className="w-auto gap-1 px-1.5 py-1 text-micro text-[var(--text-secondary)]">
+              <Link href="/agents">
+                <Icon name="agents" size={12} />
+                {agents.length ? "More agents" : "Find or make an agent"}
+              </Link>
+            </DropdownMenuItem>
+          </div>
           <DropdownMenuRadioItem value="auto">
             <span className="min-w-0 flex-1 font-medium">Auto agent</span>
             <span className="text-micro text-[var(--text-tertiary)]">Spectra picks</span>
           </DropdownMenuRadioItem>
-          {agents.map((item, index) => (
-            <DropdownMenuRadioItem key={item.agentId} value={String(index)}>
-              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="truncate font-medium">{item.title}</span>
-                {item.summary ? <span className="line-clamp-1 text-micro text-[var(--text-tertiary)]">{item.summary}</span> : null}
-              </span>
-            </DropdownMenuRadioItem>
+          {shownAgents.map(({ item, index }) => (
+            <AgentOption key={item.agentId} item={item} index={index} />
           ))}
+          {foldedAgents.length ? (
+            <DropdownMenuDisclosure label={`${foldedAgents.length} more`}>
+              {foldedAgents.map(({ item, index }) => (
+                <AgentOption key={item.agentId} item={item} index={index} />
+              ))}
+            </DropdownMenuDisclosure>
+          ) : null}
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
         <RuntimeControls />
-        <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <Link href="/agents" className="text-[var(--text-secondary)]">
-            <Icon name="agents" size={13} />
-            <span className="flex-1">{agents.length ? "More agents" : "Find or make an agent"}</span>
-          </Link>
-        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
-const SPEED_STOPS = ["slow", "medium", "fast"] as const;
-const SPEED_TICKS = 18;
-
-/** Three stops in the prism menu. Its arrow keys stay with the slider rather than moving the menu. */
-function SpeedSlider({ label, value, onChange }: { label: string; value: (typeof SPEED_STOPS)[number]; onChange: (value: (typeof SPEED_STOPS)[number]) => void }) {
-  const stop = SPEED_STOPS.indexOf(value);
-  const step = (by: number) => {
-    const next = SPEED_STOPS[stop + by];
-    if (next) onChange(next);
-  };
-  return (
-    <div
-      className="speed-control"
-      role="radiogroup"
-      aria-label={label}
-      onPointerDown={(event) => event.stopPropagation()}
-      onKeyDown={(event) => {
-        event.stopPropagation();
-        if (event.key === "ArrowRight" || event.key === "ArrowUp") {
-          event.preventDefault();
-          step(1);
-        } else if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
-          event.preventDefault();
-          step(-1);
-        }
-      }}
-    >
-      <span className="speed-control-label">{label}</span>
-      <div className="speed-control-ticks" aria-hidden="true">
-        {Array.from({ length: SPEED_TICKS }, (_, index) => (
-          <i key={index} style={{ height: `${30 + (70 * index) / (SPEED_TICKS - 1)}%` }} data-on={index < ((stop + 1) * SPEED_TICKS) / SPEED_STOPS.length || undefined} />
-        ))}
-      </div>
-      <div className="speed-control-stops">
-        {SPEED_STOPS.map((stopName) => (
-          <button
-            key={stopName}
-            type="button"
-            role="radio"
-            aria-checked={stopName === value}
-            tabIndex={stopName === value ? 0 : -1}
-            onClick={() => onChange(stopName)}
-          >
-            {stopName}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/** The model, how hard it thinks, and how fast its work plays. */
+/** The model and how hard it thinks. */
 function RuntimeControls() {
   const { preferences, update } = useSpectraPreferences();
   const { status } = useAgentRuntime();
@@ -544,7 +515,7 @@ function RuntimeControls() {
     ? "Spectra default"
     : standingIn
       ? "Spectra for now"
-      : models(ai.runtime).find((item) => item.id === chosenModel)?.label ?? PROVIDER_LABEL[ai.runtime];
+      : models(ai.runtime).find((item) => item.id === chosenModel)?.label ?? (chosenModel || "Preferred");
   const choose = (next: string) => {
     if (next === "spectra") return applyRuntimeChoice("spectra", patch);
     const [provider, ...rest] = next.split(":");
@@ -569,27 +540,37 @@ function RuntimeControls() {
             {(["codex", "claude"] as const).map((provider) => {
               const entry = status?.[provider];
               const problem = entry ? providerProblem(provider, entry.state) : "Checking this computer…";
-              const ownDefault = `${provider === "claude" ? "Claude" : "Codex"} default`;
+              const providerChosen = ai.runtime === provider && !standingIn;
               return (
                 <div key={provider} className="mb-1.5 border-b border-[var(--border-subtle)] pb-1.5">
-                  <div className="px-2 pb-1 text-micro font-medium text-[var(--text-tertiary)]">{PROVIDER_LABEL[provider]}</div>
                   {unavailable ? (
-                    <Tooltip label={unavailable} className="flex" side="right">
-                      <DropdownMenuItem asChild>
-                        <Link href={DEVICES_HREF} aria-label={`${ownDefault}. ${unavailable}`} className="opacity-45">
-                          {ownDefault}
-                        </Link>
-                      </DropdownMenuItem>
-                    </Tooltip>
-                  ) : problem ? (
-                    <p className="px-2 pb-1 text-micro leading-[18px] text-[var(--text-secondary)]">{problem}</p>
-                  ) : (
                     <>
-                      <DropdownMenuRadioItem value={`${provider}:`}>{ownDefault}</DropdownMenuRadioItem>
+                      <div className="px-2 pb-1 text-micro font-medium text-[var(--text-tertiary)]">{PROVIDER_LABEL[provider]}</div>
+                      <Tooltip label={unavailable} className="flex" side="right">
+                        <DropdownMenuItem asChild>
+                          <Link href={DEVICES_HREF} aria-label={`Preferred ${PROVIDER_LABEL[provider]} model. ${unavailable}`} className="opacity-45">
+                            Preferred
+                          </Link>
+                        </DropdownMenuItem>
+                      </Tooltip>
+                    </>
+                  ) : problem ? (
+                    <>
+                      <div className="px-2 pb-1 text-micro font-medium text-[var(--text-tertiary)]">{PROVIDER_LABEL[provider]}</div>
+                      <p className="px-2 pb-1 text-micro leading-[18px] text-[var(--text-secondary)]">{problem}</p>
+                    </>
+                  ) : (
+                    <DropdownMenuDisclosure
+                      heading
+                      label={PROVIDER_LABEL[provider]}
+                      hint={providerChosen ? modelLabel : undefined}
+                      defaultOpen={providerChosen}
+                    >
+                      <DropdownMenuRadioItem value={`${provider}:`}>Preferred</DropdownMenuRadioItem>
                       {entry?.models.map((item) => (
                         <DropdownMenuRadioItem key={item.id} value={`${provider}:${item.id}`}>{item.label}</DropdownMenuRadioItem>
                       ))}
-                    </>
+                    </DropdownMenuDisclosure>
                   )}
                 </div>
               );
@@ -601,7 +582,7 @@ function RuntimeControls() {
       <div className="flex items-center justify-between gap-3 px-2 py-1.5 text-caption" onKeyDown={(event) => event.stopPropagation()}>
         <span className="text-[var(--text-primary)]">Thinking</span>
         <span role="radiogroup" aria-label="Thinking" className="inline-flex rounded-control bg-[var(--bg-secondary)] p-0.5">
-          {(["medium", "high"] as const).map((level) => (
+          {(["low", "medium", "high"] as const).map((level) => (
             <button
               key={level}
               type="button"
@@ -618,8 +599,6 @@ function RuntimeControls() {
           ))}
         </span>
       </div>
-      <SpeedSlider label="Work speed" value={ai.workSpeed} onChange={(workSpeed) => patch({ workSpeed })} />
-      <SpeedSlider label="While following" value={ai.followSpeed} onChange={(followSpeed) => patch({ followSpeed })} />
     </>
   );
 }

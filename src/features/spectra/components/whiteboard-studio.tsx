@@ -1,5 +1,7 @@
 "use client";
 
+import { useLatest, useStudioContextItems } from "./studio-context-menu";
+import { StudioToolPane } from "./studio-pane";
 import { describeFailure } from "@/components/ui/truthful-state";
 import {
   AlignCenter,
@@ -48,6 +50,7 @@ import {
   ZoomIn,
   ZoomOut,
   type LucideIcon,
+  Copy,
 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useMutation } from "convex/react";
@@ -867,6 +870,7 @@ export function WhiteboardStudio({
   // a consequence of pane width, so a split panel edits like fullscreen.
   const readOnly = readOnlyProp || contract.readOnly;
   const canEdit = contract.can("edit") && !readOnlyProp;
+  const referencePointRef = useRef<{ x: number; y: number } | null>(null);
   // The registry grants `present` from the type's own capabilities, so presenting
   // is not something reaching the bar implies. The state is gated too, not just
   // the control: an ungranted role must not be able to be in Present at all.
@@ -1165,14 +1169,18 @@ export function WhiteboardStudio({
             throw new Error(
               "Unlock a visible board layer before adding a live reference.",
             );
-          const center = {
-            x:
-              viewport.x +
-              (canvasRef.current?.clientWidth ?? 800) / viewport.zoom / 2,
-            y:
-              viewport.y +
-              (canvasRef.current?.clientHeight ?? 600) / viewport.zoom / 2,
-          };
+          // Added by right-clicking the board, it lands where that was.
+          const center = referencePointRef.current
+            ? { x: referencePointRef.current.x + 200, y: referencePointRef.current.y + 150 }
+            : {
+                x:
+                  viewport.x +
+                  (canvasRef.current?.clientWidth ?? 800) / viewport.zoom / 2,
+                y:
+                  viewport.y +
+                  (canvasRef.current?.clientHeight ?? 600) / viewport.zoom / 2,
+              };
+          referencePointRef.current = null;
           const gridSize = board.settings?.gridSize ?? 24;
           const place = (value: number) =>
             board.settings?.snapToGrid === false
@@ -1598,6 +1606,34 @@ export function WhiteboardStudio({
   );
   useOpenAnchor(artifactId, landOnNode);
 
+  const boardVerbs = useLatest({ addNode, deleteSelected, duplicateSelected, pasteTextNode, worldPoint });
+  useStudioContextItems(({ target, x, y }) => {
+    referencePointRef.current = null;
+    if (target.closest("[data-reference-id]")) return null;
+    const nodeElement = target.closest(".whiteboard-node");
+    if (nodeElement) {
+      const id = nodeElement.getAttribute("data-anchor-region");
+      if (!id || !canEdit) return null;
+      setSelectedNodeIds((current) => (current.includes(id) ? current : [id]));
+      return [[
+        { key: "node-copy", label: "Duplicate", icon: Copy, onSelect: () => boardVerbs.current.duplicateSelected() },
+        { key: "node-delete", label: "Delete", icon: Trash2, danger: true, onSelect: () => void boardVerbs.current.deleteSelected() },
+      ]];
+    }
+    if (!canEdit || !target.closest(".whiteboard-canvas")) return null;
+    const at = boardVerbs.current.worldPoint(x, y);
+    referencePointRef.current = at;
+    return [[
+      { key: "add-note", label: "Add a note here", onSelect: () => boardVerbs.current.addNode("note", at.x, at.y) },
+      { key: "add-text", label: "Add text here", onSelect: () => boardVerbs.current.addNode("text", at.x, at.y) },
+      { key: "add-shape", label: "Add a shape here", onSelect: () => boardVerbs.current.addNode("shape", at.x, at.y) },
+      {
+        key: "paste-note",
+        label: "Paste as a note",
+        onSelect: () => void navigator.clipboard?.readText().then((text) => text && boardVerbs.current.pasteTextNode(text)),
+      },
+    ]];
+  });
   function addNode(type: WhiteboardNodeType, x?: number, y?: number) {
     const layer = layers.find(
       (candidate) => !candidate.locked && candidate.visible,
@@ -3644,27 +3680,20 @@ export function WhiteboardStudio({
         ) : null}
         {panel !== "none" &&
         !(contract.surface === "full" && panel === "layers") ? (
-          <aside
-            className={
-              contract.surface === "full"
-                ? "whiteboard-panel spectra-studio-inspector-overlay"
-                : "whiteboard-panel"
+          <StudioToolPane
+            id="board-tool"
+            title={
+              panel === "layers"
+                ? "Pages and layers"
+                : panel === "outline"
+                  ? "Accessible outline"
+                  : panel === "search"
+                    ? "Find on board"
+                    : "Templates"
             }
+            onClose={() => setPanel("none")}
           >
-            <header>
-              <strong>
-                {panel === "layers"
-                  ? "Pages and layers"
-                  : panel === "outline"
-                    ? "Accessible outline"
-                    : panel === "search"
-                      ? "Find on board"
-                      : "Templates"}
-              </strong>
-              <button type="button" onClick={() => setPanel("none")}>
-                <X className="h-4 w-4" />
-              </button>
-            </header>
+            <div className="whiteboard-panel" data-in-pane>
             {panel === "search" ? (
               <>
                 <input
@@ -3887,7 +3916,8 @@ export function WhiteboardStudio({
                 ) : null}
               </>
             )}
-          </aside>
+            </div>
+          </StudioToolPane>
         ) : null}
 
         <main>
@@ -3959,24 +3989,23 @@ export function WhiteboardStudio({
               </button>
             </div>
           ) : null}
-          {selectedNode && selectedNodeIds.length === 1 ? (
+          {selectedNode && selectedNodeIds.length === 1 && !inspectorOpen ? (
             <button
               type="button"
               className="whiteboard-inspector-trigger"
-              aria-label={
-                inspectorOpen ? "Hide object details" : "Show object details"
-              }
-              aria-expanded={inspectorOpen}
-              onClick={() => setInspectorOpen((open) => !open)}
+              aria-label="Show object details"
+              aria-expanded={false}
+              onClick={() => setInspectorOpen(true)}
             >
               <SlidersHorizontal className="h-3.5 w-3.5" />
-              <span>{inspectorOpen ? "Hide details" : "Object details"}</span>
+              <span>Object details</span>
             </button>
           ) : null}
           {selectedEdge && inspectorOpen ? (
             /* A connector is editable in the same panel its objects are, so
                labelling the line joining two notes does not mean deleting it. */
-            <div className="whiteboard-inspector">
+            <StudioToolPane id="board-object" title="Object details" onClose={() => setInspectorOpen(false)}>
+            <div className="whiteboard-inspector" data-in-pane>
               <div>
                 <strong>Connector</strong>
                 <button
@@ -4034,9 +4063,11 @@ export function WhiteboardStudio({
                 />
               </label>
             </div>
+            </StudioToolPane>
           ) : null}
           {selectedNode && selectedNodeIds.length === 1 && inspectorOpen ? (
-            <div className="whiteboard-inspector">
+            <StudioToolPane id="board-object" title="Object details" onClose={() => setInspectorOpen(false)}>
+            <div className="whiteboard-inspector" data-in-pane>
               <div>
                 <strong>
                   {selectedNode.semanticLabel || NODE_NOUNS[selectedNode.type]}
@@ -4181,6 +4212,7 @@ export function WhiteboardStudio({
                 </label>
               ) : null}
             </div>
+            </StudioToolPane>
           ) : null}
         </main>
       </div>

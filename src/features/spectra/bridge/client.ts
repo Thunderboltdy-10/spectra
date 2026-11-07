@@ -538,20 +538,53 @@ export async function unpairBridge() {
   }
 }
 
-export async function selectBridgeFolder() {
+/**
+ * Which folder was chosen: its grant, null when the picker was closed, and
+ * undefined from a Bridge too old to say.
+ */
+export async function selectBridgeFolder(): Promise<string | null | undefined> {
   const response = await authorizedBridgeRequest("/v1/mount/select", {
     method: "POST",
   }, BRIDGE_FOLDER_PICKER_TIMEOUT_MS);
   if (!response) throw new Error("Reconnect this device before selecting a folder.");
+  const body = z.object({ grantId: z.string().nullable() }).safeParse(await response.json().catch(() => null));
+  return body.success ? body.data.grantId : undefined;
 }
 
+export type BridgeFilesSelected = {
+  /** How many were newly brought in. */
+  selected: number;
+  added: BridgeFile[];
+  /** Files already here, chosen alone before or through a folder. */
+  existing: BridgeFile[];
+};
+
+const syncedFile = z.object({ grantId: z.string(), relativePath: z.string() });
+
 /** Native multi-select grants just the chosen files, without their folder. */
-export async function selectBridgeFiles() {
+export async function selectBridgeFiles(): Promise<BridgeFilesSelected> {
   const response = await authorizedBridgeRequest("/v1/files/select", {
     method: "POST",
   }, BRIDGE_FOLDER_PICKER_TIMEOUT_MS);
   if (!response) throw new Error("Reconnect this device before selecting files.");
-  return z.object({ selected: z.number().int().min(0).max(100) }).parse(await response.json()).selected;
+  return z
+    .object({
+      selected: z.number().int().min(0).max(100),
+      added: z.array(syncedFile).default([]),
+      existing: z.array(syncedFile).default([]),
+    })
+    .parse(await response.json());
+}
+
+/** Something Spectra AI named on this computer. Bridge asks the person there; null means they said no. */
+export async function syncBridgeNamedPath(path: string): Promise<string | null> {
+  const response = await authorizedBridgeRequest(
+    "/v1/files/sync-named",
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }) },
+    BRIDGE_FOLDER_PICKER_TIMEOUT_MS,
+  );
+  if (!response) throw new Error("Reconnect this device before syncing a file.");
+  return z.object({ grantId: z.string().nullable().optional() }).parse(await response.json()).grantId ?? null;
 }
 
 export async function retryBridgeFolder(grantId: string) {

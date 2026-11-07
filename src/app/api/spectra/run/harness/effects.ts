@@ -1,5 +1,5 @@
 import { storeArtifactContent } from "@/lib/convex-server";
-import { reachableDeviceStore } from "@/lib/device-store";
+import { deviceStoreCall, reachableDeviceStore } from "@/lib/device-store";
 import { throwIfAborted } from "./abort";
 import { executeRegisteredCalendarMutation } from "./calendar-command";
 import { normalizeCalendarCommand } from "@/features/spectra/calendar/domain/command";
@@ -198,12 +198,16 @@ export async function executeApplicationCommand(
     const overview = await query<Record<string, never>, CloudOverview | null>("bridge:overview", {});
     return { devices: describeDevicesForAi(overview, Date.now()) };
   }
+  if (command === "read_computer_names") {
+    return await readComputerNames(typeof parsed.path === "string" ? parsed.path : "");
+  }
   if (command === "control_device" || command === "pair_device") {
     // These run on the user's computer, through the Spectra page open there
     // and its local Bridge; the page reports the result on Devices.
     const action = command === "pair_device" ? "pair" : String(parsed.action);
     const grantId = typeof parsed.grantId === "string" ? parsed.grantId : undefined;
     const deviceId = typeof parsed.deviceId === "string" ? parsed.deviceId : undefined;
+    const path = typeof parsed.path === "string" ? parsed.path : undefined;
     onUiEvent?.({
       key: "devices_action",
       payload: {
@@ -211,6 +215,7 @@ export async function executeApplicationCommand(
         actionId: `${executionId}:${operationId ?? action}`,
         ...(grantId ? { grantId } : {}),
         ...(deviceId ? { deviceId } : {}),
+        ...(path ? { path } : {}),
         note: action === "pair" ? "Connecting this computer" : "Working on your computer",
       },
     });
@@ -221,7 +226,9 @@ export async function executeApplicationCommand(
       message:
         action === "pair"
           ? "Spectra is connecting the computer the user has it open on. The user confirms the code on the computer; check with devices status afterwards."
-          : "Sent to Spectra on the user's computer, which runs it through Bridge. The Devices page shows the result; check with devices status.",
+          : action === "sync_path"
+            ? "A prompt is open on the user's computer. It comes in only if they agree there; check with devices status, then find it with search."
+            : "Sent to Spectra on the user's computer, which runs it through Bridge. The Devices page shows the result; check with devices status.",
     };
   }
   if (command === "remove_device") {
@@ -750,6 +757,25 @@ export async function executeApplicationCommand(
  * commits the restored version. The request id is the operation's, so a
  * retried operation replays its receipt instead of restoring twice.
  */
+/**
+ * The names in the ordinary places on the person's computer: names and kinds,
+ * one level, read-only. Bridge decides what is reachable.
+ */
+async function readComputerNames(path: string) {
+  const settings = await query<Record<string, never>, { accountId: string }>("deviceWorks:settings", {}).catch(() => null);
+  if (!settings) return { available: false, message: "Spectra can't tell whose computer this is right now." };
+  try {
+    return { available: true, ...(await deviceStoreCall<Record<string, unknown>>(settings.accountId, "computerNames", { path })) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (/unknown request/i.test(message))
+      return { available: false, message: "This computer's Spectra Bridge needs updating before Spectra can see file names. Offer devices update." };
+    if (/DEVICE_STORE_UNAVAILABLE|connect|timed? ?out|socket|closed/i.test(message))
+      return { available: false, message: "Spectra Bridge isn't reachable on the user's computer right now. Suggest opening it, or devices pair if it was never set up." };
+    return { available: false, message: message || "That path couldn't be read." };
+  }
+}
+
 /** New work goes to the person's computer whenever Bridge answers, unless they chose the cloud. */
 async function deviceHomeForNewWork(blueprintKey: string) {
   if (!DEVICE_WORK_TYPES.has(blueprintKey)) return undefined;

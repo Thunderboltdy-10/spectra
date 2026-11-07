@@ -16,7 +16,7 @@ vi.mock("../../bridge/client", () => {
   return {
     loadBridgeStatusCache: () => bridge.status,
     selectBridgeFolder: call("select"),
-    selectBridgeFiles: async () => { bridge.calls.push("selectFiles"); return bridge.selected; },
+    selectBridgeFiles: async () => { bridge.calls.push("selectFiles"); return { selected: bridge.selected, added: [], existing: [] }; },
     retryBridgeFolder: call("retry"),
     pauseBridgeFolder: call("pauseFolder"),
     removeBridgeFolder: call("remove"),

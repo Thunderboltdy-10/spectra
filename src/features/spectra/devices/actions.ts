@@ -6,6 +6,7 @@
 export const LOCAL_DEVICE_ACTIONS = [
   "add_folder",
   "add_files",
+  "sync_path",
   "retry_folder",
   "pause_folder",
   "resume_folder",
@@ -26,7 +27,7 @@ export const FOLDER_ACTIONS: ReadonlySet<LocalDeviceAction> = new Set([
   "remove_folder",
 ]);
 
-export type LocalDeviceRequest = { action: LocalDeviceAction; grantId?: string };
+export type LocalDeviceRequest = { action: LocalDeviceAction; grantId?: string; path?: string };
 
 export function isLocalDeviceAction(value: unknown): value is LocalDeviceAction {
   return typeof value === "string" && (LOCAL_DEVICE_ACTIONS as readonly string[]).includes(value);

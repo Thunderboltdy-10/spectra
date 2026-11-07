@@ -15,41 +15,27 @@ import { ArtifactCommentsPanel } from "../components/artifact-comments-panel";
 
 afterEach(cleanup);
 
-// The comments panel sits on the shared Dialog: menus opened inside it float
-// over it, and Escape closes only the topmost surface.
+// Comments live in the work's pane. A menu opened there floats over it, and
+// Escape closes only the menu.
 
-async function renderPanel(onClose = vi.fn()) {
+async function renderPanel() {
   render(
     <ArtifactCommentsPanel
       open
       artifactId="artifact-1"
-      artifactTitle="Essay"
       regions={[{ regionId: "artifact:structure", label: "Whole work" }]}
-      onClose={onClose}
     />,
   );
   await act(async () => {});
-  return onClose;
 }
 
-describe("comments panel on the shared Dialog", () => {
-  it("is a named modal dialog", async () => {
-    await renderPanel();
-    expect(screen.getByRole("dialog", { name: "Comments" })).toBeTruthy();
-  });
-
+describe("comments in the pane", () => {
   it("opens the notifications menu over the panel, and Escape closes only the menu", async () => {
-    const onClose = await renderPanel();
+    await renderPanel();
     fireEvent.keyDown(screen.getByRole("button", { name: "Comment notifications" }), { key: "Enter" });
     const menu = await screen.findByRole("menu");
-    // Before: the menu opened at z-dropdown (60), under the panel (z-panel, 80).
-    expect(menu.className).not.toContain("z-dropdown");
-
     fireEvent.keyDown(menu, { key: "Escape" });
     expect(screen.queryByRole("menu")).toBeNull();
-    expect(onClose).not.toHaveBeenCalled();
-
-    fireEvent.keyDown(screen.getByRole("dialog", { name: "Comments" }), { key: "Escape" });
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Comment notifications" })).toBeTruthy();
   });
 });

@@ -40,6 +40,12 @@ crons.interval(
   {},
 );
 crons.daily(
+  "finish-analytics-read-models",
+  { hourUTC: 2, minuteUTC: 40 },
+  internal.analytics.advanceReadModels,
+  {},
+);
+crons.daily(
   "maintain-artifact-snapshots",
   { hourUTC: 2, minuteUTC: 20 },
   internal.artifactSnapshots.maintain,

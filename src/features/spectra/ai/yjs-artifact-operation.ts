@@ -1607,14 +1607,6 @@ async function applyAiArtifactMutationAttempt(params: {
         executionId: params.executionId,
       });
     }
-    if (claimActorKind === "ai")
-      await convexMutation("spectraArtifacts:markAiState", {
-        artifactId: params.artifactId,
-        runId: params.runId,
-        executionId: params.executionId,
-        state: "updating",
-      }).catch(() => undefined);
-
     // Claims are acquired inside synchronizeMutation. Re-resolve once against
     // the synchronized Y.Doc so a just-finished non-overlapping human edit is
     // preserved by field-level patch operations rather than overwritten from

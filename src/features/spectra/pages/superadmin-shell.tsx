@@ -502,9 +502,9 @@ export function SuperadminShell() {
     return (
       <main className="spectra-wave-y relative isolate h-full min-h-0 flex-1 overflow-y-auto" data-spectra-app-surface="true">
         <PageBody>
-          <PageHeader title="Platform" />
+          <PageHeader title="Superadmin" />
           {loading ? (
-            <LoadingRows label="Opening the platform" count={6} className="mt-6" />
+            <LoadingRows label="Opening superadmin" count={6} className="mt-6" />
           ) : error ? (
             <div className="mt-6">
               <ErrorPanel message={error} retry={() => void load()} />

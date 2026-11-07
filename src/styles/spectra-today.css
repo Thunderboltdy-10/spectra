@@ -284,7 +284,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
-  max-width: 1120px;
+  width: 100%;
   margin-top: -14px;
 }
 
@@ -315,11 +315,90 @@
   color: var(--text-secondary);
 }
 
+/* Its height: a little under what the brief wants on a full day. The rest
+   fades into the page; it scrolls there, or opens. */
+@property --morning-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+.morning-fold {
+  --morning-limit-px: 372;
+  position: relative;
+}
+
+/* Stacked under the story on a narrow page, the moves come sooner. */
+.morning-story-fold {
+  --morning-limit-px: 300;
+}
+
+.morning-scroll {
+  --morning-fade: 0px;
+  max-height: calc(var(--morning-limit-px) * 1px);
+  overflow-y: auto;
+  overscroll-behavior: auto;
+  margin-inline: -10px;
+  padding-inline: 10px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--morning-fade)), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--morning-fade)), transparent);
+  transition:
+    max-height 460ms cubic-bezier(0.22, 1, 0.36, 1),
+    --morning-fade 220ms var(--ease-standard);
+}
+
+.morning-fold[data-overflows]:not([data-open], [data-end]) .morning-scroll {
+  --morning-fade: 110px;
+}
+
+.morning-fold[data-open] .morning-scroll {
+  max-height: var(--morning-open-height, 2000px);
+  overflow-y: hidden;
+}
+
+.morning-scroll:focus-visible {
+  outline-offset: 2px;
+}
+
+/* Just past the fade while folded, under everything once open. */
+.morning-fold-toggle {
+  position: absolute;
+  bottom: -27px;
+  left: 50%;
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 4px;
+  padding-inline: 10px;
+  border-radius: var(--radius-control);
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text-secondary);
+  transform: translateX(-50%);
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    opacity var(--motion-fast) var(--ease-standard);
+}
+
+.morning-fold-toggle:hover {
+  background: var(--bg-desk-hover);
+  color: var(--text-primary);
+}
+
+.morning-fold[data-open] .morning-fold-toggle {
+  position: static;
+  display: flex;
+  margin: 6px auto 0;
+  width: fit-content;
+  transform: none;
+}
+
 .morning-body {
-  display: grid;
-  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.25fr);
-  align-items: start;
-  gap: 24px 48px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 40px clamp(32px, 4vw, 72px);
   animation: morning-settle 600ms 250ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
@@ -328,6 +407,16 @@
   font-size: 13px;
   font-weight: 600;
   color: var(--text-tertiary);
+}
+
+.morning-body > * {
+  min-width: 0;
+  flex: 1.5 1 420px;
+}
+
+.morning-body > .morning-story-fold {
+  flex: 1 1 300px;
+  max-width: 620px;
 }
 
 .morning-story {
@@ -536,13 +625,32 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .morning-scroll {
+    transition: none;
+  }
+
   .morning-body {
     animation: none !important;
   }
 }
 
-@media (max-width: 1100px) {
-  .morning-body {
-    grid-template-columns: 1fr;
-  }
+/* More of the work to pick up, a row at a time. */
+.today-more {
+  display: flex;
+  height: 28px;
+  align-items: center;
+  margin: 10px auto 0;
+  padding-inline: 10px;
+  border-radius: var(--radius-control);
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text-secondary);
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
+}
+
+.today-more:hover {
+  background: var(--bg-desk-hover);
+  color: var(--text-primary);
 }

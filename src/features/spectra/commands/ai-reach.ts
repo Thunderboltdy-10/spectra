@@ -611,6 +611,22 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     reach: tool("devices", { fixed: { action: "status" }, appCommand: "read_devices", example: {} }),
   },
   {
+    id: "devices.list_names",
+    area: "devices",
+    title: "See file names on a computer",
+    description: "Read the names of files and folders in Documents, Desktop, Downloads and OneDrive on the user's computer, one level at a time. Names only, never contents. Use it to offer syncing something relevant.",
+    keywords: ["files on my computer", "what files do i have", "find a file", "my documents", "downloads", "desktop files"],
+    reach: tool("devices", { fixed: { action: "list_names" }, appCommand: "read_computer_names", example: { path: "Documents" } }),
+  },
+  {
+    id: "devices.sync_path",
+    area: "devices",
+    title: "Sync a file or folder by name",
+    description: "After the user agrees, ask to bring a file or folder from list_names into Spectra. A prompt on the computer decides; it only comes in if they agree there.",
+    keywords: ["sync this file", "bring it in", "import from my computer", "add this to spectra"],
+    reach: tool("devices", { fixed: { action: "sync_path" }, appCommand: "control_device", example: { path: "Documents/IB/Lab report.docx" } }),
+  },
+  {
     id: "devices.pair",
     area: "devices",
     title: "Connect this computer",
@@ -1052,6 +1068,8 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
 const DEVICE_WORK_PLUMBING = "Moving and backing up work on this computer is the owner's own choice on the Devices page; the AI writes to device work through its normal artifact tools.";
 
 export const SERVER_PLUMBING: Readonly<Record<string, string>> = {
+  "spectraArtifactLinks:establish":
+    "Keeps the links a work's own references imply; Spectra links work through spectraArtifactLinks:create.",
   "deviceWorks:choose": DEVICE_WORK_PLUMBING,
   "deviceWorks:adoptRestored": DEVICE_WORK_PLUMBING,
   "deviceWorks:touch": DEVICE_WORK_PLUMBING,

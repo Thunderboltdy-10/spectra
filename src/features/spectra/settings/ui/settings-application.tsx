@@ -107,11 +107,17 @@ type SectionProps<K extends PreferenceSection> = {
   update: (patch: Partial<SpectraPreferences[K]>) => void;
 };
 
+const ISLAND_CENTRE_OPTIONS = [
+  { value: "page", label: "Middle of the page" },
+  { value: "screen", label: "Middle of the screen" },
+];
+
 function ConversationSettings({ p, update }: SectionProps<"ai">) {
   return (
     <SettingGroup title="Conversations and the island" description="How new messages continue, and how the island at the bottom of every page waits for you.">
       <ToggleRow label="Continue the current conversation" description="When off, an unassigned send begins a new conversation. Explicitly selected conversations still continue." checked={p.continueCurrentConversation} onCheckedChange={(continueCurrentConversation) => update({ continueCurrentConversation })} />
       <SettingRow label="The dock at rest" description="Show it from the edge keeps the dock hidden until the pointer reaches the bottom of the screen, or you press Ctrl+J. Spectra still shows it when it has a question for you." control={<SelectField ariaLabel="The dock at rest" value={p.islandWake} onChange={(islandWake) => update({ islandWake: islandWake as "prism" | "edge" })} options={ISLAND_WAKE_OPTIONS} />} />
+      <SettingRow label="Where the island sits" description="The middle of the page moves as side columns open and close. The middle of the screen stays put." control={<SelectField ariaLabel="Where the island sits" value={p.islandCentre} onChange={(islandCentre) => update({ islandCentre: islandCentre as "page" | "screen" })} options={ISLAND_CENTRE_OPTIONS} />} />
       <ToggleRow label="Open requests for input" description="Required questions expand automatically while the run waits for you." checked={p.expandRequiredInput} onCheckedChange={(expandRequiredInput) => update({ expandRequiredInput })} />
       <ToggleRow label="Keep completed runs nearby" checked={p.retainCompletedRunTabs} onCheckedChange={(retainCompletedRunTabs) => update({ retainCompletedRunTabs })} />
       {p.retainCompletedRunTabs ? <SettingRow label="Keep completed runs for" control={<SelectField ariaLabel="Keep completed runs for" value={String(p.completedRunRetentionMinutes)} onChange={(next) => update({ completedRunRetentionMinutes: Number(next) })} options={RETENTION_OPTIONS} />} /> : null}

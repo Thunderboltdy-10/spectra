@@ -1256,6 +1256,8 @@ export async function createLinkNode(
   assertParentAcceptsChild(parent, "link");
   if (parent && parent._id === target._id)
     throw new Error("An item cannot reference itself.");
+  // Already here, as itself: placing it here again has nothing left to do.
+  if ((target.parentId ?? null) === (parent?._id ?? null)) return target;
   const duplicate = (
     await listChildNodes(ctx, params.accountId, parent?._id ?? null)
   ).find((row) => row.kind === "link" && row.sourceId === target._id);

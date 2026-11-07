@@ -50,6 +50,16 @@ pub struct ServerState {
     local_control: RwLock<Option<Arc<dyn LocalBridgeControl>>>,
 }
 
+/// What choosing files came to, for whoever opened the picker. `selected` is
+/// how many were newly added; `existing` were already here and can be placed.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilesSelected {
+    pub selected: usize,
+    pub added: Vec<crate::fs::SyncedFile>,
+    pub existing: Vec<crate::fs::SyncedFile>,
+}
+
 #[async_trait]
 pub trait LocalBridgeControl: Send + Sync {
     /// Pairs this computer for a waiting offer. It may show the native
@@ -58,10 +68,15 @@ pub trait LocalBridgeControl: Send + Sync {
     async fn request_update(&self) -> Result<String, String>;
     fn snapshot(&self) -> LocalControlSnapshot;
     /// Opens the native folder picker on this computer.
-    async fn select_mount(&self) -> Result<(), String>;
+    async fn select_mount(&self) -> Result<Option<String>, String>;
     /// Opens a native picker for one or several individual files.
-    async fn select_files(&self) -> Result<usize, String> {
+    async fn select_files(&self) -> Result<FilesSelected, String> {
         Err("Update Spectra Bridge to sync individual files.".into())
+    }
+    /// Brings in a file or folder Spectra AI named, once the person agrees in
+    /// a native prompt on this computer. None when they say no.
+    async fn sync_named(&self, _path: &str) -> Result<Option<String>, String> {
+        Err("Update Spectra Bridge to sync a file by name.".into())
     }
     async fn retry_mount(&self, grant_id: &str) -> Result<(), String>;
     async fn remove_mount(&self, grant_id: &str) -> Result<(), String>;
@@ -344,6 +359,7 @@ pub fn router(state: Arc<ServerState>) -> Router {
         .route("/v1/status", get(status))
         .route("/v1/mount/select", post(select_mount))
         .route("/v1/files/select", post(select_files))
+        .route("/v1/files/sync-named", post(sync_named))
         .route("/v1/mount/retry", post(retry_mount))
         .route("/v1/mount/remove", post(remove_mount))
         .route("/v1/mount/pause", post(pause_mount))
@@ -464,17 +480,34 @@ async fn status(State(state): State<Arc<ServerState>>) -> Response {
 }
 
 async fn select_mount(State(state): State<Arc<ServerState>>) -> Response {
-    act(
-        &state,
-        |control| async move { control.select_mount().await },
-    )
-    .await
+    match state.control() {
+        Some(control) => match control.select_mount().await {
+            Ok(grant_id) => Json(serde_json::json!({ "grantId": grant_id })).into_response(),
+            Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
+        },
+        None => controls_not_ready(),
+    }
 }
 
 async fn select_files(State(state): State<Arc<ServerState>>) -> Response {
     match state.control() {
         Some(control) => match control.select_files().await {
-            Ok(selected) => Json(serde_json::json!({ "selected": selected })).into_response(),
+            Ok(selection) => Json(selection).into_response(),
+            Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
+        },
+        None => controls_not_ready(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct NamedPath {
+    path: String,
+}
+
+async fn sync_named(State(state): State<Arc<ServerState>>, Json(named): Json<NamedPath>) -> Response {
+    match state.control() {
+        Some(control) => match control.sync_named(&named.path).await {
+            Ok(grant_id) => Json(serde_json::json!({ "grantId": grant_id })).into_response(),
             Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
         },
         None => controls_not_ready(),
@@ -803,13 +836,23 @@ mod tests {
                 }],
             }
         }
-        async fn select_mount(&self) -> Result<(), String> {
+        async fn select_mount(&self) -> Result<Option<String>, String> {
             self.calls.lock().unwrap().push("select".into());
-            Ok(())
+            Ok(Some("grant_folder".into()))
         }
-        async fn select_files(&self) -> Result<usize, String> {
+        async fn select_files(&self) -> Result<FilesSelected, String> {
             self.calls.lock().unwrap().push("select-files".into());
-            Ok(2)
+            Ok(FilesSelected {
+                selected: 2,
+                added: vec![crate::fs::SyncedFile {
+                    grant_id: "grant_new".into(),
+                    relative_path: "new.docx".into(),
+                }],
+                existing: vec![crate::fs::SyncedFile {
+                    grant_id: "grant_folder".into(),
+                    relative_path: "unit 1/essay.docx".into(),
+                }],
+            })
         }
         async fn retry_mount(&self, grant_id: &str) -> Result<(), String> {
             self.calls.lock().unwrap().push(format!("retry:{grant_id}"));
@@ -1121,7 +1164,11 @@ mod tests {
         assert_eq!(selection.status(), 200);
         assert_eq!(
             selection.json::<serde_json::Value>().await.unwrap(),
-            serde_json::json!({"selected": 2})
+            serde_json::json!({
+                "selected": 2,
+                "added": [{"grantId": "grant_new", "relativePath": "new.docx"}],
+                "existing": [{"grantId": "grant_folder", "relativePath": "unit 1/essay.docx"}],
+            })
         );
         assert_eq!(
             post("/v1/unpair", serde_json::json!({}))

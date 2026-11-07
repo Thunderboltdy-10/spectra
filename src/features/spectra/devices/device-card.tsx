@@ -1,12 +1,14 @@
 "use client";
 
-import { useRef, useState, type CSSProperties } from "react";
+import { Fragment, useRef, useState, type CSSProperties } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { toast } from "@/components/ui/toast";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { treeFailureMessage, useTreeActions, useTreeContainers } from "../organization/tree-client";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
+import { api } from "../../../../convex/_generated/api";
+import { useAuthedArgs } from "../data/use-authed-args";
+import { DeviceFolderBrowser } from "./device-folder-browser";
+import { PlaceInMenu } from "./place-in-menu";
 import { useLifeArrival, useLifeDeparture, useLifeJoin } from "../life/use-life";
 import type { LocalDeviceRequest } from "./actions";
 import { timeAgo, type DeviceTone, type DeviceView, type FolderView } from "./devices-model";
@@ -51,6 +53,7 @@ export function DeviceCard({
   downloadUrl?: string | null;
 }) {
   const ref = useRef<HTMLElement>(null);
+  const [browsing, setBrowsing] = useState<string | null>(null);
   useLifeArrival(ref, lifeKey, fresh ? "human" : undefined, DEVICE_FIGURE);
   useLifeJoin(ref, lifeKey);
   useLifeDeparture(ref, true, DEVICE_FIGURE, lifeKey);
@@ -85,7 +88,20 @@ export function DeviceCard({
       <section aria-label={`Files and folders on ${device.name}`}>
         <ul className="device-folders">
           {device.folders.map((folder, index) => (
-            <FolderTile key={folder.id} folder={folder} ink={FOLDER_INKS[index % FOLDER_INKS.length]} local={local} busy={busy} onAction={onAction} />
+            <Fragment key={folder.id}>
+              <FolderTile
+                folder={folder}
+                ink={FOLDER_INKS[index % FOLDER_INKS.length]!}
+                local={local}
+                busy={busy}
+                onAction={onAction}
+                browsing={browsing === folder.id}
+                onBrowse={() => setBrowsing((current) => (current === folder.id ? null : folder.id))}
+              />
+              {browsing === folder.id && folder.rootNodeId && folder.kind !== "file" ? (
+                <DeviceFolderBrowser key={folder.rootNodeId} rootNodeId={folder.rootNodeId} name={folder.name} onClose={() => setBrowsing(null)} />
+              ) : null}
+            </Fragment>
           ))}
           {local ? (
             <li>
@@ -162,50 +178,31 @@ export function DeviceCard({
 }
 
 /** One folder can stand in several workspaces; it still syncs once. */
-function AddToWorkspaces({ nodeId, name }: { nodeId: string; name: string }) {
-  const [open, setOpen] = useState(false);
-  const [added, setAdded] = useState<ReadonlySet<string>>(new Set());
-  const { nodes, status } = useTreeContainers(null, open);
-  const { createReference } = useTreeActions();
-  const workspaces = nodes.filter((node) => node.kind === "workspace" && node.nodeId !== nodeId);
-  const add = async (workspaceNodeId: string, title: string) => {
-    try {
-      await createReference(nodeId, workspaceNodeId);
-      setAdded((current) => new Set(current).add(workspaceNodeId));
-      toast.success(`${name} is in ${title}.`);
-    } catch (error) {
-      toast.error(treeFailureMessage(error, `Couldn't add ${name} to ${title}.`));
-    }
-  };
+/** A folder placed whole. */
+function PlaceFolder({ nodeId, name }: { nodeId: string; name: string }) {
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <IconButton icon="folder" label={`Add ${name} to a workspace`} size="compact" />
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-64 p-1">
-        {workspaces.length === 0 ? (
-          <p className="px-2 py-1.5 text-caption text-[var(--text-secondary)]">
-            {status === "LoadingFirstPage" ? "Loading workspaces" : "No workspaces yet."}
-          </p>
-        ) : (
-          workspaces.map((workspace) => {
-            const done = added.has(workspace.nodeId);
-            return (
-              <button
-                key={workspace.nodeId}
-                type="button"
-                disabled={done}
-                onClick={() => void add(workspace.nodeId, workspace.name)}
-                className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-control px-2 py-1.5 text-left text-ui text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:cursor-default"
-              >
-                <span className="min-w-0 truncate">{workspace.name}</span>
-                {done ? <Icon name="done" size={14} /> : null}
-              </button>
-            );
-          })
-        )}
-      </PopoverContent>
-    </Popover>
+    <PlaceInMenu items={[{ nodeId, name }]} skip={new Set([nodeId])}>
+      <IconButton icon="folder" label={`Add ${name} to a workspace or folder`} size="compact" />
+    </PlaceInMenu>
+  );
+}
+
+/** A file chosen alone, placed as the work it became once it has synced. */
+function PlaceFile({ grantId, name }: { grantId: string; name: string }) {
+  // Asked only when someone reaches for it: a page of files holds no subscriptions.
+  const [wanted, setWanted] = useState(false);
+  const found = useQuery(api.bridge.syncedNodes, useAuthedArgs(wanted ? { items: [{ grantId, relativePath: name }] } : "skip", "account"));
+  const node = found?.[0];
+  return (
+    <PlaceInMenu items={node ? [{ nodeId: node.nodeId, name: node.name }] : []} emptyHint="This file is still syncing.">
+      <IconButton
+        icon="folder"
+        label={`Add ${name} to a workspace or folder`}
+        size="compact"
+        onPointerEnter={() => setWanted(true)}
+        onFocus={() => setWanted(true)}
+      />
+    </PlaceInMenu>
   );
 }
 
@@ -215,19 +212,24 @@ function FolderTile({
   local,
   busy,
   onAction,
+  browsing,
+  onBrowse,
 }: {
   folder: FolderView;
   ink: string;
   local: boolean;
   busy: string | null;
   onAction: (request: LocalDeviceRequest) => void;
+  browsing: boolean;
+  onBrowse: () => void;
 }) {
   const act = local && folder.actionable;
+  const isFile = folder.kind === "file";
   const working = busy?.endsWith(`:${folder.id}`) ?? false;
   const progress = folder.progress && folder.progress.synced < folder.progress.total ? folder.progress : null;
   const where = folder.path === folder.name ? null : folder.path.slice(0, folder.path.length - folder.name.length).replace(/\s*›\s*$/, "");
   return (
-    <li className="device-folder" data-tone={folder.tone} data-paused={folder.paused || undefined} style={{ "--folder-ink": `var(${ink})` } as CSSProperties}>
+    <li className="device-folder" data-open={browsing || undefined} data-tone={folder.tone} data-paused={folder.paused || undefined} style={{ "--folder-ink": `var(${ink})` } as CSSProperties}>
       <span aria-hidden className="device-folder-tab" />
       <span className="device-folder-name" title={folder.path}>
         {folder.kind === "file" ? <Icon name="document" size={14} className="mr-1 inline-block" /> : null}
@@ -246,9 +248,18 @@ function FolderTile({
           <span style={{ width: `${(progress.synced / Math.max(1, progress.total)) * 100}%` }} />
         </span>
       ) : null}
-      {act || folder.rootNodeId ? (
+      {folder.rootNodeId && !isFile ? (
+        <button type="button" className="device-folder-browse" aria-expanded={browsing} onClick={onBrowse}>
+          {browsing ? "Hide files" : "See files"}
+        </button>
+      ) : null}
+      {act || folder.rootNodeId || isFile ? (
         <span className="device-folder-actions" data-visible={working || undefined}>
-          {folder.rootNodeId ? <AddToWorkspaces nodeId={folder.rootNodeId} name={folder.name} /> : null}
+          {isFile ? (
+            <PlaceFile grantId={folder.id} name={folder.name} />
+          ) : folder.rootNodeId ? (
+            <PlaceFolder nodeId={folder.rootNodeId} name={folder.name} />
+          ) : null}
           {act && folder.tone === "attention" ? (
             <IconButton icon="syncing" label={`Retry ${folder.name}`} size="compact" disabled={working} onClick={() => onAction({ action: "retry_folder", grantId: folder.id })} />
           ) : null}

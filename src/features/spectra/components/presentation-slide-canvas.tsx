@@ -408,6 +408,7 @@ function PresentationObjectView({
   return (
     <div
       className="presentation-object"
+      data-object-id={compact ? undefined : object.id}
       {...(path ? targetAttrs(path) : {})}
       data-spectra-part={selected && !compact ? "grip" : undefined}
       data-selected={selected || undefined}

@@ -550,6 +550,7 @@ fn unpair_this_computer(
         "device_id",
         "browser_origin",
         "browser_session_token",
+        "browser_sessions",
         SYNC_PAUSED_KEY,
         LAST_SYNC_KEY,
         "replica_migration_complete",
@@ -3818,12 +3819,15 @@ async fn complete_pairing_offer(
         (exchange.device_id, exchange.browser_origin)
     };
     let session_token = state.prepare_pairing_session(&browser_origin);
+    // Every browser origin stays joined across restarts, not only the newest.
+    let browser_sessions = state.sessions_json_with(&browser_origin, &session_token);
     journal
         .set_configs(&[
             ("deployment_url", &deployment),
             ("device_id", &device_id),
             ("browser_origin", &browser_origin),
             ("browser_session_token", &session_token),
+            ("browser_sessions", &browser_sessions),
         ])
         .map_err(|error| error.to_string())?;
     state.set_device_id(device_id);
@@ -4834,6 +4838,9 @@ fn main() {
                 ) {
                     let _ = state.restore_pairing(origin, &token);
                 }
+                if let Some(sessions) = journal.config("browser_sessions")? {
+                    state.restore_sessions(&sessions);
+                }
             }
             if credential_ready {
                 if let Some(device_id) = journal.config("device_id")? {
@@ -5399,6 +5406,7 @@ mod devices_tests {
         journal
             .set_config("browser_session_token", "token")
             .unwrap();
+        journal.set_config("browser_sessions", "{}").unwrap();
         journal.set_config("installation_id", "install-1").unwrap();
         journal.set_config("file-mount:unavailable", "{}").unwrap();
         journal.set_config("mount:unrestored", "{}").unwrap();
@@ -5413,6 +5421,7 @@ mod devices_tests {
         );
         assert_eq!(journal.config(&mount_paused_key(&grant.id)).unwrap(), None);
         assert_eq!(journal.config("browser_session_token").unwrap(), None);
+        assert_eq!(journal.config("browser_sessions").unwrap(), None);
         assert!(!sync_paused(&journal));
         assert_eq!(
             journal.config("installation_id").unwrap().as_deref(),

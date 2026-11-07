@@ -12,7 +12,7 @@ import { HOME_PATH } from "../chat/home-routes";
 export type TourPerson = { firstName: string; school: string | null };
 
 /** A choice the step asks for, answered right in Spectra's note. */
-export type TourAsk = "reminders" | "bridge";
+export type TourAsk = "reminders" | "bridge" | "storage";
 
 export type TourStep = {
   id: string;
@@ -105,6 +105,14 @@ export const TOUR_STEPS: readonly TourStep[] = [
     ask: "bridge",
     say: () =>
       "Devices connects Spectra Bridge on your computer. With it I can open, read and organise files on your own machine, only ever where you allow it.",
+  },
+  {
+    id: "storage",
+    path: "/devices",
+    targets: ["[data-work-home]"],
+    ask: "storage",
+    say: () =>
+      "One more choice, and it's worth a moment. If you mostly use one computer, keep your work on it: everything opens instantly, works offline, and a backup goes up once a day. It looks and works the same either way.",
   },
   {
     id: "account",

@@ -2,7 +2,7 @@
 
 import { SearchField } from "@/components/ui/search-field";
 import { useMemo, useState } from "react";
-import { useQuery } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
 import { Segmented } from "@/components/ui/segmented";

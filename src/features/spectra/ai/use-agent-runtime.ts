@@ -44,6 +44,11 @@ const subscribe = (listener: () => void) => {
   return () => void listeners.delete(listener);
 };
 
+/** Bridge came or went: what this computer offers may have changed with it. */
+export function recheckAgentRuntime() {
+  return refresh(true);
+}
+
 export function useAgentRuntime() {
   const current = useSyncExternalStore(subscribe, () => status, () => null);
   useEffect(() => {

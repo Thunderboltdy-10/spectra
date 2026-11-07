@@ -170,6 +170,7 @@ export function artifactSummaryProjection(
     nativeFormat: artifact.nativeFormat,
     compatibilityProfile: artifact.compatibilityProfile,
     blueprintKey: artifact.blueprintKey,
+    ...(artifact.storageHome ? { storageHome: artifact.storageHome, storageStoreId: artifact.storageStoreId } : {}),
     title: artifact.title.slice(0, ARTIFACT_SUMMARY_TITLE_CHARS),
     ...(artifact.renamedFromTitle ? { renamedFromTitle: artifact.renamedFromTitle.slice(0, ARTIFACT_SUMMARY_TITLE_CHARS) } : {}),
     summary: boundedSummaryText(

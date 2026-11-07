@@ -196,6 +196,7 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
           .then((named) => {
             if (!named?.title) return;
             const placeId = places?.some((place) => place.id === named.placeId) ? named.placeId : undefined;
+            if (placeId && !session.workspaceId) session.workspaceId = placeId;
             emit({ type: "thread_title", title: named.title, ...(placeId ? { placeId } : {}) });
           })
           .catch(() => undefined)

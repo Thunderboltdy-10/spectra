@@ -1,5 +1,6 @@
 "use client";
 
+import { readIdentity } from "../administration/identity";
 import { shortAnswerMatches } from "../../../../shared/quiz-answer-match";
 import { useMissingAssets } from "./use-missing-assets";
 import { currentTimeMs } from "@/lib/unique-token";
@@ -384,7 +385,7 @@ function quizPracticeErrorMessage(error: unknown, fallback: string) {
   if (message.includes("QUIZ_PRACTICE_ATTEMPT_LIMIT_REACHED"))
     return "You have reached this quiz’s configured practice-attempt limit.";
   if (message.includes("QUIZ_PRACTICE_STILL_PUBLISHING"))
-    return "It is still publishing. Press Attempt again in a moment.";
+    return "It is still saving. Press again in a moment.";
   if (message.includes("QUIZ_PRACTICE_NOT_PUBLISHED"))
     return "This practice version is no longer available. The author may be preparing an updated draft.";
   if (message.includes("QUIZ_ATTEMPT_NOT_EDITABLE"))
@@ -474,6 +475,17 @@ export function QuizStudio({
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
   const [inspectAttempt, setInspectAttempt] = useState(false);
+  const [practiseWhenReady, setPractiseWhenReady] = useState(false);
+  const [studentWords, setStudentWords] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void readIdentity()
+      .then((identity) => live && setStudentWords((identity?.membership?.role ?? "student") === "student"))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
   const [practiceAttempt, setPracticeAttempt] =
     useState<SpectraQuizPracticeAttempt>();
   const practiceQuestionTypes = useMemo(
@@ -1061,6 +1073,18 @@ export function QuizStudio({
         ),
       )
     : null;
+  useEffect(() => {
+    if (!practiseWhenReady) return;
+    if (publishIssues.length) {
+      setPractiseWhenReady(false);
+      return;
+    }
+    if (!published || !synchronizationReady) return;
+    setPractiseWhenReady(false);
+    openQuizMode("attempt");
+    // openQuizMode reads the current attempts itself; this only waits for the save.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [practiseWhenReady, publishIssues.length, published, synchronizationReady]);
   const practiceExperience = practiceAttempt?.experience;
   const practiceAnswersRevealed = practiceAttempt?.answersRevealed !== false;
   const resumableAttempt = practiceAttempts.find(
@@ -1194,7 +1218,7 @@ export function QuizStudio({
     }
     if (!published) {
       setPracticeError(
-        "Publish this formative quiz before starting a private attempt.",
+        studentWords ? "Press Practise to start." : "Publish this formative quiz before starting a private attempt.",
       );
       setView("preview");
       return;
@@ -1426,6 +1450,12 @@ export function QuizStudio({
     return shortAnswerMatches(answers[question.id], question.correctAnswer);
   }
 
+  /** Practising a quiz of your own needs no separate publishing step. */
+  function practiseOwnQuiz() {
+    publishQuiz();
+    setPractiseWhenReady(true);
+  }
+
   function publishQuiz() {
     const issues = validateQuizForPublishing(
       questions as PortableQuizQuestion[],
@@ -1570,7 +1600,7 @@ export function QuizStudio({
         activeQuizMode === "build"
           ? {
               id: "preview",
-              label: "Preview as learner",
+              label: studentWords ? "Try it" : "Preview as learner",
               icon: Eye,
               tab: "Review",
               priority: "essential",
@@ -1705,18 +1735,26 @@ export function QuizStudio({
           // one is sat. A disabled primary would be a dead control.
           published || !canEditQuiz
             ? {
-                label: "Attempt",
+                label: studentWords ? "Practise" : "Attempt",
                 icon: Radio,
                 requires: "attempt",
                 busy: practiceBusy,
                 disabled: !published || !synchronizationReady,
                 onSelect: () => openQuizMode("attempt"),
               }
-            : {
-                label: publishedAt ? "Publish changes" : "Publish",
-                requires: "edit",
-                onSelect: publishQuiz,
-              }
+            : studentWords
+              ? {
+                  label: "Practise",
+                  icon: Radio,
+                  requires: "edit",
+                  busy: practiseWhenReady,
+                  onSelect: practiseOwnQuiz,
+                }
+              : {
+                  label: publishedAt ? "Publish changes" : "Publish",
+                  requires: "edit",
+                  onSelect: publishQuiz,
+                }
         }
       />
       {canEditQuiz ? (
@@ -1737,7 +1775,7 @@ export function QuizStudio({
             Editing a published quiz withdraws it: attempts are pinned to the
             version they started on, and the next attempt must not snapshot
             questions nobody has re-validated. */}
-        {canEditQuiz && !publishIssues.length ? (
+        {canEditQuiz && !studentWords && !publishIssues.length ? (
           <p
             className="border-b border-[var(--border-subtle)] px-4 py-2 text-micro leading-5 text-[var(--text-secondary)]"
             role="status"

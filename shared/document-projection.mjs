@@ -225,27 +225,7 @@ export function docxRichInlineToJson(content, binding, nativeReadOnly = false) {
   const nodes = content.flatMap((item) => {
     if (item.kind === "text") {
       if (!item.text) return [];
-      const format = record(item.format);
-      const marks = [
-        ...(format.bold === true ? [{ type: "bold" }] : []),
-        ...(format.italic === true ? [{ type: "italic" }] : []),
-        ...(format.underline === true ? [{ type: "underline" }] : []),
-        ...(format.strike === true ? [{ type: "strike" }] : []),
-      ];
-      const style = {
-        ...(typeof format.fontFamily === "string"
-          ? { fontFamily: format.fontFamily }
-          : {}),
-        ...(typeof format.fontSizePoints === "number"
-          ? { fontSize: `${format.fontSizePoints}pt` }
-          : {}),
-        ...(typeof format.color === "string" ? { color: `#${format.color}` } : {}),
-      };
-      if (Object.keys(style).length) marks.push({ type: "textStyle", attrs: style });
-      if (typeof format.highlight === "string")
-        marks.push({ type: "highlight", attrs: { color: format.highlight } });
-      else if (typeof format.shading === "string")
-        marks.push({ type: "highlight", attrs: { color: `#${format.shading}` } });
+      const marks = marksFromRunFormat(item.format);
       if (item.href) marks.push({ type: "link", attrs: { href: item.href } });
       return [{ type: "text", text: item.text, ...(marks.length ? { marks } : {}) }];
     }
@@ -337,6 +317,133 @@ function cellJsonFromRichContent(content, binding, nativeReadOnly) {
   ];
 }
 
+const ALIGNED = new Set(["center", "right", "justify"]);
+
+/** A paragraph format as the editor's node attributes. Defaults write nothing. */
+export function paragraphAttrsFromFormat(value) {
+  const format = record(value);
+  const number = (key) => {
+    const size = Number(format[key]);
+    return Number.isFinite(size) ? size : 0;
+  };
+  const line = number("lineSpacing");
+  const after = number("spacingAfterPoints");
+  const before = number("spacingBeforePoints");
+  const indent = number("indentLevel");
+  const firstLine = number("firstLineIndentPoints");
+  return {
+    ...(ALIGNED.has(format.alignment) ? { textAlign: format.alignment } : {}),
+    ...(line > 0 && line !== 1 ? { lineSpacing: line } : {}),
+    ...(after > 0 ? { spacingAfter: after } : {}),
+    ...(before > 0 ? { spacingBefore: before } : {}),
+    ...(indent !== 0 ? { indentLevel: indent } : {}),
+    ...(firstLine !== 0 ? { firstLineIndent: firstLine } : {}),
+    ...(typeof format.border === "string" && format.border !== "none"
+      ? { frameBorder: format.border }
+      : {}),
+    ...(typeof format.shading === "string"
+      ? { frameShading: `#${format.shading}` }
+      : {}),
+    ...(format.pageBreak === true ? { pageBreak: true } : {}),
+    ...(format.pageBreakBefore === true ? { pageBreakBefore: true } : {}),
+  };
+}
+
+/** The other direction, shaped the way the Word lens writes `w:pPr`. */
+export function paragraphFormatFromAttrs(value) {
+  const attrs = record(value);
+  const positive = (entry) => {
+    const size = Number(entry);
+    return Number.isFinite(size) && size > 0 ? size : 0;
+  };
+  const signed = (entry) => {
+    const size = Number(entry);
+    return Number.isFinite(size) ? size : 0;
+  };
+  return {
+    alignment: ALIGNED.has(attrs.textAlign) ? attrs.textAlign : "left",
+    lineSpacing: positive(attrs.lineSpacing) || 1,
+    spacingAfterPoints: positive(attrs.spacingAfter),
+    spacingBeforePoints: positive(attrs.spacingBefore),
+    // Indent keeps its sign. A Word style may outdent a heading into the margin,
+    // and reporting that as level 0 would pull it back on the next save.
+    indentLevel: Math.round(signed(attrs.indentLevel)),
+    firstLineIndentPoints: signed(attrs.firstLineIndent),
+    border:
+      typeof attrs.frameBorder === "string" && attrs.frameBorder !== "none"
+        ? attrs.frameBorder
+        : null,
+    shading: colorHex(attrs.frameShading) ?? null,
+    ...(attrs.pageBreak === true ? { pageBreak: true } : {}),
+    ...(attrs.pageBreakBefore === true ? { pageBreakBefore: true } : {}),
+  };
+}
+
+/** Marks for a run format, in the order the editor reads them. */
+function marksFromRunFormat(value) {
+  const format = record(value);
+  const marks = [
+    ...(format.bold === true ? [{ type: "bold" }] : []),
+    ...(format.italic === true ? [{ type: "italic" }] : []),
+    ...(format.underline === true ? [{ type: "underline" }] : []),
+    ...(format.strike === true ? [{ type: "strike" }] : []),
+    ...(format.verticalAlign === "superscript" ? [{ type: "superscript" }] : []),
+    ...(format.verticalAlign === "subscript" ? [{ type: "subscript" }] : []),
+    ...(format.smallCaps === true ? [{ type: "smallCaps" }] : []),
+    ...(format.allCaps === true ? [{ type: "allCaps" }] : []),
+  ];
+  const style = {
+    ...(typeof format.fontFamily === "string"
+      ? { fontFamily: format.fontFamily }
+      : {}),
+    ...(typeof format.fontSizePoints === "number"
+      ? { fontSize: `${format.fontSizePoints}pt` }
+      : {}),
+    ...(typeof format.color === "string" ? { color: `#${format.color}` } : {}),
+  };
+  if (Object.keys(style).length) marks.push({ type: "textStyle", attrs: style });
+  if (typeof format.highlight === "string")
+    marks.push({ type: "highlight", attrs: { color: format.highlight } });
+  else if (typeof format.shading === "string")
+    marks.push({ type: "highlight", attrs: { color: `#${format.shading}` } });
+  return marks;
+}
+
+/**
+ * The block's own formatting, written onto the node the editor loads. A paragraph
+ * that opens without it reads as left-aligned and single-spaced, and the first
+ * save then writes that back over the file.
+ */
+function withBlockFormatting(node, blockAttrs) {
+  const paragraph = paragraphAttrsFromFormat(record(blockAttrs).paragraphFormat);
+  if (!Object.keys(paragraph).length) return node;
+  if (node.type === "paragraph" || node.type === "heading")
+    return { ...node, attrs: { ...node.attrs, ...paragraph } };
+  // Lists and quotes hold their text a level down, and a list's own indent is its
+  // depth, so only the alignment carries through to their paragraphs.
+  if ((node.type === "bulletList" || node.type === "blockquote") && paragraph.textAlign) {
+    const align = (child) =>
+      child?.type === "paragraph"
+        ? { ...child, attrs: { ...child.attrs, textAlign: paragraph.textAlign } }
+        : Array.isArray(child?.content)
+          ? { ...child, content: child.content.map(align) }
+          : child;
+    return { ...node, content: node.content.map(align) };
+  }
+  return node;
+}
+
+function withCellAlignment(rowIndex, columnIndex, content, alignments) {
+  const row = Array.isArray(alignments) ? alignments[rowIndex] : undefined;
+  const textAlign = Array.isArray(row) ? row[columnIndex] : undefined;
+  if (!ALIGNED.has(textAlign) || !Array.isArray(content)) return content;
+  return content.map((child) =>
+    child?.type === "paragraph"
+      ? { ...child, attrs: { ...child.attrs, textAlign } }
+      : child,
+  );
+}
+
 export function docxRichBlockToJson(value, binding) {
   const block = record(value);
   if (
@@ -399,7 +506,12 @@ export function docxRichBlockToJson(value, binding) {
               : cell;
           return {
           type: rowIndex === 0 && attrs.headerRow !== false ? "tableHeader" : "tableCell",
-          content: cellJsonFromRichContent(effectiveCell, binding, nativeReadOnly),
+          content: withCellAlignment(
+            rowIndex,
+            columnIndex,
+            cellJsonFromRichContent(effectiveCell, binding, nativeReadOnly),
+            attrs.cellAlignments,
+          ),
           };
         }),
       })),
@@ -416,7 +528,7 @@ export function docxRichBlockToJson(value, binding) {
   if (!richInlineHasSemantics(effectiveInlineContent)) return null;
   const content = docxRichInlineToJson(effectiveInlineContent, binding, nativeReadOnly);
   if (block.type === "heading")
-    return {
+    return withBlockFormatting({
       type: "heading",
       attrs: {
         ...nativeAttrs,
@@ -426,9 +538,9 @@ export function docxRichBlockToJson(value, binding) {
           2,
       },
       content,
-    };
+    }, attrs);
   if (block.type === "list")
-    return {
+    return withBlockFormatting({
       type: "bulletList",
       attrs: nativeAttrs,
       content: [
@@ -437,11 +549,29 @@ export function docxRichBlockToJson(value, binding) {
           content: [{ type: "paragraph", content }],
         },
       ],
-    };
-  return { type: "paragraph", attrs: nativeAttrs, content };
+    }, attrs);
+  return withBlockFormatting({ type: "paragraph", attrs: nativeAttrs, content }, attrs);
 }
 
 function blockToJson(blockValue, index, nativeBinding) {
+  const attrs = record(record(blockValue).attrs);
+  const node = plainOrRichBlockToJson(blockValue, index, nativeBinding);
+  const formatted = withBlockFormatting(node, attrs);
+  // Runs that came through as plain text still have the block's own format to wear.
+  const marks = record(blockValue).inlineContent ? [] : marksFromRunFormat(attrs.format);
+  if (!marks.length) return formatted;
+  const wear = (child) =>
+    child?.type === "text"
+      ? { ...child, marks: [...(child.marks ?? []), ...marks.filter((mark) => !child.marks?.some((own) => own.type === mark.type))] }
+      : Array.isArray(child?.content)
+        ? { ...child, content: child.content.map(wear) }
+        : child;
+  return Array.isArray(formatted.content) && (formatted.type === "paragraph" || formatted.type === "heading")
+    ? { ...formatted, content: formatted.content.map(wear) }
+    : formatted;
+}
+
+function plainOrRichBlockToJson(blockValue, index, nativeBinding) {
   const block = record(blockValue);
   const id =
     typeof block.id === "string" && block.id.trim()
@@ -520,9 +650,14 @@ function blockToJson(blockValue, index, nativeBinding) {
       },
       content: (rows.length ? rows : [[""]]).map((row, rowIndex) => ({
         type: "tableRow",
-        content: row.map((cell) => ({
+        content: row.map((cell, columnIndex) => ({
           type: rowIndex === 0 && attrs.headerRow !== false ? "tableHeader" : "tableCell",
-          content: [{ type: "paragraph", content: inlineText(cell) }],
+          content: withCellAlignment(
+            rowIndex,
+            columnIndex,
+            [{ type: "paragraph", content: inlineText(cell) }],
+            attrs.cellAlignments,
+          ),
         })),
       })),
     };
@@ -636,6 +771,10 @@ function runFormatFromMarks(marks) {
     ...(list.some((mark) => mark?.type === "italic") ? { italic: true } : {}),
     ...(list.some((mark) => mark?.type === "underline") ? { underline: true } : {}),
     ...(list.some((mark) => mark?.type === "strike") ? { strike: true } : {}),
+    ...(list.some((mark) => mark?.type === "superscript") ? { verticalAlign: "superscript" } : {}),
+    ...(list.some((mark) => mark?.type === "subscript") ? { verticalAlign: "subscript" } : {}),
+    ...(list.some((mark) => mark?.type === "smallCaps") ? { smallCaps: true } : {}),
+    ...(list.some((mark) => mark?.type === "allCaps") ? { allCaps: true } : {}),
     ...(typeof style.fontFamily === "string" ? { fontFamily: style.fontFamily } : {}),
     ...(pointsFromCssSize(style.fontSize) !== undefined
       ? { fontSizePoints: pointsFromCssSize(style.fontSize) }
@@ -797,6 +936,7 @@ export function documentBlocksFromJson(json) {
           ...(node.attrs?.nativeReadOnly === true
             ? { nativeReadOnly: true }
             : {}),
+          ...carriedParagraphFormat(node),
         },
       };
     }
@@ -865,16 +1005,27 @@ export function documentBlocksFromJson(json) {
         text: String(node.attrs?.label ?? "Citation"),
         citation: node.attrs,
       };
+    const nativeReadOnly = node?.attrs?.nativeReadOnly === true;
+    const format = carriedParagraphFormat(node);
     return {
       id,
       type: "paragraph",
       text,
       ...(hasRichContent ? { inlineContent } : {}),
-      ...(node?.attrs?.nativeReadOnly === true
-        ? { attrs: { nativeReadOnly: true } }
+      ...(nativeReadOnly || format.paragraphFormat
+        ? { attrs: { ...(nativeReadOnly ? { nativeReadOnly: true } : {}), ...format } }
         : {}),
     };
   });
+}
+
+/** Only a node that has formatting says so; a plain paragraph's block stays plain. */
+function carriedParagraphFormat(node) {
+  const attrs = record(node?.attrs);
+  const format = paragraphFormatFromAttrs(attrs);
+  return Object.keys(paragraphAttrsFromFormat(format)).length
+    ? { paragraphFormat: format }
+    : {};
 }
 
 const MIRROR_KEYS = ["type", "text", "rows", "richRows", "inlineContent", "attrs"];

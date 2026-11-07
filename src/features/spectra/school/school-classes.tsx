@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { EmptyState, LoadingRows } from "@/components/ui/page-state";

@@ -23,6 +23,7 @@ vi.mock("convex/react", () => ({ useQuery: mocks.useQuery }));
 vi.mock("../data/use-authed-args", () => ({
   useAuthedArgs: (value: unknown) => value,
 }));
+vi.mock("../island/run-tabs", () => ({ useRunTabs: () => [], runTabCard: () => undefined, refreshRunTabs: vi.fn() }));
 vi.mock("../data/api", () => ({
   clearSpectraRunAgent: vi.fn(),
   getSpectraOperationConflict: vi.fn(),

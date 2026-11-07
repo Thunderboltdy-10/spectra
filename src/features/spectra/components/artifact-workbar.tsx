@@ -173,6 +173,8 @@ function layoutKey(layout: Pick<GroupedLayout, "labelHidden" | "groupMenus" | "i
  * (the answer for every registered type), an explicit array is for surfaces the
  * registry does not model, and `[]` states that the type has no modes.
  */
+const MAX_WORKBAR_OVERRUN = 64;
+
 export function ArtifactWorkbar({
   label,
   modes,
@@ -409,7 +411,17 @@ export function ArtifactWorkbar({
       setCollapse((current) => (layoutKey(current) === layoutKey(next) ? current : next));
     };
     recompute();
-    const observer = new ResizeObserver(() => recompute());
+    let width = host.clientWidth;
+    const observer = new ResizeObserver(() => {
+      // A new width is a new plan: what was too wide at the old one says nothing now.
+      if (host.clientWidth !== width && overrun > 0) {
+        width = host.clientWidth;
+        setOverrun(0);
+        return;
+      }
+      width = host.clientWidth;
+      recompute();
+    });
     observer.observe(host);
     return () => observer.disconnect();
     // `measureSignature` stands for `arranged`: a fresh array with the same
@@ -428,7 +440,8 @@ export function ArtifactWorkbar({
     const shown = [...host.children].filter((child) => !child.classList.contains("spectra-workbar-measure"));
     const right = Math.max(...shown.map((child) => child.getBoundingClientRect().right));
     const over = Math.ceil(right - host.getBoundingClientRect().right);
-    if (over > 0) setOverrun((current) => current + over);
+    // A font rendering wider than measured is a few pixels, never the whole bar.
+    if (over > 0) setOverrun((current) => Math.min(MAX_WORKBAR_OVERRUN, current + over));
   }, [collapse, customizing]);
 
   const layout = customizing ? EMPTY_LAYOUT : collapse;

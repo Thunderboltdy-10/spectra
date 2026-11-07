@@ -1,8 +1,10 @@
 import type { HarnessMessage } from "../ai/harness/types";
 
 /*
- * The morning brief (docs/product/HOME.md, "The morning brief"): yesterday in
- * a few lines and up to five things to do today, each one press away. The
+ * The morning brief (docs/product/HOME.md, "The morning brief"): what's coming
+ * up, the few things to do today, each one press away, and yesterday in a line
+ * or two. A quiet yesterday doesn't make a quiet brief: there's always a next
+ * thing to get ahead of, and it's written whatever the model does. The
  * server gathers the context and asks the model once a day; this module is
  * the shapes, the prompt and the reading of the answer. Pure, so the route,
  * Home and the tests agree on them.
@@ -31,6 +33,10 @@ export type BriefContext = {
   today: BriefContextItem[];
   /** Deadlines in the next two weeks. */
   due: BriefContextItem[];
+  /** Deadlines after that, for looking further ahead on a quiet week. */
+  later: BriefContextItem[];
+  /** Their classes and projects, so there's always something to get ahead on. */
+  places: string[];
   /** School tasks past their deadline and still open; ids are "school:<record>". */
   late: BriefContextItem[];
   /** Tasks with no date. */
@@ -69,7 +75,7 @@ export type BriefSuggestion = {
   doneId?: string;
 };
 
-export type DailyBrief = { recap: string; suggestions: BriefSuggestion[] };
+export type DailyBrief = { recap: string; ahead?: string; suggestions: BriefSuggestion[] };
 
 const pad = (value: number) => String(value).padStart(2, "0");
 
@@ -149,12 +155,14 @@ export function briefMessages(context: BriefContext): HarnessMessage[] {
       role: "system",
       content: [
         "You write a student's morning brief in Spectra, their school workspace. They read it when they wake up.",
-        'Reply with JSON only: {"recap": string, "suggestions": [suggestion]}.',
-        "recap: two or three plain sentences about what they did yesterday, in the second person, naming the threads and works. If nothing happened, say so in a few words, without reassurance.",
-        "suggestions: four or five things for today, most useful first, that move the day forward. Do the work for the student where you can rather than only pointing at it:",
+        'Reply with JSON only: {"ahead": string, "recap": string, "suggestions": [suggestion]}.',
+        "ahead: one or two plain sentences on what matters next, in the second person: the nearest deadlines and tests with their days, and what to get ahead of. This is the heart of the brief, so always write it. On a quiet week, look further ahead or say what would be worth doing now while there's room.",
+        "recap: one or two plain sentences about what they did yesterday, naming the threads and works. If nothing happened yesterday, leave it empty. Never write that there is nothing to report.",
+        "suggestions: always four or five things to do, most useful first, whatever yesterday looked like. Do the work for the student where you can rather than only pointing at it. Always include at least one work to make or pick up (make or open) and at least one thing to ask Spectra (ask):",
         "- When a deadline or test is coming, propose making the work that prepares for it (make), such as a quiz to revise or a document that plans the essay.",
         "- When something coming has no task to prepare it yet, draft that task with every detail (add): a dated, timed slot before the deadline, an estimate and the steps.",
         "- Point at a late task, or one due in the next three days, at most twice (task). Pick up a recent work only when it is unfinished (open).",
+        "- With little coming up, suggest getting ahead in one of their classes: revising what they last worked on, a quiz on a recent topic, or a plan for the next big assessment.",
         "Each suggestion is one of:",
         '- {"kind":"task","targetId":"<id>"}: work on a due, late or undated task from the lists.',
         '- {"kind":"open","targetId":"<id>"}: pick up a recent work from the lists.',
@@ -175,9 +183,11 @@ export function briefMessages(context: BriefContext): HarnessMessage[] {
         section("Recent works", context.recentWorks, context.timeZone),
         section("Today", context.today, context.timeZone),
         section("Due in the next two weeks", context.due, context.timeZone),
+        section("Due after that", context.later, context.timeZone),
+        context.places.length ? `Their classes and projects: ${context.places.slice(0, BRIEF_LIMITS.items).join(", ")}.` : "",
         section("Late", context.late, context.timeZone),
         section("Open tasks with no date", context.open, context.timeZone),
-      ].join("\n\n"),
+      ].filter(Boolean).join("\n\n"),
     },
   ];
 }
@@ -213,6 +223,7 @@ export function parseBrief(text: string, context: BriefContext): DailyBrief {
   const json = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
   const raw = JSON.parse(json) as Record<string, unknown>;
   const recap = str(raw.recap, 600) ?? "";
+  const ahead = str(raw.ahead, 600);
   const works = new Map([...context.recentWorks, ...context.yesterdayWorks].map((item) => [item.id, item.type]));
   const tasks = new Set([...context.due, ...context.late, ...context.open, ...context.today].map((item) => item.id));
   const suggestions = (Array.isArray(raw.suggestions) ? raw.suggestions : []).flatMap((value): BriefSuggestion[] => {
@@ -238,6 +249,67 @@ export function parseBrief(text: string, context: BriefContext): DailyBrief {
     if (item.kind === "ask" && prompt) return [{ kind: "ask", title, why, prompt, ...how }];
     return [];
   });
-  if (!recap && !suggestions.length) throw new Error("The brief came back empty.");
-  return { recap, suggestions: suggestions.slice(0, BRIEF_LIMITS.suggestions) };
+  if (!ahead && !suggestions.length) throw new Error("The brief came back empty.");
+  return { recap, ...(ahead ? { ahead } : {}), suggestions: suggestions.slice(0, BRIEF_LIMITS.suggestions) };
+}
+
+const shortDay = (at: number, timeZone: string) =>
+  new Intl.DateTimeFormat("en-GB", { timeZone, weekday: "long", day: "numeric", month: "long" }).format(at);
+
+/**
+ * The brief without the model: plainer, and still a real plan. A morning with
+ * no brief at all is the one thing this must never be.
+ */
+export function plainBrief(context: BriefContext): DailyBrief {
+  const coming = [...context.due, ...context.later].sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+  const next = coming[0];
+  const after = coming[1];
+  const ahead = next
+    ? `${clip(next.title, BRIEF_LIMITS.title)} is next, on ${shortDay(next.at ?? Date.now(), context.timeZone)}${after ? `, then ${clip(after.title, BRIEF_LIMITS.title)} on ${shortDay(after.at ?? Date.now(), context.timeZone)}` : ""}.`
+    : context.places.length
+      ? `Nothing has a date yet, so this is a good week to get ahead in ${context.places.slice(0, 2).join(" and ")}.`
+      : "Nothing has a date yet, so this is a good week to get ahead.";
+  const moves: BriefSuggestion[] = [];
+  for (const task of context.late.slice(0, 1))
+    moves.push({ kind: "task", title: `Catch up on ${clip(task.title, 50)}`, why: "This one is past its deadline.", targetId: task.id });
+  if (next) {
+    moves.push({
+      kind: "make",
+      workType: "document",
+      title: `Plan for ${clip(next.title, 50)}`,
+      why: `It's on ${shortDay(next.at ?? Date.now(), context.timeZone)}.`,
+      prompt: `Make a short document that plans how I get ${next.title} done by ${shortDay(next.at ?? Date.now(), context.timeZone)}: what's left, what to do first and when.`,
+    });
+    moves.push({
+      kind: "add",
+      title: `Set time aside for ${clip(next.title, 40)}`,
+      why: "A slot before the deadline makes it real.",
+      task: { title: `Work on ${clip(next.title, 100)}`, dueDay: zonedDay(next.at ?? Date.now(), context.timeZone), estimateMinutes: 45 },
+    });
+  }
+  const recent = context.recentWorks[0];
+  if (recent)
+    moves.push({
+      kind: "open",
+      title: `Pick up ${clip(recent.title, 50)}`,
+      why: "It's what you worked on last.",
+      targetId: recent.id,
+      ...(recent.type ? { workType: recent.type } : {}),
+    });
+  const place = context.places[0];
+  if (!next && place)
+    moves.push({
+      kind: "make",
+      workType: "quiz",
+      title: `Test yourself in ${clip(place, 50)}`,
+      why: "A short quiz shows what to revise before it matters.",
+      prompt: `Make a ten-question quiz on what I've been studying lately in ${place}.`,
+    });
+  moves.push({
+    kind: "ask",
+    title: "Plan the next two weeks",
+    why: "See what's coming and when to do it.",
+    prompt: "Look at what's coming up in my calendar and tasks, and plan the next two weeks with me.",
+  });
+  return { recap: "", ahead, suggestions: moves.slice(0, BRIEF_LIMITS.suggestions) };
 }

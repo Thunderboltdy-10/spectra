@@ -5,8 +5,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
+use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{Request, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -38,7 +39,8 @@ fn is_local_development_origin(value: &str) -> bool {
 pub struct ServerState {
     paired: RwLock<bool>,
     allowed_origins: RwLock<HashSet<String>>,
-    session_token: RwLock<Vec<u8>>,
+    /// One session per browser origin: joining from a second never ends the first.
+    sessions: RwLock<HashMap<String, Vec<u8>>>,
     bind_error: RwLock<Option<String>>,
     pending_pairing: RwLock<HashMap<String, PairingOffer>>,
     pairing_completion: RwLock<HashMap<String, String>>,
@@ -89,7 +91,7 @@ impl ServerState {
         Self {
             paired: RwLock::new(false),
             allowed_origins: RwLock::new(origins),
-            session_token: RwLock::new(vec![]),
+            sessions: RwLock::new(HashMap::new()),
             bind_error: RwLock::new(None),
             pending_pairing: RwLock::new(HashMap::new()),
             pairing_completion: RwLock::new(HashMap::new()),
@@ -127,7 +129,7 @@ impl ServerState {
     pub fn pair(&self, origin: String) -> String {
         let mut token = vec![0_u8; 32];
         rand::rng().fill_bytes(&mut token);
-        *self.session_token.write().unwrap() = token.clone();
+        self.sessions.write().unwrap().insert(origin.clone(), token.clone());
         self.allowed_origins.write().unwrap().insert(origin);
         *self.paired.write().unwrap() = true;
         base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, token)
@@ -135,7 +137,7 @@ impl ServerState {
     /// Unpairing: the browser session and the device identity are dropped.
     pub fn forget_pairing(&self) {
         *self.paired.write().unwrap() = false;
-        *self.session_token.write().unwrap() = vec![];
+        self.sessions.write().unwrap().clear();
         *self.device_id.write().unwrap() = None;
         self.cloud_seen_at.store(0, Ordering::Relaxed);
         self.pending_pairing.write().unwrap().clear();
@@ -227,16 +229,41 @@ impl ServerState {
         let decoded =
             base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, token)?;
         anyhow::ensure!(decoded.len() == 32, "invalid stored browser session");
-        self.allowed_origins.write().unwrap().insert(origin);
-        *self.session_token.write().unwrap() = decoded;
+        self.allowed_origins.write().unwrap().insert(origin.clone());
+        self.sessions.write().unwrap().insert(origin, decoded);
         *self.paired.write().unwrap() = true;
         Ok(())
+    }
+    /// Every session as the journal keeps it, with one about to be committed.
+    pub fn sessions_json_with(&self, origin: &str, token: &str) -> String {
+        let encode = |bytes: &Vec<u8>| {
+            base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, bytes)
+        };
+        let mut stored: HashMap<String, String> = self
+            .sessions
+            .read()
+            .unwrap()
+            .iter()
+            .map(|(origin, token)| (origin.clone(), encode(token)))
+            .collect();
+        stored.insert(origin.to_owned(), token.to_owned());
+        serde_json::to_string(&stored).unwrap_or_else(|_| "{}".into())
+    }
+    /// A session that can't be read is dropped; its browser joins again on its own.
+    pub fn restore_sessions(&self, json: &str) {
+        let Ok(stored) = serde_json::from_str::<HashMap<String, String>>(json) else {
+            return;
+        };
+        for (origin, token) in stored {
+            let _ = self.restore_pairing(origin, &token);
+        }
     }
     pub fn resume_session(&self, origin: &str) -> Option<String> {
         if !self.is_paired() || !self.allowed_origins.read().unwrap().contains(origin) {
             return None;
         }
-        let token = self.session_token.read().unwrap();
+        let sessions = self.sessions.read().unwrap();
+        let token = sessions.get(origin)?;
         if token.len() != 32 {
             return None;
         }
@@ -252,13 +279,26 @@ impl ServerState {
         let supplied =
             base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, supplied)
                 .unwrap_or_default();
-        let expected = self.session_token.read().unwrap();
-        expected.len() == 32
-            && supplied.len() == 32
-            && bool::from(supplied.ct_eq(expected.as_slice()))
+        self.sessions
+            .read()
+            .unwrap()
+            .values()
+            .any(|expected| session_matches(expected, &supplied))
+    }
+    fn origin_session_matches(&self, origin: &str, supplied: &[u8]) -> bool {
+        self.is_paired()
+            && self
+                .sessions
+                .read()
+                .unwrap()
+                .get(origin)
+                .is_some_and(|expected| session_matches(expected, supplied))
     }
     pub fn resume_session_with_token(&self, origin: &str, token: &str) -> Option<String> {
-        if !self.session_token_matches(token) {
+        let supplied =
+            base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, token)
+                .unwrap_or_default();
+        if !self.origin_session_matches(origin, &supplied) {
             return None;
         }
         self.resume_session(origin)
@@ -295,6 +335,10 @@ impl ServerState {
     }
 }
 
+fn session_matches(expected: &[u8], supplied: &[u8]) -> bool {
+    expected.len() == 32 && supplied.len() == 32 && bool::from(supplied.ct_eq(expected))
+}
+
 pub fn router(state: Arc<ServerState>) -> Router {
     let protected = Router::new()
         .route("/v1/status", get(status))
@@ -309,12 +353,15 @@ pub fn router(state: Arc<ServerState>) -> Router {
         .route("/v1/file/reveal", post(reveal_file))
         .route("/v1/unpair", post(unpair))
         .route("/v1/agent/hub", post(set_agent_hub))
+        .route("/v1/works/call", post(works_call))
         .route_layer(middleware::from_fn_with_state(state.clone(), authenticate));
     let cors_state = state.clone();
     Router::new()
         .route("/v1/health", get(health))
         .route("/v1/agent/connect", get(crate::agent_relay::connect))
         .route("/v1/agent/mcp/{id}", post(crate::agent_relay::mcp))
+        .route("/v1/rooms", get(open_room_socket))
+        .route("/v1/store", get(crate::agent_relay::store_socket))
         .route("/v1/pair", post(pair_offer))
         .route("/v1/pair/status", post(pair_status))
         .route("/v1/session/resume", post(resume))
@@ -369,8 +416,51 @@ async fn health(State(state): State<Arc<ServerState>>) -> Json<HealthResponse> {
     })
 }
 
-async fn status(State(state): State<Arc<ServerState>>) -> Json<LocalBridgeStatus> {
-    Json(state.local_status())
+/// A socket to this computer's rooms. Browsers can't set headers on one, so it
+/// proves itself in its first message: a paired browser with its session, and
+/// the local server with the relay token.
+async fn open_room_socket(
+    State(state): State<Arc<ServerState>>,
+    headers: HeaderMap,
+    socket: WebSocketUpgrade,
+) -> Response {
+    let Some(rooms) = crate::rooms::shared().cloned() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "Work on this computer isn't available").into_response();
+    };
+    let origin = headers.get("origin").and_then(|value| value.to_str().ok()).map(str::to_string);
+    let authorize: crate::rooms::Authorize = Arc::new(move |token: &str| match &origin {
+        Some(origin) => {
+            let supplied = base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, token)
+                .unwrap_or_default();
+            state.origin_session_matches(origin, &supplied)
+        }
+        None => crate::agent_relay::relay_token_matches(token),
+    });
+    socket
+        .protocols([crate::rooms::FRAME_PROTOCOL])
+        .max_message_size(crate::rooms::FRAME_BYTES + 64)
+        .max_frame_size(crate::rooms::FRAME_BYTES + 64)
+        .on_upgrade(move |socket| crate::rooms::serve_browser(socket, rooms, authorize))
+}
+
+/// One request about stored work, from a paired browser.
+async fn works_call(body: String) -> Response {
+    let Some(rooms) = crate::rooms::shared().cloned() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "Work on this computer isn't available").into_response();
+    };
+    (
+        [(http::header::CONTENT_TYPE, "application/json")],
+        crate::rooms::answer_store_request(rooms, body).await,
+    )
+        .into_response()
+}
+
+async fn status(State(state): State<Arc<ServerState>>) -> Response {
+    // Reading the journal waits for its lock; a long sync must not hold this thread.
+    match tokio::task::spawn_blocking(move || state.local_status()).await {
+        Ok(status) => Json::<LocalBridgeStatus>(status).into_response(),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Status is unavailable").into_response(),
+    }
 }
 
 async fn select_mount(State(state): State<Arc<ServerState>>) -> Response {
@@ -592,12 +682,7 @@ async fn authenticate(
             base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, v).ok()
         })
         .unwrap_or_default();
-    let token_ok = state.is_paired() && {
-        let expected = state.session_token.read().unwrap();
-        expected.len() == 32
-            && supplied.len() == 32
-            && bool::from(supplied.ct_eq(expected.as_slice()))
-    };
+    let token_ok = origin.is_some_and(|value| state.origin_session_matches(value, &supplied));
     if !allowed || !token_ok {
         return (StatusCode::UNAUTHORIZED, "Bridge session is not authorized").into_response();
     }
@@ -802,8 +887,8 @@ mod tests {
         restored.restore_pairing(ORIGIN.into(), &token).unwrap();
         assert!(*restored.paired.read().unwrap());
         assert_eq!(
-            *restored.session_token.read().unwrap(),
-            *original.session_token.read().unwrap()
+            *restored.sessions.read().unwrap(),
+            *original.sessions.read().unwrap()
         );
     }
     #[test]
@@ -833,6 +918,35 @@ mod tests {
         assert_eq!(state.pending_pairing.read().unwrap().len(), 5);
         assert!(state.take_pairing_offer(&format!("{:0>64}", 5)).is_ok());
     }
+    #[test]
+    fn a_second_origin_never_ends_the_first_session() {
+        let state = ServerState::unpaired();
+        let first = state.pair(ORIGIN.into());
+        let second = state.pair("http://localhost:3160".into());
+        assert_ne!(first, second);
+        assert_eq!(state.resume_session(ORIGIN), Some(first.clone()));
+        assert_eq!(state.resume_session_with_token(ORIGIN, &first), Some(first.clone()));
+        assert_eq!(state.resume_session("http://localhost:3160"), Some(second.clone()));
+        // One origin's session doesn't open another's.
+        assert_eq!(state.resume_session_with_token(ORIGIN, &second), None);
+    }
+
+    #[test]
+    fn every_origin_survives_a_restart() {
+        let state = ServerState::unpaired();
+        let first = state.pair(ORIGIN.into());
+        let second = state.prepare_pairing_session("http://localhost:3160");
+        let stored = state.sessions_json_with("http://localhost:3160", &second);
+        let restored = ServerState::unpaired();
+        restored.restore_sessions(&stored);
+        assert!(restored.is_paired());
+        assert_eq!(restored.resume_session(ORIGIN), Some(first));
+        assert_eq!(restored.resume_session("http://localhost:3160"), Some(second));
+        let unread = ServerState::unpaired();
+        unread.restore_sessions("not json");
+        assert!(!unread.is_paired());
+    }
+
     #[test]
     fn complete_pairing_reuses_the_session_for_a_second_tab() {
         let state = ServerState::unpaired();

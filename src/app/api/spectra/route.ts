@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { createHash, randomBytes } from "crypto";
 import { isAuthNoSchool, requireActor } from "@/lib/auth-server";
-import { convexMutation, convexQuery } from "@/lib/convex-server";
+import { convexMutation, convexQuery, storeArtifactContent } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 import { aiPublicLinkToken } from "@/lib/server-secrets";
@@ -1373,6 +1373,7 @@ export async function POST(request: NextRequest) {
             : "manual";
       const parentNodeId = optionalString(body.parentNodeId);
       const nativeFormat = optionalString(body.nativeFormat);
+      const storageStoreId = optionalString(body.storageStoreId);
       const result = await spectraMutation("spectraArtifacts:create", {
         blueprintKey,
         title: requireString(body.title, "title"),
@@ -1388,9 +1389,53 @@ export async function POST(request: NextRequest) {
             ? { parentNodeId }
             : {}),
         ...(nativeFormat ? { nativeFormat } : {}),
+        ...(storageStoreId ? { storageStoreId } : {}),
         source,
       });
       return ok(result);
+    }
+
+    if (action === "touchDeviceWork") {
+      const result = await spectraMutation("deviceWorks:touch", {
+        artifactId: requireString(body.artifactId, "artifactId"),
+        ...(typeof body.title === "string" ? { title: body.title } : {}),
+        ...(typeof body.summary === "string" ? { summary: body.summary } : {}),
+        ...(Array.isArray(body.tags) ? { tags: body.tags.filter((tag): tag is string => typeof tag === "string") } : {}),
+        ...(body.edited === true ? { edited: true } : {}),
+      });
+      return ok(result);
+    }
+
+    if (action === "workMovedToDevice") {
+      const result = await spectraMutation("deviceWorks:movedToDevice", {
+        artifactId: requireString(body.artifactId, "artifactId"),
+        storeId: requireString(body.storeId, "storeId"),
+      });
+      return ok(result);
+    }
+
+    if (action === "workMovedToCloud") {
+      const artifactId = requireString(body.artifactId, "artifactId");
+      const blueprintKey = requireBlueprint(body.blueprintKey);
+      const content = await storeArtifactContent(artifactId, encodeArtifactContentForStorage(blueprintKey, body.content));
+      const result = await spectraMutation("deviceWorks:movedToCloud", {
+        artifactId,
+        title: requireString(body.title, "title"),
+        ...(typeof body.summary === "string" ? { summary: body.summary } : {}),
+        tags: Array.isArray(body.tags) ? body.tags.filter((tag): tag is string => typeof tag === "string") : [],
+        content,
+        textIndex: typeof body.text === "string" ? body.text : "",
+      });
+      return ok(result);
+    }
+
+    if (action === "restoreDeviceVersion") {
+      const { restoreDeviceVersion } = await import("@/lib/device-restore-server");
+      return ok(await restoreDeviceVersion({
+        artifactId: requireString(body.artifactId, "artifactId"),
+        versionId: requireString(body.versionId, "versionId"),
+        requestId: requireString(body.requestId, "requestId"),
+      }));
     }
 
     if (action === "copyArtifact") {
@@ -1404,12 +1449,21 @@ export async function POST(request: NextRequest) {
         content?: unknown;
         tags?: string[];
         nativeFormat?: string;
+        storageHome?: "device";
+        storageStoreId?: string;
       } | null;
       if (!source) return badRequest("That work is no longer available to copy.");
       if (source.blueprintKey === "agent" || source.blueprintKey === "timetable")
         return badRequest("This kind of work cannot be copied.");
-      const content =
-        source.blueprintKey === "sheets"
+      const onDevice = source.storageHome === "device";
+      const me = onDevice ? await spectraQuery("identity:me", {}) as { accountId: string } : null;
+      const stored = me
+        ? await (await import("@/lib/device-store")).deviceStoreCall<{ content?: unknown } | null>(me.accountId, "get", { artifactId })
+        : null;
+      if (onDevice && !stored?.content) return badRequest("Open Spectra Bridge on the computer that holds this work to copy it.");
+      const content = onDevice
+        ? stored!.content
+        : source.blueprintKey === "sheets"
           ? decodeSheetsContentFromStorage(source.content)
           : source.content;
       const parentNodeId = optionalString(body.parentNodeId);
@@ -1426,9 +1480,28 @@ export async function POST(request: NextRequest) {
         workspaceId,
         ...(parentNodeId === "root" ? { parentNodeId: "root" as const } : parentNodeId ? { parentNodeId } : {}),
         ...(source.nativeFormat ? { nativeFormat: source.nativeFormat } : {}),
+        ...(onDevice && source.storageStoreId ? { storageStoreId: source.storageStoreId } : {}),
         source: "artifact",
         sourceArtifactIds: [artifactId],
       });
+      if (me) {
+        const created = result as { artifactId: string; schemaVersion?: number };
+        const { deviceBaseline } = await import("@/features/spectra/collaboration/device-work");
+        const { deviceStoreCall } = await import("@/lib/device-store");
+        const baseline = deviceBaseline({
+          typeKey: source.blueprintKey,
+          title: `${source.title} (copy)`.slice(0, 300),
+          summary: source.summary,
+          tags: source.tags ?? [],
+          schemaVersion: created.schemaVersion ?? 1,
+          content,
+        });
+        await deviceStoreCall(me.accountId, "seed", {
+          artifactId: created.artifactId,
+          stateBase64: baseline.stateBase64,
+          projection: baseline.projection,
+        });
+      }
       return ok(result);
     }
 
@@ -1583,6 +1656,8 @@ export async function POST(request: NextRequest) {
       const result = await spectraMutation("quizPractice:start", {
         artifactId: requireString(body.artifactId, "artifactId"),
         clientAttemptId: requireString(body.clientAttemptId, "clientAttemptId"),
+        ...(body.deviceContent !== undefined ? { deviceContent: body.deviceContent } : {}),
+        ...(body.ownDraft === true ? { ownDraft: true } : {}),
       });
       return ok(result);
     }

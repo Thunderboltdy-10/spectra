@@ -11,9 +11,11 @@ import { useWorkAvailability } from "./use-work-availability";
 
 import { Tooltip } from "@/components/ui/tooltip";
 import { DismissibleArtifactNotice } from "./dismissible-artifact-notice";
-import { useQuery } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { useCalmQuery } from "../data/use-calm-query";
 import { toast } from "@/components/ui/toast";
+import { DeviceWorkAway, useDeviceWorkAway } from "../bridge/device-work-away";
+import { newWorkStoreId, seedNewDeviceWork } from "../bridge/device-works";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { describeFailure } from "@/components/ui/truthful-state";
@@ -326,10 +328,14 @@ const WhiteboardStudio = dynamic(
   () => import("./whiteboard-studio").then((module) => withStudioViewportReady(module.WhiteboardStudio)),
   { loading: StudioTypePlaceholder },
 );
-const TimetableStudio = dynamic(
-  () => import("./timetable-studio").then((module) => withStudioViewportReady(module.TimetableStudio)),
-  { loading: StudioTypePlaceholder },
-);
+/** Timetables moved into the Calendar, so an old link lands there. */
+function TimetableMoved() {
+  const router = useRouter();
+  useEffect(() => {
+    router.replace("/calendar");
+  }, [router]);
+  return <p className="px-6 py-10 text-[var(--text-secondary)]">Timetables now live in your Calendar. Taking you there.</p>;
+}
 const AgentFoundry = dynamic(
   () => import("./agent-foundry").then((module) => withStudioViewportReady(module.AgentFoundry)),
   { loading: StudioTypePlaceholder },
@@ -2660,6 +2666,7 @@ export function ArtifactStudio({
   instanceKey?: string;
   executeApplicationCommand?: ApplicationCommandDispatcher;
 }) {
+  const deviceWorkAway = useDeviceWorkAway(artifact);
   const router = useRouter();
   const width = panelWidth ?? 720;
   const handleClose = useCallback(
@@ -2822,6 +2829,8 @@ export function ArtifactStudio({
           )}
         </div>
       </div>
+    ) : deviceWorkAway ? (
+      <DeviceWorkAway title={artifact.title} reason={deviceWorkAway} />
     ) : (
       <div className="flex h-full min-h-0 flex-col bg-transparent">
         <ArtifactStudioEditor
@@ -2830,7 +2839,7 @@ export function ArtifactStudio({
           // first keystroke, restoring the server snapshot and making every
           // artifact editor appear non-interactive. Remote revisions are
           // reconciled by ArtifactStudioEditor's snapshot effects.
-          key={`${artifact._id}:editor`}
+          key={`${artifact._id}:editor:${artifact.storageHome ?? "cloud"}`}
           mode={mode}
           artifact={artifact}
           artifacts={artifacts}
@@ -5592,6 +5601,13 @@ function ArtifactStudioEditor({
       // The server closes preceding history and admits this exact restore in
       // one transaction. No optimistic restore is authored in the local Y.Doc.
       const requestId = pendingRestoreRequestRef.current.requestId;
+      if (version._id.startsWith("device:")) {
+        // Bridge writes it back into the room, and the open document follows.
+        await postSpectra({ action: "restoreDeviceVersion", artifactId: artifact._id, versionId: version._id, requestId });
+        pendingRestoreRequestRef.current = null;
+        if (restoreSelectionRef.current.artifactId === artifact._id) setHistoryOpen(false);
+        return;
+      }
       const result = await postSpectra<{
         state: "committed" | "unchanged";
         receipt: { versionId?: string; roomId?: string; sequence?: number; updateDigest?: string };
@@ -6769,17 +6785,7 @@ function ArtifactStudioEditor({
                 />
               ) : null}
               {artifact.blueprintKey === "timetable" ? (
-                <TimetableStudio
-                  key={`${artifact._id}:timetable`}
-                  artifactId={artifact._id}
-                  artifacts={artifacts}
-                  content={editorContent}
-                  onChange={editorChange}
-                  aiChangedPaths={highlightPaths}
-                  readOnly={readOnly}
-                  synchronizationReady={presentation.ready}
-                  onActiveRegionChange={handleActiveRegionChange}
-                />
+                <TimetableMoved />
               ) : null}
               {artifact.blueprintKey === "agent" ? (
                 <AgentFoundry
@@ -7447,7 +7453,8 @@ function StudioDetails({
     setDuplicating(true);
     const creation = beginCreation();
     try {
-      const result = await postSpectra<{ artifactId: string }>({
+      const storageStoreId = newWorkStoreId(artifact.blueprintKey);
+      const result = await postSpectra<{ artifactId: string; schemaVersion?: number }>({
         action: "createArtifact",
         blueprintKey: artifact.blueprintKey,
         title: `${artifact.title} copy`,
@@ -7455,7 +7462,16 @@ function StudioDetails({
         content: artifact.content,
         tags: artifact.tags,
         workspaceId: placements[0]?.workspaceId,
+        ...(storageStoreId ? { storageStoreId } : {}),
       });
+      if (storageStoreId)
+        await seedNewDeviceWork(result, {
+          blueprintKey: artifact.blueprintKey,
+          title: `${artifact.title} copy`,
+          summary: artifact.summary,
+          tags: artifact.tags,
+          content: artifact.content,
+        });
       spectraBus.emit("workspace.refreshRequested", {});
       creation.land();
       onOpenArtifact(result.artifactId);

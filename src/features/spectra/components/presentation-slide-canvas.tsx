@@ -28,6 +28,7 @@ import type { SpectraArtifact, SpectraArtifactAsset } from "../data/api";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { SpectraRichContent } from "./spectra-rich-content";
 import { SlideTextField } from "./slide-text-field";
+import { SlideDiagram } from "./presentation-slide-diagram";
 
 /**
  * One slide drawn at the deck's own scale. The studio writes on it; the rail,
@@ -615,6 +616,8 @@ function PresentationObjectView({
             ))}
           </tbody>
         </table>
+      ) : object.type === "embed" && typeof (objectContent.diagram as { code?: unknown } | undefined)?.code === "string" ? (
+        <SlideDiagram code={(objectContent.diagram as { code: string }).code} alt={object.altText} compact={compact} />
       ) : object.type === "embed" && objectContent.nativeObject ? (
         <NativeObjectCard object={object} asset={asset} />
       ) : object.type === "embed" ? (

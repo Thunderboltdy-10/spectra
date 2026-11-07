@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useQuery } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
 import { api } from "../../../../convex/_generated/api";
@@ -25,7 +25,7 @@ import { relativeTime, workspaceInk } from "./node-identity";
 import { groupByWhen } from "./shelf-model";
 import { ShelfNotes, useShelfStacks } from "./shelf-stacks";
 import { useShelfGather } from "./shelf-gather";
-import { treeFailureMessage, useTreeActions, useTreeQuickView, type TreeNode } from "./tree-client";
+import { treeFailureMessage, useTreeActions, useTreeQuickView, useWorkspaceTallies, type TreeNode } from "./tree-client";
 import { useLoadOnApproach } from "./use-load-on-approach";
 
 /*
@@ -72,6 +72,16 @@ function places(nodes: readonly TreeNode[], book: ClassBook) {
 }
 
 const bar = "block animate-pulse rounded-full bg-[var(--bg-tertiary)]";
+
+/** What a workspace holds, as people count it; the threads in it aren't its artifacts. */
+function tallyLine(tally: { artifacts: number; threads: number } | undefined, childCount?: number) {
+  if (!tally) return childCount === 0 ? "Empty" : "\u00a0";
+  if (!tally.artifacts && !tally.threads) return childCount ? "Folders only" : "Empty";
+  return [
+    tally.artifacts ? `${tally.artifacts} artifact${tally.artifacts === 1 ? "" : "s"}` : null,
+    tally.threads ? `${tally.threads} thread${tally.threads === 1 ? "" : "s"}` : null,
+  ].filter(Boolean).join(", ");
+}
 
 /**
  * The shelf on its way, in the shelf's own grid: notes where the notes will
@@ -134,6 +144,9 @@ export function LibraryShelf({
   const [allWorkspaces, setAllWorkspaces] = useState(false);
   const [allLoose, setAllLoose] = useState(false);
   const workspaces = places(nodes, book);
+  const tallies = useWorkspaceTallies(
+    workspaces.flatMap(({ node }) => (node.workspace?.workspaceId ? [node.workspace.workspaceId] : [])),
+  );
   const shownPlaces = allWorkspaces ? workspaces : workspaces.slice(0, WORKSPACES_SHOWN);
   const actions = useTreeActions();
   const moveInto = (nodeId: string, placeId: string) => {
@@ -183,9 +196,7 @@ export function LibraryShelf({
       </span>
       <span className="school-tile-foot">
         <span>
-          {node.childCount
-            ? `${node.childCount} item${node.childCount === 1 ? "" : "s"}`
-            : "Empty"}
+          {tallyLine(node.workspace?.workspaceId ? tallies?.[node.workspace.workspaceId] : undefined, node.childCount)}
         </span>
         <span className="ml-auto text-[var(--text-tertiary)]">
           {relativeTime(node.activityAt, now)}

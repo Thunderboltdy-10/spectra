@@ -46,6 +46,7 @@ import {
   RESULT_CARD_SUMMARY_READ_MODEL_VERSION,
   RUN_TAB_PROJECTION_VERSION,
   upsertResultCardSummary,
+  lastRunEventSequence,
 } from "./spectraRunProjection";
 import { assertPlatformRunning, platformStopped } from "./platformControls";
 
@@ -1667,7 +1668,7 @@ export const appendEvent = mutation({
       );
       if (existing) return { ignored: true, sequence: existing.sequence };
     }
-    const sequence = (run.eventSequence ?? 0) + 1;
+    const sequence = (await lastRunEventSequence(ctx, run)) + 1;
     const now = Date.now();
     await ctx.db.insert("spectraRunEvents", {
       runId: args.runId,
@@ -1699,10 +1700,7 @@ export const appendEvents = mutation({
     const { run } = await requireOwnedRun(ctx, args.runId);
     // The worker learns Stop and new messages from its event writes.
     const stopped = run.executionId !== args.executionId || isTerminalRunStatus(run.status);
-    const harness = stopped
-      ? null
-      : await ctx.db.query("spectraHarnessStates").withIndex("by_run", (q) => q.eq("runId", args.runId)).unique();
-    const signals = { stopped, steerWaiting: Boolean(harness?.steers?.length) };
+    const signals = { stopped, steerWaiting: !stopped && Boolean(run.steerWaiting) };
     if (run.executionId !== args.executionId || args.events.length === 0)
       return { ignored: true, sequence: run.eventSequence ?? 0, count: 0, ...signals };
     const terminalTypes = new Set([
@@ -1730,10 +1728,12 @@ export const appendEvents = mutation({
     );
     const existingTerminalTypes = new Set(
       (needsTerminalCheck
-        ? await ctx.db
+        ? // A repeat of a terminal event follows it closely, so the end of the log answers.
+          await ctx.db
             .query("spectraRunEvents")
             .withIndex("by_run_sequence", (q) => q.eq("runId", args.runId))
-            .collect()
+            .order("desc")
+            .take(25)
         : []
       )
         .filter(
@@ -1751,7 +1751,7 @@ export const appendEvents = mutation({
     if (unique.length === 0)
       return { ignored: true, sequence: run.eventSequence ?? 0, count: 0, ...signals };
     const now = Date.now();
-    let sequence = run.eventSequence ?? 0;
+    let sequence = await lastRunEventSequence(ctx, run);
     for (const event of unique) {
       sequence += 1;
       await ctx.db.insert("spectraRunEvents", {
@@ -1763,14 +1763,9 @@ export const appendEvents = mutation({
         createdAt: now,
       });
     }
-    await ctx.db.patch(args.runId, {
-      eventSequence: sequence,
-      heartbeatAt: now,
-      updatedAt: now,
-      ...(dockSummaryAfterEvents(run, unique)
-        ? { dockSummary: dockSummaryAfterEvents(run, unique) }
-        : {}),
-    });
+    // The worker's own heartbeat keeps the lease; only a change people see touches the run.
+    const dockSummary = dockSummaryAfterEvents(run, unique);
+    if (dockSummary) await ctx.db.patch(args.runId, { eventSequence: sequence, dockSummary, updatedAt: now });
     return { ignored: false, sequence, count: unique.length, ...signals };
   },
 });
@@ -2320,7 +2315,7 @@ export const reconcileStaleRuns = internalMutation({
           }),
         ),
       );
-      const sequence = (run.eventSequence ?? 0) + 1;
+      const sequence = (await lastRunEventSequence(ctx, run)) + 1;
       await ctx.db.insert("spectraRunEvents", {
         runId: run._id,
         executionId: run.executionId ?? "interrupted",
@@ -2872,7 +2867,7 @@ export const reviseConfirmation = mutation({
         }),
       ),
     );
-    const sequence = (run.eventSequence ?? 0) + 1;
+    const sequence = (await lastRunEventSequence(ctx, run)) + 1;
     await ctx.db.insert("spectraRunEvents", {
       runId: args.runId,
       executionId: args.executionId,
@@ -2940,7 +2935,7 @@ export const stopRun = mutation({
         ),
     );
     await releaseClaimsForRun(ctx, args.runId, now);
-    const sequence = (run.eventSequence ?? 0) + 1;
+    const sequence = (await lastRunEventSequence(ctx, run)) + 1;
     await ctx.db.patch(args.runId, {
       status: "cancelled",
       outcome: "cancelled",
@@ -3196,7 +3191,7 @@ export const resetForRetry = mutation({
           ctx.db.patch(attachment._id, { executionId }),
         ),
     );
-    const sequence = (run.eventSequence ?? 0) + 1;
+    const sequence = (await lastRunEventSequence(ctx, run)) + 1;
     await ctx.db.patch(args.runId, {
       status: "queued",
       finalSummary: undefined,

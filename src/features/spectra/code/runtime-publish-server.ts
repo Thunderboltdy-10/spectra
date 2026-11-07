@@ -220,6 +220,15 @@ export async function publishRuntime(
   expectedSourceHash: string,
 ): Promise<RuntimePublishResult> {
     const initialArtifact = await getArtifact(artifactId);
+    if ((initialArtifact as { storageHome?: string }).storageHome === "device") {
+      return {
+        ok: false,
+        error: {
+          code: "RUNTIME_BUILD_FAILED",
+          message: "This is kept on your computer, and a published link has to live online. Move it online from Devices, then publish.",
+        },
+      };
+    }
     const initialContent = normalizeCodeContent(initialArtifact.content);
     if (initialContent.runtime === "none") {
       throw new Error(

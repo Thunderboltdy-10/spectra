@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useEffectEvent } from "react";
 import { usePathname } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
-import { useConvexAuth, useQuery } from "convex/react";
+import { useConvexAuth } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { api } from "../../../../convex/_generated/api";
 import { spectraBus } from "../events";
 import { useSpectraRouter } from "../hooks/use-spectra-router";

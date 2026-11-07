@@ -65,6 +65,9 @@ const docxRunFormatSchema = z
     color: z.string().nullable().optional(),
     highlight: z.string().nullable().optional(),
     shading: z.string().nullable().optional(),
+    verticalAlign: z.enum(["superscript", "subscript"]).nullable().optional(),
+    smallCaps: z.boolean().nullable().optional(),
+    allCaps: z.boolean().nullable().optional(),
   })
   .strict();
 
@@ -73,9 +76,15 @@ const docxParagraphFormatSchema = z
     alignment: z.enum(["left", "center", "right", "justify"]).nullable().optional(),
     lineSpacing: z.number().nullable().optional(),
     spacingAfterPoints: z.number().nullable().optional(),
+    spacingBeforePoints: z.number().nullable().optional(),
     indentLevel: z.number().nullable().optional(),
+    /** Positive is a first-line indent, negative a hanging one. */
+    firstLineIndentPoints: z.number().nullable().optional(),
     border: z.string().nullable().optional(),
     shading: z.string().nullable().optional(),
+    /** Read from the file. A paragraph that only holds a page break, or starts a page. */
+    pageBreak: z.boolean().nullable().optional(),
+    pageBreakBefore: z.boolean().nullable().optional(),
   })
   .strict();
 

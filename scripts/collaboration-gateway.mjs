@@ -1,6 +1,6 @@
 import { Server } from "@hocuspocus/server";
 import { artifactProjection } from "./collaboration-artifact-projection.mjs";
-import { createHash } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { installAgentHub } from "./agent-hub.mjs";
 import { MAX_ASSEMBLED_BYTES, installServerFraming, selectFrameProtocol } from "../shared/collaboration-framing.mjs";
 import { jwtVerify } from "jose";
@@ -105,7 +105,10 @@ const GATEWAY_PROTOCOL_VERSION = 1;
 const PERSISTENCE_RETRY_MAX_MS = 5_000;
 const PERSISTENCE_REBASE_MAX_ATTEMPTS = 8;
 const GATEWAY_STARTED_AT = Date.now();
-const POLICY_SWEEP_MS = 30_000;
+// Deployed, Convex tells the gateway about each permission change, so the sweep is only a backstop.
+const POLICY_SWEEP_MS = process.env.NODE_ENV === "production" ? 60_000 : 30_000;
+const POLICY_PUSH_MAX_AGE_MS = 60_000;
+const POLICY_PUSH_MAX_BYTES = 64 * 1024;
 const roomLoads = createRoomLoadCache();
 const activeConnections = new Set();
 const authorizationGuard = createCollaborationAuthorizationGuard({
@@ -983,6 +986,13 @@ const server = new Server({
   stopOnSignals: false,
 
   async onRequest({ request, response }) {
+    if (request.method === "POST" && request.url?.startsWith("/_spectra/policy-changed")) {
+      const artifactIds = await readPolicyPush(request);
+      response.writeHead(artifactIds ? 204 : 403);
+      response.end();
+      if (artifactIds) void enforceActivePolicyVersions(new Set(artifactIds));
+      throw null;
+    }
     if (!request.url?.startsWith("/_spectra/health")) return;
     const convex = await probeConvexReadiness();
     response.writeHead(200, {
@@ -1604,14 +1614,44 @@ const server = new Server({
   },
 });
 
-async function enforceActivePolicyVersions() {
-  if (policySweepRunning || activeConnections.size === 0) return;
+/** The artifact ids in a signed, recent notice from Convex; null for anything else. */
+async function readPolicyPush(request) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > POLICY_PUSH_MAX_BYTES) return null;
+    chunks.push(chunk);
+  }
+  const body = Buffer.concat(chunks);
+  const supplied = Buffer.from(String(request.headers["x-spectra-signature"] ?? ""), "hex");
+  const expected = createHmac("sha256", bridgeKey).update(body).digest();
+  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return null;
+  try {
+    const notice = JSON.parse(body.toString("utf8"));
+    if (Math.abs(Date.now() - notice.at) > POLICY_PUSH_MAX_AGE_MS || !Array.isArray(notice.artifactIds)) return null;
+    return notice.artifactIds.map(String);
+  } catch {
+    return null;
+  }
+}
+
+let policySweepWaiting = null;
+
+async function enforceActivePolicyVersions(only) {
+  if (activeConnections.size === 0) return;
+  if (policySweepRunning) {
+    // A push during a sweep checks those rooms straight after it.
+    if (only) policySweepWaiting = new Set([...(policySweepWaiting ?? []), ...only]);
+    return;
+  }
   policySweepRunning = true;
   try {
     const grouped = new Map();
     for (const connection of activeConnections) {
       const context = connection.context;
       if (!context?.artifactId || !context?.partitionKey) continue;
+      if (only && !only.has(String(context.artifactId))) continue;
       const key = `${context.artifactId}\u0000${context.partitionKey}`;
       const group = grouped.get(key) ?? {
         artifactId: context.artifactId,
@@ -1665,6 +1705,11 @@ async function enforceActivePolicyVersions() {
     );
   } finally {
     policySweepRunning = false;
+    if (policySweepWaiting) {
+      const waiting = policySweepWaiting;
+      policySweepWaiting = null;
+      void enforceActivePolicyVersions(waiting);
+    }
   }
 }
 

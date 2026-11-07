@@ -3,6 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { getFunctionName } from "convex/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { forgetIdentityForTests } from "../administration/identity";
 
 const mocks = vi.hoisted(() => ({
   data: {} as Record<string, unknown>,
@@ -44,6 +45,7 @@ function connected(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  forgetIdentityForTests();
   globalThis.ResizeObserver ??= class {
     observe() {}
     unobserve() {}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { Icon } from "@/components/icons";
 import { Plus, X } from "@/components/icons/glyph-icons";
 import { api } from "../../../../../convex/_generated/api";

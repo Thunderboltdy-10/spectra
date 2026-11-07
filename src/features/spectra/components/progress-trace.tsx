@@ -2,9 +2,8 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertCircle, Check, ChevronDown } from "@/components/icons/glyph-icons";
+import { ChevronDown } from "@/components/icons/glyph-icons";
 import { WorkingMark } from "@/components/ui/skeleton";
-import { Icon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import { transitionFor, useSpectraMotion } from "../motion";
 import { CrossfadeText } from "../motion/motion-primitives";
@@ -31,26 +30,37 @@ export function workedDuration(milliseconds: number) {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-/** What a part of the reasoning is about, when it opens with a bold title, and the rest. */
-function thinkingParts(text: string) {
-  const titled = /^\s*\*\*([^*\n]{2,100})\*\*\s*/.exec(text);
-  // Further headings arrive with nothing between them: keep each on its own line.
-  const body = (titled ? text.slice(titled[0].length) : text).replace(/\*\*\s*\*\*/g, "\n").replace(/\*\*/g, "").trim();
-  // A heading about the machinery (a guide being loaded, an escaped quote) says nothing to the reader.
-  const title = titled?.[1]?.trim();
-  return { title: title && !/\\|guidance|\bskills?\b|\btools?\b|system prompt/i.test(title) ? title : "Thinking", body };
+/**
+ * The thinking as it was written, block by block: a bold line is what the next
+ * paragraphs are about. A heading about the machinery (a guide being loaded, an
+ * escaped quote) says nothing to the reader, so only its paragraphs stay.
+ */
+export function thinkingBlocks(text: string) {
+  const blocks: Array<{ heading: boolean; text: string }> = [];
+  // Headings can arrive with nothing between them: each still starts a block.
+  for (const raw of text.replace(/\*\*\s*\*\*/g, "\n\n").replace(/\*\*([^*\n]{2,100})\*\*\s*(?=\S)/g, "**$1**\n\n").split(/\n\s*\n/)) {
+    const block = raw.trim();
+    if (!block) continue;
+    const heading = /^\*\*([^*\n]{2,100})\*\*$/.exec(block)?.[1]?.trim();
+    if (heading) {
+      if (!/\\|guidance|\bskills?\b|\btools?\b|system prompt/i.test(heading)) blocks.push({ heading: true, text: heading });
+      continue;
+    }
+    blocks.push({ heading: false, text: block.replace(/\*\*/g, "") });
+  }
+  return blocks;
 }
 
 /**
  * What the list shows of the steps: a run of the same action is one line with a
- * count, and a look at something that failed on the way to a good result is left
- * out, since nothing about the result depends on it.
+ * count, and something that failed on the way to a later success is left out: the
+ * work went on past it, and the reply says if anything is still not done.
  */
 export function visibleTraceSteps<T extends { id: string; kind?: string; title?: string; status?: string }>(steps: T[], active: boolean) {
   const shown: Array<T & { repeats?: number }> = [];
   steps.forEach((step, index) => {
-    const recovered = step.status === "error" && (active || index < steps.length - 1)
-      && /^(read|reading|search|searching|check|checking|look|looking|find|finding|list|listing)\b/i.test(step.title ?? "");
+    const recovered = step.status === "error"
+      && (active || steps.slice(index + 1).some((later) => later.kind !== "thinking" && later.status !== "error"));
     if (recovered) return;
     const last = shown[shown.length - 1];
     if (last && step.kind !== "thinking" && last.kind !== "thinking" && last.title === step.title && last.status === step.status) {
@@ -62,7 +72,24 @@ export function visibleTraceSteps<T extends { id: string; kind?: string; title?:
   return shown;
 }
 
-/** One stretch of reasoning: a few lines tall, following the words as they come. */
+/** A paragraph of thinking: as tall as it needs up to a limit, following the words as they come. */
+function ThinkingParagraph({ text, streaming }: { text: string; streaming: boolean }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [tall, setTall] = useState(false);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    setTall(element.scrollHeight > element.clientHeight + 1);
+    if (streaming) element.scrollTop = element.scrollHeight;
+  }, [text, streaming]);
+  return (
+    <p ref={ref} tabIndex={tall ? 0 : undefined} data-following={(streaming && tall) || undefined} className="spectra-thinking-body">
+      {text}
+    </p>
+  );
+}
+
+/** One stretch of the model's thinking, written out as it comes. */
 function ThinkingPart({
   step,
   streaming,
@@ -70,26 +97,29 @@ function ThinkingPart({
   step: SpectraLiveExchange["steps"][number];
   streaming: boolean;
 }) {
-  const { title, body } = thinkingParts(step.summary ?? "");
-  const bodyRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const element = bodyRef.current;
-    if (streaming && element) element.scrollTop = element.scrollHeight;
-  }, [body, streaming]);
+  const blocks = thinkingBlocks(step.summary ?? "");
+  if (!blocks.length) return null;
   return (
-    <>
-      <div className="flex w-full items-center gap-2 text-left">
-        {streaming ? <WorkingMark /> : <span aria-hidden className="spectra-thinking-mark" />}
-        <span className={cn("min-w-0 flex-1 truncate text-micro font-semibold text-[var(--text-secondary)]", streaming && "thinking-wave")}>
-          {title}
-        </span>
-      </div>
-      {body ? (
-        <div ref={bodyRef} tabIndex={0} data-streaming={streaming || undefined} className="spectra-thinking-body">
-          {body}
-        </div>
-      ) : null}
-    </>
+    <div className="space-y-1">
+      {blocks.map((block, index) => {
+        const last = index === blocks.length - 1;
+        if (block.heading)
+          return (
+            <div key={index} className="spectra-trace-line">
+              <span aria-hidden className="spectra-thinking-mark" />
+              <span className={cn("min-w-0 flex-1 text-caption font-medium text-[var(--text-secondary)]", streaming && last && "thinking-wave")}>
+                {block.text}
+              </span>
+            </div>
+          );
+        return (
+          <div key={index} className="spectra-trace-line">
+            {index === 0 ? <span aria-hidden className="spectra-thinking-mark" /> : <span aria-hidden className="spectra-thinking-indent" />}
+            <ThinkingParagraph text={block.text} streaming={streaming && last} />
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -131,8 +161,6 @@ export function ProgressTrace({
   // replies between them included, then fold away. A choice the user made holds.
   const [chosenOpen, setChosenOpen] = useState(() => (persistKey ? groupOpenByKey.get(persistKey) : undefined));
   const groupOpen = chosenOpen ?? active;
-  // Steps seen working here: when one finishes, its light settles into a tick that draws itself.
-  const [ranHere, setRanHere] = useState<Set<string>>(() => new Set());
   const finished = !active && (steps.length > 0 || hasOutput);
   const [now, setNow] = useState(() => Date.now());
   // The clock runs for the whole turn, writing included, so a long silent
@@ -158,18 +186,13 @@ export function ProgressTrace({
     setSawFinish(at);
   }, [active, finished, persistKey, endedAt, sawFinish]);
 
-  useEffect(() => {
-    const fresh = steps.filter((step) => step.status === "running" && !ranHere.has(step.id));
-    if (fresh.length) setRanHere((current) => new Set([...current, ...fresh.map((step) => step.id)]));
-  }, [steps, ranHere]);
-
-  // The list follows the newest step unless the reader has scrolled back.
+  // Only the small hover preview is short enough to need its own scrolling.
   const listRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(true);
   useLayoutEffect(() => {
     const element = listRef.current;
-    if (active && element && followRef.current) element.scrollTop = element.scrollHeight;
-  }, [active, steps]);
+    if (compact && active && element && followRef.current) element.scrollTop = element.scrollHeight;
+  }, [active, compact, steps]);
 
   const settledAt = endedAt ?? sawFinish;
   const timed = startedAt !== undefined && (active || settledAt !== undefined);
@@ -239,14 +262,15 @@ export function ProgressTrace({
           >
             <div
               ref={listRef}
-              onScroll={(event) => {
-                const element = event.currentTarget;
-                followRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
-              }}
-              className={cn(
-                "spectra-trace-list relative overflow-y-auto pr-1",
-                compact ? "spectra-live-dock-progress max-h-40" : "max-h-80",
-              )}
+              onScroll={
+                compact
+                  ? (event) => {
+                      const element = event.currentTarget;
+                      followRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
+                    }
+                  : undefined
+              }
+              className={cn("relative pr-1", compact && "spectra-trace-list spectra-live-dock-progress max-h-40 overflow-y-auto")}
             >
               {visibleSteps.map((step, index) => (
                 <motion.div
@@ -259,17 +283,11 @@ export function ProgressTrace({
                   {step.kind === "thinking" ? (
                     <ThinkingPart step={step} streaming={active && step.status === "running" && index === visibleSteps.length - 1} />
                   ) : (
-                    <div className="flex w-full items-center gap-2 text-left">
-                      {active && step.status === "running" ? (
-                        <WorkingMark />
-                      ) : step.status === "error" ? (
-                        <AlertCircle className="h-3.5 w-3.5 text-[var(--text-tertiary)]" />
-                      ) : (
-                        <Icon name="check" size={14} animate={ranHere.has(step.id)} className="text-[var(--success)]" />
-                      )}
+                    <div className="spectra-trace-line">
+                      {active && step.status === "running" ? <WorkingMark /> : <span aria-hidden className="spectra-thinking-mark" />}
                       <span
                         className={cn(
-                          "min-w-0 flex-1 truncate text-micro font-semibold text-[var(--text-secondary)]",
+                          "min-w-0 flex-1 truncate text-caption font-medium text-[var(--text-secondary)]",
                           active && step.status === "running" && "thinking-wave",
                         )}
                       >
@@ -287,8 +305,8 @@ export function ProgressTrace({
       {answers?.length ? (
         <ul className="mb-1.5 space-y-1" aria-label="Your answers">
           {answers.map((answer) => (
-            <li key={answer.toolCallId} className="flex min-w-0 items-center gap-2 text-micro text-[var(--text-secondary)]">
-              <Check className="h-3.5 w-3.5 shrink-0 text-[var(--success)]" />
+            <li key={answer.toolCallId} className="flex min-w-0 items-center gap-2 text-caption text-[var(--text-secondary)]">
+              <span aria-hidden className="spectra-thinking-mark" />
               <span className="min-w-0 truncate">
                 {answer.question ? (
                   <span className="text-[var(--text-tertiary)]">

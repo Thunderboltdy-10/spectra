@@ -78,6 +78,9 @@ export type OrgNodeView = {
     owned: boolean;
     shared: boolean;
     aiState?: string;
+    /** Kept on one computer, so it opens only where that computer's Bridge answers. */
+    storageHome?: "device";
+    storageStoreId?: string;
   };
 };
 
@@ -245,6 +248,8 @@ export async function hydrateNodes(
               summary?: string;
               updatedAt?: number;
               aiState?: string;
+              storageHome?: "device";
+              storageStoreId?: string;
             }
           | undefined;
         const sharedOut = await sharedOutPromise;
@@ -265,6 +270,9 @@ export async function hydrateNodes(
             (ownerAccountId !== undefined && ownerAccountId !== node.accountId) ||
             sharedOut?.has(node.sourceId) === true,
           aiState: artifactProjection?.aiState,
+          ...(artifactProjection?.storageHome
+            ? { storageHome: artifactProjection.storageHome, storageStoreId: artifactProjection.storageStoreId }
+            : {}),
         };
       } else if (node.kind === "thread") {
         const threadId = ctx.db.normalizeId("spectraThreads", node.sourceId);

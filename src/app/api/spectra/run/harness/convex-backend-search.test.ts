@@ -9,6 +9,8 @@ import type { SemanticResult } from "../../../../../../shared/semantic-types";
 const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
 let answer: Record<string, unknown> = {};
 
+// Search also looks on the person's computer. A test must not reach whichever Bridge is running here.
+vi.mock("@/lib/device-store", () => ({ deviceStoreCall: vi.fn(async () => { throw new Error("no Bridge in tests"); }) }));
 vi.mock("./io", async (importOriginal) => {
   const original = await importOriginal<typeof import("./io")>();
   const handle = async (name: string, args: Record<string, unknown>) => {

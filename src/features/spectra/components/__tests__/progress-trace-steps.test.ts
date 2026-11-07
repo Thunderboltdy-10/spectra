@@ -15,9 +15,10 @@ describe("what the trace shows", () => {
     expect(shown).toHaveLength(2);
   });
 
-  it("leaves out a failed look that later work moved past, and keeps a real failure", () => {
+  it("leaves out a failure that later work moved past, and keeps one nothing came after", () => {
     expect(visibleTraceSteps([step("a", "Reading your notes", "error"), step("b", "Edited your notes")], false).map((s) => s.id)).toEqual(["b"]);
-    expect(visibleTraceSteps([step("a", "Edited your notes", "error"), step("b", "Edited your notes")], false).map((s) => s.id)).toEqual(["a", "b"]);
+    expect(visibleTraceSteps([step("a", "Edited your notes", "error"), step("b", "Edited your notes")], false).map((s) => s.id)).toEqual(["b"]);
+    expect(visibleTraceSteps([step("a", "Edited your notes"), step("b", "Moving it to the Trash", "error")], false).map((s) => s.id)).toEqual(["a", "b"]);
     expect(visibleTraceSteps([step("a", "Reading your notes", "error")], false).map((s) => s.id)).toEqual(["a"]);
   });
 });

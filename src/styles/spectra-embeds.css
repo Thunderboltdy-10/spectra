@@ -712,7 +712,7 @@ button.work-embed-title:hover {
   min-width: 0;
   flex: 1;
   background: transparent;
-  font-size: 14.5px;
+  font-size: 15px;
   color: var(--text-primary);
   outline: none;
 }
@@ -754,19 +754,19 @@ button.work-embed-title:hover {
 
 .inline-reference-name {
   overflow: hidden;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .inline-reference-kind {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-tertiary);
 }
 
 .inline-reference-none {
   padding: 14px 10px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-tertiary);
 }

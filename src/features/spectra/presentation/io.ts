@@ -1,3 +1,4 @@
+import { diagramCode, diagramPicture } from "./diagram-image";
 import { strFromU8, strToU8, zipSync } from "fflate";
 import { OFFICE_ARCHIVE_LIMITS, readBoundedArchive } from "../../../../shared/parser-limits";
 import {
@@ -827,6 +828,17 @@ export async function buildPresentationPptx(
       if (url) assetDataUrls.set(assetId, await dataUrl(url));
     }),
   );
+  // PowerPoint has nothing that runs a slide's diagram code: it gets the picture of it.
+  const diagramPictures = new Map<string, string>();
+  await Promise.all(
+    content.slides.flatMap((slide) =>
+      slide.objects.map(async (object) => {
+        const code = diagramCode(object);
+        const picture = code ? await diagramPicture(code, object.width, object.height) : null;
+        if (picture) diagramPictures.set(object.id, picture.toDataURL("image/png"));
+      }),
+    ),
+  );
   for (const slide of content.slides) {
     const page = pptx.addSlide();
     page.background = {
@@ -886,6 +898,8 @@ export async function buildPresentationPptx(
             margin: 0.05,
           });
         }
+      } else if (diagramPictures.has(object.id)) {
+        page.addImage({ data: diagramPictures.get(object.id)!, altText: object.altText, ...options });
       } else if (object.type === "image") {
         const source = (object.content && typeof object.content === "object"
           ? object.content
@@ -1151,6 +1165,9 @@ export async function renderPresentationSlide(
       );
       context.fill();
       context.stroke();
+    } else if (diagramCode(object)) {
+      const picture = await diagramPicture(diagramCode(object)!, object.width, object.height);
+      if (picture) context.drawImage(picture, 0, 0, object.width, object.height);
     } else if (object.type === "image") {
       const source = object.content as { assetId?: string };
       const asset = source.assetId ? byId.get(source.assetId) : undefined;

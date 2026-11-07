@@ -30,7 +30,7 @@ const ACTION: Record<BriefSuggestion["kind"], { label: string; done: string }> =
 };
 
 /** How many moves show before the rest fold away. */
-const SHOWN_MOVES = 3;
+const SHOWN_MOVES = 4;
 
 const presented = (key: string | undefined): key is PresentedWorkType => Boolean(key && key in workTypeMeta);
 
@@ -55,7 +55,7 @@ export function TodayBrief({ brief, agenda }: { brief: BriefState; agenda: Today
     return (
       <section aria-label="Your morning" className="morning" data-writing>
         <p className="morning-writing">
-          There's nothing to catch up on this morning.{" "}
+          Your brief is taking longer than usual.{" "}
           <button
             type="button"
             className="cursor-pointer underline underline-offset-2"
@@ -66,7 +66,7 @@ export function TodayBrief({ brief, agenda }: { brief: BriefState; agenda: Today
               })
             }
           >
-            Plan ahead
+            Plan the week with Spectra
           </button>
         </p>
       </section>
@@ -103,15 +103,25 @@ function ReadyBrief({ brief, agenda }: { brief: Extract<BriefState, { status: "r
         {brief.earlier ? <p className="morning-earlier">Today&apos;s is on its way.</p> : null}
       </div>
       <div className="morning-body">
-        {brief.recap ? (
-          <div>
-            <h3 className="morning-label">{brief.earlier ? "The day before" : "Yesterday"}</h3>
-            <p className="morning-recap">{brief.recap}</p>
+        {brief.ahead || brief.recap ? (
+          <div className="morning-story">
+            {brief.ahead ? (
+              <div>
+                <h3 className="morning-label">Coming up</h3>
+                <p className="morning-recap">{brief.ahead}</p>
+              </div>
+            ) : null}
+            {brief.recap ? (
+              <div>
+                <h3 className="morning-label">{brief.earlier ? "The day before" : "Yesterday"}</h3>
+                <p className={brief.ahead ? "morning-recap-small" : "morning-recap"}>{brief.recap}</p>
+              </div>
+            ) : null}
           </div>
         ) : null}
         {brief.suggestions.length ? (
           <div>
-            <h3 className="morning-label">{brief.earlier ? "From yesterday" : "For today"}</h3>
+            <h3 className="morning-label">{brief.earlier ? "From the last brief" : "For today"}</h3>
             <ul className="morning-moves">
               {moves.slice(0, all ? undefined : SHOWN_MOVES).map(({ suggestion, index }) => (
                 <Move key={index} suggestion={suggestion} busy={busy === index} onPress={() => press(suggestion, index)} />

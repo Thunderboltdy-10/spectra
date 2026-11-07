@@ -5,6 +5,8 @@ export const BRIDGE_URL = "http://127.0.0.1:47615";
 export const BRIDGE_PROTOCOL_VERSION = "1.0";
 /** Health/status must not block revoke, pairing UI, or Saved/Queued truth. */
 export const BRIDGE_REQUEST_TIMEOUT_MS = 2500;
+/** A status read waits for the journal, which a long sync can hold for a moment. */
+export const BRIDGE_STATUS_TIMEOUT_MS = 8000;
 /** Folder selection waits for the user to choose or cancel in the native picker. */
 export const BRIDGE_FOLDER_PICKER_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -407,27 +409,58 @@ export function persistBridgeStatusCache(status: BridgeStatus) {
 /** Bridge answers its own refusals with a sentence; a route it does not know means it is older than this app. */
 export const BRIDGE_OUTDATED = "This computer's Spectra Bridge is too old for this. Update it from Devices, then try again.";
 
-async function authorizedBridgeRequest(
+/**
+ * The session Bridge holds for this browser, or null once it has plainly said
+ * there is none. A failed request throws and leaves the session alone: Bridge
+ * being slow for a moment must never cost this browser its place.
+ */
+async function resumeBridgeSession(token: string, signal?: AbortSignal) {
+  const resume = await fetch(`${BRIDGE_URL}/v1/session/resume`, {
+    method: "POST",
+    signal: bridgeRequestSignal(signal),
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!resume.ok) throw new Error("Spectra Bridge could not check this browser's session.");
+  const result = z
+    .object({ paired: z.boolean(), sessionToken: z.string().optional() })
+    .passthrough()
+    .parse(await resume.json());
+  if (result.paired && result.sessionToken) {
+    persistBridgeSession(result.sessionToken);
+    return result.sessionToken;
+  }
+  clearBridgeSession();
+  return null;
+}
+
+export async function authorizedBridgeRequest(
   path: string,
   init: RequestInit = {},
   timeoutMs = BRIDGE_REQUEST_TIMEOUT_MS,
 ) {
   const token = loadBridgeSession();
   if (!token) return null;
-  const headers = new Headers(init.headers);
-  headers.set("authorization", `Bearer ${token}`);
-  const response = await fetch(`${BRIDGE_URL}${path}`, {
-    ...init,
-    headers,
-    signal: bridgeRequestSignal(init.signal ?? undefined, timeoutMs),
-    cache: "no-store",
-  });
+  const send = (session: string) => {
+    const headers = new Headers(init.headers);
+    headers.set("authorization", `Bearer ${session}`);
+    return fetch(`${BRIDGE_URL}${path}`, {
+      ...init,
+      headers,
+      signal: bridgeRequestSignal(init.signal ?? undefined, timeoutMs),
+      cache: "no-store",
+    });
+  };
+  let response = await send(token);
   if (response.status === 401) {
-    // A stale browser token otherwise causes every 15-second health refresh to
-    // emit another unauthorized network error while Bridge is unavailable.
-    clearBridgeSession();
-    clearBridgeStatusCache();
-    return null;
+    // Ask once for the current session. With none, BridgeConnection joins again.
+    const current = await resumeBridgeSession(token, init.signal ?? undefined);
+    if (!current) return null;
+    response = await send(current);
+    if (response.status === 401) {
+      clearBridgeSession();
+      return null;
+    }
   }
   if (response.status === 404) throw new Error(BRIDGE_OUTDATED);
   if (!response.ok) {
@@ -443,36 +476,7 @@ export async function bridgeStatus(
   signal?: AbortSignal,
 ): Promise<BridgeStatus | null> {
   try {
-    // Read before the request: a refused token is cleared by it, and the
-    // resume below needs it to ask Bridge for a fresh session.
-    const token = loadBridgeSession();
-    let response = await authorizedBridgeRequest("/v1/status", { signal });
-    if (!response && token && typeof window !== "undefined") {
-      const resume = await fetch(`${BRIDGE_URL}/v1/session/resume`, {
-        method: "POST",
-        signal: bridgeRequestSignal(signal),
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${token}`,
-        },
-        cache: "no-store",
-      });
-      if (resume.status === 401) {
-        clearBridgeSession();
-        clearBridgeStatusCache();
-        return null;
-      }
-      if (resume.ok) {
-        const result = z
-          .object({ paired: z.boolean(), sessionToken: z.string().optional() })
-          .passthrough()
-          .parse(await resume.json());
-        if (result.paired && result.sessionToken) {
-          persistBridgeSession(result.sessionToken);
-          response = await authorizedBridgeRequest("/v1/status", { signal });
-        }
-      }
-    }
+    const response = await authorizedBridgeRequest("/v1/status", { signal }, BRIDGE_STATUS_TIMEOUT_MS);
     return response ? statusSchema.parse(await response.json()) : null;
   } catch {
     return null;

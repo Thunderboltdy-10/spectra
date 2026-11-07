@@ -199,8 +199,11 @@ export const commit = internalMutation({
     const admission = await assertVerifiedAiArtifactWriteAdmission(ctx, identity);
     const before = { title: beforeProjection.title, summary: beforeProjection.summary,
       content: beforeProjection.content, tags: beforeProjection.tags };
-    await ctx.db.patch(artifact._id, { ...before, contentHash: args.beforeProjectionHash, liveStateVectorHash: append.baseStateVectorHash });
-    await ctx.db.patch(room._id, { lastProjectionSequence: room.nextSequence - 1 });
+    // Usually the row already says this, and rewriting it would run every trigger for nothing.
+    if ((artifact.contentHash ?? null) !== args.beforeProjectionHash || artifact.liveStateVectorHash !== append.baseStateVectorHash)
+      await ctx.db.patch(artifact._id, { ...before, contentHash: args.beforeProjectionHash, liveStateVectorHash: append.baseStateVectorHash });
+    if (room.lastProjectionSequence !== room.nextSequence - 1)
+      await ctx.db.patch(room._id, { lastProjectionSequence: room.nextSequence - 1 });
     await commitHumanCheckpoint(ctx, artifact._id, "Your work before Spectra edited", { kind: "pre_ai_checkpoint" });
     // Without native sources the appender's ordinary AI history boundary is
     // the whole history effect; it already fits oversized snapshots off-row.

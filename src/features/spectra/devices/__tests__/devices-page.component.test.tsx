@@ -20,10 +20,12 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("convex/react", () => ({
+  useConvex: () => ({ query: vi.fn(async () => []) }),
   useConvexAuth: () => ({ isAuthenticated: true, isLoading: false }),
   useQuery: (ref: unknown, args: unknown) => {
     if (args === "skip") return undefined;
     const name = String((ref as { _name?: string })?._name ?? ref);
+    if (/deviceWorks/.test(name)) return undefined;
     return /syncPolicy/.test(name) ? { contentDirection: "manual" } : h.cloud;
   },
   useMutation: (ref: unknown) => {
@@ -39,6 +41,7 @@ vi.mock("../../../../../convex/_generated/api", () => {
     api: {
       bridge: { overview: ref("bridge:overview"), requestPairing: ref("bridge:requestPairing"), revokeDevice: ref("bridge:revokeDevice") },
       syncPolicy: { effective: ref("syncPolicy:effective"), overrideAccount: ref("syncPolicy:overrideAccount") },
+      deviceWorks: { settings: ref("deviceWorks:settings"), counts: ref("deviceWorks:counts"), onThisComputer: ref("deviceWorks:onThisComputer"), movable: ref("deviceWorks:movable"), backupsToRestore: ref("deviceWorks:backupsToRestore"), choose: ref("deviceWorks:choose"), backupUploadUrl: ref("deviceWorks:backupUploadUrl"), recordBackup: ref("deviceWorks:recordBackup"), adoptRestored: ref("deviceWorks:adoptRestored"), deleteBackups: ref("deviceWorks:deleteBackups") },
     },
   };
 });

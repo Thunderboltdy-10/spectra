@@ -1,7 +1,7 @@
 {
   "initialDelayMs": 1000,
   "maxDelayMs": 60000,
-  "activeRunPollMaxDelayMs": 15000,
+  "activeRunPollMaxDelayMs": 30000,
   "jitterPercent": 20,
   "bridgeMountRepairInitialDelayMs": 5000,
   "bridgeMountRepairMaxDelayMs": 900000,

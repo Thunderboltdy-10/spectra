@@ -7,6 +7,8 @@ import {
   docxNativeMediaUrl as sharedDocxNativeMediaUrl,
   docxRichBlockToJson as sharedDocxRichBlockToJson,
   docxRichInlineToJson as sharedDocxRichInlineToJson,
+  paragraphAttrsFromFormat as sharedParagraphAttrsFromFormat,
+  paragraphFormatFromAttrs as sharedParagraphFormatFromAttrs,
   authoredSemanticsEqual,
   restoreDocxEquationCarryMetadata,
 } from "../../../../shared/document-projection.mjs";
@@ -287,6 +289,9 @@ export function restoreDocxBlockCarryMetadata(
   };
 }
 
+export const paragraphAttrsFromFormat = sharedParagraphAttrsFromFormat;
+export const paragraphFormatFromAttrs = sharedParagraphFormatFromAttrs;
+
 export function documentContentToProseMirrorJson(
   content: Record<string, unknown>,
 ): DocumentJsonNode {
@@ -564,13 +569,18 @@ const RUN_FORMAT_FIELDS = [
   "color",
   "highlight",
   "shading",
+  "verticalAlign",
+  "smallCaps",
+  "allCaps",
 ] as const;
 
 const PARAGRAPH_FORMAT_FIELDS = [
   "alignment",
   "lineSpacing",
   "spacingAfterPoints",
+  "spacingBeforePoints",
   "indentLevel",
+  "firstLineIndentPoints",
   "border",
   "shading",
 ] as const;

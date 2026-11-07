@@ -81,4 +81,10 @@ crons.interval(
   internal.dailyBriefs.dispatchDue,
   {},
 );
+crons.interval(
+  "purge-expired-secret-nonces",
+  { hours: 1 },
+  internal.secretStore.purgeExpiredNonces,
+  {},
+);
 export default crons;

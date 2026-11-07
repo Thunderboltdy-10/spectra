@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { api } from "../../../../convex/_generated/api";
 import { classIdentity, type ClassIdentity } from "../../../../shared/class-identity";
 import { useAuthedArgs } from "../data/use-authed-args";
@@ -106,6 +106,13 @@ export function ClassShelf({
 
   const folders = children.nodes.filter((node) => node.kind === "folder");
   const work = children.nodes.filter((node) => node.kind !== "folder" && node.source?.blueprintKey !== "planner_task");
+  const allTasks = useMemo(() => ahead.concat(months.flatMap((month) => month.tasks)), [ahead, months]);
+  // Tasks the student or Spectra added belong to the class too; those made for a ManageBac task show in To do.
+  const ownTasks = useMemo(() => {
+    const school = new Set(allTasks.map((task) => task.title.trim()));
+    return children.nodes.filter((node) => node.source?.blueprintKey === "planner_task" && !school.has(node.name.trim()));
+  }, [allTasks, children.nodes]);
+  const ownTaskItems = useShelfStacks(ownTasks);
   const workItems = useShelfStacks(work);
   const shownWork = allWork ? workItems : workItems.slice(0, WORK_SHOWN);
   const shownAhead = allAhead ? ahead : ahead.slice(0, AHEAD_SHOWN);
@@ -147,7 +154,15 @@ export function ClassShelf({
             ) : null}
           </section>
 
-          <section aria-labelledby="class-work">
+          {ownTaskItems.length ? (
+          <section aria-labelledby="class-own-tasks">
+            <h3 id="class-own-tasks" className="library-shelf-heading">
+              Your tasks <span className="school-heading-count">{ownTasks.length}</span>
+            </h3>
+            <ShelfNotes items={ownTaskItems} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} whereOf={sharedMark} />
+          </section>
+        ) : null}
+        <section aria-labelledby="class-work">
             <h3 id="class-work" className="library-shelf-heading">
               Your work {work.length ? <span className="school-heading-count">{work.length}</span> : null}
             </h3>

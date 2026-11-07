@@ -135,6 +135,7 @@ export const saveCheckpoint = mutation({
         ownerAccountId: actor._id,
         ...patch,
       });
+    if (run.steerWaiting) await ctx.db.patch(run._id, { steerWaiting: false });
     return {
       steers: steers.map((steer) => ({ text: steer.text, ...(steer.attachmentIds?.length ? { attachmentIds: steer.attachmentIds } : {}) })),
       active: ACTIVE.has(run.status),
@@ -150,6 +151,7 @@ export const takeSteers = mutation({
     const row = await stateRow(ctx, args.runId);
     const steers = row?.executionId === args.executionId ? (row.steers ?? []) : [];
     if (row && steers.length) await ctx.db.patch(row._id, { steers: [], updatedAt: Date.now() });
+    if (run.steerWaiting) await ctx.db.patch(run._id, { steerWaiting: false });
     return {
       steers: steers.map((steer) => ({ text: steer.text, ...(steer.attachmentIds?.length ? { attachmentIds: steer.attachmentIds } : {}) })),
       active: ACTIVE.has(run.status),
@@ -228,6 +230,7 @@ export const queueSteer = mutation({
       steers: [...(row.steers ?? []), { text, ...(attachmentIds.length ? { attachmentIds } : {}), createdAt: Date.now() }].slice(-10),
       updatedAt: Date.now(),
     });
+    await ctx.db.patch(run._id, { steerWaiting: true });
     return { queued: true, threadId: run.threadId ?? null };
   },
 });

@@ -358,7 +358,7 @@ export function ArtifactCommentsPanel({
       <article key={comment._id} className={nested ? "mt-3" : ""}>
         <CommentFrame id={comment._id} arrival={arrivals.current.get(comment._id)}>
           <div className="flex items-start gap-2.5">
-            <span className={`flex shrink-0 items-center justify-center rounded-full bg-[var(--bg-secondary)] font-semibold text-[var(--text-secondary)] ${nested ? "size-5 text-[10px]" : "size-6 text-micro"}`}>{initials(comment.author?.name)}</span>
+            <span className={`flex shrink-0 items-center justify-center rounded-full bg-[var(--bg-secondary)] font-semibold text-[var(--text-secondary)] ${nested ? "size-5 text-micro" : "size-6 text-micro"}`}>{initials(comment.author?.name)}</span>
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-2">
                 <span data-comment-author className="truncate text-caption font-semibold text-[var(--text-primary)]">{comment.author?.name ?? "Former collaborator"}</span>

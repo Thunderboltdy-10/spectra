@@ -91,12 +91,12 @@
 .sheets-function-name {
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .sheets-function-summary {
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.35;
 }
 
@@ -200,7 +200,7 @@
 .spectra-sheets-studio .sheets-column-header {
   color: color-mix(in oklab, var(--sheet-ink) 55%, var(--text-secondary));
   font-family: var(--font-display);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 400;
 }
 .spectra-sheets-studio .sheets-row-header {

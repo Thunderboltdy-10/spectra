@@ -7,7 +7,8 @@ import { Icon, type IconName } from "@/components/icons";
 import { PrismLoader } from "@/components/spectra-prism-optic";
 import { IconButton } from "@/components/ui/icon-button";
 import { Tooltip } from "@/components/ui/tooltip";
-import { getAdministration, type AdministrationIdentity } from "@/features/spectra/administration/api";
+import type { AdministrationIdentity } from "@/features/spectra/administration/api";
+import { readIdentity } from "@/features/spectra/administration/identity";
 import { formatRelativeTime } from "@/features/spectra/components/spectra-view-model";
 import { useWorkspaceCatalog } from "@/features/spectra/data/use-catalog-pages";
 import { getSpectraThreads, type SpectraSchoolMessage, type SpectraThread } from "@/features/spectra/data/api";
@@ -170,7 +171,7 @@ export function Rail() {
   const [identity, setIdentity] = useState<AdministrationIdentity | null>(null);
   useEffect(() => {
     let live = true;
-    void getAdministration<AdministrationIdentity>("identity")
+    void readIdentity()
       .then((value) => live && setIdentity(value))
       .catch(() => live && setIdentity(null));
     return () => {

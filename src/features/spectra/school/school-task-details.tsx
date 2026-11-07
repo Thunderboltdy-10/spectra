@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useConvex, useConvexAuth, useQuery } from "convex/react";
+import { useConvex, useConvexAuth } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import type { IconName } from "@/components/icons";
 import { Button } from "@/components/ui/button";

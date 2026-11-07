@@ -34,7 +34,7 @@ afterEach(() => {
 });
 
 describe("Bridge discovery gate (LV-012)", () => {
-  it("drops remembered local identity after Bridge refuses the browser session", async () => {
+  it("keeps the remembered computer, as not connected, while a refused browser joins again", async () => {
     window.localStorage.setItem(BRIDGE_DISCOVERY_STORAGE_KEY, "enabled");
     window.localStorage.setItem(BRIDGE_SESSION_STORAGE_KEY, "expired-session");
     window.localStorage.setItem(BRIDGE_STATUS_CACHE_KEY, JSON.stringify({
@@ -48,8 +48,8 @@ describe("Bridge discovery gate (LV-012)", () => {
       : new Response("Expired session", { status: 401 })));
     const { result } = renderHook(() => useBridgeHealth());
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-    expect(window.localStorage.getItem(BRIDGE_STATUS_CACHE_KEY)).toBeNull();
-    expect(result.current.status).toBeNull();
+    expect(window.localStorage.getItem(BRIDGE_STATUS_CACHE_KEY)).not.toBeNull();
+    expect(result.current.status).toMatchObject({ deviceId: "old-device", paired: false, cloudConnected: false });
     expect(result.current.reachability).toBe("running");
   });
 

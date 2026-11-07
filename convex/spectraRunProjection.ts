@@ -1,5 +1,5 @@
 import type { Doc } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 
 export const RUN_TAB_PROJECTION_VERSION = 3;
 export const RESULT_CARD_SUMMARY_READ_MODEL_VERSION = 2;
@@ -123,6 +123,22 @@ function compactDockSummary(value: unknown) {
  * document: context snapshots, plans, usage payloads, routing reasons and
  * approval detail belong to the run detail query, not the tab index.
  */
+/**
+ * The last event written for a run. An event batch leaves the run row alone, so
+ * the subscriptions reading that row don't all run again every few seconds.
+ */
+export async function lastRunEventSequence(
+  ctx: { db: { query: QueryCtx["db"]["query"] } },
+  run: Pick<Doc<"spectraAiRuns">, "_id" | "eventSequence">,
+) {
+  const last = await ctx.db
+    .query("spectraRunEvents")
+    .withIndex("by_run_sequence", (q) => q.eq("runId", run._id))
+    .order("desc")
+    .first();
+  return Math.max(run.eventSequence ?? 0, last?.sequence ?? 0);
+}
+
 export function projectRunTabSummary(run: Doc<"spectraAiRuns">) {
   return {
     _id: run._id,

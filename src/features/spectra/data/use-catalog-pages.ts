@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import { useQuery } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "./use-authed-args";

@@ -45,6 +45,9 @@ export default defineSchema({
     .index("by_status", ["status"]),
 
   accounts: defineTable({
+    /** Where new work is kept. Unset until they've been asked. */
+    workStorage: v.optional(v.union(v.literal("device_backup"), v.literal("device_only"), v.literal("cloud"))),
+    workBackupEveryHours: v.optional(v.number()),
     clerkId: v.string(),
     email: v.string(),
     emailVerified: v.boolean(),
@@ -85,9 +88,11 @@ export default defineSchema({
     state: v.union(v.literal("writing"), v.literal("ready"), v.literal("failed")),
     claimedAt: v.number(),
     recap: v.optional(v.string()),
+    /** What matters next; the part of the brief that's always there. */
+    ahead: v.optional(v.string()),
     suggestions: v.optional(v.array(briefSuggestionValidator)),
     /** The last day's brief, kept on the page until this day's is ready. */
-    previous: v.optional(v.object({ day: v.string(), recap: v.optional(v.string()), suggestions: v.optional(v.array(briefSuggestionValidator)) })),
+    previous: v.optional(v.object({ day: v.string(), recap: v.optional(v.string()), ahead: v.optional(v.string()), suggestions: v.optional(v.array(briefSuggestionValidator)) })),
     updatedAt: v.number(),
   }).index("by_account", ["accountId"]),
 
@@ -2069,7 +2074,22 @@ export default defineSchema({
     .index("by_workspace", ["workspaceId", "createdAt"])
     .index("by_phase_updated", ["phase", "updatedAt"]),
 
+  deviceBackups: defineTable({
+    accountId: v.id("accounts"),
+    storeId: v.string(),
+    storageId: v.id("_storage"),
+    bytes: v.number(),
+    works: v.number(),
+    /** Holds every work rather than what changed since the last one. */
+    full: v.boolean(),
+    createdAt: v.number(),
+  }).index("by_account", ["accountId", "createdAt"]),
+
   spectraArtifacts: defineTable({
+    /** Kept on a computer through Spectra Bridge rather than here. */
+    storageHome: v.optional(v.literal("device")),
+    /** Which computer's store has it. */
+    storageStoreId: v.optional(v.string()),
     // Set by a rename until the live document says something else.
     renamedFromTitle: v.optional(v.string()),
     ownerAccountId: v.id("accounts"),
@@ -2927,6 +2947,19 @@ export default defineSchema({
     content: v.string(),
     updatedAt: v.number(),
   }).index("by_account_slug", ["accountId", "slug"]),
+
+  /** What a run changed in the memory files, so undoing the run can put it back. */
+  spectraMemoryChanges: defineTable({
+    accountId: v.id("accounts"),
+    runId: v.string(),
+    file: v.union(v.literal("about"), v.literal("preferences"), v.literal("topic")),
+    slug: v.optional(v.string()),
+    before: v.any(),
+    after: v.any(),
+    at: v.number(),
+  })
+    .index("by_run", ["runId"])
+    .index("by_account_at", ["accountId", "at"]),
 
   memoryPreferences: defineTable({
     accountId: v.id("accounts"),
@@ -4801,6 +4834,8 @@ export default defineSchema({
     ),
     lastRetryKey: v.optional(v.string()),
     eventSequence: v.optional(v.number()),
+    /** A message arrived during this run; the worker learns it from its next event write. */
+    steerWaiting: v.optional(v.boolean()),
     traceDegraded: v.optional(v.boolean()),
     approval: v.optional(
       v.object({

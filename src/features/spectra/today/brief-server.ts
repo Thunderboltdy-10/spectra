@@ -7,6 +7,7 @@ import {
   briefMessages,
   nextDay,
   parseBrief,
+  plainBrief,
   zonedInstant,
   type BriefContext,
   type BriefContextItem,
@@ -20,6 +21,9 @@ import {
  */
 
 const AGENDA_DAYS = 14;
+/** A quiet fortnight still has something on the way. */
+const LOOK_AHEAD_DAYS = 45;
+const MODEL_ATTEMPTS = 2;
 const DUE_KINDS = new Set<CalendarItem["kind"]>(["official_deadline", "task", "milestone", "reminder"]);
 
 type Row = Record<string, unknown>;
@@ -40,13 +44,15 @@ export async function gatherBriefContext(day: string, timeZone: string): Promise
   const yesterdayStart = zonedInstant(nextDay(day, -1), "00:00", timeZone);
   const tomorrowStart = zonedInstant(nextDay(day), "00:00", timeZone);
   const horizon = zonedInstant(nextDay(day, AGENDA_DAYS), "00:00", timeZone);
+  const farHorizon = zonedInstant(nextDay(day, LOOK_AHEAD_DAYS), "00:00", timeZone);
   const yesterday = (at: number | undefined) => at !== undefined && at >= yesterdayStart && at < todayStart;
 
-  const [threadPage, artifacts, calendar, school] = await Promise.all([
+  const [threadPage, artifacts, calendar, school, workspaces] = await Promise.all([
     optional(convexQuery<object, unknown>("spectraThreads:list", { limit: 30 }), null),
     optional(convexQuery<object, unknown>("spectraArtifacts:list", { placement: "all", limit: 40 }), null),
-    optional(convexQuery<object, unknown>("calendar:overview", { from: todayStart, to: horizon }), null),
+    optional(convexQuery<object, unknown>("calendar:overview", { from: todayStart, to: farHorizon }), null),
     optional(convexQuery<object, unknown>("school:tasks", { view: "current" }), null),
+    optional(convexQuery<object, unknown>("spectraWorkspaces:list", {}), null),
   ]);
 
   const threads = rows(threadPage, "threads").filter((thread) => text(thread.status) === "active");
@@ -75,6 +81,16 @@ export async function gatherBriefContext(day: string, timeZone: string): Promise
     at: item.startAt,
   });
 
+  // School tasks not on the calendar yet are still coming; the calendar's own copy wins.
+  const dueItems = live.filter((item) => DUE_KINDS.has(item.kind) && item.startAt! >= tomorrowStart);
+  const onCalendar = new Set(dueItems.map((item) => item.title.trim().toLowerCase()));
+  const schoolComing = rows(school, "tasks").flatMap((task): BriefContextItem[] => {
+    const at = num(task.dueAt);
+    if (task.past || at === undefined || at < tomorrowStart || onCalendar.has(text(task.title).trim().toLowerCase())) return [];
+    return [{ id: `school:${text(task.recordId)}`, title: text(task.title), ...(text(task.className) ? { note: text(task.className) } : {}), at }];
+  });
+  const coming = [...dueItems.map(agendaItem), ...schoolComing].sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+
   return {
     day,
     timeZone,
@@ -88,7 +104,13 @@ export async function gatherBriefContext(day: string, timeZone: string): Promise
     yesterdayWorks: works.filter((work) => yesterday(num(work.updatedAt))).map(workItem),
     recentWorks: works.slice(0, 12).map(workItem),
     today: live.filter((item) => item.startAt! >= todayStart && item.startAt! < tomorrowStart).map(agendaItem),
-    due: live.filter((item) => DUE_KINDS.has(item.kind) && item.startAt! >= tomorrowStart).map(agendaItem),
+    due: coming.filter((item) => (item.at ?? 0) < horizon),
+    later: coming.filter((item) => (item.at ?? 0) >= horizon),
+    places: rows(workspaces, "workspaces")
+      .filter((workspace) => text(workspace.status) !== "archived")
+      .map((workspace) => text(workspace.title))
+      .filter(Boolean)
+      .slice(0, 20),
     late: rows(school, "tasks")
       .filter((task) => !task.past && num(task.dueAt) !== undefined && num(task.dueAt)! < todayStart)
       .map((task) => ({
@@ -104,22 +126,42 @@ export async function gatherBriefContext(day: string, timeZone: string): Promise
   };
 }
 
+/** The model's brief, topped up where it came back thin; the plain one if the model can't. */
+async function composeBrief(context: BriefContext, signal: AbortSignal) {
+  const plain = plainBrief(context);
+  for (let attempt = 0; attempt < MODEL_ATTEMPTS; attempt += 1) {
+    try {
+      const turn = await callSpectraModel({
+        messages: briefMessages(context),
+        reasoning: "medium",
+        purpose: "daily",
+        // Reasoning counts against this; a tight limit leaves no room for the answer.
+        maxTokens: 8_000,
+        responseFormat: { type: "json_object" },
+        signal,
+        title: "Spectra morning brief",
+      });
+      const written = parseBrief(turn.text, context);
+      const suggestions = [
+        ...written.suggestions,
+        ...plain.suggestions.filter((move) => !written.suggestions.some((kept) => kept.kind === move.kind)),
+      ].slice(0, Math.max(written.suggestions.length, 4));
+      return { recap: written.recap, ahead: written.ahead ?? plain.ahead, suggestions };
+    } catch (error) {
+      if (signal.aborted) break;
+      console.warn("[spectra:brief] attempt", attempt + 1, error instanceof Error ? error.message : error);
+    }
+  }
+  return plain;
+}
+
 /** Writes the day's brief unless it is written or being written; true when this call wrote it. */
 export async function writeMorningBrief({ day, timeZone, signal }: { day: string; timeZone: string; signal: AbortSignal }) {
   const claimed = await convexMutation<{ day: string }, boolean>("dailyBriefs:claim", { day });
   if (!claimed) return false;
   try {
     const context = await gatherBriefContext(day, timeZone);
-    const turn = await callSpectraModel({
-      messages: briefMessages(context),
-      reasoning: "high",
-      purpose: "daily",
-      maxTokens: 2_000,
-      responseFormat: { type: "json_object" },
-      signal,
-      title: "Spectra morning brief",
-    });
-    await convexMutation("dailyBriefs:save", { day, ...parseBrief(turn.text, context) });
+    await convexMutation("dailyBriefs:save", { day, ...(await composeBrief(context, signal)) });
     return true;
   } catch (error) {
     await convexMutation("dailyBriefs:save", { day, failed: true }).catch(() => undefined);

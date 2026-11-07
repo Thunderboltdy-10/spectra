@@ -5,6 +5,7 @@ import { getSpectraArtifact, getSpectraThreadMessages } from "../data/api";
 import type { PresentedWorkType } from "./presentation";
 import { cornerPreview, threadPreview, workPreview, type WorkPreview } from "./work-preview";
 import { fileViewKind } from "../files/file-kind";
+import type { RichBlock } from "../rich-content/ast";
 import { readOfficeBytes } from "../files/office-preview-client";
 import { useBusyArtifacts } from "../collaboration/artifact-ai-activity";
 
@@ -21,16 +22,50 @@ export type PreviewSource = { _id: string; blueprintKey: PresentedWorkType; upda
 const cache = new Map<string, WorkPreview | null>();
 const lastFinished = new Map<string, WorkPreview | null>();
 const keyOf = (work: PreviewSource) => `${work._id}:${work.updatedAt}`;
-/** The files a card draws from their own bytes: a PDF's first page, a sheet's corner, a deck's slides. */
+/** The files a card draws from their own bytes: a PDF's first page, a document's opening, a sheet's corner, a deck's slides. */
 function fileFace(work: PreviewSource) {
   if (work.blueprintKey !== "resource" || !work.title) return null;
   const kind = fileViewKind(undefined, work.title);
-  return kind === "pdf" || kind === "sheet" || kind === "slides" ? kind : null;
+  return kind === "pdf" || kind === "document" || kind === "sheet" || kind === "slides" ? kind : null;
 }
 /** Other files are named by their kind, which needs no read. */
 const readable = (work: PreviewSource) => work.blueprintKey !== "resource" || fileFace(work) !== null;
 /** Larger files keep the name of their kind: a card is not worth reading that much. */
 const FILE_FACE_LIMIT = 12_000_000;
+const FACE_BLOCKS = 12;
+
+/*
+ * What a card shows only changes when its work does, so a reload needn't read every
+ * work on the shelf again. Kept in browser storage, which the account boundary
+ * clears on any change of account, by work: a new version replaces the old one.
+ */
+const FACE_CACHE = "spectra-work-faces-v1";
+const FACE_CACHE_ENTRIES = 500;
+const faceUrl = (work: PreviewSource) => `/__work-face/${encodeURIComponent(work._id)}`;
+
+async function keptFace(work: PreviewSource): Promise<WorkPreview | null> {
+  if (typeof caches === "undefined") return null;
+  try {
+    const kept = await (await caches.open(FACE_CACHE)).match(faceUrl(work));
+    if (!kept) return null;
+    const entry = (await kept.json()) as { updatedAt: number; preview: WorkPreview };
+    return entry.updatedAt === work.updatedAt ? entry.preview : null;
+  } catch {
+    return null;
+  }
+}
+
+async function keepFace(work: PreviewSource, preview: WorkPreview) {
+  if (typeof caches === "undefined") return;
+  try {
+    const store = await caches.open(FACE_CACHE);
+    await store.put(faceUrl(work), new Response(JSON.stringify({ updatedAt: work.updatedAt, preview })));
+    const keys = await store.keys();
+    await Promise.all(keys.slice(0, Math.max(0, keys.length - FACE_CACHE_ENTRIES)).map((key) => store.delete(key)));
+  } catch {
+    // Storage can be full or blocked; the card just reads again next time.
+  }
+}
 /** The width a PDF's first page is drawn at, about twice a card's. */
 const PAGE_WIDTH = 480;
 /** How many of a thread's latest messages it takes to find its last exchange. */
@@ -47,8 +82,15 @@ async function previewFor(work: PreviewSource, signal: AbortSignal) {
   return workPreview(work.blueprintKey, artifact.content);
 }
 
+/** A block of a file's text in the shape a document's card reads. */
+function faceBlock(block: RichBlock) {
+  if (block.type !== "heading" && block.type !== "paragraph" && block.type !== "list") return [];
+  const words = block.raw.replace(/^\s*(?:[-+*]|\d+\.)\s+/gm, "").replace(/[#*_`>~]/g, "").replace(/\s+/g, " ").trim();
+  return words ? [{ type: block.type === "heading" ? "heading" : "paragraph", text: words }] : [];
+}
+
 /** A file's face from its kept copy; nothing when there is no copy or it is too big. */
-async function filePreview(workId: string, face: "pdf" | "sheet" | "slides", signal: AbortSignal): Promise<WorkPreview | null> {
+async function filePreview(workId: string, face: "pdf" | "document" | "sheet" | "slides", signal: AbortSignal): Promise<WorkPreview | null> {
   const response = await fetch(`/api/spectra/native?artifactId=${encodeURIComponent(workId)}`, { signal });
   if (!response.ok || Number(response.headers.get("content-length")) > FILE_FACE_LIMIT) {
     void response.body?.cancel();
@@ -59,6 +101,7 @@ async function filePreview(workId: string, face: "pdf" | "sheet" | "slides", sig
   if (face === "pdf") return pdfFace(bytes);
   const read = await readOfficeBytes({ kind: face, bytes }, signal);
   if (read.kind === "slides") return workPreview("presentation", read.deck);
+  if (read.kind === "document") return workPreview("document", { blocks: read.ast.blocks.slice(0, FACE_BLOCKS).flatMap(faceBlock) });
   if (read.kind !== "sheet") return null;
   const sheet = read.sheets.find((candidate) => candidate.id === read.activeSheetId) ?? read.sheets[0];
   return sheet ? cornerPreview(sheet.cells, (cell) => (cell as { text?: string }).text?.slice(0, 40) ?? "") : null;
@@ -105,7 +148,9 @@ async function readPreview(work: PreviewSource, signal: AbortSignal) {
   await acquire();
   try {
     if (signal.aborted || cache.has(keyOf(work))) return;
-    const preview = await previewFor(work, signal);
+    const kept = await keptFace(work);
+    const preview = kept ?? (await previewFor(work, signal));
+    if (preview && !kept && !signal.aborted) void keepFace(work, preview);
     if (!signal.aborted) {
       cache.set(keyOf(work), preview);
       lastFinished.set(work._id, preview);

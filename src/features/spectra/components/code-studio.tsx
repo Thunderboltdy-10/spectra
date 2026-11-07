@@ -156,6 +156,25 @@ type RunState =
 
 type CodeSurface = "preview" | "code" | "split";
 
+const surfaceKey = (artifactId: string) => `spectra:code-surface:${artifactId}`;
+
+function rememberedSurface(artifactId: string): CodeSurface | null {
+  try {
+    const value = window.localStorage.getItem(surfaceKey(artifactId));
+    return value === "preview" || value === "code" || value === "split" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberSurface(artifactId: string, surface: CodeSurface) {
+  try {
+    window.localStorage.setItem(surfaceKey(artifactId), surface);
+  } catch {
+    // Only a convenience: the studio still opens on the default.
+  }
+}
+
 /**
  * The registry owns which views exist and who may enter them, so the studio
  * translates its own surface names to the registry's mode ids rather than
@@ -467,11 +486,15 @@ export function CodeStudio({
   // Full screen shows code and what it makes side by side. The panel has room for
   // one, so it opens on what the code makes, when it makes something.
   const [surface, setSurface] = useState<CodeSurface>(() => {
-    const mode = incoming.visualisation.openMode;
-    if (mode === "preview" || mode === "source") return mode === "preview" ? "preview" : "code";
     const makesSomething =
       incoming.runtime !== "none" && incoming.runtime !== "python" && incoming.visualisation.enabled !== false;
-    return contract.surface === "full" || !makesSomething ? "split" : "preview";
+    const chosen = rememberedSurface(artifactId);
+    // The split only exists at full width; narrower, it reads as the code.
+    if (chosen === "split" && contract.surface !== "full") return "code";
+    if (chosen && (chosen === "code" || makesSomething)) return chosen;
+    const mode = incoming.visualisation.openMode;
+    if (mode === "preview" || mode === "source") return mode === "preview" ? "preview" : "code";
+    return makesSomething ? "preview" : "code";
   });
   const [sourceMode, setSourceMode] = useState<"code" | "parameters">("code");
   const [fileQuery, setFileQuery] = useState("");
@@ -2355,6 +2378,7 @@ export function CodeStudio({
   // under it — or the preview's min-content blows the panel across the library.
   const splitPreviewOpen = surface === "split" && isFullscreen;
   const selectSurface = (next: CodeSurface) => {
+    rememberSurface(artifactId, next);
     setSurface(next);
     setSettingsOpen(false);
   };

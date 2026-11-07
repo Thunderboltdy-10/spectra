@@ -622,7 +622,7 @@ function PresentationObjectInspector({
           />
         </label>
       ) : null}
-      {object.type === "chart" || object.type === "embed" ? (
+      {object.type === "chart" || (object.type === "embed" && !(object.content as { diagram?: unknown } | null)?.diagram) ? (
         <div className="presentation-source-binding">
           <SelectField
             label="Source work"
@@ -2354,7 +2354,7 @@ export function PresentationStudio({
       downloadBlob(blob, `${stem}.${format === "png" ? "slides.zip" : format}`);
       setIoMessage(
         `${format === "pptx"
-          ? "PowerPoint export preserved editable text, shapes, images, charts, tables, and notes; unsupported live embeds and complex motion remain Spectra-native."
+          ? "Exported to PowerPoint. Text, shapes, charts, tables and notes stay editable there, and diagrams come across as pictures."
           : format === "odp"
             ? "OpenDocument export contains editable slide text frames; media, live embeds, and advanced motion require the Spectra source for full fidelity."
             : "Static export completed from the current synchronized scene."}${linkedWarning}`,

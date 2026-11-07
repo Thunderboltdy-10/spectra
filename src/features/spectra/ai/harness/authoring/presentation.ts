@@ -54,7 +54,8 @@ export type VisualSpec =
       alt?: string;
     }
   | { type: "table"; rows: string[][]; alt?: string }
-  | { type: "shape"; text: string };
+  | { type: "shape"; text: string }
+  | { type: "diagram"; code: string; alt?: string };
 
 export type SlideSpec = {
   layout?: PresentationLayoutId;
@@ -159,6 +160,8 @@ function titleObject(value: string, ordinal: number, ids: IdFactory) {
   return object;
 }
 
+const MAX_DIAGRAM_CODE = 60_000;
+
 function visualObject(spec: VisualSpec, ordinal: number, ids: IdFactory, label: string): PresentationObject {
   switch (spec.type) {
     case "chart": {
@@ -194,8 +197,20 @@ function visualObject(spec: VisualSpec, ordinal: number, ids: IdFactory, label: 
       object.content = { shape: "rounded-rectangle", text: String(spec.text ?? "").trim() };
       return object;
     }
+    case "diagram": {
+      const code = String(spec.code ?? "").trim();
+      if (!code) throw new AuthoringError(`${label}: visual.code is empty. Give the SVG or HTML that draws the diagram.`);
+      if (code.length > MAX_DIAGRAM_CODE)
+        throw new AuthoringError(`${label}: visual.code is ${code.length} characters; keep a diagram under ${MAX_DIAGRAM_CODE}.`);
+      if (!/^(<\?xml[^>]*>\s*)?<(svg|!doctype|html|div|canvas|style|script)[\s>]/i.test(code))
+        throw new AuthoringError(`${label}: visual.code must start with <svg or be an HTML page.`);
+      const object = newObject("embed", ordinal, ids);
+      object.content = { diagram: { code } };
+      object.altText = spec.alt?.trim() || "Diagram";
+      return object;
+    }
     default:
-      throw new AuthoringError(`${label}: visual.type must be chart, table or shape.`);
+      throw new AuthoringError(`${label}: visual.type must be chart, table, shape or diagram.`);
   }
 }
 
@@ -486,6 +501,7 @@ function objectSummary(object: PresentationObject) {
   }
   if (object.type === "table") return `[table, ${(record(object.content).rows as unknown[] | undefined)?.length ?? 0} rows]`;
   if (object.type === "image") return `[image: ${object.altText ?? "no alt text"}]`;
+  if (object.type === "embed" && record(object.content).diagram) return `[diagram: ${object.altText ?? "no description"}]`;
   return presentationObjectText(object).replace(/\n+/g, " / ");
 }
 
@@ -511,6 +527,22 @@ export function presentationOutline(content: unknown, options: { max?: number; s
 const CHARACTER_DRAWING = /[─━│┃┌┐└┘├┤┬┴┼═║╭╮╯╰]{3,}/;
 
 /** Slides that are empty, hold placeholder copy, overflow or miss a layout role. */
+const MIN_DIAGRAM_LABEL = 14;
+
+/** How big a diagram's smallest label comes out on the slide, once SVG is scaled to its box. Null when that can't be read off the code. */
+function diagramLabelSize(object: PresentationSlide["objects"][number]) {
+  const code = (record(object.content).diagram as { code?: unknown } | undefined)?.code;
+  if (typeof code !== "string") return null;
+  const viewBox = /viewBox\s*=\s*["'][\d.+-]+[\s,]+[\d.+-]+[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(code);
+  const sizes = [...code.matchAll(/font-size\s*[=:]\s*["']?\s*([\d.]+)/gi)].map((match) => Number(match[1]));
+  const drawnWidth = Number(viewBox?.[1]);
+  const drawnHeight = Number(viewBox?.[2]);
+  if (!drawnWidth || !drawnHeight || !sizes.length || !object.width || !object.height) return null;
+  // The drawing keeps its proportions, so the tighter side of the box sets the scale.
+  const scale = Math.min(object.width / drawnWidth, object.height / drawnHeight);
+  return Math.min(...sizes) * scale;
+}
+
 /** What is wrong with one slide, in the model's words. */
 function slideProblems(slide: PresentationSlide, index: number) {
   const visible = slide.objects.filter((object) => !object.hidden);
@@ -529,6 +561,9 @@ function slideProblems(slide: PresentationSlide, index: number) {
       problems.push(`${label}: "${truncate(presentationObjectText(object), 40)}" overflows its box; shorten it or split the slide`);
     else if (CHARACTER_DRAWING.test(value))
       problems.push(`${label}: a diagram typed in characters does not read on a slide; say it in words, a table or a chart`);
+    const smallest = object.type === "embed" ? diagramLabelSize(object) : null;
+    if (smallest !== null && smallest < MIN_DIAGRAM_LABEL)
+      problems.push(`${label}: the diagram's smallest label shows at about ${Math.round(smallest)} on the slide, too small to read. Use bigger labels and fewer words, or leave out body so the diagram gets the whole slide`);
   }
   for (const issue of presentationLayoutRoleIssues(slide)) problems.push(`${label}: ${issue}`);
   return problems;

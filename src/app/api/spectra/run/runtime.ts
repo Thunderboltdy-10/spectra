@@ -5,6 +5,7 @@ import { withSpectraRequestLog } from "@/features/spectra/ai/run-log";
 import { prepareAttachments as prepareRunAttachments } from "@/features/spectra/compute/files/attachment-preprocessor";
 import { createNdjsonResponse } from "@/features/spectra/runs/streaming/ndjson-response";
 import { requireActor } from "@/lib/auth-server";
+import { deviceUndoPlan, restoreDeviceVersion } from "@/lib/device-restore-server";
 import { errorStatus } from "@/lib/route-handler";
 import { NextRequest } from "next/server";
 import { asOwner, verifyScheduledCallback } from "@/lib/scheduled-callback";
@@ -666,10 +667,18 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
     } catch (error) {
       return new Response(publicError(error), { status: errorStatus(error) });
     }
-    // Everything with a lasting effect goes back: new works, the calendar, the Library, settings.
+    // Works kept on a computer have their history there, so Bridge says what can go back.
+    const onDevice = await deviceUndoPlan(
+      state.cards.flatMap((card) => card.actions.flatMap((entry) => (entry.key === "open" && entry.targetId ? [entry.targetId] : []))),
+      runId,
+    );
+    // Everything with a lasting effect goes back: new works, the calendar, the Library, settings, memory.
     let reversal: { counts: Partial<RunUndoCounts>; left: string[]; kept: string[]; trashedWorks: string[] };
     try {
-      reversal = await mutate<{ runId: string }, typeof reversal>("spectraRunUndo:reverseWrites", { runId });
+      reversal = await mutate<{ runId: string; keepWorks: string[] }, typeof reversal>("spectraRunUndo:reverseWrites", {
+        runId,
+        keepWorks: onDevice.keep,
+      });
     } catch (error) {
       return new Response(publicError(error), { status: errorStatus(error) });
     }
@@ -700,14 +709,27 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
         failed.push(error instanceof Error ? publicError(error) : "Spectra could not restore that earlier copy.");
       }
     }
+    for (const item of onDevice.restore) {
+      if (gone.has(item.artifactId)) continue;
+      try {
+        await restoreDeviceVersion({
+          artifactId: item.artifactId,
+          versionId: `device:${item.versionId}`,
+          requestId: `undo:${runId}:${item.artifactId}`,
+        });
+        restored.push(item.artifactId);
+      } catch (error) {
+        failed.push(error instanceof Error ? publicError(error) : "Spectra could not restore that earlier copy.");
+      }
+    }
     const counts = { ...reversal.counts, restored: restored.length };
     const reversedAnything = Object.values(counts).some(Boolean);
-    if (!reversedAnything && (failed.length || plan.blocked.length || reversal.kept.length))
-      return new Response(failed[0] ?? plan.blocked[0]?.reason ?? reversal.kept[0] ?? "Spectra could not undo this run.", { status: 409 });
+    const stayed = [...new Set([...plan.blocked.map((item) => item.reason), ...onDevice.notes, ...reversal.kept])];
+    if (!reversedAnything && (failed.length || stayed.length))
+      return new Response(failed[0] ?? stayed[0] ?? "Spectra could not undo this run.", { status: 409 });
     const summary = runUndoSummary(counts);
     const notes = [
-      ...plan.blocked.map((item) => item.reason),
-      ...reversal.kept,
+      ...stayed,
       ...failed,
       ...(reversal.left.length ? [`Still in place: ${reversal.left.join(", ")}.`] : []),
     ];

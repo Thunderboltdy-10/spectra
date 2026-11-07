@@ -103,6 +103,19 @@
    break is a break a writer inserts twice.
    --------------------------------------------------------------------------- */
 
+.spectra-document-studio .ProseMirror [data-page-break-before] {
+  border-top: 1px dashed var(--border-default);
+  padding-top: 12px;
+}
+
+@media print {
+  .spectra-document-studio .ProseMirror [data-page-break-before] {
+    border-top: 0;
+    padding-top: 0;
+    break-before: page;
+  }
+}
+
 .spectra-document-studio .ProseMirror .spectra-page-break,
 .spectra-document-studio .ProseMirror .spectra-section-break {
   position: relative;

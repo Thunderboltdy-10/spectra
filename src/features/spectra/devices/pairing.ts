@@ -198,6 +198,23 @@ export function createPairing(deps: PairingDeps) {
 
 export type Pairing = ReturnType<typeof createPairing>;
 
+const REJOIN_WAIT_MS = 20_000;
+
+/**
+ * Lets this browser in without a code, when Bridge already belongs to this
+ * account: the computer's saved key answers for it, so nothing asks on screen.
+ * Runs apart from the Devices page's flow, which never sees it.
+ */
+export async function rejoinBridge(request: PairingRequest): Promise<boolean> {
+  const pairing = createPairing(browserDeps);
+  const timer = setTimeout(() => pairing.cancel(), REJOIN_WAIT_MS);
+  try {
+    return (await pairing.start(request)).phase === "paired";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 let shared: Pairing | null = null;
 
 /** The one pairing flow for this browser tab. */

@@ -39,7 +39,7 @@ import {
   type SpectraThreadTrace,
   type SpectraWorkspace,
 } from "../data/api";
-import { useQuery } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
@@ -53,6 +53,8 @@ import { isReplyEmbedRegion, replyEmbedRegion } from "../../../../shared/artifac
 import { publicSpectraFailureText } from "../runs/live-dock";
 import { BatchedChoiceBlock, ChoiceBlock } from "./conversation-choice";
 import { compareConflictRegions } from "../collaboration/region-text";
+import { Icon } from "@/components/icons";
+import { runTabCard, useRunTabs } from "../island/run-tabs";
 import { HarnessInputPanel, WorkTouchCards, messageTouches } from "./harness-run-parts";
 import { HarnessWidgets, messageWidgets } from "./thread-widget";
 import { applyHarnessEvent, isHarnessExchangeEvent, type HarnessAnswerValue, type HarnessExchangeFields } from "../ai/harness-exchange";
@@ -753,12 +755,17 @@ function ReplyWork({
   touches,
   onOpen,
   currentTitles,
+  undone,
+  onUndo,
 }: {
   threadId?: string;
   runId?: string;
   touches: readonly HarnessArtifactTouchView[];
   onOpen?: (artifactId: string) => void;
   currentTitles?: ReadonlyMap<string, string>;
+  undone?: boolean;
+  /** Offered when the run can still be reversed. */
+  onUndo?: () => void;
 }) {
   const region = runId ? replyEmbedRegion(runId) : undefined;
   const container = useArtifactEmbedContainer("thread", threadId ?? "", Boolean(threadId && region));
@@ -776,7 +783,13 @@ function ReplyWork({
           region={(regionId) => regionId === region}
         />
       ) : null}
-      <WorkTouchCards touches={shown.size ? touches.filter((touch) => !shown.has(touch.id)) : touches} onOpen={onOpen} currentTitles={currentTitles} />
+      <WorkTouchCards touches={shown.size ? touches.filter((touch) => !shown.has(touch.id)) : touches} onOpen={onOpen} currentTitles={currentTitles} undone={undone} />
+      {onUndo ? (
+        <button type="button" onClick={onUndo} className="reply-undo">
+          <Icon name="undoSpectra" size={15} aria-hidden />
+          Undo Spectra's changes
+        </button>
+      ) : null}
     </>
   );
 }
@@ -1884,6 +1897,14 @@ export function ConversationSurface({
     },
     [observedThreadId, renderedDetail?.thread._id],
   );
+  const runTabs = useRunTabs();
+  const runTabCardByRun = useMemo(
+    () => new Map(runTabs.flatMap((tab) => {
+      const card = runTabCard(tab);
+      return card ? [[tab.runId, card] as const] : [];
+    })),
+    [runTabs],
+  );
   const traceByRun = useMemo(
     () => {
       const traces = new Map(
@@ -2108,6 +2129,23 @@ export function ConversationSurface({
                     !persistedAssistantRunIds.has(message.runId)),
               );
               const touches = message.role === "assistant" ? messageTouches(message.metadata) : [];
+              // A trace loads when it's opened; the thread's tab already knows about its latest run.
+              const tabCard = message.runId ? runTabCardByRun.get(message.runId) : undefined;
+              const runCards = trace
+                ? trace.cards.map((card) => ({
+                    id: card._id,
+                    runId: card.runId,
+                    status: card.status,
+                    title: card.title,
+                    summary: card.summary,
+                    variant: card.variant,
+                    actions: card.actions,
+                    provenance: card.provenance,
+                    updatedAt: card.updatedAt,
+                  }))
+                : tabCard ? [tabCard] : [];
+              const undone = runCards.some((card) => card.actions.some((action) => action.key === "undone"));
+              const undoable = !undone && onCardAction ? runCards.find((card) => card.actions.some((action) => action.key === "revert")) : undefined;
               const conversationCards = (trace?.cards ?? []).flatMap((card) => {
                 const repeatsAnswer = Boolean(message.content.trim()) &&
                   card.summary?.trim() === message.content.trim();
@@ -2200,9 +2238,19 @@ export function ConversationSurface({
                   ) : (
                     <div className="relative pl-9">
                       <ReplyMark />
-                      {trace && trace.run.providerUsed !== "Spectra" ? (
+                      {liveExchange && liveExchange.runId === message.runId &&
+                      !visibleMessages.slice(messageIndex + 1).some((other) => other.role === "assistant" && other.runId === message.runId) ? (
+                        <ProgressTrace
+                          steps={liveExchange.steps}
+                          answers={liveExchange.answers}
+                          active={liveExchange.status !== "failed" && liveExchange.status !== "waiting" && liveExchange.status !== "stopped"}
+                          hasOutput
+                          persistKey={liveExchange.runId ?? liveExchange.id}
+                          startedAt={liveExchange.startedAt}
+                        />
+                      ) : trace ? (
                         <PersistedProgressTrace trace={trace} />
-                      ) : !trace && !activeRun && message.runId ? (
+                      ) : !activeRun && message.runId ? (
                         (() => {
                           const asked = visibleMessages.find((other) => other.role === "user" && other.runId === message.runId);
                           if (!asked || message.createdAt <= asked.createdAt) return null;
@@ -2245,6 +2293,9 @@ export function ConversationSurface({
                         touches={touches}
                         onOpen={onOpenArtifact}
                         currentTitles={currentTitles}
+                        undone={undone}
+                        // With no slips the result card is still on show, and it has this button.
+                        onUndo={undoable && touches.length ? () => onCardAction?.(undoable, "revert") : undefined}
                       />
                       {(() => {
                         const choices = messageChoices(

@@ -23,6 +23,7 @@ import type { PreferenceSection, SpectraPreferences } from "../schema";
 import { clearSpectraMemory, exportSpectraMemory } from "../../data/api";
 import { MemoryFilesSettings } from "./memory-files-settings";
 import { RuntimeSettings } from "./runtime-settings";
+import { WorkHomeChoice } from "../../devices/work-home-choice";
 import { downloadDocumentBlob } from "../../components/artifact-studio-file-utils";
 import { COMMAND_TABS } from "../../commands";
 import { SMART_COMPLETION_TARGET } from "../../actions/protocol/semantic-action";
@@ -41,6 +42,7 @@ import { registerSettingsToggleControl } from "../../collaboration/settings-togg
 const SECTIONS = [
   { id: "ai", label: "Spectra AI", icon: "agent" },
   { id: "subscriptions", label: "AI subscriptions", icon: "agents" },
+  { id: "storage", label: "Where work is kept", icon: "devices" },
   { id: "writing", label: "Writing", icon: "edit" },
   { id: "day", label: "Your day", icon: "clock" },
   { id: "appearance", label: "Appearance", icon: "theme" },
@@ -391,6 +393,7 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
       </div>
     ),
     subscriptions: <RuntimeSettings />,
+    storage: <div className="max-w-xl"><WorkHomeChoice /></div>,
     writing: <WritingSettings p={preferences.writing} update={updateSection("writing")} refreshConfirmedPreferences={refreshConfirmedPreferences} />,
     day: <DaySettings p={preferences.notifications} update={updateSection("notifications")} />,
     appearance: <AppearanceSettings p={preferences.appearance} update={updateSection("appearance")} />,

@@ -1008,8 +1008,20 @@ export function SpectraShell({
   const [workspaceShareOpen, setWorkspaceShareOpen] = useState(false);
   const [artifactDeletePending, setArtifactDeletePending] =
     useState<SpectraArtifact | null>(null);
-  const [artifactShareTarget, setArtifactShareTarget] =
+  const [artifactShareTarget, setShareDialogTarget] =
     useState<SpectraArtifact | null>(null);
+  const setArtifactShareTarget = (artifact: SpectraArtifact | null) => {
+    if (artifact?.storageHome !== "device") return setShareDialogTarget(artifact);
+    // Others can't reach this computer, so sharing brings the work online first.
+    void import("../bridge/device-works")
+      .then(({ moveWorkToCloud }) => moveWorkToCloud(artifact._id))
+      .then(() => {
+        toast.info("Moved online so the people you share with can open it.");
+        spectraBus.emit("workspace.refreshRequested", {});
+        setShareDialogTarget({ ...artifact, storageHome: undefined, storageStoreId: undefined });
+      })
+      .catch(() => toast.error("Open Spectra Bridge on the computer that holds this work to share it."));
+  };
   const invitationCollection = searchParams.get("collection") === "invitations";
   const {
     shareInvitations,

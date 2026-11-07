@@ -43,6 +43,7 @@ import {
   type OrgNode,
 } from "./orgTreeShared";
 import { hydrateNodes, type OrgNodeView } from "./orgTreeViews";
+import { orgNodeCountByWorkspace } from "./orgNodeAggregates";
 import { enqueueStructureRequest } from "./bridgeStructure";
 import { treePagination } from "./orgTreePagination";
 
@@ -1009,6 +1010,32 @@ export const ensureAccountRoots = mutation({
       workspaceNodesCreated: created,
       rootCount: roots.length,
     };
+  },
+});
+
+/** How many works and threads each workspace holds, however deep they sit in its folders. */
+export const workspaceTallies = query({
+  args: { workspaceIds: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    const ids = [...new Set(args.workspaceIds)].slice(0, 60);
+    if (!ids.length) return {};
+    const counts = await orgNodeCountByWorkspace.countBatch(
+      ctx,
+      ids.flatMap((id) => [
+        { namespace: actor.accountId, bounds: { prefix: ["live-card", id] as [string, string] } },
+        { namespace: actor.accountId, bounds: { prefix: ["live-card", id, "thread"] as [string, string, string] } },
+        { namespace: actor.accountId, bounds: { prefix: ["live-card", id, "link"] as [string, string, string] } },
+      ]),
+    );
+    return Object.fromEntries(
+      ids.map((id, index) => {
+        const all = counts[index * 3] ?? 0;
+        const threads = counts[index * 3 + 1] ?? 0;
+        const links = counts[index * 3 + 2] ?? 0;
+        return [id, { artifacts: Math.max(0, all - threads - links), threads }];
+      }),
+    ) as Record<string, { artifacts: number; threads: number }>;
   },
 });
 

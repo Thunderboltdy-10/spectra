@@ -6,6 +6,7 @@ import { findPrimaryNode } from "./orgTreeShared";
 import { getAuthenticatedActor } from "./identityShared";
 import type { Doc, Id } from "./_generated/dataModel";
 import { commandHasNothingToUndo, type RunUndoCounts } from "../shared/run-undo";
+import { sameTopicText } from "./spectraMemory";
 
 type Row = Record<string, unknown>;
 const row = (value: unknown): Row => (value && typeof value === "object" && !Array.isArray(value) ? (value as Row) : {});
@@ -192,12 +193,64 @@ async function trashCreatedWork(ctx: MutationCtx, accountId: Id<"accounts">, art
 }
 
 /**
+ * What a run wrote to the memory files goes back too, newest first, and only where
+ * the text is still what the run left. Anything changed since is the person's now.
+ */
+async function reverseMemory(ctx: MutationCtx, accountId: Id<"accounts">, runId: string) {
+  const changes = await ctx.db.query("spectraMemoryChanges").withIndex("by_run", (q) => q.eq("runId", runId)).collect();
+  if (!changes.length) return { reversed: 0, keptAny: false };
+  const head = await ctx.db.query("spectraMemoryHeads").withIndex("by_account", (q) => q.eq("accountId", accountId)).unique();
+  const now = Date.now();
+  let about = head?.about ?? "";
+  let preferences = head?.preferences ?? "";
+  let topics = head?.topics ?? [];
+  let reversed = 0;
+  let keptAny = false;
+  for (const change of [...changes].reverse()) {
+    if (change.accountId !== accountId) continue;
+    if (change.file !== "topic") {
+      const current = change.file === "about" ? about : preferences;
+      if (head && current === change.after) {
+        if (change.file === "about") about = String(change.before ?? "");
+        else preferences = String(change.before ?? "");
+        reversed += 1;
+      } else keptAny = true;
+    } else {
+      const slug = change.slug ?? "";
+      const existing = await ctx.db.query("spectraMemoryTopics").withIndex("by_account_slug", (q) => q.eq("accountId", accountId).eq("slug", slug)).unique();
+      if (!head || !sameTopicText(existing, change.after)) {
+        keptAny = true;
+      } else {
+        const before = change.before as { title: string; summary: string; content: string } | null;
+        if (!before) {
+          if (existing) await ctx.db.delete(existing._id);
+          topics = topics.filter((entry) => entry.slug !== slug);
+        } else {
+          if (existing) await ctx.db.patch(existing._id, { ...before, updatedAt: now });
+          else await ctx.db.insert("spectraMemoryTopics", { accountId, slug, ...before, updatedAt: now });
+          const entry = { slug, title: before.title, summary: before.summary, chars: before.content.length, updatedAt: now };
+          topics = [entry, ...topics.filter((candidate) => candidate.slug !== slug)];
+        }
+        reversed += 1;
+      }
+    }
+    await ctx.db.delete(change._id);
+  }
+  if (head && reversed) await ctx.db.patch(head._id, { about, preferences, topics, updatedAt: now });
+  return { reversed, keptAny };
+}
+
+/**
  * Reverses a run's writes, newest first. Each one stands alone: one that no longer
  * applies is reported and the rest still go back. Edited works are restored by the
  * caller through the live document, which is why they are not here.
  */
 export const reverseWrites = mutation({
-  args: { runId: v.id("spectraAiRuns") },
+  args: {
+    runId: v.id("spectraAiRuns"),
+    /** Works kept on a computer that were edited since: only Bridge can tell, so the caller says. */
+    keepWorks: v.optional(v.array(v.string())),
+  },
   handler: async (ctx, args) => {
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
@@ -217,7 +270,7 @@ export const reverseWrites = mutation({
         const artifactId = ctx.db.normalizeId("spectraArtifacts", String(output.artifactId ?? operation.pendingArtifactId ?? ""));
         const artifact = artifactId ? await ctx.db.get(artifactId) : null;
         if (!artifact || artifact.createdFrom?.runId !== run._id || artifact.status !== "active") continue;
-        if (await editedAfter(ctx, artifact._id, operation._creationTime)) {
+        if (args.keepWorks?.includes(String(artifact._id)) || (await editedAfter(ctx, artifact._id, operation._creationTime))) {
           kept.push(`You edited "${artifact.title}" after Spectra made it, so it stays.`);
           continue;
         }
@@ -261,6 +314,9 @@ export const reverseWrites = mutation({
         await ctx.db.patch(operation._id, { output: { ...output, undoneAt: Date.now() } });
       }
     }
+    const memory = await reverseMemory(ctx, actor.accountId, String(run._id));
+    if (memory.reversed) count("memory");
+    if (memory.keptAny) kept.push("Spectra's memory changed after this, so it stays as it is.");
     return { counts, left: [...new Set(left)], kept: [...new Set(kept)], trashedWorks };
   },
 });

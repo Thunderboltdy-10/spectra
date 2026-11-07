@@ -24,7 +24,7 @@ const REVERSIBLE_COMMANDS = new Set([
 ]);
 
 /** Writes that change nothing the user owns, so they neither arm Undo nor need a way back. */
-const NOTHING_TO_UNDO = new Set(["show_work", "save_version", "trigger_managebac_sync"]);
+const NOTHING_TO_UNDO = new Set(["show_work", "save_version", "trigger_managebac_sync", "navigate_spectra", "read_devices"]);
 
 export function commandCanBeReversed(command: unknown) {
   return typeof command === "string" && REVERSIBLE_COMMANDS.has(command);
@@ -42,6 +42,7 @@ export type RunUndoCounts = {
   library: number;
   settings: number;
   sharing: number;
+  memory: number;
 };
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
@@ -56,6 +57,7 @@ export function runUndoSummary(counts: Partial<RunUndoCounts>) {
     counts.library ? `reversed ${plural(counts.library, "Library change", "Library changes")}` : "",
     counts.settings ? `put ${plural(counts.settings, "setting", "settings")} back` : "",
     counts.sharing ? `took back ${plural(counts.sharing, "sharing change", "sharing changes")}` : "",
+    counts.memory ? "put Spectra's memory back" : "",
   ].filter(Boolean);
   if (!parts.length) return "There was nothing left to undo.";
   const list = parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;

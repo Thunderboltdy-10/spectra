@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { useConvexAuth, useMutation } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -29,6 +30,7 @@ import { DeviceCard } from "./device-card";
 import { runLocalDeviceAction } from "./device-actions";
 import { devicesModel, nativeWritesChoice, nativeWritesPlan, type CloudOverview, type DeviceView, type NativeWrites } from "./devices-model";
 import { NativeWritesChoice } from "./native-writes-choice";
+import { WorkHomeChoice } from "./work-home-choice";
 import { PairingPanel, THIS_COMPUTER_LIFE_KEY } from "./pairing-panel";
 import { devicePairing } from "./pairing";
 import { firstTipMoment } from "../onboarding/first-tips";
@@ -320,7 +322,8 @@ export function DevicesPage() {
               ) : null}
             </section>
 
-            <aside aria-label="For every device" className="min-w-0 xl:sticky xl:top-6">
+            <aside aria-label="For every device" className="min-w-0 space-y-4">
+              <WorkHomeChoice />
               <NativeWritesChoice value={nativeWrites} disabled={!policy} onChange={chooseNativeWrites} />
             </aside>
           </div>

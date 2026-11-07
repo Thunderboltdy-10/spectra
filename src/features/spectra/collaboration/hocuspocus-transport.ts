@@ -37,8 +37,12 @@ import {
   collaborationNeedsSignIn,
 } from "./auth-session";
 import { requestSpectra } from "../data/request";
+import { base64ToBytes, deviceProjectionOf, type DeviceSeed } from "./device-work";
+import { enterDeviceRoom } from "../bridge/device-works";
 
 type SessionResponse = {
+  /** Kept on a computer: Bridge is the room, and this is what a new work starts from. */
+  device?: { storeId: string; seed: DeviceSeed };
   token: string;
   documentName: string;
   provider: "self_hosted_yjs";
@@ -48,6 +52,11 @@ type SessionResponse = {
   accountId: string;
   displayName: string;
 };
+
+/** How long typing settles before Bridge is told what the work now says. */
+const DEVICE_PROJECTION_MS = 2_000;
+/** Lists show when a work was last edited, to within this. */
+const DEVICE_TOUCH_MS = 5 * 60_000;
 
 function collaborationCursor(
   value: unknown,
@@ -271,7 +280,7 @@ async function fetchCollaborationSession(
             : failure?.message;
       throw new Error(error || "Could not start collaboration.");
     }
-    return payload;
+    return payload.device ? await enterDeviceRoom(artifactId, payload) : payload;
   } catch (error) {
     if (timedOut) throw new Error("COLLABORATION_CONNECT_TIMEOUT");
     throw error;
@@ -376,6 +385,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   ) => {
     this.documentChangeVersion += 1;
     this.playCommittedPerformances();
+    this.scheduleDeviceProjection();
     this.localDurabilityPending = true;
     if (origin !== this.provider && this.connectionStarted) {
       if (!this.provider?.synced) {
@@ -578,6 +588,63 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       this.localRecoveryDeliveryPending = false;
       this.recoveryConfirmation = null;
       this.updateSynchronizationState();
+    }).catch(() => undefined);
+  }
+
+  /** Bridge says what it holds by state vector; nothing else has hashed it. */
+  private confirmDeviceFrontier(vectorBase64: string) {
+    if (this.destroyed || this.nativeConflict) return;
+    const candidate = this.quarantined ? this.providerDocument : this.document;
+    let vector: Map<number, number>;
+    try { vector = Y.decodeStateVector(base64ToBytes(vectorBase64)); } catch { return; }
+    for (const [client, clock] of Y.decodeStateVector(Y.encodeStateVector(this.document)))
+      if ((vector.get(client) ?? 0) < clock) return;
+    if (candidate !== this.document) this.releaseQuarantine();
+    this.authoredRegionIds = [];
+    this.durablePendingUpdateIds.clear();
+    this.localDurabilityPending = false;
+    this.localRecoveryPending = false;
+    this.localRecoveryDeliveryPending = false;
+    this.recoveryConfirmation = null;
+    this.updateSynchronizationState();
+  }
+
+  private onDevice = false;
+  private deviceProjectionTimer: ReturnType<typeof setTimeout> | undefined;
+  private deviceListing = "";
+  private deviceTouchedAt = 0;
+
+  private scheduleDeviceProjection() {
+    if (!this.onDevice || this.deviceProjectionTimer !== undefined) return;
+    this.deviceProjectionTimer = setTimeout(() => {
+      this.deviceProjectionTimer = undefined;
+      this.sendDeviceProjection();
+    }, DEVICE_PROJECTION_MS);
+  }
+
+  /** Bridge searches and lists from what this says; the list here only needs the name. */
+  private sendDeviceProjection() {
+    const provider = this.provider;
+    if (!provider?.synced) return this.scheduleDeviceProjection();
+    const projection = deviceProjectionOf(this.document, this.schemaVersion);
+    if (!projection) return;
+    provider.sendStateless(JSON.stringify({ type: "spectra.device_projection", projection }));
+    const listing = JSON.stringify([projection.title, projection.summary ?? "", projection.tags]);
+    const now = Date.now();
+    if (listing === this.deviceListing && now - this.deviceTouchedAt < DEVICE_TOUCH_MS) return;
+    this.deviceListing = listing;
+    this.deviceTouchedAt = now;
+    void requestSpectra("/api/spectra", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "touchDeviceWork",
+        artifactId: this.artifactId,
+        title: projection.title,
+        summary: projection.summary ?? "",
+        tags: projection.tags,
+        edited: true,
+      }),
     }).catch(() => undefined);
   }
 
@@ -910,6 +977,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       // is still being issued. Never resurrect a provider after its transport
       // has been destroyed; doing so creates an invisible reconnect/token loop.
       if (this.destroyed || this.intentionallyDisconnected) return;
+      this.onDevice = Boolean(initial.device);
       this.update({
         level: initial.level,
         accountId: initial.accountId,
@@ -1044,6 +1112,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
               documentHash?: unknown;
               confirmationId?: unknown;
               frontierHash?: unknown;
+              deviceStateVector?: unknown;
               durableAnchor?: unknown;
               stateVector?: unknown;
               code?: unknown;
@@ -1149,7 +1218,8 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                 )
               : [];
             if (message.type === "spectra.durable_frontier") {
-              if (typeof message.frontierHash === "string") this.confirmDurableFrontier(message.frontierHash, message.durableAnchor);
+              if (typeof message.deviceStateVector === "string") this.confirmDeviceFrontier(message.deviceStateVector);
+              else if (typeof message.frontierHash === "string") this.confirmDurableFrontier(message.frontierHash, message.durableAnchor);
               return;
             }
             if (message.type === "spectra.durable_pending") {
@@ -1163,7 +1233,8 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                 const confirmation = this.recoveryConfirmation;
                 if (!confirmation || confirmation.id !== message.confirmationId || this.destroyed) return;
                 this.recoveryConfirmation = null;
-                if (typeof message.frontierHash === "string") this.confirmDurableFrontier(message.frontierHash, message.durableAnchor);
+                if (typeof message.deviceStateVector === "string") this.confirmDeviceFrontier(message.deviceStateVector);
+                else if (typeof message.frontierHash === "string") this.confirmDurableFrontier(message.frontierHash, message.durableAnchor);
                 this.updateSynchronizationState();
                 return;
               }
@@ -1330,6 +1401,12 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
 
   destroy() {
     if (this.destroyed) return;
+    if (this.deviceProjectionTimer !== undefined) {
+      clearTimeout(this.deviceProjectionTimer);
+      this.deviceProjectionTimer = undefined;
+      try { this.sendDeviceProjection(); } catch { /* Bridge saved the words already. */ }
+      if (this.deviceProjectionTimer !== undefined) clearTimeout(this.deviceProjectionTimer);
+    }
     this.destroyed = true;
     this.durabilityEpoch += 1;
     this.intentionallyDisconnected = true;

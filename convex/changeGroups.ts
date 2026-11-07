@@ -443,9 +443,9 @@ export async function commitHumanCheckpoint(
       q.eq("artifactId", artifactId).eq("status", "open"),
     )
     .collect();
-  await requireCurrentProjection(ctx, artifactId);
   const humanGroups = groups.filter((group) => group.source === "human");
   if (humanGroups.length === 0) return [];
+  await requireCurrentProjection(ctx, artifactId);
   const artifact = await ctx.db.get(artifactId);
   if (!artifact) return [];
   const after = {

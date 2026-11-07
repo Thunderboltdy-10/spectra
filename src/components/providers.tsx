@@ -13,11 +13,13 @@ import { SpectraMotionConfig } from "@/features/spectra/motion/motion-primitives
 import { LifeField } from "@/features/spectra/life/life-field";
 import { SchoolLoginSync } from "@/features/spectra/school/school-login-sync";
 import { AccountStorageBoundary } from "./account-storage-boundary";
+import { setKeptQueryClient } from "@/features/spectra/data/use-kept-query";
 import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
 const convexClient = convexUrl ? new ConvexReactClient(convexUrl) : null;
+setKeptQueryClient(convexClient);
 
 function LiveDataProvider({ children }: { children: React.ReactNode }) {
   if (!convexClient) throw new Error("NEXT_PUBLIC_CONVEX_URL is required.");

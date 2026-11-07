@@ -200,6 +200,31 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
     { params: num, delta: "format-paragraph", touches: ["body"], field: true },
   ],
   [
+    "format.spacingBefore",
+    "Set space before the current paragraph.",
+    { params: num, delta: "format-paragraph", touches: ["body"], field: true },
+  ],
+  [
+    "format.firstLineIndent",
+    "Indent the first line of the current paragraph, or hang the rest with a negative value.",
+    { params: text, delta: "format-paragraph", touches: ["body"], field: true },
+  ],
+  [
+    "format.superscript",
+    "Toggle superscript on the current selection.",
+    { requires: "edit", delta: "format-runs", touches: ["body"], manifest: "format_blocks" },
+  ],
+  [
+    "format.subscript",
+    "Toggle subscript on the current selection.",
+    { requires: "edit", delta: "format-runs", touches: ["body"], manifest: "format_blocks" },
+  ],
+  [
+    "format.smallCaps",
+    "Toggle small capitals on the current selection.",
+    { requires: "edit", delta: "format-runs", touches: ["body"], manifest: "format_blocks" },
+  ],
+  [
     "format.border",
     "Set a border on the current paragraph.",
     { params: text, delta: "format-paragraph", touches: ["body"], field: true },

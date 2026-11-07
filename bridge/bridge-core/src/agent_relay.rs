@@ -142,6 +142,48 @@ fn claude_is_confined(args: &[String]) -> bool {
     tools_off && args.iter().any(|arg| arg == "--strict-mcp-config")
 }
 
+pub fn relay_token_matches(candidate: &str) -> bool {
+    relay_token().is_some_and(|expected| {
+        candidate.len() == expected.len() && bool::from(candidate.as_bytes().ct_eq(expected.as_bytes()))
+    })
+}
+
+/// The local server's socket for requests about stored work.
+pub async fn store_socket(headers: HeaderMap, socket: WebSocketUpgrade) -> Response {
+    if headers.contains_key("origin") {
+        return (StatusCode::FORBIDDEN, "Not for browsers").into_response();
+    }
+    let offered = headers
+        .get("sec-websocket-protocol")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    if !offered.split(',').map(str::trim).any(relay_token_matches) {
+        return (StatusCode::UNAUTHORIZED, "Agent relay token is wrong").into_response();
+    }
+    let Some(rooms) = crate::rooms::shared().cloned() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "Work on this computer isn't available").into_response();
+    };
+    socket
+        .protocols([PROTOCOL])
+        .max_message_size(MAX_FRAME_BYTES)
+        .max_frame_size(MAX_FRAME_BYTES)
+        .on_upgrade(move |socket| async move {
+            let (mut sink, mut stream) = socket.split();
+            while let Some(Ok(message)) = stream.next().await {
+                match message {
+                    Message::Text(text) => {
+                        let reply = crate::rooms::answer_store_request(rooms.clone(), text.to_string()).await;
+                        if sink.send(Message::Text(reply.into())).await.is_err() {
+                            return;
+                        }
+                    }
+                    Message::Close(_) => return,
+                    _ => {}
+                }
+            }
+        })
+}
+
 pub async fn connect(
     Query(query): Query<ConnectQuery>,
     headers: HeaderMap,
@@ -573,7 +615,44 @@ async fn hub_control(ticket: &HubTicket) -> anyhow::Result<()> {
     }
 }
 
+/// A hub connection for stored work rather than a provider's program.
+async fn hub_work_pipe(base: &str, sid: &str, provider: &str) -> anyhow::Result<()> {
+    let rooms = crate::rooms::shared().cloned().ok_or_else(|| anyhow::anyhow!("no work store"))?;
+    let endpoint = format!("{base}/_spectra/agent-hub/pipe?sid={sid}");
+    let (socket, _) = tokio_tungstenite::connect_async(hub_request(&endpoint, None)?).await?;
+    let (sink, stream) = socket.split();
+    if provider == "store" {
+        let sink = sink.with(|text: String| async move {
+            Ok::<_, tokio_tungstenite::tungstenite::Error>(HubMessage::Text(text.into()))
+        });
+        let stream = stream.filter_map(|frame| async move {
+            match frame {
+                Ok(HubMessage::Text(text)) => Some(Ok::<_, tokio_tungstenite::tungstenite::Error>(text.to_string())),
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            }
+        });
+        crate::rooms::serve_store_requests(Box::pin(sink), Box::pin(stream), rooms).await;
+    } else {
+        let sink = sink.with(|bytes: Vec<u8>| async move {
+            Ok::<_, tokio_tungstenite::tungstenite::Error>(HubMessage::Binary(bytes.into()))
+        });
+        let stream = stream.filter_map(|frame| async move {
+            match frame {
+                Ok(HubMessage::Binary(bytes)) => Some(Ok::<_, tokio_tungstenite::tungstenite::Error>(bytes.to_vec())),
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            }
+        });
+        crate::rooms::serve_pipe(Box::pin(sink), Box::pin(stream), rooms).await;
+    }
+    Ok(())
+}
+
 async fn hub_pipe(base: &str, sid: &str, provider: &str) -> anyhow::Result<()> {
+    if matches!(provider, "rooms" | "store") {
+        return hub_work_pipe(base, sid, provider).await;
+    }
     let Some(program) = executable(provider) else {
         anyhow::bail!("unknown provider");
     };

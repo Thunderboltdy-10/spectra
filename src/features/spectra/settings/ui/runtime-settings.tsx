@@ -1,11 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select";
-import { toast } from "@/components/ui/toast";
 import { PROVIDER_LABEL, providerProblem, useAgentRuntime } from "../../ai/use-agent-runtime";
-import { setBridgeAgentHub } from "../../bridge/client";
+import { bridgeUnavailableReason, useBridgeAvailability } from "../../bridge/availability";
+import { DEVICES_HREF } from "../../bridge/client";
 import { useSpectraPreferences } from "../preference-store";
 import type { SpectraPreferences } from "../schema";
 
@@ -17,12 +18,9 @@ const SPEED_OPTIONS = [
   { value: "slow", label: "Slow" },
 ];
 
-/** Choosing your own runtime lets Spectra's server reach this computer's CLI, and nothing before that does. */
+/** BridgeConnection tells this computer's Bridge about the choice, now or when it next opens. */
 export function applyRuntimeChoice(runtime: Ai["runtime"], update: (patch: Partial<Ai>) => void) {
-  update({ runtime });
-  setBridgeAgentHub(runtime !== "spectra").catch(() => {
-    if (runtime !== "spectra") toast.error("Spectra Bridge didn't answer. Open it on this computer, then choose again.");
-  });
+  update({ runtime, runtimeChosen: true });
 }
 
 function Row({ label, description, control }: { label: string; description?: string; control: ReactNode }) {
@@ -55,8 +53,18 @@ function ProviderRow({ provider, model, onModel }: {
   onModel: (model: string) => void;
 }) {
   const { status } = useAgentRuntime();
+  const unavailable = bridgeUnavailableReason(useBridgeAvailability());
   const entry = status?.[provider];
   const name = PROVIDER_LABEL[provider];
+  if (unavailable) {
+    return (
+      <Row
+        label={name}
+        description={unavailable}
+        control={<Button size="sm" variant="secondary" asChild><Link href={DEVICES_HREF}>Go to Devices</Link></Button>}
+      />
+    );
+  }
   if (!entry) return <Row label={name} description="Checking this computer…" control={null} />;
   if (entry.state !== "ready") {
     return <Row label={name} description={providerProblem(provider, entry.state) ?? undefined} control={null} />;
@@ -71,7 +79,7 @@ function ProviderRow({ provider, model, onModel }: {
           ariaLabel={`${name} model`}
           value={model}
           onChange={onModel}
-          options={[{ value: "", label: "Its default model" }, ...entry.models.map((item) => ({ value: item.id, label: item.label }))]}
+          options={[{ value: "", label: `${provider === "claude" ? "Claude" : "Codex"} default` }, ...entry.models.map((item) => ({ value: item.id, label: item.label }))]}
         />
       }
     />
@@ -81,6 +89,7 @@ function ProviderRow({ provider, model, onModel }: {
 export function RuntimeSettings() {
   const { preferences, update } = useSpectraPreferences();
   const { recheck } = useAgentRuntime();
+  const ownAgentOff = Boolean(bridgeUnavailableReason(useBridgeAvailability()));
   const ai = preferences.ai;
   const patch = (next: Partial<Ai>) => update("ai", next);
   return (
@@ -97,9 +106,9 @@ export function RuntimeSettings() {
               value={ai.runtime}
               onChange={(runtime) => applyRuntimeChoice(runtime as Ai["runtime"], patch)}
               options={[
+                { value: "codex", label: "Codex", disabled: ownAgentOff },
+                { value: "claude", label: "Claude Code", disabled: ownAgentOff },
                 { value: "spectra", label: "Spectra default" },
-                { value: "codex", label: "Codex" },
-                { value: "claude", label: "Claude Code" },
               ]}
             />
           }

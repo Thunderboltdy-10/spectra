@@ -70,8 +70,17 @@ export const readTopic = query({
   },
 });
 
+const CHANGES_KEPT_MS = 30 * 24 * 60 * 60 * 1_000;
+
+type TopicText = { title: string; summary: string; content: string };
+
+export const sameTopicText = (a: TopicText | null | undefined, b: TopicText | null | undefined) =>
+  a && b ? a.title === b.title && a.summary === b.summary && a.content === b.content : !a && !b;
+
 export const update = mutation({
   args: {
+    /** The run making this change, so undoing that run can put it back. */
+    runId: v.optional(v.string()),
     file: v.union(v.literal("about"), v.literal("preferences"), v.literal("topic")),
     slug: v.optional(v.string()),
     title: v.optional(v.string()),
@@ -91,6 +100,23 @@ export const update = mutation({
     const current = row
       ? { about: row.about, preferences: row.preferences, topics: row.topics }
       : { about: await earlierClaims(ctx, actor.accountId), preferences: "", topics: [] as MemoryTopicEntry[] };
+    const journal = async (slug: string | undefined, before: unknown, after: unknown) => {
+      if (!args.runId) return;
+      await ctx.db.insert("spectraMemoryChanges", {
+        accountId: actor.accountId,
+        runId: args.runId,
+        file: args.file,
+        ...(slug ? { slug } : {}),
+        before,
+        after,
+        at: now,
+      });
+      const stale = await ctx.db
+        .query("spectraMemoryChanges")
+        .withIndex("by_account_at", (q) => q.eq("accountId", actor.accountId).lt("at", now - CHANGES_KEPT_MS))
+        .take(8);
+      await Promise.all(stale.map((change) => ctx.db.delete(change._id)));
+    };
     const save = async (patch: Partial<typeof current>) => {
       if (row) await ctx.db.patch(row._id, { ...patch, updatedAt: now });
       else await ctx.db.insert("spectraMemoryHeads", { accountId: actor.accountId, schoolId: actor.schoolId, ...current, ...patch, updatedAt: now });
@@ -101,6 +127,7 @@ export const update = mutation({
       const applied = applyMemoryText(current[args.file], args, MEMORY_CAPS[args.file], label);
       if (!applied.ok) return { ok: false, message: applied.message };
       if (applied.text !== current[args.file] || !row) await save({ [args.file]: applied.text });
+      if (applied.text !== current[args.file]) await journal(undefined, current[args.file], applied.text);
       return { ok: true, message: `Saved. ${label} is ${applied.text.length} of ${MEMORY_CAPS[args.file]} characters.` };
     }
 
@@ -108,7 +135,10 @@ export const update = mutation({
     if (!slug) return { ok: false, message: "A topic needs a slug, such as mit-interview." };
     const existing = await topicRow(ctx, actor.accountId, slug);
     if (args.remove) {
-      if (existing) await ctx.db.delete(existing._id);
+      if (existing) {
+        await ctx.db.delete(existing._id);
+        await journal(slug, { title: existing.title, summary: existing.summary, content: existing.content }, null);
+      }
       await save({ topics: current.topics.filter((entry) => entry.slug !== slug) });
       return { ok: true, message: `Erased the topic ${slug}.` };
     }
@@ -128,6 +158,9 @@ export const update = mutation({
       await ctx.db.insert("spectraMemoryTopics", { accountId: actor.accountId, slug, title, summary, content: applied.text, updatedAt: now });
     const entry: MemoryTopicEntry = { slug, title, summary, chars: applied.text.length, updatedAt: now };
     await save({ topics: [entry, ...current.topics.filter((candidate) => candidate.slug !== slug)] });
+    const before = existing ? { title: existing.title, summary: existing.summary, content: existing.content } : null;
+    const after = { title, summary, content: applied.text };
+    if (!sameTopicText(before, after)) await journal(slug, before, after);
     return { ok: true, message: `Saved. The topic ${slug} is ${applied.text.length} of ${MEMORY_CAPS.topic} characters.` };
   },
 });

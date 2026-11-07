@@ -186,11 +186,14 @@ export function WorkTouchCards({
   touches,
   onOpen,
   currentTitles,
+  undone = false,
 }: {
   touches: readonly HarnessArtifactTouchView[];
   onOpen?: (artifactId: string) => void;
   /** Names as they are now, when known: a work renamed since keeps its new name here. */
   currentTitles?: ReadonlyMap<string, string>;
+  /** The run was undone: a slip says what became of the work, not what the run did. */
+  undone?: boolean;
 }) {
   const unique = dedupeTouches(touches).map((touch) => {
     const title = currentTitles?.get(touch.id);
@@ -201,9 +204,14 @@ export function WorkTouchCards({
     <ul className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-2" aria-label="Work from this response">
       {unique.map((touch) => {
         const meta = (workTypeMeta as Record<string, (typeof workTypeMeta)[keyof typeof workTypeMeta] | undefined>)[touch.type] ?? workTypeMeta.document;
-        const action = ACTION_COPY[touch.action];
+        const reversed = undone && touch.action !== "referenced";
+        const action = reversed ? "Undone" : ACTION_COPY[touch.action];
         // A change that only repeats the action ("Edited", "Edited") says it once.
-        const change = touch.change?.trim() && touch.change.trim().toLowerCase() !== action.toLowerCase() ? touch.change : meta.label;
+        const change = reversed
+          ? touch.action === "created" ? "Moved to the Trash" : "Put back as it was"
+          : touch.change?.trim() && touch.change.trim().toLowerCase() !== action.toLowerCase() ? touch.change : meta.label;
+        // What the undo sent to the Trash doesn't open from here.
+        const opens = reversed && touch.action === "created" ? undefined : onOpen;
         const body = (
           <>
             <span className="work-slip-glyph" aria-hidden>
@@ -216,13 +224,13 @@ export function WorkTouchCards({
                 <span className="truncate">{change}</span>
               </span>
             </span>
-            {onOpen ? <span className="work-slip-open">Open</span> : null}
+            {opens ? <span className="work-slip-open">Open</span> : null}
           </>
         );
         return (
           <li key={touch.id} data-work-slip style={{ "--work-hue": meta.color, "--work-tint": meta.soft } as CSSProperties}>
-            {onOpen ? (
-              <button type="button" onClick={() => onOpen(touch.id)} aria-label={`Open ${touch.title}`} className="work-slip">
+            {opens ? (
+              <button type="button" onClick={() => opens(touch.id)} aria-label={`Open ${touch.title}`} className="work-slip">
                 {body}
               </button>
             ) : (

@@ -180,7 +180,7 @@ export function installAgentHub(httpServer, { serverKey, bridgeKey, now = () => 
     }
     if (role === "server") {
       const provider = url.searchParams.get("provider");
-      if (provider !== "codex" && provider !== "claude") return refuse(socket, "400 Bad Request");
+      if (!["codex", "claude", "rooms", "store"].includes(provider)) return refuse(socket, "400 Bad Request");
       const claims = readAgentHubTicket(offeredTicket(request), serverKey, now());
       if (!claims) return refuse(socket, "401 Unauthorized");
       return accept(request, socket, head, (ws) => onServer(ws, claims.sub, provider));

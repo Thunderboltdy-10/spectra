@@ -10,11 +10,11 @@ import { internal } from "./_generated/api";
 import type { IndexedSemanticKind } from "../shared/semantic-types";
 
 /** Quiet period after the last save before re-indexing. */
-export const SEMANTIC_DEBOUNCE_MS = 60_000;
+export const SEMANTIC_DEBOUNCE_MS = 5 * 60_000;
 /** A continuously edited item is still indexed this often. */
-export const SEMANTIC_MAX_WAIT_MS = 300_000;
+export const SEMANTIC_MAX_WAIT_MS = 30 * 60_000;
 /** Coalesced saves rewrite the queue row at most this often. */
-const TOUCH_INTERVAL_MS = 15_000;
+const TOUCH_INTERVAL_MS = 60_000;
 
 type QueueDb = Pick<MutationCtx["db"], "query" | "insert" | "patch">;
 type QueueCtx = { db: QueueDb; scheduler: MutationCtx["scheduler"] };

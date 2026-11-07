@@ -180,7 +180,7 @@ function AddToWorkspaces({ nodeId, name }: { nodeId: string; name: string }) {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <IconButton icon="workspace" label={`Add ${name} to a workspace`} size="compact" />
+        <IconButton icon="folder" label={`Add ${name} to a workspace`} size="compact" />
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-1">
         {workspaces.length === 0 ? (

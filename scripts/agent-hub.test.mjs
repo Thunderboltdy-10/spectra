@@ -31,6 +31,8 @@ async function hub(options = {}) {
 
 function connect(url, ticket, headers) {
   const socket = new WebSocket(url, ticket ? ["spectra-agent", ticket] : ["spectra-agent"], { headers });
+  // Ending a socket still connecting emits an error nobody is waiting for.
+  socket.on("error", () => undefined);
   opened.push(() => socket.terminate());
   return socket;
 }

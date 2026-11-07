@@ -7,6 +7,7 @@ import { aiWorking } from "../artifacts/ai-working";
 import type { PresentedWorkType } from "../artifacts/presentation";
 import { authoredSummary } from "../artifacts/registry";
 import { useWorkPreview, type PreviewSource } from "../artifacts/use-work-previews";
+import { useDeviceWorkAwayNote } from "../bridge/device-work-away";
 import { WorkCardBody, workCardStyle } from "../components/work-card";
 import { nodeIdentity, relativeTime } from "./node-identity";
 import type { TreeNode } from "./tree-client";
@@ -43,9 +44,12 @@ export function LibraryNote({
   const card = useRef<HTMLButtonElement>(null);
   const preview = useWorkPreview(previewSource(node), card);
   const shared = sharedLabel(node);
+  const away = useDeviceWorkAwayNote(node.source);
   return (
     <button
       ref={card}
+      data-device-away={away ? true : undefined}
+      title={away ?? undefined}
       type="button"
       data-node-row={node.nodeId}
       data-life-launch

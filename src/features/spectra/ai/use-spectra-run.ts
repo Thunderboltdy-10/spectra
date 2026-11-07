@@ -29,6 +29,7 @@ import {
 import { publishArtifactAiActivity } from "../collaboration/artifact-ai-activity";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { spectraBus } from "../events";
+import { refreshRunTabs } from "../island/run-tabs";
 import { isRetryableRunStatus } from "./run-lifecycle";
 import { observeUiRun, stopObservingUiRun, uiObserverForRun } from "../collaboration/settings-observation-client";
 
@@ -1657,6 +1658,7 @@ export function useSpectraRun({
             );
           const undone = (await response.json().catch(() => ({}))) as { summary?: string; notes?: string[] };
           toast.success(undone.summary ?? "Undone.", undone.notes?.length ? { description: undone.notes.join(" ") } : undefined);
+          void refreshRunTabs(true);
           spectraBus.emit("threads.changed", {});
           await onDataChanged?.();
         } catch (error) {

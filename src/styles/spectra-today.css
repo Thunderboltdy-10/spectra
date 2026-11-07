@@ -27,7 +27,7 @@
   margin-left: auto;
   border-radius: 6px;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--text-secondary);
   text-decoration: underline;
@@ -84,7 +84,7 @@
   padding: 2px 7px;
   border-radius: var(--radius-chip);
   background: var(--bg-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-secondary);
 }
 
@@ -135,7 +135,7 @@
   display: block;
   min-height: 0;
   padding: 20px 22px;
-  font-size: 13.5px;
+  font-size: 14px;
   color: var(--text-secondary);
 }
 
@@ -187,7 +187,7 @@
 
 .today-day-name {
   padding-bottom: 1px;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   line-height: 1.2;
   color: var(--text-secondary);
@@ -195,7 +195,7 @@
 
 .today-day[data-today] .today-day-name {
   padding-bottom: 3px;
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text-primary);
 }
 
@@ -244,7 +244,7 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow-wrap: anywhere;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   line-height: 1.3;
   color: var(--text-primary);
@@ -254,14 +254,14 @@
   display: flex;
   min-width: 0;
   gap: 8px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 500;
   color: color-mix(in oklab, var(--class-ink) 70%, var(--text-secondary));
 }
 
 .today-day-free,
 .today-day-more {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-tertiary);
 }
 
@@ -295,13 +295,13 @@
 }
 
 .morning-earlier {
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.4;
   color: var(--text-tertiary);
 }
 
 .morning-title {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 550;
   color: color-mix(in oklab, var(--ink-orange) 75%, var(--text-secondary));
 }
@@ -311,7 +311,7 @@
   align-items: center;
   gap: 10px;
   align-self: center;
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text-secondary);
 }
 
@@ -325,9 +325,22 @@
 
 .morning-label {
   margin-bottom: 8px;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-tertiary);
+}
+
+.morning-story {
+  display: grid;
+  gap: 20px;
+}
+
+.morning-recap-small {
+  max-width: 52ch;
+  font-size: var(--text-ui);
+  line-height: 1.55;
+  color: var(--text-secondary);
+  text-wrap: pretty;
 }
 
 .morning-recap {
@@ -373,14 +386,14 @@
 }
 
 .morning-move-title {
-  font-size: 14.5px;
+  font-size: 15px;
   font-weight: 550;
   line-height: 20px;
   color: var(--text-primary);
 }
 
 .morning-move-why {
-  font-size: 13px;
+  font-size: 14px;
   line-height: 18px;
   color: var(--text-secondary);
   text-wrap: pretty;
@@ -389,7 +402,7 @@
 /* How to do a move, folded until asked for: its steps in order. */
 .morning-move-how {
   margin-top: 6px;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text-secondary);
 }
 
@@ -428,7 +441,7 @@
   align-items: center;
   gap: 4px;
   margin: 6px 0 0 38px;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-tertiary);
   border-radius: var(--radius-control, 6px);
@@ -446,7 +459,7 @@
 .morning-move-detail,
 .morning-move-draft {
   margin-top: 6px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   color: color-mix(in oklab, var(--move-ink) 80%, var(--text-secondary));
 }

@@ -2117,6 +2117,15 @@ export const getAgentRuntime = query({
   },
 });
 
+async function workspaceIsShared(ctx: MutationCtx, workspaceId: Id<"spectraWorkspaces"> | undefined) {
+  if (!workspaceId) return false;
+  const grant = await ctx.db
+    .query("accessGrants")
+    .withIndex("by_resource", (q) => q.eq("resourceType", "workspace").eq("resourceId", workspaceId))
+    .first();
+  return Boolean(grant);
+}
+
 export const create = mutation({
   args: {
     blueprintKey: vBlueprintKey,
@@ -2135,6 +2144,8 @@ export const create = mutation({
     parentNodeId: v.optional(v.union(v.id("orgNodes"), v.literal("root"))),
     /** Office import format (xlsx/docx/…) so lens open can hydrate without a title extension. */
     nativeFormat: v.optional(v.string()),
+    /** Keep it on this computer's Bridge store rather than here. */
+    storageStoreId: v.optional(v.string()),
     runId: v.optional(v.id("spectraAiRuns")),
     executionId: v.optional(v.string()),
     threadId: v.optional(v.id("spectraThreads")),
@@ -2177,10 +2188,15 @@ export const create = mutation({
       .toLowerCase()
       .replace(/[^a-z0-9._-]+/g, "")
       .slice(0, 32);
+    const keptOnDevice = Boolean(
+      args.storageStoreId && !nativeFormat && !(await workspaceIsShared(ctx, args.workspaceId)),
+    );
     const content = await contentForArtifactStorage(
       ctx,
       args.blueprintKey,
-      args.content ?? defaultArtifactContent(args.blueprintKey as BlueprintKey),
+      keptOnDevice
+        ? defaultArtifactContent(args.blueprintKey as BlueprintKey)
+        : args.content ?? defaultArtifactContent(args.blueprintKey as BlueprintKey),
     );
     const artifactId = await ctx.db.insert("spectraArtifacts", {
       ownerAccountId: actor._id,
@@ -2193,12 +2209,15 @@ export const create = mutation({
       summary,
       content,
       ...(nativeFormat ? { nativeFormat } : {}),
-      textIndex: buildArtifactTextIndex({
-        title,
-        summary,
-        content,
-        tags: args.tags,
-      }),
+      ...(keptOnDevice ? { storageHome: "device" as const, storageStoreId: args.storageStoreId } : {}),
+      textIndex: keptOnDevice
+        ? title
+        : buildArtifactTextIndex({
+            title,
+            summary,
+            content,
+            tags: args.tags,
+          }),
       tags: args.tags ?? [],
       status: "active",
       createdFrom: {
@@ -2278,7 +2297,11 @@ export const create = mutation({
       occurredAt: now,
     });
 
-    return { artifactId, nodeId };
+    return {
+      artifactId,
+      nodeId,
+      ...(keptOnDevice ? { schemaVersion: defaultArtifactSchemaVersion(args.blueprintKey as BlueprintKey) } : {}),
+    };
   },
 });
 
@@ -2385,6 +2408,8 @@ export const createPending = mutation({
     executionId: v.string(),
     threadId: v.optional(v.id("spectraThreads")),
     sourceAttachmentIds: v.optional(v.array(v.string())),
+    /** Keep it on this computer's Bridge store rather than here. */
+    storageStoreId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
@@ -2414,6 +2439,9 @@ export const createPending = mutation({
       title,
       summary,
       content,
+      ...(args.storageStoreId && !(await workspaceIsShared(ctx, args.workspaceId))
+        ? { storageHome: "device" as const, storageStoreId: args.storageStoreId }
+        : {}),
       textIndex: `${title} ${summary}`,
       tags: [],
       status: "active",

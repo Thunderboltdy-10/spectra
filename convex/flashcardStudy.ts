@@ -156,6 +156,13 @@ function projection(
   };
 }
 
+/** A card of a deck kept on a computer: Spectra holds its progress, never its words. */
+const DEVICE_CARD = { fingerprint: undefined, bidirectional: true };
+
+function studyCard(artifact: Doc<"spectraArtifacts">, cardId: string) {
+  return artifact.storageHome === "device" ? DEVICE_CARD : deckCardIndex(artifact).get(cardId);
+}
+
 /**
  * The deck's cards as this module needs them: which directions each offers and
  * what each is currently asking. Anything else on a card is deck presentation
@@ -225,6 +232,7 @@ export const list = query({
     )
       throw new Error("FLASHCARD_DECK_UNAVAILABLE");
     const index = deckCardIndex(artifact);
+    const cardOf = (cardId: string) => (artifact.storageHome === "device" ? DEVICE_CARD : index.get(cardId));
     const states = await ctx.db
       .query("flashcardStudyStates")
       .withIndex("by_account_artifact", (q) =>
@@ -233,13 +241,13 @@ export const list = query({
       .collect();
     const now = Date.now();
     const studiable = (state: Doc<"flashcardStudyStates">) => {
-      const card = index.get(state.cardId);
+      const card = cardOf(state.cardId);
       if (!card) return false;
       return (state.direction ?? "forward") === "forward" || card.bidirectional;
     };
     const active = states.filter(studiable);
     const projected = active.map((state) =>
-      projection(state, now, index.get(state.cardId)?.fingerprint),
+      projection(state, now, cardOf(state.cardId)?.fingerprint),
     );
     // Progress for cards the deck no longer offers is kept, not deleted, so
     // restoring a card or turning reverse study back on restores the history
@@ -280,8 +288,7 @@ export const review = mutation({
       throw new Error("FLASHCARD_DECK_UNAVAILABLE");
     const cardId = args.cardId.trim();
     const direction: StudyDirection = args.direction ?? "forward";
-    const index = deckCardIndex(artifact);
-    const card = index.get(cardId);
+    const card = studyCard(artifact, cardId);
     if (!cardId || !card || (direction === "reverse" && !card.bidirectional))
       throw new Error("FLASHCARD_CARD_UNAVAILABLE");
     const clientReviewId = args.clientReviewId.trim().slice(0, 180);
@@ -390,7 +397,7 @@ export const setNote = mutation({
       throw new Error("FLASHCARD_DECK_UNAVAILABLE");
     const cardId = args.cardId.trim();
     const direction: StudyDirection = args.direction ?? "forward";
-    const card = deckCardIndex(artifact).get(cardId);
+    const card = studyCard(artifact, cardId);
     if (!card || (direction === "reverse" && !card.bidirectional))
       throw new Error("FLASHCARD_CARD_UNAVAILABLE");
     const note = args.note.slice(0, 4_000);

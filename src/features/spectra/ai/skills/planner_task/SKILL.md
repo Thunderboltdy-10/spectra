@@ -30,7 +30,7 @@ optional due time, notes, and done. Keep it that small unless the user asks for 
 ## Task or something else?
 
 - Several separate things to do are several tasks, not one task with subtasks.
-- A time block without an outcome ("study maths 4–5") belongs on the calendar or in a timetable.
+- A time block without an outcome ("study maths 4–5") belongs on the calendar.
 - Long notes belong in a document; link it from the notes.
 - A school deadline from ManageBac is the school's. Never change its official date; plan the
   user's own work around it.

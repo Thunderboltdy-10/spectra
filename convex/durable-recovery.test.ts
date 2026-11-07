@@ -133,7 +133,7 @@ it("revokes a deactivated actor's cached grant even with an unchanged artifact p
   const close=vi.fn();
   const connection={context:{...cached},sendStateless:vi.fn(),webSocket:{close}};
   const connections=new Set([connection]);
-  const sweep=new Function("bridge","activeConnections","refreshAuthorization",`let policySweepRunning=false; ${sweepCode}; return enforceActivePolicyVersions;`)(
+  const sweep=new Function("bridge","activeConnections","refreshAuthorization",`let policySweepRunning=false; let policySweepWaiting=null; ${sweepCode}; return enforceActivePolicyVersions;`)(
     ()=>t.query(internal.collaborationGatewayStore.policy,{artifactId:ids[0].artifactId,partitionKey:"root"}),connections,
     build(()=>t.query(internal.collaborationGatewayStore.authorize,authArgs)));
   await sweep();

@@ -8,6 +8,7 @@ import {
   COLLABORATION_SESSION_TTL_MS,
   signCollaborationSession,
 } from "@/lib/collaboration-token";
+import { DEVICE_ROOM_URL } from "@/features/spectra/collaboration/device-work";
 import { ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
@@ -34,11 +35,21 @@ export async function POST(request: NextRequest) {
       throw new Error(
         "COLLABORATION_SESSION_INVALID: Artifact and client identity are required.",
       );
-    let artifact: { _id: string; blueprintKey: string };
+    let artifact: {
+      _id: string;
+      blueprintKey: string;
+      storageHome?: "device";
+      storageStoreId?: string;
+      title: string;
+      summary?: string;
+      tags?: string[];
+      schemaVersion?: number;
+      content?: unknown;
+    };
     try {
       artifact = await convexQuery<
         Record<string, unknown>,
-        { _id: string; blueprintKey: string }
+        typeof artifact
       >("spectraArtifacts:get", { artifactId });
     } catch (error) {
       logger.warn("Collaboration work lookup failed", {
@@ -50,6 +61,37 @@ export async function POST(request: NextRequest) {
     }
     const resourceType =
       artifact.blueprintKey === "agent" ? "agent" : "artifact";
+    if (artifact.storageHome === "device") {
+      const access = await convexQuery<
+        Record<string, unknown>,
+        { allowed: boolean; level: "read" | "modify" | null }
+      >("authority:access", { resourceType, resourceId: artifactId });
+      if (!access.allowed || !access.level)
+        throw new Error(
+          "COLLABORATION_SESSION_FORBIDDEN: You no longer have access to this artifact.",
+        );
+      return ok({
+        token: "",
+        documentName: collaborationDocumentName(artifactId, partitionKey, artifact.blueprintKey),
+        provider: "self_hosted_yjs",
+        url: DEVICE_ROOM_URL,
+        expiresInMs: COLLABORATION_SESSION_TTL_MS,
+        level: access.level,
+        accountId: actor.accountId,
+        displayName: actor.name,
+        device: {
+          storeId: artifact.storageStoreId ?? "",
+          seed: {
+            typeKey: artifact.blueprintKey,
+            title: artifact.title,
+            summary: artifact.summary,
+            tags: artifact.tags ?? [],
+            schemaVersion: artifact.schemaVersion ?? schemaVersion,
+            content: artifact.content,
+          },
+        },
+      });
+    }
     const [room, access] = await Promise.all([
       convexMutation<
         Record<string, unknown>,

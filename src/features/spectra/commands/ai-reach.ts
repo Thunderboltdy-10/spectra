@@ -1049,7 +1049,18 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
  * Public Convex functions that are not user actions: protocols, the AI's own
  * run machinery, uploads and housekeeping. Each says why.
  */
+const DEVICE_WORK_PLUMBING = "Moving and backing up work on this computer is the owner's own choice on the Devices page; the AI writes to device work through its normal artifact tools.";
+
 export const SERVER_PLUMBING: Readonly<Record<string, string>> = {
+  "deviceWorks:choose": DEVICE_WORK_PLUMBING,
+  "deviceWorks:adoptRestored": DEVICE_WORK_PLUMBING,
+  "deviceWorks:touch": DEVICE_WORK_PLUMBING,
+  "deviceWorks:finishCreate": DEVICE_WORK_PLUMBING,
+  "deviceWorks:movedToDevice": DEVICE_WORK_PLUMBING,
+  "deviceWorks:movedToCloud": DEVICE_WORK_PLUMBING,
+  "deviceWorks:backupUploadUrl": DEVICE_WORK_PLUMBING,
+  "deviceWorks:recordBackup": DEVICE_WORK_PLUMBING,
+  "deviceWorks:deleteBackups": DEVICE_WORK_PLUMBING,
   "landingRequests:submit": "The public landing page's request form; nobody is signed in there.",
   "landingRequests:setStatus": "Operators triage landing page requests from the admin page.",
   "memory:remember": "The older memory store, kept for settings; the AI writes its notes through update_memory.",

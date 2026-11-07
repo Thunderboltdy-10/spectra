@@ -107,7 +107,11 @@ import {
 import { Endnote, Footnote, SpectraNotes } from "../editor/document-notes";
 import { academicSelection, executeAcademicEditorOperations } from "../editor/document-academic-commands";
 import type { DocumentAcademicOperation } from "../commands/office/document-academic-operations";
-import { documentBlocksFromJson } from "../lenses/document-projection";
+import {
+  documentBlocksFromJson,
+  paragraphAttrsFromFormat,
+  paragraphFormatFromAttrs,
+} from "../lenses/document-projection";
 import { nextWordNoteId, type WordTextAnchor } from "../lenses/docx-academic-schema";
 import type { WordSource } from "../lenses/docx-citation-schema";
 import { CitationSourcePickers } from "./document-citation-pickers";
@@ -115,7 +119,11 @@ import { DocumentSpreadSheets, spreadStyle, useDocumentCanvas, useDocumentSpread
 import { DocumentStatusRail, useDocumentZoom, usePageCount, useSheetFit } from "./document-status-rail";
 import { editNoteText } from "../editor/note-text-edit";
 import {
+  AllCaps,
   PageBreak,
+  SmallCaps,
+  Subscript,
+  Superscript,
   ParagraphFrame,
   SectionBreak,
 } from "../editor/document-structure";
@@ -289,6 +297,13 @@ function blockRunFormat(node: JSONContent) {
       fontSizePoints: pointsFromCssSize(style.fontSize),
       color: wordHex(style.color),
       shading: wordHex(attributesOf("highlight").color),
+      verticalAlign: marks.some((mark) => mark.type === "superscript")
+        ? "superscript"
+        : marks.some((mark) => mark.type === "subscript")
+          ? "subscript"
+          : null,
+      smallCaps: marks.some((mark) => mark.type === "smallCaps") || null,
+      allCaps: marks.some((mark) => mark.type === "allCaps") || null,
     };
   };
   const first = read(texts[0]!);
@@ -306,6 +321,9 @@ function blockRunFormat(node: JSONContent) {
     "fontSizePoints",
     "color",
     "shading",
+    "verticalAlign",
+    "smallCaps",
+    "allCaps",
   ] as const) {
     const value = agreed(key);
     if (value !== undefined) format[key] = value;
@@ -315,36 +333,7 @@ function blockRunFormat(node: JSONContent) {
 
 /** Paragraph properties, shaped the way the DOCX lens writes `w:pPr`. */
 function blockParagraphFormat(node: JSONContent) {
-  const attrs = (node.attrs ?? {}) as Record<string, unknown>;
-  const alignment =
-    attrs.textAlign === "center" ||
-    attrs.textAlign === "right" ||
-    attrs.textAlign === "justify"
-      ? attrs.textAlign
-      : "left";
-  const numeric = (value: unknown) => {
-    const size = Number(value);
-    return Number.isFinite(size) && size > 0 ? size : 0;
-  };
-  // Indent keeps its sign. A Word style may outdent a heading into the left
-  // margin — `ProductHead` in the Microsoft test asset sits 2.26in out — and
-  // reporting that as level 0 would ask the lens to pull it back on the next
-  // save, changing a page nobody touched.
-  const level = (value: unknown) => {
-    const size = Number(value);
-    return Number.isFinite(size) ? Math.round(size) : 0;
-  };
-  return {
-    alignment,
-    lineSpacing: numeric(attrs.lineSpacing) || 1,
-    spacingAfterPoints: numeric(attrs.spacingAfter),
-    indentLevel: level(attrs.indentLevel),
-    border:
-      typeof attrs.frameBorder === "string" && attrs.frameBorder !== "none"
-        ? attrs.frameBorder
-        : null,
-    shading: wordHex(attrs.frameShading),
-  };
+  return paragraphFormatFromAttrs(node.attrs);
 }
 
 /**
@@ -630,37 +619,22 @@ function withEditorFormatting(
           ? [markFor("highlight", { color: `#${runFormat.shading}` })]
           : []),
       ];
-      const alignment = paragraphFormat.alignment;
-      const spacing = Number(paragraphFormat.lineSpacing);
-      const after = Number(paragraphFormat.spacingAfterPoints);
-      const indent = Number(paragraphFormat.indentLevel);
       const attrs = {
         ...node.attrs,
-        ...(alignment === "center" ||
-        alignment === "right" ||
-        alignment === "justify"
-          ? { textAlign: alignment }
-          : {}),
-        ...(Number.isFinite(spacing) && spacing > 0 && spacing !== 1
-          ? { lineSpacing: spacing }
-          : {}),
-        ...(Number.isFinite(after) && after > 0 ? { spacingAfter: after } : {}),
-        ...(Number.isFinite(indent) && indent !== 0
-          ? { indentLevel: indent }
-          : {}),
-        ...(typeof paragraphFormat.border === "string" &&
-        paragraphFormat.border !== "none"
-          ? { frameBorder: paragraphFormat.border }
-          : {}),
-        ...(typeof paragraphFormat.shading === "string"
-          ? { frameShading: `#${paragraphFormat.shading}` }
-          : {}),
+        ...paragraphAttrsFromFormat(paragraphFormat),
       };
       // Marks are applied to the text the block already holds; nothing is
-      // inserted, so a block with no text keeps its shape.
+      // inserted, so a block with no text keeps its shape. A run that already
+      // has a mark of its own keeps it.
       const applyMarks = (child: JSONContent): JSONContent =>
         child.type === "text"
-          ? { ...child, marks: [...(child.marks ?? []), ...marks] }
+          ? {
+              ...child,
+              marks: [
+                ...(child.marks ?? []),
+                ...marks.filter((mark) => !child.marks?.some((own) => own.type === mark.type)),
+              ],
+            }
           : {
               ...child,
               ...(child.content
@@ -1080,6 +1054,10 @@ export function DocumentStudio({
         PageBreak,
         SectionBreak,
         ParagraphFrame,
+        Superscript,
+        Subscript,
+        SmallCaps,
+        AllCaps,
         Footnote,
         Endnote,
         SpectraNotes,
@@ -2732,6 +2710,35 @@ export function DocumentStudio({
         withEdit(() =>
           editor!.chain().focus().setParagraphSpacing(points).run(),
         ),
+      ...(typeof blockAttrs.spacingBefore === "number"
+        ? { spacingBefore: blockAttrs.spacingBefore }
+        : {}),
+      setSpacingBefore: (points) =>
+        withEdit(() =>
+          editor!.chain().focus().setParagraphSpacingBefore(points).run(),
+        ),
+      ...(typeof blockAttrs.firstLineIndent === "number"
+        ? { firstLineIndent: blockAttrs.firstLineIndent }
+        : {}),
+      setFirstLineIndent: (points) =>
+        withEdit(() =>
+          editor!.chain().focus().setParagraphFirstLine(points).run(),
+        ),
+      superscript: {
+        active: Boolean(editor?.isActive("superscript")),
+        toggle: () =>
+          withEdit(() => editor!.chain().focus().toggleMark("superscript").run()),
+      },
+      subscript: {
+        active: Boolean(editor?.isActive("subscript")),
+        toggle: () =>
+          withEdit(() => editor!.chain().focus().toggleMark("subscript").run()),
+      },
+      smallCaps: {
+        active: Boolean(editor?.isActive("smallCaps")),
+        toggle: () =>
+          withEdit(() => editor!.chain().focus().toggleMark("smallCaps").run()),
+      },
       border:
         typeof blockAttrs.frameBorder === "string"
           ? blockAttrs.frameBorder

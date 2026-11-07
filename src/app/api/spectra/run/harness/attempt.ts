@@ -53,13 +53,13 @@ import { awaitedUiOperation, cancelUiObservation, notifyUiObservation } from "./
 /** A serverless route stops at 300 s; hand the run on well before that. */
 const YIELD_AFTER_MS = 230_000;
 /** One small model call against the notes as they are now, after the reply went out. */
-async function reflectOnRun(actorClerkId: string, request: Omit<ReflectionRequest, "head">) {
+async function reflectOnRun(actorClerkId: string, runId: string, request: Omit<ReflectionRequest, "head">) {
   try {
     const head = await readMemoryHead(actorClerkId);
     if (!head.enabled) return;
     const changes = await modelMemoryReflector({ ...request, head }, AbortSignal.timeout(45_000));
     for (const change of changes)
-      await mutate<unknown & object, MemoryChangeResult>("spectraMemory:update", { actorClerkId, ...change });
+      await mutate<unknown & object, MemoryChangeResult>("spectraMemory:update", { actorClerkId, runId, ...change });
   } catch (error) {
     runLog().warn("spectra.harness.memory_reflection", { error: error instanceof Error ? error.message : String(error) });
   }
@@ -734,7 +734,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     // The reply is out; the notes catch up behind it.
     if (params.mode === "start" && !params.scheduled && !result.memoryWritten && worthReflecting(params.prompt))
       titleWrites.push(
-        reflectOnRun(actorClerkId, {
+        reflectOnRun(actorClerkId, runId, {
           prompt: params.prompt,
           reply: content,
           context: [environment.page, ...touches.slice(0, 2).map((touch) => touch.title)].filter(Boolean).join(", "),

@@ -1,3 +1,5 @@
+import { internal } from "./_generated/api";
+import { collaborationGatewayOrigin } from "./collaborationPolicyPush";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { getAuthenticatedActor, getActorForAccountId, type AuthenticatedActor } from "./identityShared";
@@ -716,7 +718,15 @@ export async function bumpPolicyVersion(ctx: MutationCtx, resourceType: Resource
         const rooms = await ctx.db.query("collaborationRooms").withIndex("by_artifact_partition", (q) => q.eq("artifactId", artifact._id)).collect();
         await Promise.all(rooms.map((room) => ctx.db.patch(room._id, { policyVersion: artifactVersion, updatedAt: now })));
       }
+      await pushPolicyChange(ctx, [...affectedArtifactIds].map(String));
     }
   }
+  if (resourceType === "artifact" || resourceType === "agent") await pushPolicyChange(ctx, [resourceId]);
   return version;
+}
+
+/** Open rooms learn of the change straight away instead of at the next sweep. */
+async function pushPolicyChange(ctx: MutationCtx, artifactIds: string[]) {
+  if (!artifactIds.length || !collaborationGatewayOrigin()) return;
+  await ctx.scheduler.runAfter(0, internal.collaborationPolicyPush.notify, { artifactIds: artifactIds.slice(0, 500) });
 }

@@ -474,6 +474,7 @@ async function projection(
           : undefined
         : source.summary,
       blueprintKey: source.blueprintKey,
+      ...(source.storageHome ? { storageHome: source.storageHome } : {}),
       tags: retainedAccess?.allowed
         ? Array.isArray(snapshotRecord.tags)
           ? snapshotRecord.tags.filter(

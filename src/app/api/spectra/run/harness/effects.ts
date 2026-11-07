@@ -1,4 +1,5 @@
 import { storeArtifactContent } from "@/lib/convex-server";
+import { reachableDeviceStore } from "@/lib/device-store";
 import { throwIfAborted } from "./abort";
 import { executeRegisteredCalendarMutation } from "./calendar-command";
 import { normalizeCalendarCommand } from "@/features/spectra/calendar/domain/command";
@@ -7,6 +8,8 @@ import { executeReferenceInsertion } from "./reference-command";
 import { executeEmbedCommand } from "./embed-command";
 import type { RestoreRequest } from "@/lib/artifact-restore-server";
 import { act, mutate, query } from "./io";
+
+const DEVICE_WORK_TYPES = new Set(["document", "flashcard_deck", "quiz", "presentation", "sheets", "code", "whiteboard"]);
 import {
   authorityPublicMessage,
   authorityRequiresNotice,
@@ -747,6 +750,16 @@ export async function executeApplicationCommand(
  * commits the restored version. The request id is the operation's, so a
  * retried operation replays its receipt instead of restoring twice.
  */
+/** New work goes to the person's computer whenever Bridge answers, unless they chose the cloud. */
+async function deviceHomeForNewWork(blueprintKey: string) {
+  if (!DEVICE_WORK_TYPES.has(blueprintKey)) return undefined;
+  const settings = await query<Record<string, never>, { accountId: string; storage: string | null }>(
+    "deviceWorks:settings", {},
+  ).catch(() => null);
+  if (!settings || settings.storage === "cloud") return undefined;
+  return (await reachableDeviceStore(settings.accountId)) ?? undefined;
+}
+
 async function restoreVersion(input: {
   runId: string;
   operationId: string;
@@ -1107,6 +1120,7 @@ export async function executeOperation(
     // Never write or finalize a default/empty shell as a completed create.
     assertCreateContentNotHollow(input.blueprintKey, input.content, "create");
     const summary = (input.summary ?? "").trim() || input.title;
+    const storageStoreId = await deviceHomeForNewWork(input.blueprintKey);
     const pending = await mutate<unknown & object, { artifactId: string; nodeId?: string }>(
       "spectraArtifacts:createPending",
       {
@@ -1117,6 +1131,7 @@ export async function executeOperation(
         runId,
         threadId: context.threadId,
         executionId: context.executionId,
+        ...(storageStoreId ? { storageStoreId } : {}),
       },
     );
     await mutate("spectraOperations:attachPendingArtifact", {
@@ -1146,13 +1161,22 @@ export async function executeOperation(
     // the Convex projection is written. Telling the model it failed now would
     // only make it write a second copy, so a slow projection finishes behind the run.
     const finalize = () =>
-      mutate("spectraArtifacts:finalizePendingLive", {
-        actorClerkId,
-        artifactId: pending.artifactId,
-        runId,
-        executionId: context.executionId,
-        summary,
-      }) as Promise<Record<string, unknown>>;
+      (storageStoreId
+        ? mutate("deviceWorks:finishCreate", {
+            artifactId: pending.artifactId,
+            runId,
+            executionId: context.executionId,
+            title: input.title,
+            summary,
+            tags: input.tags,
+          })
+        : mutate("spectraArtifacts:finalizePendingLive", {
+            actorClerkId,
+            artifactId: pending.artifactId,
+            runId,
+            executionId: context.executionId,
+            summary,
+          })) as Promise<Record<string, unknown>>;
     const stillSyncing = (error: unknown) =>
       /has not finished synchronizing|synchronized AI version is unavailable/i.test(error instanceof Error ? error.message : String(error));
     const startedFinalizing = Date.now();
@@ -1190,13 +1214,14 @@ export async function executeOperation(
     if (typeof output.nodeId === "string") affected.push({ type: "workspaceItem", id: output.nodeId });
   } else if (operation.type === "artifact.update") {
     const input = operation.input;
-    const artifact = await query<{ actorClerkId: string; artifactId: string }, { blueprintKey: string; nativeFormat?: string }>(
+    const artifact = await query<{ actorClerkId: string; artifactId: string }, { blueprintKey: string; nativeFormat?: string; storageHome?: "device" }>(
       "spectraArtifacts:get",
       { actorClerkId, artifactId: input.artifactId },
     );
+    const onDevice = artifact.storageHome === "device";
     if (artifact.blueprintKey !== input.blueprintKey)
       throw new Error("The artifact update blueprint does not match the live artifact.");
-    const replicaTruth = await query<
+    const replicaTruth = onDevice ? null : await query<
       { workId: string },
       { replicas: Array<{ kind?: string; state?: string; nativeFormat?: string }> }
     >("replicas:forWork", { workId: input.artifactId }).catch(() => null);
@@ -1255,7 +1280,14 @@ export async function executeOperation(
     const live = admitted
       ? null
       : await readLiveArtifactValue({ artifactId: input.artifactId, timeoutMs: 5_000 }).catch(() => null);
-    if (live)
+    if (onDevice) {
+      // The words stay on the computer; only what lists show comes up here.
+      await mutate("deviceWorks:touch", {
+        artifactId: input.artifactId,
+        ...(live ? { title: live.title, ...(live.summary !== undefined ? { summary: live.summary } : {}), tags: live.tags } : {}),
+        edited: true,
+      }).catch(() => null);
+    } else if (live)
       await mutate("spectraArtifacts:stageAiPatch", {
         actorClerkId,
         artifactId: input.artifactId,

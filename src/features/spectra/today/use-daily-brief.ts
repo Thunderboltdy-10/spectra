@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { useSpectraPreferences } from "../settings/preference-store";
@@ -30,6 +31,7 @@ export type BriefState =
       day: string;
       wakeTime: string;
       recap: string;
+      ahead?: string;
       suggestions: BriefSuggestion[];
       /** The last day's brief, shown while today's is written. */
       earlier?: boolean;
@@ -51,7 +53,7 @@ export function useDailyBrief(now: number | null): BriefState {
   // Until the reader's own preferences are in, the default must not ask for a brief they turned off.
   // A showcase (the landing page) has the brief its story holds, and asks for nothing.
   const showcase = useShowcaseTime() !== null;
-  const on = showcase || (hydrated && preferences.notifications.dailyBrief && preferences.integrations.tourStatus === "done" && setup?.phase === "ready");
+  const on = showcase || (hydrated && preferences.notifications.dailyBrief && (setup?.established === true || (preferences.integrations.tourStatus === "done" && (setup?.phase === "ready" || setup?.phase === "awaiting_connection"))));
   const timeZone = useMemo(() => localZone(), []);
   const day = now ? zonedDay(now, timeZone) : null;
   const awake = Boolean(now && day && now >= zonedInstant(day, wakeTime, timeZone));
@@ -70,7 +72,8 @@ export function useDailyBrief(now: number | null): BriefState {
 
   const missing = row === null || row?.state === "absent" || (row?.state === "failed" && Date.now() - row.claimedAt > RETRY_AFTER_MS);
   const firstSyncToday = Boolean(day && setup?.completedAt && zonedDay(setup.completedAt, timeZone) === day);
-  const due = awake || firstSyncToday;
+  // Someone with nothing on the page yet shouldn't wait for their alarm to see it.
+  const due = awake || firstSyncToday || (row !== undefined && !row?.previous);
   useEffect(() => {
     if (!on || showcase || !due || !missing || !day || asked.current === day) return;
     asked.current = day;
@@ -98,7 +101,7 @@ export function useDailyBrief(now: number | null): BriefState {
     if (showcase && row?.state !== "ready") return { status: "off" };
     // Written before they wake, it is there as soon as they look.
     if (row?.state === "ready")
-      return { status: "ready", day, wakeTime, recap: row.recap ?? "", suggestions: row.suggestions as BriefSuggestion[] };
+      return { status: "ready", day, wakeTime, recap: row.recap ?? "", ...(row.ahead ? { ahead: row.ahead } : {}), suggestions: row.suggestions as BriefSuggestion[] };
     // Until today's is ready, the last one stays.
     if (row?.previous)
       return {
@@ -106,6 +109,7 @@ export function useDailyBrief(now: number | null): BriefState {
         day: row.previous.day,
         wakeTime,
         recap: row.previous.recap,
+        ...(row.previous.ahead ? { ahead: row.previous.ahead } : {}),
         suggestions: row.previous.suggestions as BriefSuggestion[],
         earlier: true,
       };

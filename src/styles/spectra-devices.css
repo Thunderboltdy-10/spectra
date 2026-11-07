@@ -90,7 +90,7 @@
 
 .device-card-meta {
   margin-top: 2px;
-  font-size: 13.5px;
+  font-size: 14px;
   color: var(--text-secondary);
 }
 
@@ -99,21 +99,21 @@
   padding: 3px 10px;
   border-radius: var(--radius-chip);
   background: color-mix(in oklab, var(--brand-primary) 10%, var(--card-paper));
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   color: color-mix(in oklab, var(--brand-primary) 80%, var(--text-primary));
 }
 
 .device-card-subhead {
   margin-bottom: 8px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-secondary);
 }
 
 .device-card-quiet {
   margin-top: 10px;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text-tertiary);
 }
 
@@ -126,7 +126,7 @@
   padding: 8px 14px 8px 22px;
   border-top: 1px solid var(--card-border-soft);
   background: var(--card-paper-quiet);
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text-tertiary);
 }
 
@@ -194,7 +194,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-tertiary);
 }
 
@@ -205,7 +205,7 @@
   gap: 6px;
   margin-top: auto;
   padding-top: 10px;
-  font-size: 12.5px;
+  font-size: 13px;
   color: color-mix(in oklab, var(--folder-ink) 60%, var(--text-secondary));
 }
 
@@ -259,7 +259,7 @@
   gap: 8px;
   border-radius: 12px;
   border: 1px dashed var(--card-border);
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--text-secondary);
   transition:
@@ -291,7 +291,7 @@
 
 .device-slip-about {
   margin-top: 4px;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
   color: var(--text-secondary);
 }
@@ -409,7 +409,7 @@
   border-radius: 6px 22px 6px 6px;
   background: var(--card-paper);
   color: var(--text-tertiary);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.04em;
   box-shadow:
@@ -433,7 +433,7 @@
 
 .resource-surface-error {
   max-width: 52ch;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
   color: var(--danger);
 }
@@ -455,7 +455,7 @@
   cursor: pointer;
   width: fit-content;
   margin: 0 auto;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
 }
 
@@ -463,7 +463,7 @@
   display: grid;
   gap: 4px;
   margin: 14px 0;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
 }
 
@@ -472,10 +472,89 @@
   align-items: center;
   gap: 6px;
   margin-top: 14px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
 }
 
 .resource-surface-link:hover {
   color: var(--text-primary);
+}
+
+/* A work kept on a computer that isn't answering: still there, not reachable. */
+[data-device-away] {
+  opacity: 0.55;
+  filter: saturate(0.6);
+}
+
+.work-home-card {
+  display: block;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  text-align: left;
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--card-border);
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+
+.work-home-card:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.work-home-card:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus-ring-color);
+}
+
+.work-home-card[aria-checked="true"] {
+  background: color-mix(in oklab, var(--brand-primary) 7%, var(--card-paper));
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--brand-primary) 55%, transparent);
+}
+
+.work-home-card:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.work-home-recommended {
+  display: block;
+  margin-top: 2px;
+  font-size: 14px;
+  line-height: 18px;
+  color: var(--brand-primary);
+}
+
+.work-home-impact {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 19px;
+  color: var(--text-secondary);
+}
+
+.work-home-impact-mark {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  transform: translateY(-1px);
+  background: var(--brand-primary);
+}
+
+.work-home-impact[data-good="false"] .work-home-impact-mark {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--border-strong);
+}
+
+.work-home-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--card-border);
 }

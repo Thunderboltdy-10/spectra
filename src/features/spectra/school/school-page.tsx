@@ -1,7 +1,7 @@
 "use client";
 
 import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { useQuery } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { PanelTabs, SidePanel } from "@/components/ui/side-panel";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { api } from "../../../../convex/_generated/api";
 import type { SchoolSyncKind } from "../../../../shared/school-sync";
-import { getAdministration, type AdministrationIdentity } from "../administration/api";
+import { readIdentity } from "../administration/identity";
 import { ArtifactStatusControl } from "../components/artifact-status-control";
 import { syncSpectraManageBac } from "../data/api";
 import { useAuthedArgs } from "../data/use-authed-args";
@@ -92,7 +92,7 @@ export function SchoolPage() {
     else if (cls) setSelection({ kind: "class", id: cls });
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
     let live = true;
-    void getAdministration<AdministrationIdentity>("identity")
+    void readIdentity()
       .then((identity) => live && setAdmin(identity?.membership?.role === "school_admin"))
       .catch(() => undefined);
     return () => {
@@ -165,7 +165,7 @@ export function SchoolPage() {
 
   return (
     <main className="spectra-wave-y relative isolate flex h-full min-h-0 flex-1" data-spectra-app-surface="true" data-school-page>
-      <div className="min-w-0 flex-1 overflow-y-auto">
+      <div className="spectra-page-scroll min-w-0 flex-1 overflow-y-auto">
         <PageBody>
           <PageHeader title="School" description={summary(current?.tasks, status, now)} commands={commands} plan={BAR_PLAN} barLabel="School commands" />
           <PanelTabs label="School sections" tabs={SECTIONS} value={section} onChange={(id) => go(id as Section)} />

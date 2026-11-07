@@ -31,6 +31,7 @@ import {
   type CalendarOverview,
 } from "../domain/model";
 import { fetchCalendarOverview, mergeCalendarPages, type CalendarContinuation } from "../data/overview-client";
+import { exportCalendarFile, importCalendarFile } from "./calendar-transfer";
 import {
   addLocalDays,
   endOfLocalDay,
@@ -403,6 +404,19 @@ type ResizeGesture = {
 
 /** `startAt` opens the calendar on that day instead of this week's Monday (the landing page shows the days ahead). */
 /** `still`: a picture of the calendar (the landing page), where a wheel always scrolls the page around it. */
+const STALE_SYNC_EVERY_MS = 15 * 60_000;
+
+function staleSyncIsDue() {
+  try {
+    const key = "spectra.calendar.staleSyncAt";
+    if (Date.now() - Number(window.sessionStorage.getItem(key) ?? 0) < STALE_SYNC_EVERY_MS) return false;
+    window.sessionStorage.setItem(key, String(Date.now()));
+  } catch {
+    // Without storage it asks once per visit, as the ref already limits it to.
+  }
+  return true;
+}
+
 export function CalendarApplication({ startAt, still = false }: { startAt?: number; still?: boolean } = {}) {
   const initialStart = startAt ?? startOfLocalWeek(Date.now());
   const [daySpan, setDaySpanState] = useState(7);
@@ -412,6 +426,7 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
   const [refreshing, setRefreshing] = useState(false);
   const [continuation, setContinuation] = useState<CalendarContinuation | null>(null);
   const overviewRequestRef = useRef<AbortController | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [error, setError] = useState("");
   const [needsSchool, setNeedsSchool] = useState(false);
   const [opened, setOpened] = useState<OpenedCalendarItem | null>(null);
@@ -541,6 +556,7 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
   useEffect(() => {
     if (overview?.sourceState.kind !== "stale" || staleSyncRef.current) return;
     staleSyncRef.current = true;
+    if (!staleSyncIsDue()) return;
     void syncSpectraManageBac()
       .then(() => load("merge", visibleRange.from, visibleRange.to))
       .catch(() => {
@@ -1144,6 +1160,31 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
     return () => scroller.removeEventListener("wheel", onWheel);
   }, [changeDaySpan, error, overview, still]);
 
+  const importCalendar = async (file: File) => {
+    const toastId = toast(`Bringing in ${file.name}`);
+    try {
+      const report = await importCalendarFile(file, timezone, (event) => calendarPost({ action: "createPersonalItem", ...event }));
+      const parts = [
+        report.added ? `Added ${report.added} ${report.added === 1 ? "event" : "events"}.` : "Nothing new to add.",
+        report.alreadyThere ? `${report.alreadyThere} already on your calendar.` : "",
+        report.leftOut ? `${report.leftOut} more left out: import a shorter file for those.` : "",
+      ];
+      toast.success(parts.filter(Boolean).join(" "), { id: toastId });
+      if (report.added) void load("merge", visibleRange.from, visibleRange.to, true);
+    } catch (nextError) {
+      toast.error(describeFailure(nextError, { fallback: "That file couldn't be read. Try an .ics or .csv file." }).message, { id: toastId });
+    }
+  };
+
+  const exportCalendar = async () => {
+    try {
+      const count = await exportCalendarFile(timezone);
+      toast.success(`Exported ${count} ${count === 1 ? "event" : "events"}.`);
+    } catch (nextError) {
+      toast.error(describeFailure(nextError, { fallback: "Check your connection, then try exporting again." }).message);
+    }
+  };
+
   const commands: BarCommand[] = [
     { id: "add", icon: "add", label: "Add", pinned: true, onSelect: () => setComposerOpen(true) },
     {
@@ -1153,6 +1194,8 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
       active: layersOpen,
       onSelect: () => setLayersOpen((open) => !open),
     },
+    { id: "import", icon: "upload", label: "Import", onSelect: () => importInputRef.current?.click() },
+    { id: "export", icon: "download", label: "Export", onSelect: () => void exportCalendar() },
     {
       id: "refresh",
       icon: "retry",
@@ -1298,6 +1341,20 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
           )}
         </section>
 
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".ics,.csv,text/calendar,text/csv"
+          className="sr-only"
+          tabIndex={-1}
+          aria-label="Import a calendar file"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void importCalendar(file);
+          }}
+        />
+
         <CalendarComposer
           open={composerOpen}
           onClose={() => setComposerOpen(false)}
@@ -1343,7 +1400,7 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
   );
 }
 
-const CALENDAR_BAR_PLAN = [{ hideLabel: "layers" }, { toMenu: "refresh" }, { toMenu: "layers" }] as const;
+const CALENDAR_BAR_PLAN = [{ toMenu: "export" }, { toMenu: "import" }, { hideLabel: "layers" }, { toMenu: "refresh" }, { toMenu: "layers" }] as const;
 
 /** While the week loads: its days as ghosts, so it opens with what is in it rather than empty. */
 function CalendarWeekGhost({ span }: { span: number }) {

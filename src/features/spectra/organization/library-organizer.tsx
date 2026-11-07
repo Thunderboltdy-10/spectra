@@ -14,7 +14,8 @@ import { Pencil, RotateCcw, ChevronRight, Copy, FolderPlus, Link2, Lock, Share2,
 import { copyWorkHere } from "./shared-works";
 import { toast } from "@/components/ui/toast";
 import { showRetryToast } from "@/components/ui/retry-toast";
-import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { useConvexAuth, useMutation } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { IsolatedErrorBoundary } from "@/components/global-error-boundary";

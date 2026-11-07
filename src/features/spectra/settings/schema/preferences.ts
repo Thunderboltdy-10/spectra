@@ -32,6 +32,8 @@ const aiSchema = z.object({
   reasoningProfile: z.enum(["configured_maximum", "balanced", "fast"]).default("configured_maximum"),
   /** Whose inference runs this person's work: Spectra's, or their own Codex or Claude Code. */
   runtime: z.enum(["spectra", "codex", "claude"]).default("spectra"),
+  /** False until this person picks one, so their own subscription can become the default when it's found. */
+  runtimeChosen: z.boolean().default(false),
   /** Empty is the CLI's default for this account. */
   codexModel: z.string().max(120).default(""),
   claudeModel: z.string().max(120).default(""),

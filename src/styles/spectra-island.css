@@ -93,7 +93,7 @@
     inset 0 2px 0 var(--tab-ink),
     inset 0 -1px 0 var(--card-border);
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
@@ -118,7 +118,7 @@
   background: var(--danger);
   padding: 0 4px;
   color: var(--bg-primary);
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
@@ -302,6 +302,82 @@
   }
 }
 
+.speed-control {
+  display: grid;
+  row-gap: 6px;
+  padding: 8px;
+}
+
+.speed-control-label {
+  font-size: var(--text-caption, 13px);
+  color: var(--text-primary);
+}
+
+.speed-control-ticks {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 20px;
+}
+
+.speed-control-ticks i {
+  flex: 1;
+  border-radius: 1px;
+  background: var(--border-default);
+  transition: background-color 160ms ease;
+}
+
+.speed-control-ticks i[data-on] {
+  background: var(--text-primary);
+}
+
+.speed-control-stops {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.speed-control-stops button {
+  padding: 2px 0;
+  border-radius: 4px;
+  font-size: var(--text-caption, 13px);
+  text-transform: capitalize;
+  color: var(--text-tertiary);
+  transition: color 160ms ease;
+}
+
+.speed-control-stops button:nth-child(2) {
+  text-align: center;
+}
+
+.speed-control-stops button:first-child {
+  text-align: left;
+}
+
+.speed-control-stops button:last-child {
+  text-align: right;
+}
+
+.speed-control-stops button:hover,
+.speed-control-stops button[aria-checked="true"] {
+  color: var(--text-primary);
+}
+
+.speed-control-stops button[aria-checked="true"] {
+  font-weight: 600;
+}
+
+.speed-control-stops button:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .speed-control-ticks i,
+  .speed-control-stops button {
+    transition: none;
+  }
+}
+
 .composer-send {
   background: color-mix(in oklab, var(--brand-primary) 10%, var(--card-paper));
   color: color-mix(in oklab, var(--brand-primary) 55%, var(--text-tertiary));
@@ -325,7 +401,7 @@
 
 .composer-heard {
   padding: 0 16px 10px;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text-secondary);
 }
 

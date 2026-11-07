@@ -286,7 +286,7 @@ body {
   max-width: 48ch;
   margin-top: 3px;
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -299,7 +299,7 @@ body {
   border-radius: var(--control-radius);
   background: var(--brand-primary);
   color: #fff;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 620;
 }
 
@@ -387,7 +387,7 @@ body {
   min-width: 0;
   overflow: hidden;
   color: var(--text-primary);
-  font-size: 12.5px;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -418,7 +418,7 @@ body {
   display: block;
   margin-bottom: 5px;
   font-family: var(--font-display);
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text-primary);
 }
 
@@ -426,7 +426,7 @@ body {
   margin: 0 auto;
   max-width: 44ch;
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -437,7 +437,7 @@ body {
   border-radius: var(--control-radius);
   background: var(--bg-elevated);
   color: var(--text-primary);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -467,7 +467,7 @@ body {
   align-items: center;
   justify-content: space-between;
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .spectra-deck-viewer-context strong {
@@ -541,13 +541,13 @@ body {
 .spectra-deck-viewer-card > small {
   max-width: 560px;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.55;
 }
 
 .spectra-deck-viewer-card > em {
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
 }
 
@@ -1255,7 +1255,7 @@ body {
   table-layout: fixed;
   border-collapse: collapse;
   color: #34423b;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .whiteboard-node td {
@@ -1274,7 +1274,7 @@ body {
   top: -29px;
   left: 2px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.01em;
 }
@@ -1324,7 +1324,7 @@ body {
   gap: 7px;
   padding: 14px;
   color: #727d77;
-  font-size: 12px;
+  font-size: 13px;
   text-align: center;
 }
 
@@ -1342,7 +1342,7 @@ body {
 
 .whiteboard-embed-node strong {
   color: #2d3933;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .whiteboard-embed-node small {
@@ -1418,7 +1418,7 @@ body {
 }
 
 .whiteboard-panel > header strong {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 750;
 }
 
@@ -1442,7 +1442,7 @@ body {
   border-radius: var(--control-radius);
   outline: 0;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .whiteboard-panel > input:focus {
@@ -1482,7 +1482,7 @@ body {
 
 .whiteboard-panel button strong {
   overflow: hidden;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 680;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1533,7 +1533,7 @@ body {
   align-items: center;
   justify-content: flex-start;
   color: var(--brand-ink);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
 }
 
@@ -1628,7 +1628,7 @@ body {
   border-radius: var(--card-radius);
   background: rgba(255, 255, 255, 0.96);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
   box-shadow: 0 8px 22px rgba(39, 52, 45, 0.09);
   backdrop-filter: blur(14px);
@@ -1704,7 +1704,7 @@ body {
 
 .whiteboard-inspector > div:first-child strong {
   overflow: hidden;
-  font-size: 12px;
+  font-size: 13px;
   text-overflow: ellipsis;
   text-transform: capitalize;
   white-space: nowrap;
@@ -1748,7 +1748,7 @@ body {
   outline: 0;
   background: var(--bg-elevated);
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* The inspector's icon buttons are 28px squares, and Spectra's Select renders a
@@ -1781,7 +1781,7 @@ body {
   border-radius: var(--card-radius);
   background: #fff6f4;
   color: #8d4036;
-  font-size: 11px;
+  font-size: 12px;
   box-shadow: 0 10px 26px rgba(81, 42, 36, 0.1);
 }
 
@@ -1826,7 +1826,7 @@ body {
   width: auto;
   padding: 0 11px;
   border-color: #e2e5df;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* A newly created node or edge materialises once, in place. Updates and
@@ -2085,7 +2085,7 @@ body {
   justify-content: center;
   border-radius: var(--radius-pill);
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .timetable-week-header > button[data-today="true"] strong {
@@ -2411,7 +2411,7 @@ body {
 
 .timetable-agenda button strong {
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .timetable-agenda button small {
@@ -2432,7 +2432,7 @@ body {
 
 .timetable-empty strong {
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .timetable-empty span {
@@ -2529,7 +2529,7 @@ body {
 
 .timetable-layers-popover header strong,
 .timetable-import-report strong {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 750;
 }
 
@@ -2707,7 +2707,7 @@ body {
 }
 
 .timetable-event-editor > header strong {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 750;
 }
 
@@ -3164,10 +3164,10 @@ body {
 
   /* Approved type scale — prefer the `text-micro` … `text-display` utilities
      (wired through `@theme inline`) over arbitrary text-[Npx] values. */
-  --text-micro: 11px;
-  --text-caption: 12px;
-  --text-ui: 13px;
-  --text-body: 14px;
+  --text-micro: 12px;
+  --text-caption: 13px;
+  --text-ui: 14px;
+  --text-body: 15px;
   --text-editor: 16px;
   --text-title: 17px;
   --text-display: 30px;
@@ -3297,10 +3297,10 @@ body {
   --text-editor: 20px;
 }
 :root[data-spectra-interface-text="large"] {
-  --text-micro: 12px;
-  --text-caption: 13px;
-  --text-ui: 14px;
-  --text-body: 15px;
+  --text-micro: 13px;
+  --text-caption: 14px;
+  --text-ui: 15px;
+  --text-body: 16px;
 }
 /* §Motion contract — the one reduced-motion path for every CSS animation.
 
@@ -3917,7 +3917,7 @@ button:disabled {
   padding: 0.55rem 0.7rem;
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
@@ -5723,7 +5723,7 @@ button[data-spectra-context-trigger="true"]::after {
   background: transparent;
   padding: 13px 15px 24px;
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.7;
   outline: none;
 }
@@ -5894,7 +5894,7 @@ button[data-spectra-context-trigger="true"]::after {
 
 .presentation-component-library h4 {
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -6399,7 +6399,7 @@ button[data-spectra-context-trigger="true"]::after {
   align-items: center;
   gap: 6px;
   color: #d7d8d2;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .presentation-presenter-actions {
@@ -6492,7 +6492,7 @@ button[data-spectra-context-trigger="true"]::after {
 .presentation-presenter-notes p {
   margin: 8px 0 0;
   color: #e7e8e3;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.45;
   white-space: pre-wrap;
 }
@@ -6506,7 +6506,7 @@ button[data-spectra-context-trigger="true"]::after {
   height: 100%;
   background: #000;
   color: #6f716b;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 @container presentation-studio (max-width: 760px) {
@@ -6588,7 +6588,7 @@ button[data-spectra-context-trigger="true"]::after {
   justify-content: center;
   border-radius: var(--chip-radius);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -6625,7 +6625,7 @@ button[data-spectra-context-trigger="true"]::after {
   background: transparent;
   padding: 0 10px;
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   outline: none;
 }
@@ -6650,7 +6650,7 @@ button[data-spectra-context-trigger="true"]::after {
   padding: 0 10px;
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
   outline: none;
 }
 .sheets-formula-input:focus {
@@ -7029,7 +7029,7 @@ button[data-spectra-context-trigger="true"]::after {
   border: 0;
   background: transparent;
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
   outline: none;
 }
@@ -7173,7 +7173,7 @@ button[data-spectra-context-trigger="true"]::after {
   margin: 0;
   max-width: 46ch;
   color: var(--text-secondary);
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.62;
 }
 
@@ -7202,7 +7202,7 @@ button[data-spectra-context-trigger="true"]::after {
   padding: 10px 12px;
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.6;
   resize: vertical;
   transition:
@@ -7246,7 +7246,7 @@ button[data-spectra-context-trigger="true"]::after {
   padding: 0;
   color: var(--text-secondary);
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 520;
   cursor: pointer;
   transition: color var(--motion-fast) var(--ease-standard);
@@ -7323,7 +7323,7 @@ button[data-spectra-context-trigger="true"]::after {
 .foundry-mission-objective {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.55;
 }
 
@@ -7344,7 +7344,7 @@ button[data-spectra-context-trigger="true"]::after {
   gap: 8px;
   border-radius: var(--radius-input);
   padding: 10px 12px;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
@@ -7425,13 +7425,13 @@ button[data-spectra-context-trigger="true"]::after {
   margin: -4px 0 0;
   max-width: 58ch;
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.6;
 }
 
 .foundry-section.is-answered .foundry-section-prompt {
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
 }
 
@@ -7439,7 +7439,7 @@ button[data-spectra-context-trigger="true"]::after {
   margin: 0;
   max-width: 62ch;
   white-space: pre-wrap;
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.62;
 }
 
@@ -7492,20 +7492,20 @@ button[data-spectra-context-trigger="true"]::after {
   width: auto;
   grid-template-columns: auto auto;
   padding: 6px 11px;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .foundry-choice-label {
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 540;
 }
 
 .foundry-choice-detail {
   grid-column: 1;
   color: var(--text-tertiary);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -7571,7 +7571,7 @@ button[data-spectra-context-trigger="true"]::after {
   align-items: center;
   justify-content: space-between;
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -7590,7 +7590,7 @@ button[data-spectra-context-trigger="true"]::after {
   justify-content: space-between;
   gap: 14px;
   color: var(--text-tertiary);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -7633,14 +7633,14 @@ button[data-spectra-context-trigger="true"]::after {
   margin: 0;
   max-width: 62ch;
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.6;
 }
 
 .foundry-empty {
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.6;
 }
 
@@ -7677,14 +7677,14 @@ button[data-spectra-context-trigger="true"]::after {
 
 .foundry-compile-label {
   color: var(--text-primary);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 550;
   letter-spacing: -0.008em;
 }
 
 .foundry-compile-stale {
   color: var(--foundry-quarantine);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .foundry-compile-rule {
@@ -7726,7 +7726,7 @@ button[data-spectra-context-trigger="true"]::after {
   justify-content: space-between;
   gap: 12px;
   color: var(--text-tertiary);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -7769,7 +7769,7 @@ button[data-spectra-context-trigger="true"]::after {
   border-left: 2px solid var(--foundry-quarantine);
   padding-left: 9px;
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -7821,7 +7821,7 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .foundry-evidence-label {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 570;
   letter-spacing: -0.01em;
 }
@@ -7830,7 +7830,7 @@ button[data-spectra-context-trigger="true"]::after {
   margin: 0;
   color: var(--text-secondary);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -7843,7 +7843,7 @@ button[data-spectra-context-trigger="true"]::after {
   padding: 0;
   list-style: none;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -7862,7 +7862,7 @@ button[data-spectra-context-trigger="true"]::after {
   background: color-mix(in oklab, var(--foundry-quarantine) 10%, transparent);
   padding: 8px 10px;
   color: var(--foundry-quarantine);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
@@ -7914,7 +7914,7 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .foundry-skill-name {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 570;
   letter-spacing: -0.012em;
 }
@@ -7930,7 +7930,7 @@ button[data-spectra-context-trigger="true"]::after {
   margin: 0;
   max-width: 62ch;
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.6;
 }
 
@@ -7941,20 +7941,20 @@ button[data-spectra-context-trigger="true"]::after {
   gap: 4px;
   padding-left: 20px;
   color: var(--text-primary);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
 .foundry-skill-steps > li::marker {
   color: var(--text-tertiary);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .foundry-skill-contract {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
@@ -8072,7 +8072,7 @@ button[data-spectra-context-trigger="true"]::after {
   margin: 0;
   min-width: 0;
   max-width: 70ch;
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 560;
   line-height: 1.5;
   overflow-wrap: anywhere;
@@ -8125,7 +8125,7 @@ button[data-spectra-context-trigger="true"]::after {
   border-radius: var(--radius-input);
   background: var(--card-paper);
   padding: 12px 14px;
-  font-size: 13px;
+  font-size: 14px;
   transition: border-color var(--motion-fast) var(--ease-standard);
 }
 
@@ -8160,7 +8160,7 @@ button[data-spectra-context-trigger="true"]::after {
   background: var(--card-paper-quiet);
   padding: 3px 10px;
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .agent-bench-points,
@@ -8172,7 +8172,7 @@ button[data-spectra-context-trigger="true"]::after {
   gap: 5px;
   padding: 0;
   list-style: none;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -8245,7 +8245,7 @@ button[data-spectra-context-trigger="true"]::after {
 .agent-bench-problem {
   margin: 0;
   color: color-mix(in oklab, var(--danger) 80%, var(--text-primary));
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -8277,7 +8277,7 @@ button[data-spectra-context-trigger="true"]::after {
   align-items: center;
   gap: 8px;
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .agent-bench-row {
@@ -8307,7 +8307,7 @@ button[data-spectra-context-trigger="true"]::after {
 
 .agent-bench-skill > legend {
   padding: 0 0 6px;
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 570;
 }
 
@@ -8322,7 +8322,7 @@ button[data-spectra-context-trigger="true"]::after {
   background: color-mix(in oklab, var(--warning) 10%, transparent);
   padding: 11px 14px 11px 28px;
   color: color-mix(in oklab, var(--warning) 78%, var(--text-primary));
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
@@ -8342,13 +8342,13 @@ button[data-spectra-context-trigger="true"]::after {
   gap: 12px;
   border-top: 1px solid var(--foundry-rule);
   padding: 10px 0;
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .foundry-release-number {
   color: var(--foundry-mark);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
@@ -8406,7 +8406,7 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .foundry-ledger-unit {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   opacity: 0.6;
 }
@@ -8433,7 +8433,7 @@ button[data-spectra-context-trigger="true"]::after {
 .foundry-ledger-name {
   overflow: hidden;
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: -0.004em;
   text-overflow: ellipsis;
@@ -8455,7 +8455,7 @@ button[data-spectra-context-trigger="true"]::after {
 .foundry-ledger-note {
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -8489,7 +8489,7 @@ button[data-spectra-context-trigger="true"]::after {
 
 .foundry-ledger-stats dt {
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .foundry-ledger-stats dd {
@@ -8514,7 +8514,7 @@ button[data-spectra-context-trigger="true"]::after {
   padding-left: 12px;
   position: relative;
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -8532,7 +8532,7 @@ button[data-spectra-context-trigger="true"]::after {
 .foundry-ledger-clear {
   margin: 0;
   color: var(--foundry-hold);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -9021,7 +9021,7 @@ button[data-spectra-context-trigger="true"]::after {
 
 .spectra-item-rail-number {
   text-align: center;
-  font-size: 12px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
 }
@@ -9035,7 +9035,7 @@ button[data-spectra-context-trigger="true"]::after {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
 }
@@ -9180,7 +9180,7 @@ button[data-spectra-context-trigger="true"]::after {
   height: 32px;
   place-items: center;
   border-radius: var(--control-radius);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -9213,7 +9213,7 @@ button[data-spectra-context-trigger="true"]::after {
 .spectra-calendar-zoom-label {
   min-width: 4.5rem;
   text-align: center;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
 }
@@ -9222,7 +9222,7 @@ button[data-spectra-context-trigger="true"]::after {
   height: 32px;
   padding: 0 10px;
   border-radius: var(--control-radius);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
 }
@@ -9240,7 +9240,7 @@ button[data-spectra-context-trigger="true"]::after {
   min-width: 0;
   overflow-x: auto;
   overflow-y: auto;
-  padding: 0 12px 24px;
+  padding: 0 12px max(24px, calc(var(--spectra-composer-safe-area, 0px) + 16px));
   overscroll-behavior-x: contain;
 }
 
@@ -9457,7 +9457,7 @@ button[data-spectra-context-trigger="true"]::after {
 
 .spectra-calendar-block-time {
   flex-shrink: 0;
-  font-size: 11.5px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: color-mix(in oklab, var(--block-ink) 65%, var(--text-secondary));
 }
@@ -9467,7 +9467,7 @@ button[data-spectra-context-trigger="true"]::after {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
 }
@@ -9703,7 +9703,7 @@ button[data-spectra-context-trigger="true"]::after {
   border-radius: var(--control-radius);
   background: color-mix(in oklab, var(--brand-primary) 5%, var(--bg-elevated));
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -9724,7 +9724,7 @@ button[data-spectra-context-trigger="true"]::after {
   border: 1px solid var(--border-default);
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -9988,7 +9988,7 @@ button[data-spectra-context-trigger="true"]::after {
   outline: 0;
   background: transparent;
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .spectra-planner-description > form button {
@@ -10871,7 +10871,7 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
 
 .spectra-inspector-action {
   height: 32px !important;
-  font-size: 13px !important;
+  font-size: 14px !important;
   border-radius: var(--control-radius) !important;
   padding: 0 8px !important;
 }
@@ -11563,7 +11563,7 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
 .spectra-presence-menu-option {
   padding: 4px 7px;
   border-radius: var(--chip-radius);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.4;
   color: var(--text-secondary);
   white-space: nowrap;
@@ -11955,7 +11955,7 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
   border-radius: var(--radius-chip);
   border: 1px solid var(--border-default);
   background: transparent;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.005em;
   color: var(--text-secondary);
@@ -12001,7 +12001,7 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
   border: 1px solid var(--border-default);
   background: var(--bg-elevated);
   box-shadow: var(--shadow-lg);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.35;
   color: var(--text-secondary);
   pointer-events: none;
@@ -12038,7 +12038,7 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
   background: color-mix(in oklab, var(--bg-elevated) 94%, #fff6e7);
   box-shadow: 0 14px 34px -22px rgba(72, 47, 17, 0.55);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.35;
   backdrop-filter: blur(14px) saturate(1.08);
   animation: spectra-held-notice var(--motion-base) var(--ease-standard) both;
@@ -12969,7 +12969,7 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
   gap: 8px;
   padding: 0 4px;
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
@@ -14068,7 +14068,7 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
   flex: 1;
   align-items: center;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-secondary);
 }
@@ -14119,7 +14119,7 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 10px;
-  font-size: 13.5px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
 }
@@ -14133,7 +14133,7 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
 
 .calendar-card-length button {
   padding: 1px 9px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-secondary);
   transition: background var(--motion-fast) var(--ease-standard);
 }
@@ -14151,7 +14151,7 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
 }
 
@@ -14160,7 +14160,7 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
   align-items: center;
   gap: 6px;
   align-self: flex-start;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-secondary);
 }
@@ -14180,7 +14180,7 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
   margin-top: 4px;
   padding-top: 8px;
   border-top: 1px solid var(--border-subtle);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.45;
   color: var(--text-tertiary);
 }
@@ -14505,25 +14505,37 @@ html[data-spectra-carrying] .spectra-presence-actor[data-actor-kind="ai"] {
 }
 
 /* One stretch of Spectra's reasoning in the trace: a few lines tall, the rest a scroll away. */
-.spectra-thinking-mark {
+.spectra-trace-line {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  gap: 8px;
+  text-align: left;
+}
+.spectra-thinking-mark,
+.spectra-thinking-indent {
   width: 14px;
-  height: 14px;
+  height: 1.25rem;
   flex: none;
-  background: radial-gradient(circle, var(--text-tertiary) 0 1.5px, transparent 2px);
+}
+.spectra-thinking-mark {
+  background: radial-gradient(circle, var(--text-tertiary) 0 2px, transparent 2.5px);
 }
 .spectra-thinking-body {
-  margin: 2px 0 2px 22px;
-  max-height: 5rem;
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  max-height: 7.5rem;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
   white-space: pre-line;
   overflow-wrap: anywhere;
-  font-size: var(--text-micro, 0.75rem);
-  line-height: 1rem;
+  font-size: var(--text-caption, 0.8125rem);
+  line-height: 1.25rem;
   color: var(--text-tertiary);
 }
-.spectra-thinking-body[data-streaming] {
+.spectra-thinking-body[data-following] {
   overflow-y: hidden;
   mask-image: linear-gradient(to bottom, transparent, #000 1.25rem);
 }

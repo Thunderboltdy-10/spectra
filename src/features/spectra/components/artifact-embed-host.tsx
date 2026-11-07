@@ -2,7 +2,8 @@
 
 import { useArtifactAiActivity } from "../collaboration/artifact-ai-activity";
 import { describeFailure } from "@/components/ui/truthful-state";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { useCalmQuery } from "../data/use-calm-query";
 import { useRef, useState, type ReactNode } from "react";
 import { toast } from "@/components/ui/toast";

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import { useConvexAuth, useQuery } from "convex/react";
+import { useConvexAuth } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { usePathname } from "next/navigation";
 import { api } from "../../../../convex/_generated/api";
 import { syncSpectraManageBacOnLogin } from "../data/api";

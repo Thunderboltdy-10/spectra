@@ -3,7 +3,8 @@ import { downloadDocumentBlob } from "../components/artifact-studio-file-utils";
 import { useWorkAvailability } from "../components/use-work-availability";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { useCalmQuery } from "../data/use-calm-query";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
@@ -19,7 +20,8 @@ import { ReconnectAction } from "./storage-toggle-group";
 import { FileStorageControls } from "./file-storage-controls";
 import { readConvexError } from "../../../../shared/convex-error.mjs";
 import { FileViewer, type ViewedFile } from "../files/file-viewer";
-import { fileViewKind } from "../files/file-kind";
+import { fileViewKind, type OfficeViewKind } from "../files/file-kind";
+import { OfficeGhost } from "../files/office-ghost";
 
 const DOCUMENT_LENS = new Set(["docx", "docm", "dotx", "dotm"]);
 const OFFICE_LENS = new Set([
@@ -106,6 +108,7 @@ export function ResourceSurface({
         Boolean(replica.pendingPayloadRef),
     ) ?? false;
   const autoOpenedRef = useRef<string | undefined>(undefined);
+  const [becoming, setBecoming] = useState(false);
   async function protectedAction(action: "apply" | "fork" | "discard") {
     setFileAction("materialize");
     setOpenError(undefined);
@@ -151,6 +154,7 @@ export function ResourceSurface({
       // switch from ResourceSurface to DocumentStudio without a remount or a
       // duplicate work item.
       spectraBus.emit("artifact.lensActivated", { artifactId: artifact._id });
+      setBecoming(true);
     } catch (error) {
       setOpenError(
         error instanceof Error
@@ -219,6 +223,16 @@ export function ResourceSurface({
     } catch (error) {
       setOpenError(error instanceof Error ? error.message : String(error));
     }
+  }
+  // An Office file with a kept copy is on its way to being a work of its own: it
+  // shows the ghost of that work, not a file page that flips a moment later.
+  if (lens && !openError && (becoming || opening || truth === undefined || hasPayload)) {
+    const nativeKind: OfficeViewKind = DOCUMENT_LENS.has(format) ? "document" : format.startsWith("x") ? "sheet" : "slides";
+    return (
+      <section className="resource-surface" aria-label={artifact.title}>
+        <OfficeGhost kind={nativeKind} filename={artifact.title} />
+      </section>
+    );
   }
   return (
     <section className="resource-surface" aria-label={`${artifact.title} file`}>

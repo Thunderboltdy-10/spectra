@@ -1206,9 +1206,10 @@ async function codexStatus(accountId: string | undefined): Promise<RuntimeProvid
 }
 
 const CLAUDE_MODELS = [
-  { id: "sonnet", label: "Sonnet" },
-  { id: "opus", label: "Opus" },
-  { id: "haiku", label: "Haiku" },
+  { id: "claude-fable-5-1", label: "Fable 5.1" },
+  { id: "opus", label: "Opus 5.5" },
+  { id: "sonnet", label: "Sonnet 5.5" },
+  { id: "haiku", label: "Haiku 5.5" },
 ];
 
 async function claudeStatus(accountId: string | undefined): Promise<RuntimeProviderStatus> {

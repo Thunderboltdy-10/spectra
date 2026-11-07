@@ -7,7 +7,8 @@ import {
   type ReactNode,
 } from "react";
 import { useAuth } from "@clerk/nextjs";
-import { useConvexAuth, useQuery } from "convex/react";
+import { useConvexAuth } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { api } from "../../convex/_generated/api";
 import { bindAccountStorageScope } from "@/lib/account-storage";
 

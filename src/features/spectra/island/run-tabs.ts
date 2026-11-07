@@ -229,7 +229,7 @@ let leaveBus: (() => void) | null = null;
 function joinRunTabsBus() {
   busReaders += 1;
   if (!leaveBus) {
-    const removeThreads = spectraBus.on("threads.changed", () => void refreshRunTabs(true));
+    const removeThreads = spectraBus.on("threads.changed", () => void refreshRunTabs(false, true));
     const removeRun = spectraBus.on("run.changed", () => void refreshRunTabs(false, true));
     leaveBus = () => {
       removeThreads();

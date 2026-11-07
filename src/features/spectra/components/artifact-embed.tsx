@@ -1,5 +1,6 @@
 "use client";
 
+import { useEmbedFromDevice } from "./use-embed-from-device";
 import { ArrowUpRight, Check, RotateCw, AlertCircle, FileQuestion, Laptop, LockKeyhole, Maximize2, Minimize2, Pencil, Pin, Plus, Radio, Send, X } from "@/components/icons/glyph-icons";
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { motion } from "framer-motion";
@@ -119,7 +120,7 @@ function EmbedStatus({
 }
 
 export function ArtifactEmbed({
-  embed,
+  embed: reference,
   busy = false,
   onOpenSource,
   onRetry,
@@ -162,6 +163,7 @@ export function ArtifactEmbed({
   /** Take this work off a stacked card, onto one of its own. */
   onUnstack?: () => void;
 }) {
+  const embed = useEmbedFromDevice(reference);
   const rootRef = useRef<HTMLElement | null>(null);
   const faceRef = useRef<HTMLDivElement | null>(null);
   const openTimer = useRef<number | undefined>(undefined);

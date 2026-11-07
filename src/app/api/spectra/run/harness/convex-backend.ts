@@ -21,6 +21,7 @@ import type { CommentRow } from "@/features/spectra/ai/harness/comments";
 import type { EmbedRow, EmbedState } from "@/features/spectra/ai/harness/embeds";
 import type { IncomingInvitation, SharingInvitation, SharingLink, SharingMember, SharingState } from "@/features/spectra/ai/harness/sharing";
 import type { VersionRow, VersionSource } from "@/features/spectra/ai/harness/versions";
+import { deviceStoreCall } from "@/lib/device-store";
 import { readLiveArtifactValue } from "@/features/spectra/ai/yjs-artifact-operation";
 import { overlayLiveArtifactRecord } from "@/features/spectra/collaboration/artifact-yjs-model";
 import { parseModelOperation, type ModelOperation } from "@/features/spectra/operations/schema";
@@ -287,6 +288,8 @@ export class ConvexHarnessBackend implements HarnessBackend {
     const live = canEdit
       ? await readLiveArtifactValue({ artifactId: id, timeoutMs: 3_000, signal }).catch(() => null)
       : null;
+    if (artifact.storageHome === "device" && !live)
+      throw new Error("This work is kept on the person's computer, and Spectra Bridge isn't reachable right now. Tell them to open it.");
     const current = overlayLiveArtifactRecord(artifact, live);
     const placement = rows(artifact.placements)[0];
     return {
@@ -578,17 +581,46 @@ export class ConvexHarnessBackend implements HarnessBackend {
   }
 
   async search(input: SearchRequest): Promise<SearchResponse> {
-    const response = await act<unknown & object, SemanticSearchResponse>("semantic:search", {
-      query: input.query.trim().slice(0, 500),
-      kinds: input.kinds?.length ? input.kinds : SEMANTIC_KINDS.filter((kind): kind is SearchKind => kind !== "memory"),
-      limit: Math.max(1, Math.min(30, input.limit)),
-      hints: this.searchHints(),
-    });
+    const [response, onComputer] = await Promise.all([
+      act<unknown & object, SemanticSearchResponse>("semantic:search", {
+        query: input.query.trim().slice(0, 500),
+        kinds: input.kinds?.length ? input.kinds : SEMANTIC_KINDS.filter((kind): kind is SearchKind => kind !== "memory"),
+        limit: Math.max(1, Math.min(30, input.limit)),
+        hints: this.searchHints(),
+      }),
+      !input.kinds?.length || input.kinds.includes("artifact" as SearchKind)
+        ? this.searchComputer(input.query, input.limit)
+        : Promise.resolve([] as SearchHit[]),
+    ]);
+    const hits = response.results.map(searchHit);
+    const known = new Set(hits.map((hit) => hit.id));
     return {
-      hits: response.results.map(searchHit),
+      hits: [...onComputer.filter((hit) => !known.has(hit.id)), ...hits],
       mode: response.mode,
       ...(response.degraded ? { degraded: response.degraded.reason } : {}),
     };
+  }
+
+  /** Words on the person's computer aren't in the cloud's index, and Bridge finds them quickly. */
+  private async searchComputer(queryText: string, limit: number): Promise<SearchHit[]> {
+    try {
+      const me = await query<Record<string, never>, { accountId: string } | null>("identity:me", {});
+      if (!me) return [];
+      const found = await deviceStoreCall<Array<{ artifactId: string; title?: string | null; excerpt?: string | null; blueprintKey?: string | null; updatedAt?: number }>>(
+        me.accountId, "search", { query: queryText.trim().slice(0, 500), limit: Math.max(1, Math.min(10, limit)) }, 2_500,
+      );
+      return found.map((work) => ({
+        kind: "artifact" as SearchKind,
+        id: work.artifactId,
+        title: work.title || "Untitled",
+        typeLabel: work.blueprintKey ?? "Work",
+        ...(work.excerpt ? { snippet: work.excerpt } : {}),
+        ownership: "mine",
+        ...(work.updatedAt !== undefined ? { updatedAt: work.updatedAt } : {}),
+      })) as SearchHit[];
+    } catch {
+      return [];
+    }
   }
 
   async readThread(input: ThreadReadRequest): Promise<string> {
@@ -687,7 +719,13 @@ export class ConvexHarnessBackend implements HarnessBackend {
   }
 
   async updateMemory(change: MemoryChange) {
-    return mutate<unknown & object, MemoryChangeResult>("spectraMemory:update", { actorClerkId: this.actorClerkId, ...change });
+    const result = await mutate<unknown & object, MemoryChangeResult>("spectraMemory:update", {
+      actorClerkId: this.actorClerkId,
+      runId: this.input.runId,
+      ...change,
+    });
+    if (result.ok) this.changedWorkspace = true;
+    return result;
   }
 
   async readComments(input: { artifactId: string; includeResolved?: boolean }): Promise<CommentRow[] | null> {

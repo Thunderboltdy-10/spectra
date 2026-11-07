@@ -20,13 +20,17 @@ import { getActorForAccountId } from "./identityShared";
 
 type Ctx = QueryCtx | MutationCtx;
 export const LOGIN_SYNC_SETUP_VERSION = 3;
+/** Long enough that a brief can't land in the middle of someone's first setup. */
+const ESTABLISHED_AFTER_MS = 48 * 60 * 60 * 1_000;
 
 /** The same durable gate drives onboarding and the first morning brief. */
 export async function schoolSetupForAccount(ctx: Ctx, accountId: Id<"accounts">) {
   const actor = await getActorForAccountId(ctx, accountId);
   const preferences = await ctx.db.query("accountPreferences").withIndex("by_account_scope_key", (q) => q.eq("accountId", accountId).eq("scope", "account").eq("scopeKey", "account")).unique();
   const tourComplete = preferences?.values?.integrations?.tourStatus === "done";
-  const base = { accountId, tourComplete, schoolAdmin: actor?.schoolRole === "school_admin", completedAt: null as number | null, integrationId: null as Id<"schoolIntegrations"> | null };
+  const account = await ctx.db.get(accountId);
+  const established = Boolean(account && Date.now() - account._creationTime > ESTABLISHED_AFTER_MS);
+  const base = { accountId, tourComplete, established, schoolAdmin: actor?.schoolRole === "school_admin", completedAt: null as number | null, integrationId: null as Id<"schoolIntegrations"> | null };
   if (!actor) return { ...base, phase: "no_school" as const };
   const integration = await ctx.db.query("schoolIntegrations").withIndex("by_school_provider", (q) => q.eq("schoolId", actor.schoolId).eq("provider", "managebac")).unique();
   if (!integration || !["connected", "degraded"].includes(integration.status)) return { ...base, phase: "awaiting_connection" as const };

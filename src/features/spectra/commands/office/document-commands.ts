@@ -47,6 +47,9 @@ import {
   Quote,
   RefreshCw,
   Rows3,
+  Subscript as Subscript_,
+  CaseUpper,
+  IndentIncrease,
   SeparatorHorizontal,
   Sigma,
   SpellCheck,
@@ -121,6 +124,13 @@ export const DOCUMENT_STYLE_OPTIONS: readonly CommandControlOption[] = [
   { value: "code", label: "Code block", icon: SquareCode },
 ];
 
+/** Word's own first-line choices, half an inch either way. */
+const DOCUMENT_FIRST_LINE_OPTIONS: readonly CommandControlOption[] = [
+  { value: "0", label: "None" },
+  { value: "36", label: "First line" },
+  { value: "-36", label: "Hanging" },
+];
+
 /** Paper sizes Spectra can lay out and print truthfully. */
 export const DOCUMENT_PAGE_SIZES: readonly CommandControlOption[] = [
   { value: "a4", label: "A4", icon: FileText },
@@ -187,6 +197,15 @@ export type DocumentParagraphHandlers = {
   /** Space after the paragraph, in points. */
   spacingAfter?: number;
   setSpacingAfter: (points: number) => void;
+  /** Space before the paragraph, in points. */
+  spacingBefore?: number;
+  setSpacingBefore: (points: number) => void;
+  /** First line in points. Above zero indents it; below zero hangs the rest. */
+  firstLineIndent?: number;
+  setFirstLineIndent: (points: number) => void;
+  superscript: DocumentToggle;
+  subscript: DocumentToggle;
+  smallCaps: DocumentToggle;
   border?: string;
   setBorder: (kind: string) => void;
   shading?: string | null;
@@ -314,7 +333,79 @@ function foundationBindings(handlers: DocumentCommandHandlers): CommandBinding[]
 function paragraphBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
   const paragraph = handlers.paragraph;
   const disabled = !handlers.editable || undefined;
+  const characterToggle = (
+    id: string,
+    label: string,
+    icon: typeof Rows3,
+    hint: string,
+    toggle: DocumentToggle,
+  ): CommandBinding => ({
+    id,
+    label,
+    icon,
+    tab: "Format",
+    group: "Font",
+    priority: "secondary",
+    requires: "edit",
+    disabled,
+    hint,
+    touches: ["body"],
+    manifestOps: ["format_blocks"],
+    active: Boolean(toggle.active),
+    onSelect: () => toggle.toggle(),
+  });
   return [
+    characterToggle("format.superscript", "Superscript", Superscript, "Small raised text, like the 2 in x²", paragraph.superscript),
+    characterToggle("format.subscript", "Subscript", Subscript_, "Small lowered text, like the 2 in H₂O", paragraph.subscript),
+    characterToggle("format.smallCaps", "Small caps", CaseUpper, "Lowercase letters as small capitals", paragraph.smallCaps),
+    {
+      id: "format.spacingBefore",
+      label: "Space before",
+      icon: Rows3,
+      tab: "Format",
+      group: "Paragraph",
+      priority: "secondary",
+      requires: "edit",
+      disabled,
+      hint: "Space above this paragraph, in points",
+      touches: ["body"],
+      manifestOps: ["format_blocks"],
+      control: {
+        kind: "numeric",
+        value: paragraph.spacingBefore ?? 0,
+        min: 0,
+        max: 96,
+        step: 2,
+        suffix: "pt",
+        presets: DOCUMENT_PARAGRAPH_SPACING,
+      },
+      onSelect: (value) => {
+        const next = typeof value === "number" ? value : Number(value);
+        if (Number.isFinite(next)) paragraph.setSpacingBefore(Math.min(96, Math.max(0, next)));
+      },
+    },
+    {
+      id: "format.firstLineIndent",
+      label: "First line",
+      icon: IndentIncrease,
+      tab: "Format",
+      group: "Paragraph",
+      priority: "secondary",
+      requires: "edit",
+      disabled,
+      hint: "Indent the first line, or hang the rest of the paragraph",
+      touches: ["body"],
+      manifestOps: ["format_blocks"],
+      control: {
+        kind: "menu",
+        options: DOCUMENT_FIRST_LINE_OPTIONS,
+        value: String(paragraph.firstLineIndent ?? 0),
+      },
+      onSelect: (value) => {
+        const next = Number(value);
+        if (Number.isFinite(next)) paragraph.setFirstLineIndent(next);
+      },
+    },
     {
       id: "format.paragraphSpacing",
       label: "Paragraph spacing",
@@ -1702,6 +1793,13 @@ export function documentStubHandlers(): DocumentCommandHandlers {
     paragraph: {
       spacingAfter: 0,
       setSpacingAfter: noop,
+      spacingBefore: 0,
+      setSpacingBefore: noop,
+      firstLineIndent: 0,
+      setFirstLineIndent: noop,
+      superscript: { active: false, toggle: noop },
+      subscript: { active: false, toggle: noop },
+      smallCaps: { active: false, toggle: noop },
       border: "none",
       setBorder: noop,
       shading: null,

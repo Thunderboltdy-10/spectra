@@ -22,6 +22,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -40,6 +41,8 @@ import { useDictation } from "./dictation";
 import { PROVIDER_LABEL, providerProblem, useAgentRuntime } from "../ai/use-agent-runtime";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { applyRuntimeChoice } from "../settings/ui/runtime-settings";
+import { bridgeUnavailableReason, useBridgeAvailability } from "../bridge/availability";
+import { DEVICES_HREF } from "../bridge/client";
 
 /*
  * The island's composer (ISLAND.md, "The composer"): Spectra's only one.
@@ -180,7 +183,7 @@ export const IslandComposer = forwardRef<
   }, []);
 
   const agent = agentIndex !== undefined && agentIndex >= 0 ? agents[agentIndex] : null;
-  const agentLabel = agentIndex === undefined || agentIndex < 0 ? "Auto: Spectra picks the agent" : agent?.title ?? "Auto";
+  const agentLabel = agentIndex === undefined || agentIndex < 0 ? "Auto agent" : agent?.title ?? "Auto agent";
 
   const sending = useRef(false);
   // Each send turns the prism once: the message has gone to Spectra.
@@ -445,8 +448,9 @@ function AgentSwitch({
       </Tooltip>
       <DropdownMenuContent align="start" side="top" layer="toast" className="min-w-[16rem]">
         <DropdownMenuRadioGroup value={chosen} onValueChange={(value) => onChoose(value === "auto" ? -1 : Number(value))}>
+          <DropdownMenuLabel>Agent</DropdownMenuLabel>
           <DropdownMenuRadioItem value="auto">
-            <span className="min-w-0 flex-1 font-medium">Auto</span>
+            <span className="min-w-0 flex-1 font-medium">Auto agent</span>
             <span className="text-micro text-[var(--text-tertiary)]">Spectra picks</span>
           </DropdownMenuRadioItem>
           {agents.map((item, index) => (
@@ -473,27 +477,53 @@ function AgentSwitch({
 }
 
 const SPEED_STOPS = ["slow", "medium", "fast"] as const;
+const SPEED_TICKS = 18;
 
 /** Three stops in the prism menu. Its arrow keys stay with the slider rather than moving the menu. */
 function SpeedSlider({ label, value, onChange }: { label: string; value: (typeof SPEED_STOPS)[number]; onChange: (value: (typeof SPEED_STOPS)[number]) => void }) {
+  const stop = SPEED_STOPS.indexOf(value);
+  const step = (by: number) => {
+    const next = SPEED_STOPS[stop + by];
+    if (next) onChange(next);
+  };
   return (
-    <label className="block px-2 py-1.5" onKeyDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-      <span className="flex items-baseline justify-between text-caption">
-        <span className="text-[var(--text-primary)]">{label}</span>
-        <span className="text-micro capitalize text-[var(--text-tertiary)]">{value}</span>
-      </span>
-      <input
-        type="range"
-        min={0}
-        max={2}
-        step={1}
-        aria-label={label}
-        aria-valuetext={value}
-        value={SPEED_STOPS.indexOf(value)}
-        onChange={(event) => onChange(SPEED_STOPS[Number(event.target.value)])}
-        className="mt-1 block h-4 w-full cursor-pointer accent-[var(--text-primary)]"
-      />
-    </label>
+    <div
+      className="speed-control"
+      role="radiogroup"
+      aria-label={label}
+      onPointerDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+          event.preventDefault();
+          step(1);
+        } else if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+          event.preventDefault();
+          step(-1);
+        }
+      }}
+    >
+      <span className="speed-control-label">{label}</span>
+      <div className="speed-control-ticks" aria-hidden="true">
+        {Array.from({ length: SPEED_TICKS }, (_, index) => (
+          <i key={index} style={{ height: `${30 + (70 * index) / (SPEED_TICKS - 1)}%` }} data-on={index < ((stop + 1) * SPEED_TICKS) / SPEED_STOPS.length || undefined} />
+        ))}
+      </div>
+      <div className="speed-control-stops">
+        {SPEED_STOPS.map((stopName) => (
+          <button
+            key={stopName}
+            type="button"
+            role="radio"
+            aria-checked={stopName === value}
+            tabIndex={stopName === value ? 0 : -1}
+            onClick={() => onChange(stopName)}
+          >
+            {stopName}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -503,12 +533,18 @@ function RuntimeControls() {
   const { status } = useAgentRuntime();
   const ai = preferences.ai;
   const patch = (next: Partial<typeof ai>) => update("ai", next);
+  const unavailable = bridgeUnavailableReason(useBridgeAvailability());
   const models = (provider: "codex" | "claude") => status?.[provider]?.models ?? [];
   const chosenModel = ai.runtime === "codex" ? ai.codexModel : ai.runtime === "claude" ? ai.claudeModel : "";
-  const value = ai.runtime === "spectra" ? "spectra" : `${ai.runtime}:${chosenModel}`;
+  // With Bridge away a run answers on Spectra's model, so the menu says that. The
+  // choice itself is untouched: it applies again as soon as Bridge is back.
+  const standingIn = ai.runtime !== "spectra" && Boolean(unavailable);
+  const value = ai.runtime === "spectra" || standingIn ? "spectra" : `${ai.runtime}:${chosenModel}`;
   const modelLabel = ai.runtime === "spectra"
     ? "Spectra default"
-    : models(ai.runtime).find((item) => item.id === chosenModel)?.label ?? PROVIDER_LABEL[ai.runtime];
+    : standingIn
+      ? "Spectra for now"
+      : models(ai.runtime).find((item) => item.id === chosenModel)?.label ?? PROVIDER_LABEL[ai.runtime];
   const choose = (next: string) => {
     if (next === "spectra") return applyRuntimeChoice("spectra", patch);
     const [provider, ...rest] = next.split(":");
@@ -530,18 +566,26 @@ function RuntimeControls() {
         </DropdownMenuSubTrigger>
         <DropdownMenuSubContent layer="toast">
           <DropdownMenuRadioGroup value={value} onValueChange={choose}>
-            <DropdownMenuRadioItem value="spectra">Spectra default</DropdownMenuRadioItem>
             {(["codex", "claude"] as const).map((provider) => {
               const entry = status?.[provider];
               const problem = entry ? providerProblem(provider, entry.state) : "Checking this computer…";
+              const ownDefault = `${provider === "claude" ? "Claude" : "Codex"} default`;
               return (
-                <div key={provider} className="mt-1.5 border-t border-[var(--border-subtle)] pt-1.5">
+                <div key={provider} className="mb-1.5 border-b border-[var(--border-subtle)] pb-1.5">
                   <div className="px-2 pb-1 text-micro font-medium text-[var(--text-tertiary)]">{PROVIDER_LABEL[provider]}</div>
-                  {problem ? (
+                  {unavailable ? (
+                    <Tooltip label={unavailable} className="flex" side="right">
+                      <DropdownMenuItem asChild>
+                        <Link href={DEVICES_HREF} aria-label={`${ownDefault}. ${unavailable}`} className="opacity-45">
+                          {ownDefault}
+                        </Link>
+                      </DropdownMenuItem>
+                    </Tooltip>
+                  ) : problem ? (
                     <p className="px-2 pb-1 text-micro leading-[18px] text-[var(--text-secondary)]">{problem}</p>
                   ) : (
                     <>
-                      <DropdownMenuRadioItem value={`${provider}:`}>Its default</DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value={`${provider}:`}>{ownDefault}</DropdownMenuRadioItem>
                       {entry?.models.map((item) => (
                         <DropdownMenuRadioItem key={item.id} value={`${provider}:${item.id}`}>{item.label}</DropdownMenuRadioItem>
                       ))}
@@ -550,6 +594,7 @@ function RuntimeControls() {
                 </div>
               );
             })}
+            <DropdownMenuRadioItem value="spectra">Spectra default</DropdownMenuRadioItem>
           </DropdownMenuRadioGroup>
         </DropdownMenuSubContent>
       </DropdownMenuSub>

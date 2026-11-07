@@ -48,14 +48,24 @@ export function clearAccountScopedStorage() {
   }
 }
 
+const ACCOUNT_SCOPE_KEY = "spectra:account-storage-scope:v1";
+
+/** The account this browser's kept data belongs to, for anything kept in memory too. */
+export function accountStorageScope() {
+  try {
+    return window.localStorage.getItem(ACCOUNT_SCOPE_KEY);
+  } catch {
+    return null;
+  }
+}
+
 /** Persisted database IDs can be restored only by their deployment/account. */
 export function bindAccountStorageScope(scope: string) {
   if (typeof window === "undefined") return;
-  const key = "spectra:account-storage-scope:v1";
   try {
-    if (window.localStorage.getItem(key) === scope) return;
+    if (window.localStorage.getItem(ACCOUNT_SCOPE_KEY) === scope) return;
     clearAccountScopedStorage();
-    window.localStorage.setItem(key, scope);
+    window.localStorage.setItem(ACCOUNT_SCOPE_KEY, scope);
   } catch {
     clearAccountScopedStorage();
   }

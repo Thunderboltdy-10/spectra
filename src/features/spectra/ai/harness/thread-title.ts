@@ -1,4 +1,4 @@
-import { callSpectraModel } from "./model";
+import { callSpectraModel, type ModelRequest } from "./model";
 
 /*
  * Names a new thread and, when it is unfiled, picks the workspace it clearly
@@ -8,6 +8,7 @@ import { callSpectraModel } from "./model";
 
 export type ThreadTitleRequest = {
   prompt: string;
+  runtime?: ModelRequest["runtime"];
   /** The user's workspaces, offered for an unfiled thread. */
   places?: Array<{ id: string; title: string }>;
 };
@@ -61,6 +62,7 @@ export function parseThreadTitle(raw: string): ThreadTitle | null {
 /** The production writer: same model, fixed low reasoning. */
 export const modelThreadTitleWriter: ThreadTitleWriter = async (request, signal) => {
   const turn = await callSpectraModel({
+    runtime: request.runtime,
     messages: [
       { role: "system", content: SYSTEM },
       { role: "user", content: describe(request) },

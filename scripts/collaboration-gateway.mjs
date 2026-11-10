@@ -1049,21 +1049,26 @@ const server = new Server({
 
   async connected({ connection }) {
     const document = connection.document;
+    let closed = false;
+    let unwatch = () => {};
+    connection.onClose(() => {
+      closed = true;
+      activeConnections.delete(connection);
+      unwatch();
+    });
     try { await reauthorize(connection.context); }
     catch {
       connection.webSocket.close(connection.context.authorizationRevoked ? 4403 : 1013,
         connection.context.authorizationRevoked ? "Access or permissions changed" : "Authorization temporarily unavailable");
       return;
     }
+    if (closed) return;
     activeConnections.add(connection);
+    unwatch = authorizationGuard.watch(connection);
+    if (closed) { unwatch(); return; }
     openDocuments.set(durableHeadKey(connection.context), { document, nextSequence: 0 });
     try { await catchUpCanonicalRoom(document, connection.context); }
-    catch (error) { forceCanonicalReconnect(connection.context, collaborationFailureMessage(error)); }
-    const unwatch = authorizationGuard.watch(connection);
-    connection.onClose(() => {
-      activeConnections.delete(connection);
-      unwatch();
-    });
+    catch (error) { if (!closed) forceCanonicalReconnect(connection.context, collaborationFailureMessage(error)); }
   },
 
   async beforeHandleMessage({

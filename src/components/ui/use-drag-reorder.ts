@@ -51,14 +51,14 @@ export function useDragReorder({
   const orderRef = useRef(order);
   orderRef.current = order;
 
-  const itemsNow = () => {
+  const itemsNow = useCallback(() => {
     const found = new Map<string, HTMLElement>();
     container.current?.querySelectorAll<HTMLElement>(`[${attribute}]`).forEach((element) => {
       const id = element.getAttribute(attribute);
       if (id) found.set(id, element);
     });
     return found;
-  };
+  }, [attribute]);
 
   const place = () => {
     const current = drag.current;
@@ -82,7 +82,8 @@ export function useDragReorder({
       const dx = from.left - to.left;
       const dy = from.top - to.top;
       if (!dx && !dy) return;
-      element.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: SETTLE_MS, easing: EASE });
+      const animation = element.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: SETTLE_MS, easing: EASE });
+      animation.id = "spectra-reorder";
     });
     place();
   });
@@ -92,8 +93,7 @@ export function useDragReorder({
     itemsNow().forEach((element, id) => rects.set(id, element.getBoundingClientRect()));
     before.current = rects;
     setPreview(next);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [itemsNow]);
 
   const begin = useCallback(
     (event: PointerEvent<HTMLElement>, id: string) => {
@@ -129,7 +129,7 @@ export function useDragReorder({
         for (const [otherId, other] of itemsNow()) {
           if (otherId === id) continue;
           // Still sliding: its box is not where it is going, and the pointer would pull it straight back.
-          if (other.getAnimations?.().some((animation) => animation.playState === "running")) continue;
+          if (other.getAnimations?.().some((animation) => animation.id === "spectra-reorder" && animation.playState === "running")) continue;
           const rect = other.getBoundingClientRect();
           if (moved.clientX < rect.left || moved.clientX > rect.right || moved.clientY < rect.top || moved.clientY > rect.bottom) continue;
           const to = orderRef.current.indexOf(otherId);
@@ -180,7 +180,7 @@ export function useDragReorder({
       window.addEventListener("pointercancel", cancel, true);
       window.addEventListener("keydown", key, true);
     },
-    [changeTo, disabled, onReorder],
+    [changeTo, disabled, itemsNow, onReorder],
   );
 
   const onKeyDown = useCallback(

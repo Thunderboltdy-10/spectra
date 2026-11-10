@@ -258,6 +258,11 @@ afterEach(() => {
 });
 
 describe("ChatShell load states", () => {
+  it("loads only catalogs needed for chat context", async () => {
+    render(<ChatShell />);
+    await waitFor(() => expect(mocks.getOverview).toHaveBeenCalledWith(undefined, false, false));
+  });
+
   it("does not turn an initial chat read failure into a welcome state", async () => {
     mocks.getOverview.mockRejectedValueOnce(new Error("gateway unavailable"));
     render(<ChatShell />);

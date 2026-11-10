@@ -3,6 +3,7 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import { getSpectraRunDetail, getSpectraRunEvents, getSpectraRunTabs } from "../data/api";
+import { spectraBus } from "../events";
 
 vi.mock("../data/api", () => ({ getSpectraRunTabs: vi.fn(), getSpectraRunEvents: vi.fn(), getSpectraRunDetail: vi.fn(), postSpectra: vi.fn() }));
 vi.mock("../settings/preference-store", () => ({ useSpectraPreferences: () => ({ preferences: { ai: { continueCurrentConversation: true } } }) }));
@@ -35,6 +36,41 @@ afterEach(() => { cleanup(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubA
 async function settle(milliseconds = 20) { await act(async () => { await vi.advanceTimersByTimeAsync(milliseconds); }); }
 
 describe("the run request", () => {
+  it("streams reply and reasoning chunks without announcing tab-index changes for each chunk", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    respond = () => new Response(new ReadableStream<Uint8Array>({ start(value) { controller = value; } }));
+    const encoder = new TextEncoder();
+    const write = (event: unknown) => controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+    const changed = vi.fn(), leave = spectraBus.on("run.changed", changed);
+    const { result } = renderHook(() => useSpectraRun({ surface: "chat" }));
+    let pending!: Promise<boolean>;
+    try {
+      act(() => { pending = result.current.run("Give a short answer"); });
+      await settle();
+      await act(async () => { write({ type: "run_created", runId: "run", card }); });
+      await settle();
+      expect(changed).toHaveBeenCalledWith({ runId: "run" });
+      changed.mockClear();
+      await act(async () => {
+        for (const content of ["A ", "streamed ", "answer."])
+          write({ type: "text_delta", runId: "run", content });
+        write({ type: "reasoning_delta", runId: "run", id: "thought", content: "Checking the calculation", done: true });
+        write({ type: "text_replace", runId: "run", content: "The complete streamed answer." });
+      });
+      await settle();
+      expect.soft(result.current.liveExchange?.content).toBe("The complete streamed answer.");
+      expect.soft(JSON.stringify(result.current.liveExchange?.steps)).toContain("Checking the calculation");
+      expect.soft(changed).not.toHaveBeenCalled();
+      changed.mockClear();
+      await act(async () => {
+        write({ type: "final", runId: "run", summary: "Done", card: { ...card, status: "completed" } });
+        controller.close();
+        await pending;
+      });
+      expect(changed).toHaveBeenCalledWith({ runId: "run" });
+    } finally { leave(); }
+  });
+
   it("names what is open, the selection, the references and the agent, and nothing else about context", async () => {
     respond = () => ndjson([{ type: "run_created", runId: "run", card }]);
     const open = [{ id: "doc-1", type: "document", title: "Cell notes" }];

@@ -159,6 +159,53 @@ describe("runHarnessLoop", () => {
     expect(order).toEqual(["start 1", "end 1", "start 2", "end 2"]);
   });
 
+  it("serializes an exclusive reversal between independent writes", async () => {
+    const order: string[] = [];
+    const edit = tool({ name: "edit", execute: async (args) => {
+      order.push(`start ${args.step}`);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      order.push(`end ${args.step}`);
+      return { ok: true, content: "saved" };
+    } });
+    const undo = tool({ name: "undo", exclusive: true, execute: async () => {
+      order.push("undo");
+      return { ok: true, content: "undone" };
+    } });
+    const model = scripted([{ text: "", toolCalls: [call("a", "edit", { step: 1 }), call("b", "undo"), call("c", "edit", { step: 2 })] }, { text: "Done", toolCalls: [] }]);
+    await runHarnessLoop(emptyLoopState([user("undo")]), deps({ callModel: model.caller, tools: [edit, undo] }));
+    expect(order).toEqual(["start 1", "end 1", "undo", "start 2", "end 2"]);
+  });
+
+  it("holds following writes behind a paused reversal and preserves its approval scope on resume", async () => {
+    const edit = vi.fn(async () => ({ ok: true, content: "saved" }));
+    const undo = tool({ name: "undo", exclusive: true, execute: async (_args, ctx) => {
+      if (!ctx.approved) return { ok: false, content: "", pause: { kind: "approval", category: "bridge_files", question: "Undo desktop changes?", approvalScope: "previous:attempt-1" } };
+      expect(ctx.approvalScope).toBe("previous:attempt-1");
+      expect(edit).not.toHaveBeenCalled();
+      return { ok: true, content: "undone" };
+    } });
+    const model = scripted([{ text: "", toolCalls: [call("a", "undo"), call("b", "edit")] }, { text: "Done", toolCalls: [] }]);
+    const options = deps({ callModel: model.caller, tools: [undo, tool({ name: "edit", execute: edit })] });
+    const paused = await runHarnessLoop(emptyLoopState([user("undo")]), options);
+    expect(paused.status).toBe("paused");
+    expect(edit).not.toHaveBeenCalled();
+    const resumed = await runHarnessLoop(JSON.parse(JSON.stringify(paused.state)), options, { kind: "approval", allowed: true });
+    expect(resumed.status).toBe("completed");
+    expect(edit).toHaveBeenCalledOnce();
+  });
+
+  it("does not run a reversal ahead of an earlier deferred write", async () => {
+    const order: string[] = [];
+    const edit = tool({ name: "edit", effect: "settings", category: () => "settings", execute: async () => { order.push("edit"); return { ok: true, content: "saved" }; } });
+    const undo = tool({ name: "undo", exclusive: true, execute: async () => { order.push("undo"); return { ok: true, content: "undone" }; } });
+    const model = scripted([{ text: "", toolCalls: [call("a", "edit"), call("b", "undo")] }, { text: "Done", toolCalls: [] }]);
+    const options = deps({ callModel: model.caller, tools: [edit, undo] });
+    const paused = await runHarnessLoop(emptyLoopState([user("go")]), options);
+    expect(order).toEqual([]);
+    await runHarnessLoop(paused.state, options, { kind: "approval", allowed: true });
+    expect(order).toEqual(["edit", "undo"]);
+  });
+
   it("turns tool errors and bad arguments into results the model reads", async () => {
     const broken = tool({
       name: "broken",

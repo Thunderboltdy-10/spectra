@@ -471,7 +471,7 @@ async function createCollaborationSession(
       stateBase64: baseline.stateBase64,
       projection: baseline.projection,
     });
-    const endpoint = deviceRoomEndpoint(actor.accountId);
+    const endpoint = await deviceRoomEndpoint(actor.accountId);
     return {
       actor,
       artifact,

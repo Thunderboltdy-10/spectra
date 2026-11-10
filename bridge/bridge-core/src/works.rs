@@ -5,6 +5,7 @@
 //! asked. Rooms (`rooms.rs`) keep the document live and write here; the routes
 //! below read the last projection the app saved, for lists, search and the AI.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -13,14 +14,26 @@ use base64::Engine as _;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 /// Older saved points are dropped past this.
 const VERSIONS_KEPT: i64 = 200;
 const BACKUP_MAGIC: &[u8; 8] = b"SPECTRA1";
 
 pub fn default_store_path() -> Option<PathBuf> {
-    let base = std::env::var_os("LOCALAPPDATA").or_else(|| std::env::var_os("HOME"))?;
-    Some(PathBuf::from(base).join("Spectra").join("works").join("works.db"))
+    store_path_for_profile(
+        std::env::var_os("SPECTRA_BRIDGE_DATA_DIR").map(PathBuf::from),
+        std::env::var_os("LOCALAPPDATA").or_else(|| std::env::var_os("HOME")).map(PathBuf::from),
+    )
+}
+
+fn store_path_for_profile(isolated: Option<PathBuf>, base: Option<PathBuf>) -> Option<PathBuf> {
+    let root = match isolated {
+        Some(path) if path.is_absolute() => path,
+        Some(_) => return None,
+        None => base?.join("Spectra"),
+    };
+    Some(root.join("works").join("works.db"))
 }
 
 fn now_ms() -> i64 {
@@ -57,6 +70,30 @@ pub struct Projection {
 pub struct WorkStore {
     db: Mutex<Connection>,
     path: Option<PathBuf>,
+    account: Option<String>,
+}
+
+/// The complete envelope has been checked; its bytes cannot change while
+/// ownership is being verified. Keep it compressed until the import pass.
+pub struct ValidatedBackup {
+    bytes: Vec<u8>,
+    artifact_ids: Vec<String>,
+}
+
+impl ValidatedBackup {
+    pub fn from_bytes(bytes: Vec<u8>) -> anyhow::Result<Self> {
+        let mut artifact_ids = Vec::new();
+        let mut seen = HashSet::new();
+        visit_backup(&bytes, |header, _| {
+            if let Some(id) = header["artifactId"].as_str() {
+                if seen.insert(id.to_owned()) { artifact_ids.push(id.to_owned()); }
+            }
+            Ok(())
+        })?;
+        Ok(Self { bytes, artifact_ids })
+    }
+
+    pub fn artifact_ids(&self) -> &[String] { &self.artifact_ids }
 }
 
 impl WorkStore {
@@ -70,6 +107,65 @@ impl WorkStore {
 
     pub fn in_memory() -> anyhow::Result<Self> {
         Self::prepare(Connection::open_in_memory()?, None)
+    }
+
+    pub fn account_id(&self) -> Option<&str> { self.account.as_deref() }
+
+    /// The verified pairing selects a private store; device ids may change.
+    pub fn for_account(legacy_path: &Path, deployment: &str, account: &str) -> anyhow::Result<Self> {
+        anyhow::ensure!(!deployment.is_empty() && !account.is_empty(), "A verified work account is required");
+        let binding = format!("{}\0{account}", deployment.trim_end_matches('/'));
+        let directory = hex::encode(Sha256::digest(binding.as_bytes()));
+        let path = legacy_path.parent().context("finding the works folder")?.join("accounts").join(directory).join("works.db");
+        let mut store = Self::open(&path)?;
+        store.account = Some(account.to_owned());
+        Ok(store)
+    }
+
+    pub fn legacy_ids(path: &Path) -> anyhow::Result<Vec<String>> {
+        if !path.try_exists()? { return Ok(Vec::new()); }
+        let db = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let mut statement = db.prepare("SELECT artifact_id FROM works ORDER BY artifact_id")?;
+        Ok(statement.query_map([], |row| row.get(0))?.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn migration_complete(&self) -> anyhow::Result<bool> {
+        Ok(self.lock().query_row("SELECT value FROM store_meta WHERE key = 'legacy_migration'", [], |row| row.get::<_, String>(0)).optional()?.as_deref() == Some("done"))
+    }
+
+    pub fn finish_migration(&self) -> anyhow::Result<()> {
+        self.lock().execute("INSERT INTO store_meta(key, value) VALUES('legacy_migration', 'done') ON CONFLICT(key) DO UPDATE SET value = 'done'", [])?;
+        Ok(())
+    }
+
+    /// Only the cloud-proven ids may cross the old, unscoped boundary.
+    pub fn copy_verified_legacy(&self, source: &Path, ids: &[String]) -> anyhow::Result<()> {
+        let account = self.account.as_deref().context("A verified work account is required")?;
+        let mut uri = reqwest::Url::from_file_path(source).map_err(|_| anyhow::anyhow!("The legacy work path must be absolute"))?;
+        uri.set_query(Some("mode=ro"));
+        let mut db = self.lock();
+        db.execute("ATTACH DATABASE ?1 AS legacy", [uri.as_str()])?;
+        let copied = (|| -> anyhow::Result<()> {
+            let tx = db.transaction()?;
+            for id in ids {
+                let inserted = tx.execute(
+                    "INSERT OR IGNORE INTO works(artifact_id, owner, state, title, summary, tags, blueprint_key, schema_version, content, content_hash, updated_at, backed_up_at)
+                     SELECT artifact_id, ?2, state, title, summary, tags, blueprint_key, schema_version, content, content_hash, updated_at, NULL FROM legacy.works WHERE artifact_id = ?1",
+                    params![id, account],
+                )?;
+                if inserted == 0 { continue; }
+                tx.execute("INSERT INTO work_updates(artifact_id, seq, body) SELECT artifact_id, seq, body FROM legacy.work_updates WHERE artifact_id = ?1", [id])?;
+                tx.execute("INSERT INTO work_versions(id, artifact_id, at, source, summary, actor, run_id, state, title, content) SELECT id, artifact_id, at, source, summary, actor, run_id, state, title, content FROM legacy.work_versions WHERE artifact_id = ?1", [id])?;
+                tx.execute("INSERT INTO work_text(artifact_id, owner, title, body) SELECT artifact_id, ?2, title, body FROM legacy.work_text WHERE artifact_id = ?1", params![id, account])?;
+            }
+            tx.execute("INSERT OR IGNORE INTO store_meta(key, value) SELECT key, value FROM legacy.store_meta WHERE key = 'store_id'", [])?;
+            tx.commit()?;
+            Ok(())
+        })();
+        let detached = db.execute_batch("DETACH DATABASE legacy");
+        copied?;
+        detached?;
+        Ok(())
     }
 
     fn prepare(db: Connection, path: Option<PathBuf>) -> anyhow::Result<Self> {
@@ -111,7 +207,7 @@ impl WorkStore {
              );
              CREATE TABLE IF NOT EXISTS store_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);",
         )?;
-        Ok(Self { db: Mutex::new(db), path })
+        Ok(Self { db: Mutex::new(db), path, account: None })
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
@@ -137,9 +233,9 @@ impl WorkStore {
         let mut db = self.lock();
         let tx = db.transaction()?;
         tx.execute(
-            "INSERT INTO works(artifact_id, updated_at) VALUES(?1, ?2)
+            "INSERT INTO works(artifact_id, updated_at, owner) VALUES(?1, ?2, ?3)
              ON CONFLICT(artifact_id) DO UPDATE SET updated_at = ?2",
-            params![artifact_id, now],
+            params![artifact_id, now, self.account],
         )?;
         let next: i64 = tx.query_row(
             "SELECT COALESCE(MAX(seq), 0) + 1 FROM work_updates WHERE artifact_id = ?1",
@@ -183,7 +279,7 @@ impl WorkStore {
                content_hash = COALESCE(?9, content_hash), updated_at = ?10",
             params![
                 artifact_id,
-                projection.owner,
+                self.account.as_ref().or(projection.owner.as_ref()),
                 projection.title,
                 projection.summary,
                 tags,
@@ -477,44 +573,189 @@ impl WorkStore {
 
     /// Brings a backup back. Work changed here since then stays as it is.
     pub fn restore_bundle(&self, bundle: &[u8]) -> anyhow::Result<i64> {
-        use std::io::Read as _;
-        let mut decoder = flate2::read::GzDecoder::new(bundle);
-        let mut magic = [0u8; 8];
-        decoder.read_exact(&mut magic)?;
-        anyhow::ensure!(&magic == BACKUP_MAGIC, "That isn't a Spectra backup.");
+        anyhow::ensure!(self.account.is_none(), "This backup needs verified work ownership before restoring");
+        visit_backup(bundle, |_, _| Ok(()))?;
+        self.restore_filtered(bundle, None)
+    }
+
+    pub fn restore_verified(&self, bundle: ValidatedBackup, allowed: &HashSet<String>) -> anyhow::Result<i64> {
+        anyhow::ensure!(self.account.is_some(), "A verified work account is required");
+        self.restore_filtered(&bundle.bytes, Some(allowed))
+    }
+
+    fn restore_filtered(&self, bundle: &[u8], allowed: Option<&HashSet<String>>) -> anyhow::Result<i64> {
         let mut restored = 0;
-        loop {
-            let mut length = [0u8; 4];
-            match decoder.read_exact(&mut length) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => break,
-                Err(error) => return Err(error.into()),
-            }
-            let mut header = vec![0u8; u32::from_be_bytes(length) as usize];
-            decoder.read_exact(&mut header)?;
-            decoder.read_exact(&mut length)?;
-            let mut body = vec![0u8; u32::from_be_bytes(length) as usize];
-            decoder.read_exact(&mut body)?;
-            let header: Value = serde_json::from_slice(&header)?;
+        visit_backup(bundle, |header, body| {
             let Some(artifact_id) = header["artifactId"].as_str() else {
-                continue;
+                return Ok(());
             };
+            if allowed.is_some_and(|ids| !ids.contains(artifact_id)) { return Ok(()); }
             let incoming = header["updatedAt"].as_i64().unwrap_or(0);
             let existing = self.work(artifact_id)?.and_then(|work| work["updatedAt"].as_i64());
             if existing.is_some_and(|at| at >= incoming) {
-                continue;
+                return Ok(());
             }
             let projection: Projection = serde_json::from_value(header.clone())?;
             self.import(artifact_id, &projection, &body)?;
             restored += 1;
-        }
+            Ok(())
+        })?;
         Ok(restored)
+    }
+}
+
+fn visit_backup(bundle: &[u8], mut visit: impl FnMut(Value, Vec<u8>) -> anyhow::Result<()>) -> anyhow::Result<()> {
+    use std::io::Read as _;
+    fn part(reader: &mut impl std::io::Read, length: u32) -> anyhow::Result<Vec<u8>> {
+        let mut bytes = Vec::new();
+        reader.take(u64::from(length)).read_to_end(&mut bytes)?;
+        anyhow::ensure!(bytes.len() == length as usize, "This backup is incomplete");
+        Ok(bytes)
+    }
+    let mut decoder = flate2::read::GzDecoder::new(bundle);
+    let mut magic = [0u8; 8];
+    decoder.read_exact(&mut magic)?;
+    anyhow::ensure!(&magic == BACKUP_MAGIC, "That isn't a Spectra backup.");
+    loop {
+        let mut length = [0u8; 4];
+        if decoder.read(&mut length[..1])? == 0 { return Ok(()); }
+        decoder.read_exact(&mut length[1..])?;
+        let header = part(&mut decoder, u32::from_be_bytes(length))?;
+        decoder.read_exact(&mut length)?;
+        let body = part(&mut decoder, u32::from_be_bytes(length))?;
+        visit(serde_json::from_slice(&header)?, body)?;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_stores_keep_work_separate_across_accounts_and_deployments() {
+        let root = tempfile::tempdir().unwrap();
+        let legacy = root.path().join("works.db");
+        let first = WorkStore::for_account(&legacy, "https://school.example/", "a").unwrap();
+        first.save_projection("work", &sample()).unwrap();
+        let other = WorkStore::for_account(&legacy, "https://school.example", "b").unwrap();
+        let deployment = WorkStore::for_account(&legacy, "https://other.example", "a").unwrap();
+        assert!(other.work("work").unwrap().is_none());
+        assert!(deployment.work("work").unwrap().is_none());
+        let reopened = WorkStore::for_account(&legacy, "https://school.example", "a").unwrap();
+        assert_eq!(reopened.work("work").unwrap().unwrap()["title"], "Hamlet essay");
+        assert_ne!(first.path, other.path);
+    }
+
+    #[test]
+    fn verified_migration_preserves_only_permitted_work_state_and_history() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("legacy # space.db");
+        let legacy = WorkStore::open(&path).unwrap();
+        legacy.save_projection("owned", &Projection { owner: None, ..sample() }).unwrap();
+        legacy.compact("owned", b"state").unwrap();
+        legacy.append_update("owned", b"update").unwrap();
+        let version = legacy.add_version("owned", "before_ai", Some("Before"), Some("actor"), Some("run"), b"version-state").unwrap();
+        // A caller-supplied local owner never proves that this work belongs here.
+        legacy.save_projection("foreign", &sample()).unwrap();
+        legacy.mark_backed_up(now_ms() + 10_000).unwrap();
+        let store_id = legacy.store_id().unwrap();
+        let original = legacy.work("owned").unwrap();
+        let scoped = WorkStore::for_account(&path, "https://school.example", "a").unwrap();
+        assert!(!scoped.migration_complete().unwrap());
+        scoped.copy_verified_legacy(&path, &["owned".into()]).unwrap();
+        assert_eq!(scoped.work("owned").unwrap(), original);
+        assert_eq!(scoped.load("owned").unwrap(), (Some(b"state".to_vec()), vec![b"update".to_vec()]));
+        assert_eq!(scoped.version("owned", version).unwrap(), legacy.version("owned", version).unwrap());
+        assert!(scoped.work("foreign").unwrap().is_none());
+        assert!(scoped.versions("foreign", 200).unwrap().is_empty());
+        assert_eq!(scoped.search("hamlet", None, 10).unwrap().len(), 1);
+        assert_eq!(scoped.summary().unwrap()["storeId"], store_id);
+        assert_eq!(scoped.summary().unwrap()["changedSinceBackup"], 1);
+        assert_eq!(scoped.summary().unwrap()["lastBackupAt"], Value::Null);
+        assert_eq!(legacy.work("owned").unwrap(), original);
+        assert_eq!(legacy.summary().unwrap()["works"], 2);
+        assert_eq!(legacy.lock().query_row("SELECT owner FROM works WHERE artifact_id='owned'", [], |row| row.get::<_, Option<String>>(0)).unwrap(), None);
+        assert!(!scoped.migration_complete().unwrap());
+        scoped.finish_migration().unwrap();
+        assert!(WorkStore::for_account(&path, "https://school.example", "a").unwrap().migration_complete().unwrap());
+    }
+
+    #[test]
+    fn a_failed_legacy_copy_rolls_back_and_can_retry_without_losing_source_work() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("works.db");
+        let legacy = WorkStore::open(&path).unwrap();
+        legacy.save_projection("owned", &sample()).unwrap();
+        legacy.append_update("owned", b"update").unwrap();
+        let scoped = WorkStore::for_account(&path, "https://school.example", "a").unwrap();
+        scoped.lock().execute_batch("CREATE TRIGGER fail_copy BEFORE INSERT ON work_updates BEGIN SELECT RAISE(ABORT, 'fixture migration failure'); END").unwrap();
+        assert!(scoped.copy_verified_legacy(&path, &["owned".into()]).is_err());
+        assert!(scoped.work("owned").unwrap().is_none());
+        assert!(!scoped.migration_complete().unwrap());
+        assert!(legacy.work("owned").unwrap().is_some());
+        scoped.lock().execute_batch("DROP TRIGGER fail_copy").unwrap();
+        scoped.copy_verified_legacy(&path, &["owned".into()]).unwrap();
+        assert_eq!(scoped.load("owned").unwrap().1, vec![b"update".to_vec()]);
+    }
+
+    #[test]
+    fn repeated_migration_preserves_newer_scoped_work_and_has_no_duplicate_history() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("works.db");
+        let legacy = WorkStore::open(&path).unwrap();
+        legacy.save_projection("owned", &sample()).unwrap();
+        let id = legacy.add_version("owned", "edit", None, None, None, b"state").unwrap();
+        let scoped = WorkStore::for_account(&path, "https://school.example", "a").unwrap();
+        scoped.copy_verified_legacy(&path, &["owned".into()]).unwrap();
+        scoped.save_projection("owned", &Projection { title: Some("My newer title".into()), ..Projection::default() }).unwrap();
+        scoped.copy_verified_legacy(&path, &["owned".into(), "owned".into()]).unwrap();
+        assert_eq!(scoped.work("owned").unwrap().unwrap()["title"], "My newer title");
+        assert_eq!(scoped.versions("owned", 200).unwrap().len(), 1);
+        assert!(scoped.version("owned", id).unwrap().is_some());
+    }
+
+    #[test]
+    fn default_profile_keeps_the_existing_work_path() {
+        let base = std::env::temp_dir().join("spectra-user-data");
+        assert_eq!(store_path_for_profile(None, Some(base.clone())), Some(base.join("Spectra/works/works.db")));
+        assert_eq!(store_path_for_profile(None, None), None);
+    }
+
+    #[test]
+    fn an_absolute_profile_does_not_require_or_use_the_default_base() {
+        let profile = std::env::temp_dir().join("spectra-isolated-profile");
+        for base in [None, Some(std::env::temp_dir().join("other-user-data"))] {
+            assert_eq!(store_path_for_profile(Some(profile.clone()), base), Some(profile.join("works/works.db")));
+        }
+    }
+
+    #[test]
+    fn an_invalid_profile_never_falls_back_to_the_default_store() {
+        for profile in ["", "profile", "../profile"] {
+            assert_eq!(store_path_for_profile(Some(PathBuf::from(profile)), Some(std::env::temp_dir())), None);
+        }
+    }
+
+    #[test]
+    fn isolated_profiles_preserve_separate_work_and_history() {
+        let root = tempfile::tempdir().unwrap();
+        let base = Some(root.path().join("normal-user"));
+        let original = store_path_for_profile(None, base.clone()).unwrap();
+        let first = store_path_for_profile(Some(root.path().join("first")), base.clone()).unwrap();
+        let second = store_path_for_profile(Some(root.path().join("second")), base).unwrap();
+        for (path, title) in [(&original, "Original"), (&first, "First"), (&second, "Second")] {
+            let store = WorkStore::open(path).unwrap();
+            store.save_projection("same-id", &Projection { title: Some(title.into()), ..sample() }).unwrap();
+            store.add_version("same-id", "edit", None, None, None, b"state").unwrap();
+        }
+        for (path, title) in [(&original, "Original"), (&first, "First"), (&second, "Second")] {
+            let store = WorkStore::open(path).unwrap();
+            assert_eq!(store.work("same-id").unwrap().unwrap()["title"], title);
+            let versions = store.versions("same-id", 5).unwrap();
+            assert_eq!(versions.len(), 1);
+            assert_eq!(store.version("same-id", versions[0]["id"].as_i64().unwrap()).unwrap().unwrap()["title"], title);
+        }
+    }
 
     fn sample() -> Projection {
         Projection {
@@ -608,6 +849,49 @@ mod tests {
             .unwrap();
         assert_eq!(store.restore_bundle(&bundle).unwrap(), 0);
         assert_eq!(store.work("w1").unwrap().unwrap()["title"], "Newer");
+    }
+
+    #[test]
+    fn a_partial_backup_length_is_not_a_clean_end() {
+        use std::io::Write as _;
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(BACKUP_MAGIC).unwrap();
+        encoder.write_all(&[0, 0]).unwrap();
+        let store = WorkStore::in_memory().unwrap();
+        assert!(store.restore_bundle(&encoder.finish().unwrap()).is_err());
+    }
+
+    #[test]
+    fn scoped_restore_uses_only_the_verified_ids_including_legacy_ownerless_work() {
+        let legacy = WorkStore::in_memory().unwrap();
+        legacy.save_projection("owned", &Projection { owner: None, ..sample() }).unwrap();
+        legacy.save_projection("foreign", &sample()).unwrap();
+        let (bundle, _) = legacy.backup_bundle(true).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let scoped = WorkStore::for_account(&root.path().join("works.db"), "https://school.example", "a").unwrap();
+        assert!(scoped.restore_bundle(&bundle).is_err());
+        let bundle = ValidatedBackup::from_bytes(bundle).unwrap();
+        assert_eq!(bundle.artifact_ids().len(), 2);
+        assert_eq!(scoped.restore_verified(bundle, &HashSet::from(["owned".into()])).unwrap(), 1);
+        assert!(scoped.work("foreign").unwrap().is_none());
+        assert_eq!(scoped.lock().query_row("SELECT owner FROM works WHERE artifact_id='owned'", [], |row| row.get::<_, String>(0)).unwrap(), "a");
+    }
+
+    #[test]
+    fn an_incomplete_backup_fails_before_restoring_its_valid_prefix() {
+        use std::io::{Read as _, Write as _};
+        let legacy = WorkStore::in_memory().unwrap();
+        legacy.save_projection("owned", &sample()).unwrap();
+        let mut bytes = Vec::new();
+        flate2::read::GzDecoder::new(legacy.backup_bundle(true).unwrap().0.as_slice()).read_to_end(&mut bytes).unwrap();
+        bytes.extend([0, 0]);
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&bytes).unwrap();
+        let destination = WorkStore::in_memory().unwrap();
+        let bundle = encoder.finish().unwrap();
+        assert!(destination.restore_bundle(&bundle).is_err());
+        assert!(ValidatedBackup::from_bytes(bundle).is_err());
+        assert!(destination.work("owned").unwrap().is_none());
     }
 
     #[test]

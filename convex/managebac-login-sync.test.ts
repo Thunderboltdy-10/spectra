@@ -5,10 +5,14 @@ import schema from "./schema";
 import { api } from "./_generated/api";
 import { settleStudentSyncState } from "./schoolSyncShared";
 import { SCHOOL_SYNC_KINDS } from "../shared/school-sync";
+import { syncStatus } from "./school";
+import type { QueryCtx } from "./_generated/server";
+import type { FunctionReturnType } from "convex/server";
 
 const modules = import.meta.glob("./**/*.ts");
 const identity = { subject: "login-student", email: "student@example.test", emailVerified: true };
 const counts = { fetched: 0, created: 0, updated: 0, unchanged: 0, tombstoned: 0, projected: 0, skipped: 0, quarantined: 0, conflicts: 0, errors: 0 };
+const syncStatusHandler = Reflect.get(syncStatus, "_handler") as (ctx: QueryCtx, args: Record<string, never>) => Promise<FunctionReturnType<typeof api.school.syncStatus>>;
 afterEach(() => vi.useRealTimers());
 
 async function fixture() {
@@ -119,6 +123,30 @@ it("resumes setup when an admin adds the school's key after signup", async () =>
 it("does not report another person's school-wide sync as this student's success", async () => {
   const { student } = await fixture();
   expect((await student.query(api.school.syncStatus, {})).connection.lastSyncAt).toBeNull();
+});
+
+it.each(["idle", "queued", "running"] as const)("keeps %s sync metadata clock-free without a running deadline", async state => {
+  const { t, ids, student } = await fixture();
+  await t.run(ctx => ctx.db.insert("schoolSyncStates", { ...ids, kind: "classes", state,
+    ...(state === "running" ? {} : { dueAt: Date.now() + 60_000 }), updatedAt: Date.now() }));
+  const result = await student.run(async ctx => {
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => { throw Error("No running sync deadline needs the clock"); });
+    try { return await syncStatusHandler(ctx, {}); } finally { clock.mockRestore(); }
+  });
+  expect(result.kinds.find(row => row.kind === "classes")?.state).toBe(state);
+});
+
+it("keeps a sync running until its exact watchdog deadline", async () => {
+  const { t, ids, student } = await fixture();
+  const dueAt = Date.now() + 60_000;
+  await t.run(ctx => ctx.db.insert("schoolSyncStates", { ...ids, kind: "classes", state: "running", dueAt, updatedAt: Date.now() }));
+  for (const [now, state] of [[dueAt - 1, "running"], [dueAt, "idle"]] as const) {
+    const result = await student.run(async ctx => {
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+      try { return await syncStatusHandler(ctx, {}); } finally { clock.mockRestore(); }
+    });
+    expect(result.kinds.find(row => row.kind === "classes")?.state).toBe(state);
+  }
 });
 
 it("retries the old setup that incorrectly completed without current memberships", async () => {

@@ -6,14 +6,17 @@ import aggregateTest from "@convex-dev/aggregate/test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
-import { sweepReplicaTruth } from "./replicas";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { forWork, payloadForWork, presentationsForAccount, resolveExternalConflict, sweepReplicaTruth } from "./replicas";
+import { completeWrite, commitPayloadUpload } from "./bridgeSync";
 import { observeDatabase } from "../scripts/perf-read-ledger";
 import {
   encodeArtifactContentForStorage,
   sheetCellEntries,
 } from "../shared/sheet-cells";
 import { BRIDGE_CLAIM_REDRIVE_MS, BRIDGE_WRITE_EXPIRES_MS } from "../shared/replica-truth";
+import { POLICY_PRESETS } from "../shared/sync-policy";
+import { shouldActivateExternalNativeRevision } from "../src/features/spectra/lenses/native-reconciliation";
 import type { QueueMaterializationArgs, CloudMaterializationArgs, queueMaterializationInTransaction,
   commitCloudMaterializationInTransaction } from "./replicaMaterialization";
 
@@ -56,7 +59,347 @@ const baseHash = payloadHash("base");
 const nextHash = payloadHash("next");
 const bridgeCredential = "bridge-test-credential-000000000001";
 
+describe("account-private conflict writes", () => {
+  async function foreignConflicts(t: ReturnType<typeof convexTest>, fixture: Awaited<ReturnType<typeof seedWork>>, count = 1) {
+    return t.run(async ctx => {
+      const now = Date.now();
+      const accountId = await ctx.db.insert("accounts", { clerkId: "conflict-peer", email: "conflict-peer@example.test",
+        emailVerified: true, name: "Conflict peer", status: "active", createdAt: now, updatedAt: now });
+      const replicaId = await ctx.db.insert("workReplicas", { accountId, workId: fixture.workId, kind: "local",
+        nativeFormat: "docx", revision: baseHash, contentHash: baseHash, state: "current", updatedAt: now });
+      const ids = [];
+      for (let i = 0; i < count; i++) ids.push(await ctx.db.insert("syncConflicts", {
+        accountId, workId: fixture.workId, replicaIds: [replicaId, fixture.cloudId], regionIds: ["private"], partNames: [],
+        localRevision: nextHash, spectraRevision: baseHash, state: "open", createdAt: now,
+        previews: [{ regionId: "private", spectra: "Shared", external: "Private peer words" }],
+      }));
+      return Promise.all(ids.map(id => ctx.db.get(id)));
+    });
+  }
+
+  it.each(["preview", "portable"] as const)("records its own %s conflict without reusing another account's matching revisions", async kind => {
+    const t = setupTest(), fixture = await seedWork(t), user = t.withIdentity(identity);
+    const foreign = await foreignConflicts(t, fixture);
+    const previews = [{ regionId: "body", spectra: "Shared words", external: "My desktop words" }];
+    if (kind === "preview") await t.run(async ctx => {
+      await ctx.db.patch(fixture.localId, { payloadRef: String(fixture.nextPayloadId), revision: nextHash, contentHash: nextHash, state: "ahead" });
+      await ctx.db.insert("syncOperations", { accountId: fixture.accountId, workId: fixture.workId, replicaId: fixture.localId,
+        idempotencyKey: "own-external-preview", direction: "external", state: "applied", actorKind: "external-edit",
+        revisionBefore: baseHash, revisionAfter: nextHash, createdAt: Date.now(), updatedAt: Date.now() });
+    });
+    const record = () => kind === "preview"
+      ? user.mutation(api.replicas.recordExternalReconciliation, {
+        workId: fixture.workId, localReplicaId: fixture.localId, localPayloadRef: String(fixture.nextPayloadId), localRevision: nextHash,
+        content: { blocks: [] }, fidelityMap: {}, regionIds: ["body"], partNames: ["word/document.xml"], conflictRegionIds: ["body"], previews,
+      })
+      : user.mutation(api.replicas.attachPortablePayload, {
+        workId: fixture.workId, payloadRef: String(fixture.nextPayloadId), contentHash: nextHash, nativeFormat: "docx",
+      });
+    await record();
+    const rows = await t.run(ctx => ctx.db.query("syncConflicts").collect());
+    expect.soft(rows.filter(row => row.accountId !== fixture.accountId)).toEqual(foreign);
+    const own = rows.filter(row => row.accountId === fixture.accountId);
+    expect.soft(own).toHaveLength(1);
+    if (kind === "preview") expect.soft(own[0]?.previews).toEqual(previews);
+    await record();
+    expect((await t.run(ctx => ctx.db.query("syncConflicts").collect())).map(row => row._id)).toEqual(rows.map(row => row._id));
+    expect((await t.run(ctx => ctx.db.get(fixture.localId)))?.state).toBe(kind === "preview" ? "diverged" : "current");
+  });
+
+  it.each(["local", "spectra"] as const)("keeps %s resolution within this account under foreign conflict density", async resolution => {
+    const t = setupTest(), fixture = await seedWork(t), user = t.withIdentity(identity);
+    const foreign = await foreignConflicts(t, fixture, 100);
+    const ownId = await t.run(ctx => ctx.db.insert("syncConflicts", {
+      accountId: fixture.accountId, workId: fixture.workId, replicaIds: [fixture.localId, fixture.cloudId],
+      regionIds: ["body"], partNames: [], localRevision: nextHash, spectraRevision: baseHash, state: "open", createdAt: Date.now(),
+    }));
+    const handler = Reflect.get(resolveExternalConflict, "_handler") as (ctx: MutationCtx, input: { workId: typeof fixture.workId; resolution: typeof resolution }) => Promise<unknown>;
+    const measure = () => user.run(async ctx => {
+      const observed = observeDatabase(ctx.db);
+      return { result: await handler({ ...ctx, db: observed.db }, { workId: fixture.workId, resolution }), ...observed.snapshot() };
+    });
+    const actual = await measure();
+    expect.soft(actual.result).toEqual({ resolved: 1, workId: null });
+    expect.soft(await t.run(ctx => Promise.all(foreign.map(row => ctx.db.get(row!._id))))).toEqual(foreign);
+    expect.soft(await t.run(ctx => ctx.db.get(ownId))).toMatchObject({ state: `resolved-${resolution}` });
+    const rangeReads = actual.reads.filter(read => read.table === "syncConflicts" && read.index !== null);
+    expect(rangeReads).toHaveLength(1);
+    expect(rangeReads[0]).toMatchObject({ documentsReturned: 1, postIndexFilter: false });
+    await t.run(async ctx => {
+      await ctx.db.patch(ownId, { state: "open", resolvedAt: undefined, updatedAt: undefined });
+      for (const row of foreign.slice(1)) await ctx.db.delete(row!._id);
+    });
+    const sparse = await measure();
+    expect(sparse.result).toEqual(actual.result);
+    expect(sparse.calls).toBe(actual.calls);
+    expect(sparse.writes).toBe(actual.writes);
+    // The trigger also reads the row it patches; include that real cost.
+    const rows = (sample: typeof actual) => sample.reads.filter(read => read.table === "syncConflicts")
+      .reduce((count, read) => count + read.documentsReturned, 0);
+    expect(rows(actual)).toBe(2);
+    expect(rows(sparse)).toBe(rows(actual));
+  });
+
+  it("allows protected-original apply past a foreign conflict while retaining its own conflict guard", async () => {
+    const t = setupTest(), fixture = await seedWork(t), user = t.withIdentity(identity);
+    const foreign = await foreignConflicts(t, fixture);
+    const ownId = await t.run(async ctx => {
+      await ctx.db.patch(fixture.workId, { protectedBaseContent: { blocks: [] }, protectedBaseContentHash: baseHash });
+      await ctx.db.patch(fixture.localId, { pendingPayloadRef: String(fixture.nextPayloadId), pendingContentHash: nextHash, pendingBaseRevision: baseHash });
+      return ctx.db.insert("syncConflicts", { accountId: fixture.accountId, workId: fixture.workId,
+        replicaIds: [fixture.localId, fixture.cloudId], regionIds: ["body"], partNames: [], localRevision: nextHash,
+        spectraRevision: baseHash, state: "open", createdAt: Date.now() });
+    });
+    await expect(user.mutation(api.replicas.applyProtectedPending, { workId: fixture.workId })).rejects.toThrow("PROTECTED_ORIGINAL_CONFLICT");
+    expect(await t.run(ctx => ctx.db.query("bridgeWriteRequests").collect())).toEqual([]);
+    await t.run(ctx => ctx.db.delete(ownId));
+    await expect(user.mutation(api.replicas.applyProtectedPending, { workId: fixture.workId })).resolves.toMatchObject({ state: "pending" });
+    expect(await t.run(ctx => Promise.all(foreign.map(row => ctx.db.get(row!._id))))).toEqual(foreign);
+    const [write] = await t.run(ctx => ctx.db.query("bridgeWriteRequests").collect());
+    expect(write).toMatchObject({ accountId: fixture.accountId, replicaId: fixture.localId, deviceId: fixture.deviceId });
+  });
+});
+
 describe("reactive work metadata availability", () => {
+  it.each(["work metadata", "Library summary", "cloud payload", "local payload"] as const)("keeps %s available independently of other accounts' replica density", async (kind) => {
+    const t = setupTest();
+    const fixture = await seedWork(t);
+    const user = t.withIdentity(identity);
+    const foreignIds = await t.run(async ctx => {
+      const now = Date.now();
+      const accountId = await ctx.db.insert("accounts", {
+        clerkId: "replica-dense-local-peer", email: "dense-local-peer@example.test", emailVerified: true,
+        name: "Other desktop owner", status: "active", createdAt: now, updatedAt: now,
+      });
+      const ids = [];
+      for (let i = 0; i < 100; i++) ids.push(await ctx.db.insert("workReplicas", {
+        accountId, workId: fixture.workId, kind: "local", nativeFormat: "docx", revision: baseHash,
+        state: "pending", projectionBaseContent: { body: "private".repeat(1500) }, updatedAt: now,
+      }));
+      // Reinsert the valid pair after the foreign rows, keeping the same real
+      // device, mount and stored payload. Cloud truth remains shared.
+      for (const id of [fixture.cloudId, fixture.localId]) {
+        const original = await ctx.db.get(id);
+        assert(original);
+        const { _id, _creationTime, ...row } = original;
+        expect(_creationTime).toBeGreaterThan(0);
+        await ctx.db.insert("workReplicas", row.kind === "cloud" ? { ...row, accountId } : { ...row, state: "pending" });
+        await ctx.db.delete(_id);
+      }
+      return ids;
+    });
+    const endpoint = kind === "work metadata" ? forWork : kind === "Library summary" ? presentationsForAccount : payloadForWork;
+    const args = kind === "Library summary" ? {} : { workId: fixture.workId,
+      ...(kind.endsWith("payload") ? { prefer: kind === "local payload" ? "local-latest" : "cloud" } : {}) };
+    const handler = Reflect.get(endpoint, "_handler") as (ctx: QueryCtx, input: typeof args) => Promise<unknown>;
+    const measure = () => user.run(async ctx => {
+      const observed = observeDatabase(ctx.db);
+      return { result: await handler({ ...ctx, db: observed.db }, args), ...observed.snapshot() };
+    });
+    const dense = await measure();
+    await t.run(async ctx => { for (const id of foreignIds.slice(1)) await ctx.db.delete(id); });
+    const sparse = await measure();
+    if (kind === "work metadata") expect(sparse.result).toMatchObject({ replicas: [
+      expect.objectContaining({ kind: "cloud", state: "current" }), expect.objectContaining({ kind: "local", state: "pending" }),
+    ] });
+    else if (kind === "Library summary") expect(sparse.result).toMatchObject([{ pendingCount: 1, replicas: [
+      expect.objectContaining({ kind: "cloud", state: "current" }), expect.objectContaining({ kind: "local", state: "pending" }),
+    ] }]);
+    else expect(sparse.result).toMatchObject({ replicaKind: kind === "local payload" ? "local" : "cloud", hash: baseHash });
+    expect.soft(dense.result).toEqual(sparse.result);
+    expect.soft(dense.calls).toBe(sparse.calls);
+    expect(dense.writes + sparse.writes).toBe(0);
+    const rows = (sample: typeof dense) => sample.reads.filter(r => r.table === "workReplicas");
+    expect(rows(dense).every(r => !r.postIndexFilter)).toBe(true);
+    expect(rows(sparse).reduce((n, r) => n + r.documentsReturned, 0)).toBe(kind === "Library summary" ? 3 : 2);
+    expect.soft(rows(dense).reduce((n, r) => n + r.documentsReturned, 0)).toBe(rows(sparse).reduce((n, r) => n + r.documentsReturned, 0));
+    expect.soft(rows(dense).reduce((n, r) => n + r.serializedDocumentBytes, 0)).toBe(rows(sparse).reduce((n, r) => n + r.serializedDocumentBytes, 0));
+  });
+
+  it.each([true, false])("retains the 20-row replica ceiling with cloud present=%s", async (withCloud) => {
+    const t = setupTest();
+    const fixture = await seedWork(t);
+    await t.run(async ctx => {
+      if (!withCloud) await ctx.db.delete(fixture.cloudId);
+      for (let i = 0; i < 25; i++) await ctx.db.insert("workReplicas", {
+        accountId: fixture.accountId, workId: fixture.workId, kind: "local", nativeFormat: "docx",
+        revision: baseHash, state: "current", updatedAt: Date.now(),
+      });
+    });
+    const args = { workId: fixture.workId };
+    const handler = Reflect.get(forWork, "_handler") as (ctx: QueryCtx, input: typeof args) => Promise<{ replicas: Array<{ kind: string; _creationTime: number }> }>;
+    const sample = await t.withIdentity(identity).run(async ctx => {
+      const observed = observeDatabase(ctx.db);
+      return { result: await handler({ ...ctx, db: observed.db }, args), ...observed.snapshot() };
+    });
+    expect(sample.result.replicas).toHaveLength(20);
+    expect(sample.result.replicas.filter(r => r.kind === "cloud")).toHaveLength(withCloud ? 1 : 0);
+    const times = sample.result.replicas.map(r => r._creationTime);
+    expect(times).toEqual([...times].sort((a, b) => a - b));
+    expect(sample.reads.filter(r => r.table === "workReplicas").reduce((n, r) => n + r.documentsReturned, 0)).toBe(20);
+    expect(sample.writes).toBe(0);
+  });
+
+  it.each(["conflict", "operation"] as const)("bounds own %s reads independently of other accounts' history", async (kind) => {
+    const t = setupTest();
+    const fixture = await seedWork(t);
+    const user = t.withIdentity(identity);
+    const foreignIds = await t.run(async ctx => {
+      const now = Date.now();
+      await ctx.db.patch(fixture.localId, { state: "ahead", revision: nextHash });
+      const accountId = await ctx.db.insert("accounts", {
+        clerkId: "replica-dense-peer", email: "dense-peer@example.test", emailVerified: true,
+        name: "Dense peer", status: "active", createdAt: now, updatedAt: now,
+      });
+      const rows = [];
+      for (let i = 0; i < 100; i++) rows.push(kind === "conflict"
+        ? await ctx.db.insert("syncConflicts", { accountId, workId: fixture.workId, replicaIds: [],
+          regionIds: ["body"], partNames: [], localRevision: nextHash, spectraRevision: baseHash, state: "open", createdAt: now })
+        : await ctx.db.insert("syncOperations", { accountId, workId: fixture.workId, idempotencyKey: `foreign-${i}`,
+          direction: "cloud-to-local", state: "pending", actorKind: "user", createdAt: now, updatedAt: now }));
+      if (kind === "conflict") await ctx.db.insert("syncConflicts", {
+        accountId: fixture.accountId, workId: fixture.workId, replicaIds: [fixture.localId], regionIds: ["body"], partNames: [],
+        localRevision: nextHash, spectraRevision: baseHash, state: "open", createdAt: now,
+      });
+      else await ctx.db.insert("syncOperations", {
+        accountId: fixture.accountId, workId: fixture.workId, replicaId: fixture.localId, idempotencyKey: "own-pending",
+        direction: "cloud-to-local", state: "pending", actorKind: "user", createdAt: now - 1000, updatedAt: now,
+      });
+      return rows;
+    });
+    const args = { workId: fixture.workId };
+    const handler = Reflect.get(forWork, "_handler") as (ctx: QueryCtx, input: typeof args) => Promise<unknown>;
+    const measure = () => user.run(async ctx => {
+      const observed = observeDatabase(ctx.db);
+      return { result: await handler({ ...ctx, db: observed.db }, args), ...observed.snapshot() };
+    });
+    const dense = await measure();
+    await t.run(async ctx => { for (const id of foreignIds.slice(1)) await ctx.db.delete(id); });
+    const sparse = await measure();
+    expect(sparse.result).toMatchObject(kind === "conflict" ? { openConflictCount: 1 } : { pendingCount: 1 });
+    expect(dense.calls).toBe(sparse.calls);
+    expect(dense.writes + sparse.writes).toBe(0);
+    expect.soft(dense.result).toEqual(sparse.result);
+    const table = kind === "conflict" ? "syncConflicts" : "syncOperations";
+    const rows = (sample: typeof dense) => sample.reads.filter(r => r.table === table).reduce((n, r) => n + r.documentsReturned, 0);
+    expect(rows(sparse)).toBe(1);
+    expect(rows(dense)).toBe(rows(sparse));
+  });
+
+  it.each(["conflict", "operation"] as const)("keeps another account's %s out of open-work sync metadata", async (kind) => {
+    const t = setupTest();
+    const fixture = await seedWork(t);
+    const user = t.withIdentity(identity);
+    await t.run(ctx => ctx.db.patch(fixture.localId, { state: "ahead", revision: nextHash, contentHash: nextHash }));
+    const args = { workId: fixture.workId };
+    const expected = await user.query(api.replicas.forWork, args);
+    const handler = Reflect.get(forWork, "_handler") as (ctx: QueryCtx, input: typeof args) => Promise<typeof expected>;
+    const measure = () => user.run(async ctx => {
+      const observed = observeDatabase(ctx.db);
+      return { result: await handler({ ...ctx, db: observed.db }, args), ...observed.snapshot() };
+    });
+    const before = await measure();
+    const id = await t.run(async ctx => {
+      const now = Date.now();
+      const accountId = await ctx.db.insert("accounts", {
+        clerkId: "replica-private-sync", email: "private-sync@example.test", emailVerified: true,
+        name: "Other computer", status: "active", createdAt: now, updatedAt: now,
+      });
+      const replicaId = await ctx.db.insert("workReplicas", {
+        accountId, workId: fixture.workId, kind: "local", nativeFormat: "docx", revision: nextHash,
+        state: "pending", updatedAt: now,
+      });
+      return kind === "conflict"
+        ? ctx.db.insert("syncConflicts", {
+          accountId, workId: fixture.workId, replicaIds: [replicaId], regionIds: ["body"], partNames: ["word/document.xml"],
+          previews: [{ regionId: "body", spectra: "Shared words", external: "Private unshared desktop words" }],
+          localRevision: nextHash, spectraRevision: baseHash, localPayloadRef: "private-local-payload", state: "open", createdAt: now,
+        })
+        : ctx.db.insert("syncOperations", {
+          accountId, workId: fixture.workId, replicaId, idempotencyKey: "private-computer-write",
+          direction: "cloud-to-local", state: "pending", actorKind: "user", createdAt: now, updatedAt: now,
+        });
+    });
+    const after = await measure();
+    expect(after.calls).toBe(before.calls);
+    expect(after.writes).toBe(0);
+    assert(after.result);
+    expect(shouldActivateExternalNativeRevision({ operations: after.result.recentOperations,
+      localHash: nextHash, cloudHash: baseHash, localState: "ahead" })).toBe(true);
+    expect(after.result).toEqual(expected);
+    await t.run(async ctx => {
+      if (kind === "conflict") await ctx.db.patch(id as Id<"syncConflicts">, { accountId: fixture.accountId, replicaIds: [fixture.localId] });
+      else await ctx.db.patch(id as Id<"syncOperations">, { accountId: fixture.accountId, replicaId: fixture.localId });
+    });
+    const own = await user.query(api.replicas.forWork, args);
+    assert(own);
+    if (kind === "conflict") {
+      expect(own.openConflictCount).toBe(1);
+      expect(own.conflicts[0]?.previews?.[0].external).toBe("Private unshared desktop words");
+    } else {
+      expect(own.pendingCount).toBe(1);
+      expect(own.recentOperations[0]?._id).toBe(id);
+      expect(shouldActivateExternalNativeRevision({ operations: own.recentOperations,
+        localHash: nextHash, cloudHash: baseHash, localState: "ahead" })).toBe(false);
+    }
+  });
+
+  it.each(["pending", "error"] as const)("keeps another account's %s computer state out of Library summaries", async (state) => {
+    const t = setupTest();
+    const fixture = await seedWork(t);
+    const user = t.withIdentity(identity);
+    await t.run(ctx => ctx.db.patch(fixture.localId, { state: "unavailable", unavailableReason: "unlinked-by-user" }));
+    const handler = Reflect.get(presentationsForAccount, "_handler") as (ctx: QueryCtx, args: object) => Promise<unknown>;
+    const measure = () => user.run(async ctx => {
+      const observed = observeDatabase(ctx.db);
+      return { result: await handler({ ...ctx, db: observed.db }, {}), ...observed.snapshot() };
+    });
+    const before = await measure();
+    const foreignAccountId = await t.run(async ctx => {
+      const now = Date.now();
+      const accountId = await ctx.db.insert("accounts", {
+        clerkId: "replica-other-computer", email: "other-computer@example.test", emailVerified: true,
+        name: "Other computer owner", status: "active", createdAt: now, updatedAt: now,
+      });
+      await ctx.db.insert("workReplicas", {
+        accountId, workId: fixture.workId, kind: "local", nativeFormat: "docx", revision: baseHash,
+        state, errorCode: state === "error" ? "office-locked" : undefined, updatedAt: now,
+      });
+      return accountId;
+    });
+    const rowsBefore = await t.run(ctx => ctx.db.query("workReplicas").collect());
+    const after = await measure();
+    expect(after.calls).toBe(before.calls);
+    expect(after.writes).toBe(0);
+    expect(await t.run(ctx => ctx.db.query("workReplicas").collect())).toEqual(rowsBefore);
+    expect(after.result).toEqual(before.result);
+    await t.run(async ctx => {
+      await ctx.db.patch(fixture.localId, { state, errorCode: state === "error" ? "office-locked" : undefined });
+      await ctx.db.patch(fixture.cloudId, { accountId: foreignAccountId });
+    });
+    const [own] = await user.query(api.replicas.presentationsForAccount, {});
+    expect(own.replicas).toHaveLength(2);
+    expect(own.replicas).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "cloud", state: "current" }),
+      expect.objectContaining({ kind: "local", state }),
+    ]));
+    expect(own.pendingCount).toBe(state === "pending" ? 1 : 0);
+  });
+
+  it("reads owner replica metadata without an unused wall-clock dependency", async () => {
+    const t = setupTest();
+    const fixture = await seedWork(t);
+    const user = t.withIdentity(identity);
+    const args = { workId: fixture.workId };
+    const expected = await user.query(api.replicas.forWork, args);
+    const handler = Reflect.get(forWork, "_handler") as (ctx: QueryCtx, input: typeof args) => Promise<typeof expected>;
+    const actual = await user.run(async (ctx) => {
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => { throw new Error("Owner metadata does not need the wall clock"); });
+      try { return await handler(ctx, args); } finally { clock.mockRestore(); }
+    });
+    expect(actual).toEqual(expected);
+  });
+
   it("cannot create a new file in a file-only grant while retaining the existing replica", async () => {
     const t = setupTest();
     const fixture = await seedWork(t);
@@ -88,6 +431,19 @@ describe("reactive work metadata availability", () => {
 });
 
 describe("Bridge materialization receipt replay", () => {
+  it("refuses desktop write admission after policy changes to Never", async () => {
+    const t = setupTest();
+    const fixture = await seedWork(t);
+    await t.run(async ctx => {
+      const policies = await ctx.db.query("syncPolicies").withIndex("by_account_scope", q => q.eq("accountId", fixture.accountId)).collect();
+      for (const policy of policies) await ctx.db.delete(policy._id);
+    });
+    await expect(queueNative(t.withIdentity(identity), {
+      workId: fixture.workId, payloadRef: String(fixture.nextPayloadId), contentHash: nextHash,
+      baseRevision: baseHash, fidelityMap: {}, regionIds: [], partNames: [],
+    })).rejects.toThrow("NATIVE_WRITES_DISABLED");
+    expect(await t.run(ctx => ctx.db.query("bridgeWriteRequests").collect())).toEqual([]);
+  });
   it("refreshes only the current authorized claim before the native write", async () => {
     const t = setupTest();
     const fixture = await seedWork(t);
@@ -219,6 +575,8 @@ async function seedWork(t: ReturnType<typeof convexTest>) {
   const actor = await seedActor(t);
   return t.run(async (ctx) => {
     const now = Date.now();
+    const policyId = await ctx.db.insert("syncPolicies", { accountId: actor.accountId,
+      scopeKind: "account", scopeId: String(actor.accountId), ...POLICY_PRESETS.both, createdAt: now, updatedAt: now });
     const workId = await ctx.db.insert("spectraArtifacts", {
       ownerAccountId: actor.accountId,
       schoolId: actor.schoolId,
@@ -321,6 +679,7 @@ async function seedWork(t: ReturnType<typeof convexTest>) {
     });
     return {
       ...actor,
+      policyId,
       workId,
       deviceId,
       mountId,
@@ -392,6 +751,20 @@ describe("replica truth machine", () => {
     const first = await cloudNative(actor, input);
     expect(await cloudNative(actor, input)).toEqual(first);
     expect(await t.run(ctx => ctx.db.get(fixture.cloudId))).toMatchObject({ revision: nextHash, payloadRef: String(fixture.nextPayloadId) });
+    expect(await t.run(ctx => ctx.db.get(fixture.localId))).toMatchObject({ state: "behind", revision: baseHash, contentHash: baseHash });
+    const folder = await actor.mutation(api.orgTree.createFolder, { name: "Native rescan fixture" });
+    await t.run(async ctx => {
+      await ctx.db.patch(fixture.mountId, { rootOrgNodeId: folder.nodeId });
+      await ctx.db.patch(fixture.localId, { localResourceId: "lr_deadbeef" });
+    });
+    await t.mutation(api.bridgeSync.discoverResourcesPage, { credential: bridgeCredential, mountId: fixture.mountId,
+      resources: [{ localResourceId: "lr_deadbeef", relativePath: "Truth.docx", size: 4, contentHash: baseHash, nativeFormat: "docx" }] });
+    expect(await t.run(ctx => ctx.db.get(fixture.localId))).toMatchObject({ state: "behind", contentHash: baseHash });
+    expect(await t.run(ctx => ctx.db.query("syncConflicts").collect())).toEqual([]);
+    await cloudNative(actor, { ...input, payloadRef: String(fixture.basePayloadId), contentHash: baseHash, baseRevision: nextHash,
+      nativeReceipt: { ...input.nativeReceipt, baseRevision: nextHash, basePayloadHash: nextHash,
+        resultRevision: baseHash, resultPayloadHash: baseHash, operationId: `native:${fixture.workId}:${nextHash}:${baseHash}` } });
+    expect(await t.run(ctx => ctx.db.get(fixture.localId))).toMatchObject({ state: "current", contentHash: baseHash });
     expect((await t.run(ctx => ctx.db.get(fixture.workId)))?.content).toEqual(before?.content);
     const newer = "d".repeat(64);
     await t.run(ctx => ctx.db.patch(fixture.cloudId, { revision: newer, contentHash: newer }));
@@ -829,7 +1202,7 @@ describe("replica truth machine", () => {
       email: "replica-stranger@example.test",
       emailVerified: true,
     };
-    await t.run(async (ctx) => {
+    const collaboratorGrantId = await t.run(async (ctx) => {
       const now = Date.now();
       await ctx.db.patch(fixture.workId, { schoolId: fixture.schoolId });
       const collaboratorAccountId = await ctx.db.insert("accounts", {
@@ -850,7 +1223,7 @@ describe("replica truth machine", () => {
         createdAt: now,
         updatedAt: now,
       });
-      await ctx.db.insert("accessGrants", {
+      const grantId = await ctx.db.insert("accessGrants", {
         schoolId: fixture.schoolId,
         resourceType: "artifact",
         resourceId: fixture.workId,
@@ -881,6 +1254,7 @@ describe("replica truth machine", () => {
         createdAt: now,
         updatedAt: now,
       });
+      return grantId;
     });
     const ownerTruth = await t.withIdentity(identity).query(api.replicas.forWork, {
       workId: fixture.workId,
@@ -898,9 +1272,18 @@ describe("replica truth machine", () => {
     );
     expect(collaboratorTruth.replicas.every((replica) => replica.kind === "cloud")).toBe(true);
     expect(collaboratorTruth.replicas.some((replica) => "relativePath" in replica)).toBe(false);
+    await expect(t.withIdentity(collaboratorIdentity).query(api.replicas.localEffectCount, { workIds: [fixture.workId] })).rejects.toThrow("WORK_NOT_FOUND");
+    expect(await t.withIdentity(collaboratorIdentity).query(api.replicas.undoNeedsLocalApproval, { workIds: [fixture.workId] })).toBe(false);
+    expect(await t.withIdentity(identity).query(api.replicas.undoNeedsLocalApproval, { workIds: [fixture.workId] })).toBe(true);
+    await t.run(ctx => ctx.db.patch(fixture.policyId, { contentDirection: "manual" }));
+    expect(await t.withIdentity(identity).query(api.replicas.undoNeedsLocalApproval, { workIds: [fixture.workId] })).toBe(false);
+    await t.run(ctx => ctx.db.patch(fixture.policyId, { contentDirection: "bidirectional" }));
+    await expect(t.withIdentity(strangerIdentity).query(api.replicas.undoNeedsLocalApproval, { workIds: [fixture.workId] })).rejects.toThrow("WORK_NOT_FOUND");
     expect(await t.withIdentity(strangerIdentity).query(api.replicas.forWork, {
       workId: fixture.workId,
     })).toBeNull();
+    await t.run(async (ctx) => ctx.db.patch(collaboratorGrantId, { level: "read", capabilities: ["read", "use", "comment"] }));
+    await expect(t.withIdentity(collaboratorIdentity).query(api.replicas.undoNeedsLocalApproval, { workIds: [fixture.workId] })).rejects.toThrow("WORK_NOT_FOUND");
   });
 
   it("forwards shared Office capability to cloud payloads and lens activation without exposing owner Bridge state", async () => {
@@ -1146,6 +1529,8 @@ describe("replica truth machine", () => {
         updatedAt: now,
       });
       for (const accountId of [collaboratorAccountId, readerAccountId]) {
+        await ctx.db.insert("syncPolicies", { accountId, scopeKind: "account", scopeId: String(accountId),
+          ...POLICY_PRESETS.both, createdAt: now, updatedAt: now });
         await ctx.db.insert("schoolMemberships", {
           accountId,
           schoolId: fixture.schoolId,
@@ -1825,6 +2210,7 @@ describe("replica truth machine", () => {
   it("rolls a storage strategy back when Bridge read-back disagrees", async () => {
     const t = setupTest();
     const fixture = await seedWork(t);
+    await t.run(ctx => ctx.db.delete(fixture.policyId));
     await t.run(async (ctx) => ctx.db.delete(fixture.localId));
     const asUser = t.withIdentity(identity);
     const transition = await asUser.mutation(
@@ -2417,6 +2803,128 @@ describe("replica truth machine", () => {
     });
     return { keepHash, keepPayloadId };
   }
+
+  async function secondLocalCopy(t: ReturnType<typeof convexTest>, f: Awaited<ReturnType<typeof seedWork>>) {
+    return t.run(ctx => ctx.db.insert("workReplicas", {
+      accountId: f.accountId, workId: f.workId, kind: "local", deviceId: f.deviceId, mountId: f.mountId,
+      localResourceId: "second-copy", relativePath: "Second.docx", nativeFormat: "docx", payloadRef: String(f.basePayloadId),
+      revision: baseHash, baseRevision: baseHash, contentHash: baseHash, state: "current", updatedAt: Date.now(),
+    }));
+  }
+
+  it.each(["pending", "claimed"] as const)("binds the exact %s resolution write beyond another copy's failed history", async state => {
+    const t = setupTest(), f = await seedWork(t), user = t.withIdentity(identity);
+    const seeded = await seedKeepSpectraConflict(t, f);
+    const queued = await queueNative(user, { workId: f.workId, localReplicaId: f.localId,
+      payloadRef: String(seeded.keepPayloadId), contentHash: seeded.keepHash, baseRevision: nextHash,
+      fidelityMap: {}, regionIds: ["body"], partNames: ["word/document.xml"] });
+    const requestId = requireWriteRequestId(queued.requestId), otherId = await secondLocalCopy(t, f);
+    const history = await t.run(async ctx => {
+      await ctx.db.patch(requestId, { state, claimedAt: state === "claimed" ? Date.now() : undefined });
+      const ids = [], now = Date.now() + 1000;
+      for (let i = 0; i < 100; i++) ids.push(await ctx.db.insert("bridgeWriteRequests", {
+        accountId: f.accountId, workId: f.workId, replicaId: otherId, deviceId: f.deviceId, mountId: f.mountId,
+        localResourceId: "second-copy", relativePath: "Second.docx", payloadRef: String(f.nextPayloadId),
+        baseRevision: baseHash, targetRevision: nextHash, contentHash: nextHash, idempotencyKey: `failed-history-${i}`,
+        regionIds: ["body"], partNames: [], state: "failed", errorCode: "write-failed", createdAt: now + i, updatedAt: now + i,
+      }));
+      return { ids, conflicts: await ctx.db.query("syncConflicts").collect() };
+    });
+    const args = { workId: f.workId, resolution: "spectra" as const, requestId };
+    const handler = Reflect.get(resolveExternalConflict, "_handler") as (ctx: MutationCtx, input: typeof args) => Promise<unknown>;
+    const measure = () => user.run(async ctx => {
+      const observed = observeDatabase(ctx.db);
+      const result = await handler({ ...ctx, db: observed.db }, args).catch(error => ({ error: String(error) }));
+      return { result, ...observed.snapshot() };
+    });
+    const dense = await measure();
+    await t.run(async ctx => {
+      for (const row of history.conflicts) await ctx.db.patch(row._id, { state: row.state, resolutionRequestId: row.resolutionRequestId, updatedAt: row.updatedAt });
+      for (const id of history.ids.slice(1)) await ctx.db.delete(id);
+    });
+    const sparse = await measure();
+    expect(sparse.result).toMatchObject({ requestId });
+    expect.soft(dense.result).toEqual(sparse.result);
+    expect.soft(dense.calls).toBe(sparse.calls);
+    expect.soft(dense.documentsReturned).toBe(sparse.documentsReturned);
+    expect(dense.reads.filter(read => read.table === "bridgeWriteRequests" && read.operation === "take")).toEqual([]);
+    expect(dense.writes).toBe(sparse.writes);
+    expect(await t.run(ctx => ctx.db.get(requestId))).toMatchObject({ state, replicaId: f.localId });
+  });
+
+  it.each(["foreign", "other-work", "inactive", "missing"] as const)("never substitutes a different write for an explicit %s request", async kind => {
+    const t = setupTest(), f = await seedWork(t), user = t.withIdentity(identity);
+    const seeded = await seedKeepSpectraConflict(t, f);
+    await queueNative(user, { workId: f.workId, payloadRef: String(seeded.keepPayloadId), contentHash: seeded.keepHash,
+      baseRevision: nextHash, fidelityMap: {}, regionIds: ["body"], partNames: ["word/document.xml"] });
+    const requestId = await t.run(async ctx => {
+      const now = Date.now();
+      const accountId = kind === "foreign" ? await ctx.db.insert("accounts", { clerkId: "wrong-write-peer", email: "wrong-write@example.test",
+        emailVerified: true, name: "Wrong write peer", status: "active", createdAt: now, updatedAt: now }) : f.accountId;
+      const workId = kind === "other-work" ? await ctx.db.insert("spectraArtifacts", { ownerAccountId: f.accountId, schoolId: f.schoolId,
+        title: "Other work", blueprintKey: "document", content: { blocks: [] }, tags: [], status: "active", createdAt: now, updatedAt: now }) : f.workId;
+      const id = await ctx.db.insert("bridgeWriteRequests", { accountId, workId, replicaId: f.localId, deviceId: f.deviceId, mountId: f.mountId,
+        localResourceId: "wrong-target", relativePath: "Wrong.docx", payloadRef: String(f.nextPayloadId), baseRevision: baseHash,
+        targetRevision: nextHash, contentHash: nextHash, idempotencyKey: "wrong-target", regionIds: ["body"], partNames: [],
+        state: kind === "inactive" ? "failed" : "pending", createdAt: now + 1000, updatedAt: now });
+      if (kind === "missing") await ctx.db.delete(id);
+      return id;
+    });
+    const before = await t.run(ctx => ctx.db.query("syncConflicts").collect());
+    await expect(user.mutation(api.replicas.resolveExternalConflict, { workId: f.workId, resolution: "spectra", requestId }))
+      .rejects.toThrow("CONFLICT_RESOLUTION_WRITE_REQUIRED");
+    expect(await t.run(ctx => ctx.db.query("syncConflicts").collect())).toEqual(before);
+  });
+
+  it.each(["verified", "failed", "conflicted", "superseded", "external"] as const)("settles only the bound conflict on %s despite other-request density", async outcome => {
+    const samples = [];
+    for (const count of [1, 100]) {
+      const t = setupTest(), f = await seedWork(t), user = t.withIdentity(identity), otherId = await secondLocalCopy(t, f);
+      const queue = { workId: f.workId, payloadRef: String(f.nextPayloadId), contentHash: nextHash, baseRevision: baseHash,
+        fidelityMap: {}, regionIds: ["body"], partNames: ["word/document.xml"] };
+      const other = await queueNative(user, { ...queue, localReplicaId: otherId });
+      const own = await queueNative(user, { ...queue, localReplicaId: f.localId });
+      const requestId = requireWriteRequestId(own.requestId), otherRequestId = requireWriteRequestId(other.requestId);
+      const seeded = await t.run(async ctx => {
+        const now = Date.now(), ids = [];
+        for (let i = 0; i < count; i++) ids.push(await ctx.db.insert("syncConflicts", { accountId: f.accountId, workId: f.workId,
+          replicaIds: [otherId, f.cloudId], regionIds: ["body"], partNames: [], localRevision: baseHash, spectraRevision: nextHash,
+          state: "resolving-spectra", resolutionRequestId: otherRequestId, createdAt: now }));
+        const ownId = await ctx.db.insert("syncConflicts", { accountId: f.accountId, workId: f.workId, replicaIds: [f.localId, f.cloudId],
+          regionIds: ["body"], partNames: [], localRevision: baseHash, spectraRevision: nextHash,
+          state: "resolving-spectra", resolutionRequestId: requestId, createdAt: now });
+        const thirdHash = payloadHash("third"), storageId = await ctx.storage.store(new Blob(["third"]));
+        const thirdPayloadId = await ctx.db.insert("payloadObjects", { accountId: f.accountId, hash: thirdHash, storageId, bytes: 5,
+          mediaType: "application/test", refCount: 0, state: "active", createdAt: now, verifiedAt: now });
+        return { ownId, unrelated: await Promise.all(ids.map(id => ctx.db.get(id))), thirdHash, thirdPayloadId };
+      });
+      if (outcome === "superseded") {
+        await queueNative(user, { ...queue, localReplicaId: f.localId, payloadRef: String(seeded.thirdPayloadId), contentHash: seeded.thirdHash });
+      } else {
+        const args = outcome === "external" ? { credential: bridgeCredential, replicaId: f.localId, hash: seeded.thirdHash,
+          bytes: 5, mediaType: "application/test", payloadRef: String(seeded.thirdPayloadId) }
+          : { credential: bridgeCredential, requestId, outcome, actualRevision: nextHash, errorCode: outcome === "verified" ? undefined : "write-failed" };
+        const target = outcome === "external" ? commitPayloadUpload : completeWrite;
+        const handler = Reflect.get(target, "_handler") as (ctx: MutationCtx, input: typeof args) => Promise<unknown>;
+        samples.push(await t.run(async ctx => {
+          const observed = observeDatabase(ctx.db);
+          await handler({ ...ctx, db: observed.db }, args);
+          return observed.snapshot();
+        }));
+      }
+      expect.soft(await t.run(ctx => ctx.db.get(seeded.ownId))).toMatchObject({ state: outcome === "verified" ? "resolved-spectra" : "open" });
+      expect.soft(await t.run(ctx => Promise.all(seeded.unrelated.map(row => ctx.db.get(row!._id))))).toEqual(seeded.unrelated);
+      expect(await t.run(ctx => ctx.db.get(otherRequestId))).toMatchObject({ state: "pending", replicaId: otherId });
+    }
+    if (samples.length) {
+      const [sparse, dense] = samples;
+      expect.soft(dense.calls).toBe(sparse.calls);
+      expect.soft(dense.documentsReturned).toBe(sparse.documentsReturned);
+      const range = dense.reads.filter(read => read.table === "syncConflicts" && read.operation === "take");
+      expect(range).toHaveLength(1);
+      expect(range[0]).toMatchObject({ documentsReturned: 1, postIndexFilter: false });
+    }
+  });
 
   it("refuses a desktop write that was not built on the unread Word save", async () => {
     const t = setupTest();

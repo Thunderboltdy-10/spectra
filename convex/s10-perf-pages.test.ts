@@ -1,13 +1,15 @@
 /// <reference types="vite/client" />
 import { mkdirSync, writeFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import type { FunctionArgs, FunctionReference, FunctionReturnType } from "convex/server";
 import schema from "./schema";
 import type { QueryCtx } from "./_generated/server";
 import { api } from "./_generated/api";
-import { containersPage, listChildren, searchPage, quickViewPage } from "./orgTree";
+import { containersPage, listChildren, searchPage, quickViewPage, recentWorks } from "./orgTree";
 import { upsertArtifactSummary } from "./orgTreeShared";
+import { sharedByActor } from "./orgTreeViews";
+import { forArtifact } from "./sharingPeople";
 import { evaluateAccess } from "./authorityShared";
 import { observeDatabase, serializedBytes } from "../scripts/perf-read-ledger";
 
@@ -22,6 +24,8 @@ const listChildrenHandler = queryHandler<typeof api.orgTree.listChildren>(listCh
 const containersPageHandler = queryHandler<typeof api.orgTree.containersPage>(containersPage);
 const searchPageHandler = queryHandler<typeof api.orgTree.searchPage>(searchPage);
 const quickViewPageHandler = queryHandler<typeof api.orgTree.quickViewPage>(quickViewPage);
+const recentWorksHandler = queryHandler<typeof api.orgTree.recentWorks>(recentWorks);
+const sharingPeopleHandler = queryHandler<typeof api.sharingPeople.forArtifact>(forArtifact);
 async function fixture() {
   const t = convexTest(schema, modules);
   const ids = await t.run(async (ctx) => {
@@ -43,6 +47,162 @@ async function fixture() {
 }
 
 describe("PERF independent actor-scoped pagination", () => {
+  async function peopleFixture(mode: "none" | "direct" | "workspace" | "revoked", expiresAt?: number) {
+    const f = await fixture();
+    const artifactId = await f.t.run(async ctx => {
+      const id = await ctx.db.insert("spectraArtifacts", { ownerAccountId: f.ids.accountId, schoolId: f.ids.schoolId,
+        blueprintKey: "document", title: "People clock", content: {}, tags: [], status: "active", createdAt: f.ids.now, updatedAt: f.ids.now });
+      let resourceId: string = id;
+      if (mode === "workspace") {
+        resourceId = await ctx.db.insert("spectraWorkspaces", { ownerAccountId: f.ids.accountId, schoolId: f.ids.schoolId,
+          title: "People workspace", status: "active", defaultView: "cards", createdAt: f.ids.now, updatedAt: f.ids.now, lastActivityAt: f.ids.now });
+        await ctx.db.insert("orgNodes", { accountId: f.ids.accountId, schoolId: f.ids.schoolId, parentId: null,
+          kind: "work", sourceId: id, name: "People clock", orderKey: "p", workspaceContextId: ctx.db.normalizeId("spectraWorkspaces", resourceId)!,
+          accessProjection: true, createdAt: f.ids.now, updatedAt: f.ids.now });
+      }
+      if (mode !== "none") await ctx.db.insert("accessGrants", { schoolId: f.ids.schoolId,
+        resourceType: mode === "workspace" ? "workspace" : "artifact", resourceId, principalType: "account", principalId: f.ids.ownerId,
+        level: "read", capabilities: ["read"], source: "direct", createdByAccountId: f.ids.accountId,
+        expiresAt, ...(mode === "revoked" ? { revokedAt: f.ids.now } : {}), createdAt: f.ids.now, updatedAt: f.ids.now });
+      return id;
+    });
+    return { ...f, artifactId };
+  }
+
+  it.each(["none", "direct", "workspace", "revoked"] as const)("keeps %s people metadata independent of the clock when no grant can expire", async mode => {
+    const f = await peopleFixture(mode);
+    const reading = await f.measure(async ctx => {
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => { throw Error("People metadata has no live expiring grant"); });
+      try { return await sharingPeopleHandler(ctx, { artifactId: f.artifactId }); } finally { clock.mockRestore(); }
+    });
+    expect(reading.result?.people.map(p => p.accountId)).toEqual(mode === "direct" || mode === "workspace"
+      ? [f.ids.accountId, f.ids.ownerId] : [f.ids.accountId]);
+    expect(reading.writes).toBe(0);
+  });
+
+  it.each(["direct", "workspace"] as const)("keeps exact expiry for %s people grants", async mode => {
+    const f = await peopleFixture(mode, 2_000_000_000_000);
+    for (const [now, shared] of [[1_999_999_999_999, true], [2_000_000_000_000, false]] as const) {
+      const reading = await f.measure(async ctx => {
+        const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+        try { return await sharingPeopleHandler(ctx, { artifactId: f.artifactId }); } finally { clock.mockRestore(); }
+      });
+      expect(reading.result?.shared).toBe(shared);
+      expect(reading.writes).toBe(0);
+    }
+  });
+
+  it("avoids a clock dependency when outgoing invitations cannot expire", async () => {
+    const { t, ids, user, measure } = await fixture();
+    await t.run(async (ctx) => {
+      await ctx.db.insert("shareInvitations", { schoolId: ids.schoolId, resourceType: "artifact", resourceId: "permanent",
+        inviterAccountId: ids.accountId, inviteeAccountId: ids.ownerId, level: "read", status: "accepted", createdAt: ids.now, updatedAt: ids.now });
+    });
+    await user.run(async (ctx) => {
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => { throw new Error("No invitation needs expiry evaluation"); });
+      try { expect(await sharedByActor(ctx, ids.accountId, ["unshared", "permanent"])).toEqual(new Set(["permanent"])); }
+      finally { clock.mockRestore(); }
+    });
+    const reading = await measure(async (ctx) => [...await sharedByActor(ctx, ids.accountId, ["unshared", "permanent", "permanent"])]);
+    expect(reading.documentsReturned).toBe(1);
+    expect(reading.writes).toBe(0);
+  });
+
+  it("stops sharing reads at the first live invitation and respects exact expiry", async () => {
+    const { t, ids, measure } = await fixture();
+    await t.run(async (ctx) => {
+      for (const [resourceId, status, expiresAt] of [
+        ["later-live", "pending", ids.now - 1], ["later-live", "pending", ids.now + 1], ["later-live", "pending", ids.now + 2],
+        ["expired", "accepted", ids.now], ["unrelated", "pending", undefined],
+      ] as const) await ctx.db.insert("shareInvitations", { schoolId: ids.schoolId, resourceType: "artifact", resourceId,
+        inviterAccountId: ids.accountId, inviteeAccountId: ids.ownerId, level: "read", status, expiresAt, createdAt: ids.now, updatedAt: ids.now });
+    });
+    const reading = await measure(async (ctx) => {
+      const clock = vi.spyOn(Date, "now").mockReturnValue(ids.now);
+      try { return [...await sharedByActor(ctx, ids.accountId, ["later-live", "expired"])]; }
+      finally { clock.mockRestore(); }
+    });
+    expect(reading.result).toEqual(["later-live"]);
+    expect(reading.documentsReturned).toBe(3);
+    expect(reading.writes).toBe(0);
+  });
+
+  it("pages one-kind quick views without reading newer unrelated node kinds", async () => {
+    const { t, ids, measure, user } = await fixture();
+    await t.run(async ctx => {
+      for (let i = 0; i < 3; i++) await ctx.db.insert("orgNodes", { accountId: ids.accountId, schoolId: ids.schoolId,
+        parentId: ids.folderId, kind: "folder", name: `Visible folder ${i}`, orderKey: String(i), activityAt: ids.now - i, createdAt: ids.now, updatedAt: ids.now - i });
+    });
+    const args = { view: "recent" as const, kinds: ["folder" as const], paginationOpts: { cursor: null, numItems: 2 } };
+    const read = () => measure(ctx => quickViewPageHandler(ctx, args));
+    const before = await read();
+    await t.run(async ctx => {
+      for (let i = 0; i < 16; i++) await ctx.db.insert("orgNodes", { accountId: ids.accountId, schoolId: ids.schoolId,
+        parentId: null, kind: "thread", name: `Unrelated thread ${i}`, orderKey: String(i), activityAt: ids.now + i + 1, createdAt: ids.now, updatedAt: ids.now + i + 1 });
+    });
+    const after = await read();
+    expect.soft(after.result.page).toEqual(before.result.page);
+    expect.soft(after.documentsReturned).toBe(before.documentsReturned);
+    expect.soft(after.serializedDocumentBytes).toBe(before.serializedDocumentBytes);
+    expect(after.writes).toBe(0);
+    const next = await user.query(api.orgTree.quickViewPage, { ...args, paginationOpts: { cursor: after.result.continueCursor, numItems: 2 } });
+    const all = [...after.result.page, ...next.page];
+    expect(all).toHaveLength(4);
+    expect(new Set(all.map(row => row.nodeId)).size).toBe(4);
+  });
+
+  it("keeps recent work visible and its read cost independent of newer threads", async () => {
+    const { t, ids, measure } = await fixture();
+    const expected = await t.run(async (ctx) => {
+      const works = [];
+      for (let i = 0; i < 4; i++) {
+        const artifactId = await ctx.db.insert("spectraArtifacts", { ownerAccountId: ids.accountId, schoolId: ids.schoolId,
+          blueprintKey: i === 2 ? "planner_task" : "document", schemaVersion: 1, title: `Recent work ${i}`, content: {},
+          tags: [], status: i === 3 ? "deleted" : "active", createdAt: ids.now, updatedAt: ids.now - i });
+        await upsertArtifactSummary(ctx, (await ctx.db.get(artifactId))!);
+        await ctx.db.insert("orgNodes", { accountId: ids.accountId, schoolId: ids.schoolId, parentId: null,
+          kind: "work", sourceId: artifactId, name: `Recent work ${i}`, typeKey: i === 2 ? "planner_task" : "document",
+          orderKey: String(i), activityAt: ids.now - i, createdAt: ids.now, updatedAt: ids.now - i });
+        if (i < 2) works.push({ workId: artifactId, title: `Recent work ${i}`, typeKey: "document", activityAt: ids.now - i });
+      }
+      await ctx.db.insert("orgNodes", { accountId: ids.accountId, schoolId: ids.schoolId, parentId: ids.folderId,
+        kind: "work", sourceId: works[0]!.workId, name: "Duplicate placement", typeKey: "document", orderKey: "z",
+        activityAt: ids.now - 10, createdAt: ids.now, updatedAt: ids.now - 10 });
+      return works;
+    });
+    const read = () => measure((ctx) => recentWorksHandler(ctx, { limit: 12 }));
+    const before = await read();
+    expect(before.result).toEqual(expected);
+    const addThreads = (from: number, count: number) => t.run(async (ctx) => {
+      for (let i = from; i < from + count; i++) await ctx.db.insert("orgNodes", { accountId: ids.accountId,
+        schoolId: ids.schoolId, parentId: null, kind: "thread", name: `Newer thread ${i}`, orderKey: String(i),
+        activityAt: ids.now + i + 1, createdAt: ids.now, updatedAt: ids.now + i + 1 });
+    });
+    await addThreads(0, 16);
+    const after = await read();
+    expect(after.result).toEqual(expected);
+    expect.soft(after.documentsReturned).toBe(before.documentsReturned);
+    expect.soft(after.serializedDocumentBytes).toBe(before.serializedDocumentBytes);
+    await addThreads(16, 48);
+    const dense = await read();
+    expect.soft(dense.result).toEqual(expected);
+    expect.soft(dense.documentsReturned).toBe(before.documentsReturned);
+    expect(dense.writes).toBe(0);
+    const withoutClock = await measure(async (ctx) => {
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => { throw new Error("Recent owner work must not read the clock"); });
+      try { return await recentWorksHandler(ctx, { limit: 12 }); }
+      finally { clock.mockRestore(); }
+    });
+    expect(withoutClock.result).toEqual(expected);
+    expect(withoutClock.reads.filter((read) => read.table === "shareInvitations")).toEqual([]);
+    expect(withoutClock.writes).toBe(0);
+    if (process.env.SPECTRA_PERF_EVIDENCE === "1") {
+      const directory = ".spectra-local/launch-audit/evidence/S10-PERF";
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(`${directory}/recent-work-density.json`, JSON.stringify({ before, after, dense }, null, 2));
+    }
+  });
+
   it("reaches visible rows on the first request despite unrelated school density", async () => {
     const { t, ids, measure } = await fixture();
     await t.run(async (ctx) => {
@@ -100,6 +260,7 @@ describe("PERF independent actor-scoped pagination", () => {
     const read = () => user.query(api.orgTree.quickViewPage, { view: "shared", paginationOpts: { cursor: null, numItems: 50 } });
     const allowed = await read();
     expect(allowed.page.some((row) => row.sourceId === shared.artifactId && row.source?.available)).toBe(true);
+    expect((await user.query(api.orgTree.recentWorks, {})).some((row) => row.workId === shared.artifactId)).toBe(true);
     const before = await user.run((ctx) => evaluateAccess(ctx, "artifact", shared.artifactId));
     expect(before.allowed).toBe(true);
     await t.run((ctx) => ctx.db.patch(shared.grantId, { expiresAt: ids.now - 1 }));
@@ -108,5 +269,6 @@ describe("PERF independent actor-scoped pagination", () => {
     const after = await read();
     expect(after.page.some((row) => row.sourceId === shared.artifactId && row.source?.available)).toBe(false);
     expect(JSON.stringify(after)).not.toContain("Fresh private summary");
+    expect((await user.query(api.orgTree.recentWorks, {})).some((row) => row.workId === shared.artifactId)).toBe(false);
   });
 });

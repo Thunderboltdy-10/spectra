@@ -77,6 +77,33 @@ afterEach(() => {
 });
 
 describe("School page", () => {
+  it.each(["blocked", "never-synced", "failed"])("does not claim an empty workload for %s task data", state => {
+    const status = connected(state === "blocked" ? { state: "blocked", problem: { code: "INTEGRATION_IDENTITY_REQUIRED", message: "Account match required", fixBy: "student", fixHint: "Match your account." } } : {});
+    if (state === "never-synced") Object.assign(status.kinds[0]!, { state: "idle", lastSuccessAt: null });
+    if (state === "failed") Object.assign(status.kinds[0]!, { state: "failed", problem: { code: "INTEGRATION_NOT_READY", message: "Sync failed", fixHint: "Try again." } });
+    mocks.data["school:syncStatus"] = status;
+    mocks.data["school:tasks"] = { tasks: [] };
+    mocks.data["school:classes"] = { classes: [{ providerClassId: "c1", recordId: "class-1", title: "Physics HL", subject: "Physics", yearGroupId: null, academicPeriodKey: "2026", archived: false, selected: true, modes: { current_tasks: "auto" } }] };
+    render(<SchoolPage />);
+    expect(screen.queryAllByText(/Nothing due/)).toHaveLength(0);
+    expect(screen.queryAllByLabelText("Nothing due", { exact: true })).toHaveLength(0);
+    fireEvent.click(screen.getByRole("tab", { name: "Tasks" }));
+    expect(screen.queryAllByText(/Nothing due/)).toHaveLength(0);
+    fireEvent.click(screen.getByRole("tab", { name: "Classes" }));
+    expect(screen.queryAllByText(/Nothing due/)).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: /Physics HL/ }));
+    expect(screen.queryAllByText(/Nothing due/)).toHaveLength(0);
+  });
+
+  it("keeps the empty-workload messages for successfully synced task data", () => {
+    mocks.data["school:tasks"] = { tasks: [] };
+    render(<SchoolPage />);
+    expect(screen.getByText(/^Nothing due this week\./)).toBeTruthy();
+    expect(screen.getByText("Nothing due", { exact: true })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Tasks" }));
+    expect(screen.getByText("Nothing due", { exact: true })).toBeTruthy();
+  });
+
   it("opens on an overview of what's coming up and sync, with nothing ManageBac can't bring", async () => {
     render(<SchoolPage />);
     expect(screen.getByRole("heading", { level: 1, name: "School" })).toBeTruthy();

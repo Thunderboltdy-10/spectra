@@ -595,6 +595,10 @@ export const quickViewPage = query({
       ? await ctx.db.query("orgNodes")
         .withIndex("by_account_live_pinned_name", (q) => q.eq("accountId", actor.accountId).eq("deletedAt", undefined).eq("pinned", true))
         .paginate(paging.options)
+      : args.kinds?.length === 1
+        ? await ctx.db.query("orgNodes")
+          .withIndex("by_account_live_kind_activity", (q) => q.eq("accountId", actor.accountId).eq("deletedAt", undefined).eq("kind", args.kinds![0]!))
+          .order("desc").paginate(paging.options)
       : await ctx.db.query("orgNodes")
         .withIndex("by_account_live_activity", (q) => q.eq("accountId", actor.accountId).eq("deletedAt", undefined))
         .order("desc").paginate(paging.options);
@@ -639,7 +643,7 @@ export const recentWorks = query({
     const limit = Math.min(Math.max(Math.floor(args.limit ?? 5), 1), 12);
     const rows = await ctx.db
       .query("orgNodes")
-      .withIndex("by_account_live_activity", (q) => q.eq("accountId", actor.accountId).eq("deletedAt", undefined))
+      .withIndex("by_account_live_kind_activity", (q) => q.eq("accountId", actor.accountId).eq("deletedAt", undefined).eq("kind", "work"))
       .order("desc")
       .take(60);
     const seen = new Set<string>();
@@ -648,7 +652,7 @@ export const recentWorks = query({
       if (works.length >= limit) break;
       if (row.kind !== "work" || !row.sourceId || seen.has(row.sourceId) || NOT_RECENT_WORK.has(row.typeKey ?? "")) continue;
       seen.add(row.sourceId);
-      const view = (await hydrateNodes(ctx, [row], { withSource: true, accountId: actor.accountId }))[0];
+      const view = (await hydrateNodes(ctx, [row], { withSource: true }))[0];
       if (!view?.source?.available) continue;
       if (!view.source.owned) {
         const artifactId = normalizeArtifactId(ctx, row.sourceId);

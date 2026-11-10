@@ -163,7 +163,8 @@ function feedLedger(event: ReturnType<typeof parseSpectraStreamEvent>): void {
     default:
       break;
   }
-  spectraBus.emit("run.changed", { runId });
+  if (event.type !== "text_delta" && event.type !== "text_replace" && event.type !== "reasoning_delta")
+    spectraBus.emit("run.changed", { runId });
 }
 
 export type SpectraRunSurface = "chat" | "workspace" | "artifacts" | "artifact";
@@ -975,7 +976,7 @@ export function useSpectraRun({
           }
           const event = parseSpectraStreamEvent(raw);
           feedLedger(event);
-          if (event.type === "run_created") requestRunId = event.runId;
+          if (event.type === "run_created" || event.type === "result_card") requestRunId = event.runId;
           if (requestRunId) publishLocalRunEvent(engineIdentity.current, requestRunId, event);
           if (
             event.type === "error" ||

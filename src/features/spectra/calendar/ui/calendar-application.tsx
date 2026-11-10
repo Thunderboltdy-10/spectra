@@ -477,6 +477,10 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
           merged.migration.complete = (merged.migration.pageComplete ?? false) && incoming.migration.complete;
           return merged;
         }
+        // A fresh full-range read replaces removed rows; extensions and later pages still merge.
+        if (incoming.range.from <= visibleRange.from && incoming.range.to >= visibleRange.to) {
+          return { ...incoming, items: mergeById(current.items.filter((item) => item.id.startsWith("pending:")), incoming.items) };
+        }
         const retainFrom = addLocalDays(visibleRange.from, -EXTEND_DAYS);
         const retainTo = addLocalDays(visibleRange.to, EXTEND_DAYS);
         return {

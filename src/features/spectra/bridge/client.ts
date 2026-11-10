@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { humanizePublicFailure } from "./humanize";
+import { accountStorageMatches, accountStorageRevision, assertAccountStorageRevision } from "@/lib/account-storage-scope";
 
 export const BRIDGE_URL = "http://127.0.0.1:47615";
 export const BRIDGE_PROTOCOL_VERSION = "1.0";
@@ -367,6 +368,7 @@ export function bridgeConnectionState(
 
 export function loadBridgeSession() {
   if (typeof window === "undefined") return null;
+  if (!accountStorageMatches(accountStorageRevision())) return null;
   return (
     window.localStorage.getItem(BRIDGE_SESSION_STORAGE_KEY) ??
     window.sessionStorage.getItem(BRIDGE_SESSION_STORAGE_KEY)
@@ -377,6 +379,7 @@ export function persistBridgeSession(token: string) {
   enableBridgeDiscovery();
   window.localStorage.setItem(BRIDGE_SESSION_STORAGE_KEY, token);
   window.sessionStorage.removeItem(BRIDGE_SESSION_STORAGE_KEY);
+  window.dispatchEvent(new StorageEvent("storage", { key: BRIDGE_SESSION_STORAGE_KEY }));
 }
 
 export function clearBridgeSession() {
@@ -392,6 +395,7 @@ export function clearBridgeStatusCache() {
 
 export function loadBridgeStatusCache(): BridgeStatus | null {
   if (typeof window === "undefined") return null;
+  if (!accountStorageMatches(accountStorageRevision())) return null;
   try {
     const raw = window.localStorage.getItem(BRIDGE_STATUS_CACHE_KEY);
     if (!raw) return null;
@@ -414,18 +418,20 @@ export const BRIDGE_OUTDATED = "This computer's Spectra Bridge is too old for th
  * there is none. A failed request throws and leaves the session alone: Bridge
  * being slow for a moment must never cost this browser its place.
  */
-async function resumeBridgeSession(token: string, signal?: AbortSignal) {
+async function resumeBridgeSession(token: string, revision: string, signal?: AbortSignal) {
   const resume = await fetch(`${BRIDGE_URL}/v1/session/resume`, {
     method: "POST",
     signal: bridgeRequestSignal(signal),
     headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
     cache: "no-store",
   });
+  if (!accountStorageMatches(revision)) return null;
   if (!resume.ok) throw new Error("Spectra Bridge could not check this browser's session.");
   const result = z
     .object({ paired: z.boolean(), sessionToken: z.string().optional() })
     .passthrough()
     .parse(await resume.json());
+  if (!accountStorageMatches(revision)) return null;
   if (result.paired && result.sessionToken) {
     persistBridgeSession(result.sessionToken);
     return result.sessionToken;
@@ -439,6 +445,8 @@ export async function authorizedBridgeRequest(
   init: RequestInit = {},
   timeoutMs = BRIDGE_REQUEST_TIMEOUT_MS,
 ) {
+  const revision = accountStorageRevision();
+  if (!accountStorageMatches(revision)) return null;
   const token = loadBridgeSession();
   if (!token) return null;
   const send = (session: string) => {
@@ -452,11 +460,13 @@ export async function authorizedBridgeRequest(
     });
   };
   let response = await send(token);
+  if (!accountStorageMatches(revision)) return null;
   if (response.status === 401) {
     // Ask once for the current session. With none, BridgeConnection joins again.
-    const current = await resumeBridgeSession(token, init.signal ?? undefined);
+    const current = await resumeBridgeSession(token, revision, init.signal ?? undefined);
     if (!current) return null;
     response = await send(current);
+    if (!accountStorageMatches(revision)) return null;
     if (response.status === 401) {
       clearBridgeSession();
       return null;
@@ -464,10 +474,9 @@ export async function authorizedBridgeRequest(
   }
   if (response.status === 404) throw new Error(BRIDGE_OUTDATED);
   if (!response.ok) {
-    throw new Error(
-      (await response.text()) ||
-        "Spectra Bridge could not complete the request.",
-    );
+    const error = await response.text();
+    if (!accountStorageMatches(revision)) return null;
+    throw new Error(error || "Spectra Bridge could not complete the request.");
   }
   return response;
 }
@@ -476,8 +485,10 @@ export async function bridgeStatus(
   signal?: AbortSignal,
 ): Promise<BridgeStatus | null> {
   try {
+    const revision = accountStorageRevision();
     const response = await authorizedBridgeRequest("/v1/status", { signal }, BRIDGE_STATUS_TIMEOUT_MS);
-    return response ? statusSchema.parse(await response.json()) : null;
+    const status = response ? statusSchema.parse(await response.json()) : null;
+    return accountStorageMatches(revision) ? status : null;
   } catch {
     return null;
   }
@@ -543,11 +554,13 @@ export async function unpairBridge() {
  * undefined from a Bridge too old to say.
  */
 export async function selectBridgeFolder(): Promise<string | null | undefined> {
+  const revision = accountStorageRevision();
   const response = await authorizedBridgeRequest("/v1/mount/select", {
     method: "POST",
   }, BRIDGE_FOLDER_PICKER_TIMEOUT_MS);
   if (!response) throw new Error("Reconnect this device before selecting a folder.");
   const body = z.object({ grantId: z.string().nullable() }).safeParse(await response.json().catch(() => null));
+  assertAccountStorageRevision(revision);
   return body.success ? body.data.grantId : undefined;
 }
 
@@ -563,28 +576,34 @@ const syncedFile = z.object({ grantId: z.string(), relativePath: z.string() });
 
 /** Native multi-select grants just the chosen files, without their folder. */
 export async function selectBridgeFiles(): Promise<BridgeFilesSelected> {
+  const revision = accountStorageRevision();
   const response = await authorizedBridgeRequest("/v1/files/select", {
     method: "POST",
   }, BRIDGE_FOLDER_PICKER_TIMEOUT_MS);
   if (!response) throw new Error("Reconnect this device before selecting files.");
-  return z
+  const selected = z
     .object({
       selected: z.number().int().min(0).max(100),
       added: z.array(syncedFile).default([]),
       existing: z.array(syncedFile).default([]),
     })
     .parse(await response.json());
+  assertAccountStorageRevision(revision);
+  return selected;
 }
 
 /** Something Spectra AI named on this computer. Bridge asks the person there; null means they said no. */
 export async function syncBridgeNamedPath(path: string): Promise<string | null> {
+  const revision = accountStorageRevision();
   const response = await authorizedBridgeRequest(
     "/v1/files/sync-named",
     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }) },
     BRIDGE_FOLDER_PICKER_TIMEOUT_MS,
   );
   if (!response) throw new Error("Reconnect this device before syncing a file.");
-  return z.object({ grantId: z.string().nullable().optional() }).parse(await response.json()).grantId ?? null;
+  const selected = z.object({ grantId: z.string().nullable().optional() }).parse(await response.json()).grantId ?? null;
+  assertAccountStorageRevision(revision);
+  return selected;
 }
 
 export async function retryBridgeFolder(grantId: string) {

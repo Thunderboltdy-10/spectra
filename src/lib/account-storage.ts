@@ -1,5 +1,7 @@
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { clearRunLedger } from "@/features/spectra/collaboration/run-ledger";
+import { ACCOUNT_SCOPE_KEY, prepareAccountStorageScope, retireAccountStorageRequests } from "./account-storage-scope";
+export { accountStorageScope, accountStorageRevision, accountStorageMatches, assertAccountStorageRevision, retireAccountStorageRequests } from "./account-storage-scope";
 
 const ACCOUNT_LOCAL_PREFIXES = [
   "spectra.context.",
@@ -17,6 +19,7 @@ function removeMatching(storage: Storage, prefixes: readonly string[]) {
 }
 
 export function clearAccountScopedStorage() {
+  retireAccountStorageRequests();
   if (typeof window === "undefined") return;
   try {
     useSpectraContextStore.setState(useSpectraContextStore.getInitialState(), true);
@@ -48,25 +51,15 @@ export function clearAccountScopedStorage() {
   }
 }
 
-const ACCOUNT_SCOPE_KEY = "spectra:account-storage-scope:v1";
-
-/** The account this browser's kept data belongs to, for anything kept in memory too. */
-export function accountStorageScope() {
-  try {
-    return window.localStorage.getItem(ACCOUNT_SCOPE_KEY);
-  } catch {
-    return null;
-  }
-}
-
 /** Persisted database IDs can be restored only by their deployment/account. */
 export function bindAccountStorageScope(scope: string) {
   if (typeof window === "undefined") return;
   try {
-    if (window.localStorage.getItem(ACCOUNT_SCOPE_KEY) === scope) return;
+    if (window.localStorage.getItem(ACCOUNT_SCOPE_KEY) === scope) { prepareAccountStorageScope(scope); return; }
     clearAccountScopedStorage();
     window.localStorage.setItem(ACCOUNT_SCOPE_KEY, scope);
   } catch {
     clearAccountScopedStorage();
   }
+  prepareAccountStorageScope(scope);
 }

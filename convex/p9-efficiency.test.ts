@@ -1,9 +1,14 @@
 /// <reference types="vite/client" />
 import { describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
+import aggregateTest from "@convex-dev/aggregate/test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import { upsertArtifactSummary } from "./orgTreeShared";
+import { beginRun, selectTab } from "./spectraRuns";
+import type { MutationCtx } from "./_generated/server";
+import type { FunctionArgs, FunctionReturnType } from "convex/server";
+import { observeDatabase } from "../scripts/perf-read-ledger";
 
 const modules = import.meta.glob("./**/*.ts");
 const identity = {
@@ -48,6 +53,143 @@ async function seedActor(t: ReturnType<typeof convexTest>) {
 }
 
 describe("P9.I2 run projections and targeted recovery", () => {
+  it.each([false, true])("starts a run without reading unrelated tab history (existing thread: %s)", async existing => {
+    const measure = async (history: number) => {
+      const t = convexTest(schema, modules), actor = await seedActor(t), user = t.withIdentity(identity);
+      for (const name of ["orgNodeCountByType", "orgNodeCountByWorkspace", "orgNodeCountByParent"])
+        aggregateTest.register(t, name);
+      const fixture = await t.run(async ctx => {
+        const now = Date.now();
+        const makeThread = (title: string) => ctx.db.insert("spectraThreads", {
+          ownerAccountId: actor.accountId, schoolId: actor.schoolId, title, origin: "chat",
+          status: "active", messageCount: 0, createdAt: now, updatedAt: now,
+        });
+        const threadId = await makeThread("Target"), otherThread = await makeThread("Unrelated");
+        const runId = await ctx.db.insert("spectraAiRuns", {
+          ownerAccountId: actor.accountId, schoolId: actor.schoolId, threadId: otherThread, sourceSurface: "chat",
+          status: "completed", userPrompt: "Earlier", createdAt: now - 7_200_000, updatedAt: now - 7_200_000,
+        });
+        const tab = { ownerAccountId: actor.accountId, schoolId: actor.schoolId, runId,
+          threadId: otherThread, surface: "chat" as const, createdAt: now, updatedAt: now };
+        const selected = await ctx.db.insert("spectraRunTabs", { ...tab, selected: true });
+        const hidden = await ctx.db.insert("spectraRunTabs", { ...tab, selected: true, hiddenAt: now });
+        const legacy = await ctx.db.insert("spectraRunTabs", { ...tab, selected: true, schoolId: undefined });
+        const canonical = existing ? await ctx.db.insert("spectraRunTabs", { ...tab, threadId, selected: false }) : null;
+        const duplicate = existing ? await ctx.db.insert("spectraRunTabs", { ...tab, threadId, selected: false, updatedAt: now - 1 }) : null;
+        for (let i = 0; i < history; i++) await ctx.db.insert("spectraRunTabs", {
+          ...tab, selected: false, ...(i % 2 ? { hiddenAt: now } : {}), threadTitle: "Unrelated ".repeat(200),
+        });
+        return { threadId, selected, hidden, legacy, canonical, duplicate };
+      });
+      const handler = Reflect.get(beginRun, "_handler") as (ctx: MutationCtx, args: FunctionArgs<typeof api.spectraRuns.beginRun>) => Promise<FunctionReturnType<typeof api.spectraRuns.beginRun>>;
+      const measured = await user.run(async ctx => {
+        const observer = observeDatabase(ctx.db);
+        const result = await handler({ ...ctx, db: observer.db }, {
+          sourceSurface: "chat", userPrompt: "Read-only tip", submissionKey: "new-run",
+          ...(existing ? { threadId: fixture.threadId } : {}),
+        });
+        return { result, ...observer.snapshot() };
+      });
+      expect(measured.result.created).toBe(true);
+      const tabs = await t.run(ctx => ctx.db.query("spectraRunTabs").collect());
+      expect(tabs.find(tab => tab._id === fixture.selected)?.selected).toBe(false);
+      expect(tabs.find(tab => tab._id === fixture.hidden)?.selected).toBe(true);
+      expect(tabs.find(tab => tab._id === fixture.legacy)?.selected).toBe(true);
+      const current = tabs.find(tab => tab.threadId === measured.result.threadId && tab.selected);
+      expect(current).toMatchObject({ runId: measured.result.runId, runSummary: { _id: measured.result.runId, status: "queued" } });
+      if (existing) {
+        expect(current?._id).toBe(fixture.canonical);
+        expect(tabs.find(tab => tab._id === fixture.duplicate)).toMatchObject({ selected: false, hiddenAt: expect.any(Number) });
+      }
+      return { writes: measured.writes, tabRows: measured.reads.filter(read => read.table === "spectraRunTabs").reduce((sum, read) => sum + read.documentsReturned, 0) };
+    };
+    const small = await measure(0), dense = await measure(100);
+    expect.soft(dense.writes).toBe(small.writes);
+    expect(dense.tabRows).toBe(small.tabRows);
+  });
+
+  it("keeps tab-selection reads independent of unrelated conversation history", async () => {
+    const t = convexTest(schema, modules), actor = await seedActor(t), user = t.withIdentity(identity);
+    const fixture = await t.run(async ctx => {
+      const now = Date.now();
+      const threadId = await ctx.db.insert("spectraThreads", {
+        ownerAccountId: actor.accountId, schoolId: actor.schoolId, title: "Selected conversation", origin: "workspace",
+        status: "active", messageCount: 0, createdAt: now, updatedAt: now,
+      });
+      const runId = await ctx.db.insert("spectraAiRuns", {
+        ownerAccountId: actor.accountId, schoolId: actor.schoolId, threadId, sourceSurface: "workspace",
+        status: "completed", userPrompt: "Latest run", createdAt: now, updatedAt: now,
+      });
+      await ctx.db.patch(threadId, { lastRunId: runId });
+      const tab = { ownerAccountId: actor.accountId, schoolId: actor.schoolId, runId, threadId,
+        surface: "workspace" as const, selected: false, createdAt: now, updatedAt: now };
+      const canonical = await ctx.db.insert("spectraRunTabs", { ...tab, schoolId: undefined, selected: true });
+      const duplicate = await ctx.db.insert("spectraRunTabs", { ...tab, updatedAt: now - 1 });
+      const otherThread = await ctx.db.insert("spectraThreads", {
+        ownerAccountId: actor.accountId, schoolId: actor.schoolId, title: "Other conversation", origin: "workspace",
+        status: "active", messageCount: 0, createdAt: now, updatedAt: now,
+      });
+      const other = await ctx.db.insert("spectraRunTabs", { ...tab, threadId: otherThread, selected: true });
+      return { canonical, duplicate, other, tab, otherThread, runId, threadId };
+    });
+    // Warm the stored projection so the measured states differ only in cold history.
+    await user.mutation(api.spectraRuns.selectTab, { threadId: fixture.threadId });
+    const handler = Reflect.get(selectTab, "_handler") as (ctx: MutationCtx, args: FunctionArgs<typeof api.spectraRuns.selectTab>) => Promise<FunctionReturnType<typeof api.spectraRuns.selectTab>>;
+    const measure = async () => {
+      await t.run(ctx => ctx.db.patch(fixture.other, { selected: true }));
+      return user.run(async ctx => {
+        const observer = observeDatabase(ctx.db);
+        const result = await handler({ ...ctx, db: observer.db }, { threadId: fixture.threadId });
+        return { result, ...observer.snapshot() };
+      });
+    };
+    const before = await measure();
+    await t.run(async ctx => {
+      for (let i = 0; i < 100; i++) await ctx.db.insert("spectraRunTabs", {
+        ...fixture.tab, threadId: fixture.otherThread, selected: false, updatedAt: fixture.tab.updatedAt - i - 10,
+        ...(i % 2 ? { hiddenAt: fixture.tab.updatedAt - i } : {}),
+      });
+    });
+    const after = await measure();
+    expect.soft(after.result).toEqual(before.result);
+    expect.soft(after.documentsReturned).toBe(before.documentsReturned);
+    expect.soft(after.serializedDocumentBytes).toBe(before.serializedDocumentBytes);
+    expect(after.writes).toBe(before.writes);
+    const tabs = await t.run(async ctx => Promise.all([fixture.canonical, fixture.duplicate, fixture.other].map(id => ctx.db.get(id))));
+    expect(tabs[0]).toMatchObject({ runId: fixture.runId, selected: true });
+    expect(tabs[1]).toMatchObject({ selected: false, hiddenAt: expect.any(Number) });
+    expect(tabs[2]).toMatchObject({ selected: false });
+    await user.mutation(api.spectraRuns.selectTab, {});
+    expect((await t.run(ctx => ctx.db.get(fixture.canonical)))?.selected).toBe(false);
+  });
+
+  it.each(["runId", "threadId"] as const)("refuses another student's same-school %s when selecting a tab", async field => {
+    const t = convexTest(schema, modules);
+    const actor = await seedActor(t);
+    const foreign = await t.run(async ctx => {
+      const now = Date.now();
+      const ownerAccountId = await ctx.db.insert("accounts", {
+        clerkId: "other-private-student", email: "other@example.test", emailVerified: true,
+        name: "Other student", status: "active", createdAt: now, updatedAt: now,
+      });
+      const threadId = await ctx.db.insert("spectraThreads", {
+        ownerAccountId, schoolId: actor.schoolId, title: "Private conversation", origin: "workspace",
+        status: "active", messageCount: 0, createdAt: now, updatedAt: now,
+      });
+      const runId = await ctx.db.insert("spectraAiRuns", {
+        ownerAccountId, schoolId: actor.schoolId, threadId, sourceSurface: "workspace",
+        status: "completed", userPrompt: "Private prompt", finalSummary: "Private reply", createdAt: now, updatedAt: now,
+      });
+      await ctx.db.patch(threadId, { lastRunId: runId });
+      return { runId, threadId };
+    });
+    await expect(t.withIdentity(identity).mutation(api.spectraRuns.selectTab,
+      field === "runId" ? { runId: foreign.runId } : { threadId: foreign.threadId },
+    )).rejects.toThrow("not available");
+    expect(await t.run(ctx => ctx.db.query("spectraRunTabs")
+      .withIndex("by_account_updated", q => q.eq("ownerAccountId", actor.accountId)).collect())).toEqual([]);
+  });
+
   it("updates the tab projection with run writes and returns no heavy run fields", async () => {
     const t = convexTest(schema, modules);
     const actor = await seedActor(t);

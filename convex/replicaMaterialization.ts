@@ -100,7 +100,7 @@ export async function queueMaterializationInTransaction(
   const devices = (
     await Promise.all(deviceIds.map((id) => ctx.db.get(id)))
   ).filter((device): device is Doc<"bridgeDevices"> => Boolean(device));
-  const liveDeviceId = chooseLiveBridgeDeviceId(devices, Date.now());
+  const liveDeviceId = chooseLiveBridgeDeviceId(devices);
   const local = chooseLiveLocalReplica(
     locals,
     liveDeviceId,
@@ -137,6 +137,8 @@ export async function queueMaterializationInTransaction(
   // Refuse protected AI writes before superseding requests or recording pending content.
   if (effects.actorKind === "ai" && policy.protectedOriginal)
     throw new Error("NATIVE_PROMOTION_PROTECTED");
+  if (!policy.protectedOriginal && policy.contentDirection !== "bidirectional" && policy.contentDirection !== "spectra-to-local")
+    throw new Error("NATIVE_WRITES_DISABLED");
   // A desktop save Spectra has not taken in yet is the newest truth; writing
   // now would replace it. Only a write built on that save (Keep Spectra, after
   // the user saw both) may go ahead; anything else reconciles first.
@@ -154,6 +156,7 @@ export async function queueMaterializationInTransaction(
   const hasImmediateProjection =
     effects.actorKind === "user" &&
     effects.canonicalProjection === "legacy" &&
+    !work.liveStateVectorHash &&
     input.promotionMode !== "verified-first" &&
     args.projectionContent !== undefined &&
     input.projectionContentHash !== undefined;
@@ -391,6 +394,15 @@ export async function commitCloudMaterializationInTransaction(
     projectionBaseContentHash: args.projectionContentHash, fidelityMap: args.fidelityMap,
     projectionBaseFidelityMap: args.fidelityMap, state: "current", lastVerifiedAt: now, updatedAt: now,
   });
+  // The disk did not change. Remember that explicitly so reopening or a scan
+  // cannot mistake the older copy for a new external edit.
+  const locals = await ctx.db.query("workReplicas").withIndex("by_work_kind", q =>
+    q.eq("workId", args.workId).eq("kind", "local")).take(20);
+  for (const local of locals) {
+    if (local.accountId !== actor.accountId || (local.state !== "current" && local.state !== "behind")) continue;
+    const state = local.contentHash === args.contentHash ? "current" : "behind";
+    if (state !== local.state) await ctx.db.patch(local._id, { state, updatedAt: now });
+  }
   const operationId = await ctx.db.insert("syncOperations", {
     accountId: actor.accountId, workId: args.workId, replicaId: cloud._id, idempotencyKey,
     direction: "cloud-to-local", revisionBefore: args.baseRevision, revisionAfter: args.contentHash,
@@ -421,10 +433,10 @@ async function supersedeWriteRequest(
   // The run that queued this write may already be done and waiting on it.
   if (operation?.actorKind === "ai" && operation.runId) await settleRunNativeOutcome(ctx, operation.runId);
   const resolving = await ctx.db.query("syncConflicts")
-    .withIndex("by_work_state", (q) => q.eq("workId", request.workId).eq("state", "resolving-spectra"))
+    .withIndex("by_request_account_state", (q) => q.eq("resolutionRequestId", request._id).eq("accountId", request.accountId).eq("state", "resolving-spectra"))
     .take(50);
   await Promise.all(resolving
-    .filter((conflict) => conflict.resolutionRequestId === request._id)
+    .filter((conflict) => conflict.workId === request.workId && conflict.resolutionRequestId === request._id)
     .map((conflict) => ctx.db.patch(conflict._id, {
       state: "open",
       resolutionRequestId: undefined,

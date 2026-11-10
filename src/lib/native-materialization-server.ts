@@ -5,6 +5,16 @@ import type { NativeMaterializationCandidate, QueuedNativeMaterialization } from
 import { convexQuery, storeArtifactContent } from "./convex-server";
 import { createCollaborationGatewayBridgeClient } from "../../scripts/collaboration-gateway-bridge-client.mjs";
 import { getConvexUrl } from "./env";
+import type { EffectiveSyncPolicy } from "../../shared/sync-policy";
+
+/** Native bytes still advance in Spectra when desktop writeback is disabled. */
+export async function writableNativeReplica<T extends { kind: string; state: string; mountId?: Id<"bridgeMounts"> }>(workId: Id<"spectraArtifacts">, replicas: readonly T[]) {
+  const local = replicas.find(replica => replica.kind === "local" && replica.state !== "unavailable");
+  if (!local) return undefined;
+  const policy = await convexQuery<{ itemId: Id<"spectraArtifacts">; mountId?: Id<"bridgeMounts"> }, EffectiveSyncPolicy>(
+    "syncPolicy:effective", { itemId: workId, ...(local.mountId ? { mountId: local.mountId } : {}) });
+  return policy.protectedOriginal || policy.contentDirection === "bidirectional" || policy.contentDirection === "spectra-to-local" ? local : undefined;
+}
 
 /** Keep the signed envelope bounded using the existing immutable content
  * lifecycle. No replica or canonical write occurs while retaining these bodies. */

@@ -33,6 +33,14 @@ function source(overrides: Partial<LiveDockTabSource> = {}): LiveDockTabSource {
 }
 
 describe("Live Dock V2", () => {
+  it.each(["cancelled", "failed"])("does not reopen stale questions after %s", (status) => {
+    for (const inputRequest of [undefined, { kind: "short_answer" as const, prompt: "Choose a subject" }]) {
+      const model = deriveLiveDockTab(source({ run: { status, decision: "clarify", retryable: true }, inputRequest }));
+      expect(model.state).toBe(status === "cancelled" ? "cancelled" : "paused");
+      expect(model.inputRequest).toBeNull();
+    }
+  });
+
   it("keeps send and panel visibility independent", () => {
     expect(shouldAutoOpenConversationAfterSend()).toBe(false);
     const shell = read("src/features/spectra/pages/spectra-shell.tsx");

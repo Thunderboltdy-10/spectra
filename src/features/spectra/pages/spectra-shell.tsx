@@ -3015,13 +3015,6 @@ export function SpectraShell({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingArtifactOpen, cancelArtifactOpen]);
 
-  /** The chat browser takes the one Side slot a conversation or a run would. */
-  function openChatBrowser() {
-    setActiveRunPanelId(null);
-    setLiveThread(null);
-    setChatBrowserOpen(true);
-  }
-
   function openArtifactTab(artifact: SpectraArtifact) {
     void requestArtifactOpen(artifact._id, "push", "tab")
       .catch(() => toast.error("That work could not be opened."));

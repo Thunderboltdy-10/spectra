@@ -109,6 +109,52 @@ describe("Spectra API route", () => {
     expect(convexQuery).not.toHaveBeenCalled();
   });
 
+  it("omits unused run catalogs from a context-only overview", async () => {
+    const workspaces = [{ _id: "workspace_1", title: "Biology" }];
+    const artifacts = [{ _id: "artifact_1", placementStatus: "inbox" }];
+    const convexQuery = vi.fn(async (name: string) => {
+      if (name === "spectraWorkspaces:list") return workspaces;
+      if (name === "spectraArtifacts:list") return artifacts;
+      throw new Error("Unused run catalog was read");
+    });
+    vi.doMock("@/lib/auth-server", () => mockAuth());
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation: vi.fn() }));
+    const route = await import("@/app/api/spectra/route");
+    const response = await route.GET(new NextRequest("http://localhost/api/spectra?action=overview&includeRuns=false"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ workspaces, artifacts, runs: [], resultCards: [] });
+    expect(convexQuery.mock.calls.map(([name]) => name)).toEqual(["spectraWorkspaces:list", "spectraArtifacts:list"]);
+  });
+
+  it("can load deferred runs without reading an already-cached unscoped catalog", async () => {
+    const runs = [{ _id: "run_1" }], resultCards = [{ _id: "card_1" }];
+    const convexQuery = vi.fn(async (name: string) => {
+      if (name === "spectraRuns:listRecent") return runs;
+      if (name === "spectraRuns:listResultCards") return resultCards;
+      throw new Error("Catalog was unnecessarily reread");
+    });
+    vi.doMock("@/lib/auth-server", () => mockAuth());
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation: vi.fn() }));
+    const route = await import("@/app/api/spectra/route");
+    const response = await route.GET(new NextRequest("http://localhost/api/spectra?action=overview&includeCatalog=false"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ workspaces: [], artifacts: [], runs, resultCards });
+    expect(convexQuery.mock.calls.map(([name]) => name)).toEqual(["spectraRuns:listRecent", "spectraRuns:listResultCards"]);
+  });
+
+  it.each([true, false])("preserves workspace validation and card scope when includeCatalog=%s", async (includeCatalog) => {
+    const workspace = { workspace: { _id: "workspace_1" }, items: [] };
+    const convexQuery = vi.fn(async (name: string) => name === "orgTree:listWorkspaceContentsPublic" ? workspace : []);
+    vi.doMock("@/lib/auth-server", () => mockAuth());
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation: vi.fn() }));
+    const route = await import("@/app/api/spectra/route");
+    const response = await route.GET(new NextRequest(`http://localhost/api/spectra?action=overview&workspaceId=workspace_1&includeCatalog=${includeCatalog}`));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ selectedWorkspaceId: "workspace_1", workspace });
+    expect(convexQuery).toHaveBeenCalledWith("orgTree:listWorkspaceContentsPublic", { workspaceId: "workspace_1", includeDetails: false });
+    expect(convexQuery).toHaveBeenCalledWith("spectraRuns:listResultCards", { workspaceId: "workspace_1", includeHidden: false, limit: 20 });
+  });
+
   it("loads overview data from new Spectra tables", async () => {
     const convexMutation = vi.fn();
     const convexQuery = vi

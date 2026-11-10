@@ -246,6 +246,16 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
 
   // Work
   {
+    id: "conversation.undo_previous_run",
+    area: "conversation",
+    title: "Undo the previous Spectra run",
+    description: "Reverse the preceding run in this thread using its saved state, preserving later human edits.",
+    keywords: ["undo that", "revert", "previous change"],
+    server: ["spectraRunUndo:reverseWrites"],
+    reach: tool("undo_previous_run"),
+  },
+
+  {
     id: "work.create",
     area: "work",
     title: "Create work",
@@ -1086,8 +1096,8 @@ export const SERVER_PLUMBING: Readonly<Record<string, string>> = {
   "memory:forget": "The older memory store, kept for settings; the AI writes its notes through update_memory.",
   "spectraHarness:takeSteers": "The run loop collects messages the user sent while it worked.",
   "spectraHarness:discardCheckpoint": "The run loop drops a resume checkpoint it no longer needs.",
-  "spectraRunUndo:reverseWrites": "The user's own Undo this run button; the AI never undoes itself.",
   "spectraRunUndo:bringBackCalendarItem": "Undo puts back calendar events the run removed.",
+  "spectraRunUndo:recordReversal": "Records a completed conversational Undo for the current run after checking the prior run's reversal.",
   "spectraRunUndo:restoreSettingsLayer": "Undo puts back settings the run changed.",
   "spectraMemory:clear": "Settings clears the AI's notes on the user's own request.",
   "artifactAssets:*": "Upload protocol for work assets.",

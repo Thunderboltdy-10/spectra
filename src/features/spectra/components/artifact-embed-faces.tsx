@@ -279,6 +279,11 @@ function FlashcardFace({ content }: { content: Record<string, unknown> }) {
             fallback="Empty card"
             className="work-embed-card-words"
           />
+          {revealed && card.explanation ? (
+            <small>
+              <SpectraStoredText value={textFrom(card.explanation, 600)} inline />
+            </small>
+          ) : null}
         </span>
       </button>
       <Stepper

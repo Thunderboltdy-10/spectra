@@ -296,6 +296,21 @@ function controlDeviceArgs(args: DevicesArgs): Record<string, unknown> {
 export function appTools(session: HarnessSession): AnyHarnessTool[] {
   const timeZone = session.backend.timeZone;
   const tools = [
+    ...(session.backend.undoPreviousRun ? [{
+      name: "undo_previous_run",
+      description: "Undo the immediately preceding Spectra run in this thread, using its exact saved state for all lasting changes. Use when the user says undo that after your last change; never guess an inverse edit. Takes no target ids. Run before making any other changes this turn. Later human edits are preserved and any changes left in place are reported.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+      effect: "write" as const,
+      exclusive: true,
+      label: () => "Undoing the previous change",
+      parse: (raw: Record<string, unknown>) => {
+        if (Object.keys(raw).length) throw new ToolInputError("Undo takes no arguments; it only targets the preceding run in this thread.");
+        return raw;
+      },
+      execute: (_args: Record<string, unknown>, ctx: import("../types").ToolContext) => session.backend.undoPreviousRun!(
+        { approved: Boolean(ctx.approved), approvalScope: ctx.approvalScope }, ctx.signal,
+      ),
+    }] : []),
     commandTool(session, {
       name: "change_settings",
       description:

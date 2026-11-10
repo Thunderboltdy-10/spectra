@@ -16,6 +16,7 @@ import { DEVICES_HREF } from "../bridge/client";
 import { backUpNow, restoreBackups } from "../bridge/device-backup";
 import { deviceStoreSummary, moveWorkToCloud, moveWorkToDevice, useDeviceState, type WorkStorage } from "../bridge/device-works";
 import { getSpectraArtifact } from "../data/api";
+import { accountStorageMatches, accountStorageRevision } from "@/lib/account-storage-scope";
 
 /*
  * Where someone's work lives, told as what it means for them: what happens
@@ -167,6 +168,8 @@ function MoveWorks({ storage }: { storage: WorkStorage }) {
   const total = toCloud ? counts.here : counts.cloud;
   if (!total && !moving) return null;
   const move = async () => {
+    const revision = accountStorageRevision();
+    if (!accountStorageMatches(revision)) return;
     setMoving({ done: 0, total });
     let done = 0;
     let failed = 0;
@@ -175,14 +178,21 @@ function MoveWorks({ storage }: { storage: WorkStorage }) {
         const ids = toCloud
           ? await convex.query(api.deviceWorks.onThisComputer, { storeId, limit: 20 })
           : await convex.query(api.deviceWorks.movable, { limit: 20 });
+        if (!accountStorageMatches(revision)) return;
         const left = ids.slice(failed);
         if (!left.length) break;
         for (const id of left) {
           try {
             if (toCloud) await moveWorkToCloud(id);
-            else await moveWorkToDevice((await getSpectraArtifact(id)).artifact, storeId);
+            else {
+              const work = await getSpectraArtifact(id);
+              if (!accountStorageMatches(revision)) return;
+              await moveWorkToDevice(work.artifact, storeId);
+            }
+            if (!accountStorageMatches(revision)) return;
             done += 1;
           } catch {
+            if (!accountStorageMatches(revision)) return;
             failed += 1;
           }
           setMoving({ done: done + failed, total: Math.max(total, done + failed) });
@@ -191,7 +201,7 @@ function MoveWorks({ storage }: { storage: WorkStorage }) {
       if (failed) toast.warning(`${failed === 1 ? "One work" : `${failed} works`} stayed where they were, usually because they're shared.`);
       else toast.success(toCloud ? "Your work is online now." : "Your work is on this computer now.");
     } finally {
-      setMoving(null);
+      if (accountStorageMatches(revision)) setMoving(null);
     }
   };
   return (
@@ -216,6 +226,8 @@ function BackupControls({ settings }: { settings: { backupEveryHours: number; la
   const record = useMutation(api.deviceWorks.recordBackup);
   const [busy, setBusy] = useState(false);
   const backup = async () => {
+    const revision = accountStorageRevision();
+    if (!accountStorageMatches(revision)) return;
     setBusy(true);
     try {
       const result = await backUpNow(
@@ -226,13 +238,15 @@ function BackupControls({ settings }: { settings: { backupEveryHours: number; la
         },
         { force: true },
       );
+      if (!accountStorageMatches(revision)) return;
       if (result.state === "saved") toast.success("Backed up.");
       else if (result.state === "empty") toast.info("There's nothing on this computer to back up yet.");
       else toast.info("Nothing has changed since the last backup.");
     } catch (error) {
+      if (!accountStorageMatches(revision)) return;
       toast.error(error instanceof Error ? error.message : "The backup didn't finish. It will try again later.");
     } finally {
-      setBusy(false);
+      if (accountStorageMatches(revision)) setBusy(false);
     }
   };
   return (
@@ -264,21 +278,28 @@ function BringBackBackup() {
   const [busy, setBusy] = useState(false);
   if (!storeId || !counts?.elsewhere) return null;
   const bring = async () => {
+    const revision = accountStorageRevision();
+    if (!accountStorageMatches(revision)) return;
     setBusy(true);
     try {
       const backups = await convex.query(api.deviceWorks.backupsToRestore, {});
+      if (!accountStorageMatches(revision)) return;
       if (!backups.length) {
         toast.info("There's no backup to bring back. Open Spectra on the computer that holds this work.");
         return;
       }
       await restoreBackups(backups);
+      if (!accountStorageMatches(revision)) return;
       await deviceStoreSummary();
+      if (!accountStorageMatches(revision)) return;
       const { adopted } = await adopt({ storeId });
+      if (!accountStorageMatches(revision)) return;
       toast.success(`${adopted === 1 ? "One work is" : `${adopted} works are`} back on this computer.`);
     } catch (error) {
+      if (!accountStorageMatches(revision)) return;
       toast.error(error instanceof Error ? error.message : "The backup couldn't be brought back.");
     } finally {
-      setBusy(false);
+      if (accountStorageMatches(revision)) setBusy(false);
     }
   };
   return (

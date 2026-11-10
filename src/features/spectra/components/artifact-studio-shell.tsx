@@ -346,7 +346,7 @@ export function useArtifactStudioState(
   const closeStudio = useCallback(() => {
     if (activeArtifactId && mode === "split")
       closeObject("artifact", activeArtifactId);
-    else deactivateObject();
+    deactivateObject();
   }, [activeArtifactId, closeObject, deactivateObject, mode]);
 
   const setDirty = useCallback(

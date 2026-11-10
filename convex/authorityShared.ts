@@ -530,6 +530,16 @@ async function evaluateLoadedArtifactAuthority(
       sources: [],
     };
 
+  if (loaded.schoolId === actor.schoolId && loaded.ownerAccountId === actor.accountId)
+    return {
+      allowed: true as const,
+      level: "modify" as const,
+      capabilities: ownerCapabilities,
+      actor,
+      loaded,
+      reason: "owner" as const,
+      sources: [{ kind: "owner" as const }],
+    };
   const direct = await directAccess(ctx, actor, resourceType, resourceId);
   if (loaded.schoolId && loaded.schoolId !== actor.schoolId) {
     let directAccountLevel: AccessLevel | null = null;
@@ -559,17 +569,6 @@ async function evaluateLoadedArtifactAuthority(
       sources: direct.sources.filter((source) => source.kind === "direct"),
     };
   }
-  if (loaded.schoolId === actor.schoolId && loaded.ownerAccountId === actor.accountId)
-    return {
-      allowed: true as const,
-      level: "modify" as const,
-      capabilities: ownerCapabilities,
-      actor,
-      loaded,
-      reason: "owner" as const,
-      sources: [{ kind: "owner" as const }],
-    };
-
   const inherited = await inheritedArtifactAccess(
     ctx,
     actor,

@@ -2428,8 +2428,8 @@ export function ConversationSurface({
                         onOpen={onOpenArtifact}
                         currentTitles={currentTitles}
                         undone={undone}
-                        // With no slips the result card is still on show, and it has this button.
-                        onUndo={undoable && touches.length ? () => onCardAction?.(undoable, "revert") : undefined}
+                        // With no slips, only a loaded trace supplies a result card with this control.
+                        onUndo={undoable && (touches.length || !trace) ? () => onCardAction?.(undoable, "revert") : undefined}
                       />
                       {(() => {
                         const choices = messageChoices(

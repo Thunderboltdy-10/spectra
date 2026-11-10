@@ -510,6 +510,12 @@ describe("Bridge write acknowledgement after native observation", () => {
   async function seedWrite(observation: "upload" | "metadata", withReceipt = true) {
     const t = setupTest();
     const fixture = await seedBridge(t);
+    if (observation === "upload" && withReceipt) await t.run(async ctx => {
+      const now = Date.now();
+      await ctx.db.insert("syncPolicies", { accountId: fixture.accountId, scopeKind: "account", scopeId: String(fixture.accountId),
+        preset: "both", contentDirection: "bidirectional", discovery: "auto", structure: "independent", cloudContent: "full",
+        includeGlobs: [], excludeGlobs: [], timing: "continuous", protectedOriginal: false, createdAt: now, updatedAt: now });
+    });
     const hash = async (bytes: string) => Array.from(
       new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(bytes))),
       byte => byte.toString(16).padStart(2, "0"),
@@ -639,6 +645,22 @@ describe("Bridge write acknowledgement after native observation", () => {
     }
     expect(await f.t.mutation(api.bridgeSync.completeWrite, { ...recovered, outcome: "verified", actualRevision: f.targetHash }))
       .toEqual({ state: "verified" });
+  });
+
+  it("keeps explicit non-materializer writes eligible under their existing authorization", async () => {
+    const f = await seedWrite("upload", false);
+    expect(await f.t.mutation(api.bridgeSync.refreshWriteClaim, f.firstClaim)).toEqual({ valid: true });
+  });
+
+  it("refuses an Office materializer claim after desktop writes are disabled", async () => {
+    const f = await seedWrite("upload");
+    await f.t.run(async ctx => {
+      const request = (await ctx.db.get(f.requestId))!;
+      const policy = await ctx.db.query("syncPolicies").withIndex("by_account_scope", q =>
+        q.eq("accountId", request.accountId).eq("scopeKind", "account").eq("scopeId", String(request.accountId))).unique();
+      await ctx.db.patch(policy!._id, { contentDirection: "manual" });
+    });
+    expect(await f.t.mutation(api.bridgeSync.refreshWriteClaim, f.firstClaim)).toEqual({ valid: false });
   });
 
   it.each(["newer-native", "wrong-hash", "unavailable-payload", "wrong-payload"] as const)(

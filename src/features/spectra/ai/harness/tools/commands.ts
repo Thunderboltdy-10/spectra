@@ -252,6 +252,7 @@ export function commandTools(runnable: AnyHarnessTool[], offered: AnyHarnessTool
     label: (input) => (input.tool ? input.tool.label(input.args) : "Running a command"),
     question: (input) => input.tool.question?.(input.args) ?? "",
     targets: (input) => input.tool.targets?.(input.args) ?? [],
+    exclusive: (input) => typeof input.tool.exclusive === "function" ? input.tool.exclusive(input.args) : Boolean(input.tool.exclusive),
     shows: (input) => input.tool.shows?.(input.args),
     parse: (raw) => {
       const id = requireString(raw, "id", 120);

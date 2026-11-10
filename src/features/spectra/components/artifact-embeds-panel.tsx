@@ -243,7 +243,7 @@ export function ArtifactEmbedsPanel({
   onOpenSource?: (artifactId: string) => void;
 }) {
   const live = useArtifactEmbedContainer(containerType, containerId, true);
-  const embeds = live?.embeds ?? [];
+  const embeds = useMemo(() => live?.embeds ?? [], [live?.embeds]);
   const canConfigure = live?.canConfigure ?? false;
   const nativeOnly = compatibilityProfile === "strict-native";
   const canLink = containerType === "artifact" && artifact?.accessLevel !== "read";

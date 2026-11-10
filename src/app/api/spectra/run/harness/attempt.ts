@@ -5,6 +5,7 @@ import { traceEvent, withRunTrace } from "@/features/spectra/ai/harness/run-trac
 import { createRunItem } from "@/features/spectra/actions/protocol";
 import { threadFold, threadFoldTranscript } from "@/features/spectra/ai/harness/compaction";
 import { modelSummariser, runHarness, type HarnessEvent, type RunCheckpoint } from "@/features/spectra/ai/harness/run";
+import { subscriptionProviderFrom } from "@/features/spectra/ai/harness/subscription-runtime";
 import type { LoopState } from "@/features/spectra/ai/harness/loop";
 import { alwaysAllowLabel, withThreadAllows } from "@/features/spectra/ai/harness/permissions";
 import { citedSources, withoutCitations } from "@/features/spectra/ai/harness/sources";
@@ -107,6 +108,8 @@ export type AttemptParams = RunPointers & {
   mode: AttemptMode;
   /** Scheduled workers may hand off long runs; inline streams finish in place. */
   scheduled?: boolean;
+  /** One live request; automatic handoffs stay on the same relay. */
+  relayId?: string;
   signal?: AbortSignal;
 };
 
@@ -126,6 +129,7 @@ export function resumePayload(params: AttemptParams) {
     references: params.references,
     timeZone: params.timeZone,
     agentId: params.agentId,
+    relayId: params.relayId,
   };
 }
 
@@ -214,11 +218,12 @@ const FOLD_TIMEOUT_MS = 90_000;
  * Fold the oldest of a long thread's messages into its running notes, so the
  * next run, however much later, still knows the whole conversation.
  */
-async function foldThreadHistory(params: AttemptParams, history: ThreadHistory) {
+async function foldThreadHistory(params: AttemptParams, history: ThreadHistory, runtime: RunPreferences["runtime"] & { accountId?: string }) {
   const fold = params.threadId ? threadFold(history.unfolded) : null;
   if (!fold) return;
   const notes = (
     await modelSummariser({
+      runtime,
       transcript: threadFoldTranscript(history.notes, fold.older),
       signal: AbortSignal.timeout(FOLD_TIMEOUT_MS),
     })
@@ -286,9 +291,9 @@ async function readBeforeFirstTurn(params: AttemptParams) {
   return { loaded, agents, preferences, environment, history, threadSummary };
 }
 
-/** The hub routes by account, so only the user's own runtime needs to know which one this is. */
+/** Bind the attempt's owner once for its main and auxiliary CLI calls. */
 async function runtimeFor(actorClerkId: string, runtime: RunPreferences["runtime"]) {
-  if (runtime.provider === "spectra" || !process.env.SPECTRA_AGENT_HUB_URL?.trim()) return runtime;
+  if (!subscriptionProviderFrom(runtime.provider)) return runtime;
   const me = await query<unknown & object, { accountId?: unknown } | null>("identity:me", { actorClerkId }).catch(() => null);
   return me?.accountId ? { ...runtime, accountId: String(me.accountId) } : runtime;
 }
@@ -342,7 +347,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
   };
   const IMMEDIATE = new Set(["final", "error", "stopped", "input_required", "artifact_touched", "compacted", "thread_title"]);
   // A scheduled worker has no stream to the page. The relay is that stream.
-  const relay = params.scheduled ? openRunRelay(runId, executionId) : null;
+  const relay = params.scheduled ? openRunRelay(runId, executionId, params.relayId) : null;
   const publish = (event: Record<string, unknown>) => {
     const runItem = createRunItem(runId, sequence++, protocolItemForLegacyEvent(event));
     const wire = legacyEventForRunItem(runItem, event);
@@ -442,6 +447,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       scopeNodeId: params.scopeNodeId,
       prompt: params.prompt,
       timeZone,
+      permissions: withThreadAllows(preferences.permissions, threadSummary?.allowedPermissionCategories),
       toolOperations: sameAttempt ? loaded?.toolOperations : {},
       openItemIds: openItemIds(params),
       onUiEvent: (event) => publish({ type: "ui_event", runId, key: event.key, ...(event.payload ? { payload: event.payload } : {}) }),
@@ -559,6 +565,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       }
     };
 
+    const runtime = await runtimeFor(actorClerkId, preferences.runtime);
     const result = await runHarness({
       runId,
       backend,
@@ -573,7 +580,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
         ...(agents.agents.length ? { agents: agents.agents } : {}),
       },
       permissions: withThreadAllows(preferences.permissions, threadSummary?.allowedPermissionCategories),
-      runtime: await runtimeFor(actorClerkId, preferences.runtime),
+      runtime,
       workspaceId: params.workspaceId,
       // Any attempt names a thread that still needs it, resumed ones too.
       wantTitle: Boolean(threadSummary?.needsTitle),
@@ -750,6 +757,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     if (params.mode === "start" && !params.scheduled && !result.memoryWritten && worthReflecting(params.prompt))
       titleWrites.push(
         reflectOnRun(actorClerkId, runId, {
+          runtime,
           prompt: params.prompt,
           reply: content,
           context: [environment.page, ...touches.slice(0, 2).map((touch) => touch.title)].filter(Boolean).join(", "),
@@ -762,7 +770,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     // A short run can end before its thread is named; the reply is already out.
     await settleTitle(result.titling);
     titleWrites.push(
-      foldThreadHistory(params, history).catch((error) =>
+      foldThreadHistory(params, history, runtime).catch((error) =>
         runLog().warn("spectra.harness.thread_fold", { error: error instanceof Error ? error.message : String(error) }),
       ),
     );

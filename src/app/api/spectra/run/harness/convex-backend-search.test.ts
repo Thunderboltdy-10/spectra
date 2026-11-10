@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SemanticResult } from "../../../../../../shared/semantic-types";
+import { deviceStoreCall } from "@/lib/device-store";
 
 /*
  * The AI's search and chat lookups on the semantic layer: what is asked for,
@@ -15,6 +16,7 @@ vi.mock("./io", async (importOriginal) => {
   const original = await importOriginal<typeof import("./io")>();
   const handle = async (name: string, args: Record<string, unknown>) => {
     calls.push({ name, args });
+    if (name === "identity:me") return { accountId: "account-1" };
     if (name === "spectraThreads:readMessage") return { ok: true, role: "assistant", content: "The deadline moved to Friday.", nextOffset: null };
     return answer;
   };
@@ -48,9 +50,40 @@ const backend = (extra: Partial<ConstructorParameters<typeof ConvexHarnessBacken
 beforeEach(() => {
   calls.length = 0;
   answer = {};
+  vi.mocked(deviceStoreCall).mockReset().mockRejectedValue(new Error("no Bridge in tests"));
 });
 
 describe("search on the semantic layer", () => {
+  it("keeps computer provenance on local hits and duplicate cloud passages without extra reads", async () => {
+    answer = { results: [slide], mode: "hybrid" };
+    const original = JSON.stringify(answer);
+    vi.mocked(deviceStoreCall).mockResolvedValueOnce([
+      { artifactId: "local-1", title: "Photosynthesis.docx" },
+      { artifactId: "art-1", title: "Cell respiration" },
+    ]);
+    const response = await backend().search({ query: "photosynthesis", kinds: ["artifact"], limit: 12 });
+    expect(response.hits).toEqual([
+      expect.objectContaining({ id: "local-1", onComputer: true }),
+      expect.objectContaining({ id: "art-1", onComputer: true, location: "Slide 3: Krebs cycle", regionId: "slide-3" }),
+    ]);
+    expect(calls.map(call => call.name)).toEqual(["semantic:search", "identity:me"]);
+    expect(deviceStoreCall).toHaveBeenCalledExactlyOnceWith("account-1", "search", { query: "photosynthesis", limit: 10 }, 2500);
+    expect(JSON.stringify(answer)).toBe(original);
+  });
+
+  it("preserves existing computer storage metadata in title and recent listings", async () => {
+    answer = { results: [
+      { nodeId: "node-1", kind: "work", sourceId: "file-1", name: "Photosynthesis.docx", source: { storageHome: "device" } },
+      { nodeId: "node-2", kind: "work", sourceId: "cloud-1", name: "Notes" },
+    ] };
+    const named = await backend().listLibrary({ query: "photosynthesis", limit: 12 });
+    expect(named[0]).toMatchObject({ artifactId: "file-1", onComputer: true });
+    expect(named[1]).not.toHaveProperty("onComputer");
+    answer = [{ _id: "file-1", title: "Photosynthesis.docx", storageHome: "device" }] as unknown as Record<string, unknown>;
+    expect((await backend().listLibrary({ limit: 12 }))[0]).toMatchObject({ artifactId: "file-1", onComputer: true });
+    expect(calls.map(call => call.name)).toEqual(["orgTree:search", "spectraArtifacts:list"]);
+  });
+
   it("asks semantic.search for every kind with what is open as a hint", async () => {
     answer = { results: [slide], mode: "hybrid", tookMs: 12 };
     const response = await backend({ openItemIds: ["art-1", "thread-1"] }).search({ query: "  how cells make energy ", limit: 50 });

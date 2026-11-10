@@ -1155,10 +1155,14 @@ export const beginRun = mutation({
     if (workspaceId) {
       await ctx.db.patch(workspaceId, { updatedAt: now, lastActivityAt: now });
     }
-    const openTabs = await ctx.db
-      .query("spectraRunTabs")
-      .withIndex("by_account_updated", (q) => q.eq("ownerAccountId", actor._id))
-      .collect();
+    const [openTabs, conversationTabs] = await Promise.all([
+      ctx.db.query("spectraRunTabs")
+        .withIndex("by_account_selected", (q) => q.eq("ownerAccountId", actor._id).eq("selected", true))
+        .collect(),
+      ctx.db.query("spectraRunTabs")
+        .withIndex("by_account_thread", (q) => q.eq("ownerAccountId", actor._id).eq("threadId", threadId))
+        .collect(),
+    ]);
     await Promise.all(
       openTabs
         .filter(
@@ -1169,7 +1173,7 @@ export const beginRun = mutation({
           ctx.db.patch(tab._id, { selected: false, updatedAt: now }),
         ),
     );
-    const threadTabs = openTabs
+    const threadTabs = conversationTabs
       .filter(
         (tab) => tab.schoolId === actor.schoolId && tab.threadId === threadId,
       )
@@ -2461,25 +2465,25 @@ export const selectTab = mutation({
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
-    const tabs = await ctx.db
+    const selectedTabs = await ctx.db
       .query("spectraRunTabs")
-      .withIndex("by_account_updated", (q) => q.eq("ownerAccountId", actor._id))
+      .withIndex("by_account_selected", (q) => q.eq("ownerAccountId", actor._id).eq("selected", true))
       .collect();
     const now = Date.now();
-    const schoolTabs = tabs.filter(
-      (tab) => !tab.schoolId || tab.schoolId === actor.schoolId,
-    );
+    let conversationTabs: Doc<"spectraRunTabs">[] = [];
     let targetRunId = args.runId;
     let targetThreadId = args.threadId;
     let targetRun: Doc<"spectraAiRuns"> | null = null;
 
     if (args.threadId) {
       const thread = await ctx.db.get(args.threadId);
-      if (!thread || thread.schoolId !== actor.schoolId)
+      if (!thread || thread.ownerAccountId !== actor._id || thread.schoolId !== actor.schoolId)
         throw new Error("That conversation is not available.");
       targetThreadId = thread._id;
-      const forThread = schoolTabs
-        .filter((tab) => tab.threadId === thread._id)
+      conversationTabs = await ctx.db.query("spectraRunTabs")
+        .withIndex("by_account_thread", q => q.eq("ownerAccountId", actor._id).eq("threadId", thread._id)).collect();
+      const forThread = conversationTabs
+        .filter((tab) => !tab.schoolId || tab.schoolId === actor.schoolId)
         .sort((a, b) => b.updatedAt - a.updatedAt);
       // Prefer the conversation's latest run. Selecting an older dock tab
       // updates that tab's timestamp, so tab order is not conversation order.
@@ -2489,10 +2493,17 @@ export const selectTab = mutation({
 
     if (targetRunId) {
       targetRun = await ctx.db.get(targetRunId);
-      if (!targetRun || targetRun.schoolId !== actor.schoolId)
+      if (!targetRun || targetRun.ownerAccountId !== actor._id || targetRun.schoolId !== actor.schoolId)
         throw new Error("That run is not available.");
       if (!targetThreadId) targetThreadId = targetRun.threadId;
     }
+
+    if (targetThreadId && !args.threadId)
+      conversationTabs = await ctx.db.query("spectraRunTabs")
+        .withIndex("by_account_thread", q => q.eq("ownerAccountId", actor._id).eq("threadId", targetThreadId!)).collect();
+    const schoolTabs = [...new Map([...selectedTabs, ...conversationTabs]
+      .filter(tab => !tab.schoolId || tab.schoolId === actor.schoolId)
+      .map(tab => [tab._id, tab])).values()];
 
     // Explicit deselect: clear selected flags without requiring a target run.
     if (!args.runId && !args.threadId) {
@@ -2510,8 +2521,8 @@ export const selectTab = mutation({
       return { selected: false, reason: "no_run" as const };
 
     let selected = false;
-    const threadTabs = schoolTabs
-      .filter((tab) => tab.threadId === targetThreadId)
+    const threadTabs = conversationTabs
+      .filter((tab) => !tab.schoolId || tab.schoolId === actor.schoolId)
       .sort((a, b) => b.updatedAt - a.updatedAt);
     const canonical = threadTabs[0];
     for (const tab of schoolTabs) {
@@ -3079,6 +3090,23 @@ export const patchResultCard = mutation({
       updatedAt: Date.now(),
     });
     return { resultCardId: args.resultCardId };
+  },
+});
+
+/** Only Undo needs this predecessor; ordinary runs do not load older run state. */
+export const previousForUndo = query({
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string() },
+  handler: async (ctx, args) => {
+    const { run } = await requireOwnedRun(ctx, args.runId);
+    requireCurrentExecution(run.executionId, args.executionId);
+    if (run.status !== "running") throw new Error("AI_APPLICATION_OPERATION_NOT_ACTIVE");
+    if (!run.threadId) return null;
+    const previous = await ctx.db.query("spectraAiRuns")
+      .withIndex("by_thread", (q) => q.eq("threadId", run.threadId).lt("_creationTime", run._creationTime))
+      .order("desc").first();
+    if (!previous || previous.ownerAccountId !== run.ownerAccountId || previous.schoolId !== run.schoolId ||
+        !isTerminalRunStatus(previous.status) || !previous.executionId) return null;
+    return { runId: previous._id, executionId: previous.executionId };
   },
 });
 

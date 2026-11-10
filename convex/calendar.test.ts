@@ -4,6 +4,7 @@ import { convexTest } from "convex-test";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
+import { interpretCalendarMutationResult } from "../src/features/spectra/calendar/domain/command";
 
 const modules = import.meta.glob("./**/*.ts");
 const identity = {
@@ -287,10 +288,16 @@ describe("Calendar personal events", () => {
       itemId, startAt: 1_790_337_600_000, endAt: 1_790_341_200_000, expectedRevision: created.revision,
     });
     expect(moved).toMatchObject({ startAt: 1_790_337_600_000, endAt: 1_790_341_200_000 });
+    expect(interpretCalendarMutationResult({
+      type: "calendar.move_work_block", itemId, startAt: moved.startAt!, endAt: moved.endAt!, expectedRevision: created.revision,
+    }, moved).postcondition).toMatchObject({ kind: "personal_event", linkedTask: false });
     const resized = await user.mutation(api.calendar.resizeWorkBlock, {
       itemId, endAt: 1_790_343_000_000, expectedRevision: moved.revision,
     });
     expect(resized.endAt).toBe(1_790_343_000_000);
+    expect(interpretCalendarMutationResult({
+      type: "calendar.resize_work_block", itemId, endAt: resized.endAt!, expectedRevision: moved.revision,
+    }, resized).postcondition).toMatchObject({ kind: "personal_event", startAt: moved.startAt, endAt: resized.endAt });
   });
 
   it("keeps a block's length when it is moved with no end given", async () => {

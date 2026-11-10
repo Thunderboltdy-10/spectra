@@ -37,6 +37,8 @@ export type LibraryItem = {
   /** The artifact id for work items (what create/edit/read take). */
   artifactId?: string;
   location?: string;
+  /** Existing storage metadata; does not imply a linked desktop file. */
+  onComputer?: boolean;
   updatedAt?: number;
 };
 
@@ -63,6 +65,7 @@ export type SearchHit = {
   /** The workspace the item lives in, when the user can open it. */
   workspace?: string;
   ownership?: "mine" | "shared" | "school";
+  onComputer?: boolean;
   updatedAt?: number;
   /** When it happens: an event start or a due date. */
   timeAt?: number;
@@ -140,7 +143,7 @@ export interface HarnessBackend {
       approved: boolean;
     },
     signal: AbortSignal,
-  ): Promise<void>;
+  ): Promise<CommandResult | void>;
   listLibrary(
     input: { query?: string; type?: string; folderId?: string; limit: number },
     signal: AbortSignal,
@@ -178,6 +181,8 @@ export interface HarnessBackend {
    * binds to exactly this change. Optional: the in-memory backend needs none.
    */
   stageCommand?(request: CommandRequest, signal: AbortSignal): Promise<void>;
+  /** Reverse the immediately preceding run in this thread using its saved undo state. */
+  undoPreviousRun?(input: { approved: boolean; approvalScope?: string }, signal: AbortSignal): Promise<CommandResult>;
   /**
    * Hand the rest of this run to one of the user's agents: returns its
    * instructions, or null when it is unavailable. Optional.
@@ -187,5 +192,5 @@ export interface HarnessBackend {
   stageArtifactUpdate?(
     input: { id: string; type: ArtifactTypeKey; title?: string; content: Record<string, unknown>; toolCallId: string },
     signal: AbortSignal,
-  ): Promise<void>;
+  ): Promise<CommandResult | void>;
 }

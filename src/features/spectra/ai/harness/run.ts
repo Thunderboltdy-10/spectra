@@ -128,8 +128,9 @@ function userMessage(prompt: string, attachments?: HarnessContentPart[]): Harnes
   return { role: "user", content: [{ type: "text", text: prompt }, ...attachments] };
 }
 
-export const modelSummariser = async ({ transcript, signal }: { transcript: string; signal: AbortSignal }) => {
+export const modelSummariser = async ({ transcript, signal, runtime }: { transcript: string; signal: AbortSignal; runtime?: HarnessRunInput["runtime"] }) => {
   const turn = await callSpectraModel({
+    runtime,
     messages: [
       { role: "system", content: SUMMARY_INSTRUCTIONS },
       { role: "user", content: transcript },
@@ -140,10 +141,10 @@ export const modelSummariser = async ({ transcript, signal }: { transcript: stri
   return turn.text;
 };
 
-export function defaultCompactor(): Compactor {
+export function defaultCompactor(runtime?: HarnessRunInput["runtime"]): Compactor {
   return createCompactor({
     contextWindow: () => spectraModelContextWindow(),
-    summarise: modelSummariser,
+    summarise: request => modelSummariser({ ...request, runtime }),
   });
 }
 
@@ -192,7 +193,7 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
   const places = input.environment.here ? undefined : input.environment.places;
   const titling: Promise<void> =
     writeTitle && input.wantTitle
-      ? writeTitle({ prompt: input.prompt, ...(places?.length ? { places } : {}) }, AbortSignal.timeout(45_000))
+      ? writeTitle({ prompt: input.prompt, ...(input.runtime ? { runtime: input.runtime } : {}), ...(places?.length ? { places } : {}) }, AbortSignal.timeout(45_000))
           .then((named) => {
             if (!named?.title) return;
             const placeId = places?.some((place) => place.id === named.placeId) ? named.placeId : undefined;
@@ -317,7 +318,7 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
     }
   };
 
-  const baseCompactor = input.compactor === undefined ? defaultCompactor() : (input.compactor ?? undefined);
+  const baseCompactor = input.compactor === undefined ? defaultCompactor(input.runtime) : (input.compactor ?? undefined);
   const outcome = await runHarnessLoop(
     state,
     {

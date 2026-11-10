@@ -18,6 +18,16 @@ export type SchoolCas = FunctionReturnType<typeof api.school.cas>;
 export type SchoolExperience = SchoolCas["experiences"][number];
 export type SchoolExperienceDetail = NonNullable<FunctionReturnType<typeof api.school.casExperience>>;
 
+/** An inaccessible or never-synced empty response says nothing about workload. */
+export function hasSchoolTaskSnapshot(status: SchoolSyncStatus | undefined, view: "current" | "past" | "all" = "current") {
+  if (!status || !["connected", "degraded"].includes(status.connection.state)) return false;
+  const kinds = view === "all" ? ["current_tasks", "past_tasks"] : [view === "past" ? "past_tasks" : "current_tasks"];
+  return kinds.every(kind => {
+    const row = status.kinds.find(row => row.kind === kind);
+    return row?.available && row.mode !== "off" && row.lastSuccessAt != null && !row.problem && !["off", "failed", "blocked"].includes(row.state);
+  });
+}
+
 export const MODE_LABEL: Record<SchoolSyncMode, string> = { auto: "Auto", manual: "Manual", off: "Off" };
 export const MODE_HINT: Record<SchoolSyncMode, string> = {
   auto: "Kept up to date in the background.",

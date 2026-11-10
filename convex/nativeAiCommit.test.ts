@@ -11,6 +11,7 @@ import { artifactCreationIdentity, artifactOperationDigest, artifactScopeDigest,
 import { canonicalArtifactWriteContent } from "../src/features/spectra/operations/artifact-write-content";
 import { nativeAiRequestDigest } from "../shared/native-ai-commit";
 import { nativeOperationId } from "../shared/native-office-contract";
+import { POLICY_PRESETS } from "../shared/sync-policy";
 import { planNativeArtifactYjsMutation, readNativeArtifactYjsDocument } from "../src/features/spectra/work/models/yjs/native-artifact-model";
 
 const injected = vi.hoisted(() => ({ stage: "" }));
@@ -143,6 +144,8 @@ async function bridgeFixture() {
   const source = f.args.expected.nativeSource!;
   const localId = await f.t.run(async ctx => {
     const now = Date.now();
+    await ctx.db.insert("syncPolicies", { accountId: f.args.append.accountId, scopeKind: "account",
+      scopeId: String(f.args.append.accountId), ...POLICY_PRESETS.both, createdAt: now, updatedAt: now });
     const deviceId = await ctx.db.insert("bridgeDevices", { accountId: f.args.append.accountId,
       name: "Disposable Bridge", platform: "windows", credentialHash: hash("fixture credential"),
       protocolVersion: "1", appVersion: "1", pairedAt: now, lastSeenAt: now, state: "active" });
@@ -159,10 +162,31 @@ async function bridgeFixture() {
   f.args.nativeCandidate = { destination: "bridge", queue: { ...cloud, localReplicaId: localId,
     regionIds: cloud.nativeReceipt.targets.regionIds, partNames: cloud.nativeReceipt.targets.partNames,
     nativeReceipt: { ...cloud.nativeReceipt, state: "pending" } } };
+  await f.t.run(async ctx => {
+    const operation = (await ctx.db.get(f.ids.operationId))!;
+    const scope = { ...operation.output.artifactWriteScope, approvalCategories: ["bridge_files"] };
+    await ctx.db.patch(operation._id, { requiresConfirmation: true, output: { ...operation.output,
+      artifactWriteScope: scope, approvedArtifactScope: await artifactScopeDigest(scope) } });
+    await ctx.db.patch(f.ids.runId, { approval: { executionId: "attempt", status: "accepted", reasons: ["Desktop file"], requestedAt: Date.now() } });
+  });
   return { ...f, localId };
 }
 
 describe("atomic AI native commit", () => {
+  it("refuses an unclassified Bridge effect before changing history or queuing bytes", async () => {
+    const f = await bridgeFixture();
+    await f.t.run(async ctx => {
+      const operation = (await ctx.db.get(f.ids.operationId))!;
+      const scope = { ...operation.output.artifactWriteScope };
+      delete scope.approvalCategories;
+      await ctx.db.patch(operation._id, { requiresConfirmation: false, output: { ...operation.output, artifactWriteScope: scope } });
+    });
+    await expect(f.commit()).rejects.toThrow("AI_ARTIFACT_APPROVAL_SCOPE_REQUIRED");
+    expect(await f.t.run(ctx => ctx.db.query("bridgeWriteRequests").collect())).toEqual([]);
+    expect(await f.t.run(ctx => ctx.db.query("spectraArtifactVersions").collect())).toEqual([]);
+    expect((await f.t.run(ctx => ctx.db.get(f.ids.artifactId)))?.content).toEqual(f.before.content);
+  });
+
   it("admits the exact pending create binding and replays its original native receipt after Stop", async () => {
     const f = await fixture("create");
     const client = f.t.withIdentity({ subject: "native-ai-owner", email: "native-ai@example.test", emailVerified: true });

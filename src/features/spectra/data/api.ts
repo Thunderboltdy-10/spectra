@@ -1061,16 +1061,32 @@ async function readJson<T>(response: Response): Promise<T> {
   return payload as T;
 }
 
-export async function getSpectraOverview(workspaceId?: string, force = false) {
-  const key = workspaceId ?? "home";
+export async function getSpectraOverview(workspaceId?: string, force = false, includeRuns = true) {
+  const scope = workspaceId ?? "home";
+  const key = `${scope}${includeRuns ? "" : ":catalog"}`;
+  if (force) overviewCache.delete(includeRuns ? `${scope}:catalog` : scope);
   const cached = overviewCache.get(key);
   if (!force && cached && Date.now() - cached.cachedAt < CACHE_TTL)
     return cached.value;
+  if (!force && !includeRuns) {
+    const full = overviewCache.get(scope);
+    if (full && Date.now() - full.cachedAt < CACHE_TTL) return full.value;
+    const fullRead = overviewReads.get(scope);
+    if (fullRead) return fullRead;
+  }
+  const pendingCatalog = !force && includeRuns && !workspaceId ? overviewReads.get(`${scope}:catalog`) : undefined;
+  if (pendingCatalog) await pendingCatalog.catch(() => undefined);
+  const priorCatalog = !force && includeRuns && !workspaceId ? overviewCache.get(`${scope}:catalog`) : undefined;
+  const catalog = priorCatalog && Date.now() - priorCatalog.cachedAt < CACHE_TTL ? priorCatalog : undefined;
   const params = new URLSearchParams({ action: "overview" });
   if (workspaceId) params.set("workspaceId", workspaceId);
+  if (!includeRuns) params.set("includeRuns", "false");
+  if (catalog) params.set("includeCatalog", "false");
   // A forced read has to see what just changed, so it never joins one already under way.
   const joined = force ? undefined : overviewReads.get(key);
-  const reading = joined ?? requestSpectra(`/api/spectra?${params.toString()}`, { cache: "no-store" }).then(readJson<SpectraOverview>);
+  const reading = joined ?? requestSpectra(`/api/spectra?${params.toString()}`, { cache: "no-store" })
+    .then(readJson<SpectraOverview>)
+    .then(value => catalog ? { ...catalog.value, runs: value.runs, resultCards: value.resultCards } : value);
   if (!joined && !force) {
     overviewReads.set(key, reading);
     void reading.catch(() => undefined).finally(() => {
@@ -1078,7 +1094,7 @@ export async function getSpectraOverview(workspaceId?: string, force = false) {
     });
   }
   const value = await reading;
-  overviewCache.set(key, { value, cachedAt: Date.now() });
+  overviewCache.set(key, { value, cachedAt: catalog?.cachedAt ?? Date.now() });
   if (workspaceId && value.workspace)
     workspaceCache.set(workspaceId, {
       value: value.workspace,

@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, anyhow};
@@ -20,7 +20,7 @@ use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
 use yrs::{Doc, ReadTxn, StateVector, Transact, Update};
 
-use crate::works::{Projection, WorkStore};
+use crate::works::{Projection, ValidatedBackup, WorkStore};
 
 pub const FRAME_PROTOCOL: &str = "spectra-fragments-v1";
 pub const FRAME_BYTES: usize = 512 * 1024;
@@ -323,33 +323,49 @@ pub struct Rooms {
     store: Arc<WorkStore>,
     open: Mutex<HashMap<String, Arc<Mutex<Room>>>>,
     next_peer: AtomicU64,
+    authority: Mutex<Option<StoredWorkAuthority>>,
 }
+
+#[derive(Clone)]
+struct StoredWorkAuthority { deployment: String, credential: String }
 
 fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// This computer's rooms, opened the first time they're needed.
-pub fn shared() -> Option<&'static Arc<Rooms>> {
-    static ROOMS: OnceLock<Option<Arc<Rooms>>> = OnceLock::new();
-    ROOMS
-        .get_or_init(|| {
-            let path = crate::works::default_store_path()?;
-            match WorkStore::open(&path) {
-                Ok(store) => Some(Rooms::new(Arc::new(store))),
-                Err(error) => {
-                    eprintln!("[works] {error:#}");
-                    None
-                }
-            }
-        })
-        .as_ref()
-}
-
 impl Rooms {
     pub fn new(store: Arc<WorkStore>) -> Arc<Self> {
-        Arc::new(Self { store, open: Mutex::new(HashMap::new()), next_peer: AtomicU64::new(1) })
+        Arc::new(Self { store, open: Mutex::new(HashMap::new()), next_peer: AtomicU64::new(1), authority: Mutex::new(None) })
     }
+
+    pub async fn for_account(store_path: std::path::PathBuf, legacy_path: std::path::PathBuf, deployment: String, credential: String, account: String) -> anyhow::Result<Arc<Self>> {
+        let owner = account.clone();
+        let cloud = deployment.clone();
+        let source = legacy_path.clone();
+        let (store, ids) = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+            let store = WorkStore::for_account(&store_path, &cloud, &owner)?;
+            let ids = if store.migration_complete()? { None } else { Some(WorkStore::legacy_ids(&source)?) };
+            Ok((store, ids))
+        }).await??;
+        let store = if let Some(ids) = ids {
+            let mut allowed = Vec::new();
+            for chunk in ids.chunks(100) {
+                allowed.extend(crate::sync::owned_stored_works(&deployment, &credential, &account, chunk).await?);
+            }
+            tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+                if legacy_path.try_exists()? { store.copy_verified_legacy(&legacy_path, &allowed)?; }
+                store.finish_migration()?;
+                Ok(store)
+            }).await??
+        } else { store };
+        Ok(Arc::new(Self { store: Arc::new(store), open: Mutex::new(HashMap::new()), next_peer: AtomicU64::new(1), authority: Mutex::new(Some(StoredWorkAuthority { deployment, credential })) }))
+    }
+
+    pub(crate) fn refresh_authority(&self, deployment: String, credential: String) {
+        *locked(&self.authority) = Some(StoredWorkAuthority { deployment, credential });
+    }
+
+    pub(crate) fn clear_authority(&self) { *locked(&self.authority) = None; }
 
     pub fn store(&self) -> &WorkStore {
         &self.store
@@ -730,13 +746,22 @@ impl Connection {
 }
 
 /// Runs a connection until its other side goes.
-async fn drive(rooms: Arc<Rooms>, authorize: Authorize, mut inbound: mpsc::Receiver<Vec<u8>>, out: Outgoing) {
+async fn revoked(changes: &mut Option<tokio::sync::watch::Receiver<u64>>) {
+    match changes {
+        Some(changes) => { let _ = changes.changed().await; }
+        None => std::future::pending().await,
+    }
+}
+
+async fn drive(rooms: Arc<Rooms>, authorize: Authorize, mut inbound: mpsc::Receiver<Vec<u8>>, out: Outgoing, mut changes: Option<tokio::sync::watch::Receiver<u64>>) {
     let connection = Arc::new(Mutex::new(Connection::new(rooms, authorize, out.clone())));
     let mut assembler = Assembler::default();
     let mut ping = tokio::time::interval(PING_EVERY);
     ping.tick().await;
     loop {
         tokio::select! {
+            biased;
+            _ = revoked(&mut changes) => break,
             message = inbound.recv() => {
                 let Some(message) = message else { break };
                 let whole = match assembler.accept(message) {
@@ -766,14 +791,26 @@ async fn drive(rooms: Arc<Rooms>, authorize: Authorize, mut inbound: mpsc::Recei
 }
 
 /// A browser's socket to the rooms.
-pub async fn serve_browser(socket: WebSocket, rooms: Arc<Rooms>, authorize: Authorize) {
+pub async fn serve_browser(socket: WebSocket, rooms: Arc<Rooms>, authorize: Authorize, changes: tokio::sync::watch::Receiver<u64>) {
     let (mut sink, mut stream) = socket.split();
     let (out, mut outgoing) = mpsc::unbounded_channel::<Vec<u8>>();
     let (to_room, inbound) = mpsc::channel::<Vec<u8>>(256);
+    let mut writing_changes = changes.clone();
     let writer = tokio::spawn(async move {
-        while let Some(message) = outgoing.recv().await {
+        loop {
+            let message = tokio::select! {
+                biased;
+                _ = writing_changes.changed() => return,
+                message = outgoing.recv() => message,
+            };
+            let Some(message) = message else { return; };
             for frame in frames(message) {
-                if sink.send(Message::Binary(frame.into())).await.is_err() {
+                let sent = tokio::select! {
+                    biased;
+                    _ = writing_changes.changed() => return,
+                    sent = sink.send(Message::Binary(frame.into())) => sent,
+                };
+                if sent.is_err() {
                     return;
                 }
             }
@@ -792,42 +829,76 @@ pub async fn serve_browser(socket: WebSocket, rooms: Arc<Rooms>, authorize: Auth
             }
         }
     });
-    drive(rooms, authorize, inbound, out).await;
+    drive(rooms, authorize, inbound, out, Some(changes)).await;
     reader.abort();
     writer.abort();
 }
 
 /// The server's socket for one request after another about stored work.
-pub async fn serve_store_requests<S, R, E>(mut sink: S, mut stream: R, rooms: Arc<Rooms>)
+pub async fn serve_store_requests<S, R, E>(mut sink: S, mut stream: R, rooms: Arc<Rooms>, mut changes: tokio::sync::watch::Receiver<u64>)
 where
     S: futures_util::Sink<String> + Unpin,
     R: futures_util::Stream<Item = Result<String, E>> + Unpin,
 {
-    while let Some(Ok(text)) = stream.next().await {
-        let reply = answer_store_request(rooms.clone(), text).await;
-        if sink.send(reply).await.is_err() {
-            return;
+    loop {
+        tokio::select! {
+            biased;
+            _ = changes.changed() => return,
+            request = async {
+                let Some(Ok(text)) = stream.next().await else { return false; };
+                let reply = answer_store_request(rooms.clone(), text).await;
+                sink.send(reply).await.is_ok()
+            } => if !request { return; },
         }
     }
 }
 
 /// Reads `{id, method, params}` and answers `{id, result}` or `{id, error}`.
 pub async fn answer_store_request(rooms: Arc<Rooms>, text: String) -> String {
+    enum Answer { Ready(Value), Restore { id: Value, bundle: ValidatedBackup } }
+    let request_rooms = rooms.clone();
     let answered = tokio::task::spawn_blocking(move || {
         let request: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
         let id = request["id"].clone();
         let method = request["method"].as_str().unwrap_or_default().to_string();
-        match rooms.call(&method, &request["params"]) {
+        if method == "restore" && request_rooms.store.account_id().is_some() {
+            let parsed = (|| -> anyhow::Result<_> {
+                let bundle = from_base64(request["params"]["bundleBase64"].as_str().context("The backup is missing")?)?;
+                ValidatedBackup::from_bytes(bundle)
+            })();
+            return match parsed {
+                Ok(bundle) => Answer::Restore { id, bundle },
+                Err(error) => Answer::Ready(json!({ "id": id, "error": format!("{error:#}") })),
+            };
+        }
+        Answer::Ready(match request_rooms.call(&method, &request["params"]) {
             Ok(result) => json!({ "id": id, "result": result }),
             Err(error) => json!({ "id": id, "error": format!("{error:#}") }),
+        })
+    }).await;
+    match answered {
+        Ok(Answer::Ready(value)) => value,
+        Ok(Answer::Restore { id, bundle }) => {
+            let restored = async {
+                let authority = locked(&rooms.authority).clone().context("A verified work account is required")?;
+                let account = rooms.store.account_id().context("A verified work account is required")?;
+                let mut allowed = HashSet::new();
+                for chunk in bundle.artifact_ids().chunks(100) {
+                    allowed.extend(crate::sync::owned_stored_works(&authority.deployment, &authority.credential, account, chunk).await?);
+                }
+                tokio::task::spawn_blocking(move || rooms.store.restore_verified(bundle, &allowed)).await?
+            }.await;
+            match restored {
+                Ok(count) => json!({ "id": id, "result": { "restored": count } }),
+                Err(error) => json!({ "id": id, "error": format!("{error:#}") }),
+            }
         }
-    })
-    .await;
-    answered.unwrap_or_else(|_| json!({ "error": "The request stopped unexpectedly." })).to_string()
+        Err(_) => json!({ "error": "The request stopped unexpectedly." }),
+    }.to_string()
 }
 
 /// A connection arriving through the hub, already vouched for by it.
-pub async fn serve_pipe<S, R, E>(mut sink: S, mut stream: R, rooms: Arc<Rooms>)
+pub async fn serve_pipe<S, R, E>(mut sink: S, mut stream: R, rooms: Arc<Rooms>, changes: tokio::sync::watch::Receiver<u64>)
 where
     S: futures_util::Sink<Vec<u8>> + Unpin + Send + 'static,
     R: futures_util::Stream<Item = Result<Vec<u8>, E>> + Unpin + Send + 'static,
@@ -835,10 +906,16 @@ where
 {
     let (out, mut outgoing) = mpsc::unbounded_channel::<Vec<u8>>();
     let (to_room, inbound) = mpsc::channel::<Vec<u8>>(256);
+    let mut writing_changes = changes.clone();
     let writer = tokio::spawn(async move {
         while let Some(message) = outgoing.recv().await {
             for frame in frames(message) {
-                if sink.send(frame).await.is_err() {
+                let sent = tokio::select! {
+                    biased;
+                    _ = writing_changes.changed() => return,
+                    sent = sink.send(frame) => sent,
+                };
+                if sent.is_err() {
                     return;
                 }
             }
@@ -851,7 +928,7 @@ where
             }
         }
     });
-    drive(rooms, Arc::new(|_| true), inbound, out).await;
+    drive(rooms, Arc::new(|_| true), inbound, out, Some(changes)).await;
     reader.abort();
     writer.abort();
 }
@@ -859,6 +936,60 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn account_migration_and_backup_restore_wait_for_complete_bounded_ownership_proof() {
+        use std::sync::atomic::AtomicBool;
+        let root = tempfile::tempdir().unwrap();
+        let legacy_path = root.path().join("works.db");
+        let legacy = WorkStore::open(&legacy_path).unwrap();
+        for index in 0..201 {
+            let id = if index < 101 { format!("a-{index:03}") } else { format!("z-{index:03}") };
+            legacy.save_projection(&id, &Projection { title: Some(id.clone()), content: Some(json!({"blocks":[]})), ..Projection::default() }).unwrap();
+        }
+        let requests = Arc::new(Mutex::new(Vec::<usize>::new()));
+        let refuse_second = Arc::new(AtomicBool::new(true));
+        let seen = requests.clone();
+        let refuse = refuse_second.clone();
+        let router = axum::Router::new().route("/api/query", axum::routing::post(move |axum::Json(request): axum::Json<Value>| {
+            let seen = seen.clone(); let refuse = refuse.clone();
+            async move {
+                assert_eq!(request["path"], "bridgeSync:ownedStoredWorks");
+                assert_eq!(request["args"]["credential"], "fixture-only");
+                let ids = request["args"]["artifactIds"].as_array().unwrap();
+                let number = { let mut seen = seen.lock().unwrap(); seen.push(ids.len()); seen.len() };
+                let account = if refuse.load(Ordering::SeqCst) && number == 2 { "different-account" } else { "a" };
+                let allowed: Vec<_> = ids.iter().filter(|id| id.as_str().unwrap().starts_with("a-")).cloned().collect();
+                axum::Json(json!({"status":"success", "value":{"accountId":account,"artifactIds":allowed}}))
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
+        let make = || Rooms::for_account(legacy_path.clone(), legacy_path.clone(), endpoint.clone(), "fixture-only".into(), "a".into());
+        assert!(make().await.is_err());
+        let incomplete = WorkStore::for_account(&legacy_path, &endpoint, "a").unwrap();
+        assert_eq!(incomplete.summary().unwrap()["works"], 0);
+        assert!(!incomplete.migration_complete().unwrap());
+        drop(incomplete);
+        refuse_second.store(false, Ordering::SeqCst);
+        requests.lock().unwrap().clear();
+        let rooms = make().await.unwrap();
+        assert_eq!(*requests.lock().unwrap(), vec![100,100,1]);
+        assert_eq!(rooms.call("summary", &json!({})).unwrap()["works"], 101);
+        assert!(rooms.call("get", &json!({"artifactId":"z-101"})).unwrap().is_null());
+        drop(make().await.unwrap());
+        assert_eq!(*requests.lock().unwrap(), vec![100,100,1]);
+        let empty = root.path().join("fresh/works.db");
+        let restored = Rooms::for_account(empty.clone(), empty, endpoint, "fixture-only".into(), "a".into()).await.unwrap();
+        let bundle = legacy.backup_bundle(true).unwrap().0;
+        let reply: Value = serde_json::from_str(&answer_store_request(restored.clone(), json!({"id":1,"method":"restore","params":{"bundleBase64":base64_of(&bundle)}}).to_string()).await).unwrap();
+        assert_eq!(reply["result"]["restored"], 101);
+        assert!(restored.call("get", &json!({"artifactId":"z-101"})).unwrap().is_null());
+        assert_eq!(*requests.lock().unwrap(), vec![100,100,1,100,100,1]);
+        assert_eq!(legacy.summary().unwrap()["works"], 201);
+        server.abort();
+    }
     use yrs::{GetString, Text};
 
     const DOCUMENT: &str = "artifact:work1:cm9vdA:ZG9jdW1lbnQ";

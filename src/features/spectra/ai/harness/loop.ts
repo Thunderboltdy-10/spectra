@@ -249,6 +249,7 @@ type Prepared = {
   category?: PermissionCategory;
   error?: string;
   targets: string[];
+  exclusive?: boolean;
 };
 
 function prepare(call: HarnessToolCall, tools: Map<string, AnyHarnessTool>): Prepared {
@@ -311,7 +312,8 @@ function prepare(call: HarnessToolCall, tools: Map<string, AnyHarnessTool>): Pre
   } catch {
     category = undefined;
   }
-  return { call, tool, args, effect, category, label: safeLabel(tool, args), targets };
+  const exclusive = typeof tool.exclusive === "function" ? tool.exclusive(args) : tool.exclusive;
+  return { call, tool, args, effect, category, label: safeLabel(tool, args), targets, exclusive };
 }
 
 function fallbackLabel(name: string) {
@@ -463,6 +465,8 @@ export async function runHarnessLoop(
             runId: deps.runId,
             toolCallId: prepared.call.id,
             approved: granted,
+            ...(granted && state.pending?.toolCallId === prepared.call.id && state.pending.approvalScope
+              ? { approvalScope: state.pending.approvalScope } : {}),
           });
         outcome = await run(approved);
         // A tool can discover mid-call that its effect needs approval (a
@@ -607,9 +611,28 @@ export async function runHarnessLoop(
     const outcomes = new Map<string, ToolOutcome>();
     const chains = new Map<string, Promise<void>>();
     const tasks: Promise<void>[] = [];
+    let deferFollowing = false;
     for (const item of prepared) {
+      if (item.exclusive) {
+        await Promise.all(tasks);
+        if (deferred.size) deferFollowing = true;
+      }
+      if (deferFollowing) {
+        deferred.add(item.call.id);
+        continue;
+      }
       if (asksFirst(item)) {
         deferred.add(item.call.id);
+        if (item.exclusive) deferFollowing = true;
+        continue;
+      }
+      if (item.exclusive) {
+        const outcome = await executeOne(item);
+        if (outcome.pause) {
+          deferred.add(item.call.id);
+          knownPauses.set(item.call.id, outcome.pause);
+          deferFollowing = true;
+        } else outcomes.set(item.call.id, outcome);
         continue;
       }
       const waits = item.targets.flatMap((target) => {

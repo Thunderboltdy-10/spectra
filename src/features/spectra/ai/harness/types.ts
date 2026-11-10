@@ -68,6 +68,8 @@ export type PendingInput = {
   /** A short free-text answer is accepted. */
   allowText?: boolean;
   category?: PermissionCategory;
+  /** Server-selected change an approval covers, retained across a resume. */
+  approvalScope?: string;
 };
 
 export type InputAnswer =
@@ -107,6 +109,7 @@ export type ToolContext = {
   toolCallId: string;
   /** The user (or their stored choice) approved this call. */
   approved?: boolean;
+  approvalScope?: string;
 };
 
 export class ToolInputError extends Error {
@@ -139,6 +142,8 @@ export type HarnessTool<A = Record<string, unknown>> = {
    * every other call runs in parallel.
    */
   targets?: (args: A) => string[];
+  /** Wait for preceding calls and finish before following calls start. */
+  exclusive?: boolean | ((args: A) => boolean);
   /** The artifact the step works in, which a view following the run opens while it does. */
   shows?: (args: A) => string | undefined;
   /** Validate and normalise raw JSON arguments. Throw ToolInputError. */

@@ -84,13 +84,13 @@ export const forArtifact = query({
     const decision = await evaluateArtifactAccessForActor(ctx, actor, args.artifactId);
     if (!decision.allowed || !decision.loaded) return null;
     const artifact = decision.loaded.resource;
-    const now = Date.now();
+    let now: number | undefined;
     const levels = new Map<string, { level: "read" | "modify"; through?: string }>();
     const raise = (accountId: string, level: "read" | "modify", through?: string) => {
       const current = levels.get(accountId);
       if (!current || (current.level === "read" && level === "modify")) levels.set(accountId, { level, through: current && !through ? undefined : through });
     };
-    const active = (grant: { revokedAt?: number; expiresAt?: number }) => !grant.revokedAt && (!grant.expiresAt || grant.expiresAt > now);
+    const active = (grant: { revokedAt?: number; expiresAt?: number }) => !grant.revokedAt && (!grant.expiresAt || grant.expiresAt > (now ??= Date.now()));
 
     const direct = await ctx.db
       .query("accessGrants")

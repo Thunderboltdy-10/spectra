@@ -143,6 +143,30 @@ describe("Calendar, School, and administration V2", () => {
     ).toThrow("CALENDAR_OFFICIAL_DEADLINE_UNLOCKED");
   });
 
+  it.each(["personal_event", "task", "milestone", "reminder"] as const)("verifies existing %s move/resize results without inventing a task link", (kind) => {
+    const item = calendarItemFromWire({ id: "personal", kind, startAt: 1_000, endAt: 2_000 });
+    for (const type of ["calendar.move_work_block", "calendar.resize_work_block"] as const) {
+      expect(verifyCalendarActionPostcondition({ type, itemId: item.id, startAt: 1_000, endAt: 2_000, expectedRevision: 1 }, item))
+        .toMatchObject({ kind, linkedTask: false });
+    }
+    expect(() => verifyCalendarActionPostcondition({ type: "calendar.schedule_task", startAt: 1_000, endAt: 2_000, timezone: "UTC" }, item))
+      .toThrow("CALENDAR_POSTCONDITION_KIND_MISMATCH");
+    expect(() => verifyCalendarActionPostcondition({ type: "calendar.move_work_block", itemId: item.id, startAt: 1_000, endAt: 2_000, expectedRevision: 1 }, { ...item, sourceLocked: true }))
+      .toThrow("CALENDAR_POSTCONDITION_KIND_MISMATCH");
+  });
+
+  it("still rejects official items, unlinked scheduled blocks and mismatched move times", () => {
+    const action = { type: "calendar.move_work_block" as const, itemId: "event", startAt: 1_000, endAt: 2_000, expectedRevision: 1 };
+    for (const kind of ["official_event", "official_deadline"] as const) {
+      expect(() => verifyCalendarActionPostcondition(action, calendarItemFromWire({ id: "event", kind, startAt: 1_000, endAt: 2_000 })))
+        .toThrow("CALENDAR_POSTCONDITION_KIND_MISMATCH");
+    }
+    expect(() => verifyCalendarActionPostcondition(action, calendarItemFromWire({ id: "event", kind: "scheduled_work_block", startAt: 1_000, endAt: 2_000 })))
+      .toThrow("CALENDAR_POSTCONDITION_TASK_MISSING");
+    expect(() => verifyCalendarActionPostcondition(action, calendarItemFromWire({ id: "event", kind: "personal_event", startAt: 1_001, endAt: 2_000 })))
+      .toThrow("CALENDAR_POSTCONDITION_TIME_MISMATCH");
+  });
+
   it("places date-only school events on the day without hiding them", () => {
     const dated = calendarItemFromWire({
       id: "assembly",

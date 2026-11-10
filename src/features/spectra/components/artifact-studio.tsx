@@ -871,6 +871,7 @@ function ReadonlyArtifactSnapshot({
       ) : null}
       {blueprintKey === "planner_task" ? (
         <div className="mt-6 space-y-4">
+          {typeof body.description === "string" && body.description ? <SpectraStoredText value={body.description} /> : null}
           <section className="rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
             <div className="grid grid-cols-2 gap-4 text-micro">
               <div>
@@ -1031,7 +1032,7 @@ function ReadonlyArtifactSnapshot({
                 top: `${10 + ((index * 31) % 72)}%`,
               }}
             >
-              {String(
+              {humanValue(
                 node.text ?? node.content ?? node.label ?? node.type ?? "Node",
               )}
             </div>
@@ -1176,8 +1177,9 @@ function humanizeKey(value: string) {
     .replace(/^./, (character) => character.toUpperCase());
 }
 
-function humanValue(value: unknown) {
+function humanValue(value: unknown, storedRichText = false) {
   if (value == null || value === "") return "Not set";
+  if (storedRichText) return textOf(value, 0, true) || "Not set";
   if (
     typeof value === "string" ||
     typeof value === "number" ||
@@ -1258,8 +1260,8 @@ function humanDiff(
       return;
     changes.push({
       label: humanFieldLabel(path),
-      before: humanValue(before),
-      after: humanValue(after),
+      before: humanValue(before, path[0] === "content" && (blueprintKey === "quiz" || blueprintKey === "flashcard_deck")),
+      after: humanValue(after, path[0] === "content" && (blueprintKey === "quiz" || blueprintKey === "flashcard_deck")),
       path,
     });
   };
@@ -2641,7 +2643,7 @@ function ArtifactStudioEditor({
     } finally {
       if (!request.signal.aborted) setHistoryLoading(false);
     }
-  }, [artifact._id, selectHistoryVersion]);
+  }, [artifact._id]);
   useEffect(() => {
     historyActiveArtifactRef.current = historyOpen ? artifact._id : null;
     if (historyOpen) void loadHistoryPage();
@@ -4757,17 +4759,18 @@ function ArtifactStudioEditor({
           target.isContentEditable)
       ) {
         // Typing in the pane: the first Escape leaves the box, the next closes the pane.
-        if (target.closest(".studio-pane")) target.blur();
+        if (target.closest(".studio-pane") || (pane.open && studioSurfaceRef.current?.contains(target))) target.blur();
         return;
       }
       // Capture while overlays still exist. A bubble listener runs after Radix
       // closes the menu, so Escape on More would close the whole studio.
       if (
+        (document.querySelector('[data-escape-claim]') && (!pane.open || target?.closest('[data-escape-claim]'))) ||
         document.querySelector(
           // A work edited in place inside another, any modal (presenting, a
           // rehearsal's report), or an editor holding a selection that Escape
           // should let go of (`data-escape-claim`) takes Escape for itself.
-          '[data-escape-claim], [data-state="open"][aria-haspopup], [role="menu"][data-state="open"], [role="listbox"][data-state="open"], [role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"], details[open], [aria-expanded="true"][aria-haspopup], .slash-command-portal, .spectra-document-studio[data-focus], [data-embed-editor]',
+          '[data-state="open"][aria-haspopup], [role="menu"][data-state="open"], [role="listbox"][data-state="open"], [role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"], details[open], [aria-expanded="true"][aria-haspopup], .slash-command-portal, .spectra-document-studio[data-focus], [data-embed-editor]',
         )
       ) {
         return;
@@ -5161,12 +5164,9 @@ function ArtifactStudioEditor({
         catch { setLiveConflict({ message: "This version was restored. Reconnect to display the latest changes." }); }
       }
     } catch (error) {
-      setLiveConflict({
-        message:
-          error instanceof Error
-            ? error.message
-            : "This restore could not be applied safely.",
-      });
+      const message = error instanceof Error ? error.message : "This restore could not be applied safely.";
+      setLiveConflict({ message });
+      toast.error(message);
     } finally {
       restoreInFlightRef.current = false;
       setHistoryBusy(null);

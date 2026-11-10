@@ -4,6 +4,8 @@
  * the stored structure.
  */
 
+import { plainTextFromStored } from "../../rich-content/adapters";
+
 type Snapshot = { title?: unknown; summary?: unknown; content?: unknown };
 
 export type ReadablePart = { label?: string; text: string };
@@ -22,17 +24,17 @@ const TEXT_KEYS = [
 ];
 
 /** The words inside a stored value, skipping ids, styling and anything else that is not read. */
-export function textOf(value: unknown, depth = 0): string {
+export function textOf(value: unknown, depth = 0, storedRichText = false): string {
   if (value == null || depth > 12) return "";
-  if (typeof value === "string") return value;
+  if (typeof value === "string") return storedRichText ? plainTextFromStored(value) : value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) return value.map((item) => textOf(item, depth + 1)).filter(Boolean).join(" ");
+  if (Array.isArray(value)) return value.map((item) => textOf(item, depth + 1, storedRichText)).filter(Boolean).join(" ");
   if (typeof value !== "object") return "";
   const record = value as Record<string, unknown>;
   const parts: string[] = [];
   for (const key of TEXT_KEYS) {
     if (key in record) {
-      const text = textOf(record[key], depth + 1);
+      const text = textOf(record[key], depth + 1, storedRichText);
       if (text) parts.push(text);
     }
   }
@@ -93,7 +95,7 @@ export function readableParts(blueprintKey: string | undefined, snapshot: Snapsh
   const content = record(snapshot.content);
   const numbered = (items: Record<string, unknown>[], noun: string) =>
     items.forEach((item, index) => {
-      const text = clean(textOf(item));
+      const text = clean(textOf(item, 0, blueprintKey === "quiz"));
       if (text) out.push({ label: `${noun} ${index + 1}`, text });
     });
   switch (blueprintKey) {
@@ -110,7 +112,7 @@ export function readableParts(blueprintKey: string | undefined, snapshot: Snapsh
     case "flashcard_deck":
       records(content.cards).forEach((card, index) => {
         for (const [key, noun] of [["front", "front"], ["back", "back"], ["hint", "hint"]] as const) {
-          const text = clean(textOf(card[key]));
+          const text = clean(textOf(card[key], 0, true));
           if (text) out.push({ label: `Card ${index + 1} ${noun}`, text });
         }
       });

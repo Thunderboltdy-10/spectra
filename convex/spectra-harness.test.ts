@@ -5,6 +5,9 @@ import aggregateTest from "@convex-dev/aggregate/test";
 import { makeFunctionReference } from "convex/server";
 import schema from "./schema";
 import { api } from "./_generated/api";
+import { answer } from "./spectraHarness";
+import { observeDatabase } from "../scripts/perf-read-ledger";
+import type { MutationCtx } from "./_generated/server";
 
 const modules = import.meta.glob("./**/*.ts");
 const execute = makeFunctionReference<"mutation">("spectraApplicationWrites:execute");
@@ -69,6 +72,50 @@ async function fixture(patch: Record<string, unknown> = { appearance: { theme: "
 }
 
 describe("AI harness durable state", () => {
+  it.each([true, false, "question"] as const)("clears answered %s controls before another worker starts, without reading unrelated cards", async (choice) => {
+    const measurements = [];
+    for (const unrelated of [1, 100]) {
+      const f = await fixture();
+      if (choice === "question") {
+        await f.actor.mutation(api.spectraHarness.saveCheckpoint, { runId: f.ids.runId, executionId: EXECUTION, state: { turns: 1 },
+          pending: { kind: "question", toolCallId: "call-1", question: "Which subject?" } });
+        await f.actor.mutation(api.spectraRuns.updateStatus, { runId: f.ids.runId, executionId: EXECUTION, status: "awaiting_resolution" });
+      } else await f.pauseForApproval();
+      const cardId = await f.t.run(async ctx => {
+        const run = (await ctx.db.get(f.ids.runId))!;
+        const card = { ownerAccountId: f.ids.accountId, schoolId: run.schoolId, surface: "workspace" as const,
+          status: choice === "question" ? "awaiting_resolution" as const : "awaiting_confirmation" as const,
+          title: "Needs your input", variant: "status" as const, actions: choice === "question" ? [{ key: "continue", label: "Answer" }] : [{ key: "confirm", label: "Allow" }, { key: "cancel", label: "Don't allow" }],
+          createdAt: 1, updatedAt: 1 };
+        for (let i = 0; i < unrelated; i++) {
+          const { _id: _runId, _creationTime: _created, ...other } = run;
+          const otherRun = await ctx.db.insert("spectraAiRuns", other);
+          await ctx.db.insert("spectraResultCards", { ...card, runId: otherRun });
+        }
+        return ctx.db.insert("spectraResultCards", { ...card, runId: f.ids.runId });
+      });
+      await f.actor.mutation(api.spectraRuns.patchResultCard, { resultCardId: cardId, executionId: EXECUTION, title: "Needs your OK" });
+      const args = { runId: f.ids.runId, executionId: EXECUTION, toolCallId: "call-1",
+        answer: choice === "question" ? { kind: "question" as const, text: "Physics" } : { kind: "approval" as const, allowed: choice } };
+      const handler = Reflect.get(answer, "_handler") as (ctx: MutationCtx, input: typeof args) => Promise<unknown>;
+      const measure = () => f.actor.run(async ctx => { const observed = observeDatabase(ctx.db);
+        const result = await handler({ ...ctx, db: observed.db }, args);return { result, ...observed.snapshot() }; });
+      const measured = await measure();measurements.push(measured);
+      const state = await f.t.run(async ctx => ({ card: await ctx.db.get(cardId),
+        summary: await ctx.db.query("spectraResultCardSummaries").withIndex("by_card", q => q.eq("cardId", cardId)).unique(),
+        others: (await ctx.db.query("spectraResultCards").collect()).filter(c => c._id !== cardId) }));
+      expect.soft(state.card).toMatchObject({ status: "queued", actions: [] });
+      expect.soft(state.summary).toMatchObject({ status: "queued", actions: [], runSummary: { status: "queued" } });
+      expect(state.others).toHaveLength(unrelated);
+      expect(state.others.every(c => c.status.startsWith("awaiting_") && c.actions.length === (choice === "question" ? 1 : 2))).toBe(true);
+      const replay = await measure();expect(replay.result).toEqual({ alreadyAnswered: true });expect(replay.writes).toBe(0);
+    }
+    expect(measurements[0].calls).toBe(measurements[1].calls);
+    expect(measurements[0].writes).toBe(measurements[1].writes);
+    const cardReads = measurements.map(m => m.reads.filter(r => r.table === "spectraResultCards" && r.operation === "collect"));
+    expect.soft(cardReads).toEqual([[expect.objectContaining({ index: "by_run", documentsReturned: 1, postIndexFilter: false })], [expect.objectContaining({ index: "by_run", documentsReturned: 1, postIndexFilter: false })]]);
+  });
+
   it("hands messages sent during a run to the next checkpoint once", async () => {
     const f = await fixture();
     await f.actor.mutation(api.spectraHarness.saveCheckpoint, { runId: f.ids.runId, executionId: EXECUTION, state: { turns: 1 } });

@@ -1,11 +1,12 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { mutation, query } from "./functions";
+import { mutation as projectedMutation } from "./orgNodeMutation";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
 import { applicationApprovalScope } from "./spectraApplicationWriteScope";
-import { currentArtifactApprovalScope } from "./spectraArtifactWriteScope";
+import { currentArtifactApprovalScope, preparedArtifactScope } from "./spectraArtifactWriteScope";
 import { requireCurrentExecution } from "./spectraRunLifecycle";
 import { mergeUiObserverInterest } from "./spectraUiObservation";
 import { vUiObserverInterest } from "./spectraUiObservationSchema";
@@ -282,14 +283,15 @@ export const joinableRun = query({
 });
 
 /** The category a recorded operation asks under, decided by the server. */
-function operationCategory(operation: Doc<"spectraOperations">): PermissionCategory | null {
-  if (operation.type !== "app.command") return "permanent_delete";
+function operationCategories(operation: Doc<"spectraOperations">): PermissionCategory[] {
+  if (operation.type !== "app.command") return preparedArtifactScope(operation)?.approvalCategories ?? ["permanent_delete"];
   const input = record(operation.input);
-  return applicationApprovalCategory(String(input.command), record(input.args));
+  const category = applicationApprovalCategory(String(input.command), record(input.args));
+  return category ? [category] : [];
 }
 
 /** The user's stored choice: full control, or "Always allow" this category, unless they set it to Never. */
-async function storedAllows(ctx: QueryCtx | MutationCtx, accountId: Id<"accounts">, run: Doc<"spectraAiRuns">, category: PermissionCategory) {
+async function storedPermissionDecision(ctx: QueryCtx | MutationCtx, accountId: Id<"accounts">, run: Doc<"spectraAiRuns">, category: PermissionCategory) {
   const layer = await ctx.db
     .query("accountPreferences")
     .withIndex("by_account_scope_key", (q) =>
@@ -297,10 +299,10 @@ async function storedAllows(ctx: QueryCtx | MutationCtx, accountId: Id<"accounts
     )
     .unique();
   const ai = record(record(layer?.values).ai);
-  if (Array.isArray(ai.permissionDeny) && ai.permissionDeny.includes(category)) return false;
-  if (ai.permissionFullControl === true) return true;
-  if (Array.isArray(ai.permissionAllow) && ai.permissionAllow.includes(category)) return true;
-  return threadAllows(ctx, run, category);
+  if (Array.isArray(ai.permissionDeny) && ai.permissionDeny.includes(category)) return "deny";
+  if (ai.permissionFullControl === true) return "allow";
+  if (Array.isArray(ai.permissionAllow) && ai.permissionAllow.includes(category)) return "allow";
+  return await threadAllows(ctx, run, category) ? "allow" : "ask";
 }
 
 /** An "Allow" given in a thread covers the same kind of step for the rest of that thread. */
@@ -358,7 +360,7 @@ async function addAlwaysAllow(ctx: MutationCtx, accountId: Id<"accounts">, categ
  * must still match, exactly as for a confirmation. The run is re-queued so a
  * worker can resume it from the checkpoint.
  */
-export const answer = mutation({
+export const answer = projectedMutation({
   args: {
     runId: v.id("spectraAiRuns"),
     executionId: v.string(),
@@ -389,6 +391,12 @@ export const answer = mutation({
     if (pending.kind !== args.answer.kind)
       throw new Error("HARNESS_INPUT_CHANGED: This question changed. Refresh and answer again.");
     const now = Date.now();
+    const resumeCards = async () => {
+      const cards = await ctx.db.query("spectraResultCards")
+        .withIndex("by_run", q => q.eq("runId", args.runId)).collect();
+      for (const card of cards)
+        await ctx.db.patch(card._id, { status: "queued", actions: [], updatedAt: now });
+    };
     if (args.answer.kind === "question") {
       if (run.status !== "awaiting_resolution")
         throw new Error("HARNESS_INPUT_CHANGED: This question was already answered in another view.");
@@ -416,6 +424,7 @@ export const answer = mutation({
         heartbeatAt: now,
         updatedAt: now,
       });
+      await resumeCards();
       return { alreadyAnswered: false, label: text || String(chosen?.label ?? "") };
     }
     const approvalOpen =
@@ -473,6 +482,7 @@ export const answer = mutation({
       heartbeatAt: now,
       updatedAt: now,
     });
+    await resumeCards();
     return { alreadyAnswered: false, label: args.answer.allowed ? "Allowed" : "Not allowed" };
   },
 });
@@ -514,10 +524,14 @@ export const ensureApproved = mutation({
         run.approval?.status === "accepted" &&
         run.approval.executionId === args.executionId &&
         (output.approvedApplicationScope ?? output.approvedArtifactScope) === scope;
+      const categories = operationCategories(operation);
+      if (!categories.length && !approvedByUser) throw new Error("AI_PERMISSION_REQUIRED: Ask the user first.");
+      for (const category of categories) {
+        const decision = await storedPermissionDecision(ctx, actor._id, run, category);
+        if (decision === "deny") throw new Error("AI_PERMISSION_REQUIRED: This change is set to Never in Settings.");
+        if (!approvedByUser && decision !== "allow") throw new Error("AI_PERMISSION_REQUIRED: Ask the user first.");
+      }
       if (approvedByUser) continue;
-      const category = operationCategory(operation);
-      if (!category || !(await storedAllows(ctx, actor._id, run, category)))
-        throw new Error("AI_PERMISSION_REQUIRED: Ask the user first.");
       if (operation.type === "app.command") {
         await ctx.db.patch(operation._id, { output: { ...output, pendingApplicationScope: scope, approvedApplicationScope: scope } });
       } else {

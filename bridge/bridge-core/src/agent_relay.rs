@@ -27,7 +27,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, Query};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
@@ -67,6 +67,7 @@ fn relay_root() -> Option<PathBuf> {
     Some(PathBuf::from(base).join("Spectra"))
 }
 
+#[cfg(not(test))]
 fn relay_token() -> Option<&'static str> {
     static TOKEN: OnceLock<Option<String>> = OnceLock::new();
     TOKEN
@@ -87,6 +88,10 @@ fn relay_token() -> Option<&'static str> {
         .as_deref()
 }
 
+// Unit-test servers must never read or replace the installed Bridge's token.
+#[cfg(test)]
+fn relay_token() -> Option<&'static str> { Some("dummy-local-relay-test-token") }
+
 fn random_hex() -> String {
     let mut bytes = [0_u8; 32];
     rand::rng().fill_bytes(&mut bytes);
@@ -101,6 +106,8 @@ pub fn prepare() {
 #[derive(Deserialize)]
 pub struct ConnectQuery {
     provider: String,
+    #[serde(flatten)]
+    identity: crate::server::LocalRelayIdentity,
 }
 
 #[derive(Deserialize)]
@@ -149,7 +156,11 @@ pub fn relay_token_matches(candidate: &str) -> bool {
 }
 
 /// The local server's socket for requests about stored work.
-pub async fn store_socket(headers: HeaderMap, socket: WebSocketUpgrade) -> Response {
+pub async fn store_socket(
+    State(state): State<Arc<crate::server::ServerState>>,
+    Query(identity): Query<crate::server::LocalRelayIdentity>,
+    headers: HeaderMap, socket: WebSocketUpgrade,
+) -> Response {
     if headers.contains_key("origin") {
         return (StatusCode::FORBIDDEN, "Not for browsers").into_response();
     }
@@ -160,7 +171,11 @@ pub async fn store_socket(headers: HeaderMap, socket: WebSocketUpgrade) -> Respo
     if !offered.split(',').map(str::trim).any(relay_token_matches) {
         return (StatusCode::UNAUTHORIZED, "Agent relay token is wrong").into_response();
     }
-    let Some(rooms) = crate::rooms::shared().cloned() else {
+    if !state.local_relay_matches(&identity) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let mut revoked = state.relay_changes();
+    let Some(rooms) = state.work_rooms() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "Work on this computer isn't available").into_response();
     };
     socket
@@ -169,11 +184,29 @@ pub async fn store_socket(headers: HeaderMap, socket: WebSocketUpgrade) -> Respo
         .max_frame_size(MAX_FRAME_BYTES)
         .on_upgrade(move |socket| async move {
             let (mut sink, mut stream) = socket.split();
-            while let Some(Ok(message)) = stream.next().await {
+            loop {
+                if !state.local_relay_matches(&identity) { return; }
+                let incoming = tokio::select! {
+                    biased;
+                    _ = revoked.changed() => return,
+                    incoming = stream.next() => incoming,
+                };
+                let Some(Ok(message)) = incoming else { return; };
                 match message {
                     Message::Text(text) => {
-                        let reply = crate::rooms::answer_store_request(rooms.clone(), text.to_string()).await;
-                        if sink.send(Message::Text(reply.into())).await.is_err() {
+                        if !state.local_relay_matches(&identity) { return; }
+                        let reply = tokio::select! {
+                            biased;
+                            _ = revoked.changed() => return,
+                            reply = crate::rooms::answer_store_request(rooms.clone(), text.to_string()) => reply,
+                        };
+                        if !state.local_relay_matches(&identity) { return; }
+                        let sent = tokio::select! {
+                            biased;
+                            _ = revoked.changed() => return,
+                            sent = sink.send(Message::Text(reply.into())) => sent,
+                        };
+                        if sent.is_err() {
                             return;
                         }
                     }
@@ -185,6 +218,7 @@ pub async fn store_socket(headers: HeaderMap, socket: WebSocketUpgrade) -> Respo
 }
 
 pub async fn connect(
+    State(state): State<Arc<crate::server::ServerState>>,
     Query(query): Query<ConnectQuery>,
     headers: HeaderMap,
     socket: WebSocketUpgrade,
@@ -196,14 +230,12 @@ pub async fn connect(
         .get("sec-websocket-protocol")
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default();
-    let authorized = relay_token().is_some_and(|expected| {
-        offered.split(',').map(str::trim).any(|candidate| {
-            candidate.len() == expected.len()
-                && bool::from(candidate.as_bytes().ct_eq(expected.as_bytes()))
-        })
-    });
+    let authorized = offered.split(',').map(str::trim).any(relay_token_matches);
     if !authorized {
         return (StatusCode::UNAUTHORIZED, "Agent relay token is wrong").into_response();
+    }
+    if !state.local_relay_matches(&query.identity) {
+        return StatusCode::FORBIDDEN.into_response();
     }
     let Some(program) = executable(&query.provider) else {
         return (StatusCode::BAD_REQUEST, "Unknown provider").into_response();
@@ -212,25 +244,43 @@ pub async fn connect(
         .protocols([PROTOCOL])
         .max_message_size(MAX_FRAME_BYTES)
         .max_frame_size(MAX_FRAME_BYTES)
-        .on_upgrade(move |socket| local_session(socket, program))
+        .on_upgrade(move |socket| local_session(socket, program, state, query.identity))
 }
 
 fn relay_note(kind: &str, detail: &str) -> String {
     serde_json::json!({ "relay": kind, "detail": detail }).to_string()
 }
 
-async fn local_session(mut socket: WebSocket, program: &'static str) {
-    let Some(start) = read_start_local(&mut socket).await else {
+async fn local_session(mut socket: WebSocket, program: &'static str, state: Arc<crate::server::ServerState>, identity: crate::server::LocalRelayIdentity) {
+    let mut revoked = state.relay_changes();
+    if !state.local_relay_matches(&identity) { return; }
+    let start = tokio::select! {
+        biased;
+        _ = revoked.changed() => return,
+        start = read_start_local(&mut socket) => start,
+    };
+    let Some(start) = start else {
         return;
     };
+    if !state.local_relay_matches(&identity) { return; }
     let (to_cli, from_far) = mpsc::channel::<String>(64);
     let (to_far, mut from_cli) = mpsc::channel::<String>(64);
     let session = tokio::spawn(run_cli(program, start, from_far, to_far));
+    let _cancel_session = AbortOnDrop(session.abort_handle());
     loop {
+        if !state.local_relay_matches(&identity) { break; }
         tokio::select! {
+            biased;
+            _ = revoked.changed() => break,
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Text(text))) => {
-                    if to_cli.send(text.to_string()).await.is_err() {
+                    if !state.local_relay_matches(&identity) { break; }
+                    let sent = tokio::select! {
+                        biased;
+                        _ = revoked.changed() => break,
+                        sent = to_cli.send(text.to_string()) => sent,
+                    };
+                    if sent.is_err() {
                         break;
                     }
                 }
@@ -239,7 +289,13 @@ async fn local_session(mut socket: WebSocket, program: &'static str) {
             },
             line = from_cli.recv() => match line {
                 Some(line) => {
-                    if socket.send(Message::Text(line.into())).await.is_err() {
+                    if !state.local_relay_matches(&identity) { break; }
+                    let sent = tokio::select! {
+                        biased;
+                        _ = revoked.changed() => break,
+                        sent = socket.send(Message::Text(line.into())) => sent,
+                    };
+                    if sent.is_err() {
                         break;
                     }
                 }
@@ -526,11 +582,12 @@ pub fn set_hub_enabled(enabled: bool) -> std::io::Result<()> {
 pub struct HubTicket {
     pub url: String,
     pub ticket: String,
+    pub account_id: String,
 }
 
 /// Keeps one control connection to the hub while this computer has agreed to it.
 /// `fetch` asks Spectra for a fresh ticket; `None` means this deployment has no hub.
-pub async fn run_hub<F, Fut>(fetch: F)
+pub async fn run_hub<F, Fut>(state: Arc<crate::server::ServerState>, fetch: F)
 where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<Option<HubTicket>>>,
@@ -541,18 +598,35 @@ where
             tokio::time::sleep(Duration::from_secs(5)).await;
             continue;
         }
-        match fetch().await {
+        let mut changes = state.relay_changes();
+        let Some(identity) = state.local_relay_identity() else {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            continue;
+        };
+        let Some(rooms) = state.work_rooms() else {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            continue;
+        };
+        let fetched = tokio::select! {
+            biased;
+            _ = changes.changed() => continue,
+            fetched = fetch() => fetched,
+        };
+        if !state.local_relay_matches(&identity) { continue; }
+        match fetched {
             Ok(None) => {
                 tokio::time::sleep(HUB_UNCONFIGURED_WAIT).await;
                 continue;
             }
             Ok(Some(ticket)) => {
-                let began = std::time::Instant::now();
-                if let Err(error) = hub_control(&ticket).await {
-                    eprintln!("[agent-hub] {error}");
-                }
-                if began.elapsed() >= HUB_STABLE_AFTER {
-                    backoff = Duration::from_secs(1);
+                if state.work_account().as_ref().is_some_and(|(_, account)| account == &ticket.account_id) {
+                    let began = std::time::Instant::now();
+                    if let Err(error) = hub_control(&ticket, state.clone(), identity, rooms, changes).await {
+                        eprintln!("[agent-hub] {error}");
+                    }
+                    if began.elapsed() >= HUB_STABLE_AFTER {
+                        backoff = Duration::from_secs(1);
+                    }
                 }
             }
             Err(error) => eprintln!("[agent-hub] ticket: {error}"),
@@ -583,43 +657,70 @@ struct HubOpen {
     provider: String,
 }
 
-async fn hub_control(ticket: &HubTicket) -> anyhow::Result<()> {
+async fn hub_control(ticket: &HubTicket, state: Arc<crate::server::ServerState>, identity: crate::server::LocalRelayIdentity, rooms: Arc<crate::rooms::Rooms>, mut changes: tokio::sync::watch::Receiver<u64>) -> anyhow::Result<()> {
+    anyhow::ensure!(state.work_account().as_ref().is_some_and(|(_, account)| account == &ticket.account_id), "Hub ticket belongs to another work account");
     let endpoint = format!("{}/_spectra/agent-hub/bridge", ticket.url.trim_end_matches('/'));
-    let (mut socket, _) =
-        tokio_tungstenite::connect_async(hub_request(&endpoint, Some(&ticket.ticket))?).await?;
+    let (mut socket, _) = tokio::select! {
+        biased;
+        _ = changes.changed() => return Ok(()),
+        socket = tokio_tungstenite::connect_async(hub_request(&endpoint, Some(&ticket.ticket))?) => socket?,
+    };
     let mut consent = tokio::time::interval(Duration::from_secs(5));
-    loop {
+    let (stop, _) = tokio::sync::watch::channel(0u64);
+    let mut pipes = tokio::task::JoinSet::new();
+    let result = loop {
+        if !state.local_relay_matches(&identity) { break Ok(()); }
         tokio::select! {
+            biased;
+            _ = changes.changed() => break Ok(()),
+            _ = pipes.join_next(), if !pipes.is_empty() => {},
             frame = socket.next() => match frame {
                 Some(Ok(HubMessage::Text(text))) => {
                     if let Ok(open) = serde_json::from_str::<HubOpen>(&text) {
                         let base = ticket.url.trim_end_matches('/').to_string();
-                        tokio::spawn(async move {
-                            if let Err(error) = hub_pipe(&base, &open.open, &open.provider).await {
+                        let rooms = rooms.clone();
+                        let mut stopped = stop.subscribe();
+                        pipes.spawn(async move {
+                            let result = if matches!(open.provider.as_str(), "rooms" | "store") {
+                                hub_work_pipe(&base, &open.open, &open.provider, rooms, stopped).await
+                            } else {
+                                tokio::select! {
+                                    biased;
+                                    _ = stopped.changed() => Ok(()),
+                                    result = hub_pipe(&base, &open.open, &open.provider) => result,
+                                }
+                            };
+                            if let Err(error) = result {
                                 eprintln!("[agent-hub] pipe: {error}");
                             }
                         });
                     }
                 }
                 Some(Ok(_)) => {}
-                Some(Err(error)) => return Err(error.into()),
-                None => return Ok(()),
+                Some(Err(error)) => break Err(error.into()),
+                None => break Ok(()),
             },
             _ = consent.tick() => {
                 if !hub_enabled() {
-                    let _ = socket.close(None).await;
-                    return Ok(());
+                    break Ok(());
                 }
             }
         }
-    }
+    };
+    stop.send_modify(|generation| *generation += 1);
+    // Room pipes finish their final local save before their task is dropped.
+    while pipes.join_next().await.is_some() {}
+    result
 }
 
 /// A hub connection for stored work rather than a provider's program.
-async fn hub_work_pipe(base: &str, sid: &str, provider: &str) -> anyhow::Result<()> {
-    let rooms = crate::rooms::shared().cloned().ok_or_else(|| anyhow::anyhow!("no work store"))?;
+async fn hub_work_pipe(base: &str, sid: &str, provider: &str, rooms: Arc<crate::rooms::Rooms>, mut stopped: tokio::sync::watch::Receiver<u64>) -> anyhow::Result<()> {
     let endpoint = format!("{base}/_spectra/agent-hub/pipe?sid={sid}");
-    let (socket, _) = tokio_tungstenite::connect_async(hub_request(&endpoint, None)?).await?;
+    let (socket, _) = tokio::select! {
+        biased;
+        _ = stopped.changed() => return Ok(()),
+        socket = tokio_tungstenite::connect_async(hub_request(&endpoint, None)?) => socket?,
+    };
     let (sink, stream) = socket.split();
     if provider == "store" {
         let sink = sink.with(|text: String| async move {
@@ -632,7 +733,7 @@ async fn hub_work_pipe(base: &str, sid: &str, provider: &str) -> anyhow::Result<
                 Err(error) => Some(Err(error)),
             }
         });
-        crate::rooms::serve_store_requests(Box::pin(sink), Box::pin(stream), rooms).await;
+        crate::rooms::serve_store_requests(Box::pin(sink), Box::pin(stream), rooms, stopped).await;
     } else {
         let sink = sink.with(|bytes: Vec<u8>| async move {
             Ok::<_, tokio_tungstenite::tungstenite::Error>(HubMessage::Binary(bytes.into()))
@@ -644,15 +745,12 @@ async fn hub_work_pipe(base: &str, sid: &str, provider: &str) -> anyhow::Result<
                 Err(error) => Some(Err(error)),
             }
         });
-        crate::rooms::serve_pipe(Box::pin(sink), Box::pin(stream), rooms).await;
+        crate::rooms::serve_pipe(Box::pin(sink), Box::pin(stream), rooms, stopped).await;
     }
     Ok(())
 }
 
 async fn hub_pipe(base: &str, sid: &str, provider: &str) -> anyhow::Result<()> {
-    if matches!(provider, "rooms" | "store") {
-        return hub_work_pipe(base, sid, provider).await;
-    }
     let Some(program) = executable(provider) else {
         anyhow::bail!("unknown provider");
     };
@@ -677,6 +775,7 @@ async fn hub_pipe(base: &str, sid: &str, provider: &str) -> anyhow::Result<()> {
     let (to_cli, from_far) = mpsc::channel::<String>(64);
     let (to_far, mut from_cli) = mpsc::channel::<String>(64);
     let session = tokio::spawn(run_cli(program, start, from_far, to_far));
+    let _cancel_session = AbortOnDrop(session.abort_handle());
     loop {
         tokio::select! {
             incoming = socket.next() => match incoming {
@@ -703,9 +802,86 @@ async fn hub_pipe(base: &str, sid: &str, provider: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+struct AbortOnDrop(tokio::task::AbortHandle);
+impl Drop for AbortOnDrop { fn drop(&mut self) { self.0.abort(); } }
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cancelling_a_relay_future_also_aborts_its_child_task() {
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move { let _ = started.send(()); std::future::pending::<()>().await; });
+        ready.await.unwrap();
+        let cancel = AbortOnDrop(task.abort_handle());
+        drop(cancel);
+        assert!(task.await.unwrap_err().is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn hub_account_binding_and_unpairing_close_store_room_and_waiting_cli_pipes() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("works.db");
+        let state = Arc::new(crate::server::ServerState::unpaired());
+        state.set_device_id("fixture-device".into());
+        state.pair("http://localhost:3000".into());
+        let identity = state.local_relay_identity().unwrap();
+        state.prepare_work_rooms(&identity, path.clone(), path, "http://fixture".into(), "fixture-only".into(), "a".into()).await.unwrap();
+        let rooms = state.work_rooms().unwrap();
+        rooms.call("save", &serde_json::json!({"artifactId":"a-work","projection":{"title":"Private A work"}})).unwrap();
+        let opened = Arc::new(AtomicU64::new(0));
+        let closed = Arc::new(AtomicU64::new(0));
+        let (notices, mut received) = mpsc::unbounded_channel();
+        let count_open = opened.clone(); let count_closed = closed.clone();
+        let router = axum::Router::new()
+            .route("/_spectra/agent-hub/bridge", axum::routing::get(|socket: WebSocketUpgrade| async move {
+                socket.protocols([PROTOCOL]).on_upgrade(|mut socket| async move {
+                    for provider in ["store", "rooms", "codex"] {
+                        socket.send(Message::Text(serde_json::json!({"open":provider,"provider":provider}).to_string().into())).await.unwrap();
+                    }
+                    while socket.next().await.is_some() {}
+                })
+            }))
+            .route("/_spectra/agent-hub/pipe", axum::routing::get(move |Query(query): Query<HashMap<String,String>>, socket: WebSocketUpgrade| {
+                let opened = count_open.clone(); let closed = count_closed.clone(); let notices = notices.clone();
+                async move { socket.protocols([PROTOCOL]).on_upgrade(move |mut socket| async move {
+                    if query["sid"] == "store" {
+                        socket.send(Message::Text(r#"{"id":1,"method":"get","params":{"artifactId":"a-work"}}"#.into())).await.unwrap();
+                        let reply = socket.next().await.unwrap().unwrap().into_text().unwrap();
+                        let reply: serde_json::Value = serde_json::from_str(&reply).unwrap();
+                        assert_eq!(reply["result"]["title"], "Private A work");
+                    }
+                    // The CLI receives no start frame and never runs a program.
+                    opened.fetch_add(1, Ordering::SeqCst);
+                    let _ = notices.send(());
+                    while socket.next().await.is_some() {}
+                    closed.fetch_add(1, Ordering::SeqCst);
+                    let _ = notices.send(());
+                }) }
+            }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
+        let wrong = HubTicket { url: url.clone(), ticket: "fixture-only".into(), account_id: "b".into() };
+        assert!(hub_control(&wrong, state.clone(), identity.clone(), rooms.clone(), state.relay_changes()).await.is_err());
+        // In-memory consent only: never read or change the installed consent file.
+        let previous = HUB_ENABLED.swap(true, Ordering::SeqCst);
+        let ticket = HubTicket { url, ticket: "fixture-only".into(), account_id: "a".into() };
+        let control_state = state.clone();
+        let changes = state.relay_changes();
+        let task = tokio::spawn(async move { hub_control(&ticket, control_state, identity, rooms, changes).await });
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while opened.load(Ordering::SeqCst) < 3 { received.recv().await.unwrap(); }
+        }).await.unwrap();
+        state.forget_pairing();
+        tokio::time::timeout(Duration::from_secs(3), task).await.unwrap().unwrap().unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while closed.load(Ordering::SeqCst) < 3 { received.recv().await.unwrap(); }
+        }).await.unwrap();
+        HUB_ENABLED.store(previous, Ordering::SeqCst);
+        server.abort();
+    }
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(ToString::to_string).collect()

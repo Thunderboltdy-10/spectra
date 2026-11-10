@@ -164,6 +164,27 @@ describe("S11 independent native/canonical/history boundaries", () => {
     ]));
   });
 
+  it("settles its own native conflict beyond other accounts' conflict rows", async () => {
+    const { t, ids, reconcile } = await fixture();
+    const seeded = await t.run(async ctx => {
+      const now = Date.now();
+      const accountId = await ctx.db.insert("accounts", { clerkId: "s11-peer", email: "s11-peer@example.test", emailVerified: true,
+        name: "Native peer", status: "active", createdAt: now, updatedAt: now });
+      const foreign = [];
+      for (let i = 0; i < 100; i++) foreign.push(await ctx.db.insert("syncConflicts", { accountId, workId: ids.workId,
+        replicaIds: [ids.cloudId], localRevision: ids.localRevision, spectraRevision: ids.baseRevision,
+        regionIds: ["private"], partNames: [], state: "open", createdAt: now }));
+      const own = await ctx.db.insert("syncConflicts", { accountId: ids.accountId, workId: ids.workId,
+        replicaIds: [ids.localId, ids.cloudId], localRevision: ids.localRevision, spectraRevision: ids.baseRevision,
+        regionIds: ["native"], partNames: [], state: "open", createdAt: now });
+      return { foreign: await Promise.all(foreign.map(id => ctx.db.get(id))), own };
+    });
+    expect(await reconcile()).toMatchObject({ state: "applied" });
+    expect(await t.run(ctx => ctx.db.get(seeded.own))).toMatchObject({ state: "resolved-merged" });
+    expect(await t.run(ctx => Promise.all(seeded.foreign.map(row => ctx.db.get(row!._id))))).toEqual(seeded.foreign);
+    expect((await t.run(ctx => ctx.db.get(ids.workId)))?.content).toEqual(content("edited in Word", "original human"));
+  });
+
   it("does not call an unprocessed native change applied when no operation is found", async () => {
     const { t, ids, reconcile } = await fixture();
     await t.run(ctx => ctx.db.delete(ids.operationId));

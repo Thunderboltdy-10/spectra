@@ -17,6 +17,16 @@ const request = (onText = vi.fn(), onRetry = vi.fn()) =>
   }) as Parameters<ModelCaller>[0];
 
 describe("leaving the user's own runtime", () => {
+  it("never invokes the paid fallback when the runtime is explicitly forced", async () => {
+    vi.stubEnv("SPECTRA_AI_RUNTIME", "codex");
+    const fallback = vi.fn<ModelCaller>();
+    const primary: DisposableModelCaller = async () => { throw new ProviderUnavailableError("Codex is unavailable."); };
+    try {
+      await expect(withRuntimeFallback(primary, fallback, vi.fn())(request())).rejects.toThrow("Codex is unavailable.");
+      expect(fallback).not.toHaveBeenCalled();
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   it("hands the same transcript to OpenRouter, takes back partial text, and says why once", async () => {
     const dispose = vi.fn();
     const primary: DisposableModelCaller = Object.assign(

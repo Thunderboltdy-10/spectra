@@ -1,5 +1,5 @@
 import { MEMORY_CAPS, type MemoryChange, type MemoryHead } from "../../../../../shared/memory-files";
-import { callSpectraModel } from "./model";
+import { callSpectraModel, type ModelRequest } from "./model";
 
 /*
  * Notes keep themselves current. After a run one small call reads the exchange
@@ -10,6 +10,7 @@ import { callSpectraModel } from "./model";
 
 export type ReflectionRequest = {
   prompt: string;
+  runtime?: ModelRequest["runtime"];
   reply: string;
   /** Where this happened, for scoping a preference. */
   context?: string;
@@ -82,6 +83,7 @@ export function worthReflecting(prompt: string) {
 
 export const modelMemoryReflector: MemoryReflector = async (request, signal) => {
   const turn = await callSpectraModel({
+    runtime: request.runtime,
     messages: [
       { role: "system", content: SYSTEM },
       { role: "user", content: describe(request) },

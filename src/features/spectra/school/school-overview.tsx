@@ -9,7 +9,7 @@ import { SCHOOL_SYNC_KIND_INFO, type SchoolSyncKind } from "../../../../shared/s
 import { resolveSpectraManageBacIdentity } from "../data/api";
 import { ClassTile, useDueByClass } from "./school-classes";
 import { SearchField } from "@/components/ui/search-field";
-import { ago, groupCurrentTasks, sentenceOf, taskMatches, type SchoolSyncStatus } from "./school-model";
+import { ago, groupCurrentTasks, hasSchoolTaskSnapshot, sentenceOf, taskMatches, type SchoolSyncStatus } from "./school-model";
 import { TaskGroup, TaskTicket, TicketsSkeleton, WeekStrip, WeekStripSkeleton } from "./school-tickets";
 import { useClassBook } from "./use-class-book";
 
@@ -115,7 +115,7 @@ export function Overview({
             }
           />
         ) : null}
-        <WeekStrip tasks={tasks ?? []} book={book} now={now} />
+        <WeekStrip tasks={tasks ?? []} book={book} now={now} known={hasSchoolTaskSnapshot(status)} />
         {tasks?.length ? (
           <div className="school-find">
             <SearchField value={query} onChange={setQuery} label="Find a task" className="w-full sm:max-w-72" />
@@ -126,7 +126,7 @@ export function Overview({
         ) : !groups.length && searching ? (
           <EmptyState compact icon="search" title="No tasks match" detail="Try fewer words, or search every task in Tasks." action={<Button size="sm" onClick={() => setQuery("")}>Clear search</Button>} />
         ) : !groups.length ? (
-          <EmptyState compact icon="task" title="Nothing due" detail="New tasks from ManageBac show up here. Past work is in Tasks." action={<Button size="sm" onClick={onOpenTasks}>Open Tasks</Button>} />
+          hasSchoolTaskSnapshot(status) ? <EmptyState compact icon="task" title="Nothing due" detail="New tasks from ManageBac show up here. Past work is in Tasks." action={<Button size="sm" onClick={onOpenTasks}>Open Tasks</Button>} /> : null
         ) : (
           groups.map((group) => {
             const shown = group.key === "later" && !searching ? group.tasks.slice(0, LATER_SHOWN) : group.tasks;

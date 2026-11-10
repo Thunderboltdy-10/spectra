@@ -191,6 +191,8 @@ describe("runHarness", () => {
 
   it("names the thread of a run that asks a question in its first turn", async () => {
     const events: HarnessEvent[] = [];
+    const runtime = { provider: "codex", model: "gpt-6-luna", accountId: "selected-owner" };
+    const titleWriter = vi.fn(async () => ({ title: "Biology unit plan" }));
     const result = await runHarness({
       runId: "r-ask",
       backend: new MemoryBackend(),
@@ -199,7 +201,8 @@ describe("runHarness", () => {
       environment: { now: 0 },
       permissions: DEFAULT_PERMISSION_PREFS,
       wantTitle: true,
-      titleWriter: async () => ({ title: "Biology unit plan" }),
+      titleWriter,
+      runtime,
       compactor: null,
       callModel: model([
         { text: "", toolCalls: [{ id: "q1", name: "ask_user", arguments: JSON.stringify({ question: "Which unit?" }) }] },
@@ -208,6 +211,7 @@ describe("runHarness", () => {
     });
     expect(result.status).toBe("paused");
     await result.titling;
+    expect(titleWriter).toHaveBeenCalledWith(expect.objectContaining({ runtime }), expect.any(AbortSignal));
     expect(events.filter((event) => event.type === "thread_title")).toEqual([{ type: "thread_title", title: "Biology unit plan" }]);
   });
 

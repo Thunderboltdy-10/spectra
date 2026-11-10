@@ -1,6 +1,7 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { convexQuery } from "@/lib/convex-server";
+import { localBridgeRelay } from "@/lib/local-bridge-relay";
 import type { SpectraReasoningProfile } from "../model-config";
 import { getSpectraReasoningProfile, getSpectraModelId } from "../model-config";
 import type { ModelCaller } from "./loop";
@@ -55,7 +56,7 @@ export type RuntimeProviderStatus = {
   models: Array<{ id: string; label: string }>;
 };
 
-export type OneShotRequest = {
+export type OneShotRequest = RuntimeTarget & {
   messages: HarnessMessage[];
   signal: AbortSignal;
   onText?: (delta: string) => void;
@@ -103,14 +104,28 @@ function hubTicket(accountId: string, secret: string) {
   return `${body}.${createHmac("sha256", secret).update(body).digest("base64url")}`;
 }
 
-function relayEndpoint(provider: SubscriptionProvider, accountId: string | undefined) {
+async function authenticatedRuntimeAccount() {
+  const actor = await convexQuery<Record<string, never>, { accountId: string } | null>("identity:me", {});
+  if (!actor?.accountId) throw new ProviderUnavailableError("Spectra Bridge requires an authenticated account.");
+  return actor.accountId;
+}
+
+async function relayEndpoint(provider: SubscriptionProvider, accountId: string | undefined) {
   const hub = hubUrl();
-  if (!hub) return { url: `${RELAY_URL}?provider=${provider}`, protocols: ["spectra-agent", relayToken()] };
+  const owner = accountId ?? await authenticatedRuntimeAccount();
+  if (!hub) {
+    try {
+      const relay = await localBridgeRelay(owner);
+      return { url: `${RELAY_URL}?provider=${provider}&${relay.query}`, protocols: ["spectra-agent", relay.token] };
+    } catch (error) {
+      throw new ProviderUnavailableError(error instanceof Error ? error.message : "Spectra Bridge can't be reached.");
+    }
+  }
   const secret = process.env.SPECTRA_COLLAB_TOKEN_SECRET?.trim();
-  if (!secret || !accountId) throw new ProviderUnavailableError("Spectra Bridge can't be reached from this server.");
+  if (!secret) throw new ProviderUnavailableError("Spectra Bridge can't be reached from this server.");
   return {
     url: `${hub}/_spectra/agent-hub/server?provider=${provider}`,
-    protocols: ["spectra-agent", hubTicket(accountId, secret)],
+    protocols: ["spectra-agent", hubTicket(owner, secret)],
   };
 }
 
@@ -161,19 +176,8 @@ async function answerMcp(
   }
 }
 
-function relayToken() {
-  const base = process.env.LOCALAPPDATA || process.env.HOME || "";
-  try {
-    return readFileSync(join(base, "Spectra", "agent-relay.token"), "utf8").trim();
-  } catch {
-    throw new ProviderUnavailableError(
-      "Spectra Bridge is not running the agent relay, so your Codex or Claude Code session cannot start.",
-    );
-  }
-}
-
 class RelaySocket {
-  private socket: WebSocket;
+  private socket?: WebSocket;
   private closed = false;
   onFrame: (frame: Record<string, unknown>) => void = () => undefined;
   onClose: (reason: string) => void = () => undefined;
@@ -184,13 +188,18 @@ class RelaySocket {
   readonly ready: Promise<void>;
 
   constructor(provider: SubscriptionProvider, start: { args: string[]; system?: string; mcp?: boolean }, accountId?: string) {
-    const endpoint = relayEndpoint(provider, accountId);
-    this.socket = new WebSocket(endpoint.url, endpoint.protocols);
-    this.ready = new Promise((resolve, reject) => {
-      this.socket.addEventListener("open", () => {
-        this.socket.send(JSON.stringify(start));
+    this.ready = this.connect(provider, start, accountId);
+  }
+
+  private async connect(provider: SubscriptionProvider, start: { args: string[]; system?: string; mcp?: boolean }, accountId?: string) {
+    const endpoint = await relayEndpoint(provider, accountId);
+    if (this.closed) throw new ProviderUnavailableError("The AI session has closed.");
+    const socket = this.socket = new WebSocket(endpoint.url, endpoint.protocols);
+    return new Promise<void>((resolve, reject) => {
+      socket.addEventListener("open", () => {
+        socket.send(JSON.stringify(start));
       });
-      this.socket.addEventListener("message", (event) => {
+      socket.addEventListener("message", (event) => {
         const raw = String(event.data);
         let frame: Record<string, unknown>;
         try {
@@ -221,8 +230,8 @@ class RelaySocket {
         reject(new ProviderUnavailableError(message));
         this.handleClose(message);
       };
-      this.socket.addEventListener("error", failed);
-      this.socket.addEventListener("close", failed);
+      socket.addEventListener("error", failed);
+      socket.addEventListener("close", failed);
     });
   }
 
@@ -236,7 +245,7 @@ class RelaySocket {
         }),
       )
       .then((reply) => {
-        if (this.closed) return;
+        if (this.closed || !this.socket) return;
         // The Bridge reads a reply by these exact first characters.
         this.socket.send(JSON.stringify(reply === undefined ? { relayReply: id } : { relayReply: id, body: reply }));
       });
@@ -253,14 +262,14 @@ class RelaySocket {
   }
 
   send(frame: unknown) {
-    if (this.closed) throw new ProviderUnavailableError("The AI session has closed.");
+    if (this.closed || !this.socket) throw new ProviderUnavailableError("The AI session has closed.");
     this.socket.send(JSON.stringify(frame));
   }
 
   close() {
     this.closed = true;
     try {
-      this.socket.close();
+      this.socket?.close();
     } catch {
       // Already gone.
     }
@@ -400,7 +409,10 @@ class CodexConnection {
 
   listen(threadId: string, listener: CodexListener) {
     clearTimeout(this.idleTimer);
-    this.threads.set(threadId, listener);
+    this.threads.set(threadId, {
+      ...listener,
+      onNotification: AsyncLocalStorage.bind(listener.onNotification),
+    });
   }
 
   forget(threadId: string) {
@@ -475,7 +487,7 @@ function codexConnections() {
 
 async function codexConnection(accountId: string | undefined) {
   const connections = codexConnections();
-  const key = accountId ?? "this-computer";
+  const key = accountId ?? await authenticatedRuntimeAccount();
   const existing = connections.get(key);
   // Threads pile up inside a long-lived app-server. Swap it when nothing is using it.
   if (existing && !existing.lost && existing.threadsStarted >= THREADS_PER_CONNECTION && existing.idle) {
@@ -488,7 +500,7 @@ async function codexConnection(accountId: string | undefined) {
     await existing.ready;
     return existing;
   }
-  const connection = new CodexConnection(accountId);
+  const connection = new CodexConnection(key);
   connections.set(key, connection);
   try {
     await connection.ready;
@@ -859,8 +871,8 @@ function codexModelCaller(target: RuntimeTarget): DisposableModelCaller {
 }
 
 async function codexOneShot(request: OneShotRequest): Promise<ModelTurn> {
-  const connection = await codexConnection(undefined);
-  const model = process.env.SPECTRA_CODEX_ONESHOT_MODEL?.trim() || defaultCodexModel();
+  const connection = await codexConnection(request.accountId);
+  const model = request.model || process.env.SPECTRA_CODEX_ONESHOT_MODEL?.trim() || defaultCodexModel();
   const effort = codexEffort(request.reasoning ?? getSpectraReasoningProfile());
   const result = await connection.request("thread/start", {
     model,
@@ -1113,8 +1125,8 @@ function claudeModelCaller(target: RuntimeTarget): DisposableModelCaller {
 
 async function claudeOneShot(request: OneShotRequest): Promise<ModelTurn> {
   const stream = new TurnStream();
-  const model = defaultClaudeModel();
-  const relay = new RelaySocket("claude", { args: claudeArgs({ model }), system: systemOf(request.messages) });
+  const model = request.model || defaultClaudeModel();
+  const relay = new RelaySocket("claude", { args: claudeArgs({ model }), system: systemOf(request.messages) }, request.accountId);
   relay.onFrame = (frame) => routeClaudeFrame(stream, frame, { blocks: new Map(), waiting: new Map() });
   relay.onClose = (reason) => stream.push({ type: "lost", reason });
   try {
@@ -1139,7 +1151,10 @@ async function claudeOneShot(request: OneShotRequest): Promise<ModelTurn> {
 
 /** The harness caller for one attempt. */
 export function subscriptionModelCaller(provider: SubscriptionProvider, target: RuntimeTarget = {}): DisposableModelCaller {
-  return provider === "codex" ? codexModelCaller(target) : claudeModelCaller(target);
+  const runtime = provider === "codex" ? codexModelCaller(target) : claudeModelCaller(target);
+  const caller: DisposableModelCaller = (input) => runtime(input.toolChoice === "none" ? { ...input, tools: [] } : input);
+  caller.dispose = () => runtime.dispose?.();
+  return caller;
 }
 
 function statusFromError(error: unknown): RuntimeProviderStatus {
@@ -1309,7 +1324,7 @@ export function withRuntimeFallback(
         },
       });
     } catch (error) {
-      if (input.signal.aborted) throw error;
+      if (input.signal.aborted || subscriptionProvider()) throw error;
       down = true;
       const reason = error instanceof Error ? error.message : String(error);
       traceEvent("runtime.fallback", { reason: reason.slice(0, 300) });

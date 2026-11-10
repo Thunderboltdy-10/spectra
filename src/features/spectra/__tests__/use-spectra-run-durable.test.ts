@@ -43,6 +43,37 @@ afterEach(() => { cleanup(); stopObservingUiRun("run"); vi.clearAllTimers(); vi.
 async function settle(milliseconds = 20) { await act(async () => { await vi.advanceTimersByTimeAsync(milliseconds); }); }
 
 describe("Durable run event consumption", () => {
+  it.each([
+    { kind: "approval" as const, value: { kind: "approval" as const, allowed: true }, label: "Allowed" },
+    { kind: "approval" as const, value: { kind: "approval" as const, allowed: false }, label: "Not allowed" },
+    { kind: "question" as const, value: { kind: "question" as const, text: "Physics" }, label: "Physics" },
+  ])("shares a $label resume with its paused owner when the prelude is a result card", async ({ kind, value, label }) => {
+    const waiting = tab(kind === "approval" ? "awaiting_confirmation" : "awaiting_resolution");
+    source({ ...waiting, surface: "artifact", run: { ...waiting.run, artifactId: "artifact" } }, []);
+    const approval = { id: "card", runId: "run", status: waiting.run.status, title: "Needs your input", variant: "status", actions: [{ key: "confirm", label: "Allow" }], updatedAt: 3 };
+    const input = { kind, toolCallId: "write", executionId: "attempt", question: "Change the Word file?" };
+    transport.mockImplementation(async (_url?: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const events = body.action === "run"
+        ? [{ type: "run_created", runId: "run", card: approval }, { type: "input_required", runId: "run", input, card: approval }]
+        : [{ type: "result_card", runId: "run", card: approval }, { type: "input_answered", runId: "run", toolCallId: "write", label },
+          { type: "final", runId: "run", summary: "Saved", card: { ...approval, status: "completed", title: "Done", actions: [], updatedAt: 4 } }];
+      return new Response(events.map(event => JSON.stringify(event)).join("\n") + "\n");
+    });
+    const owner = renderHook(() => useSpectraRun({ surface: "artifact", artifactId: "artifact" }));
+    const answerer = renderHook(() => useSpectraRun({ surface: "chat", threadId: "thread", observeDurableRuns: false }));
+    await settle();
+    await act(async () => { await owner.result.current.run("Summarise this Word file"); });
+    await settle();
+    expect(owner.result.current.liveExchange?.input).toMatchObject({ kind });
+    vi.mocked(getSpectraRunEvents).mockClear();
+    await act(async () => { expect(await answerer.result.current.answer("run", "write", value)).toBe(true); });
+    await settle();
+    expect.soft(owner.result.current.liveExchange).toBeNull();
+    expect.soft(owner.result.current.cards).toContainEqual(expect.objectContaining({ id: "card", status: "completed", actions: [] }));
+    expect.soft(getSpectraRunEvents).not.toHaveBeenCalled();
+  });
+
   it.each([{}, { artifactId: "artifact" }, { workspaceId: "workspace" }])("does not discover other conversations for a new chat with context %j", async (context) => {
     const foreign = { ...tab("awaiting_confirmation"), run: { ...tab("awaiting_confirmation").run, artifactId: "artifact" }, workspaceId: "workspace" };
     source(foreign, approvalEvents());

@@ -21,19 +21,26 @@ export async function deviceUndoPlan(touched: string[], runId: string) {
   const plan = { restore: [] as Array<{ artifactId: string; versionId: number }>, keep: [] as string[], notes: [] as string[] };
   const artifactIds = [...new Set(touched)];
   if (!artifactIds.length) return plan;
-  const homes = await convexQuery<{ artifactIds: string[] }, { accountId: string; onDevice: string[] }>("deviceWorks:homesOf", { artifactIds });
-  for (const artifactId of homes.onDevice) {
+  const homes = await Promise.all(Array.from({ length: Math.ceil(artifactIds.length / 24) }, (_, index) =>
+    convexQuery<{ artifactIds: string[] }, { accountId: string; onDevice: string[] }>("deviceWorks:homesOf", { artifactIds: artifactIds.slice(index * 24, (index + 1) * 24) })));
+  for (const home of homes) for (const artifactId of home.onDevice) {
     try {
-      const versions = await deviceStoreCall<VersionRow[]>(homes.accountId, "versions", { artifactId, limit: 50 });
+      const versions = await deviceStoreCall<VersionRow[]>(home.accountId, "versions", { artifactId, limit: 200 });
       const ofRun = versions.filter((version) => version.runId === runId);
       const last = ofRun[0];
       if (!last) continue;
+      if (versions.length === 200 && versions.at(-1)?.runId === runId) {
+        plan.keep.push(artifactId);
+        plan.notes.push("This run reaches beyond the available version history, so work kept on this computer stays as it is.");
+        continue;
+      }
       const [work, lastVersion] = await Promise.all([
-        deviceStoreCall<{ title?: string; content?: unknown } | null>(homes.accountId, "get", { artifactId }),
-        deviceStoreCall<StoredVersion | null>(homes.accountId, "version", { artifactId, id: last.id }),
+        deviceStoreCall<{ title?: string; content?: unknown } | null>(home.accountId, "get", { artifactId }),
+        deviceStoreCall<StoredVersion | null>(home.accountId, "version", { artifactId, id: last.id }),
       ]);
       const changedSince =
         versions.some((version) => version.id > last.id) ||
+        (work?.title ?? null) !== (lastVersion?.title ?? null) ||
         JSON.stringify(work?.content ?? null) !== JSON.stringify(lastVersion?.content ?? null);
       if (changedSince) {
         plan.keep.push(artifactId);

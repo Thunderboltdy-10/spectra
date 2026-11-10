@@ -56,6 +56,21 @@ async function backfill(t: Awaited<ReturnType<typeof setup>>["t"]) {
 }
 
 describe("personal analytics semantics", () => {
+  it.each([
+    ["model_input_tokens", 12, 12, null],
+    ["collaboration_bytes", 0, null, 0],
+    ["storage_bytes", 80, null, null],
+  ] as const)("requires this metric's own rows when only %s is recorded", async (category, quantity, tokens, bytes) => {
+    const { t, now, schoolId, accountId } = await setup();
+    await t.run(ctx => ctx.db.insert("usageMeters", {
+      schoolId, accountId, category, quantity, day: new Date(now).toISOString().slice(0, 10),
+      dimensionsKey: "default", updatedAt: now,
+    }));
+    const result = await t.withIdentity(identity).query(api.analytics.personalOverview, { from: now - 1, to: now + 1 });
+    expect(result.metrics.modelTokens).toMatchObject({ value: tokens, state: { kind: tokens === null ? "partial" : "available" } });
+    expect(result.metrics.collaborationBytes).toMatchObject({ value: bytes, state: { kind: bytes === null ? "partial" : "available" } });
+  });
+
   it("excludes legacy timetables and deleted work consistently, preserving account and date scope", async () => {
     const { t, now, schoolId, accountId, foreignAccountId } = await setup();
     await t.run(async ctx => {

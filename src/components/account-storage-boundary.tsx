@@ -10,7 +10,7 @@ import { useAuth } from "@clerk/nextjs";
 import { useConvexAuth } from "convex/react";
 import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { api } from "../../convex/_generated/api";
-import { bindAccountStorageScope } from "@/lib/account-storage";
+import { bindAccountStorageScope, retireAccountStorageRequests } from "@/lib/account-storage";
 
 const AccountStorageReady = createContext(true);
 export function useAccountStorageReady() {
@@ -37,6 +37,7 @@ export function AccountStorageBoundary({ children }: { children: ReactNode }) {
     owner: string;
     scope: string;
   } | null>(null);
+  useLayoutEffect(() => () => retireAccountStorageRequests(), [owner]);
   useLayoutEffect(() => {
     if (scope === null || owner === null) return;
     bindAccountStorageScope(scope);

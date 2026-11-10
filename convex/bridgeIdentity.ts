@@ -94,7 +94,6 @@ export type LocalReplicaWriteCandidate = {
 /** The paired Bridge that is actually running, not a leftover active row. */
 export function chooseLiveBridgeDeviceId(
   devices: readonly SeenBridgeDevice[],
-  now: number,
   windowMs = LIVE_BRIDGE_DEVICE_WINDOW_MS,
 ) {
   const active = devices.filter((device) => device.state === "active");

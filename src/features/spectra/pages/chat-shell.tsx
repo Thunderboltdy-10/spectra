@@ -23,7 +23,6 @@ import { ConversationSurface } from "../components/conversation-surface";
 import { ProductErrorState } from "../components/product-state";
 import { useProvideIslandEngine } from "../island/engine";
 import { CrossfadeText } from "../motion";
-import { ComposerArtifactDock } from "../components/composer-artifact-dock";
 import { GlobalSearch } from "../components/context-controls";
 import {
   StudioSplitPlaceholder,
@@ -129,7 +128,7 @@ export function ChatShell() {
         (nextThreadId ?? null) === activeThreadRef.current;
       // The overview hydrates independently; a selected thread must not wait
       // for the work and workspace catalog. The thread column reads its own list.
-      const catalogs = getSpectraOverview().then((overview) => {
+      const catalogs = getSpectraOverview(undefined, false, false).then((overview) => {
         if (!isCurrentLoad()) return;
         setWorkspaces(overview.workspaces);
         setArtifacts((current) => {
@@ -820,17 +819,6 @@ export function ChatShell() {
           executeApplicationCommand={applicationCommandDispatcher}
         />
       ) : null}
-      <div className="pointer-events-none absolute bottom-0 left-0 right-[var(--spectra-side-width,0px)] z-chrome bg-transparent px-5 pb-24 pt-2 sm:px-8">
-        <div className="pointer-events-auto mx-auto max-w-[820px] spectra-live-stack">
-          <ComposerArtifactDock
-            artifacts={artifacts}
-            cards={runEngine.cards}
-            threadId={composerThread?.id ?? threadId ?? undefined}
-            onOpen={openArtifact}
-          />
-        </div>
-      </div>
-
       {runsOpen ? <ChatRunsPanel onClose={closeRuns} /> : null}
     </div>
   );

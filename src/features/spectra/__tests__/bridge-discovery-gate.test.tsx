@@ -34,6 +34,24 @@ afterEach(() => {
 });
 
 describe("Bridge discovery gate (LV-012)", () => {
+  it("wakes every mounted surface after same-tab manual reconnect with one shared probe", async () => {
+    const fetchMock = vi.fn(async (url) => Response.json(String(url).endsWith("/v1/health")
+      ? { version: "0.1.0", paired: true, protocolVersion: "1.0" }
+      : { version: "0.1.0", paired: true, protocolVersion: "1.0", cloudConnected: true, mounts: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const first = renderHook(() => useBridgeHealth());
+    const second = renderHook(() => useBridgeHealth());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(first.result.current.reachability).toBe("not-set-up");
+    await act(async () => {
+      persistBridgeSession("reconnected-session");
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(first.result.current.reachability).toBe("connected");
+    expect(second.result.current.reachability).toBe("connected");
+    expect(healthCalls(fetchMock)).toBe(1);
+  });
+
   it("keeps the remembered computer, as not connected, while a refused browser joins again", async () => {
     window.localStorage.setItem(BRIDGE_DISCOVERY_STORAGE_KEY, "enabled");
     window.localStorage.setItem(BRIDGE_SESSION_STORAGE_KEY, "expired-session");

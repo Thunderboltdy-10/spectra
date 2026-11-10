@@ -40,6 +40,7 @@ import {
 import { requestSpectra } from "../data/request";
 import { base64ToBytes, deviceProjectionOf, type DeviceSeed } from "./device-work";
 import { enterDeviceRoom } from "../bridge/device-works";
+import { accountStorageMatches, accountStorageRevision, assertAccountStorageRevision } from "@/lib/account-storage-scope";
 
 type SessionResponse = {
   /** Kept on a computer: Bridge is the room, and this is what a new work starts from. */
@@ -248,6 +249,8 @@ async function fetchCollaborationSession(
   clientId: string,
   schemaVersion: number,
 ) {
+  const revision = accountStorageRevision();
+  assertAccountStorageRevision(revision);
   const controller = new AbortController();
   let timedOut = false;
   const timeout = setTimeout(() => {
@@ -271,6 +274,7 @@ async function fetchCollaborationSession(
     const payload = (await response.json()) as
       | SessionResponse
       | { error?: string | { code?: string; message?: string } };
+    assertAccountStorageRevision(revision);
     if (!response.ok || !("token" in payload)) {
       const failure = "error" in payload ? payload.error : undefined;
       const error =
@@ -298,12 +302,12 @@ async function session(
 ) {
   return coalesceInFlight(
     collaborationSessionRequests,
-    collaborationSessionRequestKey(
+    `${accountStorageRevision()}:${collaborationSessionRequestKey(
       artifactId,
       partitionKey,
       clientId,
       schemaVersion,
-    ),
+    )}`,
     1_100,
     () =>
       fetchCollaborationSession(
@@ -316,6 +320,7 @@ async function session(
 }
 
 export class HocuspocusArtifactTransport implements ArtifactCollaborationTransport {
+  private readonly accountRevision = accountStorageRevision();
   readonly document = new Y.Doc();
   readonly clientId: string;
   private provider: HocuspocusProvider | null = null;
@@ -633,6 +638,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     const projection = deviceProjectionOf(this.document, this.schemaVersion);
     if (!projection) return;
     provider.sendStateless(JSON.stringify({ type: "spectra.device_projection", projection }));
+    if (!accountStorageMatches(this.accountRevision)) return;
     const listing = JSON.stringify([projection.title, projection.summary ?? "", projection.tags]);
     const now = Date.now();
     if (listing === this.deviceListing && now - this.deviceTouchedAt < DEVICE_TOUCH_MS) return;

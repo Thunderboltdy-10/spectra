@@ -5,7 +5,7 @@ import { internalMutation, mutation } from "./orgNodeMutation";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
-import { createFolderNode, placeSourceNode, purgeNode, purgeSourceNodes, trashNode, findPrimaryNode, moveNode, renameNode, restoreTrashedNode, ensureGeneralNode } from "./orgTreeShared";
+import { createFolderNode, placeSourceNode, purgeNode, purgeSourceNodes, trashNode, findPrimaryNode, moveNode, renameNode, restoreTrashedNode, ensureGeneralNode, artifactSummaryFor, ARTIFACT_SUMMARY_READ_MODEL_VERSION } from "./orgTreeShared";
 import { z } from "zod";
 import {
   activeReplicaWriteTarget,
@@ -121,6 +121,25 @@ export const workSignal = query({
 
 const AGENT_HUB_TICKET_MS = 10 * 60_000;
 
+/** One-time legacy migration: only the paired account's explicit work ids. */
+export const ownedStoredWorks = query({
+  args: { credential: v.string(), artifactIds: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    z.array(z.string()).max(100).parse(args.artifactIds);
+    const { device } = await requireDevice(ctx, args.credential);
+    const artifactIds: Id<"spectraArtifacts">[] = [];
+    for (const id of new Set(args.artifactIds)) {
+      const artifactId = ctx.db.normalizeId("spectraArtifacts", id);
+      if (!artifactId) continue;
+      const summary = await artifactSummaryFor(ctx, artifactId);
+      const owner = summary?.readModelVersion === ARTIFACT_SUMMARY_READ_MODEL_VERSION
+        ? summary.ownerAccountId : (await ctx.db.get(artifactId))?.ownerAccountId;
+      if (owner === device.accountId) artifactIds.push(artifactId);
+    }
+    return { accountId: device.accountId, artifactIds };
+  },
+});
+
 /**
  * A short-lived ticket for the agent hub, for the Bridge that holds this
  * device's credential. It names the account the hub may route to this computer.
@@ -131,7 +150,7 @@ export const agentHubTicket = mutation({
     const { device } = await requireDevice(ctx, args.credential);
     const url = process.env.SPECTRA_AGENT_HUB_URL?.trim();
     const secret = process.env.SPECTRA_COLLAB_BRIDGE_KEY;
-    if (!url || !secret) return { url: null, ticket: null };
+    if (!url || !secret) return { url: null, ticket: null, accountId: device.accountId };
     const base64url = (bytes: Uint8Array) =>
       btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     const encoder = new TextEncoder();
@@ -140,7 +159,7 @@ export const agentHubTicket = mutation({
     );
     const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
     const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(body));
-    return { url, ticket: `${body}.${base64url(new Uint8Array(signature))}` };
+    return { url, ticket: `${body}.${base64url(new Uint8Array(signature))}`, accountId: device.accountId };
   },
 });
 
@@ -707,6 +726,7 @@ async function discoverResourceForMount(
       // current revision is an ordinary edit for Spectra to take in.
       const localBase = existingReplica.baseRevision ?? existingReplica.contentHash ?? existingReplica.revision;
       const replicasDisagree = Boolean(
+        (changed || existingReplica.state !== "behind") &&
         input.contentHash &&
         existingCloud?.contentHash &&
         input.contentHash !== existingCloud.contentHash &&
@@ -717,6 +737,8 @@ async function discoverResourceForMount(
         ? "diverged" as const
         : activeWrite
           ? "pending" as const
+          : !changed && existingReplica.state === "behind"
+            ? "behind" as const
           : !input.contentHash
             ? "ahead" as const
             : existingCloud?.payloadRef && existingCloud.contentHash === input.contentHash
@@ -1292,10 +1314,10 @@ export const commitPayloadUpload = mutation({
         if (pendingOperation?.actorKind === "ai" && pendingOperation.runId)
           await settleRunNativeOutcome(ctx, pendingOperation.runId);
         const resolving = await ctx.db.query("syncConflicts")
-          .withIndex("by_work_state", (q) => q.eq("workId", replica.workId).eq("state", "resolving-spectra"))
+          .withIndex("by_request_account_state", (q) => q.eq("resolutionRequestId", activeWrite._id).eq("accountId", activeWrite.accountId).eq("state", "resolving-spectra"))
           .take(50);
         await Promise.all(resolving
-          .filter((conflict) => conflict.resolutionRequestId === activeWrite._id)
+          .filter((conflict) => conflict.workId === replica.workId && conflict.resolutionRequestId === activeWrite._id)
           .map((conflict) => ctx.db.patch(conflict._id, {
             state: "open",
             resolutionRequestId: undefined,
@@ -1611,6 +1633,12 @@ export const refreshWriteClaim = mutation({
         !activeReplicaWriteTarget(replica, mount, device) || !replica ||
         replica.mountId !== request.mountId || replica.deviceId !== request.deviceId ||
         !(await writeRevisionStillApplicable(ctx, request, replica))) return { valid: false };
+    // Office saves follow the current writeback policy. Explicit new-file,
+    // storage and protected-original actions have their own user admission.
+    if (request.nativeReceipt) {
+      const policy = await computeEffectivePolicy(ctx, actor.accountId, { item: String(request.workId), mount: String(request.mountId) });
+      if (policy.contentDirection !== "bidirectional" && policy.contentDirection !== "spectra-to-local") return { valid: false };
+    }
     await ctx.db.patch(request._id, { claimedAt: now, updatedAt: now });
     return { valid: true };
   },
@@ -1912,10 +1940,10 @@ export const completeWrite = mutation({
         await ctx.db.patch(strategyTransition._id, { state: "verified", updatedAt: now });
       }
       const resolvingConflicts = await ctx.db.query("syncConflicts")
-        .withIndex("by_work_state", (q) => q.eq("workId", request.workId).eq("state", "resolving-spectra"))
+        .withIndex("by_request_account_state", (q) => q.eq("resolutionRequestId", request._id).eq("accountId", request.accountId).eq("state", "resolving-spectra"))
         .take(50);
       await Promise.all(resolvingConflicts
-        .filter((conflict) => conflict.resolutionRequestId === request._id)
+        .filter((conflict) => conflict.workId === request.workId && conflict.resolutionRequestId === request._id)
         .map((conflict) => ctx.db.patch(conflict._id, { state: "resolved-spectra", resolvedAt: now, updatedAt: now })));
       return completion("verified");
     }
@@ -1958,10 +1986,10 @@ export const completeWrite = mutation({
       });
     }
     const resolvingConflicts = await ctx.db.query("syncConflicts")
-      .withIndex("by_work_state", (q) => q.eq("workId", request.workId).eq("state", "resolving-spectra"))
+      .withIndex("by_request_account_state", (q) => q.eq("resolutionRequestId", request._id).eq("accountId", request.accountId).eq("state", "resolving-spectra"))
       .take(50);
     await Promise.all(resolvingConflicts
-      .filter((conflict) => conflict.resolutionRequestId === request._id)
+      .filter((conflict) => conflict.workId === request.workId && conflict.resolutionRequestId === request._id)
       .map((conflict) => ctx.db.patch(conflict._id, { state: "open", resolutionRequestId: undefined, errorCode: args.errorCode ?? "resolution-write-failed", updatedAt: now })));
     return completion(conflicted ? "conflicted" : "failed");
   },

@@ -198,7 +198,7 @@ impl LocalBridgeControl for SpectraLocalControl {
             .state
             .take_pairing_offer(challenge)
             .map_err(|error| error.to_string())?;
-        let result = complete_pairing_offer(&self.app, &offer, &self.state, &self.journal).await;
+        let result = complete_pairing_offer(self, &offer).await;
         if result.is_ok() {
             self.active_mount_syncs.pairing.resume();
             self.wake.wake_configuration();
@@ -568,6 +568,7 @@ fn unpair_this_computer(
         "browser_origin",
         "browser_session_token",
         "browser_sessions",
+        "work_account",
         SYNC_PAUSED_KEY,
         LAST_SYNC_KEY,
         "replica_migration_complete",
@@ -901,49 +902,6 @@ fn open_devices_page(app: &tauri::AppHandle) {
         && let Some(runtime) = app.try_state::<BridgeRuntime>()
     {
         record_runtime_error(&runtime.journal, "Could not open Spectra", &error);
-    }
-}
-
-/* ---------------------------------------------------------------- pairing */
-
-const PAIRING_DECLINED: &str = "Pairing was cancelled on this computer.";
-
-/// "123 456": the code as the Devices page shows it.
-fn spaced_code(code: &str) -> String {
-    if code.len() == 6 && code.is_ascii() {
-        format!("{} {}", &code[..3], &code[3..])
-    } else {
-        code.to_owned()
-    }
-}
-
-fn pairing_confirmation_text(code: &str) -> String {
-    format!(
-        "Spectra wants to connect this computer to your account.\n\nThe Devices page in Spectra shows the code {}. Connect only if it matches.",
-        spaced_code(code)
-    )
-}
-
-/// The one native prompt pairing needs: the person confirms, on this
-/// computer, the code the Devices page shows.
-async fn confirm_pairing_on_this_computer(
-    app: &tauri::AppHandle,
-    code: &str,
-) -> Result<(), String> {
-    let (answer_tx, answer_rx) = tokio::sync::oneshot::channel();
-    app.dialog()
-        .message(pairing_confirmation_text(code))
-        .title("Connect to Spectra")
-        .buttons(MessageDialogButtons::OkCancelCustom(
-            "Connect".into(),
-            "Cancel".into(),
-        ))
-        .show(move |confirmed| {
-            let _ = answer_tx.send(confirmed);
-        });
-    match answer_rx.await {
-        Ok(true) => Ok(()),
-        _ => Err(PAIRING_DECLINED.into()),
     }
 }
 
@@ -3775,17 +3733,17 @@ async fn sync_grant(
     }
 }
 
-/// Pairs this computer for an offer from the Devices page. A computer already
-/// paired to the account resumes quietly. Switching accounts requires an
-/// explicit disconnect, so remembered folders cannot follow a different owner.
-/// A new pairing asks in a native dialog showing the same code as the page.
+/// The signed-in web account supplies the challenge. Switching accounts retires
+/// old sessions and restores only that account's remembered file permissions.
 async fn complete_pairing_offer(
-    app: &tauri::AppHandle,
+    control: &SpectraLocalControl,
     offer: &PairingOffer,
-    state: &Arc<ServerState>,
-    journal: &Arc<Journal>,
 ) -> Result<(), String> {
+    let SpectraLocalControl { state, journal, grants, active_mount_syncs, wake, .. } = control;
     let deployment = deployment_for_offer(journal, offer)?;
+    let changes = state.relay_changes();
+    let generation = *changes.borrow();
+    let still_connecting = || if *changes.borrow() == generation { Ok(()) } else { Err("This connection was cancelled. Connect this computer again.".to_string()) };
     let device_name = this_device_name();
     let installation_id = match journal
         .config("installation_id")
@@ -3802,14 +3760,12 @@ async fn complete_pairing_offer(
     };
     let existing = match journal.config("device_id").map_err(|error| error.to_string())? {
         Some(device_id) => {
-            let credential = HostPlatform.read_credential(&device_id)
+            HostPlatform.read_credential(&device_id)
                 .map_err(|_| "Bridge cannot read this computer's saved key right now. Try again when your system keyring is available.".to_string())?
-                .ok_or_else(|| "This computer's saved key is missing. Choose Disconnect this computer from the Spectra Bridge tray menu, then connect again. You will need to choose its files again.".to_string())?;
-            Some((device_id, credential))
         }
         None => None,
     };
-    let (device_id, browser_origin) = if let Some((_device_id, credential)) = existing {
+    let resumed = if let Some(credential) = existing {
         match resume_pairing(
             &deployment,
             &credential,
@@ -3819,22 +3775,36 @@ async fn complete_pairing_offer(
         )
         .await
         {
-            Ok(exchange) => (exchange.device_id, exchange.browser_origin),
-            Err(error) if should_repair_pairing(&error.to_string()) => {
-                return Err("This computer's current connection cannot be used with this account. Choose Disconnect this computer from the Spectra Bridge tray menu, then connect again. You will need to choose its files again.".into());
-            }
+            Ok(exchange) => Some((exchange.device_id, exchange.browser_origin, exchange.account_id, credential)),
+            Err(error) if should_repair_pairing(&error.to_string()) => None,
             Err(error) => return Err(error.to_string()),
         }
+    } else { None };
+    let resuming = resumed.is_some();
+    let (device_id, browser_origin, account_id, credential) = if let Some(exchange) = resumed {
+        exchange
     } else {
-        confirm_pairing_on_this_computer(app, &offer.short_code).await?;
+        still_connecting()?;
         let exchange = exchange_pairing(&deployment, offer, &device_name, &installation_id)
             .await
             .map_err(|error| error.to_string())?;
+        still_connecting()?;
         HostPlatform
             .store_credential(&exchange.device_id, &exchange.device_credential)
             .map_err(|error| error.to_string())?;
-        (exchange.device_id, exchange.browser_origin)
+        (exchange.device_id, exchange.browser_origin, exchange.account_id, exchange.device_credential)
     };
+    still_connecting()?;
+    let switching = !resuming || journal.config("device_id").map_err(|error| error.to_string())?
+        .is_some_and(|previous| previous != device_id);
+    if switching {
+        active_mount_syncs.pairing.retire();
+        for grant in grants.device_grants() { grants.remove(&grant.id); }
+    }
+    // A fresh credential retires old authority even if cloud repair reuses
+    // the device ID. A verified resume leaves active CLI/room channels alive.
+    if !resuming { state.forget_pairing(); }
+    state.set_device_id(device_id.clone());
     let session_token = state.prepare_pairing_session(&browser_origin);
     // Every browser origin stays joined across restarts, not only the newest.
     let browser_sessions = state.sessions_json_with(&browser_origin, &session_token);
@@ -3847,10 +3817,54 @@ async fn complete_pairing_offer(
             ("browser_sessions", &browser_sessions),
         ])
         .map_err(|error| error.to_string())?;
-    state.set_device_id(device_id);
-    state
-        .complete_pairing_with_session(offer.challenge.clone(), browser_origin, &session_token)
+    let identity = state.pairing_identity().ok_or("This computer is no longer paired")?;
+    prepare_work_account(state, journal, &identity, &deployment, &credential, &account_id).await
         .map_err(|error| error.to_string())?;
+    if switching { restore_current_grants(grants, journal).map_err(|error| error.to_string())?; }
+    state
+        .complete_pairing_with_session_for(&identity, offer.challenge.clone(), browser_origin, &session_token)
+        .map_err(|error| error.to_string())?;
+    if switching {
+        active_mount_syncs.pairing.resume();
+        for grant in grants.device_grants() {
+            spawn_grant_watcher(grant, grants.clone(), journal.clone(), wake.clone(), active_mount_syncs.clone());
+        }
+    }
+    Ok(())
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkAccountBinding {
+    device_id: String,
+    deployment: String,
+    account_id: String,
+    credential_hash: String,
+}
+
+async fn prepare_work_account(state: &ServerState, journal: &Journal, identity: &spectra_bridge_core::server::LocalRelayIdentity, deployment: &str, credential: &str, account: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(state.is_listening(), "Bridge's local listener is not ready");
+    let deployment = deployment.trim_end_matches('/');
+    anyhow::ensure!(state.pairing_identity().as_ref() == Some(identity), "Pairing changed while preparing local work");
+    if state.work_account().as_ref().is_some_and(|(cloud, owner)| cloud == deployment && owner == account) { return Ok(()); }
+    let current = || {
+        state.pairing_identity().as_ref() == Some(identity)
+            && journal.config("device_id").ok().flatten().as_deref() == Some(identity.device_id.as_str())
+            && journal.config("deployment_url").ok().flatten().as_deref().map(|value| value.trim_end_matches('/')) == Some(deployment)
+            && HostPlatform.read_credential(&identity.device_id).ok().flatten().as_deref() == Some(credential)
+    };
+    anyhow::ensure!(current(), "Pairing changed while preparing local work");
+    let path = spectra_bridge_core::works::default_store_path().ok_or_else(|| anyhow::anyhow!("Local work directory is unavailable"))?;
+    // Old isolated profiles used the normal work store. Only verified ids are
+    // copied from it; the new store still lives inside the configured profile.
+    let legacy = if path.try_exists()? { path.clone() } else {
+        std::env::var_os("LOCALAPPDATA").or_else(|| std::env::var_os("HOME"))
+            .map(std::path::PathBuf::from).map(|root| root.join("Spectra/works/works.db")).unwrap_or_else(|| path.clone())
+    };
+    state.prepare_work_rooms(identity, path, legacy, deployment.into(), credential.into(), account.into()).await?;
+    anyhow::ensure!(current(), "Pairing changed while preparing local work");
+    let binding = WorkAccountBinding { device_id: identity.device_id.clone(), deployment: deployment.into(), account_id: account.into(), credential_hash: format!("{:x}", sha2::Sha256::digest(credential.as_bytes())) };
+    journal.set_config("work_account", &serde_json::to_string(&binding)?)?;
     Ok(())
 }
 
@@ -4159,6 +4173,30 @@ fn grant_config_matches_pairing(journal: &Journal, config: &serde_json::Value) -
         .is_some_and(|id| {
             !id.is_empty() && journal.config("device_id").ok().flatten().as_deref() == Some(id)
         })
+}
+
+/// Rehydrate only the current device's saved permissions; other accounts stay
+/// on disk for their next connection and never enter the active registry.
+fn restore_current_grants(grants: &GrantRegistry, journal: &Journal) -> anyhow::Result<()> {
+    let mut persisted = journal.config_prefix("mount:")?;
+    persisted.extend(journal.config_prefix("file-mount:")?);
+    for (key, value) in persisted {
+        let Ok(config) = serde_json::from_str::<serde_json::Value>(&value) else { continue };
+        if !grant_config_matches_pairing(journal, &config) { continue; }
+        if let (Some(label), Some(path)) = (
+            config.get("label").and_then(|value| value.as_str()),
+            config.get("path").and_then(|value| value.as_str()),
+        ) {
+            let (scope, id) = key.split_once(':').expect("persisted grant prefix");
+            if scope == "file-mount" {
+                let Some(name) = config.get("selectedFile").and_then(|value| value.as_str()) else { continue };
+                let _ = grants.restore_file_grant(id.to_owned(), label.to_owned(), std::path::Path::new(path), std::path::Path::new(name));
+            } else {
+                let _ = grants.restore_device_grant(id.to_owned(), label.to_owned(), std::path::Path::new(path));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// A watcher retains its original grant. It must never borrow the credential
@@ -4504,11 +4542,18 @@ async fn run_sync_iteration(
     let paused_grants = paused_mounts(grants, journal);
     let report = health_report(grants, journal, paused);
     if health.due(&report) {
+        let work_identity = state.pairing_identity();
         match report_health(deployment, &credential, &report).await {
-            Ok(()) => {
+            Ok(account) => {
                 health.sent(report);
                 state.mark_cloud_seen();
                 let _ = journal.delete_config("health_report_error");
+                if let Some(identity) = work_identity {
+                    match prepare_work_account(state, journal, &identity, deployment, &credential, &account).await {
+                        Ok(()) => { let _ = journal.delete_config("work_store_error"); }
+                        Err(error) => { let _ = journal.set_config("work_store_error", &error.to_string()); }
+                    }
+                }
             }
             Err(error) if should_repair_pairing(&error.to_string()) => {
                 // Spectra removed this computer (from the Devices page here or
@@ -4728,6 +4773,7 @@ async fn run_sync_iteration(
 
 async fn agent_hub_ticket_for(
     journal: &Journal,
+    state: &ServerState,
 ) -> anyhow::Result<Option<spectra_bridge_core::agent_relay::HubTicket>> {
     let deployment = journal
         .config("deployment_url")?
@@ -4738,6 +4784,8 @@ async fn agent_hub_ticket_for(
     let credential = HostPlatform
         .read_credential(&device_id)?
         .ok_or_else(|| anyhow::anyhow!("no device credential"))?;
+    anyhow::ensure!(state.local_relay_identity().as_ref().is_some_and(|identity| identity.device_id == device_id)
+        && state.work_account().as_ref().is_some_and(|(cloud, _)| cloud == deployment.trim_end_matches('/')), "Work account is not ready");
     spectra_bridge_core::sync::agent_hub_ticket(&deployment, &credential).await
 }
 
@@ -4944,37 +4992,9 @@ fn main() {
             for (key, value) in persisted_mounts {
                 if let Ok(mut config) = serde_json::from_str::<serde_json::Value>(&value) {
                     bind_legacy_folder_grant(&journal, &key, &mut config)?;
-                    if !credential_ready || !grant_config_matches_pairing(&journal, &config) {
-                        continue;
-                    }
-                    if let (Some(label), Some(path)) = (
-                        config.get("label").and_then(|value| value.as_str()),
-                        config.get("path").and_then(|value| value.as_str()),
-                    ) {
-                        let (scope, id) = key.split_once(':').expect("persisted grant prefix");
-                        let id = id.to_owned();
-                        if scope == "file-mount" {
-                            let Some(name) =
-                                config.get("selectedFile").and_then(|value| value.as_str())
-                            else {
-                                continue;
-                            };
-                            let _ = grants.restore_file_grant(
-                                id,
-                                label.to_owned(),
-                                std::path::Path::new(path),
-                                std::path::Path::new(name),
-                            );
-                        } else {
-                            let _ = grants.restore_device_grant(
-                                id,
-                                label.to_owned(),
-                                std::path::Path::new(path),
-                            );
-                        }
-                    }
                 }
             }
+            if credential_ready { restore_current_grants(&grants, &journal)?; }
             let restored_grants = grants.device_grants();
             for grant in &restored_grants {
                 if !grant.is_available() {
@@ -5017,9 +5037,11 @@ fn main() {
             let sync_grants = app.state::<BridgeRuntime>().grants.clone();
             let sync_state = state.clone();
             let hub_journal = sync_journal.clone();
-            tauri::async_runtime::spawn(spectra_bridge_core::agent_relay::run_hub(move || {
+            let hub_state = state.clone();
+            tauri::async_runtime::spawn(spectra_bridge_core::agent_relay::run_hub(state.clone(), move || {
                 let journal = hub_journal.clone();
-                async move { agent_hub_ticket_for(&journal).await }
+                let state = hub_state.clone();
+                async move { agent_hub_ticket_for(&journal, &state).await }
             }));
             let work_signal = Arc::new(WorkSignal::default());
             tauri::async_runtime::spawn(run_work_signal(
@@ -5037,10 +5059,30 @@ fn main() {
                 work_signal,
             ));
             let server_journal = journal.clone();
+            let work_journal = journal.clone();
+            let work_state = state.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(error) = serve(state).await {
                     record_runtime_error(&server_journal, "Bridge server stopped", &error);
                 }
+            });
+            tauri::async_runtime::spawn(async move {
+                // Never inspect/copy the legacy store while another Bridge
+                // owns the fixed listener and may still be writing it.
+                for _ in 0..50 {
+                    if work_state.is_listening() { break; }
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+                if !work_state.is_listening() { return; }
+                let restored = async {
+                    let Some(value) = work_journal.config("work_account")? else { return Ok::<_, anyhow::Error>(()); };
+                    let binding: WorkAccountBinding = serde_json::from_str(&value)?;
+                    let Some(identity) = work_state.pairing_identity().filter(|identity| identity.device_id == binding.device_id) else { return Ok(()); };
+                    let Some(credential) = HostPlatform.read_credential(&identity.device_id)? else { return Ok(()); };
+                    anyhow::ensure!(format!("{:x}", sha2::Sha256::digest(credential.as_bytes())) == binding.credential_hash, "Saved work account does not match the device key");
+                    prepare_work_account(&work_state, &work_journal, &identity, &binding.deployment, &credential, &binding.account_id).await
+                }.await;
+                if let Err(error) = restored { let _ = work_journal.set_config("work_store_error", &error.to_string()); }
             });
             // Connection recovery must remain available without access to the
             // previously paired account's Devices page.
@@ -5239,12 +5281,6 @@ mod devices_tests {
     }
 
     #[test]
-    fn the_pairing_dialog_shows_the_code_as_the_page_does() {
-        assert_eq!(spaced_code("123456"), "123 456");
-        assert!(pairing_confirmation_text("123456").contains("123 456"));
-    }
-
-    #[test]
     fn pausing_is_remembered_per_computer_and_per_folder() {
         let journal = Journal::in_memory().unwrap();
         let grants = GrantRegistry::default();
@@ -5418,6 +5454,34 @@ mod devices_tests {
                 name: "Essay.docx".into()
             }]
         );
+    }
+
+    #[test]
+    fn switching_back_restores_only_the_accounts_saved_files_and_folders() {
+        let journal = Journal::in_memory().unwrap();
+        let grants = GrantRegistry::default();
+        let dir = temp_folder("account-grants");
+        std::fs::write(dir.join("Chosen.docx"), b"chosen").unwrap();
+        journal.set_config("device_id", "a").unwrap();
+        let folder = grants.add_native_selection("A folder".into(), &dir).unwrap();
+        persist_folder_grant(&journal, &folder).unwrap();
+        grants.remove(&folder.id);
+        journal.set_config("device_id", "b").unwrap();
+        let file = grants.add_native_file_selection(&dir.join("Chosen.docx")).unwrap();
+        persist_file_grant(&journal, &file).unwrap();
+        grants.remove(&file.id);
+        restore_current_grants(&grants, &journal).unwrap();
+        assert_eq!(grants.device_grants().len(), 1);
+        assert_eq!(grants.device_grants()[0].id, file.id);
+        grants.remove(&file.id);
+        journal.set_config("device_id", "a").unwrap();
+        restore_current_grants(&grants, &journal).unwrap();
+        assert_eq!(grants.device_grants().len(), 1);
+        assert_eq!(grants.device_grants()[0].id, folder.id);
+        assert_eq!(std::fs::read(dir.join("Chosen.docx")).unwrap(), b"chosen");
+        assert_eq!(journal.config_prefix("mount:").unwrap().len(), 1);
+        assert_eq!(journal.config_prefix("file-mount:").unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -48,10 +48,13 @@ export function hasPendingCloudToLocalWrite(
 export function shouldActivateExternalNativeRevision(input: {
   operations?: readonly RecentNativeOperation[];
   localHash: string;
+  localState?: string;
   cloudHash: string;
 }) {
+  if (input.localState === "unavailable") return false;
   if (hasUnreconciledExternalRevision(input.operations, input.localHash))
     return true;
+  if (input.localState === "behind") return false;
   if (hasPendingCloudToLocalWrite(input.operations)) return false;
   return input.localHash !== input.cloudHash;
 }

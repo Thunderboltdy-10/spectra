@@ -9,6 +9,7 @@ import {
 import { bridgeIsAway } from "./availability";
 import { deviceBaseline, wordsOf, type DeviceSeed } from "../collaboration/device-work";
 import { requestSpectra } from "../data/request";
+import { accountStorageRevision, assertAccountStorageRevision } from "@/lib/account-storage-scope";
 
 /*
  * Talking to the work kept on this computer. Bridge answers from its own file,
@@ -29,9 +30,21 @@ type DeviceState = {
 };
 
 let state: DeviceState = { storeId: null, storage: null };
+let stateRevision: string | undefined;
 const listeners = new Set<() => void>();
 
+function deviceState() {
+  const revision = accountStorageRevision();
+  if (stateRevision !== revision) {
+    stateRevision = revision;
+    state = { storeId: null, storage: null };
+    seeded.clear(); knownOnDevice.clear();
+  }
+  return state;
+}
+
 export function publishDeviceState(next: Partial<DeviceState>) {
+  deviceState();
   const merged = { ...state, ...next };
   if (merged.storeId === state.storeId && merged.storage === state.storage) return;
   state = merged;
@@ -44,13 +57,14 @@ export function useDeviceState() {
       listeners.add(listener);
       return () => void listeners.delete(listener);
     },
-    () => state,
-    () => state,
+    deviceState,
+    deviceState,
   );
 }
 
 /** Where a new work goes: this computer, unless the person chose the cloud or Bridge isn't here. */
 export function newWorkStoreId(blueprintKey: string) {
+  deviceState();
   if (!state.storeId || state.storage === "cloud" || !DEVICE_WORK_TYPES.has(blueprintKey)) return undefined;
   return state.storeId;
 }
@@ -61,6 +75,8 @@ export async function callWorks<T = unknown>(
   timeoutMs = BRIDGE_REQUEST_TIMEOUT_MS * 2,
   options: { evenIfAway?: boolean } = {},
 ): Promise<T> {
+  const revision = accountStorageRevision();
+  assertAccountStorageRevision(revision);
   if (bridgeIsAway() && !options.evenIfAway) throw new Error("Spectra Bridge isn't answering on this computer.");
   const response = await authorizedBridgeRequest(
     "/v1/works/call",
@@ -74,6 +90,7 @@ export async function callWorks<T = unknown>(
   if (!response) throw new Error("Spectra Bridge isn't connected to this browser.");
   if (!response.ok) throw new Error(`Spectra Bridge answered ${response.status}.`);
   const reply = (await response.json()) as { result?: T; error?: string };
+  assertAccountStorageRevision(revision);
   if (reply.error) throw new Error(reply.error);
   return reply.result as T;
 }
@@ -107,6 +124,8 @@ export async function seedNewDeviceWork(
   input: { blueprintKey: string; title: string; summary?: string; tags?: string[]; content?: unknown },
 ) {
   if (created.schemaVersion === undefined || input.content === undefined) return;
+  const revision = accountStorageRevision();
+  assertAccountStorageRevision(revision); deviceState();
   knownOnDevice.add(created.artifactId);
   const seed: DeviceSeed = {
     typeKey: input.blueprintKey,
@@ -119,9 +138,12 @@ export async function seedNewDeviceWork(
   try {
     const baseline = deviceBaseline(seed);
     await callWorks("seed", { artifactId: created.artifactId, stateBase64: baseline.stateBase64, projection: baseline.projection });
+    assertAccountStorageRevision(revision);
     seeded.add(created.artifactId);
   } catch {
+    assertAccountStorageRevision(revision);
     await sendWorkToCloud(created.artifactId, { ...input, tags: input.tags ?? [], text: wordsOf(input.content) });
+    assertAccountStorageRevision(revision);
     knownOnDevice.delete(created.artifactId);
   }
 }
@@ -130,11 +152,14 @@ async function sendWorkToCloud(
   artifactId: string,
   work: { blueprintKey: string; title: string; summary?: string; tags: string[]; content?: unknown; text?: string },
 ) {
+  const revision = accountStorageRevision();
+  assertAccountStorageRevision(revision);
   const response = await requestSpectra("/api/spectra", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "workMovedToCloud", artifactId, ...work }),
   });
+  assertAccountStorageRevision(revision);
   if (!response.ok) throw new Error("This work could not be moved to the cloud.");
 }
 
@@ -143,6 +168,8 @@ export async function moveWorkToDevice(
   work: { _id: string; blueprintKey: string; title: string; summary?: string; tags?: string[]; schemaVersion?: number; content?: unknown },
   storeId: string,
 ) {
+  const revision = accountStorageRevision();
+  assertAccountStorageRevision(revision); deviceState();
   const baseline = deviceBaseline({
     typeKey: work.blueprintKey,
     title: work.title,
@@ -152,13 +179,16 @@ export async function moveWorkToDevice(
     content: work.content,
   });
   await callWorks("import", { artifactId: work._id, stateBase64: baseline.stateBase64, projection: baseline.projection });
+  assertAccountStorageRevision(revision);
   const response = await requestSpectra("/api/spectra", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "workMovedToDevice", artifactId: work._id, storeId }),
   });
+  assertAccountStorageRevision(revision);
   if (!response.ok) {
     await callWorks("remove", { artifactId: work._id }).catch(() => undefined);
+    assertAccountStorageRevision(revision);
     throw new Error("This work could not be moved to this computer.");
   }
   knownOnDevice.add(work._id);
@@ -167,7 +197,10 @@ export async function moveWorkToDevice(
 
 /** Brings a work up to the cloud, for sharing or another computer. */
 export async function moveWorkToCloud(artifactId: string) {
+  const revision = accountStorageRevision();
+  assertAccountStorageRevision(revision); deviceState();
   const stored = await callWorks<DeviceWorkRow | null>("get", { artifactId });
+  assertAccountStorageRevision(revision);
   if (!stored?.blueprintKey) throw new Error("This work isn't on this computer.");
   await sendWorkToCloud(artifactId, {
     blueprintKey: stored.blueprintKey,
@@ -177,7 +210,9 @@ export async function moveWorkToCloud(artifactId: string) {
     content: stored.content,
     text: wordsOf(stored.content),
   });
+  assertAccountStorageRevision(revision);
   await callWorks("remove", { artifactId }).catch(() => undefined);
+  assertAccountStorageRevision(revision);
   knownOnDevice.delete(artifactId);
   seeded.delete(artifactId);
 }
@@ -186,11 +221,13 @@ const seeded = new Set<string>();
 const knownOnDevice = new Set<string>();
 
 export function isDeviceWork(artifactId: string) {
+  deviceState();
   return knownOnDevice.has(artifactId);
 }
 
 /** The work as Bridge last saved it, or nothing when Bridge can't say. */
 export async function readDeviceWork(artifactId: string) {
+  deviceState();
   knownOnDevice.add(artifactId);
   return callWorks<DeviceWorkRow | null>("get", { artifactId }).catch(() => null);
 }
@@ -261,6 +298,8 @@ export async function enterDeviceRoom<T extends { token: string; device?: { stor
 ): Promise<T> {
   const device = session.device;
   if (!device) return session;
+  const revision = accountStorageRevision();
+  assertAccountStorageRevision(revision); deviceState();
   knownOnDevice.add(artifactId);
   if (!loadBridgeSession())
     throw new Error(
@@ -274,6 +313,7 @@ export async function enterDeviceRoom<T extends { token: string; device?: { stor
       "COLLABORATION_DEVICE_UNAVAILABLE: This work is kept on this computer and Spectra Bridge isn't answering. Open it and your work comes straight back.",
     );
   }
+  assertAccountStorageRevision(revision);
   if (summary.storeId !== device.storeId)
     throw new Error(
       "COLLABORATION_DEVICE_ELSEWHERE: This work is kept on another of your computers. Open it there, or move it to the cloud from that computer.",
@@ -281,7 +321,9 @@ export async function enterDeviceRoom<T extends { token: string; device?: { stor
   if (!seeded.has(artifactId)) {
     const baseline = deviceBaseline(device.seed);
     await callWorks("seed", { artifactId, stateBase64: baseline.stateBase64, projection: baseline.projection });
+    assertAccountStorageRevision(revision);
     seeded.add(artifactId);
   }
+  assertAccountStorageRevision(revision);
   return { ...session, token: loadBridgeSession() ?? "" };
 }

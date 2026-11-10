@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   postSpectra: vi.fn(),
   useQuery: vi.fn(),
   getThread: vi.fn(),
+  runTabs: [] as Array<{ runId: string }>,
+  runTabCard: vi.fn(),
   workspaceCatalog: { items: [] as Array<{ _id: string; title: string }>, status: "loading", isDone: false, error: null, more: vi.fn(), refresh: vi.fn() },
 }));
 vi.mock("../data/use-catalog-pages", () => ({ useWorkspaceCatalog: () => mocks.workspaceCatalog }));
@@ -23,7 +25,7 @@ vi.mock("convex/react", () => ({ useQuery: mocks.useQuery }));
 vi.mock("../data/use-authed-args", () => ({
   useAuthedArgs: (value: unknown) => value,
 }));
-vi.mock("../island/run-tabs", () => ({ useRunTabs: () => [], runTabCard: () => undefined, refreshRunTabs: vi.fn() }));
+vi.mock("../island/run-tabs", () => ({ useRunTabs: () => mocks.runTabs, runTabCard: mocks.runTabCard, refreshRunTabs: vi.fn() }));
 vi.mock("../data/api", () => ({
   clearSpectraRunAgent: vi.fn(),
   getSpectraOperationConflict: vi.fn(),
@@ -119,6 +121,8 @@ const detail = (
 const live = (source: SpectraThreadDetail): SpectraThreadDetail => ({ ...source, activeExecution: { run } });
 
 beforeEach(() => {
+  mocks.runTabs = [];
+  mocks.runTabCard.mockReset();
   mocks.getThread.mockReset();
   mocks.workspaceCatalog.items = [];
   mocks.workspaceCatalog.status = "loading";
@@ -149,6 +153,22 @@ afterEach(() => {
 });
 
 describe("ConversationSurface history and saved results", () => {
+  it.each([false, true])("offers command-only Undo from the run tab without loading a trace (compact=%s)", async (compact) => {
+    const card = { id: "undo-card", runId: run._id, status: "completed", title: "Done", variant: "status", actions: [{ key: "revert", label: "Undo this run", targetType: "run", targetId: run._id }], updatedAt: 1 };
+    mocks.runTabs = [{ runId: run._id }];
+    mocks.runTabCard.mockReturnValue(card);
+    const onCardAction = vi.fn();
+    const source = detail("thread-a", "Moved the deck to Trash.");
+    const view = render(<ConversationSurface detail={source} threadId="thread-a" compact={compact} onCardAction={onCardAction} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Undo Spectra's changes" }));
+    expect(onCardAction).toHaveBeenCalledWith(card, "revert");
+    expect(mocks.getTrace).not.toHaveBeenCalled();
+    mocks.runTabCard.mockReturnValue({ ...card, actions: [{ key: "undone", label: "Undone" }] });
+    mocks.runTabs = [...mocks.runTabs];
+    view.rerender(<ConversationSurface detail={source} threadId="thread-a" compact={compact} onCardAction={onCardAction} />);
+    expect(screen.queryByRole("button", { name: "Undo Spectra's changes" })).toBeNull();
+  });
+
   it.each([false, true])("does not present a saved-result box before any artifact result is loaded (compact=%s)", async (compact) => {
     mocks.getTrace.mockResolvedValue({ run, operations: [], events: [], cards: [], artifacts: [] });
     render(<ConversationSurface detail={live(detail("thread-a", "No editable document was created."))} threadId="thread-a" compact={compact} />);

@@ -96,7 +96,7 @@ export function authoredSemanticValue(value, parentKey) {
   const isImage = source.kind === "image";
   const hasInlineContent = Array.isArray(source.inlineContent);
   return Object.fromEntries(
-    Object.entries(source).flatMap(([key, child]) => {
+    Object.entries(source).sort(([left], [right]) => left.localeCompare(right)).flatMap(([key, child]) => {
       if (
         (parentKey === "image" || isImage) &&
         (key === "partName" || key === "assetId" || key === "occurrenceId")

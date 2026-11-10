@@ -4,6 +4,7 @@ import { convexTest } from "convex-test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { POLICY_PRESETS } from "../shared/sync-policy";
 
 function requireWriteRequestId(
   requestId: Id<"bridgeWriteRequests"> | "protected-original",
@@ -62,6 +63,8 @@ async function seedRevocation(t: ReturnType<typeof convexTest>) {
       createdAt: now,
       updatedAt: now,
     });
+    await ctx.db.insert("syncPolicies", { accountId, scopeKind: "account", scopeId: String(accountId),
+      ...POLICY_PRESETS.both, createdAt: now, updatedAt: now });
     await ctx.db.insert("schoolMemberships", {
       accountId,
       schoolId,

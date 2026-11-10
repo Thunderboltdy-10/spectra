@@ -1,12 +1,12 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 
 use async_trait::async_trait;
 use axum::extract::ws::WebSocketUpgrade;
-use axum::extract::{Request, State};
+use axum::extract::{Query, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -46,8 +46,27 @@ pub struct ServerState {
     pairing_completion: RwLock<HashMap<String, String>>,
     pairing_failure: RwLock<HashMap<String, String>>,
     device_id: RwLock<Option<String>>,
+    relay_generation: tokio::sync::watch::Sender<u64>,
     cloud_seen_at: AtomicU64,
     local_control: RwLock<Option<Arc<dyn LocalBridgeControl>>>,
+    listening: AtomicBool,
+    work_scope: RwLock<Option<WorkScope>>,
+    work_cache: Mutex<HashMap<(String, String), Arc<crate::rooms::Rooms>>>,
+    work_initializing: tokio::sync::Mutex<()>,
+}
+
+struct WorkScope {
+    identity: LocalRelayIdentity,
+    deployment: String,
+    account: String,
+    rooms: Arc<crate::rooms::Rooms>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LocalRelayIdentity {
+    pub device_id: String,
+    pub generation: String,
 }
 
 /// What choosing files came to, for whoever opened the picker. `selected` is
@@ -112,15 +131,99 @@ impl ServerState {
             pairing_completion: RwLock::new(HashMap::new()),
             pairing_failure: RwLock::new(HashMap::new()),
             device_id: RwLock::new(None),
+            relay_generation: tokio::sync::watch::channel(rand::rng().next_u64()).0,
             cloud_seen_at: AtomicU64::new(0),
             local_control: RwLock::new(None),
+            listening: AtomicBool::new(false),
+            work_scope: RwLock::new(None),
+            work_cache: Mutex::new(HashMap::new()),
+            work_initializing: tokio::sync::Mutex::new(()),
         }
     }
     pub fn install_local_control(&self, control: Arc<dyn LocalBridgeControl>) {
         *self.local_control.write().unwrap() = Some(control);
     }
     pub fn set_device_id(&self, device_id: String) {
-        *self.device_id.write().unwrap() = Some(device_id);
+        let mut current = self.device_id.write().unwrap();
+        if current.as_ref() == Some(&device_id) { return; }
+        if current.as_ref().is_some_and(|previous| previous != &device_id) {
+            *self.paired.write().unwrap() = false;
+            self.sessions.write().unwrap().clear();
+            self.pairing_completion.write().unwrap().clear();
+            self.cloud_seen_at.store(0, Ordering::Relaxed);
+        }
+        *current = Some(device_id);
+        self.clear_work_scope();
+        self.relay_generation.send_modify(|generation| *generation = generation.wrapping_add(1));
+    }
+    /// Also available while a confirmed pairing is preparing its local store.
+    pub fn pairing_identity(&self) -> Option<LocalRelayIdentity> {
+        let device = self.device_id.read().unwrap();
+        Some(LocalRelayIdentity {
+            device_id: device.clone()?,
+            generation: self.relay_generation.borrow().to_string(),
+        })
+    }
+    pub fn local_relay_identity(&self) -> Option<LocalRelayIdentity> {
+        if !self.is_paired() { return None; }
+        self.pairing_identity()
+    }
+    pub fn local_relay_matches(&self, identity: &LocalRelayIdentity) -> bool {
+        self.local_relay_identity().as_ref() == Some(identity)
+    }
+    pub fn relay_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.relay_generation.subscribe()
+    }
+    fn clear_work_scope(&self) {
+        *self.work_scope.write().unwrap() = None;
+        // Keep each room map until process exit: an old connection may still
+        // be finishing a save when the same account is paired again.
+        for rooms in self.work_cache.lock().unwrap().values() { rooms.clear_authority(); }
+    }
+    pub fn is_listening(&self) -> bool { self.listening.load(Ordering::Acquire) }
+    pub fn work_rooms(&self) -> Option<Arc<crate::rooms::Rooms>> {
+        let identity = self.local_relay_identity()?;
+        let scope = self.work_scope.read().unwrap();
+        scope.as_ref().filter(|scope| scope.identity == identity).map(|scope| scope.rooms.clone())
+    }
+    pub fn work_account(&self) -> Option<(String, String)> {
+        let identity = self.local_relay_identity()?;
+        let scope = self.work_scope.read().unwrap();
+        scope.as_ref().filter(|scope| scope.identity == identity).map(|scope| (scope.deployment.clone(), scope.account.clone()))
+    }
+    /// Called only with an owner from an authenticated pairing/health response
+    /// or its device/deployment-bound journal record on restart.
+    pub async fn prepare_work_rooms(&self, identity: &LocalRelayIdentity, store_path: std::path::PathBuf, legacy_path: std::path::PathBuf, deployment: String, credential: String, account: String) -> anyhow::Result<()> {
+        let _initializing = self.work_initializing.lock().await;
+        anyhow::ensure!(self.pairing_identity().as_ref() == Some(identity), "Pairing changed while preparing local work");
+        let deployment = deployment.trim_end_matches('/').to_string();
+        {
+            let device = self.device_id.read().unwrap();
+            anyhow::ensure!(device.as_deref() == Some(identity.device_id.as_str()) && self.relay_generation.borrow().to_string() == identity.generation, "Pairing changed while preparing local work");
+            let mut scope = self.work_scope.write().unwrap();
+            if scope.as_ref().is_some_and(|scope| scope.account != account || scope.deployment != deployment) {
+                *scope = None;
+                for rooms in self.work_cache.lock().unwrap().values() { rooms.clear_authority(); }
+                self.relay_generation.send_modify(|generation| *generation = generation.wrapping_add(1));
+                anyhow::bail!("Work account changed; reconnect this computer");
+            }
+        }
+        let key = (deployment.clone(), account.clone());
+        let cached = self.work_cache.lock().unwrap().get(&key).cloned();
+        let rooms = match cached {
+            Some(rooms) => rooms,
+            None => crate::rooms::Rooms::for_account(store_path, legacy_path, deployment.clone(), credential.clone(), account.clone()).await?,
+        };
+        // Holding the device read lock fences set_device_id/forget_pairing
+        // through cache insertion and publication, with no await in this span.
+        let device = self.device_id.read().unwrap();
+        anyhow::ensure!(device.as_deref() == Some(identity.device_id.as_str()) && self.relay_generation.borrow().to_string() == identity.generation, "Pairing changed while preparing local work");
+        let mut scope = self.work_scope.write().unwrap();
+        anyhow::ensure!(scope.as_ref().is_none_or(|scope| scope.account == account && scope.deployment == deployment), "Work account changed; reconnect this computer");
+        rooms.refresh_authority(deployment.clone(), credential);
+        self.work_cache.lock().unwrap().insert(key, rooms.clone());
+        *scope = Some(WorkScope { identity: identity.clone(), deployment, account, rooms });
+        Ok(())
     }
     pub fn mark_cloud_seen(&self) {
         self.cloud_seen_at.store(unix_ms(), Ordering::Relaxed);
@@ -151,9 +254,13 @@ impl ServerState {
     }
     /// Unpairing: the browser session and the device identity are dropped.
     pub fn forget_pairing(&self) {
+        let mut device = self.device_id.write().unwrap();
         *self.paired.write().unwrap() = false;
         self.sessions.write().unwrap().clear();
-        *self.device_id.write().unwrap() = None;
+        *device = None;
+        self.clear_work_scope();
+        self.relay_generation.send_modify(|generation| *generation = generation.wrapping_add(1));
+        drop(device);
         self.cloud_seen_at.store(0, Ordering::Relaxed);
         self.pending_pairing.write().unwrap().clear();
         self.pairing_completion.write().unwrap().clear();
@@ -232,6 +339,11 @@ impl ServerState {
             .unwrap()
             .insert(challenge, token.to_owned());
         Ok(())
+    }
+    pub fn complete_pairing_with_session_for(&self, identity: &LocalRelayIdentity, challenge: String, origin: String, token: &str) -> anyhow::Result<()> {
+        let device = self.device_id.read().unwrap();
+        anyhow::ensure!(device.as_deref() == Some(identity.device_id.as_str()) && self.relay_generation.borrow().to_string() == identity.generation, "Pairing changed before completion");
+        self.complete_pairing_with_session(challenge, origin, token)
     }
     /// A pairing attempt ended without pairing; the page reads why once.
     pub fn fail_pairing(&self, challenge: String, reason: String) {
@@ -374,6 +486,7 @@ pub fn router(state: Arc<ServerState>) -> Router {
     let cors_state = state.clone();
     Router::new()
         .route("/v1/health", get(health))
+        .route("/v1/agent/identity", get(local_relay_identity))
         .route("/v1/agent/connect", get(crate::agent_relay::connect))
         .route("/v1/agent/mcp/{id}", post(crate::agent_relay::mcp))
         .route("/v1/rooms", get(open_room_socket))
@@ -432,41 +545,67 @@ async fn health(State(state): State<Arc<ServerState>>) -> Json<HealthResponse> {
     })
 }
 
+async fn local_relay_identity(State(state): State<Arc<ServerState>>, headers: HeaderMap) -> Response {
+    if headers.contains_key("origin") {
+        return (StatusCode::FORBIDDEN, "Not for browsers").into_response();
+    }
+    let token = headers.get("authorization").and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer ")).unwrap_or_default();
+    if !crate::agent_relay::relay_token_matches(token) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    match (state.local_relay_identity(), state.work_account()) {
+        (Some(identity), Some((deployment, account))) => Json(serde_json::json!({ "deviceId": identity.device_id, "generation": identity.generation, "deployment": deployment, "accountId": account })).into_response(),
+        _ => (StatusCode::SERVICE_UNAVAILABLE, "Bridge's work account is not ready").into_response(),
+    }
+}
+
 /// A socket to this computer's rooms. Browsers can't set headers on one, so it
 /// proves itself in its first message: a paired browser with its session, and
 /// the local server with the relay token.
 async fn open_room_socket(
     State(state): State<Arc<ServerState>>,
+    Query(identity): Query<LocalRelayIdentity>,
     headers: HeaderMap,
     socket: WebSocketUpgrade,
 ) -> Response {
-    let Some(rooms) = crate::rooms::shared().cloned() else {
+    let origin = headers.get("origin").and_then(|value| value.to_str().ok()).map(str::to_string);
+    if origin.is_none() && !state.local_relay_matches(&identity) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let revoked = state.relay_changes();
+    let Some(rooms) = state.work_rooms() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "Work on this computer isn't available").into_response();
     };
-    let origin = headers.get("origin").and_then(|value| value.to_str().ok()).map(str::to_string);
     let authorize: crate::rooms::Authorize = Arc::new(move |token: &str| match &origin {
         Some(origin) => {
             let supplied = base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, token)
                 .unwrap_or_default();
             state.origin_session_matches(origin, &supplied)
         }
-        None => crate::agent_relay::relay_token_matches(token),
+        None => state.local_relay_matches(&identity) && crate::agent_relay::relay_token_matches(token),
     });
     socket
         .protocols([crate::rooms::FRAME_PROTOCOL])
         .max_message_size(crate::rooms::FRAME_BYTES + 64)
         .max_frame_size(crate::rooms::FRAME_BYTES + 64)
-        .on_upgrade(move |socket| crate::rooms::serve_browser(socket, rooms, authorize))
+        .on_upgrade(move |socket| crate::rooms::serve_browser(socket, rooms, authorize, revoked))
 }
 
 /// One request about stored work, from a paired browser.
-async fn works_call(body: String) -> Response {
-    let Some(rooms) = crate::rooms::shared().cloned() else {
+async fn works_call(State(state): State<Arc<ServerState>>, body: String) -> Response {
+    let mut revoked = state.relay_changes();
+    let Some(rooms) = state.work_rooms() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "Work on this computer isn't available").into_response();
+    };
+    let reply = tokio::select! {
+        biased;
+        _ = revoked.changed() => return (StatusCode::UNAUTHORIZED, "Bridge pairing changed").into_response(),
+        reply = crate::rooms::answer_store_request(rooms, body) => reply,
     };
     (
         [(http::header::CONTENT_TYPE, "application/json")],
-        crate::rooms::answer_store_request(rooms, body).await,
+        reply,
     )
         .into_response()
 }
@@ -730,7 +869,6 @@ fn unix_ms() -> u64 {
 }
 
 pub async fn serve(state: Arc<ServerState>) -> anyhow::Result<()> {
-    crate::agent_relay::prepare();
     let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), crate::BRIDGE_PORT);
     let listener = match tokio::net::TcpListener::bind(address).await {
         Ok(listener) => listener,
@@ -745,6 +883,8 @@ pub async fn serve(state: Arc<ServerState>) -> anyhow::Result<()> {
             );
         }
     };
+    crate::agent_relay::prepare();
+    state.listening.store(true, Ordering::Release);
     axum::serve(listener, router(state)).await?;
     Ok(())
 }
@@ -754,8 +894,215 @@ mod tests {
     use super::*;
     use crate::protocol::{LocalMountStatus, LocalOfficeFile};
     use std::sync::Mutex;
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
     const ORIGIN: &str = "http://localhost:3000";
+
+    #[tokio::test]
+    async fn local_relay_identity_and_channels_stay_bound_to_the_pairing() {
+        let state = Arc::new(ServerState::unpaired());
+        let base = spawn(state.clone()).await;
+        let client = reqwest::Client::new();
+        let identity_url = format!("{base}/v1/agent/identity");
+        let token = "dummy-local-relay-test-token";
+        assert_eq!(client.get(&identity_url).send().await.unwrap().status(), 401);
+        assert_eq!(client.get(&identity_url).bearer_auth(token).header("origin", ORIGIN).send().await.unwrap().status(), 403);
+        assert_eq!(client.get(&identity_url).bearer_auth(token).send().await.unwrap().status(), 503);
+        state.pair(ORIGIN.into());
+        state.set_device_id("device-1".into());
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("works.db");
+        state.prepare_work_rooms(&state.pairing_identity().unwrap(), path.clone(), path, "http://fixture".into(), "fixture-only".into(), "account-1".into()).await.unwrap();
+        let identity: LocalRelayIdentity = client.get(&identity_url).bearer_auth(token).send().await.unwrap().json().await.unwrap();
+        let request = |path: &str, identity: &LocalRelayIdentity, protocol: &str| {
+            let separator = if path.contains('?') { '&' } else { '?' };
+            let url = format!("{}{path}{separator}deviceId={}&generation={}", base.replacen("http", "ws", 1), identity.device_id, identity.generation);
+            let mut request = url.into_client_request().unwrap();
+            request.headers_mut().insert("sec-websocket-protocol", format!("{protocol}, {token}").parse().unwrap());
+            request
+        };
+        let wrong = LocalRelayIdentity { device_id: "device-2".into(), ..identity.clone() };
+        for (path, protocol) in [("/v1/store", "spectra-agent"), ("/v1/agent/connect?provider=codex", "spectra-agent"), ("/v1/rooms", crate::rooms::FRAME_PROTOCOL)] {
+            let error = tokio_tungstenite::connect_async(request(path, &wrong, protocol)).await.unwrap_err();
+            assert!(matches!(error, tokio_tungstenite::tungstenite::Error::Http(response) if response.status() == StatusCode::FORBIDDEN));
+        }
+        let (mut store, _) = tokio_tungstenite::connect_async(request("/v1/store", &identity, "spectra-agent")).await.unwrap();
+        store.send(tokio_tungstenite::tungstenite::Message::Text(r#"{"id":1,"method":"summary","params":{}}"#.into())).await.unwrap();
+        assert!(store.next().await.unwrap().unwrap().into_text().unwrap().contains("storeId"));
+        let (mut room, _) = tokio_tungstenite::connect_async(request("/v1/rooms", &identity, crate::rooms::FRAME_PROTOCOL)).await.unwrap();
+        let cli_request = request("/v1/agent/connect?provider=codex", &identity, "spectra-agent");
+        let (mut cli, _) = tokio_tungstenite::connect_async(cli_request).await.unwrap();
+        // No start frame is sent, so this test never launches a real CLI.
+        state.forget_pairing();
+        for closed in [
+            tokio::time::timeout(std::time::Duration::from_secs(2), store.next()).await,
+            tokio::time::timeout(std::time::Duration::from_secs(2), room.next()).await,
+            tokio::time::timeout(std::time::Duration::from_secs(2), cli.next()).await,
+        ] {
+            assert!(!matches!(closed.unwrap(), Some(Ok(message)) if !message.is_close()));
+        }
+        state.pair(ORIGIN.into());
+        state.set_device_id("device-1".into());
+        assert!(!state.local_relay_matches(&identity));
+        assert_ne!(state.local_relay_identity().unwrap().generation, identity.generation);
+    }
+
+    #[tokio::test]
+    async fn re_pairing_keeps_work_private_and_reuses_the_same_accounts_room_map() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("works.db");
+        let state = Arc::new(ServerState::unpaired());
+        let base = spawn(state.clone()).await;
+        let client = reqwest::Client::new();
+        let call = |token: &str, method: &str, params: serde_json::Value| client.post(format!("{base}/v1/works/call")).header("origin", ORIGIN).bearer_auth(token).json(&serde_json::json!({"id":1,"method":method,"params":params})).send();
+        state.set_device_id("device-a".into());
+        let a = state.pairing_identity().unwrap();
+        let token_a = state.pair(ORIGIN.into());
+        // No global/empty store may be exposed before migration succeeds.
+        assert_eq!(call(&token_a, "summary", serde_json::json!({})).await.unwrap().status(), 503);
+        state.prepare_work_rooms(&a, path.clone(), path.clone(), "http://fixture".into(), "fixture-a".into(), "a".into()).await.unwrap();
+        let rooms_a = state.work_rooms().unwrap();
+        let saved: serde_json::Value = call(&token_a, "save", serde_json::json!({"artifactId":"a-work","projection":{"title":"A's work","owner":"b"}})).await.unwrap().json().await.unwrap();
+        assert_eq!(saved["result"]["ok"], true);
+        // A second browser joining the same verified device must not retire
+        // the active run/room authority or hide the already-open work store.
+        state.set_device_id("device-a".into());
+        assert!(state.local_relay_matches(&a));
+        assert!(Arc::ptr_eq(&rooms_a, &state.work_rooms().unwrap()));
+        assert_eq!(call(&token_a, "summary", serde_json::json!({})).await.unwrap().status(), 200);
+        state.set_device_id("device-b".into());
+        assert!(!state.is_paired());
+        assert!(state.work_rooms().is_none());
+        assert_eq!(call(&token_a, "summary", serde_json::json!({})).await.unwrap().status(), 401);
+        let b = state.pairing_identity().unwrap();
+        let token_b = state.pair(ORIGIN.into());
+        state.prepare_work_rooms(&b, path.clone(), path.clone(), "http://fixture".into(), "fixture-b".into(), "b".into()).await.unwrap();
+        let hidden: serde_json::Value = call(&token_b, "get", serde_json::json!({"artifactId":"a-work"})).await.unwrap().json().await.unwrap();
+        assert!(hidden["result"].is_null());
+        assert!(!Arc::ptr_eq(&rooms_a, &state.work_rooms().unwrap()));
+        assert!(state.prepare_work_rooms(&a, path.clone(), path.clone(), "http://fixture".into(), "fixture-a".into(), "a".into()).await.is_err());
+        assert_eq!(state.work_account().unwrap().1, "b");
+        assert_eq!(call(&token_a, "summary", serde_json::json!({})).await.unwrap().status(), 401);
+        state.set_device_id("device-a".into());
+        assert_eq!(call(&token_b, "summary", serde_json::json!({})).await.unwrap().status(), 401);
+        let token_a = state.pair(ORIGIN.into());
+        state.prepare_work_rooms(&state.pairing_identity().unwrap(), path.clone(), path, "http://fixture/".into(), "fixture-a-new".into(), "a".into()).await.unwrap();
+        assert!(Arc::ptr_eq(&rooms_a, &state.work_rooms().unwrap()));
+        let recovered: serde_json::Value = call(&token_a, "get", serde_json::json!({"artifactId":"a-work"})).await.unwrap().json().await.unwrap();
+        assert_eq!(recovered["result"]["title"], "A's work");
+        assert_eq!(rooms_a.store().search("work", Some("a"), 10).unwrap().len(), 1);
+        assert!(rooms_a.store().search("work", Some("b"), 10).unwrap().is_empty());
+        // A new verified owner for the same pairing must retire the old scope.
+        let current = state.pairing_identity().unwrap();
+        assert!(state.prepare_work_rooms(&current, root.path().join("works.db"), root.path().join("works.db"), "http://fixture".into(), "fixture-b".into(), "b".into()).await.is_err());
+        assert!(state.work_rooms().is_none());
+        assert!(!state.local_relay_matches(&current));
+    }
+
+    #[test]
+    fn same_device_rejoin_and_startup_preserve_sessions_but_switching_rotates_them() {
+        let state = ServerState::unpaired();
+        let first = state.pair(ORIGIN.into());
+        state.set_device_id("device-a".into());
+        state.set_device_id("device-a".into());
+        assert_eq!(state.prepare_pairing_session(ORIGIN), first);
+        state.set_device_id("device-b".into());
+        let second = state.prepare_pairing_session(ORIGIN);
+        assert_ne!(first, second);
+        let restored = ServerState::unpaired();
+        restored.restore_sessions(&state.sessions_json_with(ORIGIN, &second));
+        restored.set_device_id("device-b".into());
+        assert_eq!(restored.resume_session_with_token(ORIGIN, &first), None);
+        assert_eq!(restored.resume_session_with_token(ORIGIN, &second), Some(second));
+    }
+
+    #[test]
+    fn a_cancelled_pairing_cannot_publish_its_browser_session() {
+        let state = ServerState::unpaired();
+        state.set_device_id("device-a".into());
+        let identity = state.pairing_identity().unwrap();
+        let token = state.prepare_pairing_session(ORIGIN);
+        state.forget_pairing();
+        state.set_device_id("device-b".into());
+        assert!(state.complete_pairing_with_session_for(&identity, "old-offer".into(), ORIGIN.into(), &token).is_err());
+        assert!(!state.is_paired());
+        let current = state.pairing_identity().unwrap();
+        state.complete_pairing_with_session_for(&current, "current-offer".into(), ORIGIN.into(), &token).unwrap();
+        assert!(state.is_paired());
+    }
+
+    #[tokio::test]
+    async fn migration_finishing_after_re_pairing_cannot_publish_the_old_account() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("works.db");
+        let legacy = crate::works::WorkStore::open(&path).unwrap();
+        legacy.save_projection("a-work", &crate::works::Projection { title: Some("Private A work".into()), ..Default::default() }).unwrap();
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let waiting = entered.clone(); let released = release.clone();
+        let router = Router::new().route("/api/query", post(move |Json(request): Json<serde_json::Value>| {
+            let waiting = waiting.clone(); let released = released.clone();
+            async move {
+                assert_eq!(request["args"]["credential"], "fixture-a");
+                waiting.notify_one();
+                released.notified().await;
+                Json(serde_json::json!({"status":"success","value":{"accountId":"a","artifactIds":["a-work"]}}))
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let deployment = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
+        let state = Arc::new(ServerState::unpaired());
+        state.set_device_id("device-a".into());
+        state.pair(ORIGIN.into());
+        let identity = state.pairing_identity().unwrap();
+        let preparing = state.clone(); let target = path.clone(); let cloud = deployment.clone();
+        let task = tokio::spawn(async move { preparing.prepare_work_rooms(&identity, target.clone(), target, cloud, "fixture-a".into(), "a".into()).await });
+        tokio::time::timeout(std::time::Duration::from_secs(2), entered.notified()).await.unwrap();
+        state.forget_pairing();
+        state.set_device_id("device-b".into());
+        state.pair(ORIGIN.into());
+        release.notify_one();
+        assert!(task.await.unwrap().is_err());
+        assert!(state.work_rooms().is_none());
+        // A's private copy can survive cancellation; the legacy source stays.
+        assert_eq!(legacy.work("a-work").unwrap().unwrap()["title"], "Private A work");
+        let recovered = crate::works::WorkStore::for_account(&path, &deployment, "a").unwrap();
+        assert_eq!(recovered.work("a-work").unwrap().unwrap()["title"], "Private A work");
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn unpairing_cancels_a_browser_restore_waiting_for_ownership() {
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let waiting = entered.clone();
+        let cloud = Router::new().route("/api/query", post(move || {
+            let waiting = waiting.clone();
+            async move { waiting.notify_one(); std::future::pending::<Json<serde_json::Value>>().await }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let deployment = format!("http://{}", listener.local_addr().unwrap());
+        let cloud = tokio::spawn(async move { axum::serve(listener, cloud).await.unwrap(); });
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("works.db");
+        let state = Arc::new(ServerState::unpaired());
+        state.set_device_id("device-a".into());
+        let token = state.pair(ORIGIN.into());
+        state.prepare_work_rooms(&state.pairing_identity().unwrap(), path.clone(), path, deployment, "fixture-only".into(), "a".into()).await.unwrap();
+        let rooms = state.work_rooms().unwrap();
+        let backup = crate::works::WorkStore::in_memory().unwrap();
+        backup.save_projection("a-work", &crate::works::Projection { title: Some("From backup".into()), ..Default::default() }).unwrap();
+        let bundle = backup.backup_bundle(true).unwrap().0;
+        let bundle = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bundle);
+        let base = spawn(state.clone()).await;
+        let response = tokio::spawn(async move { reqwest::Client::new().post(format!("{base}/v1/works/call")).header("origin", ORIGIN).bearer_auth(token).json(&serde_json::json!({"id":1,"method":"restore","params":{"bundleBase64":bundle}})).send().await.unwrap() });
+        tokio::time::timeout(std::time::Duration::from_secs(2), entered.notified()).await.unwrap();
+        state.forget_pairing();
+        assert_eq!(tokio::time::timeout(std::time::Duration::from_secs(2), response).await.unwrap().unwrap().status(), 401);
+        assert!(rooms.store().work("a-work").unwrap().is_none());
+        cloud.abort();
+    }
 
     #[test]
     fn development_origins_are_exact_loopback_hosts() {

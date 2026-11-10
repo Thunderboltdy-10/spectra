@@ -201,7 +201,7 @@ export function editArtifactTool(session: HarnessSession): HarnessTool<EditArgs>
       const wipe = classifyArtifactContentWipe(current.type, current.content, authored.content);
       if (wipe.fullContentDeletion && !ctx.approved) {
         // Record the exact edit first, so the approval binds to it.
-        await session.backend.stageArtifactUpdate?.(
+        const staged = await session.backend.stageArtifactUpdate?.(
           {
             id: current.id,
             type: current.type,
@@ -211,7 +211,8 @@ export function editArtifactTool(session: HarnessSession): HarnessTool<EditArgs>
           },
           ctx.signal,
         );
-        return {
+        if (staged && (!staged.ok || staged.pause)) return staged;
+        if (!staged) return {
           ok: false,
           content: "",
           pause: {
@@ -221,7 +222,7 @@ export function editArtifactTool(session: HarnessSession): HarnessTool<EditArgs>
           },
         };
       }
-      await session.backend.updateArtifact(
+      const updated = await session.backend.updateArtifact(
         {
           id: current.id,
           type: current.type,
@@ -232,6 +233,7 @@ export function editArtifactTool(session: HarnessSession): HarnessTool<EditArgs>
         },
         ctx.signal,
       );
+      if (updated && (!updated.ok || updated.pause)) return updated;
       const title = args.title ?? current.title;
       rememberTitle(session, current.id, title, current.type);
       return {

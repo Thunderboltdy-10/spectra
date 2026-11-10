@@ -14,7 +14,7 @@ const MAX_FRAME_CHARS = 1_500_000;
 const MAX_WAITING_CHARS = 4_000_000;
 
 const secret = () => process.env.SPECTRA_COLLAB_TOKEN_SECRET?.trim() || null;
-const channelId = (runId: string, executionId: string) => `${runId}:${executionId}`;
+const channelId = (runId: string, executionId: string, relayId?: string) => `${runId}:${executionId}${relayId ? `:${relayId}` : ""}`;
 
 function ticket(sub: string, role: "publish" | "watch") {
   const key = secret();
@@ -32,9 +32,9 @@ function relayBase(forBrowser: boolean) {
 }
 
 /** What the page needs to listen to this attempt. Null when there is no relay. */
-export function runRelayInvite(runId: string, executionId: string) {
+export function runRelayInvite(runId: string, executionId: string, relayId?: string) {
   try {
-    const watch = ticket(channelId(runId, executionId), "watch");
+    const watch = ticket(channelId(runId, executionId, relayId), "watch");
     if (!watch) return null;
     return { type: "live_relay" as const, url: `${relayBase(true)}/_spectra/run-relay/watch`, ticket: watch };
   } catch {
@@ -49,10 +49,10 @@ export type RunRelaySender = {
   close(): void;
 };
 
-export function openRunRelay(runId: string, executionId: string): RunRelaySender | null {
+export function openRunRelay(runId: string, executionId: string, relayId?: string): RunRelaySender | null {
   let socket: WebSocket;
   try {
-    const publish = ticket(channelId(runId, executionId), "publish");
+    const publish = ticket(channelId(runId, executionId, relayId), "publish");
     if (!publish) return null;
     socket = new WebSocket(`${relayBase(false)}/_spectra/run-relay/publish`, ["spectra-run-relay", publish]);
   } catch {

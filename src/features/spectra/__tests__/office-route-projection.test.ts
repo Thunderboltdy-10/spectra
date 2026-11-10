@@ -6,12 +6,17 @@ import {
   xlsxProjectionUpdateFromContent,
 } from "../lenses/office-content";
 import { hasUnreconciledExternalRevision, shouldActivateExternalNativeRevision } from "../lenses/native-reconciliation";
+
 import { sniffOfficeRasterMedia } from "../lenses/office-media";
 import { XlsxLensError } from "../lenses/xlsx-lens";
 
 const NATIVE_EXCEL_FILL = "#1F4E78";
 
 describe("Office lens route projection boundary", () => {
+  it("does not activate a removed device's unavailable old bytes over current cloud work", () => {
+    expect(shouldActivateExternalNativeRevision({ localState: "unavailable", localHash: "old-disk", cloudHash: "new-cloud" })).toBe(false);
+  });
+
   it("returns the Office error envelope when parsing fails before format detection", async () => {
     const response = await POST(
       new Request("http://localhost/api/spectra/lenses/office", {
@@ -98,6 +103,16 @@ describe("Office lens route projection boundary", () => {
         cloudHash: "spectra",
       }),
     ).toBe(true);
+  });
+
+  it("keeps an intentionally unchanged desktop copy behind without reverting Spectra", () => {
+    expect(shouldActivateExternalNativeRevision({
+      localHash: "disk", cloudHash: "spectra", localState: "behind",
+    })).toBe(false);
+    expect(shouldActivateExternalNativeRevision({
+      localHash: "disk", cloudHash: "spectra", localState: "behind",
+      operations: [{ direction: "external", actorKind: "external-edit", revisionAfter: "disk", state: "applied" }],
+    })).toBe(true);
   });
 
   it("uses the native projection before an Office artifact has semantic content", () => {

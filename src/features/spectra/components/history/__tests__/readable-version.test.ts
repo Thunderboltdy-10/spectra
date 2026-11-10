@@ -37,7 +37,22 @@ describe("readableParts", () => {
   });
 
   it("skips anything that is not read", () => {
-    expect(textOf({ id: "abc", color: "#fff", width: 12, text: "Kept" })).toBe("Kept");
+    expect(textOf({ id: "abc", color: "white", width: 12, text: "Kept" })).toBe("Kept");
+  });
+
+  it("reads stored quiz and card HTML as words", () => {
+    expect(readableParts("quiz", { content: { questions: [{ prompt: "<p>Waves &amp; <strong>motion</strong></p>", options: ["<p>Transverse</p>", "<p>Longitudinal</p>"] }] } })).toEqual([
+      { label: "Question 1", text: "Waves & motion Transverse Longitudinal" },
+    ]);
+    expect(readableParts("flashcard_deck", { content: { cards: [{ front: "<p>A <em>wave</em></p>", back: "<p>Energy</p><p>transfer</p>" }] } })).toEqual([
+      { label: "Card 1 front", text: "A wave" },
+      { label: "Card 1 back", text: "Energy\ntransfer" },
+    ]);
+  });
+
+  it("keeps literal markup in document text and source code", () => {
+    expect(readableParts("document", doc("<p>literal</p>"))[1]?.text).toBe("<p>literal</p>");
+    expect(readableParts("code", { content: { files: [{ path: "index.html", source: "<p>literal</p>" }] } })[0]?.text).toBe("<p>literal</p>");
   });
 });
 

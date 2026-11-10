@@ -2,6 +2,7 @@ import "server-only";
 import { comparePackages } from "@ariadng/office/preservation";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { convexQuery } from "@/lib/convex-server";
+import { writableNativeReplica } from "@/lib/native-materialization-server";
 import { materializeDocxArtifact } from "@/app/api/spectra/lenses/docx/route";
 import { materializeOfficeArtifact } from "@/app/api/spectra/lenses/office/route";
 import { docxLens, sha256Payload } from "./docx-lens";
@@ -51,7 +52,7 @@ export async function prepareWholeNativeHistoryRestore(workId: Id<"spectraArtifa
     throw new Error("NATIVE_RESTORE_SOURCE_INVALID");
   const [current, work] = await Promise.all([
     fetchVerifiedNativePayload(workId, "cloud"),
-    convexQuery<{ workId: Id<"spectraArtifacts"> }, { replicas: { _id: Id<"workReplicas">; kind: string; state: string }[] } | null>(
+    convexQuery<{ workId: Id<"spectraArtifacts"> }, { replicas: { _id: Id<"workReplicas">; kind: string; state: string; mountId?: Id<"bridgeMounts"> }[] } | null>(
       "replicas:forWork", { workId }),
   ]);
   if (!work) throw new Error("WORK_NOT_FOUND");
@@ -61,7 +62,7 @@ export async function prepareWholeNativeHistoryRestore(workId: Id<"spectraArtifa
     readback(workId, source.nativeFormat, payload, source.sourcePayloadHash),
     comparePackages(current.payload, payload),
   ]);
-  const local = work.replicas.find(replica => replica.kind === "local" && replica.state !== "unavailable");
+  const local = await writableNativeReplica(workId, work.replicas);
   const same = current.truth.hash === source.sourcePayloadHash;
   const partNames = comparison.parts.filter(part => part.verdict !== "identical").map(part => `/${part.name}`);
   const receipt: NativeSaveReceipt = { kind: "native-office-save", format: after.format,

@@ -3,6 +3,22 @@ import { normalizeArtifactContent } from "../ai/content-normalization";
 import { validateBlueprintContent } from "../artifacts/blueprint-catalog";
 
 describe("model artifact content normalization", () => {
+  it("preserves numeric and free-response answers when an edit retains old options", () => {
+    const options = ["Wavelength", "Wave speed", "Frequency", "Amplitude"];
+    const questions = [
+      { type: "numeric", correctAnswer: "3" },
+      { type: "numeric", answer: 3 },
+      { type: "short_answer", correctAnswer: "2" },
+      { type: "multiple_choice", correctAnswer: "2" },
+      { type: "multiple_choice", answer: 1 },
+    ].map((question) => ({ prompt: "Calculate the wavelength in m.", options, ...question }));
+    const quiz = normalizeArtifactContent("quiz", { questions });
+    expect((quiz.questions as Array<{ correctAnswer: string }>).map((question) => question.correctAnswer))
+      .toEqual(["3", "3", "2", "Frequency", "Wave speed"]);
+    expect(normalizeArtifactContent("quiz", quiz)).toEqual(quiz);
+    expect(questions[0].correctAnswer).toBe("3");
+  });
+
   it("adds storage ids and canonicalizes rich document block aliases", () => {
     const content = normalizeArtifactContent("document", { blocks: [
       { type: "h1", content: "Cellular respiration" },

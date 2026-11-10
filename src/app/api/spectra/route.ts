@@ -773,11 +773,12 @@ export async function GET(request: NextRequest) {
     }
 
     if (action === "overview") {
-      const workspaces = (await spectraQuery("spectraWorkspaces:list", {
+      const requestedWorkspaceId = params.get("workspaceId") ?? undefined;
+      const includeCatalog = Boolean(requestedWorkspaceId) || params.get("includeCatalog") !== "false";
+      const workspaces = (includeCatalog ? await spectraQuery("spectraWorkspaces:list", {
         includeArchived: false,
         limit: 30,
-      })) as Array<{ _id: string }>;
-      const requestedWorkspaceId = params.get("workspaceId") ?? undefined;
+      }) : []) as Array<{ _id: string }>;
       const workspace = requestedWorkspaceId
         ? await spectraQuery("orgTree:listWorkspaceContentsPublic", {
             workspaceId: requestedWorkspaceId,
@@ -788,15 +789,16 @@ export async function GET(request: NextRequest) {
         workspace && typeof workspace === "object"
           ? String((workspace as { workspace: { _id: string } }).workspace._id)
           : undefined;
+      const includeRuns = params.get("includeRuns") !== "false";
       const [artifacts, runs, resultCards] = await Promise.all([
-        spectraQuery("spectraArtifacts:list", {
+        includeCatalog ? spectraQuery("spectraArtifacts:list", {
           placement: "all",
           limit: 60,
-        }),
-        spectraQuery("spectraRuns:listRecent", {
+        }) : [],
+        includeRuns ? spectraQuery("spectraRuns:listRecent", {
           limit: 12,
-        }),
-        optionalSpectraQuery(
+        }) : [],
+        includeRuns ? optionalSpectraQuery(
           "spectraRuns:listResultCards",
           {
             workspaceId: selectedWorkspaceId,
@@ -804,7 +806,7 @@ export async function GET(request: NextRequest) {
             limit: 20,
           },
           [],
-        ),
+        ) : [],
       ]);
       return ok({
         actor,

@@ -1,7 +1,6 @@
 import { createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import WebSocket from "ws";
+import { localBridgeRelay } from "./local-bridge-relay";
 
 /*
  * The server's way to the work kept on someone's computer: straight to Bridge
@@ -23,19 +22,13 @@ function hubTicket(accountId: string) {
   return `${body}.${createHmac("sha256", secret).update(body).digest("base64url")}`;
 }
 
-function relayToken() {
-  const base = process.env.LOCALAPPDATA || process.env.HOME || "";
-  try {
-    return readFileSync(join(base, "Spectra", "agent-relay.token"), "utf8").trim();
-  } catch {
-    throw new Error("DEVICE_STORE_UNAVAILABLE: Spectra Bridge isn't running on this computer.");
-  }
-}
-
 /** How the AI's live connection reaches a room on the person's computer. */
-export function deviceRoomEndpoint(accountId: string) {
+export async function deviceRoomEndpoint(accountId: string) {
   const hub = hubUrl();
-  if (!hub) return { url: `${LOCAL_BRIDGE}/v1/rooms`, token: relayToken(), protocols: undefined };
+  if (!hub) {
+    const relay = await localBridgeRelay(accountId);
+    return { url: `${LOCAL_BRIDGE}/v1/rooms?${relay.query}`, token: relay.token, protocols: undefined };
+  }
   return {
     url: `${hub}/_spectra/agent-hub/server?provider=rooms`,
     token: "hub",
@@ -50,9 +43,11 @@ export async function deviceStoreCall<T = unknown>(
   timeoutMs = CALL_TIMEOUT_MS,
 ): Promise<T> {
   const hub = hubUrl();
+  const started = Date.now();
+  const relay = hub ? null : await localBridgeRelay(accountId, Math.min(timeoutMs, 2_500));
   const socket = hub
     ? new WebSocket(`${hub}/_spectra/agent-hub/server?provider=store`, ["spectra-agent", hubTicket(accountId)])
-    : new WebSocket(`${LOCAL_BRIDGE}/v1/store`, ["spectra-agent", relayToken()]);
+    : new WebSocket(`${LOCAL_BRIDGE}/v1/store?${relay!.query}`, ["spectra-agent", relay!.token]);
   return new Promise<T>((resolve, reject) => {
     const finish = (settle: () => void) => {
       clearTimeout(timer);
@@ -63,7 +58,7 @@ export async function deviceStoreCall<T = unknown>(
     };
     const timer = setTimeout(() => {
       finish(() => reject(new Error("DEVICE_STORE_UNAVAILABLE: Spectra Bridge didn't answer.")));
-    }, timeoutMs);
+    }, Math.max(1, timeoutMs - (Date.now() - started)));
     socket.on("open", () => socket.send(JSON.stringify({ id: 1, method, params })));
     socket.on("message", (data) => {
       try {

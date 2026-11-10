@@ -29,7 +29,7 @@ import {
   type PresentationTextRun,
 } from "../../../presentation/model";
 import { notFoundMessage } from "./locate";
-import { AuthoringError, type IdFactory, defaultIdFactory, isPlaceholder, record, truncate } from "./shared";
+import { AuthoringError, type IdFactory, defaultIdFactory, isPlaceholder, record, text, truncate } from "./shared";
 
 /*
  * Presentations are authored as slide operations. The model says what is on a
@@ -272,7 +272,7 @@ function fillSlide(
   if (spec.body !== undefined) {
     const keep = new Set(bodyObjects(slide, title).map((object) => object.id));
     slide.objects = slide.objects.filter((object) => !keep.has(object.id));
-    const entries = (Array.isArray(spec.body) ? spec.body : [spec.body]).map(String).filter((entry) => entry.trim());
+    const entries = (Array.isArray(spec.body) ? spec.body : [spec.body]).map(text).filter((entry) => entry.trim());
     entries.forEach((entry) =>
       slide.objects.push(textObject(entry, slide.objects.length + 1, ids, layout === "three-ideas")),
     );

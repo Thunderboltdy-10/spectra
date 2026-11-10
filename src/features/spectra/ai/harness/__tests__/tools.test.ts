@@ -52,6 +52,27 @@ function setup(backend = new MemoryBackend(), ai: unknown = {}) {
 }
 
 describe("harness tools", () => {
+  it("tells the model which listed and searched work is kept on a computer", async () => {
+    const { backend, run } = setup();
+    let results: unknown[] = [];
+    backend.listLibrary = async () => [
+      { id: "node-1", artifactId: "local-1", kind: "work", title: "Photosynthesis.docx", onComputer: true },
+      { id: "node-2", artifactId: "cloud-1", kind: "work", title: "Cloud notes" },
+    ];
+    backend.search = async () => ({ hits: [{ kind: "artifact", id: "local-1", title: "Photosynthesis.docx", typeLabel: "Document", onComputer: true }], mode: "hybrid" });
+    const outcome = await run(scripted([
+      { text: "", toolCalls: [call("list", "list_library", { query: "photosynthesis" }), call("search", "search", { query: "photosynthesis" })] },
+      messages => {
+        results = messages.filter(message => message.role === "tool").map(message => message.content);
+        return { text: "Found the file.", toolCalls: [] };
+      },
+    ]).caller);
+    expect(outcome.status).toBe("completed");
+    expect(results).toHaveLength(2);
+    for (const result of results) expect(result).toMatch(/Photosynthesis\.docx[^\n]*kept on a computer/);
+    expect(results[0]).not.toMatch(/Cloud notes[^\n]*kept on a computer/);
+  });
+
   it("every tool has an effect, a prose description and a label without ids", () => {
     const { tools } = setup();
     const names = tools.map((tool) => tool.name);

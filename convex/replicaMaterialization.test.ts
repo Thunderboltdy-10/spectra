@@ -59,6 +59,8 @@ async function seedWork(t: ReturnType<typeof convexTest>) {
   const actor = await seedActor(t);
   return t.run(async (ctx) => {
     const now = Date.now();
+    await ctx.db.insert("syncPolicies", { accountId: actor.accountId, scopeKind: "account", scopeId: String(actor.accountId),
+      ...POLICY_PRESETS.both, createdAt: now, updatedAt: now });
     const runId = await ctx.db.insert("spectraAiRuns", {
       ownerAccountId: actor.accountId, schoolId: actor.schoolId,
       sourceSurface: "artifact", status: "running", userPrompt: "Update the document",
@@ -226,6 +228,21 @@ async function invokeCloud(t: ReturnType<typeof convexTest>, f: Fixture) {
 }
 
 describe("Native materialization in the admitting mutation", () => {
+  it.each([false, true])("human materialization preserves an already-live canonical head: %s", async live => {
+    const t = convexTest(schema, modules);
+    const f = await seedWork(t);
+    if (live) await t.run(ctx => ctx.db.patch(f.workId, { liveStateVectorHash: "acknowledged-room-vector" }));
+    const before = await snapshot(t, f);
+    await t.mutation(internal.nativeMaterialization.commitHuman, {
+      accountId: f.accountId, artifactId: f.workId, candidate: { destination: "bridge", queue: queueArgs(f) },
+    });
+    const after = await snapshot(t, f);
+    if (live) expect(after.work).toEqual(before.work);
+    else expect(after.work).toMatchObject({ content: projection, contentHash: projectionHash });
+    expect(after.requests).toHaveLength(1);
+    expect(after.requests[0]).toMatchObject({ projectionBaseContent: projection, projectionBaseContentHash: projectionHash });
+  });
+
   it("refuses the unsigned public native effects without creating a request", async () => {
     const t = convexTest(schema, modules);
     const f = await seedWork(t);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { accountStorageMatches, accountStorageRevision } from "@/lib/account-storage-scope";
 import { useConvexAuth, useMutation } from "convex/react";
 import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { usePathname, useRouter } from "next/navigation";
@@ -70,37 +71,64 @@ function askedWhereWorkLives() {
   }
 }
 
-/** A Bridge on another account says no every time, so asking again waits a while. */
-const REJOIN_AFTER_REFUSAL_MS = 30 * 60_000;
-let rejoinAllowedAt = 0;
-let rejoinRefused = false;
+// One attempt per account/foreground activation, never competing in background.
+let rejoinAttempted = false;
+let rejoinInFlight = false;
+let rejoinRevision: string | undefined;
 
 /*
  * Keeps this browser and Bridge joined from the moment the app opens, on every
- * page. A Bridge already connected to this account lets a new browser in by
- * itself. Only a Bridge with no account yet takes the code on the computer, or
- * one on another account, and those are offered.
+ * page. The signed-in foreground account supplies its own authenticated web
+ * challenge, including on a fresh installation or after switching accounts.
  */
 export function BridgeConnection() {
+  const revision = accountStorageRevision();
   const router = useRouter();
   const pathname = usePathname();
   const { isAuthenticated } = useConvexAuth();
   const requestPairing = useMutation(api.bridge.requestPairing);
-  const { discovery, status, checked, health } = useBridgeHealth();
+  const { discovery, status, checked, refresh } = useBridgeHealth();
   const { preferences, hydrated, update } = useSpectraPreferences();
   const hasDevice = useQuery(api.bridge.hasDevice, isAuthenticated ? {} : "skip");
   const unjoined = checked && discovery.kind === "running" && !status?.paired;
-  const rejoinable = unjoined && Boolean(health?.paired) && !rejoinRefused;
+  const [activation, setActivation] = useState(0);
   useEffect(() => {
-    if (!rejoinable || !isAuthenticated || Date.now() < rejoinAllowedAt) return;
-    rejoinAllowedAt = Date.now() + REJOIN_AFTER_REFUSAL_MS;
+    const activate = () => {
+      if (rejoinInFlight || document.visibilityState !== "visible" || !document.hasFocus()) return;
+      void refresh().then(() => {
+        if (rejoinInFlight || !accountStorageMatches(revision)) return;
+        rejoinAttempted = false;
+        setActivation((value) => value + 1);
+      });
+    };
+    window.addEventListener("focus", activate);
+    document.addEventListener("visibilitychange", activate);
+    return () => {
+      window.removeEventListener("focus", activate);
+      document.removeEventListener("visibilitychange", activate);
+    };
+  }, [refresh, revision]);
+  const rejoinable = unjoined && !(rejoinRevision === revision && rejoinAttempted);
+  useEffect(() => {
+    if (rejoinRevision !== revision) {
+      rejoinRevision = revision; rejoinAttempted = false;
+    }
+    if (checked && status?.paired) { rejoinAttempted = true; return; }
+    if (!unjoined || rejoinAttempted || rejoinInFlight || !isAuthenticated || document.visibilityState !== "visible" || !document.hasFocus()) return;
+    let live = true;
+    rejoinAttempted = true;
+    rejoinInFlight = true;
     void rejoinBridge(requestPairing).then((joined) => {
+      if (!live || !accountStorageMatches(revision)) return;
       if (joined) {
-        rejoinAllowedAt = 0;
         window.dispatchEvent(new StorageEvent("storage", { key: BRIDGE_SESSION_STORAGE_KEY }));
-      } else rejoinRefused = true;
+      }
+    }).finally(() => {
+      rejoinInFlight = false;
+      if (!accountStorageMatches(revision)) setActivation((value) => value + 1);
     });
-  }, [isAuthenticated, rejoinable, requestPairing]);
+    return () => { live = false; };
+  }, [activation, checked, isAuthenticated, requestPairing, revision, status?.paired, unjoined]);
   // The choice stays with the person; Bridge hears it whenever it's here to listen.
   const joined = Boolean(status?.paired);
   const workSettings = useQuery(api.deviceWorks.settings, isAuthenticated ? {} : "skip");
@@ -110,8 +138,8 @@ export function BridgeConnection() {
     // can see file names and offer to sync them even when the server is hosted.
     void setBridgeAgentHub(true)
       .catch(() => undefined)
-      .then(() => recheckAgentRuntime());
-  }, [hydrated, joined]);
+      .then(() => { if (accountStorageMatches(revision)) recheckAgentRuntime(); });
+  }, [hydrated, joined, revision]);
   useEffect(() => {
     if (workSettings) publishDeviceState({ storage: workSettings.storage });
   }, [workSettings]);
@@ -131,7 +159,7 @@ export function BridgeConnection() {
         setStoreKnown(true);
       })
       // An older Bridge has no store; work simply stays in the cloud until it updates.
-      .catch(() => publishDeviceState({ storeId: null }));
+      .catch(() => { if (live) publishDeviceState({ storeId: null }); });
     return () => {
       live = false;
     };

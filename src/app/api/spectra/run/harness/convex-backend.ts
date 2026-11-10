@@ -26,7 +26,7 @@ import { readLiveArtifactValue } from "@/features/spectra/ai/yjs-artifact-operat
 import { overlayLiveArtifactRecord } from "@/features/spectra/collaboration/artifact-yjs-model";
 import { parseModelOperation, type ModelOperation } from "@/features/spectra/operations/schema";
 import { conductParallelResearch } from "@/features/spectra/sources/research/parallel-search";
-import { applicationCommandCategory, LOCAL_FILE_COMMANDS } from "../../../../../../shared/ai-application-approval";
+import { applicationApprovalCategory, applicationCommandCategory, LOCAL_FILE_COMMANDS } from "../../../../../../shared/ai-application-approval";
 import { unpackOperationInput } from "../../../../../../shared/operation-content";
 import { SEMANTIC_KINDS, type SemanticResult, type SemanticSearchResponse } from "../../../../../../shared/semantic-types";
 import { loadAgent } from "./agents";
@@ -35,6 +35,9 @@ import { executeOperation, rows, type EffectContext } from "./effects";
 import { act, mutate, query, safeJson } from "./io";
 import { isSchoolApiPurpose, readSchoolApi } from "./school-read";
 import { executeThreadRead } from "./thread-read";
+import { revertRun } from "./revert-run";
+import { DEFAULT_PERMISSION_PREFS, deniedResult, permissionDecision, type PermissionPrefs } from "@/features/spectra/ai/harness/permissions";
+import { PERMISSION_CATEGORY_LABELS, type PermissionCategory } from "@/features/spectra/settings/schema/ai-permissions";
 
 const isArtifactTypeKey = (value: string): value is ArtifactTypeKey => (ARTIFACT_TYPE_KEYS as readonly string[]).includes(value);
 
@@ -59,6 +62,7 @@ export type ConvexBackendInput = {
   /** Items open on screen or referenced, most important first: a search ranking hint. */
   openItemIds?: string[];
   onUiEvent?: EffectContext["onUiEvent"];
+  permissions?: PermissionPrefs;
 };
 
 const text = (value: unknown) => (typeof value === "string" ? value : "");
@@ -265,12 +269,61 @@ export class ConvexHarnessBackend implements HarnessBackend {
   }
 
   private async stored(operationId: string) {
-    const detail = await query<unknown & object, { operations: Array<{ _id: string; type: string; input: unknown; status: string; requiresConfirmation?: boolean }> }>(
+    const detail = await query<unknown & object, { operations: Array<{ _id: string; type: string; input: unknown; status: string; requiresConfirmation?: boolean; output?: unknown }> }>(
       "spectraRuns:get",
       { actorClerkId: this.actorClerkId, runId: this.input.runId },
     );
     const operation = detail.operations.find((entry) => entry._id === operationId);
     return operation ? { ...operation, input: unpackOperationInput(operation.input) } : null;
+  }
+
+  async undoPreviousRun(request: { approved: boolean; approvalScope?: string }, signal: AbortSignal): Promise<CommandResult> {
+    if (this.executedAny) return { ok: false, content: "Undo must run before new changes in this turn. Nothing was undone." };
+    const previous = await query<object, { runId: string; executionId: string } | null>("spectraRuns:previousForUndo", {
+      runId: this.input.runId, executionId: this.input.executionId,
+    });
+    if (!previous) return { ok: false, content: "There is no finished preceding run in this thread to undo. Nothing was changed." };
+    const scope = `${previous.runId}:${previous.executionId}`;
+    const response = await revertRun(this.actorClerkId, previous.runId, previous.executionId, async (state, artifactIds, onDevice) => {
+      signal.throwIfAborted();
+      if (request.approved && request.approvalScope !== scope)
+        return new Response("The previous run changed after approval. Nothing was undone; ask again to review it.", { status: 409 });
+      const categories = new Set<PermissionCategory>();
+      for (const operation of state.operations) {
+        if (!operation.requiresConfirmation || !["executed", "executing"].includes(operation.status)) continue;
+        const input = unpackOperationInput(operation.input) as Record<string, unknown>;
+        const category = operation.type === "app.command"
+          ? applicationApprovalCategory(String(input.command), (input.args ?? {}) as Record<string, unknown>) ?? "permanent_delete"
+          : "permanent_delete";
+        if (category) categories.add(category);
+      }
+      // Replica metadata, not native file contents; this read is only made for an explicit Undo.
+      let local = onDevice;
+      for (let offset = 0; offset < artifactIds.length; offset += 100)
+        local = await query<object, boolean>("replicas:undoNeedsLocalApproval", { workIds: artifactIds.slice(offset, offset + 100) }) || local;
+      signal.throwIfAborted();
+      if (local) categories.add("bridge_files");
+      const permissions = this.input.permissions ?? DEFAULT_PERMISSION_PREFS;
+      const denied = [...categories].find((category) => permissionDecision("irreversible", category, permissions) === "deny");
+      if (denied) return new Response(deniedResult(denied), { status: 403 });
+      const asking = [...categories].filter((category) => permissionDecision("irreversible", category, permissions) === "ask");
+      if (asking.length && !request.approved) {
+        return Response.json({ pause: {
+          kind: "approval", approvalScope: scope,
+          question: `Undo the previous run, including ${asking.map((category) => PERMISSION_CATEGORY_LABELS[category]).join(" and ")}?`,
+          ...(asking.length === 1 ? { category: asking[0] } : {}),
+        } });
+      }
+    }, this.input.runId);
+    if (!response.ok) return { ok: false, content: await response.text() };
+    const result = await response.json() as { changed?: boolean; summary?: string; notes?: string[]; pause?: CommandResult["pause"] };
+    if (result.pause) return { ok: false, content: "", pause: result.pause };
+    if (result.changed) {
+      await mutate("spectraRunUndo:recordReversal", { runId: this.input.runId, executionId: this.input.executionId, previousRunId: previous.runId, previousExecutionId: previous.executionId });
+      this.executedAny = true;
+    }
+    // A reversal has the same semantics as the person's Undo button; it offers no redo of itself.
+    return { ok: true, content: [result.summary, ...(result.notes ?? [])].filter(Boolean).join("\n") };
   }
 
   async getArtifact(id: string, signal: AbortSignal): Promise<ArtifactSnapshot | null> {
@@ -365,16 +418,42 @@ export class ConvexHarnessBackend implements HarnessBackend {
     input: { id: string; type: ArtifactTypeKey; title?: string; content: Record<string, unknown>; toolCallId: string },
   ) {
     const existing = this.toolOperations.get(input.toolCallId)?.[0];
-    if (existing) return { operationId: existing, staged: true };
+    if (existing) {
+      const row = await this.stored(existing);
+      if (!row || row.status !== "proposed") throw new Error("This edit was already handled or cancelled.");
+      const scope = (row.output as { artifactWriteScope?: { approvalCategories?: PermissionCategory[] } } | undefined)?.artifactWriteScope;
+      return { operationId: existing, operation: parseModelOperation({ type: row.type, input: row.input }), requiresConfirmation: row.requiresConfirmation === true,
+        approvalCategories: scope?.approvalCategories ?? ["permanent_delete" as const], approvalReasons: [] as string[] };
+    }
     const operation = this.updateOperation(input);
     const [operationId] = await this.record(input.toolCallId, [{ operation, requiresConfirmation: false }]);
-    const preparation = await act<unknown & object, { approvalReasons: string[] }>("spectraArtifactWrites:preparePlan", {
+    const preparation = await act<unknown & object, { approvalReasons: string[]; approvalCategories?: PermissionCategory[] }>("spectraArtifactWrites:preparePlan", {
       actorClerkId: this.actorClerkId,
       runId: this.input.runId,
       executionId: this.input.executionId,
       operationId,
     });
-    return { operationId: operationId!, staged: false, approvalReasons: preparation.approvalReasons };
+    return { operationId: operationId!, operation, requiresConfirmation: Boolean(preparation.approvalReasons.length || preparation.approvalCategories?.length),
+      approvalCategories: preparation.approvalCategories ?? ["permanent_delete" as const], approvalReasons: preparation.approvalReasons };
+  }
+
+  private async authorizeUpdate(staged: Awaited<ReturnType<ConvexHarnessBackend["stageUpdate"]>>, toolCallId: string, approved: boolean): Promise<CommandResult | undefined> {
+    if (!staged.requiresConfirmation) return;
+    const permissions = this.input.permissions ?? DEFAULT_PERMISSION_PREFS;
+    const denied = staged.approvalCategories.find(category => permissionDecision("irreversible", category, permissions) === "deny");
+    if (denied) return { ok: false, content: deniedResult(denied) };
+    try {
+      await this.ensureApproved(toolCallId);
+    } catch (error) {
+      if (permissionRequired(error) && String(error).includes("Never"))
+        return { ok: false, content: deniedResult(staged.approvalCategories[0]) };
+      if (!permissionRequired(error) || approved) throw error;
+      const asking = staged.approvalCategories.filter(category => permissionDecision("irreversible", category, permissions) === "ask");
+      return { ok: false, content: "", pause: { kind: "approval",
+        question: staged.approvalReasons.join(" ") || "This also changes a file on your computer through Spectra Bridge. Go ahead?",
+        ...(asking.length === 1 ? { category: asking[0] } : {}),
+      } };
+    }
   }
 
   async stageArtifactUpdate(input: {
@@ -383,8 +462,10 @@ export class ConvexHarnessBackend implements HarnessBackend {
     title?: string;
     content: Record<string, unknown>;
     toolCallId: string;
-  }) {
-    await this.stageUpdate(input);
+  }, signal: AbortSignal) {
+    const staged = await this.stageUpdate(input);
+    signal.throwIfAborted();
+    return await this.authorizeUpdate(staged, input.toolCallId, false) ?? { ok: true, content: "" };
   }
 
   async updateArtifact(
@@ -399,18 +480,11 @@ export class ConvexHarnessBackend implements HarnessBackend {
     signal: AbortSignal,
   ) {
     const staged = await this.stageUpdate(input);
-    // A staged operation was approved for its exact content; apply that.
-    let operation = this.updateOperation(input);
-    let requiresConfirmation = Boolean(staged.approvalReasons?.length);
-    if (staged.staged) {
-      const row = await this.stored(staged.operationId);
-      if (!row || row.status !== "proposed") throw new Error("This edit was already handled or cancelled.");
-      operation = parseModelOperation({ type: row.type, input: row.input });
-      requiresConfirmation = row.requiresConfirmation === true;
-    }
-    if (requiresConfirmation) await this.ensureApproved(input.toolCallId);
+    signal.throwIfAborted();
+    const authorization = await this.authorizeUpdate(staged, input.toolCallId, input.approved);
+    if (authorization) return authorization;
     try {
-      const { affected } = await executeOperation(this.actorClerkId, this.input.runId, staged.operationId, operation, {
+      const { affected } = await executeOperation(this.actorClerkId, this.input.runId, staged.operationId, staged.operation, {
         ...this.effectContext(signal, input.title ? `Editing *${input.title}*` : undefined),
       });
       this.executedAny = true;
@@ -552,6 +626,7 @@ export class ConvexHarnessBackend implements HarnessBackend {
       type: text(artifact.blueprintKey),
       title: text(artifact.title) || "Untitled",
       artifactId: String(artifact._id),
+      ...(artifact.storageHome === "device" ? { onComputer: true } : {}),
       ...(text(rows(artifact.placements)[0]?.workspaceTitle) ? { location: text(rows(artifact.placements)[0]!.workspaceTitle) } : {}),
       ...(typeof artifact.updatedAt === "number" ? { updatedAt: artifact.updatedAt } : {}),
     }));
@@ -567,6 +642,7 @@ export class ConvexHarnessBackend implements HarnessBackend {
       kind,
       title: text(item.name ?? item.title) || "Untitled",
       ...(kind === "work" ? { type: text(item.typeKey ?? item.blueprintKey), artifactId: text(item.sourceId) || undefined } : {}),
+      ...(kind === "work" && (item.source as Record<string, unknown> | undefined)?.storageHome === "device" ? { onComputer: true } : {}),
       ...(path.length ? { location: path.join(" / ") } : {}),
       ...(typeof item.activityAt === "number" ? { updatedAt: item.activityAt } : {}),
     };
@@ -594,8 +670,9 @@ export class ConvexHarnessBackend implements HarnessBackend {
     ]);
     const hits = response.results.map(searchHit);
     const known = new Set(hits.map((hit) => hit.id));
+    const computerIds = new Set(onComputer.map((hit) => hit.id));
     return {
-      hits: [...onComputer.filter((hit) => !known.has(hit.id)), ...hits],
+      hits: [...onComputer.filter((hit) => !known.has(hit.id)), ...hits.map((hit) => computerIds.has(hit.id) ? { ...hit, onComputer: true } : hit)],
       mode: response.mode,
       ...(response.degraded ? { degraded: response.degraded.reason } : {}),
     };
@@ -616,6 +693,7 @@ export class ConvexHarnessBackend implements HarnessBackend {
         typeLabel: work.blueprintKey ?? "Work",
         ...(work.excerpt ? { snippet: work.excerpt } : {}),
         ownership: "mine",
+        onComputer: true,
         ...(work.updatedAt !== undefined ? { updatedAt: work.updatedAt } : {}),
       })) as SearchHit[];
     } catch {

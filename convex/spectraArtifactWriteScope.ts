@@ -10,6 +10,7 @@ import { withoutDerivedNativeBinding, withoutFileOwnedFields } from "../src/feat
 import { assertPlannerSourceEdit } from "../shared/planner-source.mjs";
 import { isDurableContentRef } from "../shared/durable-content";
 import { unpackOperationInput } from "../shared/operation-content";
+import type { PermissionCategory } from "../src/features/spectra/settings/schema/ai-permissions";
 
 export type ArtifactWriteScope = {
   version: 1;
@@ -24,6 +25,7 @@ export type ArtifactWriteScope = {
   kind: "create" | "update" | "full_content_delete" | "archive";
   baseProducerOperationId?: string;
   creationSourceIdentity?: string;
+  approvalCategories?: PermissionCategory[];
 };
 
 export function artifactOutput(value: unknown): Record<string, unknown> {
@@ -172,6 +174,7 @@ export type AiArtifactContentEvidence = {
   sourceContentIdentity: string;
   baseContentDigest: string;
   resultContentDigest: string;
+  requestedContentDigest?: string;
   fullContentDeletion: boolean;
 };
 
@@ -239,20 +242,21 @@ async function assertAdmissionEvidence(ctx: MutationCtx, admission: Awaited<Retu
     throw new Error("AI_ARTIFACT_EVIDENCE_SCOPE_CHANGED");
   const beforeDigest = evidence.baseContentDigest;
   const afterDigest = evidence.resultContentDigest;
+  const requestedDigest = evidence.requestedContentDigest ?? afterDigest;
   if (scope.kind === "create" && (scope.creationSourceIdentity !== admission.creationIdentity ||
-      scope.baseContentDigest !== beforeDigest || scope.resultContentDigest !== afterDigest))
+      scope.baseContentDigest !== beforeDigest || scope.resultContentDigest !== requestedDigest))
     throw new Error("AI_ARTIFACT_CREATION_SOURCE_CHANGED");
   // On the exact prepared base/result, retain the server's classification of
   // the original authored input, before adapters manufacture blank defaults.
   // A rebase must classify again against the actual current content.
   const destructive = scope.kind === "full_content_delete" ||
-    ((beforeDigest !== scope.baseContentDigest || afterDigest !== scope.resultContentDigest) &&
+    ((beforeDigest !== scope.baseContentDigest || requestedDigest !== scope.resultContentDigest) &&
       evidence.fullContentDeletion);
   if (destructive || operation.requiresConfirmation) {
     const sourceMatches = scope.kind === "create"
       ? scope.creationSourceIdentity === admission.creationIdentity
       : await artifactEffectSourceMatches(ctx, scope, run, sourceIdentity);
-    if (!sourceMatches || beforeDigest !== scope.baseContentDigest || afterDigest !== scope.resultContentDigest ||
+    if (!sourceMatches || beforeDigest !== scope.baseContentDigest || requestedDigest !== scope.resultContentDigest ||
         (destructive && scope.kind !== "full_content_delete") || run.approval?.status !== "accepted" ||
         run.approval.executionId !== run.executionId || artifactOutput(operation.output).approvedArtifactScope !== await artifactScopeDigest(scope))
       throw new Error("AI_ARTIFACT_APPROVAL_SCOPE_REQUIRED");
@@ -317,9 +321,11 @@ export async function buildAiArtifactContentEvidence(args: {
   const comparableExpected = comparable(expected.content);
   if (await artifactScopeDigest(comparableAfter) !== await artifactScopeDigest(comparableExpected))
     throw new Error(`AI_ARTIFACT_RESULT_SCOPE_MISMATCH: ${firstContentDifference(comparableExpected, comparableAfter)}`);
+  const requestedDigest = await artifactScopeDigest(expected.content);
   return {
     version: 1, operationDigest: args.operationDigest, sourceContentIdentity: args.sourceContentIdentity,
     baseContentDigest: await artifactScopeDigest(before), resultContentDigest: afterDigest,
+    ...(requestedDigest !== afterDigest ? { requestedContentDigest: requestedDigest } : {}),
     fullContentDeletion: classifyArtifactContentWipe(type, before, expected.resolvedContent).fullContentDeletion,
   };
 }

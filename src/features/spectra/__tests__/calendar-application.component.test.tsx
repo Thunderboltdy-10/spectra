@@ -2,6 +2,7 @@
 
 import {
   cleanup,
+  act,
   fireEvent,
   render,
   screen,
@@ -29,6 +30,7 @@ vi.mock("../school/open-school-task", () => ({
 vi.mock("convex/react", () => ({ useConvexAuth: () => ({ isAuthenticated: false, isLoading: false }), useQuery: () => undefined, useMutation: () => vi.fn() }));
 
 import { CalendarApplication } from "../calendar/ui/calendar-application";
+import { spectraBus } from "../events";
 
 /** A block's title leads with its time ("09:00 – 10:00: Essay draft"); match it by the event. */
 const blockTitled = (title: string) => new RegExp(`: ${title}(\.|$)`);
@@ -123,6 +125,43 @@ afterAll(() => {
 });
 
 describe("Calendar application", () => {
+  it("removes items absent from a fresh overview after an AI calendar change", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
+    const items = [workBlock(), { ...workBlock(), id: "event", kind: "personal_event", title: "French practice", taskItemId: undefined }];
+    installFetch(() => undefined, items);
+    render(<CalendarApplication />);
+    await screen.findByTitle(blockTitled("French practice"));
+    const loadsBefore = gets;
+    items.pop();
+    act(() => spectraBus.emit("calendar.changed", {}));
+    await waitFor(() => expect(gets).toBeGreaterThan(loadsBefore));
+    await waitFor(() => expect(screen.queryByTitle(blockTitled("French practice"))).toBeNull());
+    expect(screen.getByTitle(blockTitled("Essay draft"))).toBeTruthy();
+  });
+
+  it("keeps bounded refresh pages resumable without bringing removed items back", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
+    installFetch(() => undefined, [workBlock()]);
+    render(<CalendarApplication />);
+    await screen.findByTitle(blockTitled("Essay draft"));
+    let page = 0;
+    vi.mocked(fetch).mockImplementation(async () => {
+      page += 1;
+      const payload = await overview([{ ...workBlock(), id: `fresh-${page}`, title: `Fresh ${page}` }]).json();
+      payload.data.pagination = { visible: page < 9 ? `page-${page + 1}` : null };
+      return json(200, payload);
+    });
+    act(() => spectraBus.emit("calendar.changed", {}));
+    await screen.findByRole("button", { name: "Load more" });
+    expect(page).toBe(8);
+    expect(screen.queryByTitle(blockTitled("Essay draft"))).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await screen.findByTitle(blockTitled("Fresh 9"));
+    expect(screen.getByTitle(blockTitled("Fresh 1"))).toBeTruthy();
+    expect(screen.queryByTitle(blockTitled("Essay draft"))).toBeNull();
+    expect(page).toBe(9);
+  });
+
   it("labels the visible month's week rather than the days buffered to its left", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 9, 30, 12, 0) });
     installFetch(() => undefined);

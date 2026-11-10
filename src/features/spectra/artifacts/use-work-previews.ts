@@ -5,7 +5,8 @@ import { getSpectraArtifact, getSpectraThreadMessages } from "../data/api";
 import type { PresentedWorkType } from "./presentation";
 import { cornerPreview, threadPreview, workPreview, type WorkPreview } from "./work-preview";
 import { fileViewKind } from "../files/file-kind";
-import type { RichBlock } from "../rich-content/ast";
+import { richContentAst, type RichBlock } from "../rich-content/ast";
+import { richContentToPlainText } from "../rich-content/serialize";
 import { readOfficeBytes } from "../files/office-preview-client";
 import { useBusyArtifacts } from "../collaboration/artifact-ai-activity";
 
@@ -41,7 +42,8 @@ const FACE_BLOCKS = 12;
  */
 const FACE_CACHE = "spectra-work-faces-v1";
 const FACE_CACHE_ENTRIES = 500;
-const faceUrl = (work: PreviewSource) => `/__work-face/${encodeURIComponent(work._id)}`;
+// Word faces used to cache serialized AST identity instead of their words.
+const faceUrl = (work: PreviewSource) => `/__work-face/${encodeURIComponent(work._id)}${fileFace(work) === "document" ? "?format=2" : ""}`;
 
 async function keptFace(work: PreviewSource): Promise<WorkPreview | null> {
   if (typeof caches === "undefined") return null;
@@ -85,7 +87,7 @@ async function previewFor(work: PreviewSource, signal: AbortSignal) {
 /** A block of a file's text in the shape a document's card reads. */
 function faceBlock(block: RichBlock) {
   if (block.type !== "heading" && block.type !== "paragraph" && block.type !== "list") return [];
-  const words = block.raw.replace(/^\s*(?:[-+*]|\d+\.)\s+/gm, "").replace(/[#*_`>~]/g, "").replace(/\s+/g, " ").trim();
+  const words = richContentToPlainText(richContentAst([block])).replace(/\s+/g, " ").trim();
   return words ? [{ type: block.type === "heading" ? "heading" : "paragraph", text: words }] : [];
 }
 

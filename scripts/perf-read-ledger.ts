@@ -26,7 +26,7 @@ export function observeDatabase<T extends object>(database: T) {
     get(target, property) {
       const member = Reflect.get(target, property, target);
       if (property === Symbol.asyncIterator) return async function* () {
-        const iterable = Reflect.apply(member, target, []) as AsyncIterable<unknown>;
+        const iterable = target as AsyncIterable<unknown>;
         for await (const row of iterable) {
           record(row, { table, index, postIndexFilter, operation: "iterate" });
           yield row;

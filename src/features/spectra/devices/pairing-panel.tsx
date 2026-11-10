@@ -39,7 +39,7 @@ function PairingCard({
   onRetry: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const waiting = state.phase === "checking" || state.phase === "requesting" || state.phase === "download";
+  const waiting = state.phase === "checking" || state.phase === "requesting" || state.phase === "download" || state.phase === "confirming";
   useLifeEntrance(ref);
   // Connected: the card flows into this computer's row, which arrives under the same key.
   useLifeDeparture(ref, true, { bars: PANEL_BARS }, THIS_COMPUTER_LIFE_KEY);
@@ -87,22 +87,7 @@ function PairingCard({
           </p>
         </div>
       ) : state.phase === "confirming" ? (
-        <div className="space-y-3">
-          <p className="text-ui font-medium text-[var(--text-primary)]">Confirm this code on the computer</p>
-          <p
-            data-devices-code
-            aria-label={`Code ${state.shortCode.split("").join(" ")}`}
-            className="font-mono text-display font-semibold tracking-[0.2em] text-[var(--text-primary)]"
-          >
-            {state.shortCode}
-          </p>
-          <p className="max-w-xl text-caption text-[var(--text-secondary)]">
-            Spectra Bridge shows the same code. Confirm it there to connect this computer.
-          </p>
-          <Button variant="ghost" size="sm" onClick={onCancel}>
-            Cancel
-          </Button>
-        </div>
+        <Waiting text="Connecting this computer." onCancel={onCancel} />
       ) : (
         <div className="space-y-3">
           <p className="flex items-center gap-2 text-ui font-medium text-[var(--text-primary)]">

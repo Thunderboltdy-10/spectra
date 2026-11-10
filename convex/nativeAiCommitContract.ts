@@ -38,7 +38,7 @@ export const nativeAiCommitArgs = {
   append: v.object({ ...appendRoomUpdateArgs, actorKind: v.literal("ai"), partitionKey: v.literal("root"),
     projectionJson: v.string(), projectionHash: v.string() }),
   evidence: v.object({ version: v.literal(1), operationDigest: v.string(), sourceContentIdentity: v.string(),
-    baseContentDigest: v.string(), resultContentDigest: v.string(), fullContentDeletion: v.boolean() }),
+    baseContentDigest: v.string(), resultContentDigest: v.string(), requestedContentDigest: v.optional(v.string()), fullContentDeletion: v.boolean() }),
   nativeCandidate: v.optional(nativeAiCandidateValidator),
 };
 export type NativeAiCommitArgs = ObjectType<typeof nativeAiCommitArgs>;

@@ -13,7 +13,7 @@ import {
   readOpenRouterAgentTurn,
 } from "../openrouter-stream";
 import type { ModelCaller } from "./loop";
-import { subscriptionOneShot, subscriptionProvider } from "./subscription-runtime";
+import { subscriptionOneShot, subscriptionProviderFrom, type RuntimeTarget } from "./subscription-runtime";
 import { jsonSize, traceEvent, traceSpan } from "./run-trace";
 import {
   ProviderUnavailableError,
@@ -37,6 +37,7 @@ const FALLBACK_ATTEMPTS = 2;
 const STREAM_IDLE_TIMEOUT_MS = 90_000;
 
 export type ModelRequest = {
+  runtime?: RuntimeTarget & { provider?: unknown };
   messages: HarnessMessage[];
   tools?: ProviderToolSpec[];
   toolChoice?: "auto" | "none";
@@ -199,11 +200,10 @@ function retryableOnSameRoute(error: unknown) {
 
 /** One model turn with retries and the configured recovery route. */
 export async function callSpectraModel(request: ModelRequest): Promise<ModelTurn> {
-  // Side calls go to OpenRouter when it is there: they are small, and a Codex or
-  // Claude thread for each one would slow the run they sit beside. A scheduled
-  // call has only OpenRouter, since no one's computer is awake for it.
+  // Foreground bookkeeping follows the run's choice. Scheduled calls have no
+  // computer to depend on and keep their configured OpenRouter route.
   const subscription =
-    request.tools?.length || request.purpose === "daily" || process.env.OPENROUTER_API_KEY?.trim() ? null : subscriptionProvider();
+    request.tools?.length || request.purpose === "daily" ? null : subscriptionProviderFrom(request.runtime?.provider);
   return traceSpan(
     "model.side_call",
     {
@@ -216,11 +216,13 @@ export async function callSpectraModel(request: ModelRequest): Promise<ModelTurn
     () =>
       subscription
         ? subscriptionOneShot(subscription, {
+            accountId: request.runtime?.accountId,
+            model: request.runtime?.model,
             messages: request.messages,
             signal: request.signal,
             onText: request.onText,
             onReasoning: request.onReasoning,
-            reasoning: request.reasoning,
+            reasoning: request.reasoning ?? request.runtime?.reasoning,
             responseFormat: request.responseFormat,
             title: request.title,
             purpose: request.purpose,

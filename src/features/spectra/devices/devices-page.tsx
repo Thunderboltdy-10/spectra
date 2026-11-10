@@ -36,6 +36,7 @@ import { WorkHomeChoice } from "./work-home-choice";
 import { PairingPanel, THIS_COMPUTER_LIFE_KEY } from "./pairing-panel";
 import { devicePairing } from "./pairing";
 import { firstTipMoment } from "../onboarding/first-tips";
+import { accountStorageMatches, accountStorageRevision } from "@/lib/account-storage-scope";
 
 const BAR_PLAN: readonly CollapseStep[] = [{ hideLabel: "pause" }, { toMenu: "pause" }, { hideLabel: "add" }, { hideLabel: "add-files" }];
 
@@ -178,30 +179,38 @@ export function DevicesPage() {
   }
 
   async function applyNativeWrites(choice: NativeWrites) {
+    const revision = accountStorageRevision();
+    if (!accountStorageMatches(revision)) return;
     const plan = nativeWritesPlan(choice, policy?.contentDirection);
     try {
       if (plan.preset)
         await overridePolicy({ values: POLICY_PRESETS[plan.preset], idempotencyKey: `devices:native-writes:${choice}:${Date.now()}` });
+      if (!accountStorageMatches(revision)) return;
       if (plan.permission) update("ai", permissionChoicePatch(stored, "bridge_files", plan.permission));
       setNotice(choice === "never" ? "Desktop files stay as they are." : choice === "ask" ? "Spectra AI asks before it changes a desktop file." : "Spectra saves changes to your desktop files.");
     } catch (error) {
-      setNotice(failureSentence(error));
+      if (accountStorageMatches(revision)) setNotice(failureSentence(error));
     }
   }
 
   async function confirmAction() {
     if (!confirm) return;
+    const revision = accountStorageRevision();
+    if (!accountStorageMatches(revision)) return;
     setConfirming(true);
     try {
       if (confirm.kind === "native-writes") await applyNativeWrites(confirm.choice);
       else if (confirm.kind === "remove-folder") {
         setBusy(`remove_folder:${confirm.grantId}`);
         const outcome = await runLocalDeviceAction({ action: "remove_folder", grantId: confirm.grantId });
+        if (!accountStorageMatches(revision)) return;
         setNotice(outcome.message);
       } else if (confirm.device.id) {
         await revokeDevice({ deviceId: confirm.device.id as Id<"bridgeDevices">, removeFiles });
+        if (!accountStorageMatches(revision)) return;
         if (confirm.device.isThisComputer) {
           await unpairBridge();
+          if (!accountStorageMatches(revision)) return;
           local.forgetSession();
           void local.refresh();
         }
@@ -212,12 +221,14 @@ export function DevicesPage() {
         );
       }
     } catch (error) {
-      setNotice(confirm.kind === "remove-device" ? pairingFailureMessage(error, local.discovery, local.online) : failureSentence(error));
+      if (accountStorageMatches(revision)) setNotice(confirm.kind === "remove-device" ? pairingFailureMessage(error, local.discovery, local.online) : failureSentence(error));
     } finally {
-      setBusy(null);
-      setConfirming(false);
-      setRemoveFiles(false);
-      setConfirm(null);
+      if (accountStorageMatches(revision)) {
+        setBusy(null);
+        setConfirming(false);
+        setRemoveFiles(false);
+        setConfirm(null);
+      }
     }
   }
 

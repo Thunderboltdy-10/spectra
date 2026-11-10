@@ -197,6 +197,9 @@ export const commit = internalMutation({
         beforeProjection.schemaVersion !== artifact.schemaVersion || afterProjection.schemaVersion !== artifact.schemaVersion)
       throw new Error("AI_NATIVE_TYPE_MISMATCH");
     const admission = await assertVerifiedAiArtifactWriteAdmission(ctx, identity);
+    if (nativeCandidate?.destination === "bridge" && (!admission.operation.requiresConfirmation ||
+        !admission.scope.approvalCategories?.includes("bridge_files")))
+      throw new Error("AI_ARTIFACT_APPROVAL_SCOPE_REQUIRED");
     const before = { title: beforeProjection.title, summary: beforeProjection.summary,
       content: beforeProjection.content, tags: beforeProjection.tags };
     // Usually the row already says this, and rewriting it would run every trigger for nothing.

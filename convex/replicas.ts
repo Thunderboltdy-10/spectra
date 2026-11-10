@@ -5,7 +5,7 @@ import { query } from "./functions";
 import { internalMutation, mutation } from "./orgNodeMutation";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { getAuthenticatedActor, getOptionalAuthenticatedActor } from "./identityShared";
 import { placeSourceNode, subtreeNodes } from "./orgTreeShared";
 import { z } from "zod";
@@ -428,6 +428,15 @@ function liveConflicts(
   );
 }
 
+async function visibleReplicasForWork(ctx: QueryCtx, workId: Id<"spectraArtifacts">, accountId: Id<"accounts">) {
+  const cloud = await ctx.db.query("workReplicas")
+    .withIndex("by_work_kind", (q) => q.eq("workId", workId).eq("kind", "cloud")).first();
+  const locals = await ctx.db.query("workReplicas")
+    .withIndex("by_work_kind_account", (q) => q.eq("workId", workId).eq("kind", "local").eq("accountId", accountId))
+    .take(cloud ? 19 : 20);
+  return [...(cloud ? [cloud] : []), ...locals].sort((a, b) => a._creationTime - b._creationTime);
+}
+
 export const forWork = query({
   args: { workId: v.id("spectraArtifacts") },
   handler: async (ctx, { workId }) => {
@@ -435,14 +444,11 @@ export const forWork = query({
     const access = await evaluateArtifactAccessForActor(ctx, actor, workId);
     // Unavailability is a normal state of a live metadata subscription.
     if (!access.allowed || !access.capabilities.includes("read")) return null;
-    const replicas = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", workId)).take(20);
     // Shared artifact access grants content authority, not access to another
     // account's Bridge filesystem. A collaborator can see the cloud truth and
     // any local replica registered to their own account; owner-local paths,
     // device ids, and mounts remain private.
-    const visibleReplicas = replicas.filter(
-      (replica) => replica.kind === "cloud" || replica.accountId === actor.accountId,
-    );
+    const visibleReplicas = await visibleReplicasForWork(ctx, workId, actor.accountId);
     const deviceIds = [
       ...new Set(
         visibleReplicas
@@ -453,7 +459,7 @@ export const forWork = query({
     const devices = (
       await Promise.all(deviceIds.map((id) => ctx.db.get(id)))
     ).filter((device): device is Doc<"bridgeDevices"> => Boolean(device));
-    const liveDeviceId = chooseLiveBridgeDeviceId(devices, Date.now());
+    const liveDeviceId = chooseLiveBridgeDeviceId(devices);
     const presented = visibleReplicas.map((replica) => {
       if (
         replica.kind !== "local" ||
@@ -469,10 +475,10 @@ export const forWork = query({
       };
     });
     const openConflicts = liveConflicts(
-      await ctx.db.query("syncConflicts").withIndex("by_work_state", (q) => q.eq("workId", workId).eq("state", "open")).take(20),
+      await ctx.db.query("syncConflicts").withIndex("by_work_account_state", (q) => q.eq("workId", workId).eq("accountId", actor.accountId).eq("state", "open")).take(20),
       presented,
     );
-    const pending = await ctx.db.query("syncOperations").withIndex("by_work_created", (q) => q.eq("workId", workId)).order("desc").take(50);
+    const pending = await ctx.db.query("syncOperations").withIndex("by_work_account_created", (q) => q.eq("workId", workId).eq("accountId", actor.accountId)).order("desc").take(50);
     const replicaById = new Map(presented.map((replica) => [String(replica._id), replica]));
     const pendingCount = pending.filter((operation) => isActionablePendingOperation(operation, replicaById)).length;
     return { replicas: presented, conflicts: openConflicts, openConflictCount: openConflicts.length, pendingCount, recentOperations: pending.slice(0, 20) };
@@ -581,9 +587,7 @@ export const presentationsForAccount = query({
     // full replica set or a This-PC file looks Unavailable (cloud metadata-only).
     for (const workId of byWork.keys()) {
       const row = ensure(workId);
-      const workReplicas = await ctx.db.query("workReplicas")
-        .withIndex("by_work", (q) => q.eq("workId", workId as Id<"spectraArtifacts">))
-        .take(20);
+      const workReplicas = await visibleReplicasForWork(ctx, workId as Id<"spectraArtifacts">, actor.accountId);
       row.replicas = workReplicas.map((replica) => ({
         kind: replica.kind,
         state: replica.state,
@@ -619,6 +623,33 @@ export const localEffectCount = query({
       count += replicas.filter((replica) => replica.state !== "unavailable").length;
     }
     return { count };
+  },
+});
+
+/** Undo can restore a shared work, but another owner's computer remains private. */
+export const undoNeedsLocalApproval = query({
+  args: { workIds: v.array(v.id("spectraArtifacts")) },
+  handler: async (ctx, { workIds }) => {
+    if (workIds.length > 100) throw new Error("Too many works in one Undo preflight.");
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    let local = false;
+    for (const workId of new Set(workIds)) {
+      const access = await evaluateArtifactAccessForActor(ctx, actor, workId);
+      if (!access.allowed || !access.capabilities.includes("modify")) throw new Error("WORK_NOT_FOUND");
+      if (local) continue;
+      const replica = await ctx.db.query("workReplicas")
+        .withIndex("by_work_kind", (q) => q.eq("workId", workId).eq("kind", "local"))
+        .filter((q) => q.and(q.eq(q.field("accountId"), actor.accountId), q.neq(q.field("state"), "unavailable")))
+        .first();
+      if (replica) {
+        const policy = await computeEffectivePolicy(ctx, actor.accountId, {
+          item: String(workId), mount: replica.mountId ? String(replica.mountId) : undefined,
+        });
+        local = policy.contentDirection === "bidirectional" || policy.contentDirection === "spectra-to-local";
+      }
+    }
+    return local;
   },
 });
 
@@ -716,10 +747,7 @@ export const payloadForWork = query({
     await requireActorArtifactCapability(ctx, actor, workId, "read");
     const work = await ctx.db.get(workId);
     if (!work) throw new Error("WORK_NOT_FOUND");
-    const replicas = await ctx.db.query("workReplicas").withIndex("by_work", (q) => q.eq("workId", workId)).take(20);
-    const visibleReplicas = replicas.filter(
-      (replica) => replica.kind === "cloud" || replica.accountId === actor.accountId,
-    );
+    const visibleReplicas = await visibleReplicasForWork(ctx, workId, actor.accountId);
     if (prefer !== "local-latest" && work.pendingPayloadRef && work.pendingContentHash) {
       const pendingId = ctx.db.normalizeId("payloadObjects", work.pendingPayloadRef);
       const pending = pendingId ? await ctx.db.get(pendingId) : null;
@@ -980,7 +1008,7 @@ export const applyProtectedPending = mutation({
     if (!local?.pendingPayloadRef || !local.pendingContentHash || !local.pendingBaseRevision || !local.deviceId || !local.mountId || !local.localResourceId || !local.relativePath)
       throw new Error("PROTECTED_PENDING_NOT_FOUND");
     const openConflict = await ctx.db.query("syncConflicts")
-      .withIndex("by_work_state", (q) => q.eq("workId", args.workId).eq("state", "open"))
+      .withIndex("by_work_account_state", (q) => q.eq("workId", args.workId).eq("accountId", actor.accountId).eq("state", "open"))
       .first();
     if (openConflict) throw new Error("PROTECTED_ORIGINAL_CONFLICT");
     const payloadId = ctx.db.normalizeId("payloadObjects", local.pendingPayloadRef);
@@ -1200,7 +1228,7 @@ export const attachPortablePayload = mutation({
         return { state: "existing" as const, replicaId: cloud._id };
       if (cloud.payloadRef && cloud.contentHash && cloud.contentHash !== input.contentHash) {
         const existingConflict = await ctx.db.query("syncConflicts")
-          .withIndex("by_work_state", (q) => q.eq("workId", args.workId).eq("state", "open"))
+          .withIndex("by_work_account_state", (q) => q.eq("workId", args.workId).eq("accountId", actor.accountId).eq("state", "open"))
           .filter((q) => q.and(q.eq(q.field("localRevision"), input.contentHash), q.eq(q.field("spectraRevision"), cloud.revision)))
           .first();
         if (!existingConflict) await ctx.db.insert("syncConflicts", {
@@ -1261,7 +1289,7 @@ export const resolveExternalConflict = mutation({
     if (!work || work.ownerAccountId !== actor.accountId)
       throw new Error("WORK_NOT_FOUND");
     const conflicts = await ctx.db.query("syncConflicts")
-      .withIndex("by_work_state", (q) => q.eq("workId", args.workId).eq("state", "open"))
+      .withIndex("by_work_account_state", (q) => q.eq("workId", args.workId).eq("accountId", actor.accountId).eq("state", "open"))
       .take(20);
     const now = Date.now();
     if (!conflicts.length) return { resolved: 0, workId: null };
@@ -1337,10 +1365,13 @@ export const resolveExternalConflict = mutation({
       throw new Error("CONFLICT_RECONCILIATION_REQUIRED");
     }
     if (args.resolution === "spectra") {
-      const requests = await ctx.db.query("bridgeWriteRequests")
+      const requests = (args.requestId
+        ? [await ctx.db.get(args.requestId)]
+        : await ctx.db.query("bridgeWriteRequests")
         .withIndex("by_work_created", (q) => q.eq("workId", args.workId))
         .order("desc")
-        .take(50);
+        .take(50)).filter((candidate): candidate is Doc<"bridgeWriteRequests"> =>
+          candidate !== null && candidate.accountId === actor.accountId && candidate.workId === args.workId);
       const bound = args.requestId
         ? requests.find((candidate) => candidate._id === args.requestId)
         : undefined;

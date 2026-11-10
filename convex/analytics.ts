@@ -140,12 +140,14 @@ export const personalOverview = query({
       meters
         .filter((item) => item.category === category)
         .reduce((sum, item) => sum + item.quantity, 0);
-    const meteringState = meters.length
+    const hasModelMeters = meters.some((item) => item.category === "model_input_tokens" || item.category === "model_output_tokens");
+    const hasCollaborationMeters = meters.some((item) => item.category === "collaboration_bytes");
+    const meteringState = (recorded: boolean) => recorded
       ? metricState(meterTruncated, computedAt)
       : ({
           kind: "partial" as const,
           details:
-            "No account metering rows were recorded in this range, so collection-disabled is not presented as zero.",
+            "No account metering rows were recorded for this metric in this range, so collection-disabled is not presented as zero.",
         });
 
     return {
@@ -177,14 +179,14 @@ export const personalOverview = query({
           ) : preparingState,
         },
         modelTokens: {
-          value: meters.length
+          value: hasModelMeters
             ? meterTotal("model_input_tokens") + meterTotal("model_output_tokens")
             : null,
-          state: meteringState,
+          state: meteringState(hasModelMeters),
         },
         collaborationBytes: {
-          value: meters.length ? meterTotal("collaboration_bytes") : null,
-          state: meteringState,
+          value: hasCollaborationMeters ? meterTotal("collaboration_bytes") : null,
+          state: meteringState(hasCollaborationMeters),
         },
       },
       byType: byType.sort((left, right) => right.value - left.value),

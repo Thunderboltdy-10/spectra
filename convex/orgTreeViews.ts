@@ -97,12 +97,12 @@ export async function sharedByActor(
   resourceIds: string[],
 ) {
   const uniqueResourceIds = [...new Set(resourceIds)];
-  const now = Date.now();
+  let now: number | undefined;
   const rows = await Promise.all(
     uniqueResourceIds.map(async (resourceId) => {
       const activeInvitations = await Promise.all(
-        (["pending", "accepted"] as const).map((status) =>
-          ctx.db
+        (["pending", "accepted"] as const).map(async (status) => {
+          const invitations = ctx.db
             .query("shareInvitations")
             .withIndex("by_resource_inviter_status", (q) =>
               q
@@ -110,15 +110,13 @@ export async function sharedByActor(
                 .eq("resourceId", resourceId)
                 .eq("inviterAccountId", accountId)
                 .eq("status", status),
-            )
-            .filter((q) =>
-              q.or(
-                q.eq(q.field("expiresAt"), undefined),
-                q.gt(q.field("expiresAt"), now),
-              ),
-            )
-            .first(),
-        ),
+            );
+          for await (const invitation of invitations) {
+            if (invitation.expiresAt === undefined || invitation.expiresAt > (now ??= Date.now()))
+              return invitation;
+          }
+          return null;
+        }),
       );
       return activeInvitations.some(Boolean) ? resourceId : null;
     }),

@@ -2631,6 +2631,7 @@ export default defineSchema({
     .index("by_device_state", ["deviceId", "state"])
     .index("by_device_mount_path", ["deviceId", "mountId", "relativePath"])
     .index("by_work_kind", ["workId", "kind"])
+    .index("by_work_kind_account", ["workId", "kind", "accountId"])
     .index("by_payload_ref", ["payloadRef"])
     .index("by_pending_payload_ref", ["pendingPayloadRef"])
     .index("by_projection_base_payload_ref", ["projectionBasePayloadRef"])
@@ -2685,6 +2686,7 @@ export default defineSchema({
     .index("by_account_key", ["accountId", "idempotencyKey"])
     .index("by_account_key_replica", ["accountId", "idempotencyKey", "replicaId"])
     .index("by_work_created", ["workId", "createdAt"])
+    .index("by_work_account_created", ["workId", "accountId", "createdAt"])
     .index("by_state_updated", ["state", "updatedAt"]),
 
   syncConflicts: defineTable({
@@ -2723,6 +2725,8 @@ export default defineSchema({
     resolvedAt: v.optional(v.number()),
   })
     .index("by_work_state", ["workId", "state"])
+    .index("by_work_account_state", ["workId", "accountId", "state"])
+    .index("by_request_account_state", ["resolutionRequestId", "accountId", "state"])
     .index("by_account_state", ["accountId", "state"])
     .index("by_local_payload_ref", ["localPayloadRef"])
     .index("by_spectra_payload_ref", ["spectraPayloadRef"])
@@ -5340,6 +5344,7 @@ export default defineSchema({
   })
     .index("by_account_updated", ["ownerAccountId", "updatedAt"])
     .index("by_account_run", ["ownerAccountId", "runId"])
+    .index("by_account_selected", ["ownerAccountId", "selected"])
     .index("by_account_thread", ["ownerAccountId", "threadId"])
     .index("by_account_workspace", [
       "ownerAccountId",

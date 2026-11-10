@@ -124,7 +124,7 @@ export const confirmPairing = mutation({
         await retireDevice(ctx, device._id, now);
     }
     await ctx.db.patch(row._id, { confirmedAt: now, consumedAt: now });
-    return { deviceId, deviceCredential: credential, browserOrigin: row.browserOrigin };
+    return { deviceId, deviceCredential: credential, browserOrigin: row.browserOrigin, accountId: row.accountId };
   },
 });
 
@@ -150,7 +150,7 @@ export const resumePairing = mutation({
       lastSeenAt: now,
     });
     await ctx.db.patch(row._id, { confirmedAt: now, consumedAt: now });
-    return { deviceId: device._id, browserOrigin: row.browserOrigin };
+    return { deviceId: device._id, browserOrigin: row.browserOrigin, accountId: device.accountId };
   },
 });
 
@@ -187,7 +187,7 @@ export const reportHealth = mutation({
       appVersion: z.string().trim().min(1).max(40).parse(args.appVersion),
       health,
     });
-    return null;
+    return String(device.accountId);
   },
 });
 
@@ -205,6 +205,17 @@ export const hasDevice = query({ args: {}, handler: async (ctx) => {
   const device = await ctx.db.query("bridgeDevices").withIndex("by_account_state", (q) => q.eq("accountId", actor.accountId).eq("state", "active")).first();
   return device !== null;
 } });
+
+/** The local relay must prove this exact paired device belongs to its caller. */
+export const localRelayAccount = query({
+  args: { deviceId: v.id("bridgeDevices") },
+  handler: async (ctx, { deviceId }) => {
+    const actor = await getOptionalAuthenticatedActor(ctx);
+    if (!actor) return null;
+    const device = await ctx.db.get(deviceId);
+    return device?.state === "active" && device.accountId === actor.accountId ? String(actor.accountId) : null;
+  },
+});
 
 export const overview = query({ args: {}, handler: async (ctx) => {
   const actor = await getOptionalAuthenticatedActor(ctx);

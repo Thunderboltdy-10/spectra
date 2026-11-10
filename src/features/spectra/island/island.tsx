@@ -487,6 +487,11 @@ export function Island() {
     [markSeen],
   );
   useEffect(() => {
+    if (!live?.runId || !live.threadId || !replyTo || replyTo === "new" || replyTo.runId !== `pending:${live.id}`) return;
+    setReplyTo({ runId: live.runId, threadId: live.threadId, title: allTabs.find((tab) => tab.runId === live.runId)?.title ?? replyTo.title });
+    openView(live.runId, true);
+  }, [allTabs, live, openView, replyTo]);
+  useEffect(() => {
     openRunRef.current = (runId) => {
       setReaching(true);
       void go(targetRef.current ?? "composer").then(() => openView(runId, true));

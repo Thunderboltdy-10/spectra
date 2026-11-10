@@ -7,6 +7,7 @@ import { getAuthenticatedActor } from "./identityShared";
 import type { Doc, Id } from "./_generated/dataModel";
 import { commandHasNothingToUndo, type RunUndoCounts } from "../shared/run-undo";
 import { sameTopicText } from "./spectraMemory";
+import { isTerminalRunStatus, requireCurrentExecution } from "./spectraRunLifecycle";
 
 type Row = Record<string, unknown>;
 const row = (value: unknown): Row => (value && typeof value === "object" && !Array.isArray(value) ? (value as Row) : {});
@@ -248,6 +249,7 @@ async function reverseMemory(ctx: MutationCtx, accountId: Id<"accounts">, runId:
 export const reverseWrites = mutation({
   args: {
     runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
     /** Works kept on a computer that were edited since: only Bridge can tell, so the caller says. */
     keepWorks: v.optional(v.array(v.string())),
   },
@@ -255,7 +257,9 @@ export const reverseWrites = mutation({
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerAccountId !== actor.accountId) throw new Error("AI run not found");
+    if (!run || run.ownerAccountId !== actor.accountId || run.schoolId !== actor.schoolId) throw new Error("AI run not found");
+    requireCurrentExecution(run.executionId, args.executionId);
+    if (!isTerminalRunStatus(run.status)) throw new Error("Undo is available after Spectra finishes this run.");
     const operations = await ctx.db.query("spectraOperations").withIndex("by_run", (q) => q.eq("runId", args.runId)).collect();
     const counts: Partial<RunUndoCounts> = {};
     const count = (kind: keyof RunUndoCounts, by = 1) => { counts[kind] = (counts[kind] ?? 0) + by; };
@@ -318,6 +322,33 @@ export const reverseWrites = mutation({
     if (memory.reversed) count("memory");
     if (memory.keptAny) kept.push("Spectra's memory changed after this, so it stays as it is.");
     return { counts, left: [...new Set(left)], kept: [...new Set(kept)], trashedWorks };
+  },
+});
+
+/** A conversational Undo has its own committed effect, even though restored versions belong to the prior run. */
+export const recordReversal = mutation({
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string(), previousRunId: v.id("spectraAiRuns"), previousExecutionId: v.string() },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    const [run, previous] = await Promise.all([ctx.db.get(args.runId), ctx.db.get(args.previousRunId)]);
+    if (!actor || !run || !previous || run.ownerAccountId !== actor.accountId || previous.ownerAccountId !== actor.accountId ||
+        run.schoolId !== actor.schoolId || previous.schoolId !== actor.schoolId || !run.threadId || run.threadId !== previous.threadId ||
+        previous._creationTime >= run._creationTime) throw new Error("AI run not found");
+    requireCurrentExecution(run.executionId, args.executionId);
+    requireCurrentExecution(previous.executionId, args.previousExecutionId);
+    if (run.status !== "running" || !isTerminalRunStatus(previous.status)) throw new Error("This run attempt is no longer active.");
+    const cards = await ctx.db.query("spectraResultCards").withIndex("by_run", (q) => q.eq("runId", previous._id)).collect();
+    const undone = cards.find((card) => card.actions.some((action) => action.key === "undone") && row(card.provenance).undoneByRunId === run._id);
+    if (!undone) throw new Error("The previous run has no committed reversal.");
+    const operations = await ctx.db.query("spectraOperations").withIndex("by_run", (q) => q.eq("runId", run._id)).collect();
+    const existing = operations.find((operation) => operation.executionId === args.executionId && operation.type === "run.revert" && row(operation.input).runId === previous._id);
+    if (existing) return { operationId: existing._id };
+    const operationId = await ctx.db.insert("spectraOperations", {
+      runId: run._id, executionId: args.executionId, actorType: "ai", type: "run.revert", status: "executed",
+      input: { runId: previous._id, executionId: args.previousExecutionId }, output: { summary: undone.summary },
+      affected: [{ type: "run", id: String(previous._id) }], requiresConfirmation: false, createdAt: Date.now(), executedAt: Date.now(),
+    });
+    return { operationId };
   },
 });
 

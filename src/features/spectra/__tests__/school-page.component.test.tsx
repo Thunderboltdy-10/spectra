@@ -20,6 +20,9 @@ vi.mock("convex/react", () => ({
   useConvex: () => ({ query: async (reference: Parameters<typeof getFunctionName>[0]) => mocks.data[getFunctionName(reference)] }),
 }));
 vi.mock("../data/use-authed-args", () => ({ useAuthedArgs: <T,>(args: T) => args }));
+const scope = vi.hoisted(() => ({ value: "test-0", count: 0 }));
+// Each test is its own account, so the shared identity read is never carried over.
+vi.mock("@/lib/account-storage", async (original) => ({ ...(await original<typeof import("@/lib/account-storage")>()), accountStorageScope: () => scope.value }));
 vi.mock("../administration/api", () => ({ getAdministration: mocks.identity }));
 vi.mock("../hooks/use-spectra-router", () => ({ useSpectraRouter: () => ({ push: vi.fn() }) }));
 vi.mock("../data/api", async (importOriginal) => ({
@@ -44,6 +47,7 @@ function connected(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  scope.value = `test-${++scope.count}`;
   globalThis.ResizeObserver ??= class {
     observe() {}
     unobserve() {}
@@ -75,12 +79,39 @@ afterEach(() => {
 });
 
 describe("School page", () => {
+  it.each(["blocked", "never-synced", "failed"])("does not claim an empty workload for %s task data", state => {
+    const status = connected(state === "blocked" ? { state: "blocked", problem: { code: "INTEGRATION_IDENTITY_REQUIRED", message: "Account match required", fixBy: "student", fixHint: "Match your account." } } : {});
+    if (state === "never-synced") Object.assign(status.kinds[0]!, { state: "idle", lastSuccessAt: null });
+    if (state === "failed") Object.assign(status.kinds[0]!, { state: "failed", problem: { code: "INTEGRATION_NOT_READY", message: "Sync failed", fixHint: "Try again." } });
+    mocks.data["school:syncStatus"] = status;
+    mocks.data["school:tasks"] = { tasks: [] };
+    mocks.data["school:classes"] = { classes: [{ providerClassId: "c1", recordId: "class-1", title: "Physics HL", subject: "Physics", yearGroupId: null, academicPeriodKey: "2026", archived: false, selected: true, modes: { current_tasks: "auto" } }] };
+    render(<SchoolPage />);
+    expect(screen.queryAllByText(/Nothing due/)).toHaveLength(0);
+    expect(screen.queryAllByLabelText("Nothing due", { exact: true })).toHaveLength(0);
+    fireEvent.click(screen.getByRole("tab", { name: "Tasks" }));
+    expect(screen.queryAllByText(/Nothing due/)).toHaveLength(0);
+    fireEvent.click(screen.getByRole("tab", { name: "Classes" }));
+    expect(screen.queryAllByText(/Nothing due/)).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: /Physics HL/ }));
+    expect(screen.queryAllByText(/Nothing due/)).toHaveLength(0);
+  });
+
+  it("keeps the empty-workload messages for successfully synced task data", () => {
+    mocks.data["school:tasks"] = { tasks: [] };
+    render(<SchoolPage />);
+    expect(screen.getByText(/^Nothing due this week\./)).toBeTruthy();
+    expect(screen.getByText("Nothing due", { exact: true })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Tasks" }));
+    expect(screen.getByText("Nothing due", { exact: true })).toBeTruthy();
+  });
+
   it("opens on an overview of what's coming up and sync, with nothing ManageBac can't bring", async () => {
     render(<SchoolPage />);
     expect(screen.getByRole("heading", { level: 1, name: "School" })).toBeTruthy();
     expect(screen.getByText("Lab report")).toBeTruthy();
     expect(screen.queryByText(/CAS/)).toBeNull();
-    expect(screen.getByText(/Up to date. Synced/)).toBeTruthy();
+    expect(screen.getByText(/^Synced (?!from)/)).toBeTruthy();
     // Admin-only connection settings stay hidden for a student.
     await waitFor(() => expect(mocks.identity).toHaveBeenCalled());
     expect(screen.queryByRole("button", { name: "Connection" })).toBeNull();

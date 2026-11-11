@@ -5,10 +5,14 @@ import schema from "./schema";
 import { api } from "./_generated/api";
 import { settleStudentSyncState } from "./schoolSyncShared";
 import { SCHOOL_SYNC_KINDS } from "../shared/school-sync";
+import { syncStatus } from "./school";
+import type { QueryCtx } from "./_generated/server";
+import type { FunctionReturnType } from "convex/server";
 
 const modules = import.meta.glob("./**/*.ts");
 const identity = { subject: "login-student", email: "student@example.test", emailVerified: true };
 const counts = { fetched: 0, created: 0, updated: 0, unchanged: 0, tombstoned: 0, projected: 0, skipped: 0, quarantined: 0, conflicts: 0, errors: 0 };
+const syncStatusHandler = Reflect.get(syncStatus, "_handler") as (ctx: QueryCtx, args: Record<string, never>) => Promise<FunctionReturnType<typeof api.school.syncStatus>>;
 afterEach(() => vi.useRealTimers());
 
 async function fixture() {
@@ -121,6 +125,30 @@ it("does not report another person's school-wide sync as this student's success"
   expect((await student.query(api.school.syncStatus, {})).connection.lastSyncAt).toBeNull();
 });
 
+it.each(["idle", "queued", "running"] as const)("keeps %s sync metadata clock-free without a running deadline", async state => {
+  const { t, ids, student } = await fixture();
+  await t.run(ctx => ctx.db.insert("schoolSyncStates", { ...ids, kind: "classes", state,
+    ...(state === "running" ? {} : { dueAt: Date.now() + 60_000 }), updatedAt: Date.now() }));
+  const result = await student.run(async ctx => {
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => { throw Error("No running sync deadline needs the clock"); });
+    try { return await syncStatusHandler(ctx, {}); } finally { clock.mockRestore(); }
+  });
+  expect(result.kinds.find(row => row.kind === "classes")?.state).toBe(state);
+});
+
+it("keeps a sync running until its exact watchdog deadline", async () => {
+  const { t, ids, student } = await fixture();
+  const dueAt = Date.now() + 60_000;
+  await t.run(ctx => ctx.db.insert("schoolSyncStates", { ...ids, kind: "classes", state: "running", dueAt, updatedAt: Date.now() }));
+  for (const [now, state] of [[dueAt - 1, "running"], [dueAt, "idle"]] as const) {
+    const result = await student.run(async ctx => {
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+      try { return await syncStatusHandler(ctx, {}); } finally { clock.mockRestore(); }
+    });
+    expect(result.kinds.find(row => row.kind === "classes")?.state).toBe(state);
+  }
+});
+
 it("retries the old setup that incorrectly completed without current memberships", async () => {
   const { t, ids, student } = await fixture();
   await t.run((ctx) => ctx.db.insert("schoolSyncBootstraps", {
@@ -157,4 +185,21 @@ it("only exposes saved sync progress to its owning account", async () => {
   expect(await student.query(api.managebac.studentSyncProgress, { runIds: [runId] })).toMatchObject([{ syncRunId: runId, status: "completed" }]);
   await t.run((ctx) => ctx.db.patch(runId, { accountId: undefined }));
   await expect(student.query(api.managebac.studentSyncProgress, { runIds: [runId] })).rejects.toThrow("AUTH_FORBIDDEN");
+});
+
+it("answers setup without reading the clock, so the query stays cacheable (E2)", async () => {
+  const { t, ids, student } = await fixture();
+  const created = await t.run(async (ctx) => (await ctx.db.get(ids.accountId))!._creationTime);
+  const first = await student.query(api.managebac.onboardingStatus, {});
+  expect(first).toMatchObject({ establishedAt: created + 48 * 60 * 60 * 1_000 });
+  expect(first).not.toHaveProperty("established");
+  vi.setSystemTime(new Date("2026-10-27T10:00:00Z"));
+  expect(await student.query(api.managebac.onboardingStatus, {})).toEqual(first);
+});
+
+it("allows the first brief on a day after setup has had time to settle (E2)", async () => {
+  const { t, ids, student } = await fixture();
+  await t.run(async (ctx) => ctx.db.insert("dailyBriefs", { accountId: ids.accountId, day: "2026-10-26", state: "ready", claimedAt: Date.now(), recap: "Done", ahead: "Next", suggestions: [], updatedAt: Date.now() } as never));
+  expect(await student.query(api.dailyBriefs.today, { day: "2026-10-23" })).toBeNull();
+  expect(await student.query(api.dailyBriefs.today, { day: "2026-10-26" })).toMatchObject({ state: "ready" });
 });

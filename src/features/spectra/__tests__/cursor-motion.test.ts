@@ -105,3 +105,18 @@ describe("CursorTravel", () => {
     expect(travel.fadeOpacity(done)).toBe(1);
   });
 });
+
+describe("an AI's hand when the work outruns it", () => {
+  it("does not dart across the page several times a second", () => {
+    const travel = new CursorTravel(() => false, "actor");
+    travel.moveTo(0, 0, 0);
+    travel.moveTo(0, 400, 10);
+    travel.moveTo(0, 800, 60);
+    travel.moveTo(0, 1200, 110);
+    // Still on its first move; the two arrivals in between are not visited.
+    expect(travel.sample(200).y).toBeLessThanOrEqual(420);
+    travel.sample(400);
+    travel.sample(2_000);
+    expect(travel.position).toEqual({ x: 0, y: 1200 });
+  });
+});

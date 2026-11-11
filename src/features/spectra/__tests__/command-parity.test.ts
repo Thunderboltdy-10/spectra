@@ -31,7 +31,15 @@ function publicConvexWrites() {
     if (!file.endsWith(".ts") || file.endsWith(".test.ts") || file.endsWith(".d.ts")) continue;
     const moduleName = file.slice(0, -3);
     const source = readFileSync(join(CONVEX_DIR, file), "utf8");
-    for (const match of source.matchAll(/^export const (\w+) = (?:mutation|action)\b/gm)) names.push(`${moduleName}:${match[1]}`);
+    const builders = new Set(["mutation", "action"]);
+    for (const imported of source.matchAll(/import\s*\{([^}]+)\}\s*from\s*["']\.\/(?:functions|orgNodeMutation)["']/g)) {
+      for (const binding of imported[1].split(",")) {
+        const [original, alias] = binding.trim().split(/\s+as\s+/);
+        if (original === "mutation" || original === "action") builders.add(alias ?? original);
+      }
+    }
+    for (const match of source.matchAll(/^export const (\w+) = (\w+)\b/gm))
+      if (builders.has(match[2])) names.push(`${moduleName}:${match[1]}`);
   }
   return names;
 }

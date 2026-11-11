@@ -111,7 +111,7 @@ export function ArtifactRichTextEditor({
   });
 
   useEffect(() => {
-    editor?.setEditable(!disabled);
+    editor?.setEditable(!disabled, false);
   }, [disabled, editor]);
 
   useEffect(() => {

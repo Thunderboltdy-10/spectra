@@ -7,12 +7,15 @@ import { getAuthenticatedActor } from "./identityShared";
 import { requireActorArtifactCapability } from "./authorityShared";
 import { validateDurablePayload } from "./collaborationDurablePayload";
 import { isDurableContentRef } from "../shared/durable-content";
+import { unpackOperationInput } from "../shared/operation-content";
 import { classifyArtifactContentWipe } from "../src/features/spectra/operations/artifact-content-wipe";
 import { canonicalArtifactWriteContent, resolveArtifactWriteInput } from "../src/features/spectra/operations/artifact-write-content";
 import { isArtifactTypeKey } from "../src/features/spectra/artifacts/registry";
+import { computeEffectivePolicy } from "./syncPolicy";
+import type { PermissionCategory } from "../src/features/spectra/settings/schema/ai-permissions";
 import {
   artifactOperationDigest, artifactOutput, artifactScopeDigest, artifactSourceIdentity,
-  artifactWriteReceipt, currentArtifactApprovalScope, type ArtifactWriteScope,
+  artifactWriteReceipt, currentArtifactApprovalScope, approvalSemanticDigest, type ArtifactWriteScope,
   artifactOperationTarget, artifactCreationIdentity,
 } from "./spectraArtifactWriteScope";
 
@@ -79,6 +82,7 @@ export const commitPreparation = internalMutation({
     const { actor, run } = await ownedAttempt(ctx, args);
     if (run.status !== "running") throw new Error("AI_ARTIFACT_OPERATION_NOT_ACTIVE");
     const reasons: string[] = [];
+    const approvalCategories = new Set<PermissionCategory>();
     for (const prepared of args.prepared) {
       const operation = await ctx.db.get(prepared.operationId);
       const scope = prepared.scope as ArtifactWriteScope;
@@ -91,19 +95,35 @@ export const commitPreparation = internalMutation({
       await requireActorArtifactCapability(ctx, actor, artifactId, scope.kind === "archive" ? "delete" : "modify");
       const artifact = (await ctx.db.get(artifactId))!;
       if (scope.sourceContentIdentity !== await artifactSourceIdentity(artifact)) throw new Error("AI_ARTIFACT_PREPARATION_CHANGED");
+      const categories: PermissionCategory[] = scope.kind === "archive" || scope.kind === "full_content_delete" ? ["permanent_delete"] : [];
+      if (operation.type === "artifact.update" && ["docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm", "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam"].includes(artifact.nativeFormat ?? "")) {
+        const replica = await ctx.db.query("workReplicas").withIndex("by_work_kind", q => q.eq("workId", artifactId).eq("kind", "local"))
+          .filter(q => q.and(q.eq(q.field("accountId"), actor.accountId), q.neq(q.field("state"), "unavailable"))).first();
+        if (replica) {
+          const policy = await computeEffectivePolicy(ctx, actor.accountId, { item: String(artifactId), mount: replica.mountId ? String(replica.mountId) : undefined });
+          if (policy.contentDirection === "bidirectional" || policy.contentDirection === "spectra-to-local") {
+            categories.push("bridge_files");
+            reasons.push("This also changes a file on your computer through Spectra Bridge. Go ahead?");
+          }
+        }
+      }
+      for (const category of categories) approvalCategories.add(category);
+      const boundScope = { ...scope };
+      delete boundScope.approvalCategories;
+      if (categories.length) boundScope.approvalCategories = categories;
       await ctx.db.patch(operation._id, {
-        requiresConfirmation: operation.requiresConfirmation || scope.kind === "archive" || scope.kind === "full_content_delete",
-        output: { ...artifactOutput(operation.output), artifactWriteScope: scope },
+        requiresConfirmation: operation.requiresConfirmation || categories.length > 0,
+        output: { ...artifactOutput(operation.output), artifactWriteScope: boundScope },
       });
       if (prepared.reason) reasons.push(prepared.reason);
     }
-    return { approvalReasons: [...new Set(reasons)] };
+    return { approvalReasons: [...new Set(reasons)], ...(approvalCategories.size ? { approvalCategories: [...approvalCategories] } : {}) };
   },
 });
 
 export const preparePlan = action({
   args: preparationArgs,
-  handler: async (ctx, args): Promise<{ approvalReasons: string[] }> => {
+  handler: async (ctx, args): Promise<{ approvalReasons: string[]; approvalCategories?: PermissionCategory[] }> => {
     const context = await ctx.runQuery(makeFunctionReference<"query">("spectraArtifactWrites:preparationContext"), args) as {
       operations: Doc<"spectraOperations">[];
       operationTargets: Array<{ operationId: Id<"spectraOperations">; artifactId: Id<"spectraArtifacts"> }>;
@@ -131,7 +151,7 @@ export const preparePlan = action({
     const prepared = [];
     const resolvedTargets = new Map(context.operationTargets.map(target => [target.operationId, target.artifactId]));
     for (const operation of context.operations) {
-      const input = artifactOutput(operation.input);
+      const input = artifactOutput(unpackOperationInput(operation.input));
       const target = targets.get(String(resolvedTargets.get(operation._id)));
       if (!target) throw new Error("AI_ARTIFACT_TARGET_NOT_RESOLVED");
       const type = target.artifact.blueprintKey;
@@ -151,6 +171,7 @@ export const preparePlan = action({
         version: 1, artifactId: target.artifact._id, runId: args.runId, executionId: args.executionId, operationId: operation._id,
         operationDigest: await artifactOperationDigest(operation), sourceContentIdentity: target.sourceContentIdentity,
         baseContentDigest: await artifactScopeDigest(before), resultContentDigest: await artifactScopeDigest(after), kind,
+        semanticBaseDigest: await approvalSemanticDigest(before), semanticResultDigest: await approvalSemanticDigest(after),
         ...(target.previousOperationId ? { baseProducerOperationId: target.previousOperationId } : {}),
         ...(kind === "create" ? { creationSourceIdentity: await artifactCreationIdentity(target.artifact) } : {}),
       };

@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronLeft, ChevronUp, Loader2, Check, ChevronDown, ChevronRight } from "@/components/icons/glyph-icons";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { SelectField } from "@/components/ui/select";
 import { embedCapabilityEnabled } from "../capabilities";
 import {
@@ -68,19 +68,22 @@ function practiceQuestion(question: Record<string, unknown>, index: number): Spe
 
 /*
  * An embedded quiz is its questions, one at a time, answered where they sit.
- * A published quiz keeps the answers as a private practice attempt (never in
- * the quiz itself) and checks them at the end; a draft can be read and tried
- * but has nothing to check against yet.
+ * Answers are a private practice attempt (never in the quiz itself) that the full
+ * quiz carries on from, and they are checked at the end. Your own quiz can be
+ * practised before it's published; someone else's draft can only be read.
  */
 export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
   const interaction = embed.effectiveInteraction ?? embed.interaction;
-  const canPractice = embeddedQuizIsPublished(embed) && embedCapabilityEnabled("quiz", interaction, "attempt.answer");
+  const published = embeddedQuizIsPublished(embed);
+  const canPractice = (published || Boolean(embed.canEditSource)) && embedCapabilityEnabled("quiz", interaction, "attempt.answer");
   const previews = useMemo(() => previewQuestions(embed).map(practiceQuestion), [embed]);
   const [attempt, setAttempt] = useState<SpectraQuizPracticeAttempt | null>(null);
   const [responses, setResponses] = useState<Record<string, string | string[]>>({});
   const [index, setIndex] = useState(0);
   const [busy, setBusy] = useState<"save" | "submit" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Two quick answers share one attempt, however long the first takes to start.
+  const starting = useRef<Promise<SpectraQuizPracticeAttempt> | null>(null);
   const questions = attempt?.questions ?? previews;
 
   if (!questions.length) return <p className="work-embed-empty">No questions yet</p>;
@@ -96,6 +99,7 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
           type="button"
           className="work-embed-quiz-check"
           onClick={() => {
+            starting.current = null;
             setAttempt(null);
             setResponses({});
             setIndex(0);
@@ -108,10 +112,15 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
 
   async function practiceAttempt() {
     if (attempt) return attempt;
-    const started = await startSpectraQuizPractice({
+    starting.current ??= startSpectraQuizPractice({
       artifactId: embed.source!.artifactId,
       clientAttemptId: crypto.randomUUID(),
+      ...(published ? {} : { ownDraft: true }),
+    }).catch((reason) => {
+      starting.current = null;
+      throw reason;
     });
+    const started = await starting.current;
     setAttempt(started);
     return started;
   }
@@ -180,7 +189,7 @@ export function ArtifactEmbedQuiz({ embed }: { embed: SpectraArtifactEmbed }) {
         <button type="button" onClick={() => setIndex(Math.min(questions.length - 1, at + 1))} disabled={last} aria-label="Next question">
           <ChevronRight className="size-4" />
         </button>
-        {canPractice && last ? (
+        {canPractice && (last || Object.keys(responses).length > 0) ? (
           <button type="button" className="work-embed-quiz-check" onClick={() => void check()} disabled={busy !== null}>
             {busy === "submit" ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : null}
             Check answers

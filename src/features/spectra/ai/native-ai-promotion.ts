@@ -73,7 +73,7 @@ export async function promoteNativeAiContent(params: {
   commit: AiBeforeCommitInfo;
   aiOperation: NativeAiOperationIdentity;
   deps?: NativePromotionDeps;
-}): Promise<AdmittedAiCommit> {
+}): Promise<AdmittedAiCommit | undefined> {
   if (!params.aiOperation || [params.aiOperation.runId, params.aiOperation.executionId, params.aiOperation.operationId]
     .some(value => typeof value !== "string" || !value.trim()))
     throw promotionError("NATIVE_PROMOTION_IDENTITY_REQUIRED", "The native edit has no authenticated AI operation identity.");
@@ -89,11 +89,19 @@ export async function promoteNativeAiContent(params: {
   const materialize = kind === "docx"
     ? params.deps?.materializeDocx ?? materializeDocxArtifact
     : params.deps?.materializeOffice ?? materializeOfficeArtifact;
-  const prepared: NativeMaterializeResult = await materialize(
-    params.workId as Id<"spectraArtifacts">,
-    params.commit.desired.content,
-    options,
-  );
+  let prepared: NativeMaterializeResult;
+  try {
+    prepared = await materialize(
+      params.workId as Id<"spectraArtifacts">,
+      params.commit.desired.content,
+      options,
+    );
+  } catch (error) {
+    // No copy of the original to hand: the edit is still Spectra's to keep, and
+    // it reaches the Office file once the bridge next offers the original.
+    if (error instanceof Error && error.message === "NATIVE_PAYLOAD_UNAVAILABLE") return undefined;
+    throw error;
+  }
   if (prepared.state === "conflicted")
     throw promotionError("NATIVE_PROMOTION_CONFLICT", prepared.conflict?.message || "Both copies changed. Nothing overwritten.");
   if (prepared.state === "protected-pending")

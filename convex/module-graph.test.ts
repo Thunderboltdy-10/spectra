@@ -73,7 +73,7 @@ function loadTimeCycles() {
   return cycles.map((cycle) => cycle.join(" -> "));
 }
 
-const referenceRoots = ["src", "convex", "shared", "scripts", "workers"];
+const referenceRoots = ["src", "convex", "shared", "scripts"];
 const skippedDirectories = new Set(["node_modules", "_generated", "__tests__", "test-fixtures", "fixtures", ".spectra-local"]);
 
 function productionSources(dir: string, out: string[] = []) {

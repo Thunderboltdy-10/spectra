@@ -35,28 +35,21 @@ describe("inline emphasis", () => {
     expect(region.querySelector("em")?.textContent).toBe("Old notes");
   });
 
-  it("shows each tool step behind a caption on its own line, without markers", () => {
+  it("shows tool steps and thinking in order, without markers", () => {
     render(
       <ProgressTrace
         active={false}
         hasOutput
         steps={[
-          {
-            id: "caption:a",
-            title: "Drafting six slides",
-            summary: "Created *Photosynthesis*\nEdited *Photosynthesis*",
-            status: "done",
-            createdAt: 1,
-          },
+          { id: "t1", kind: "thinking", title: "Thinking", summary: "**Finding the notes**\n\nThey are in *Biology*", status: "done", createdAt: 1 },
+          { id: "s1", title: "Created *Photosynthesis*", status: "done", createdAt: 2 },
         ]}
         answers={[{ toolCallId: "t1", kind: "approval", question: "Share *Revision plan* with Ana?", label: "Allowed" }]}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { expanded: false, name: /Drafted six slides/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Show details/ }));
-    expect(screen.getByText("Created Photosynthesis")).toBeTruthy();
-    expect(screen.getByText("Edited Photosynthesis")).toBeTruthy();
-    expect(document.body.textContent).not.toContain("*");
+    fireEvent.click(screen.getByRole("button", { expanded: false }));
+    expect(screen.getByText("Finding the notes")).toBeTruthy();
+    expect(screen.getAllByText("Created Photosynthesis").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("Your answers").querySelector("em")?.textContent).toBe("Revision plan");
   });
 });
@@ -65,7 +58,7 @@ describe("the progress trace before anything is known", () => {
   it("shows only that Spectra is thinking, with no placeholder step to open", () => {
     render(<ProgressTrace active steps={[]} />);
     const header = screen.getByRole("button", { name: "Thinking" });
-    expect(header.hasAttribute("disabled")).toBe(true);
+    expect(header.classList.contains("cursor-default")).toBe(true);
     fireEvent.click(header);
     expect(document.body.textContent).not.toContain("Getting ready");
     expect(header.getAttribute("aria-expanded")).toBeNull();

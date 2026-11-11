@@ -37,7 +37,7 @@ function scripted(steps: Step[]) {
 }
 
 function deps(callModel: ModelCaller): EvalDeps {
-  return { callModel, captionWriter: null, summarise: async () => "Earlier: the dog is Biscuit; the essay is on Versailles." };
+  return { callModel, titleWriter: null, summarise: async () => "Earlier: the dog is Biscuit; the essay is on Versailles." };
 }
 
 const scenario = (name: string) => EVAL_SCENARIOS.find((entry) => entry.name === name)!;
@@ -81,13 +81,13 @@ describe("eval runner", () => {
     let time = 0;
     const clock = () => time;
     const caller: ModelCaller = async ({ onText }) => {
-      time += 2_000;
+      time += 3_000;
       onText("Hi!");
       return { text: "Hi!", toolCalls: [] };
     };
     const row = await playScenario(scenario("hello"), { ...deps(caller), clock });
     expect(row.pass).toBe(false);
-    expect(row.problems).toContain("first output 2000 ms at p50, target under 1500 ms");
+    expect(row.problems).toContain("first output 3000 ms at p50, target under 1500 ms");
   });
 
   it("records a pause, answers it and checks the change", async () => {
@@ -203,7 +203,6 @@ describe("eval report", () => {
         turns: 1,
         modelCalls: 1,
         steps: [],
-        captions: [],
         reply: "Hi <script>alert(1)</script>",
         artifacts: [],
       },
@@ -219,7 +218,6 @@ describe("eval report", () => {
         turns: 2,
         modelCalls: 2,
         steps: ["Creating *Guide*"],
-        captions: [],
         reply: "",
         artifacts: [{ id: "wx1", type: "document", title: "Guide", action: "created", shape: "120 words", preview: "# Guide <b>" }],
       },
@@ -260,5 +258,31 @@ describe("eval report", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("the golden set", () => {
+  it("names twenty scenarios that exist, one behaviour each", async () => {
+    const { EVAL_SCENARIOS, GOLDEN_SET } = await import("../scenarios");
+    expect(GOLDEN_SET).toHaveLength(20);
+    expect(new Set(GOLDEN_SET).size).toBe(20);
+    const names = new Set(EVAL_SCENARIOS.map((scenario) => scenario.name));
+    expect(GOLDEN_SET.filter((name) => !names.has(name))).toEqual([]);
+  });
+
+  it("can undo the previous pass in memory", async () => {
+    const { MemoryBackend } = await import("../../memory-backend");
+    const { authorNew } = await import("../../authoring");
+    const doc = (markdown: string) => authorNew("document", { markdown }, { timeZone: "UTC" }).content;
+    const backend = new MemoryBackend({ undo: true, artifacts: [{ id: "a", type: "document", title: "Notes", content: doc("# Notes") }] });
+    const before = JSON.stringify(backend.artifacts.get("a")!.content);
+    backend.startPass();
+    await backend.updateArtifact({ id: "a", type: "document", content: doc("# Notes\n\nMore.") } as never);
+    const { id } = await backend.createArtifact({ type: "document", title: "Extra", content: doc("# Extra") } as never);
+    backend.startPass();
+    const undone = await backend.undoPreviousRun!({ approved: false }, new AbortController().signal);
+    expect(undone.ok).toBe(true);
+    expect(JSON.stringify(backend.artifacts.get("a")!.content)).toBe(before);
+    expect(backend.artifacts.has(id)).toBe(false);
   });
 });

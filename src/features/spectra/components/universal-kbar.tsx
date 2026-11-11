@@ -1,5 +1,6 @@
 "use client";
 
+import { requestFullView } from "./full-view-origin";
 import {
   useCallback,
   useEffect,
@@ -262,6 +263,7 @@ export function UniversalKBar() {
           // Agent Library and other full-page surfaces own their studio
           // locally; use the canonical Library route when no panel host is
           // mounted rather than inventing a second preview surface.
+          if (surface === "full") requestFullView(artifactId);
           router.push(`/library/${encodeURIComponent(artifactId)}`);
         }
       },

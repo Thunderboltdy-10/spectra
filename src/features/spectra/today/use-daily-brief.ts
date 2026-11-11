@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { useSpectraPreferences } from "../settings/preference-store";
@@ -19,15 +20,18 @@ import { nextDay, zonedDay, zonedInstant, type BriefSuggestion } from "./daily-b
  */
 
 const RETRY_AFTER_MS = 15 * 60_000;
+/** How long Home says it is writing before it stops promising a brief and offers to plan instead. */
+const WRITING_AT_MOST_MS = 45_000;
 
 export type BriefState =
-  | { status: "off" | "waiting" | "failed" }
+  | { status: "off" | "waiting" | "failed" | "quiet" }
   | { status: "writing"; wakeTime: string }
   | {
       status: "ready";
       day: string;
       wakeTime: string;
       recap: string;
+      ahead?: string;
       suggestions: BriefSuggestion[];
       /** The last day's brief, shown while today's is written. */
       earlier?: boolean;
@@ -49,13 +53,14 @@ export function useDailyBrief(now: number | null): BriefState {
   // Until the reader's own preferences are in, the default must not ask for a brief they turned off.
   // A showcase (the landing page) has the brief its story holds, and asks for nothing.
   const showcase = useShowcaseTime() !== null;
-  const on = showcase || (hydrated && preferences.notifications.dailyBrief && preferences.integrations.tourStatus === "done" && setup?.phase === "ready");
+  const on = showcase || (hydrated && preferences.notifications.dailyBrief && (Boolean(now && setup?.establishedAt != null && now > setup.establishedAt) || (preferences.integrations.tourStatus === "done" && (setup?.phase === "ready" || setup?.phase === "awaiting_connection"))));
   const timeZone = useMemo(() => localZone(), []);
   const day = now ? zonedDay(now, timeZone) : null;
   const awake = Boolean(now && day && now >= zonedInstant(day, wakeTime, timeZone));
   const row = useQuery(api.dailyBriefs.today, useAuthedArgs(on && day ? { day } : "skip", "account"));
   const setSchedule = useMutation(api.dailyBriefs.setSchedule);
   const asked = useRef<string | null>(null);
+  const [gaveUp, setGaveUp] = useState<string | null>(null);
 
   // The schedule follows the reader's setting and their zone as Home last saw it.
   useEffect(() => {
@@ -67,7 +72,8 @@ export function useDailyBrief(now: number | null): BriefState {
 
   const missing = row === null || row?.state === "absent" || (row?.state === "failed" && Date.now() - row.claimedAt > RETRY_AFTER_MS);
   const firstSyncToday = Boolean(day && setup?.completedAt && zonedDay(setup.completedAt, timeZone) === day);
-  const due = awake || firstSyncToday;
+  // Someone with nothing on the page yet shouldn't wait for their alarm to see it.
+  const due = awake || firstSyncToday || (row !== undefined && !row?.previous);
   useEffect(() => {
     if (!on || showcase || !due || !missing || !day || asked.current === day) return;
     asked.current = day;
@@ -75,8 +81,19 @@ export function useDailyBrief(now: number | null): BriefState {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ timeZone }),
-    }).catch(() => undefined);
+    })
+      .then((response) => {
+        if (!response.ok) setGaveUp(day);
+      })
+      .catch(() => setGaveUp(day));
   }, [due, day, missing, on, showcase, timeZone]);
+
+  const writing = Boolean(on && !showcase && due && day && row !== undefined && row?.state !== "ready" && !row?.previous && row?.state !== "failed");
+  useEffect(() => {
+    if (!writing || !day) return;
+    const timer = window.setTimeout(() => setGaveUp(day), WRITING_AT_MOST_MS);
+    return () => window.clearTimeout(timer);
+  }, [day, writing]);
 
   return useMemo((): BriefState => {
     if (!on) return { status: "off" };
@@ -84,7 +101,7 @@ export function useDailyBrief(now: number | null): BriefState {
     if (showcase && row?.state !== "ready") return { status: "off" };
     // Written before they wake, it is there as soon as they look.
     if (row?.state === "ready")
-      return { status: "ready", day, wakeTime, recap: row.recap ?? "", suggestions: row.suggestions as BriefSuggestion[] };
+      return { status: "ready", day, wakeTime, recap: row.recap ?? "", ...(row.ahead ? { ahead: row.ahead } : {}), suggestions: row.suggestions as BriefSuggestion[] };
     // Until today's is ready, the last one stays.
     if (row?.previous)
       return {
@@ -92,10 +109,12 @@ export function useDailyBrief(now: number | null): BriefState {
         day: row.previous.day,
         wakeTime,
         recap: row.previous.recap,
+        ...(row.previous.ahead ? { ahead: row.previous.ahead } : {}),
         suggestions: row.previous.suggestions as BriefSuggestion[],
         earlier: true,
       };
     if (!due) return { status: "waiting" };
-    return row?.state === "failed" ? { status: "failed" } : { status: "writing", wakeTime };
-  }, [due, day, on, row, showcase, wakeTime]);
+    if (row?.state === "failed" || gaveUp === day) return { status: "quiet" };
+    return { status: "writing", wakeTime };
+  }, [due, day, gaveUp, on, row, showcase, wakeTime]);
 }

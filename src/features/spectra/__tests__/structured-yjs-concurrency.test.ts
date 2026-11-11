@@ -99,10 +99,21 @@ describe("writing a studio draft into a room a peer already changed", () => {
     ).toEqual({ value: { text: "abc XYZ def ghi" }, conflicts: [] });
   });
 
+  it("keeps both concurrent task-note additions at the same offset", () => {
+    const baseline = { description: "Revise waves." };
+    const left = { description: "Revise waves.\n\nAddition A" };
+    const right = { description: "Revise waves.\n\nAddition B" };
+    for (const [draft, live] of [[left, right], [right, left]]) {
+      expect(draftContentForLiveWrite({ baseline, draft, live })).toEqual({
+        description: "Revise waves.\n\nAddition A\n\nAddition B",
+      });
+    }
+  });
+
   it("still reports overlapping edits of the same words and keeps the local side", () => {
     expect(mergeConcurrentText("colour", "color", "colours")).toBe("colors");
     expect(mergeConcurrentText("the cat sat", "the cut sat", "the cot sat")).toBeNull();
-    expect(mergeConcurrentText("ab", "aXb", "aYb")).toBeNull();
+    expect(mergeConcurrentText("ab", "aXb", "aYb")).toBe("aXYb");
     expect(rebaseCollaborativeValue({ text: "the cat" }, { text: "the cut" }, { text: "the cot" })).toEqual({
       value: { text: "the cut" },
       conflicts: ["/text"],

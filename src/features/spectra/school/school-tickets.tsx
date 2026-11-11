@@ -94,7 +94,7 @@ export function TaskTicket({
 }
 
 /** This week, Monday to Sunday: each day with a dot per task due, in its class's ink. */
-export function WeekStrip({ tasks, book, now }: { tasks: readonly SchoolTask[]; book: ClassBook; now: number }) {
+export function WeekStrip({ tasks, book, now, known = true }: { tasks: readonly SchoolTask[]; book: ClassBook; now: number; known?: boolean }) {
   const today = startOfDay(now);
   const monday = today - ((new Date(today).getDay() + 6) % 7) * DAY;
   const days = Array.from({ length: 7 }, (_, index) => {
@@ -112,7 +112,7 @@ export function WeekStrip({ tasks, book, now }: { tasks: readonly SchoolTask[]; 
           <li key={start} data-today={isToday || undefined} data-past={start + DAY <= now || undefined} className="school-week-day">
             <span className="school-week-name">{date.toLocaleDateString(undefined, { weekday: "short" })}</span>
             <span className="school-week-date">{date.getDate()}</span>
-            <span className="school-week-dots" aria-label={due.length ? `${due.length} due` : "Nothing due"}>
+            <span className="school-week-dots" aria-label={due.length ? `${due.length} due` : known ? "Nothing due" : undefined}>
               {due.slice(0, 4).map((task) => (
                 <span key={task.recordId} aria-hidden className="school-class-dot" style={inkStyle(book.of(task.providerClassId, task.className))} />
               ))}

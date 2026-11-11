@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { createHash, randomBytes } from "crypto";
 import { isAuthNoSchool, requireActor } from "@/lib/auth-server";
-import { convexMutation, convexQuery } from "@/lib/convex-server";
+import { convexMutation, convexQuery, storeArtifactContent } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 import { aiPublicLinkToken } from "@/lib/server-secrets";
@@ -759,16 +759,26 @@ export async function GET(request: NextRequest) {
     }
 
     if (action === "memoryExport") {
-      const result = await spectraQuery("memory:exportMine", {});
-      return ok(result);
+      const [notes, earlier] = await Promise.all([
+        spectraQuery("spectraMemory:exportFiles", {}),
+        spectraQuery("memory:exportMine", {}),
+      ]);
+      return ok({ notes, earlier });
+    }
+
+    if (action === "memoryFiles") return ok(await spectraQuery("spectraMemory:head", {}));
+
+    if (action === "memoryTopic") {
+      return ok(await spectraQuery("spectraMemory:readTopic", { slug: params.get("slug") ?? "" }));
     }
 
     if (action === "overview") {
-      const workspaces = (await spectraQuery("spectraWorkspaces:list", {
+      const requestedWorkspaceId = params.get("workspaceId") ?? undefined;
+      const includeCatalog = Boolean(requestedWorkspaceId) || params.get("includeCatalog") !== "false";
+      const workspaces = (includeCatalog ? await spectraQuery("spectraWorkspaces:list", {
         includeArchived: false,
         limit: 30,
-      })) as Array<{ _id: string }>;
-      const requestedWorkspaceId = params.get("workspaceId") ?? undefined;
+      }) : []) as Array<{ _id: string }>;
       const workspace = requestedWorkspaceId
         ? await spectraQuery("orgTree:listWorkspaceContentsPublic", {
             workspaceId: requestedWorkspaceId,
@@ -779,15 +789,16 @@ export async function GET(request: NextRequest) {
         workspace && typeof workspace === "object"
           ? String((workspace as { workspace: { _id: string } }).workspace._id)
           : undefined;
+      const includeRuns = params.get("includeRuns") !== "false";
       const [artifacts, runs, resultCards] = await Promise.all([
-        spectraQuery("spectraArtifacts:list", {
+        includeCatalog ? spectraQuery("spectraArtifacts:list", {
           placement: "all",
           limit: 60,
-        }),
-        spectraQuery("spectraRuns:listRecent", {
+        }) : [],
+        includeRuns ? spectraQuery("spectraRuns:listRecent", {
           limit: 12,
-        }),
-        optionalSpectraQuery(
+        }) : [],
+        includeRuns ? optionalSpectraQuery(
           "spectraRuns:listResultCards",
           {
             workspaceId: selectedWorkspaceId,
@@ -795,7 +806,7 @@ export async function GET(request: NextRequest) {
             limit: 20,
           },
           [],
-        ),
+        ) : [],
       ]);
       return ok({
         actor,
@@ -915,7 +926,25 @@ export async function POST(request: NextRequest) {
       const result = await spectraMutation("memory:clearAll", {
         confirmation: requireString(body.confirmation, "confirmation"),
       });
+      await spectraMutation("spectraMemory:clear", {});
       return ok(result);
+    }
+
+    if (action === "updateMemoryFile") {
+      const text = (key: string) => optionalString(body[key]);
+      return ok(
+        await spectraMutation("spectraMemory:update", {
+          file: requireString(body.file, "file"),
+          slug: text("slug"),
+          title: text("title"),
+          summary: text("summary"),
+          add: text("add"),
+          find: text("find"),
+          replace: typeof body.replace === "string" ? body.replace : undefined,
+          rewrite: typeof body.rewrite === "string" ? body.rewrite : undefined,
+          remove: body.remove === true ? true : undefined,
+        }),
+      );
     }
 
     if (action === "selectRunTab") {
@@ -1346,6 +1375,7 @@ export async function POST(request: NextRequest) {
             : "manual";
       const parentNodeId = optionalString(body.parentNodeId);
       const nativeFormat = optionalString(body.nativeFormat);
+      const storageStoreId = optionalString(body.storageStoreId);
       const result = await spectraMutation("spectraArtifacts:create", {
         blueprintKey,
         title: requireString(body.title, "title"),
@@ -1361,9 +1391,54 @@ export async function POST(request: NextRequest) {
             ? { parentNodeId }
             : {}),
         ...(nativeFormat ? { nativeFormat } : {}),
+        ...(storageStoreId ? { storageStoreId } : {}),
         source,
       });
       return ok(result);
+    }
+
+    if (action === "touchDeviceWork") {
+      const result = await spectraMutation("deviceWorks:touch", {
+        artifactId: requireString(body.artifactId, "artifactId"),
+        ...(typeof body.title === "string" ? { title: body.title } : {}),
+        ...(typeof body.summary === "string" ? { summary: body.summary } : {}),
+        ...(Array.isArray(body.tags) ? { tags: body.tags.filter((tag): tag is string => typeof tag === "string") } : {}),
+        ...(body.edited === true ? { edited: true } : {}),
+        ...(body.seeded === true ? { seeded: true } : {}),
+      });
+      return ok(result);
+    }
+
+    if (action === "workMovedToDevice") {
+      const result = await spectraMutation("deviceWorks:movedToDevice", {
+        artifactId: requireString(body.artifactId, "artifactId"),
+        storeId: requireString(body.storeId, "storeId"),
+      });
+      return ok(result);
+    }
+
+    if (action === "workMovedToCloud") {
+      const artifactId = requireString(body.artifactId, "artifactId");
+      const blueprintKey = requireBlueprint(body.blueprintKey);
+      const content = await storeArtifactContent(artifactId, encodeArtifactContentForStorage(blueprintKey, body.content));
+      const result = await spectraMutation("deviceWorks:movedToCloud", {
+        artifactId,
+        title: requireString(body.title, "title"),
+        ...(typeof body.summary === "string" ? { summary: body.summary } : {}),
+        tags: Array.isArray(body.tags) ? body.tags.filter((tag): tag is string => typeof tag === "string") : [],
+        content,
+        textIndex: typeof body.text === "string" ? body.text : "",
+      });
+      return ok(result);
+    }
+
+    if (action === "restoreDeviceVersion") {
+      const { restoreDeviceVersion } = await import("@/lib/device-restore-server");
+      return ok(await restoreDeviceVersion({
+        artifactId: requireString(body.artifactId, "artifactId"),
+        versionId: requireString(body.versionId, "versionId"),
+        requestId: requireString(body.requestId, "requestId"),
+      }));
     }
 
     if (action === "copyArtifact") {
@@ -1377,12 +1452,21 @@ export async function POST(request: NextRequest) {
         content?: unknown;
         tags?: string[];
         nativeFormat?: string;
+        storageHome?: "device";
+        storageStoreId?: string;
       } | null;
       if (!source) return badRequest("That work is no longer available to copy.");
       if (source.blueprintKey === "agent" || source.blueprintKey === "timetable")
         return badRequest("This kind of work cannot be copied.");
-      const content =
-        source.blueprintKey === "sheets"
+      const onDevice = source.storageHome === "device";
+      const me = onDevice ? await spectraQuery("identity:me", {}) as { accountId: string } : null;
+      const stored = me
+        ? await (await import("@/lib/device-store")).deviceStoreCall<{ content?: unknown } | null>(me.accountId, "get", { artifactId })
+        : null;
+      if (onDevice && !stored?.content) return badRequest("Open Spectra Bridge on the computer that holds this work to copy it.");
+      const content = onDevice
+        ? stored!.content
+        : source.blueprintKey === "sheets"
           ? decodeSheetsContentFromStorage(source.content)
           : source.content;
       const parentNodeId = optionalString(body.parentNodeId);
@@ -1399,9 +1483,28 @@ export async function POST(request: NextRequest) {
         workspaceId,
         ...(parentNodeId === "root" ? { parentNodeId: "root" as const } : parentNodeId ? { parentNodeId } : {}),
         ...(source.nativeFormat ? { nativeFormat: source.nativeFormat } : {}),
+        ...(onDevice && source.storageStoreId ? { storageStoreId: source.storageStoreId } : {}),
         source: "artifact",
         sourceArtifactIds: [artifactId],
       });
+      if (me) {
+        const created = result as { artifactId: string; schemaVersion?: number };
+        const { deviceBaseline } = await import("@/features/spectra/collaboration/device-work");
+        const { deviceStoreCall } = await import("@/lib/device-store");
+        const baseline = deviceBaseline({
+          typeKey: source.blueprintKey,
+          title: `${source.title} (copy)`.slice(0, 300),
+          summary: source.summary,
+          tags: source.tags ?? [],
+          schemaVersion: created.schemaVersion ?? 1,
+          content,
+        });
+        await deviceStoreCall(me.accountId, "seed", {
+          artifactId: created.artifactId,
+          stateBase64: baseline.stateBase64,
+          projection: baseline.projection,
+        });
+      }
       return ok(result);
     }
 
@@ -1556,6 +1659,8 @@ export async function POST(request: NextRequest) {
       const result = await spectraMutation("quizPractice:start", {
         artifactId: requireString(body.artifactId, "artifactId"),
         clientAttemptId: requireString(body.clientAttemptId, "clientAttemptId"),
+        ...(body.deviceContent !== undefined ? { deviceContent: body.deviceContent } : {}),
+        ...(body.ownDraft === true ? { ownDraft: true } : {}),
       });
       return ok(result);
     }

@@ -7,7 +7,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import { Loader2, Check, ExternalLink, FileText, Link2, X } from "@/components/icons/glyph-icons";
+import { Loader2, ExternalLink, FileText, Link2, X } from "@/components/icons/glyph-icons";
 import { useMutation } from "convex/react";
 import { toast } from "@/components/ui/toast";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -73,11 +73,11 @@ export function ComposerArtifactDock({
         if (action.targetType === "artifact") push(action.targetId);
       }
     }
-    return ordered.slice(0, 6).flatMap((id) => {
+    return ordered.filter((id) => !embeddedSourceIds.has(id)).slice(0, 6).flatMap((id) => {
       const artifact = byId.get(id);
       return artifact ? [artifact] : [];
     });
-  }, [artifacts, cards, explicitIds]);
+  }, [artifacts, cards, embeddedSourceIds, explicitIds]);
 
   useEffect(() => {
     activeView.current = {
@@ -194,15 +194,6 @@ export function ComposerArtifactDock({
                 </button>
               ) : null}
               {threadId && isArtifactTypeKey(artifact.blueprintKey) ? (
-                embeddedSourceIds.has(artifact._id) ? (
-                  <span
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-[var(--success)]"
-                    aria-label={`${artifact.title} is in this conversation`}
-                    title="In conversation"
-                  >
-                    <Check className="h-3.5 w-3.5" />
-                  </span>
-                ) : (
                   <button
                     type="button"
                     onClick={() => void keepInThread(artifact)}
@@ -217,7 +208,6 @@ export function ComposerArtifactDock({
                       <Link2 className="h-3.5 w-3.5" />
                     )}
                   </button>
-                )
               ) : null}
               {onDismiss ? (
                 <button

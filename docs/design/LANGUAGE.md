@@ -91,7 +91,7 @@ Artifact content fonts belong to the artifact, not to these settings.
 
 The scale:
 
-- 12 / 13 / 14 (base) / 16 / 20 / 24 / 32 / 44.
+- 12 / 13 / 14 / 15 (body) / 16 / 17 / 20 / 24 / 30 / 32 / 44, from the type tokens in `spectra-app.css` (`--text-micro` … `--text-display`). 11 px is the floor; only miniatures (thumbnails drawn at a page's scale) go below it, marked `spectra-token-allow`. `check:design-tokens` holds every stylesheet to this.
 - Weights are 400, 500 and 600. 700 is used only for display serif moments.
 - Sentence case everywhere.
 - Tabular numerals for times, dates, counts and sheets.

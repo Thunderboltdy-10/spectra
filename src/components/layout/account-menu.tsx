@@ -10,6 +10,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuDisclosure,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -118,17 +119,23 @@ export function AccountMenu({
           Settings
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuLabel className="flex items-center gap-2.5 normal-case tracking-normal">
-          <MenuGlyph name="theme" />
-          <span className="text-ui font-normal text-[var(--text-primary)]">Theme</span>
-        </DropdownMenuLabel>
-        <DropdownMenuRadioGroup value={preferences.appearance.theme} onValueChange={applyTheme}>
-          {(["system", "light", "dark"] as const).map((theme) => (
-            <DropdownMenuRadioItem key={theme} value={theme} className="pl-[34px] capitalize">
-              {theme}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
+        <DropdownMenuDisclosure
+          label={
+            <span className="flex items-center gap-2.5">
+              <MenuGlyph name="theme" />
+              Theme
+            </span>
+          }
+          hint={<span className="capitalize">{preferences.appearance.theme}</span>}
+        >
+          <DropdownMenuRadioGroup value={preferences.appearance.theme} onValueChange={applyTheme}>
+            {(["system", "light", "dark"] as const).map((theme) => (
+              <DropdownMenuRadioItem key={theme} value={theme} className="pl-[34px] capitalize">
+                {theme}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuDisclosure>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => spectraBus.emit("shell.openCommandBar", {})}>
           <MenuGlyph name="search" />
@@ -156,7 +163,7 @@ export function AccountMenu({
         {identity?.account.platformOperator ? (
           <DropdownMenuItem onSelect={() => router.push("/superadmin")}>
             <MenuGlyph name="locked" />
-            Platform
+            Superadmin
           </DropdownMenuItem>
         ) : null}
         <DropdownMenuSeparator />

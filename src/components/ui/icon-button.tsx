@@ -7,7 +7,7 @@ import { Tooltip } from "./tooltip";
 
 export type IconButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "children"> & {
   /** A Spectra glyph, or a node (editor workbars pass a lucide icon). */
-  icon: IconName | React.ReactNode;
+  icon: IconName | React.ReactElement | null;
   /** The name: the accessible label and the tooltip. */
   label: string;
   shortcut?: string;

@@ -13,6 +13,8 @@ import {
   readOpenRouterAgentTurn,
 } from "../openrouter-stream";
 import type { ModelCaller } from "./loop";
+import { subscriptionOneShot, subscriptionProviderFrom, type RuntimeTarget } from "./subscription-runtime";
+import { jsonSize, traceEvent, traceSpan } from "./run-trace";
 import {
   ProviderUnavailableError,
   type HarnessMessage,
@@ -23,7 +25,7 @@ import {
 /*
  * The OpenRouter client for the harness. The model, provider and reasoning
  * level come only from model-config (the environment). Two approved
- * exceptions: the caption writer asks for `low` reasoning, and the daily brief
+ * exceptions: the thread title asks for `low` reasoning, and the daily brief
  * asks for `medium` on its own lighter model when SPECTRA_DAILY_MODEL_ID is set
  * (OpenRouter then picks that model's provider).
  */
@@ -35,6 +37,7 @@ const FALLBACK_ATTEMPTS = 2;
 const STREAM_IDLE_TIMEOUT_MS = 90_000;
 
 export type ModelRequest = {
+  runtime?: RuntimeTarget & { provider?: unknown };
   messages: HarnessMessage[];
   tools?: ProviderToolSpec[];
   toolChoice?: "auto" | "none";
@@ -42,16 +45,42 @@ export type ModelRequest = {
   onText?: (delta: string) => void;
   onRetry?: () => void;
   onToolDraft?: (draft: { id: string; name: string; arguments: string }) => void;
-  /** The model's private reasoning as it streams; only the caption writer reads it. */
+  /** The model's reasoning as it streams, for the trace. */
   onReasoning?: (delta: string) => void;
-  /** Only the caption writer ("low") and the daily brief ("medium") pass this. */
+  /** Side calls pass this: titles and notes "none", compaction "low", the daily brief "medium". */
   reasoning?: SpectraReasoningProfile;
   /** "daily" runs on SPECTRA_DAILY_MODEL_ID when it is configured. */
   purpose?: "daily";
   maxTokens?: number;
   responseFormat?: Record<string, unknown>;
   title?: string;
+  /** Bookkeeping such as a title: the subscription's smallest model. */
+  small?: boolean;
+  /** Reasoning kept for this tool loop only. See createOpenRouterCaller. */
+  reasoningMemory?: ReasoningMemory;
 };
+
+/**
+ * What the provider reasoned before each tool call, by the first call's id.
+ *
+ * Providers want their reasoning back while a tool loop continues, or they think
+ * it all through again. Much of it is encrypted and only the route that wrote it
+ * can read it, so it stays beside the transcript and never in it: it is never
+ * checkpointed, never reaches another provider, and never reaches Codex or Claude.
+ */
+type ReasoningMemory = Map<string, { details: Array<Record<string, unknown>>; route: "primary" | "fallback" }>;
+
+/** The transcript for one route, with the reasoning only that route can read. */
+function messagesForRoute(messages: HarnessMessage[], memory: ReasoningMemory | undefined, route: "primary" | "fallback") {
+  if (!memory?.size) return messages;
+  const lastUser = messages.reduce((last, message, index) => (message.role === "user" ? index : last), -1);
+  return messages.map((message, index) => {
+    if (index < lastUser || message.role !== "assistant") return message;
+    const first = message.tool_calls?.[0]?.id;
+    const kept = first ? memory.get(first) : undefined;
+    return kept && kept.route === route ? { ...message, reasoning_details: kept.details } : message;
+  });
+}
 
 class RetryableProviderError extends Error {
   constructor(message: string, readonly status?: number) {
@@ -99,7 +128,7 @@ async function attempt(
     stream: true,
     stream_options: { include_usage: true },
     ...(provider ? { provider } : {}),
-    messages: request.messages,
+    messages: messagesForRoute(request.messages, request.reasoningMemory, route),
     ...(request.tools?.length
       ? { tools: request.tools, tool_choice: request.toolChoice ?? "auto" }
       : {}),
@@ -140,6 +169,9 @@ async function attempt(
       request.onToolDraft,
       STREAM_IDLE_TIMEOUT_MS,
     );
+    const firstCall = turn.toolCalls[0];
+    if (request.reasoningMemory && firstCall?.id && turn.reasoningDetails?.length)
+      request.reasoningMemory.set(firstCall.id, { details: turn.reasoningDetails, route });
     return {
       text: turn.text,
       toolCalls: turn.toolCalls.map((call, index) => ({
@@ -170,6 +202,39 @@ function retryableOnSameRoute(error: unknown) {
 
 /** One model turn with retries and the configured recovery route. */
 export async function callSpectraModel(request: ModelRequest): Promise<ModelTurn> {
+  // Foreground bookkeeping follows the run's choice. Scheduled calls have no
+  // computer to depend on and keep their configured OpenRouter route.
+  const subscription =
+    request.tools?.length || request.purpose === "daily" ? null : subscriptionProviderFrom(request.runtime?.provider);
+  return traceSpan(
+    "model.side_call",
+    {
+      title: request.title ?? "main",
+      purpose: request.purpose,
+      reasoning: request.reasoning ?? "default",
+      promptChars: jsonSize(request.messages),
+      route: subscription ?? "openrouter",
+    },
+    () =>
+      subscription
+        ? subscriptionOneShot(subscription, {
+            accountId: request.runtime?.accountId,
+            model: request.runtime?.model,
+            messages: request.messages,
+            signal: request.signal,
+            onText: request.onText,
+            onReasoning: request.onReasoning,
+            reasoning: request.reasoning ?? request.runtime?.reasoning,
+            responseFormat: request.responseFormat,
+            title: request.title,
+            purpose: request.purpose,
+            small: request.small,
+          })
+        : callOpenRouter(request),
+  );
+}
+
+async function callOpenRouter(request: ModelRequest): Promise<ModelTurn> {
   let lastError: unknown;
   let streamed = false;
   const tracked: ModelRequest = {
@@ -198,6 +263,13 @@ export async function callSpectraModel(request: ModelRequest): Promise<ModelTurn
         if (request.signal.aborted) throw error;
         if (error instanceof ProviderUnavailableError) throw error;
         lastError = error;
+        // Reasoning a provider will not take back must never fail the run.
+        if (error instanceof RetryableProviderError && error.status === 400 && request.reasoningMemory?.size) {
+          traceEvent("model.reasoning_refused", { message: error.message.slice(0, 200) });
+          request.reasoningMemory.clear();
+          index -= 1;
+          continue;
+        }
         if (!retryableOnSameRoute(error)) break;
         await delay(Math.min(4_000, 500 * 2 ** index), request.signal);
       }
@@ -210,17 +282,25 @@ export async function callSpectraModel(request: ModelRequest): Promise<ModelTurn
   );
 }
 
-export const openRouterModelCaller: ModelCaller = (input) =>
-  callSpectraModel({
-    messages: input.messages,
-    tools: input.tools,
-    toolChoice: input.toolChoice,
-    signal: input.signal,
-    onText: input.onText,
-    onRetry: input.onRetry,
-    onToolDraft: input.onToolDraft,
-    onReasoning: input.onReasoning,
-  });
+/** One run's caller. It remembers the provider's reasoning while its tool loop lasts. */
+export function createOpenRouterCaller(reasoning?: SpectraReasoningProfile): ModelCaller {
+  const reasoningMemory: ReasoningMemory = new Map();
+  return (input) =>
+    callSpectraModel({
+      messages: input.messages,
+      tools: input.tools,
+      toolChoice: input.toolChoice,
+      signal: input.signal,
+      onText: input.onText,
+      onRetry: input.onRetry,
+      onToolDraft: input.onToolDraft,
+      onReasoning: input.onReasoning,
+      reasoning,
+      reasoningMemory,
+    });
+}
+
+export const openRouterModelCaller: ModelCaller = (input) => createOpenRouterCaller()(input);
 
 let contextWindowCache: { model: string; tokens: number } | null = null;
 

@@ -1,4 +1,4 @@
-import { Extension, Node, mergeAttributes, type CommandProps } from "@tiptap/core";
+import { Extension, Mark, Node, mergeAttributes, type CommandProps } from "@tiptap/core";
 import { Selection, TextSelection } from "@tiptap/pm/state";
 
 /**
@@ -28,6 +28,10 @@ declare module "@tiptap/core" {
       setParagraphShading: (shading: string | null) => ReturnType;
       /** Space after the paragraph, in points. */
       setParagraphSpacing: (points: number) => ReturnType;
+      /** Space before the paragraph, in points. */
+      setParagraphSpacingBefore: (points: number) => ReturnType;
+      /** First line in points: above zero indents it, below zero hangs the rest. */
+      setParagraphFirstLine: (points: number) => ReturnType;
       /** Line spacing as a multiple: 1, 1.15, 1.5, 2. */
       setParagraphLineSpacing: (multiple: number) => ReturnType;
       /** The named paragraph style — Word's `w:pStyle` by another name. */
@@ -39,6 +43,25 @@ declare module "@tiptap/core" {
     };
   }
 }
+
+/** Character shapes Word has and Markdown doesn't. Each is a mark, so a run keeps its own. */
+function characterMark(name: string, tag: string, style: string, excludes?: string) {
+  return Mark.create({
+    name,
+    ...(excludes ? { excludes } : {}),
+    parseHTML() {
+      return [{ tag: `${tag}[data-mark="${name}"]` }, ...(tag === "span" ? [] : [{ tag }])];
+    },
+    renderHTML({ HTMLAttributes }) {
+      return [tag, mergeAttributes(HTMLAttributes, { "data-mark": name, ...(style ? { style } : {}) }), 0];
+    },
+  });
+}
+
+export const Superscript = characterMark("superscript", "sup", "", "subscript");
+export const Subscript = characterMark("subscript", "sub", "", "superscript");
+export const SmallCaps = characterMark("smallCaps", "span", "font-variant:small-caps");
+export const AllCaps = characterMark("allCaps", "span", "text-transform:uppercase");
 
 export const PageBreak = Node.create({
   name: "pageBreak",
@@ -159,6 +182,52 @@ export const ParagraphFrame = Extension.create({
           // list, so Spectra does the same: a step count on the paragraph. It
           // survives a copy, it is legible in the JSON, and Increase indent on a
           // plain paragraph stops being the no-op it used to be.
+          spacingBefore: {
+            default: null,
+            parseHTML: (element) => {
+              const value = Number(element.getAttribute("data-spacing-before"));
+              return Number.isFinite(value) && value > 0 ? value : null;
+            },
+            renderHTML: (attributes) =>
+              attributes.spacingBefore
+                ? {
+                    "data-spacing-before": String(attributes.spacingBefore),
+                    style: `margin-top:${attributes.spacingBefore}pt`,
+                  }
+                : {},
+          },
+          firstLineIndent: {
+            default: null,
+            parseHTML: (element) => {
+              const value = Number(element.getAttribute("data-first-line"));
+              return Number.isFinite(value) && value !== 0 ? value : null;
+            },
+            renderHTML: (attributes) =>
+              attributes.firstLineIndent
+                ? {
+                    "data-first-line": String(attributes.firstLineIndent),
+                    style:
+                      attributes.firstLineIndent > 0
+                        ? `text-indent:${attributes.firstLineIndent}pt`
+                        : `text-indent:${attributes.firstLineIndent}pt;padding-left:${-attributes.firstLineIndent}pt`,
+                  }
+                : {},
+          },
+          // From Word: this paragraph only holds a page break, or starts a new page.
+          pageBreak: {
+            default: null,
+            parseHTML: (element) => (element.hasAttribute("data-word-page-break") ? true : null),
+            renderHTML: (attributes) =>
+              attributes.pageBreak
+                ? { "data-word-page-break": "true", class: "spectra-page-break" }
+                : {},
+          },
+          pageBreakBefore: {
+            default: null,
+            parseHTML: (element) => (element.hasAttribute("data-page-break-before") ? true : null),
+            renderHTML: (attributes) =>
+              attributes.pageBreakBefore ? { "data-page-break-before": "true" } : {},
+          },
           indentLevel: {
             default: null,
             parseHTML: (element) => {
@@ -221,6 +290,8 @@ export const ParagraphFrame = Extension.create({
       setParagraphBorder: (border: string) => patch({ frameBorder: border === "none" ? null : border }),
       setParagraphShading: (shading: string | null) => patch({ frameShading: shading }),
       setParagraphSpacing: (points: number) => patch({ spacingAfter: points > 0 ? points : null }),
+      setParagraphSpacingBefore: (points: number) => patch({ spacingBefore: points > 0 ? points : null }),
+      setParagraphFirstLine: (points: number) => patch({ firstLineIndent: points !== 0 ? points : null }),
       setParagraphLineSpacing: (multiple: number) =>
         patch({ lineSpacing: multiple > 0 && multiple !== 1 ? multiple : null }),
       setParagraphStyle: (style: string | null) => patch({ blockStyle: style }),

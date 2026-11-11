@@ -30,6 +30,8 @@ sandbox: browser (HTML, CSS, JavaScript), React with TypeScript, or Python.
 - Make it accessible: real buttons and inputs, labels, keyboard use, enough contrast, and no
   meaning carried by colour alone.
 - Respect `prefers-reduced-motion` and stop animations that have finished their job.
+- In SVG, give every shape an explicit `fill`: a `polygon`, `path` or `circle` without one paints solid black. Use `fill="none"` for lines and curves. If a user reports a black shape, look for the shape that has no fill.
+- Size a canvas from its container in script (and on resize), so it draws at the width it is given rather than staying blank.
 
 ## Editing
 

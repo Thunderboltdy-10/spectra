@@ -5,6 +5,7 @@ import {
   capabilityIsActionable,
 } from "@/features/spectra/core/capability-truth";
 import { TypedSpectraBus } from "@/features/spectra/events/bus";
+
 import {
   DEFAULT_SPECTRA_PREFERENCES,
   migratePreferences,
@@ -17,6 +18,19 @@ import {
 } from "@/features/spectra/work/session/session-controller";
 
 describe("architectural kernel foundation", () => {
+  it("counts the dispatched async handler even when it registers its replacement while pending", async () => {
+    const bus = new TypedSpectraBus<{ insert: undefined }, Record<string, never>, Record<string, never>>();
+    let unregister = () => {};
+    unregister = bus.handle("insert", async () => {
+      unregister();
+      bus.handle("insert", () => "replacement");
+      await Promise.resolve();
+      return "inserted";
+    });
+    expect(await bus.commandAsyncResults("insert", undefined)).toEqual({ listeners: 1, results: ["inserted"] });
+    expect(await bus.commandAsync("insert", undefined)).toBe(1);
+  });
+
   it("registers every current work type with required contracts", () => {
     const definitions = listWorkDefinitions();
     expect(definitions.map((definition) => definition.key)).toEqual(

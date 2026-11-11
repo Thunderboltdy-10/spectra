@@ -178,7 +178,7 @@ export function formatPlanApplicationPublicError(error: unknown, options?: { exp
   }
   if (isApplyMachinery) {
     return explanationOnly ? "The change could not be fully processed."
-      : "Spectra could not apply that change. Your saved work is unchanged; retry when ready.";
+      : "Spectra could not finish that change. Anything it already saved stays saved, and you can ask it to carry on.";
   }
   if (
     /unrelated to the interpreted request|does not match the interpreted request|more visible artifacts/i.test(
@@ -197,7 +197,7 @@ export function formatPlanApplicationPublicError(error: unknown, options?: { exp
     )
   ) {
     return explanationOnly ? "The response did not pass its operation or format checks."
-      : "Spectra paused after trying to repair the response. Your saved work is unchanged; retry when ready.";
+      : "Spectra paused before finishing. Anything it already saved stays saved, and you can ask it to carry on.";
   }
   if (
     /\b(OpenRouter|provider|network|fetch failed|connection|stream failed|no meaningful stream data)\b/i.test(

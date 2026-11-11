@@ -407,7 +407,7 @@ button.work-embed-title:hover {
 
 .work-embed-sheet-grid span {
   display: block;
-  font-size: 10.5px;
+  font-size: var(--text-micro);
   color: var(--text-tertiary);
 }
 
@@ -600,8 +600,8 @@ button.work-embed-title:hover {
 }
 
 .work-embed-choice[data-active] {
-  background: var(--work-tint);
-  box-shadow: inset 0 0 0 1.5px var(--work-hue);
+  background: var(--card-paper);
+  box-shadow: inset 0 0 0 1.5px var(--text-primary);
 }
 
 .work-embed-choice-mark {
@@ -622,7 +622,7 @@ button.work-embed-title:hover {
 }
 
 .work-embed-choice[data-active] .work-embed-choice-mark {
-  background: var(--work-hue);
+  background: var(--text-primary);
   box-shadow: none;
   color: var(--card-paper);
 }
@@ -712,7 +712,7 @@ button.work-embed-title:hover {
   min-width: 0;
   flex: 1;
   background: transparent;
-  font-size: 14.5px;
+  font-size: 15px;
   color: var(--text-primary);
   outline: none;
 }
@@ -754,19 +754,19 @@ button.work-embed-title:hover {
 
 .inline-reference-name {
   overflow: hidden;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .inline-reference-kind {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-tertiary);
 }
 
 .inline-reference-none {
   padding: 14px 10px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-tertiary);
 }

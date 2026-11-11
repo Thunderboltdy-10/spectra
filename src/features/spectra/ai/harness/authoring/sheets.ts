@@ -107,6 +107,41 @@ function replaceSheet(content: SheetsContent, sheet: WorkbookSheet) {
   return { ...content, sheets: content.sheets.map((entry) => (entry.id === sheet.id ? sheet : entry)) };
 }
 
+const READABLE_MIN_WIDTH = 122;
+const READABLE_MAX_WIDTH = 300;
+const CHAR_WIDTH = 7.2;
+const CELL_PAD = 24;
+const LINE_HEIGHT = 20;
+const MAX_FITTED_ROW = 220;
+
+/** Written text can be read as it stands: columns grow to fit it, and what still will not fit wraps. */
+function readableWrite(sheet: WorkbookSheet, target: CellRange, values: CellInput[][] | CellInput): WorkbookSheet {
+  if (!Array.isArray(values)) return sheet;
+  const cells = { ...sheet.cells };
+  const columnWidths = { ...sheet.columnWidths };
+  const rowHeights = { ...sheet.rowHeights };
+  const perLine = Math.floor((READABLE_MAX_WIDTH - CELL_PAD) / CHAR_WIDTH);
+  values.forEach((row, rowOffset) => {
+    if (!Array.isArray(row)) return;
+    row.forEach((_, columnOffset) => {
+      const rowIndex = target.start.row + rowOffset;
+      const column = target.start.column + columnOffset;
+      const address = coordinateToAddress({ row: rowIndex, column });
+      const cell = cells[address];
+      if (!cell || cell.formula || cell.value === undefined || cell.value === null) return;
+      const length = String(cell.value).length;
+      const wanted = Math.min(READABLE_MAX_WIDTH, Math.round(length * CHAR_WIDTH + CELL_PAD));
+      const key = String(column);
+      if (wanted > (columnWidths[key] ?? READABLE_MIN_WIDTH)) columnWidths[key] = wanted;
+      if (length <= perLine) return;
+      cells[address] = { ...cell, format: { ...cell.format, wrap: true } };
+      const height = Math.min(MAX_FITTED_ROW, Math.ceil(length / perLine) * LINE_HEIGHT + 11);
+      if (height > (rowHeights[String(rowIndex)] ?? 0)) rowHeights[String(rowIndex)] = height;
+    });
+  });
+  return { ...sheet, cells, columnWidths, rowHeights };
+}
+
 function writeRange(sheet: WorkbookSheet, target: CellRange, values: CellInput[][] | CellInput, label: string) {
   const cells = { ...sheet.cells };
   const grid = Array.isArray(values) ? values : null;
@@ -202,7 +237,7 @@ export function applySheetsEdits(content: unknown, ops: SheetsEditOp[], ids: IdF
         const sheet = findSheet(book, op.sheet, label);
         if (op.values === undefined) throw new AuthoringError(`${label}: values is missing.`);
         const target = range(op.range, label);
-        book = replaceSheet(book, writeRange(sheet, target, op.values, label));
+        book = replaceSheet(book, readableWrite(writeRange(sheet, target, op.values, label), target, op.values));
         const rows = Array.isArray(op.values) ? op.values.length : 0;
         const columns = Array.isArray(op.values) ? Math.max(1, ...op.values.map((row) => (Array.isArray(row) ? row.length : 1))) : 0;
         touch(sheet, rows ? {
@@ -287,7 +322,7 @@ export function applySheetsEdits(content: unknown, ops: SheetsEditOp[], ids: IdF
         const width = Number(op.width);
         if (!Number.isFinite(width) || width < 20 || width > 800)
           throw new AuthoringError(`${label}: width must be from 20 to 800 pixels.`);
-        book = replaceSheet(book, { ...sheet, columnWidths: { ...sheet.columnWidths, [columnName(column)]: width } });
+        book = replaceSheet(book, { ...sheet, columnWidths: { ...sheet.columnWidths, [String(column)]: width } });
         break;
       }
       case "freeze": {

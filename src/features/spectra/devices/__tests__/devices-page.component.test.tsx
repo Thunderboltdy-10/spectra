@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BridgeStatus } from "../../bridge/client";
 import type { CloudOverview } from "../devices-model";
 import { createPairing, type Pairing } from "../pairing";
+import { bindAccountStorageScope } from "@/lib/account-storage";
 
 const NOW = Date.now();
 
@@ -20,10 +21,13 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("convex/react", () => ({
+  useConvex: () => ({ query: vi.fn(async () => []) }),
   useConvexAuth: () => ({ isAuthenticated: true, isLoading: false }),
   useQuery: (ref: unknown, args: unknown) => {
     if (args === "skip") return undefined;
     const name = String((ref as { _name?: string })?._name ?? ref);
+    if (/deviceWorks/.test(name)) return undefined;
+    if (/identity:session/.test(name)) return { catalog: { accountId: "account", schoolId: "school", membershipId: "membership" }, hasDevice: true };
     return /syncPolicy/.test(name) ? { contentDirection: "manual" } : h.cloud;
   },
   useMutation: (ref: unknown) => {
@@ -37,11 +41,15 @@ vi.mock("../../../../../convex/_generated/api", () => {
   const ref = (name: string) => ({ _name: name });
   return {
     api: {
-      bridge: { overview: ref("bridge:overview"), requestPairing: ref("bridge:requestPairing"), revokeDevice: ref("bridge:revokeDevice") },
+      bridge: { syncedNodes: ref("bridge:syncedNodes"), overview: ref("bridge:overview"), requestPairing: ref("bridge:requestPairing"), revokeDevice: ref("bridge:revokeDevice") },
+      catalogGraph: { identity: ref("catalogGraph:identity") },
+      identity: { session: ref("identity:session") },
       syncPolicy: { effective: ref("syncPolicy:effective"), overrideAccount: ref("syncPolicy:overrideAccount") },
+      deviceWorks: { settings: ref("deviceWorks:settings"), counts: ref("deviceWorks:counts"), onThisComputer: ref("deviceWorks:onThisComputer"), movable: ref("deviceWorks:movable"), backupsToRestore: ref("deviceWorks:backupsToRestore"), choose: ref("deviceWorks:choose"), backupUploadUrl: ref("deviceWorks:backupUploadUrl"), recordBackup: ref("deviceWorks:recordBackup"), adoptRestored: ref("deviceWorks:adoptRestored"), deleteBackups: ref("deviceWorks:deleteBackups") },
     },
   };
 });
+vi.mock("../place-in-menu", () => ({ PlaceInMenu: ({ children }: { children: unknown }) => children }));
 vi.mock("../../bridge/use-bridge", () => ({ useBridgeHealth: () => h.local }));
 vi.mock("../../bridge/client", async (original) => ({
   ...(await original<typeof import("../../bridge/client")>()),
@@ -100,6 +108,7 @@ let pairingStatus: { paired: boolean; sessionToken?: string } = { paired: false 
 
 beforeEach(() => {
   window.localStorage.clear();
+  bindAccountStorageScope("fixture-deployment/account-A");
   window.history.replaceState(null, "", "/devices");
   vi.stubGlobal(
     "ResizeObserver",
@@ -151,7 +160,7 @@ describe("Devices page", () => {
     render(<DevicesPage />);
     fireEvent.click(screen.getAllByRole("button", { name: "Add files" }).at(-1)!);
     await waitFor(() => expect(h.runLocalDeviceAction).toHaveBeenCalledWith({ action: "add_files" }));
-    fireEvent.click(screen.getByRole("button", { name: "Remove Essay.docx" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop syncing Essay.docx" }));
     expect(screen.getByText("Stop using this file in Spectra?")).toBeTruthy();
     expect(screen.getByText(/The file stays on this computer/)).toBeTruthy();
   });
@@ -170,7 +179,7 @@ describe("Devices page", () => {
 
   it("asks before it stops using a folder", async () => {
     render(<DevicesPage />);
-    fireEvent.click(screen.getByRole("button", { name: "Remove Biology" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop syncing Biology" }));
     expect(h.runLocalDeviceAction).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole("button", { name: "Stop using it" }));
     await waitFor(() => expect(h.runLocalDeviceAction).toHaveBeenCalledWith({ action: "remove_folder", grantId: "grant_a" }));
@@ -184,18 +193,18 @@ describe("Devices page", () => {
     expect(within(card).queryByRole("button", { name: "Show logs" })).toBeNull();
   });
 
-  it("connects this computer: the code shows on the page, then the row forms", async () => {
+  it("connects this computer: the page shows progress, then the row forms", async () => {
     h.local = bridge(false);
     h.cloud = { devices: [], mounts: [] };
     render(<DevicesPage />);
     // A first-time browser leads with the download and an installed-Bridge
-    // shortcut. Both start the same native confirmation flow.
+    // shortcut. Both start the same web connection flow.
     fireEvent.click(screen.getByRole("button", { name: "I already have it" }));
-    expect(await screen.findByText("K7Q2")).toBeTruthy();
+    expect(await screen.findByText("Connecting this computer.")).toBeTruthy();
     expect(h.requestPairing).toHaveBeenCalledWith({ browserOrigin: "https://spectra.test" });
     pairingStatus = { paired: true, sessionToken: "token" };
     await waitFor(() => expect(h.local.refresh).toHaveBeenCalled());
-    expect(screen.queryByText("K7Q2")).toBeNull();
+    expect(screen.queryByText("Connecting this computer.")).toBeNull();
   });
 
   it("starts connecting by itself when Spectra AI or the command bar asks", async () => {
@@ -203,14 +212,14 @@ describe("Devices page", () => {
     h.cloud = { devices: [], mounts: [] };
     render(<DevicesPage />);
     act(() => h.pairing.want());
-    expect(await screen.findByText("K7Q2")).toBeTruthy();
+    expect(await screen.findByText("Connecting this computer.")).toBeTruthy();
   });
 
   it("starts connecting from ?connect=1", async () => {
     h.local = bridge(false);
     window.history.replaceState(null, "", "/devices?connect=1");
     render(<DevicesPage />);
-    expect(await screen.findByText("K7Q2")).toBeTruthy();
+    expect(await screen.findByText("Connecting this computer.")).toBeTruthy();
     expect(window.location.search).toBe("");
   });
 
@@ -219,9 +228,42 @@ describe("Devices page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove this device" }));
     const dialog = await screen.findByRole("alertdialog");
     fireEvent.click(Array.from(dialog.querySelectorAll("button")).find((button) => button.textContent === "Remove")!);
-    await waitFor(() => expect(h.revokeDevice).toHaveBeenCalledWith({ deviceId: "device-here" }));
+    await waitFor(() => expect(h.revokeDevice).toHaveBeenCalledWith({ deviceId: "device-here", removeFiles: false }));
     await waitFor(() => expect(h.local.forgetSession).toHaveBeenCalled());
     expect(h.unpairBridge).toHaveBeenCalled();
+  });
+
+  it.each(["revoke", "unpair"] as const)("does not continue an old device removal after switching accounts during %s", async (stage) => {
+    let finish!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    h.revokeDevice.mockReturnValue(stage === "revoke" ? pending : Promise.resolve());
+    h.unpairBridge.mockReturnValue(stage === "unpair" ? pending : Promise.resolve());
+    const local = h.local;
+    const view = render(<DevicesPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove this device" }));
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(stage === "revoke" ? h.revokeDevice : h.unpairBridge).toHaveBeenCalledOnce());
+    view.unmount();
+    bindAccountStorageScope("fixture-deployment/account-B");
+    await act(async () => { finish(); });
+    if (stage === "revoke") expect(h.unpairBridge).not.toHaveBeenCalled();
+    expect(local.forgetSession).not.toHaveBeenCalled();
+    expect(local.refresh).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("finishes a pending native-write choice only for its original account (changed: %s)", async (changed) => {
+    let finish!: () => void;
+    h.overrideAccount.mockReturnValue(new Promise<void>(resolve => { finish = resolve; }));
+    const view = render(<DevicesPage />);
+    fireEvent.click(screen.getByRole("radio", { name: /^Always/ }));
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Allow writes" }));
+    expect(h.overrideAccount).toHaveBeenCalledOnce();
+    view.unmount();
+    bindAccountStorageScope(changed ? "fixture-deployment/account-B" : "fixture-deployment/account-A");
+    await act(async () => { finish(); });
+    expect(h.updatePreferences).toHaveBeenCalledTimes(changed ? 0 : 1);
   });
 
   it("shows native writes for the account, Never by default", () => {

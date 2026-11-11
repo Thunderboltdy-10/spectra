@@ -56,7 +56,7 @@ export function AuthorMark({ author }: { author: VersionAuthor }) {
   );
 }
 
-function ChangeText({ change, color }: { change: VersionChange; color: string }) {
+export function ChangeText({ change, color }: { change: VersionChange; color: string }) {
   const before = change.before === NOT_SET ? "" : change.before;
   const after = change.after === NOT_SET ? "" : change.after;
   const segments = foldUnchanged(wordDiff(before, after));

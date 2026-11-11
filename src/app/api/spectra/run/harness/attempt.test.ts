@@ -26,8 +26,8 @@ vi.mock("./io", async (importOriginal) => {
         return { messages: [] };
       case "spectraThreads:getSummary":
         return { needsTitle };
-      case "memory:listMine":
-        return { claims: [] };
+      case "spectraMemory:head":
+        return { enabled: true, about: "", preferences: "", topics: [] };
       case "bridge:devices":
       case "accountPreferences:layers":
         return [];
@@ -69,6 +69,11 @@ beforeEach(() => {
 });
 
 describe("thread titles", () => {
+  it("keeps the relay session through an automatic worker handoff", async () => {
+    const { resumePayload } = await import("./attempt");
+    expect(resumePayload({ ...params, mode: "start", relayId: "dispatch-1" })).toMatchObject({ mode: "resume", relayId: "dispatch-1" });
+  });
+
   it("names a thread that still needs it from a resumed attempt", async () => {
     needsTitle = true;
     const { runHarnessAttempt } = await import("./attempt");

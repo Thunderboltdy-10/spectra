@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, type CSSProperties } from "react";
-import { useQuery } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { api } from "../../../../convex/_generated/api";
 import { classIdentities, classIdentity, type ClassIdentity } from "../../../../shared/class-identity";
 import { useAuthedArgs } from "../data/use-authed-args";

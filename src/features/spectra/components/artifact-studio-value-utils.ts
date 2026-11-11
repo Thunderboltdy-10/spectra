@@ -585,6 +585,9 @@ export function mergeConcurrentText(
 ): string | null {
   const ours = textSplice(baseline, local);
   const theirs = textSplice(baseline, incoming);
+  if (ours.start === ours.end && theirs.start === theirs.end && ours.start === theirs.start)
+    return baseline.slice(0, ours.start) +
+      [ours.insert, theirs.insert].sort().join("") + baseline.slice(ours.end);
   const [first, second] =
     ours.start <= theirs.start ? [ours, theirs] : [theirs, ours];
   if (first.end > second.start || (first.end === second.start && first.start === second.start))

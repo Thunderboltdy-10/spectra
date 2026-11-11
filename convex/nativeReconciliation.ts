@@ -139,7 +139,7 @@ async function recordConflict(ctx: MutationCtx, accountId: Id<"accounts">, opera
   local: Doc<"workReplicas">, cloud: Doc<"workReplicas">, args: ExternalReconciliation) {
   const now = Date.now();
   const existing = await ctx.db.query("syncConflicts")
-    .withIndex("by_work_state", q => q.eq("workId", args.workId).eq("state", "open"))
+    .withIndex("by_work_account_state", q => q.eq("workId", args.workId).eq("accountId", accountId).eq("state", "open"))
     .filter(q => q.and(q.eq(q.field("localRevision"), local.revision), q.eq(q.field("spectraRevision"), cloud.revision))).first();
   const previews = new Map((existing?.previews ?? []).map(preview => [preview.regionId, preview]));
   for (const preview of args.previews ?? []) previews.set(preview.regionId, preview);
@@ -280,7 +280,7 @@ export const commit = internalMutation({
     // about this local revision; a chosen resolution settles what it covered.
     const regions = new Set(input.regionIds);
     const conflicts = await ctx.db.query("syncConflicts")
-      .withIndex("by_work_state", q => q.eq("workId", input.workId).eq("state", "open")).take(20);
+      .withIndex("by_work_account_state", q => q.eq("workId", input.workId).eq("accountId", actor.accountId).eq("state", "open")).take(20);
     for (const conflict of conflicts) {
       if (conflict.localRevision !== local.revision || !conflict.replicaIds.includes(local._id) ||
           (input.resolution === "merged" && !conflict.regionIds.every(region => regions.has(region)))) continue;

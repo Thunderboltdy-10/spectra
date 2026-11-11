@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const harness = vi.hoisted(() => ({ membership: null as unknown, ready: true, phase: "loading_classes", sync: vi.fn(), pathname: "/home", toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() } }));
 vi.mock("convex/react", () => ({
   useConvexAuth: () => ({ isAuthenticated: true }),
-  useQuery: (ref: Parameters<typeof getFunctionName>[0]) => getFunctionName(ref) === "catalogGraph:identity" ? harness.membership : getFunctionName(ref) === "managebac:onboardingStatus" ? { phase: harness.phase } : { connection: { state: harness.ready ? "connected" : "not_connected" } },
+  useQuery: (ref: Parameters<typeof getFunctionName>[0]) => getFunctionName(ref) === "identity:session" ? { catalog: harness.membership } : getFunctionName(ref) === "managebac:onboardingStatus" ? { phase: harness.phase } : { connection: { state: harness.ready ? "connected" : "not_connected" } },
 }));
 vi.mock("next/navigation", () => ({ usePathname: () => harness.pathname }));
 vi.mock("../data/api", () => ({ syncSpectraManageBacOnLogin: harness.sync }));

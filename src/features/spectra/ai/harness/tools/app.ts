@@ -2,6 +2,8 @@ import { patchTouchesAiPermissions } from "../../../settings/schema/ai-permissio
 import { normalizeAiPreferencePatch, preferenceLayerValuesSchema } from "../../../settings/schema/preferences";
 import { applicationCommandCategory } from "../../../../../../shared/ai-application-approval";
 import { AI_SYNC_PURPOSES, SCHOOL_SYNC_KINDS, SCHOOL_SYNC_MODES } from "../../../../../../shared/school-sync";
+import { calendarLocalTimeToEpoch } from "../../../../../../shared/calendar-time";
+import { refusePastCalendarStart } from "../../../calendar/domain/past-start";
 import type { CommandResult } from "../backend";
 import { ToolInputError, type AnyHarnessTool, type HarnessTool, type PermissionCategory, type ToolEffect, type ToolOutcome } from "../types";
 import {
@@ -142,6 +144,40 @@ export function describePatch(patch: Record<string, unknown>, prefix = ""): stri
 }
 
 const LOCAL_TIME = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2})?$/;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_REPEATS = 200;
+
+/** A local date moved by whole days; the wall-clock time stays, so summer time cannot shift a lesson. */
+function shiftLocal(local: string, days: number) {
+  const [date, time] = local.split("T");
+  const moved = new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
+  return time ? `${moved}T${time}` : moved;
+}
+
+/** The later dates of a repeating event, as {alsoAtLocal}; the first date is the event itself. */
+function repeatOf(raw: Record<string, unknown>) {
+  const repeat = raw.repeat as { everyWeeks?: unknown; until?: unknown; except?: unknown } | undefined;
+  if (repeat === undefined || repeat === null) return {};
+  if (typeof repeat !== "object") throw new ToolInputError("repeat must be {everyWeeks, until, except?}.");
+  const everyWeeks = repeat.everyWeeks;
+  if (typeof everyWeeks !== "number" || !Number.isInteger(everyWeeks) || everyWeeks < 1 || everyWeeks > 8)
+    throw new ToolInputError("repeat.everyWeeks must be a whole number of weeks from 1 to 8.");
+  if (typeof repeat.until !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(repeat.until))
+    throw new ToolInputError("repeat.until must be a date, YYYY-MM-DD.");
+  const except = new Set(Array.isArray(repeat.except) ? repeat.except.map(String).map((date) => date.slice(0, 10)) : []);
+  const start = String(raw.start);
+  const end = typeof raw.end === "string" ? raw.end : undefined;
+  const alsoAtLocal: Array<{ startLocal: string; endLocal?: string }> = [];
+  for (let step = 1; ; step += 1) {
+    const startLocal = shiftLocal(start, step * everyWeeks * 7);
+    if (startLocal.slice(0, 10) > repeat.until) break;
+    if (except.has(startLocal.slice(0, 10))) continue;
+    alsoAtLocal.push({ startLocal, ...(end ? { endLocal: shiftLocal(end, step * everyWeeks * 7) } : {}) });
+    if (alsoAtLocal.length > MAX_REPEATS)
+      throw new ToolInputError(`That is more than ${MAX_REPEATS} dates. Use a nearer repeat.until.`);
+  }
+  return alsoAtLocal.length ? { alsoAtLocal } : {};
+}
 
 function localTime(raw: Record<string, unknown>, key: string, required: boolean) {
   const value = optionalString(raw, key, 40);
@@ -153,9 +189,45 @@ function localTime(raw: Record<string, unknown>, key: string, required: boolean)
   return value.length === 10 ? `${value}T00:00` : value;
 }
 
+const CALENDAR_TOOL_FOR: Record<string, string> = {
+  add_event: "create_calendar_personal_event",
+  schedule_task: "schedule_calendar_task",
+  move_block: "move_calendar_block",
+};
+
+/**
+ * A start that has already passed is refused here, with the time now, so the
+ * model chooses again in the same turn. The server checks the same rule.
+ */
+function refuseElapsedStart(args: Record<string, unknown>, timeZone: string, now: number) {
+  const toolId = CALENDAR_TOOL_FOR[String(args.action)];
+  if (!toolId || typeof args.start !== "string") return;
+  let startAt: number;
+  let endAt: number | undefined;
+  try {
+    startAt = calendarLocalTimeToEpoch(args.start, timeZone, "earlier");
+    endAt = typeof args.end === "string" ? calendarLocalTimeToEpoch(args.end, timeZone, "earlier") : args.allDay ? startAt + 86_400_000 : undefined;
+  } catch {
+    return; // An impossible time is reported where it is converted.
+  }
+  try {
+    refusePastCalendarStart(toolId, { startAt, endAt, allDay: args.allDay === true, alreadyHappened: args.alreadyHappened === true, alsoAtLocal: args.alsoAtLocal, timezone: timeZone }, now);
+  } catch (error) {
+    throw new ToolInputError(error instanceof Error ? error.message.replace(/^CALENDAR_TIME_PASSED:\s*/, "") : String(error));
+  }
+}
+
 /* Devices: Spectra Bridge on the user's computers (docs/product/DEVICES.md). */
 
 const CALENDAR_ACTIONS = ["add_event", "schedule_task", "move_block", "resize_block", "complete_block", "remove_event"] as const;
+const CALENDAR_WORDS: Record<string, [string, string]> = {
+  schedule_task: ["Booking time in your calendar", "Booked time in your calendar"],
+  move_block: ["Moving something in your calendar", "Moved something in your calendar"],
+  resize_block: ["Changing how long something takes", "Changed how long something takes"],
+  complete_block: ["Marking something as done", "Marked something as done"],
+  remove_event: ["Taking something off your calendar", "Took something off your calendar"],
+};
+
 const LIBRARY_ACTIONS = ["create_folder", "create_workspace", "rename", "move", "link", "pin", "unpin"] as const;
 const MANAGEBAC_ACTIONS = ["sync", "select_classes", "set_sync_mode", "create_class_workspaces", "release_class_workspaces", "import_resource"] as const;
 type ManageBacAction = (typeof MANAGEBAC_ACTIONS)[number];
@@ -183,6 +255,8 @@ export const OPEN_IN_SPECTRA_DESTINATIONS = [
 
 export const DEVICES_TOOL_ACTIONS = [
   "status",
+  "list_names",
+  "sync_path",
   "pair",
   "add_folder",
   "add_files",
@@ -196,10 +270,12 @@ export const DEVICES_TOOL_ACTIONS = [
 ] as const;
 
 type DevicesAction = (typeof DEVICES_TOOL_ACTIONS)[number];
-export type DevicesArgs = { action: DevicesAction; grantId?: string; deviceId?: string; paused?: boolean };
+export type DevicesArgs = { action: DevicesAction; grantId?: string; deviceId?: string; paused?: boolean; path?: string };
 
 const DEVICES_LABELS: Record<DevicesAction, [string, string]> = {
   status: ["Checking your devices", "Checked your devices"],
+  list_names: ["Looking through file names on your computer", "Looked through file names on your computer"],
+  sync_path: ["Asking to sync it from your computer", "Asked to sync it from your computer"],
   pair: ["Connecting this computer", "Started connecting this computer"],
   add_folder: ["Opening the folder picker", "Opened the folder picker"],
   add_files: ["Opening the file picker", "Opened the file picker"],
@@ -219,7 +295,7 @@ function devicesLabel(action: string): [string, string] {
 }
 
 export function devicesToolEffect(action: DevicesAction): ToolEffect {
-  if (action === "status") return "read";
+  if (action === "status" || action === "list_names") return "read";
   if (action === "pair" || action === "remove_folder" || action === "remove_device") return "settings";
   return "write";
 }
@@ -231,8 +307,10 @@ function parseDevicesArgs(raw: Record<string, unknown>): DevicesArgs {
   if ((action === "retry_folder" || action === "pause_folder" || action === "remove_folder") && !grantId)
     throw new ToolInputError(`${action} needs grantId; read it with action status.`);
   if (action === "remove_device" && !deviceId) throw new ToolInputError("remove_device needs deviceId; read it with action status.");
+  const path = optionalString(raw, "path", 1000);
+  if (action === "sync_path" && !path) throw new ToolInputError("sync_path needs path; read it with action list_names.");
   const paused = action === "pause_folder" || action === "pause_syncing" ? raw.paused !== false : undefined;
-  return { action, ...(grantId ? { grantId } : {}), ...(deviceId ? { deviceId } : {}), ...(paused === undefined ? {} : { paused }) };
+  return { action, ...(grantId ? { grantId } : {}), ...(deviceId ? { deviceId } : {}), ...(paused === undefined ? {} : { paused }), ...(path ? { path } : {}) };
 }
 
 function controlDeviceArgs(args: DevicesArgs): Record<string, unknown> {
@@ -242,12 +320,27 @@ function controlDeviceArgs(args: DevicesArgs): Record<string, unknown> {
       : args.action === "pause_syncing"
         ? args.paused === false ? "resume_syncing" : "pause_syncing"
         : args.action;
-  return { action, ...(args.grantId ? { grantId: args.grantId } : {}), ...(args.deviceId ? { deviceId: args.deviceId } : {}) };
+  return { action, ...(args.grantId ? { grantId: args.grantId } : {}), ...(args.deviceId ? { deviceId: args.deviceId } : {}), ...(args.path ? { path: args.path } : {}) };
 }
 
 export function appTools(session: HarnessSession): AnyHarnessTool[] {
   const timeZone = session.backend.timeZone;
   const tools = [
+    ...(session.backend.undoPreviousRun ? [{
+      name: "undo_previous_run",
+      description: "Undo the immediately preceding Spectra run in this thread, using its exact saved state for all lasting changes. Use when the user says undo that after your last change; never guess an inverse edit. Takes no target ids. Run before making any other changes this turn. Later human edits are preserved and any changes left in place are reported.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+      effect: "write" as const,
+      exclusive: true,
+      label: () => "Undoing the previous change",
+      parse: (raw: Record<string, unknown>) => {
+        if (Object.keys(raw).length) throw new ToolInputError("Undo takes no arguments; it only targets the preceding run in this thread.");
+        return raw;
+      },
+      execute: (_args: Record<string, unknown>, ctx: import("../types").ToolContext) => session.backend.undoPreviousRun!(
+        { approved: Boolean(ctx.approved), approvalScope: ctx.approvalScope }, ctx.signal,
+      ),
+    }] : []),
     commandTool(session, {
       name: "change_settings",
       description:
@@ -278,7 +371,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     }),
     commandTool(session, {
       name: "calendar",
-      description: `Change the user's calendar. action add_event: a personal event {title, start, end?, allDay?, notes?}. action schedule_task: a work block for a planner task {taskId (the task's artifact id), start, end}. action move_block {itemId, start, end?, expectedRevision} and resize_block {itemId, end, expectedRevision} for work blocks from read_calendar. complete_block {itemId, expectedRevision} marks a work block done; remove_event {itemId} takes a personal event or work block off the calendar. Times are YYYY-MM-DDTHH:mm in the user's time zone (${timeZone}). Official school deadlines cannot be moved.`,
+      description: `Change the user's calendar. action add_event: a personal event {title, start, end?, allDay?, notes?}. A lesson or anything else that repeats takes repeat {everyWeeks, until (YYYY-MM-DD), except? (dates it does not happen)} on one add_event, instead of one call per date: a timetable lives here, not in a document. In a two-week cycle give each lesson everyWeeks 2 and start it in its own week, and say which week in notes. action schedule_task: a work block for a planner task {taskId (the task's artifact id), start, end}. When the user names a task, find it first and use it; make a new task only if none matches. action move_block {itemId, start, end?, expectedRevision} and resize_block {itemId, end, expectedRevision} for work blocks from read_calendar. complete_block {itemId, expectedRevision} marks a work block done; remove_event {itemId, andFollowing?} takes a personal event or work block off the calendar; andFollowing also takes every later event of its repeating lesson. To change one date of a repeating lesson, remove that event and add its replacement. Times are YYYY-MM-DDTHH:mm in the user's time zone (${timeZone}). A start that has already passed is refused; set alreadyHappened only when the user is logging something that already happened. Official school deadlines cannot be moved.`,
       parameters: {
         type: "object",
         properties: {
@@ -288,6 +381,18 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
           end: { type: "string" },
           allDay: { type: "boolean" },
           notes: { type: "string" },
+          repeat: {
+            type: "object",
+            properties: {
+              everyWeeks: { type: "number" },
+              until: { type: "string" },
+              except: { type: "array", items: { type: "string" } },
+            },
+            required: ["everyWeeks", "until"],
+            additionalProperties: false,
+          },
+          andFollowing: { type: "boolean" },
+          alreadyHappened: { type: "boolean" },
           taskId: { type: "string" },
           itemId: { type: "string" },
           expectedRevision: { type: "number" },
@@ -297,12 +402,15 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       },
       effect: "write",
       label: (args: { action: string; title?: string }) =>
-        args.action === "add_event" ? `Adding *${args.title}* to your calendar` : "Updating your calendar",
+        args.action === "add_event" ? `Adding *${args.title}* to your calendar` : CALENDAR_WORDS[args.action]?.[0] ?? "Updating your calendar",
       doneLabel: (args: { action: string; title?: string }) =>
-        args.action === "add_event" ? `Added *${args.title}* to your calendar` : "Updated your calendar",
+        args.action === "add_event" ? `Added *${args.title}* to your calendar` : CALENDAR_WORDS[args.action]?.[1] ?? "Updated your calendar",
       parse: (raw) => {
+        const parsed = (() => {
         const action = oneOf(raw, "action", CALENDAR_ACTIONS);
-        if (action === "remove_event") return { action, itemId: requireString(raw, "itemId", 200) };
+        const logged = raw.alreadyHappened === true ? { alreadyHappened: true } : {};
+        if (action === "remove_event")
+          return { action, itemId: requireString(raw, "itemId", 200), ...(raw.andFollowing === true ? { andFollowing: true } : {}) };
         if (action === "add_event")
           return {
             action,
@@ -311,18 +419,24 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
             end: localTime(raw, "end", false),
             allDay: raw.allDay === true,
             notes: optionalString(raw, "notes"),
+            ...repeatOf(raw),
+            ...logged,
           };
         if (action === "schedule_task")
-          return { action, taskId: requireString(raw, "taskId", 200), start: localTime(raw, "start", true), end: localTime(raw, "end", true) };
+          return { action, taskId: requireString(raw, "taskId", 200), start: localTime(raw, "start", true), end: localTime(raw, "end", true), ...logged };
         const expectedRevision = optionalNumber(raw, "expectedRevision");
         if (expectedRevision === undefined) throw new ToolInputError("expectedRevision is required; read it with read_calendar.");
         if (action === "complete_block") return { action, itemId: requireString(raw, "itemId", 200), expectedRevision };
         return action === "move_block"
-          ? { action, itemId: requireString(raw, "itemId", 200), start: localTime(raw, "start", true), end: localTime(raw, "end", false), expectedRevision }
+          ? { action, itemId: requireString(raw, "itemId", 200), start: localTime(raw, "start", true), end: localTime(raw, "end", false), expectedRevision, ...logged }
           : { action, itemId: requireString(raw, "itemId", 200), end: localTime(raw, "end", true), expectedRevision };
+        })();
+        refuseElapsedStart(parsed as Record<string, unknown>, timeZone, session.now());
+        return parsed;
       },
       command: (args: Record<string, unknown>) => {
         const action = args.action;
+        const logged = args.alreadyHappened === true ? { alreadyHappened: true } : {};
         if (action === "add_event")
           return {
             command: "create_calendar_personal_event",
@@ -333,17 +447,20 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
               timezone: timeZone,
               ...(args.allDay ? { allDay: true } : {}),
               ...(args.notes ? { notes: args.notes } : {}),
+              ...(args.alsoAtLocal ? { alsoAtLocal: args.alsoAtLocal } : {}),
+              ...logged,
             },
           };
         if (action === "schedule_task")
-          return { command: "schedule_calendar_task", args: { planArtifactId: args.taskId, startLocal: args.start, endLocal: args.end, timezone: timeZone } };
+          return { command: "schedule_calendar_task", args: { planArtifactId: args.taskId, startLocal: args.start, endLocal: args.end, timezone: timeZone, ...logged } };
         if (action === "complete_block")
           return { command: "complete_calendar_block", args: { itemId: args.itemId, expectedRevision: args.expectedRevision } };
-        if (action === "remove_event") return { command: "remove_calendar_event", args: { itemId: args.itemId } };
+        if (action === "remove_event")
+          return { command: "remove_calendar_event", args: { itemId: args.itemId, ...(args.andFollowing ? { andFollowing: true } : {}) } };
         if (action === "move_block")
           return {
             command: "move_calendar_block",
-            args: { itemId: args.itemId, startLocal: args.start, ...(args.end ? { endLocal: args.end } : {}), timezone: timeZone, expectedRevision: args.expectedRevision },
+            args: { itemId: args.itemId, startLocal: args.start, ...(args.end ? { endLocal: args.end } : {}), timezone: timeZone, expectedRevision: args.expectedRevision, ...logged },
           };
         return { command: "resize_calendar_block", args: { itemId: args.itemId, endLocal: args.end, timezone: timeZone, expectedRevision: args.expectedRevision } };
       },
@@ -644,41 +761,6 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       },
     }),
     commandTool(session, {
-      name: "remember",
-      description:
-        "Save something lasting about the user that will help later (a preference, their level, a goal), or revise a saved memory by memoryId. Only when the user states it or clearly wants it kept; never secrets.",
-      parameters: {
-        type: "object",
-        properties: { content: { type: "string" }, memoryId: { type: "string" } },
-        required: ["content"],
-        additionalProperties: false,
-      },
-      effect: "write",
-      label: () => "Remembering that",
-      doneLabel: () => "Remembered that",
-      parse: (raw) => ({ content: requireString(raw, "content", 2_000), memoryId: optionalString(raw, "memoryId", 200) }),
-      command: (args) => ({
-        command: "write_memory",
-        args: args.memoryId ? { action: "revise", content: args.content, memoryId: args.memoryId } : { action: "create", content: args.content },
-      }),
-    }),
-    commandTool(session, {
-      name: "forget_memory",
-      description:
-        "Erase a saved memory about the user for good, by memoryId (find it with search in [\"memory\"]). Only when the user asks to forget it; to fix a wrong memory, revise it with remember instead.",
-      parameters: {
-        type: "object",
-        properties: { memoryId: { type: "string" } },
-        required: ["memoryId"],
-        additionalProperties: false,
-      },
-      effect: "irreversible",
-      label: () => "Forgetting that",
-      doneLabel: () => "Forgot that",
-      parse: (raw) => ({ memoryId: requireString(raw, "memoryId", 200) }),
-      command: (args) => ({ command: "write_memory", args: { action: "forget", memoryId: args.memoryId } }),
-    }),
-    commandTool(session, {
       name: "add_comment",
       description:
         "Leave a visible, AI-attributed comment on a piece of work, for feedback the user asked for without changing the work. regionId is a block, slide or cell region from the content; omit it to comment on the whole item. replyTo (a comment id from read_comments) answers that comment in its thread.",
@@ -736,7 +818,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "open_in_spectra",
       description:
-        "Show the user a place in Spectra: library, calendar, settings, devices, agents (targetId: an agent to open its page), school, analytics, a workspace or an artifact (targetId; region: the region a search result gives, to open it at that slide, range, block or card). Use it when they ask to see something; whether their view follows depends on their Follow AI setting.",
+        "Show the user a place in Spectra: library, calendar, settings, devices, agents (targetId: an agent to open its page), school, analytics, a workspace or an artifact (targetId; region: the region a search result gives, to open it at that slide, range, block or card). Use it only when they ask to see something; it opens straight away. Say it opened at a passage only when you gave that passage's region; otherwise name the section.",
       parameters: {
         type: "object",
         properties: {
@@ -770,7 +852,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "devices",
       description:
-        "The user's computers connected through Spectra Bridge. status: read each computer's state, folders (grantId), last sync and any problem, with deviceIds. pair: connect the computer the user has Spectra open on; Spectra offers the download if Bridge is missing and the user confirms a code on the computer. add_folder opens the folder picker on that computer. add_files opens its native picker for one or more individual files without syncing their parent folder. retry_folder {grantId}, pause_folder {grantId, paused (false resumes)}, remove_folder {grantId} (files stay). pause_syncing {paused (false resumes)} for every folder. show_logs opens Bridge's log file. update installs a ready Bridge update. remove_device {deviceId} unpairs a computer; its files stay. Actions on a computer run there through the user's open Spectra; pass deviceId to aim at one computer. pair, remove_folder and remove_device ask first.",
+        "The user's computers connected through Spectra Bridge. Files already synced are ordinary artifacts: find them with search and read them like any other. list_names {path}: read the names of files and folders on the computer the user has Bridge on, one level at a time, in Documents, Desktop, Downloads and OneDrive; start with no path. You only ever get names, never contents. When the user's request would be helped by something you can see there and it is not in Spectra yet, say what you found and ask whether to sync it; on yes, sync_path {path} opens a prompt on the computer and it comes in only if they agree there. You cannot run commands on the computer or delete its files, and trashing a synced artifact leaves its file alone. status: read each computer's state, folders (grantId), last sync and any problem, with deviceIds. pair: connect the computer the user has Spectra open on; Spectra offers the download if Bridge is missing and the user confirms a code on the computer. add_folder opens the folder picker on that computer. add_files opens its native picker for one or more individual files without syncing their parent folder. retry_folder {grantId}, pause_folder {grantId, paused (false resumes)}, remove_folder {grantId} (files stay). pause_syncing {paused (false resumes)} for every folder. show_logs opens Bridge's log file. update installs a ready Bridge update. remove_device {deviceId} unpairs a computer; its files stay. Actions on a computer run there through the user's open Spectra; pass deviceId to aim at one computer. pair, remove_folder and remove_device ask first.",
       parameters: {
         type: "object",
         properties: {
@@ -778,6 +860,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
           grantId: { type: "string" },
           deviceId: { type: "string" },
           paused: { type: "boolean" },
+          path: { type: "string", description: "list_names and sync_path: where on the computer, such as Documents/IB. Empty lists the places." },
         },
         required: ["action"],
         additionalProperties: false,
@@ -795,6 +878,8 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       command: (args) =>
         args.action === "status"
           ? { command: "read_devices", args: {} }
+          : args.action === "list_names"
+            ? { command: "read_computer_names", args: { path: args.path ?? "" } }
           : args.action === "pair"
             ? { command: "pair_device", args: {} }
             : args.action === "remove_device"

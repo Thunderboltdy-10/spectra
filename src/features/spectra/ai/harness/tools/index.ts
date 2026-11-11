@@ -1,4 +1,5 @@
 import { loadSkillTool } from "../skills";
+import { readMemoryTool, updateMemoryTool } from "./memory";
 import type { AnyHarnessTool } from "../types";
 import { appTools } from "./app";
 import { commandTools, runOnlyTools } from "./commands";
@@ -27,6 +28,8 @@ export function buildHarnessTools(session: HarnessSession): AnyHarnessTool[] {
     readCalendarTool(session),
     schoolDataTool(session),
     loadSkillTool(),
+    readMemoryTool(session),
+    updateMemoryTool(session),
     askUserTool(),
     updateTodosTool(session),
     showWidgetTool(),

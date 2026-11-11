@@ -308,15 +308,16 @@ export function normalizeQuizContent(value: unknown) {
         existingOptionIds[optionIndex] ??
         `${String(question.id)}:option:${optionIndex + 1}`,
     );
+    const usesOptionAnswers = ["multiple_choice", "true_false", "select_all", "ordering"].includes(String(question.type));
     if (
       typeof question.correctAnswer !== "string" ||
       !question.correctAnswer.trim()
     ) {
-      if (typeof question.answer === "number" && options[question.answer])
+      if (usesOptionAnswers && typeof question.answer === "number" && options[question.answer])
         question.correctAnswer = options[question.answer];
       else
         question.correctAnswer = stringValue(
-          question.answer,
+          typeof question.answer === "number" ? String(question.answer) : question.answer,
           question.correct,
           question.solution,
           question.sampleAnswer,
@@ -324,7 +325,7 @@ export function normalizeQuizContent(value: unknown) {
         ).trim();
     }
     if (
-      options.length &&
+      usesOptionAnswers && options.length &&
       typeof question.correctAnswer === "string" &&
       question.correctAnswer.trim().length > 0 &&
       !options.includes(question.correctAnswer)

@@ -40,6 +40,7 @@ export function useArtifactLiveModel(
   initialValue: ArtifactLiveValue,
   connect = true,
   authoritativeRevision?: string | null,
+  storageEpoch?: number,
 ) {
   const supported = isArtifactTypeKey(typeKey);
   const manifest = supported ? requireArtifactTypeManifest(typeKey) : null;
@@ -50,6 +51,7 @@ export function useArtifactLiveModel(
     manifest?.schemas.currentVersion ?? 1,
     realtimeProviderForWorkType(typeKey),
     typeKey,
+    storageEpoch,
   );
   const [ownedModel, setOwnedModel] =
     useState<NativeArtifactYjsModel | null>(null);

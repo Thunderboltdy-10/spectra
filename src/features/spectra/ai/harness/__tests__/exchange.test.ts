@@ -5,24 +5,19 @@ const runId = "run";
 const empty: HarnessExchangeFields = { steps: [] };
 
 describe("live exchange from harness events", () => {
-  it("shows captions as the trace, with the tool steps behind them as detail", () => {
-    let state = applyHarnessEvent(empty, { type: "step", runId, id: "a", label: "Read Biology notes", status: "running" });
-    state = applyHarnessEvent(state, { type: "step", runId, id: "a", label: "Read Biology notes", status: "done" });
-    state = applyHarnessEvent(state, { type: "caption", runId, text: "Reading your Biology notes", final: false, stepIds: ["a"] });
-    expect(state.steps).toMatchObject([{ title: "Reading your Biology notes", summary: "Read Biology notes", status: "running" }]);
-    state = applyHarnessEvent(state, { type: "caption", runId, text: "Drafting six slides", final: false, stepIds: ["b"] });
+  it("keeps thinking and tool steps in the order they happened", () => {
+    let state = applyHarnessEvent(empty, { type: "reasoning_delta", runId, id: "t1", content: "**Finding the notes**\n\nLook" });
+    state = applyHarnessEvent(state, { type: "reasoning_delta", runId, id: "t1", content: "ing" });
+    state = applyHarnessEvent(state, { type: "step", runId, id: "s1", label: "Reading *Notes*", status: "running" });
     expect(state.steps.map((step) => step.status)).toEqual(["done", "running"]);
-    state = applyHarnessEvent(state, { type: "caption", runId, text: "Made a six-slide deck", final: true, stepIds: ["a", "b"] });
-    expect(state.caption).toBe("Made a six-slide deck");
-    expect(state.steps.every((step) => step.status === "done")).toBe(true);
+    state = applyHarnessEvent(state, { type: "step", runId, id: "s1", label: "Read *Notes*", status: "done" });
+    state = applyHarnessEvent(state, { type: "reasoning_delta", runId, id: "t2", content: "Now the edit" });
+    expect(state.steps.map((step) => step.id)).toEqual(["t1", "s1", "t2"]);
+    expect(state.steps[0]!.summary).toBe("**Finding the notes**\n\nLooking");
+    expect(state.steps[1]!.title).toBe("Read *Notes*");
+    state = applyHarnessEvent(state, { type: "reasoning_delta", runId, id: "t2", content: "", done: true });
+    expect(state.steps[2]!.status).toBe("done");
   });
-
-  it("never repeats the same caption as a new bar", () => {
-    let state = applyHarnessEvent(empty, { type: "caption", runId, text: "Reading notes", final: false, stepIds: ["a"] });
-    state = applyHarnessEvent(state, { type: "caption", runId, text: "Reading notes", final: false, stepIds: ["b"] });
-    expect(state.steps).toHaveLength(1);
-  });
-
   it("collapses an answered question to one line", () => {
     let state = applyHarnessEvent(empty, {
       type: "input_required",

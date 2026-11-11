@@ -7,9 +7,10 @@ import {
   type ReactNode,
 } from "react";
 import { useAuth } from "@clerk/nextjs";
-import { useConvexAuth, useQuery } from "convex/react";
+import { useConvexAuth } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { api } from "../../convex/_generated/api";
-import { bindAccountStorageScope } from "@/lib/account-storage";
+import { bindAccountStorageScope, retireAccountStorageRequests } from "@/lib/account-storage";
 
 const AccountStorageReady = createContext(true);
 export function useAccountStorageReady() {
@@ -20,7 +21,8 @@ export function useAccountStorageReady() {
 export function AccountStorageBoundary({ children }: { children: ReactNode }) {
   const { isLoaded, userId } = useAuth();
   const { isAuthenticated } = useConvexAuth();
-  const account = useQuery(api.identity.account, isAuthenticated ? {} : "skip");
+  const session = useQuery(api.identity.session, isAuthenticated ? {} : "skip");
+  const account = session === undefined ? undefined : (session?.account ?? null);
   const owner = isLoaded
     ? JSON.stringify([process.env.NEXT_PUBLIC_CONVEX_URL, userId ?? null])
     : null;
@@ -36,6 +38,7 @@ export function AccountStorageBoundary({ children }: { children: ReactNode }) {
     owner: string;
     scope: string;
   } | null>(null);
+  useLayoutEffect(() => () => retireAccountStorageRequests(), [owner]);
   useLayoutEffect(() => {
     if (scope === null || owner === null) return;
     bindAccountStorageScope(scope);

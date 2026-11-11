@@ -5,6 +5,7 @@ import { Icon } from "@/components/icons";
 import { IconButton } from "@/components/ui/icon-button";
 import { formatRelativeTime } from "../components/spectra-view-model";
 import { getSpectraResultCards, type SpectraResultCard } from "../data/api";
+import { plainTextFromStored } from "../rich-content/adapters";
 
 /*
  * Every run's result, hidden ones included, so nothing Spectra did is out of
@@ -55,7 +56,7 @@ export function ChatRunsPanel({ onClose }: { onClose: () => void }) {
               <span className="min-w-0 flex-1 truncate">{card.title}</span>
               {card.createdAt ? <span className="shrink-0 text-micro font-normal text-[var(--text-tertiary)]">{formatRelativeTime(card.createdAt)}</span> : null}
             </span>
-            {card.summary ? <span className="mt-1 line-clamp-2 block text-caption leading-[1.45] text-[var(--text-secondary)]">{card.summary}</span> : null}
+            {card.summary ? <span className="mt-1 line-clamp-2 block text-caption leading-[1.45] text-[var(--text-secondary)]">{plainTextFromStored(card.summary)}</span> : null}
           </li>
         ))}
       </ol>

@@ -1,12 +1,14 @@
 "use client";
 
 import { useRef, type CSSProperties } from "react";
+import { IsolatedErrorBoundary } from "@/components/global-error-boundary";
 import { Icon } from "@/components/icons";
 import type { ClassIdentity } from "../../../../shared/class-identity";
 import { aiWorking } from "../artifacts/ai-working";
-import type { PresentedWorkType } from "../artifacts/presentation";
+import { workTypeMeta, type PresentedWorkType } from "../artifacts/presentation";
 import { authoredSummary } from "../artifacts/registry";
 import { useWorkPreview, type PreviewSource } from "../artifacts/use-work-previews";
+import { useDeviceWorkAwayNote } from "../bridge/device-work-away";
 import { WorkCardBody, workCardStyle } from "../components/work-card";
 import { nodeIdentity, relativeTime } from "./node-identity";
 import type { TreeNode } from "./tree-client";
@@ -18,15 +20,29 @@ import type { TreeNode } from "./tree-client";
  * it lives in, so a class's work reads as that class's at a glance; inside a
  * place, or in none, it keeps its kind's colour.
  */
-export function LibraryNote({
-  node,
-  place,
-  where,
-  now,
-  onOpen,
-  onMenu,
-  picked,
-}: {
+export function LibraryNote(props: LibraryNoteProps) {
+  // One card that can't draw stays a plain, working way into its work; it never
+  // takes the rest of the Library with it.
+  return (
+    <IsolatedErrorBoundary
+      fallback={
+        <button
+          type="button"
+          className="library-loose-item w-full"
+          data-node-row={props.node.nodeId}
+          onClick={() => props.onOpen(props.node)}
+          onContextMenu={(event) => props.onMenu(event, props.node)}
+        >
+          <span className="min-w-0 flex-1 truncate">{props.node.name}</span>
+        </button>
+      }
+    >
+      <LibraryNoteCard {...props} />
+    </IsolatedErrorBoundary>
+  );
+}
+
+type LibraryNoteProps = {
   node: TreeNode;
   /** The place whose colour it wears; null keeps its kind's. */
   place: ClassIdentity | null;
@@ -37,15 +53,20 @@ export function LibraryNote({
   onMenu: (event: React.MouseEvent, node: TreeNode) => void;
   /** While picking work (Select): whether this card is picked. Pressing it then picks rather than opens. */
   picked?: boolean;
-}) {
+};
+
+function LibraryNoteCard({ node, place, where, now, onOpen, onMenu, picked }: LibraryNoteProps) {
   const picking = picked !== undefined;
   const type = workType(node);
   const card = useRef<HTMLButtonElement>(null);
   const preview = useWorkPreview(previewSource(node), card);
   const shared = sharedLabel(node);
+  const away = useDeviceWorkAwayNote(node.source);
   return (
     <button
       ref={card}
+      data-device-away={away ? true : undefined}
+      title={away ?? undefined}
       type="button"
       data-node-row={node.nodeId}
       data-life-launch
@@ -130,8 +151,9 @@ export function previewSource(node: TreeNode): PreviewSource {
 export function workType(node: TreeNode): PresentedWorkType {
   if (node.kind === "thread") return "thread_reference";
   if (node.kind === "link" && node.target?.kind === "thread") return "thread_reference";
+  // A reference can point at something that isn't a work, like a folder.
   const key = node.source?.blueprintKey ?? (node.kind === "link" ? node.target?.typeKey : undefined);
-  return (key as PresentedWorkType | undefined) ?? "resource";
+  return key && key in workTypeMeta ? (key as PresentedWorkType) : "resource";
 }
 
 /** One row of the side list: a place, or loose work, marked in its own colour. */

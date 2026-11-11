@@ -30,6 +30,7 @@ export const listForArtifact = query({
       ctx.db.query("spectraArtifactLinks").withIndex("by_target", (q) => q.eq("targetArtifactId", args.artifactId)).order("desc").take(limit),
     ]);
     const rows = [...outgoing.map((link) => ({ link, direction: "outgoing" as const, peerId: link.targetArtifactId })), ...incoming.map((link) => ({ link, direction: "incoming" as const, peerId: link.sourceArtifactId }))]
+      .filter((row) => !row.link.dismissedAt)
       .sort((a, b) => b.link.updatedAt - a.link.updatedAt)
       .slice(0, limit);
     return Promise.all(rows.map(async (row) => ({ ...row.link, direction: row.direction, artifact: await hydrate(ctx, row.peerId) })));
@@ -58,6 +59,7 @@ export const create = mutation({
     const now = Date.now();
     if (existing) {
       await ctx.db.patch(existing._id, {
+        dismissedAt: undefined,
         relationType: args.relationType,
         label: args.label?.trim().slice(0, 80) || undefined,
         explanation: args.explanation?.trim().slice(0, 280) || undefined,
@@ -85,13 +87,51 @@ export const create = mutation({
   },
 });
 
+/**
+ * Work that clearly belongs together is linked without being asked for. A link
+ * someone has taken away stays taken away, in either direction: its row is kept
+ * as the memory of that, and is only given back by linking the two on purpose.
+ */
+export const establish = mutation({
+  args: { artifactId: v.id("spectraArtifacts"), targetIds: v.array(v.id("spectraArtifacts")) },
+  handler: async (ctx, args) => {
+    const { actor } = await requireArtifactCapability(ctx, args.artifactId, "modify");
+    const now = Date.now();
+    let created = 0;
+    for (const targetId of args.targetIds.slice(0, 6)) {
+      if (targetId === args.artifactId) continue;
+      const known = await requireArtifactCapability(ctx, targetId).catch(() => null);
+      if (!known) continue;
+      const [forward, backward] = await Promise.all([
+        ctx.db.query("spectraArtifactLinks").withIndex("by_pair", (q) => q.eq("sourceArtifactId", args.artifactId).eq("targetArtifactId", targetId)).first(),
+        ctx.db.query("spectraArtifactLinks").withIndex("by_pair", (q) => q.eq("sourceArtifactId", targetId).eq("targetArtifactId", args.artifactId)).first(),
+      ]);
+      if (forward || backward) continue;
+      await ctx.db.insert("spectraArtifactLinks", {
+        ownerAccountId: actor._id,
+        schoolId: actor.schoolId,
+        sourceArtifactId: args.artifactId,
+        targetArtifactId: targetId,
+        relationType: "related",
+        provenance: { source: "system", reason: "About the same thing" },
+        createdBy: "system",
+        createdAt: now,
+        updatedAt: now,
+      });
+      created += 1;
+    }
+    return { created };
+  },
+});
+
 export const remove = mutation({
   args: { linkId: v.id("spectraArtifactLinks") },
   handler: async (ctx, args) => {
     const link = await ctx.db.get(args.linkId);
     if (!link) throw new Error("Artifact link not found");
     await requireArtifactCapability(ctx, link.sourceArtifactId, "modify");
-    await ctx.db.delete(args.linkId);
+    if (link.createdBy === "system") await ctx.db.patch(args.linkId, { dismissedAt: Date.now(), updatedAt: Date.now() });
+    else await ctx.db.delete(args.linkId);
     return { linkId: args.linkId };
   },
 });

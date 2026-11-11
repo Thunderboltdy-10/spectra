@@ -341,7 +341,7 @@ function PlatformOverviewSurface({
       <div className="admin-columns">
         <section>
           <AdminSectionHeader
-            title="Schools using the most"
+            title="Schools using the most AI"
             action={<InlineLink onClick={() => onTab("schools")}>All schools</InlineLink>}
           />
           {data.topSchools.length ? (
@@ -351,12 +351,12 @@ function PlatformOverviewSurface({
                   <span className="admin-line-main">
                     <strong>{school.name}</strong>
                   </span>
-                  <span className="admin-line-meta">{formatCompact(school.usage)} used</span>
+                  <span className="admin-line-meta">{formatCompact(school.usage)} tokens</span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="admin-ledger-empty">No school has used Spectra in this range yet.</p>
+            <p className="admin-ledger-empty">No school has used Spectra&apos;s AI in this range yet.</p>
           )}
         </section>
 
@@ -502,9 +502,9 @@ export function SuperadminShell() {
     return (
       <main className="spectra-wave-y relative isolate h-full min-h-0 flex-1 overflow-y-auto" data-spectra-app-surface="true">
         <PageBody>
-          <PageHeader title="Platform" />
+          <PageHeader title="Superadmin" />
           {loading ? (
-            <LoadingRows label="Opening the platform" count={6} className="mt-6" />
+            <LoadingRows label="Opening superadmin" count={6} className="mt-6" />
           ) : error ? (
             <div className="mt-6">
               <ErrorPanel message={error} retry={() => void load()} />
@@ -530,7 +530,7 @@ export function SuperadminShell() {
     <main className="spectra-wave-y relative isolate h-full min-h-0 flex-1 overflow-y-auto" data-spectra-app-surface="true">
       <PageBody>
         <PageHeader
-          title="Platform"
+          title="Superadmin"
           commands={commands}
           plan={PLATFORM_BAR_PLAN}
           barLabel="Platform commands"

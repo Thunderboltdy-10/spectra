@@ -33,6 +33,15 @@ const sixSlides = {
 };
 
 describe("presentation authoring", () => {
+  it("clears a nullable body without writing literal null or removing its visual", () => {
+    const deck = presentationFromSpec({ design: "none", slides: [{ title: "Nodes", body: "Remove this body", notes: "Keep these notes",
+      visual: { type: "shape", text: "Keep this visual" } }] }, sequentialIdFactory());
+    const edited = applyPresentationEdits(deck, JSON.parse('[{"op":"update_slide","slide":1,"body":null}]'));
+    expect(edited.slides[0]!.objects.map(presentationObjectText).filter(Boolean)).toEqual(["Nodes", "Keep this visual"]);
+    expect(edited.slides[0]!.speakerNotes).toBe("Keep these notes");
+    expect(deck.slides[0]!.objects.some((object) => presentationObjectText(object) === "Remove this body")).toBe(true);
+  });
+
   it("builds a deck from slide specs with layouts and no placeholder copy", () => {
     const deck = presentationFromSpec(sixSlides, sequentialIdFactory());
     expect(deck.slides).toHaveLength(6);

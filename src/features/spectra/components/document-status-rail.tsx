@@ -1,7 +1,7 @@
 "use client";
 
 import type { Editor } from "@tiptap/core";
-import { Minus, Plus } from "lucide-react";
+import { Minus, Plus } from "@/components/icons/glyph-icons";
 import { useCallback, useEffect, useState, type RefObject } from "react";
 import { lengthPx } from "../editor/page-flow";
 import type { DocumentCanvas } from "./document-spread";

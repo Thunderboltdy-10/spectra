@@ -56,6 +56,12 @@ later edits, and a slide the readback flags is left alone until its problem is f
 - Titles say the point, not the topic: "Renewables overtook coal in 2024", not "Energy data".
 - Body copy is short: at most four bullets of a few words, or two short sentences.
 - If a slide is too full, split it rather than cramming it.
+- Draw diagrams with code: a `diagram` visual holds the SVG that draws it, right on the slide.
+  Never type a diagram in characters. Cycles, flows, labelled structures and timelines all belong
+  here. Keep it simple enough to read from the back of the room, and describe it in `alt`. When the
+  diagram is the point of the slide, leave `body` out so it gets the whole slide. Use a `viewBox`
+  about 960 wide, labels of 24 or more and a few words per box. A row of five boxes rarely fits at
+  that size: wrap it, or use a loop.
 - Numbers from a source go in a real chart (`chartType`, `categories`, named `series` with
   units in the names) or a table, with values checked against the source. Never draw data as
   labelled shapes. Say what the chart shows without claiming causes the data does not

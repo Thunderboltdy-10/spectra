@@ -9,6 +9,7 @@ import {
   SIDEBAR_RAILED_PX,
   SIDEBAR_RAIL_HYSTERESIS_PX,
   SPLIT_OVERLAY_HYSTERESIS_PX,
+  stageMinimumFor,
   WORKBENCH_CONTENT_RESERVE_PX,
   type WorkbenchPaneAllocation,
   type WorkbenchPaneSpec,
@@ -384,5 +385,59 @@ describe("allocateWorkbenchPanes", () => {
         panes: [],
       }),
     ).toEqual({});
+  });
+});
+
+describe("the shell gives way in SHELL.md's order (F2)", () => {
+  // 1280 wide: expanded chrome leaves 1040, railed 1204.
+  const window1280 = 1280;
+  const sides = (reserve: number, floors: number[]) => {
+    const demand = reserve + floors.reduce((total, floor) => total + floor, 0);
+    const railed = resolveSidebarRail({ windowWidth: window1280, expandedWidth: SIDEBAR_EXPANDED_PX, railedWidth: SIDEBAR_RAILED_PX, demand, railed: false });
+    const host = window1280 - (railed ? SIDEBAR_RAILED_PX : SIDEBAR_EXPANDED_PX);
+    const panes = floors.map((floor, index) => ({ id: `p${index}`, floor, priority: index, overlay: false }));
+    const overlay = resolveWorkbenchPanes({ hostWidth: host, contentReserve: reserve, panes });
+    const widths = allocateWorkbenchPanes({
+      hostWidth: host,
+      contentReserve: reserve,
+      panes: panes.map((pane) => ({ ...pane, overlay: overlay[pane.id] ?? false, intent: 620, recency: 0 })),
+    });
+    const inFlow = Object.values(widths).reduce((total, width) => total + width, 0);
+    return { railed, overlay, stage: host - inFlow };
+  };
+
+  it("names each page's stage minimum", () => {
+    expect(stageMinimumFor("/library")).toBe(560);
+    expect(stageMinimumFor("/workspace/abc")).toBe(560);
+    expect(stageMinimumFor("/calendar")).toBe(640);
+    expect(stageMinimumFor("/managebac")).toBe(600);
+    expect(stageMinimumFor("/home")).toBe(WORKBENCH_CONTENT_RESERVE_PX);
+  });
+
+  it("rails the chrome before the Library falls under 560 beside a work", () => {
+    const result = sides(stageMinimumFor("/library"), [560]);
+    expect(result.railed).toBe(true);
+    expect(result.overlay.p0).toBe(false);
+    expect(result.stage).toBeGreaterThanOrEqual(560);
+  });
+
+  it("keeps the Calendar at 640 beside a thread", () => {
+    const result = sides(stageMinimumFor("/calendar"), [SIDE_PANEL_FLOOR_PX]);
+    expect(result.stage).toBeGreaterThanOrEqual(640);
+  });
+
+  it("floats a panel rather than show four columns", () => {
+    const result = sides(stageMinimumFor("/library"), [560, SIDE_PANEL_FLOOR_PX]);
+    expect(result.railed).toBe(true);
+    expect(Object.values(result.overlay).filter((floating) => !floating)).toHaveLength(1);
+    expect(result.stage).toBeGreaterThanOrEqual(560);
+  });
+});
+
+describe("the week beside the Side (F2)", () => {
+  it("keeps every day that still reads at the Calendar's minimum", async () => {
+    const { daysThatFit } = await import("../calendar/ui/calendar-application");
+    expect(daysThatFit(680)).toBe(7);
+    expect(daysThatFit(400)).toBe(3);
   });
 });

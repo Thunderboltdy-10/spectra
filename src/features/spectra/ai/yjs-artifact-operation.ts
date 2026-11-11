@@ -1,3 +1,4 @@
+import { traceEvent, traceSpan } from "@/features/spectra/ai/harness/run-trace";
 import "server-only";
 import { runLog } from "./run-log";
 
@@ -66,6 +67,9 @@ import {
   capabilityForLocalId,
 } from "@/features/spectra/capabilities/catalog";
 
+import { deviceBaseline, deviceProjectionOf } from "../collaboration/device-work";
+import { deviceRoomEndpoint, deviceStoreCall } from "@/lib/device-store";
+
 type ArtifactRecord = {
   _id: string;
   blueprintKey: string;
@@ -75,6 +79,8 @@ type ArtifactRecord = {
   tags: string[];
   content: unknown;
   compatibilityProfile?: CompatibilityProfile;
+  storageHome?: "device";
+  storageStoreId?: string;
 };
 
 type ActorIdentity = {
@@ -94,6 +100,8 @@ type CollaborationSession = {
   providerKind: "hocuspocus";
   level: "read" | "modify";
   policyVersion: number;
+  /** Kept on the person's computer: Bridge is the room. */
+  device?: { protocols?: string[] };
 };
 
 type AiRealtimeProvider = {
@@ -110,13 +118,40 @@ type AiRealtimeProvider = {
   setAwarenessField(field: string, value: unknown): void;
   flushPendingUpdates(): void;
   subscribeState(listener: () => void): () => void;
+  /** Work on a computer: says what it now holds and keeps a point to return to. */
+  deviceCheckpoint?(input: { source: string; summary?: string; actor?: string; runId?: string; schemaVersion: number }): Promise<number | null>;
   destroy(): void;
 };
 
 class HocuspocusAiRealtimeProvider implements AiRealtimeProvider {
   private readonly durableAck = new AiDurableAckGate();
+  private readonly checkpointWaiters = new Map<string, (versionId: number | null) => void>();
 
   constructor(readonly transport: HocuspocusProvider) {}
+
+  deviceCheckpoint(input: { source: string; summary?: string; actor?: string; runId?: string; schemaVersion: number }) {
+    const projection = deviceProjectionOf(this.document, input.schemaVersion);
+    if (projection) this.transport.sendStateless(JSON.stringify({ type: "spectra.device_projection", projection }));
+    const confirmationId = randomUUID();
+    return new Promise<number | null>((resolve) => {
+      const timer = setTimeout(() => {
+        this.checkpointWaiters.delete(confirmationId);
+        resolve(null);
+      }, 3_000);
+      this.checkpointWaiters.set(confirmationId, (versionId) => {
+        clearTimeout(timer);
+        resolve(versionId);
+      });
+      this.transport.sendStateless(JSON.stringify({
+        type: "spectra.device_checkpoint",
+        source: input.source,
+        confirmationId,
+        ...(input.summary ? { summary: input.summary } : {}),
+        ...(input.actor ? { actor: input.actor } : {}),
+        ...(input.runId ? { runId: input.runId } : {}),
+      }));
+    });
+  }
 
   get document() {
     return this.transport.document;
@@ -150,7 +185,17 @@ class HocuspocusAiRealtimeProvider implements AiRealtimeProvider {
         type?: string;
         updateIds?: unknown;
         documentHash?: string;
+        confirmationId?: string;
+        versionId?: number;
       };
+      if (message.type === "spectra.device_checkpoint_saved") {
+        const waiting = message.confirmationId ? this.checkpointWaiters.get(message.confirmationId) : undefined;
+        if (waiting) {
+          this.checkpointWaiters.delete(message.confirmationId!);
+          waiting(typeof message.versionId === "number" ? message.versionId : null);
+        }
+        return;
+      }
       const updateIds = Array.isArray(message.updateIds)
         ? message.updateIds.filter(
             (value): value is string =>
@@ -209,9 +254,17 @@ async function createAiRealtimeProvider(params: {
 }): Promise<AiRealtimeProvider> {
   const { session, document, observer } = params;
   const providerBox: { current?: HocuspocusAiRealtimeProvider } = {};
+  const deviceProtocols = session.device?.protocols;
+  const socketClass = deviceProtocols
+    ? class HubSocket extends WebSocket {
+        constructor(url: string | URL) {
+          super(url, deviceProtocols);
+        }
+      }
+    : WebSocket;
   const rawProvider = new HocuspocusProvider({
     url: session.url,
-    WebSocketPolyfill: framedWebSocket(WebSocket),
+    WebSocketPolyfill: framedWebSocket(socketClass),
     name: session.documentName,
     document,
     token: session.token,
@@ -393,6 +446,46 @@ async function createCollaborationSession(
     );
   const typeKey = requireArtifactType(artifact.blueprintKey);
   const resourceType = typeKey === "agent" ? "agent" : "artifact";
+  if (artifact.storageHome === "device") {
+    const access = await convexQuery<
+      { resourceType: string; resourceId: string },
+      { allowed: boolean; level: "read" | "modify" | null }
+    >("authority:access", { resourceType, resourceId: artifactId });
+    if (!access.allowed || (level === "modify" && access.level !== "modify"))
+      throw new Error("AI_ARTIFACT_PERMISSION_REVOKED: Access was removed before the live document could be loaded.");
+    const summary = await deviceStoreCall<{ storeId?: string }>(actor.accountId, "summary", {}, 4_000).catch(() => null);
+    if (!summary)
+      throw new Error("DEVICE_WORK_UNAVAILABLE: This work is kept on the person's computer, and Spectra Bridge isn't reachable right now.");
+    if (summary.storeId !== artifact.storageStoreId)
+      throw new Error("DEVICE_WORK_ELSEWHERE: This work is kept on another of the person's computers, which isn't reachable from here.");
+    const baseline = deviceBaseline({
+      typeKey,
+      title: artifact.title,
+      summary: artifact.summary,
+      tags: artifact.tags,
+      schemaVersion: artifact.schemaVersion ?? 1,
+      content: artifact.content,
+    });
+    await deviceStoreCall(actor.accountId, "seed", {
+      artifactId,
+      stateBase64: baseline.stateBase64,
+      projection: baseline.projection,
+    });
+    const endpoint = await deviceRoomEndpoint(actor.accountId);
+    return {
+      actor,
+      artifact,
+      clientId,
+      actorKind,
+      documentName: collaborationDocumentName(artifactId, "root", artifact.blueprintKey),
+      token: endpoint.token,
+      providerKind: realtimeProviderForWorkType(typeKey),
+      level,
+      policyVersion: 0,
+      url: endpoint.url,
+      device: { ...(endpoint.protocols ? { protocols: endpoint.protocols } : {}) },
+    };
+  }
   const [room, access] = await Promise.all([
     convexMutation<
       { artifactId: string; partitionKey: string; schemaVersion: number },
@@ -887,7 +980,9 @@ async function synchronizeMutation(params: {
   // Every AI write holds its regions, alone or not: the room append checks
   // them and takes the run's attribution from them.
   const heldRegions = [...boundedRegionClaims(plan.regions)];
-  const claims = await acquirePlanClaims({
+  // On a computer nobody else can be editing at the same time from elsewhere,
+  // and Yjs merges the person's own typing.
+  const claims = params.session.device ? [] : await acquirePlanClaims({
     artifactId: params.session.artifact._id,
     clientId: params.session.clientId,
     runId: params.runId,
@@ -1262,7 +1357,8 @@ async function applyAiArtifactMutationAttempt(params: {
   const typeKey = requireArtifactType(session.artifact.blueprintKey);
   // Every AI artifact write is admitted once by the signed sink. The
   // Hocuspocus gateway room is that sink's canonical store.
-  const admitsArtifactWrite = claimActorKind === "ai" && params.receipt !== "placement";
+  const onDevice = Boolean(session.device);
+  const admitsArtifactWrite = !onDevice && claimActorKind === "ai" && params.receipt !== "placement";
   const readHead = () => convexQuery<{ artifactId: string; aiOperation: { runId: string; executionId: string; operationId: string } }, NativeAiHead>(
     "nativeAiCommit:head", { artifactId: params.artifactId, aiOperation: {
       runId: params.runId, executionId: params.executionId, operationId: params.operationId,
@@ -1270,7 +1366,7 @@ async function applyAiArtifactMutationAttempt(params: {
   let nativeHead = admitsArtifactWrite ? await readHead() : undefined;
   const canonicalBridge: AiCanonicalBridge | undefined = nativeHead
     ? createCollaborationGatewayBridgeClient({ convexUrl: getConvexUrl(), bridgeKey: process.env.SPECTRA_COLLAB_BRIDGE_KEY! }) : undefined;
-  if (!params.replacePendingCreate && !nativeHead?.committedResult) {
+  if (!onDevice && !params.replacePendingCreate && !nativeHead?.committedResult) {
     const native = await nativeGateContext(session.artifact);
     const gate = gateAiArtifactMutation({
       type: typeKey as WorkType,
@@ -1319,6 +1415,7 @@ async function applyAiArtifactMutationAttempt(params: {
       () =>
         `AI_ARTIFACT_CONNECT_TIMEOUT: The live artifact could not be synchronized within 12s (status=${connectionStatus}, opened=${opened}, authenticated=${authenticated || provider.isAuthenticated}, syncEvent=${syncEventReceived}, synced=${provider.synced}, elapsedMs=${Date.now() - connectStartedAt}). Fast-fail so pending shells can be discarded instead of pulsing indefinitely.`,
     );
+    traceEvent("yjs.connect", { ms: Date.now() - connectStartedAt });
     runLog().info("spectra.ai.artifact.connect", {
       artifactId: params.artifactId,
       runId: params.runId,
@@ -1379,7 +1476,7 @@ async function applyAiArtifactMutationAttempt(params: {
     // Give the gateway one bounded paint window to fan out the AI collaborator
     // before a fast Yjs transaction can finish and tear down the provider.
     if (claimActorKind === "ai") {
-      await new Promise<void>((resolve) => setTimeout(resolve, 350));
+      await traceSpan("yjs.ai_wait", {}, () => new Promise<void>((resolve) => setTimeout(resolve, 350)));
     }
 
     let current = readLiveYjsDocument(document, typeKey);
@@ -1493,7 +1590,14 @@ async function applyAiArtifactMutationAttempt(params: {
         changedRegionIds: [] as string[],
       };
 
-    if (params.checkpointBeforeAi !== false && !nativeHead) {
+    if (onDevice) {
+      if (params.checkpointBeforeAi !== false && !params.replacePendingCreate)
+        await provider.deviceCheckpoint?.({
+          source: claimActorKind === "human" ? "before_restore" : "before_ai",
+          runId: params.runId,
+          schemaVersion: session.artifact.schemaVersion ?? 1,
+        });
+    } else if (params.checkpointBeforeAi !== false && !nativeHead) {
       await convexMutation<
         { artifactId: string; runId: string; executionId: string },
         unknown
@@ -1503,14 +1607,6 @@ async function applyAiArtifactMutationAttempt(params: {
         executionId: params.executionId,
       });
     }
-    if (claimActorKind === "ai")
-      await convexMutation("spectraArtifacts:markAiState", {
-        artifactId: params.artifactId,
-        runId: params.runId,
-        executionId: params.executionId,
-        state: "updating",
-      }).catch(() => undefined);
-
     // Claims are acquired inside synchronizeMutation. Re-resolve once against
     // the synchronized Y.Doc so a just-finished non-overlapping human edit is
     // preserved by field-level patch operations rather than overwritten from
@@ -1623,6 +1719,13 @@ async function applyAiArtifactMutationAttempt(params: {
         };
       },
     });
+    if (onDevice)
+      await provider.deviceCheckpoint?.({
+        source: claimActorKind === "human" ? "restore" : "ai",
+        runId: params.runId,
+        ...(claimActorKind === "ai" ? { actor: "Spectra" } : {}),
+        schemaVersion: session.artifact.schemaVersion ?? 1,
+      });
     return { artifactId: params.artifactId, ...result };
   } finally {
     const lastPresence = provider.awareness?.getLocalState()?.user;

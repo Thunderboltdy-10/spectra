@@ -240,3 +240,32 @@ it("opens the canonical room from the document owned by the connected Hocuspocus
     expect(activeConnections.has(connection)).toBe(true);
   } finally { canonical.destroy(); live.destroy(); }
 });
+
+it.each(["authorization", "catch-up"])("releases a peer closed during connected %s", async phase => {
+  let resume;
+  const pending = new Promise(resolve => { resume = resolve; });
+  const activeConnections = new Set(), openDocuments = new Map(), callbacks = [];
+  const unwatch = vi.fn(), watch = vi.fn(() => unwatch);
+  const catchUpCanonicalRoom = vi.fn(() => phase === "catch-up" ? pending : Promise.resolve());
+  const hooks = { reauthorize: () => phase === "authorization" ? pending : Promise.resolve(),
+    activeConnections, openDocuments, durableHeadKey: () => "room", catchUpCanonicalRoom,
+    forceCanonicalReconnect: vi.fn(), collaborationFailureMessage: String, authorizationGuard: { watch } };
+  const source = readFileSync("scripts/collaboration-gateway.mjs", "utf8");
+  const start = source.indexOf("  async connected("), end = source.indexOf("  async beforeHandleMessage(", start);
+  const connected = new Function(...Object.keys(hooks), `return ({${source.slice(start, end)}}).connected;`)(...Object.values(hooks));
+  const connection = { context: {}, document: {}, onClose: callback => callbacks.push(callback), webSocket: { close: vi.fn() } };
+  const joining = connected({ connection });
+  await Promise.resolve();
+  callbacks.forEach(callback => callback());
+  resume();
+  await joining;
+  expect(activeConnections.size).toBe(0);
+  if (phase === "authorization") {
+    expect(watch).not.toHaveBeenCalled();
+    expect(catchUpCanonicalRoom).not.toHaveBeenCalled();
+    expect(openDocuments.size).toBe(0);
+  } else {
+    expect(watch).toHaveBeenCalledOnce();
+    expect(unwatch).toHaveBeenCalledOnce();
+  }
+});

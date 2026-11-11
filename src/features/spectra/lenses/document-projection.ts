@@ -7,6 +7,8 @@ import {
   docxNativeMediaUrl as sharedDocxNativeMediaUrl,
   docxRichBlockToJson as sharedDocxRichBlockToJson,
   docxRichInlineToJson as sharedDocxRichInlineToJson,
+  paragraphAttrsFromFormat as sharedParagraphAttrsFromFormat,
+  paragraphFormatFromAttrs as sharedParagraphFormatFromAttrs,
   authoredSemanticsEqual,
   restoreDocxEquationCarryMetadata,
 } from "../../../../shared/document-projection.mjs";
@@ -287,6 +289,9 @@ export function restoreDocxBlockCarryMetadata(
   };
 }
 
+export const paragraphAttrsFromFormat = sharedParagraphAttrsFromFormat;
+export const paragraphFormatFromAttrs = sharedParagraphFormatFromAttrs;
+
 export function documentContentToProseMirrorJson(
   content: Record<string, unknown>,
 ): DocumentJsonNode {
@@ -302,12 +307,17 @@ const documentContentSchema = docxProjectionSchema
   })
   .passthrough();
 
+function isExactly(left: unknown, right: unknown) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 function nativeTrailingWhitespaceEquivalent(left: string, right: string) {
   // The editor omits terminal native run whitespace and paragraph separators
-  // from its text mirror. Keep the exact native projection when only these
-  // ASCII whitespace characters differ; inlineContent still carries authored
-  // hard breaks and other meaningful runs.
-  return left.replace(/[ \t\r\n]+$/u, "") === right.replace(/[ \t\r\n]+$/u, "");
+  // from its text mirror, including the non-breaking space of a blank-looking
+  // paragraph (the mirror is trimEnd, so this has to be too). Keep the exact
+  // native projection when only that differs; inlineContent still carries
+  // authored hard breaks and other meaningful runs.
+  return left.trimEnd() === right.trimEnd();
 }
 
 function rowsFor(block: DocxProjection["blocks"][number]) {
@@ -564,13 +574,18 @@ const RUN_FORMAT_FIELDS = [
   "color",
   "highlight",
   "shading",
+  "verticalAlign",
+  "smallCaps",
+  "allCaps",
 ] as const;
 
 const PARAGRAPH_FORMAT_FIELDS = [
   "alignment",
   "lineSpacing",
   "spacingAfterPoints",
+  "spacingBeforePoints",
   "indentLevel",
+  "firstLineIndentPoints",
   "border",
   "shading",
 ] as const;
@@ -901,6 +916,41 @@ function expandNewDocxListBlocks<T extends { id: string; type: string; text: str
   });
 }
 
+const WORD_ONLY_DETAIL = new Set(["nativePath", "ommlXml", "ommlSourceLatex"]);
+
+function comparableBlock(block: unknown) {
+  const walk = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(walk);
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([key, item]) => item !== undefined && !WORD_ONLY_DETAIL.has(key))
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, key === "text" && typeof item === "string" ? item.trimEnd() : walk(item)]),
+    );
+  };
+  return JSON.stringify(walk(block));
+}
+
+/**
+ * The editor model cannot hold everything Word can: a non-breaking space, a
+ * table's header flag, an unusual block kind. A block nobody touched comes back
+ * from that trip looking slightly different, and saving those differences made
+ * every edit to such a file fail. So what the base looks like after the same
+ * trip is the test for "unchanged", and an unchanged block stays exactly as
+ * Word has it. Only what the edit really changed reaches the file.
+ */
+function untouchedAfterEditorTrip(base: DocxProjection) {
+  try {
+    const trip = documentBlocksFromJson(
+      documentContentToProseMirrorJson(compactDocxProjectionForStorage(base) as unknown as Record<string, unknown>),
+    );
+    return new Map(trip.map((block) => [block.id, comparableBlock(block)]));
+  } catch {
+    return new Map<string, string>();
+  }
+}
+
 export function docxProjectionFromContent(
   value: unknown,
   base: DocxProjection,
@@ -909,12 +959,28 @@ export function docxProjectionFromContent(
   // activated. Convex legitimately carries `null` in that state; the native
   // projection we just read is the only safe starting point.
   if (value == null) return { projection: base, operations: [] };
-  const parsedContent = documentContentSchema.parse(value);
+  const baseById = new Map(base.blocks.map((block) => [block.id, block]));
+  const untouched = untouchedAfterEditorTrip(base);
+  const isUntouched = (block: unknown) => {
+    const id = (block as { id?: unknown } | null)?.id;
+    return typeof id === "string" && baseById.has(id) && untouched.get(id) === comparableBlock(block);
+  };
+  // Settled before the schema: a block kind only Word has must not refuse the save.
+  const withUntouched =
+    value && typeof value === "object" && Array.isArray((value as { blocks?: unknown }).blocks)
+      ? {
+          ...(value as Record<string, unknown>),
+          blocks: ((value as { blocks: unknown[] }).blocks).map((block) =>
+            isUntouched(block) ? baseById.get((block as { id: string }).id) : block,
+          ),
+        }
+      : value;
+  const parsedContent = documentContentSchema.parse(withUntouched);
   const parsed = { ...parsedContent, blocks: expandNewDocxListBlocks(parsedContent.blocks,
     parsedContent.tiptap, new Set(base.blocks.map((block) => block.id))) };
-  const baseById = new Map(base.blocks.map((block) => [block.id, block]));
   const mergeBlock = (incoming: DocxProjection["blocks"][number]) => {
     const previous = baseById.get(incoming.id);
+    if (previous && isExactly(previous, incoming)) return previous;
     if (previous && isReadOnlyProjectionPrefix(previous, incoming))
       return previous;
     const recovered = previous
@@ -952,8 +1018,13 @@ export function docxProjectionFromContent(
             row.map((cell) => [{ kind: "text" as const, text: cell }]),
           )
         : undefined;
+    // Words the edit changed have no runs yet: the old runs would put the old
+    // words back, and a save could never read back as what was asked for.
+    const staleInline = Boolean(previous?.inlineContent && !recovered.inlineContent &&
+      recovered.text.trimEnd() !== previous.text.trimEnd());
+    const { inlineContent: _previousInline, ...previousWithoutInline } = previous ?? ({} as Partial<DocxProjection["blocks"][number]>);
     return docxProjectionBlockSchema.parse({
-      ...(previous ?? {}),
+      ...(staleInline ? previousWithoutInline : previous ?? {}),
       ...recovered,
       text,
       ...(recovered.type === "equation" && blockEquation

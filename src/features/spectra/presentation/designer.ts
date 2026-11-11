@@ -1,4 +1,5 @@
 import { contrastRatio, estimateTextHeight, estimateTextOverflow, resolvePaint } from "./audit";
+import { fitTableToFrame } from "./layouts";
 import {
   presentationObjectText,
   type PresentationContent,
@@ -287,6 +288,7 @@ class Sheet {
     if (!object) return;
     Object.assign(object, frame);
     if (PICTURES.has(object.type)) object.style = { ...object.style, fit: "cover" };
+    if (object.type === "table") fitTableToFrame(object);
     if (bleed) this.behind.add(object.id);
   }
 
@@ -577,8 +579,12 @@ export function designDeck(deck: PresentationContent, family: DeckFamily = "rule
   const visualFor = { rule: "half", band: "half-right", panel: "framed", night: "stage" } as const;
   return deck.slides.map((slide, slideIndex) => {
     const ideas = designIdeas(deck, slideIndex);
+    // A diagram or chart with no words beside it needs the room, not half a slide.
+    const parts = partsOf(slide);
+    const alone = parts.visuals.length === 1 && !parts.bodies.length && !PICTURES.has(parts.visuals[0]!.type);
     const pick =
       ideas.find((idea) => idea.id === family) ??
+      (alone ? ideas.find((idea) => idea.id === "stage") : undefined) ??
       ideas.find((idea) => idea.id === visualFor[family]) ??
       ideas.find((idea) => idea.id === "cards") ??
       ideas[0];

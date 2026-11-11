@@ -5,6 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import {
   evaluateAccessForActorWithLoadedResource,
+  evaluateArtifactAccessForActor,
   requireCapability,
   type Capability,
 } from "./authorityShared";
@@ -121,6 +122,30 @@ export async function requireArtifactCapability(
   return {
     actor: decision.actor,
     artifact: decision.loaded.resource as Doc<"spectraArtifacts">,
+    decision,
+    capabilities: decision.capabilities,
+  };
+}
+
+/**
+ * The same decision as requireArtifactCapability, read from the summary row.
+ * For callers that only need to know who may do what: an artifact row carries
+ * the whole body, so every check through it costs the size of the work.
+ */
+export async function requireArtifactAuthority(
+  ctx: SpectraCtx,
+  artifactId: Id<"spectraArtifacts">,
+  capability: Capability = "read",
+) {
+  const actor = await requireSpectraActor(ctx);
+  const decision = await evaluateArtifactAccessForActor(ctx, actor, artifactId);
+  if (!decision.allowed || !decision.capabilities.includes(capability) || !decision.loaded)
+    throw new Error(
+      "AUTH_RESOURCE_FORBIDDEN: You do not have permission for this action.",
+    );
+  return {
+    actor: decision.actor,
+    artifact: decision.loaded.resource,
     decision,
     capabilities: decision.capabilities,
   };

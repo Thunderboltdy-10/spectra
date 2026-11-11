@@ -55,7 +55,6 @@ describe("live Bridge write targeting", () => {
         { _id: "silent", state: "active", lastSeenAt: now - 30 * 60_000 },
         { _id: "live", state: "active", lastSeenAt: now - 1_000 },
       ],
-      now,
     );
     expect(liveId).toBe("live");
     expect(
@@ -109,7 +108,6 @@ describe("live Bridge write targeting", () => {
     expect(
       chooseLiveBridgeDeviceId(
         [{ _id: "silent", state: "revoked", lastSeenAt: 1 }],
-        1_000_000,
       ),
     ).toBeUndefined();
   });
@@ -121,7 +119,6 @@ describe("live Bridge write targeting", () => {
           { _id: "ghost", state: "active", lastSeenAt: 1 },
           { _id: "live", state: "active", lastSeenAt: 50_000 },
         ],
-        1_000_000,
       ),
     ).toBe("live");
   });

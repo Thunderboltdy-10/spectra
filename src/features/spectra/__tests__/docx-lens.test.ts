@@ -27,6 +27,17 @@ const fixture = (name: string) =>
     (bytes) => new Uint8Array(bytes),
   );
 
+it("keeps native semantic/readback digests independent of stored object key order", async () => {
+  const opened = await docxLens.open(await fixture("complex-structure.docx"));
+  const reorder = (value: unknown): unknown => Array.isArray(value) ? value.map(reorder)
+    : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).reverse().map(([key, child]) => [key, reorder(child)])) : value;
+  const requested = reorder(opened.projection) as typeof opened.projection;
+  expect(await docxProjectionSemanticDigest(requested)).toBe(await docxProjectionSemanticDigest(opened.projection));
+  expect(await docxProjectionReadbackDigest(opened.projection, requested)).toBe(await docxProjectionSemanticDigest(requested));
+  requested.blocks[0]!.text += "Real change";
+  expect(await docxProjectionReadbackDigest(opened.projection, requested)).not.toBe(await docxProjectionSemanticDigest(requested));
+});
+
 /** Every element in the main part, so a test can count Word markup directly. */
 function mainElements(root: XmlElement): XmlElement[] {
   const found = [root];

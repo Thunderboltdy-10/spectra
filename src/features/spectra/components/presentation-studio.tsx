@@ -1,5 +1,7 @@
 "use client";
 
+import { useStudioContextItems } from "./studio-context-menu";
+import { StudioToolPane } from "./studio-pane";
 import {
   AlignCenter,
   AlignLeft,
@@ -46,6 +48,7 @@ import {
   type ComponentProps,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
+  useLayoutEffect,
 } from "react";
 import { useModalFocus } from "@/components/ui/use-modal-focus";
 import { createPortal } from "react-dom";
@@ -622,7 +625,7 @@ function PresentationObjectInspector({
           />
         </label>
       ) : null}
-      {object.type === "chart" || object.type === "embed" ? (
+      {object.type === "chart" || (object.type === "embed" && !(object.content as { diagram?: unknown } | null)?.diagram) ? (
         <div className="presentation-source-binding">
           <SelectField
             label="Source work"
@@ -965,6 +968,47 @@ export function PresentationStudio({
   const [notesOpen, setNotesOpen] = useState(false);
   const [activeSlideId, setActiveSlideId] = useState(deck.slides[0]!.id);
   const [selectedObjectId, setSelectedObjectId] = useState<string>();
+  const slideVerbs = useRef<{
+    addSlide: () => void;
+    duplicateSlide: () => void;
+    deleteSlide: () => void;
+    moveSlide: (direction: -1 | 1) => void;
+    addObject: (type: PresentationObjectType) => void;
+    deleteSelectedObject: () => void;
+    moveSelectedLayer: (direction: -1 | 1) => void;
+  } | null>(null);
+  useStudioContextItems(({ target }) => {
+    if (readOnly || target.closest("[data-reference-id]")) return null;
+    const verbs = () => slideVerbs.current;
+    const slideId = target.closest("[data-studio-item]")?.getAttribute("data-studio-item");
+    if (slideId) {
+      setActiveSlideId(slideId);
+      return [[
+        { key: "slide-new", label: "New slide after", icon: Plus, onSelect: () => verbs()?.addSlide() },
+        { key: "slide-copy", label: "Duplicate slide", icon: Copy, onSelect: () => verbs()?.duplicateSlide() },
+        { key: "slide-up", label: "Move up", icon: ArrowUp, onSelect: () => verbs()?.moveSlide(-1) },
+        { key: "slide-down", label: "Move down", icon: ArrowDown, onSelect: () => verbs()?.moveSlide(1) },
+        { key: "slide-delete", label: "Delete slide", icon: Trash2, danger: true, onSelect: () => verbs()?.deleteSlide() },
+      ]];
+    }
+    const objectId = target.closest("[data-object-id]")?.getAttribute("data-object-id");
+    if (objectId) {
+      setSelectedObjectId(objectId);
+      setLayerSelection([objectId]);
+      return [[
+        { key: "object-front", label: "Bring forward", icon: ArrowUp, onSelect: () => verbs()?.moveSelectedLayer(1) },
+        { key: "object-back", label: "Send backward", icon: ArrowDown, onSelect: () => verbs()?.moveSelectedLayer(-1) },
+        { key: "object-delete", label: "Delete", icon: Trash2, danger: true, onSelect: () => verbs()?.deleteSelectedObject() },
+      ]];
+    }
+    if (!target.closest(".presentation-stage")) return null;
+    return [[
+      { key: "add-text", label: "Add text", onSelect: () => verbs()?.addObject("text") },
+      { key: "add-shape", label: "Add shape", onSelect: () => verbs()?.addObject("shape") },
+      { key: "slide-new", label: "New slide after", icon: Plus, onSelect: () => verbs()?.addSlide() },
+      { key: "slide-copy", label: "Duplicate slide", icon: Copy, onSelect: () => verbs()?.duplicateSlide() },
+    ]];
+  });
   /** A text box just drawn, which takes the caret once it is on the slide. */
   const [freshTextId, setFreshTextId] = useState<string>();
   const [layerSelection, setLayerSelection] = useState<string[]>([]);
@@ -1437,6 +1481,9 @@ export function PresentationStudio({
       ),
     );
   }
+  useLayoutEffect(() => {
+    slideVerbs.current = { addSlide, duplicateSlide, deleteSlide, moveSlide, addObject, deleteSelectedObject, moveSelectedLayer };
+  });
   function addSlide() {
     const slide = createPresentationSlide(deck.slides.length + 1);
     mutate((draft) => {
@@ -2354,7 +2401,7 @@ export function PresentationStudio({
       downloadBlob(blob, `${stem}.${format === "png" ? "slides.zip" : format}`);
       setIoMessage(
         `${format === "pptx"
-          ? "PowerPoint export preserved editable text, shapes, images, charts, tables, and notes; unsupported live embeds and complex motion remain Spectra-native."
+          ? "Exported to PowerPoint. Text, shapes, charts, tables and notes stay editable there, and diagrams come across as pictures."
           : format === "odp"
             ? "OpenDocument export contains editable slide text frames; media, live embeds, and advanced motion require the Spectra source for full fidelity."
             : "Static export completed from the current synchronized scene."}${linkedWarning}`,
@@ -3484,11 +3531,8 @@ export function PresentationStudio({
               </section>
             </div>
             {inspectorOpen ? (
-              <aside
-                className="presentation-inspector"
-                data-overlay={inspectorOverlays || undefined}
-                aria-label="Presentation inspector"
-              >
+              <StudioToolPane id="slide-tool" title="Slide settings" onClose={() => setInspectorPreference("closed")}>
+              <div className="presentation-inspector" data-in-pane aria-label="Presentation inspector">
                 <div className="mb-3 flex items-center gap-2">
                   <SelectField
                     ariaLabel="Inspector section"
@@ -3500,15 +3544,6 @@ export function PresentationStudio({
                     }
                     options={INSPECTOR_SECTIONS}
                   />
-                  <button
-                    type="button"
-                    className={INSPECTOR_ICON_BUTTON}
-                    aria-label="Hide inspector"
-                    title="Hide inspector"
-                    onClick={() => setInspectorPreference("closed")}
-                  >
-                    <X className="size-4" />
-                  </button>
                 </div>
                 <div className="presentation-settings-grid">
                   {inspectorSection === "slide" ? (
@@ -4306,7 +4341,8 @@ export function PresentationStudio({
                     </section>
                   ) : null}
                 </div>
-              </aside>
+              </div>
+              </StudioToolPane>
             ) : null}
           </div>
         </>

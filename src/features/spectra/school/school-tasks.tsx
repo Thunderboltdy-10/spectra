@@ -2,7 +2,7 @@
 
 import { SearchField } from "@/components/ui/search-field";
 import { useMemo, useState } from "react";
-import { useQuery } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
 import { Segmented } from "@/components/ui/segmented";
@@ -10,7 +10,7 @@ import { SelectField } from "@/components/ui/select";
 import { api } from "../../../../convex/_generated/api";
 import type { SchoolSyncKind } from "../../../../shared/school-sync";
 import { useAuthedArgs } from "../data/use-authed-args";
-import { groupCurrentTasks, groupPastTasks, taskMatches, type SchoolPreferences } from "./school-model";
+import { groupCurrentTasks, groupPastTasks, hasSchoolTaskSnapshot, taskMatches, type SchoolPreferences, type SchoolSyncStatus } from "./school-model";
 import { TaskGroup, TaskTicket, TicketsSkeleton } from "./school-tickets";
 import { inkStyle, useClassBook } from "./use-class-book";
 
@@ -23,6 +23,7 @@ export type TaskView = "current" | "past" | "all";
 
 export function TasksSection({
   now,
+  status,
   view,
   onViewChange,
   selectedId,
@@ -33,6 +34,7 @@ export function TasksSection({
   onOpenSync,
 }: {
   now: number;
+  status: SchoolSyncStatus | undefined;
   view: TaskView;
   onViewChange: (view: TaskView) => void;
   selectedId: string | null;
@@ -71,6 +73,7 @@ export function TasksSection({
           action={<Button size="sm" onClick={onOpenSync}>Open Sync</Button>}
         />
       );
+    if (!hasSchoolTaskSnapshot(status, view)) return null;
     return (
       <EmptyState
         compact

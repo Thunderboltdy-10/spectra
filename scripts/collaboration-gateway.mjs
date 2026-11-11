@@ -1,6 +1,8 @@
 import { Server } from "@hocuspocus/server";
 import { artifactProjection } from "./collaboration-artifact-projection.mjs";
-import { createHash } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { installAgentHub } from "./agent-hub.mjs";
+import { installRunRelay } from "./run-relay.mjs";
 import { MAX_ASSEMBLED_BYTES, installServerFraming, selectFrameProtocol } from "../shared/collaboration-framing.mjs";
 import { jwtVerify } from "jose";
 import * as Y from "yjs";
@@ -23,6 +25,8 @@ import {
   shouldCompactRoom,
   shouldRepairNativeProjection,
   shouldRecoverNativeRoom,
+  createRoomLoadCache,
+  loadRoomThroughCache,
 } from "./collaboration-room-state.mjs";
 import {
   MAX_DURABLE_UPDATE_BYTES,
@@ -102,6 +106,13 @@ const GATEWAY_PROTOCOL_VERSION = 1;
 const PERSISTENCE_RETRY_MAX_MS = 5_000;
 const PERSISTENCE_REBASE_MAX_ATTEMPTS = 8;
 const GATEWAY_STARTED_AT = Date.now();
+// Deployed, Convex tells the gateway about each permission change and each
+// connection's lease expires on its own, so the sweep is only a backstop. Each
+// sweep costs a policy and an authorize action per open artifact (E2).
+const POLICY_SWEEP_MS = process.env.NODE_ENV === "production" ? 5 * 60_000 : 30_000;
+const POLICY_PUSH_MAX_AGE_MS = 60_000;
+const POLICY_PUSH_MAX_BYTES = 64 * 1024;
+const roomLoads = createRoomLoadCache();
 const activeConnections = new Set();
 const authorizationGuard = createCollaborationAuthorizationGuard({
   authorize: context => bridge("authorize", {
@@ -223,7 +234,7 @@ function checkpointScheduler(document) {
     maxMs: Number.POSITIVE_INFINITY,
     persist: async (payload) => {
       try {
-        const stored = await bridge("load", payload);
+        const stored = await loadRoom(payload);
         if (!stored || (stored.lastProjectionSequence ?? 0) >= stored.nextSequence - 1) return;
         const canonical = applyStoredRoomUpdates(Y, stored);
         try {
@@ -906,6 +917,10 @@ function extractYjsUpdate(frame) {
   return decoding.readVarUint8Array(decoder);
 }
 
+function loadRoom(payload) {
+  return loadRoomThroughCache(roomLoads, (request) => bridge("load", request), payload);
+}
+
 async function refreshAuthorization(context) {
   return authorizationGuard.refresh(context);
 }
@@ -965,6 +980,13 @@ const server = new Server({
   stopOnSignals: false,
 
   async onRequest({ request, response }) {
+    if (request.method === "POST" && request.url?.startsWith("/_spectra/policy-changed")) {
+      const artifactIds = await readPolicyPush(request);
+      response.writeHead(artifactIds ? 204 : 403);
+      response.end();
+      if (artifactIds) void enforceActivePolicyVersions(new Set(artifactIds));
+      throw null;
+    }
     if (!request.url?.startsWith("/_spectra/health")) return;
     const convex = await probeConvexReadiness();
     response.writeHead(200, {
@@ -1029,21 +1051,26 @@ const server = new Server({
 
   async connected({ connection }) {
     const document = connection.document;
+    let closed = false;
+    let unwatch = () => {};
+    connection.onClose(() => {
+      closed = true;
+      activeConnections.delete(connection);
+      unwatch();
+    });
     try { await reauthorize(connection.context); }
     catch {
       connection.webSocket.close(connection.context.authorizationRevoked ? 4403 : 1013,
         connection.context.authorizationRevoked ? "Access or permissions changed" : "Authorization temporarily unavailable");
       return;
     }
+    if (closed) return;
     activeConnections.add(connection);
+    unwatch = authorizationGuard.watch(connection);
+    if (closed) { unwatch(); return; }
     openDocuments.set(durableHeadKey(connection.context), { document, nextSequence: 0 });
     try { await catchUpCanonicalRoom(document, connection.context); }
-    catch (error) { forceCanonicalReconnect(connection.context, collaborationFailureMessage(error)); }
-    const unwatch = authorizationGuard.watch(connection);
-    connection.onClose(() => {
-      activeConnections.delete(connection);
-      unwatch();
-    });
+    catch (error) { if (!closed) forceCanonicalReconnect(connection.context, collaborationFailureMessage(error)); }
   },
 
   async beforeHandleMessage({
@@ -1367,7 +1394,7 @@ const server = new Server({
 
   async onLoadDocument({ context }) {
     await reauthorize(context);
-    let stored = await bridge("load", {
+    let stored = await loadRoom({
       artifactId: context.artifactId,
       partitionKey: context.partitionKey,
       accountId: context.accountId,
@@ -1412,6 +1439,7 @@ const server = new Server({
             const projectionForBridge = observedProjectionJson;
             const spilledRef = null;
             if (shouldRecover) {
+              roomLoads.forget(context.artifactId, context.partitionKey);
               await bridge("recover", {
                 artifactId: context.artifactId,
                 partitionKey: context.partitionKey,
@@ -1554,6 +1582,7 @@ const server = new Server({
         bootstrapPayload.update = Buffer.from(update).toString("base64");
       }
       bootstrapPayload.projectionJson = projectionJson;
+      roomLoads.forget(context.artifactId, context.partitionKey);
       await bridge("bootstrap", bootstrapPayload);
     }
     await reauthorize(context);
@@ -1561,8 +1590,16 @@ const server = new Server({
   },
 
   async onStoreDocument({ lastContext }) {
-    if (!lastContext) return;
-    await reauthorize(lastContext);
+    // A change the gateway applied itself has no connection behind it: no actor to reauthorize.
+    if (!lastContext?.artifactId) return;
+    // Everything accepted is already stored; this only compacts. The last
+    // person has left, so their lapsed session is no reason to keep the room in
+    // memory for ever, which is what Hocuspocus does when this hook throws.
+    try {
+      await reauthorize(lastContext);
+    } catch {
+      return;
+    }
     await compactStoredRoom(lastContext, { countAppend: false });
   },
   async onDisconnect({ document, clientsCount }) {
@@ -1583,14 +1620,44 @@ const server = new Server({
   },
 });
 
-async function enforceActivePolicyVersions() {
-  if (policySweepRunning || activeConnections.size === 0) return;
+/** The artifact ids in a signed, recent notice from Convex; null for anything else. */
+async function readPolicyPush(request) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > POLICY_PUSH_MAX_BYTES) return null;
+    chunks.push(chunk);
+  }
+  const body = Buffer.concat(chunks);
+  const supplied = Buffer.from(String(request.headers["x-spectra-signature"] ?? ""), "hex");
+  const expected = createHmac("sha256", bridgeKey).update(body).digest();
+  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return null;
+  try {
+    const notice = JSON.parse(body.toString("utf8"));
+    if (Math.abs(Date.now() - notice.at) > POLICY_PUSH_MAX_AGE_MS || !Array.isArray(notice.artifactIds)) return null;
+    return notice.artifactIds.map(String);
+  } catch {
+    return null;
+  }
+}
+
+let policySweepWaiting = null;
+
+async function enforceActivePolicyVersions(only) {
+  if (activeConnections.size === 0) return;
+  if (policySweepRunning) {
+    // A push during a sweep checks those rooms straight after it.
+    if (only) policySweepWaiting = new Set([...(policySweepWaiting ?? []), ...only]);
+    return;
+  }
   policySweepRunning = true;
   try {
     const grouped = new Map();
     for (const connection of activeConnections) {
       const context = connection.context;
       if (!context?.artifactId || !context?.partitionKey) continue;
+      if (only && !only.has(String(context.artifactId))) continue;
       const key = `${context.artifactId}\u0000${context.partitionKey}`;
       const group = grouped.get(key) ?? {
         artifactId: context.artifactId,
@@ -1644,16 +1711,26 @@ async function enforceActivePolicyVersions() {
     );
   } finally {
     policySweepRunning = false;
+    if (policySweepWaiting) {
+      const waiting = policySweepWaiting;
+      policySweepWaiting = null;
+      void enforceActivePolicyVersions(waiting);
+    }
   }
 }
 
 const policySweep = setInterval(() => {
   void enforceActivePolicyVersions();
-}, 5_000);
+}, POLICY_SWEEP_MS);
 policySweep.unref?.();
 
 installServerFraming(server, request => authenticatedRequests.has(request));
 await server.listen();
+const agentHub = installAgentHub(server.httpServer, {
+  serverKey: process.env.SPECTRA_COLLAB_TOKEN_SECRET,
+  bridgeKey: process.env.SPECTRA_COLLAB_BRIDGE_KEY,
+});
+const runRelay = installRunRelay(server.httpServer, { key: process.env.SPECTRA_COLLAB_TOKEN_SECRET });
 process.stdout.write(
   `Spectra collaboration gateway listening on ${process.env.SPECTRA_COLLAB_PORT || 1234}\n`,
 );
@@ -1662,6 +1739,8 @@ async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   clearInterval(policySweep);
+  agentHub.close();
+  runRelay.close();
   authorizationGuard.dispose();
   const { unflushed } = await drainGatewayForShutdown({
     stopAccepting: () => server.httpServer.close(),

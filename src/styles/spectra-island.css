@@ -19,6 +19,18 @@
   animation: island-content-in 200ms var(--ease-standard, ease-out) both;
 }
 
+/* The composer's empty line changing what it says: the old words leave as the new come in over them. */
+@keyframes island-content-out {
+  to {
+    opacity: 0;
+    filter: blur(3px);
+  }
+}
+
+.island-content-out {
+  animation: island-content-out 200ms var(--ease-standard, ease-out) both;
+}
+
 /* The needs-you glint: a warm dot that breathes. */
 @keyframes island-glint {
   0%,
@@ -93,7 +105,7 @@
     inset 0 2px 0 var(--tab-ink),
     inset 0 -1px 0 var(--card-border);
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
@@ -118,7 +130,7 @@
   background: var(--danger);
   padding: 0 4px;
   color: var(--bg-primary);
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
@@ -129,6 +141,16 @@
 
 /* What is put away has no lip: at rest only the threads in play show. */
 .island-rail:not([data-raised]) :is(.island-rail-tab[data-side="done"], .island-rail-threads) {
+  translate: 0 100%;
+}
+
+/* The field open, the hand away (LAUNCH-REVIEW F6): a thread that wants nothing keeps its lip, or nothing if
+   put away; working, asking, a problem or unread still stand. Hovering or focusing the island raises them all. */
+.island-rail[data-raised][data-settled] .island-rail-tab[data-state="seen"]:not([data-current]) {
+  translate: 0 calc(100% - 5px);
+}
+
+.island-rail[data-raised][data-settled] :is(.island-rail-tab[data-state="seen"][data-side="done"]:not([data-current]), .island-rail-threads) {
   translate: 0 100%;
 }
 
@@ -199,6 +221,8 @@
   overflow-y: hidden;
   scrollbar-width: none;
   overscroll-behavior-x: contain;
+  /* A tab at the leading edge is whole or gone, never cut (LAUNCH-REVIEW F6); the trailing edge fades. */
+  scroll-snap-type: x mandatory;
 }
 
 .island-rail-scroller::-webkit-scrollbar {
@@ -208,19 +232,13 @@
 .island-rail-scroller > .island-rail-tab {
   flex: none;
   max-width: 152px;
+  scroll-snap-align: start;
 }
 
 .island-rail-scroller[data-overflow-end] {
   mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent);
 }
 
-.island-rail-scroller[data-overflow-start] {
-  mask-image: linear-gradient(90deg, transparent, #000 36px);
-}
-
-.island-rail-scroller[data-overflow-start][data-overflow-end] {
-  mask-image: linear-gradient(90deg, transparent, #000 36px, #000 calc(100% - 36px), transparent);
-}
 
 .island-rail-threads {
   margin-left: 3px;
@@ -282,6 +300,7 @@
 
   .island-switcher,
   .island-content-in,
+  .island-content-out,
   .island-needs-glint {
     animation: none;
   }
@@ -325,7 +344,7 @@
 
 .composer-heard {
   padding: 0 16px 10px;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text-secondary);
 }
 

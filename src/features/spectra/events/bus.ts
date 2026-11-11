@@ -83,7 +83,8 @@ export class TypedSpectraBus<
   ): Promise<{ listeners: number; results: unknown[] }> {
     const listeners = registry.get(key);
     if (!listeners) return { listeners: 0, results: [] };
-    const results = await Promise.all([...listeners].map((listener) => listener(payload)));
-    return { listeners: listeners.size, results };
+    const dispatched = [...listeners];
+    const results = await Promise.all(dispatched.map((listener) => listener(payload)));
+    return { listeners: dispatched.length, results };
   }
 }

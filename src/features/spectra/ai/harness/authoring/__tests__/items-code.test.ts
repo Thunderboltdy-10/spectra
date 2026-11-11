@@ -138,7 +138,7 @@ describe("code authoring", () => {
     expect(() => resolveArtifactWriteInput("code", null, { content: next }, "")).not.toThrow();
     expect(() => applyCodeEdits(code, [{ op: "replace", find: "x", replace: "y" }])).toThrow(/file is required/);
     expect(() => applyCodeEdits(code, [{ op: "replace", file: "app.js", find: "nothing", replace: "y" }])).toThrow(
-      /Edit 1 \(replace\): `find` text is not in app\.js/,
+      /Edit 1 \(replace\): `find` text "[^"]*" is not in app\.js/,
     );
   });
 });

@@ -40,11 +40,15 @@ export const workTypeMeta = Object.freeze({
 /**
  * A file is named for what it holds, as the student would: a PDF, a Word
  * document, a spreadsheet. Its extension decides, and a file without a known
- * one stays a file. Office files wear the hue of the Spectra type they open
- * alongside, so a spreadsheet looks like a spreadsheet wherever it lies.
+ * one stays a file. A file Spectra opens as its own work already is that work
+ * wherever it lies. The rest wear the hue of the Spectra type they sit alongside,
+ * so a spreadsheet looks like a spreadsheet.
  */
 const FILE_KINDS: ReadonlyArray<{ pattern: RegExp; presentation: TypePresentation }> = [
   { pattern: /\.pdf$/i, presentation: { ...visuals.resource, label: "PDF" } },
+  { pattern: /\.(docx|docm|dotx|dotm)$/i, presentation: workTypeMeta.document },
+  { pattern: /\.(xlsx|xlsm|xltx|xltm|xlam)$/i, presentation: workTypeMeta.sheets },
+  { pattern: /\.(pptx|pptm|potx|potm|ppsx|ppsm)$/i, presentation: workTypeMeta.presentation },
   { pattern: /\.(docx?|odt|rtf|pages)$/i, presentation: { ...visuals.document, label: "Word document" } },
   { pattern: /\.(xlsx?|ods|csv|numbers)$/i, presentation: { ...visuals.sheets, label: "Spreadsheet" } },
   { pattern: /\.(pptx?|odp|key)$/i, presentation: { ...visuals.presentation, label: "Slide deck" } },

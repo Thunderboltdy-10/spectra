@@ -18,7 +18,7 @@ export type LabelPolicy = "always" | "never" | "whenRoom";
 
 export type BarCommand = {
   id: string;
-  icon: IconName | React.ReactNode;
+  icon: IconName | React.ReactElement | null;
   label: string;
   shortcut?: string;
   /** `always`: words carry the meaning. `never`: a universal symbol. Default `whenRoom`. */
@@ -170,7 +170,7 @@ export function AdaptiveBar({
         widths[id] ??= { full: 0, icon: 0 };
         widths[id][mode as "full" | "icon"] = element.getBoundingClientRect().width;
       }
-      const next = planLayout({ commands, plan, widths, available: host.clientWidth, gap: GAP, more: MORE });
+      const next = planLayout({ commands, plan, widths, available: roomFor(host), gap: GAP, more: MORE });
       setLayout((current) =>
         sameSet(current.labelHidden, next.labelHidden) && sameSet(current.inMenu, next.inMenu) ? current : next,
       );
@@ -179,6 +179,7 @@ export function AdaptiveBar({
     const observer = new ResizeObserver(fit);
     observer.observe(host);
     observer.observe(measure);
+    if (host.parentElement) observer.observe(host.parentElement);
     return () => observer.disconnect();
   }, [commands, plan]);
 
@@ -221,6 +222,15 @@ export function AdaptiveBar({
       ) : null}
     </div>
   );
+}
+
+function roomFor(host: HTMLElement) {
+  const style = window.getComputedStyle(host);
+  if (style.flexGrow !== "0") return host.clientWidth;
+  const parent = host.parentElement?.clientWidth ?? host.clientWidth;
+  if (style.maxWidth.endsWith("%")) return (parent * parseFloat(style.maxWidth)) / 100;
+  const fixed = parseFloat(style.maxWidth);
+  return Number.isFinite(fixed) ? Math.min(fixed, parent) : parent;
 }
 
 function sameSet(a: ReadonlySet<string>, b: ReadonlySet<string>) {

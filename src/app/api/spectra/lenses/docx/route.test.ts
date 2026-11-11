@@ -22,7 +22,8 @@ vi.mock("@/lib/convex-server", () => ({
 // (nativeMaterialization); the route only hands it the verified candidate.
 const queueHumanNativeMaterialization = vi.fn();
 const commitHumanCloudMaterialization = vi.fn();
-vi.mock("@/lib/native-materialization-server", () => ({
+vi.mock("@/lib/native-materialization-server", async importOriginal => ({
+  ...await importOriginal<typeof import("@/lib/native-materialization-server")>(),
   queueHumanNativeMaterialization,
   commitHumanCloudMaterialization,
 }));
@@ -86,6 +87,7 @@ describe("DOCX materialization route", () => {
     };
     fetchVerifiedNativePayload.mockResolvedValue({ truth, payload: sourcePayload });
     convexQuery.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      if (name === "syncPolicy:effective") return { contentDirection: "bidirectional", protectedOriginal: false };
       if (name === "replicas:forWork")
         return {
           replicas: [

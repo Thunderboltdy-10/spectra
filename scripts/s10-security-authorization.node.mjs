@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { createCollaborationAuthorizationGuard } from "./collaboration-persist.mjs";
+import { COLLABORATION_AUTHORIZE_CACHE_MS, createCollaborationAuthorizationGuard } from "./collaboration-persist.mjs";
 
 test("concurrent peers share one authority request only for the same actor, room and policy", async () => {
   let calls = 0;
@@ -49,6 +49,7 @@ function fixture(authorize = async () => ({ allowed: true, canModify: true })) {
   const guard = createCollaborationAuthorizationGuard({
     authorize,
     now: () => time,
+    maxAgeMs: 15_000,
     closeConnection: (peer, code) => calls.push({ peer, code }),
   });
   guard.watch(connection);
@@ -145,11 +146,12 @@ test("the real connected hook expires a quiet socket while the real policy sweep
   const connection = { context, document: {}, onClose: () => {}, webSocket: { close: code => closed.push(code) } };
   const guard = createCollaborationAuthorizationGuard({
     authorize: () => new Promise(() => {}),
+    maxAgeMs: 15_000,
     closeConnection: (peer, code) => { activeConnections.delete(peer); peer.webSocket.close(code); },
   });
   const connectedStart = source.indexOf("  async connected({ connection })");
   const connectedEnd = source.indexOf("  async beforeHandleMessage(", connectedStart);
-  const sweepStart = source.indexOf("async function enforceActivePolicyVersions()");
+  const sweepStart = source.indexOf("async function enforceActivePolicyVersions(");
   const sweepEnd = source.indexOf("const policySweep =", sweepStart);
   assert(connectedStart >= 0 && connectedEnd > connectedStart && sweepStart >= 0 && sweepEnd > sweepStart);
   const connected = new Function("reauthorize", "activeConnections", "authorizationGuard",
@@ -159,7 +161,7 @@ test("the real connected hook expires a quiet socket while the real policy sweep
     new Map(), () => "fixture-room", async () => {}, () => {}, String,
   );
   const sweep = new Function("activeConnections", "bridge", "refreshAuthorization",
-    `let policySweepRunning = false; ${source.slice(sweepStart, sweepEnd)} return enforceActivePolicyVersions;`)(
+    `let policySweepRunning = false; let policySweepWaiting = null; ${source.slice(sweepStart, sweepEnd)} return enforceActivePolicyVersions;`)(
     activeConnections, () => new Promise(() => {}), value => guard.refresh(value),
   );
   try {
@@ -200,7 +202,7 @@ test("a hanging refresh is coalesced, times out, and its late reply cannot exten
     await Promise.resolve();
     await Promise.resolve();
     assert.equal(context.authorizationCheckedAt, 1_000);
-    t.mock.timers.tick(10_000);
+    t.mock.timers.tick(COLLABORATION_AUTHORIZE_CACHE_MS - 5_000);
     assert.deepEqual(closed, [1013]);
     await assert.rejects(guard.require(context), /AUTHORIZATION_UNAVAILABLE/);
   } finally { guard.dispose(); }

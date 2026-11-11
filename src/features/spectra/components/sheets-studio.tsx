@@ -1,4 +1,6 @@
 "use client";
+import { StudioToolPane } from "./studio-pane";
+import { useLatest, useStudioContextItems } from "./studio-context-menu";
 import { conditionalCellCss, conditionalFormatStyles } from "../sheets/conditional-format";
 import { contentForDurableRequest } from "../data/durable-content";
 
@@ -14,6 +16,8 @@ import {
   TriangleAlert,
   Underline,
   X,
+  Copy,
+  Filter,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { chartFirstRowIsHeader, chartSummary } from "../sheets/chart-dataset";
@@ -2985,6 +2989,44 @@ export const SheetsStudio = memo(function SheetsStudio({
    * the only place an operation is implemented and a disabled command is refused
    * the same way everywhere (C1/C2).
    */
+  const sheetVerbs = useLatest({ runCommand, range });
+  useStudioContextItems(({ target }) => {
+    const address = target.closest("[data-address]")?.getAttribute("data-address");
+    if (!address) return null;
+    const cell = parseAddress(address);
+    if (!cell) return null;
+    // A right-click inside the selection acts on it; anywhere else moves it there.
+    const { start, end } = sheetVerbs.current.range;
+    const inside =
+      cell.row >= Math.min(start.row, end.row) && cell.row <= Math.max(start.row, end.row) &&
+      cell.column >= Math.min(start.column, end.column) && cell.column <= Math.max(start.column, end.column);
+    if (!inside) setRange({ start: cell, end: cell });
+    const run = (id: string) => () => void sheetVerbs.current.runCommand(id);
+    return [
+      [
+        { key: "cut", label: "Cut", hint: "Ctrl X", disabled: grantLocked, onSelect: run("clipboard.cut") },
+        { key: "copy", label: "Copy", icon: Copy, hint: "Ctrl C", onSelect: run("clipboard.copy") },
+        { key: "paste", label: "Paste", hint: "Ctrl V", disabled: grantLocked, onSelect: run("clipboard.paste") },
+      ],
+      ...(grantLocked ? [] : [
+        [
+          { key: "row", label: "Insert row", onSelect: run("insert.row") },
+          { key: "column", label: "Insert column", onSelect: run("insert.column") },
+          { key: "sort-asc", label: "Sort A to Z", onSelect: run("sort.asc") },
+          { key: "sort-desc", label: "Sort Z to A", onSelect: run("sort.desc") },
+          { key: "filter", label: "Filter", icon: Filter, onSelect: run("filter.toggle") },
+        ],
+        [
+          { key: "clear", label: "Clear contents", onSelect: run("clear.values") },
+          { key: "clear-format", label: "Clear formatting", onSelect: run("clear.formats") },
+          { key: "hide-row", label: "Hide row", onSelect: run("hide.row") },
+          { key: "hide-column", label: "Hide column", onSelect: run("hide.column") },
+          { key: "delete-row", label: "Delete row", icon: Trash2, onSelect: run("delete.row") },
+          { key: "delete-column", label: "Delete column", icon: Trash2, onSelect: run("delete.column") },
+        ],
+      ]),
+    ];
+  });
   function runCommand(id: string, value?: CommandParam) {
     if (!contract) {
       const binding = actionsRef.current.find(
@@ -4818,37 +4860,19 @@ export const SheetsStudio = memo(function SheetsStudio({
             })}
           </div>
         </div>
-        {/* One inspector rail. It overlays the grid instead of pushing it down,
-            which is what the four bars it replaces used to do, and it stays in
-            the DOM (never portaled) so its AI target hooks keep resolving. */}
+        {/* One inspector, in the pane every work opens things in. It stays inside
+            the work's own element, so its AI target hooks keep resolving. */}
         {panelMode ? (
-          <aside
-            aria-label={panelTitle}
-            className={
-              mode === "split"
-                ? "absolute inset-x-0 bottom-0 z-chrome flex max-h-[min(46%,380px)] flex-col gap-3 overflow-y-auto border-t border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-lg)] motion-safe:animate-surface-in"
-                : "absolute inset-y-0 right-0 z-chrome flex w-[min(312px,calc(100%-44px))] flex-col gap-3 overflow-y-auto border-l border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-lg)] motion-safe:animate-surface-in"
-            }
+          <StudioToolPane
+            id="sheet-tool"
+            title={panelTitle}
+            onClose={() => {
+              if (inspector === "find") setSearch("");
+              if (inspector === "filter") setFilterEditor(null);
+              setInspector(null);
+            }}
           >
-            <header className="flex items-center gap-2">
-              <h2 className="min-w-0 flex-1 truncate text-caption font-semibold text-[var(--text-primary)]">
-                {panelTitle}
-              </h2>
-              {inspector ? (
-                <button
-                  type="button"
-                  aria-label="Close panel"
-                  onClick={() => {
-                    if (inspector === "find") setSearch("");
-                    if (inspector === "filter") setFilterEditor(null);
-                    setInspector(null);
-                  }}
-                  className="grid size-7 shrink-0 place-items-center rounded-control text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                >
-                  <X className="size-4" />
-                </button>
-              ) : null}
-            </header>
+            <div aria-label={panelTitle} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-6 pt-1">
 
             {panelMode === "format" ? (
               <>
@@ -5859,7 +5883,8 @@ export const SheetsStudio = memo(function SheetsStudio({
                 </div>
               </>
             ) : null}
-          </aside>
+            </div>
+          </StudioToolPane>
         ) : null}
 
         {/* Importing replaces the whole workbook, so the wait is stated over the

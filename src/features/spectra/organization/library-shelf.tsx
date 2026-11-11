@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useQuery } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/toast";
 import { api } from "../../../../convex/_generated/api";
@@ -21,11 +21,13 @@ import { startOfDay } from "../school/school-model";
 import { classWorkspaceIdentity, isClassWorkspace } from "./class-shelf";
 import { DueTask } from "./due-task";
 import { PlaceRow, type WorkPicking } from "./library-note";
-import { relativeTime } from "./node-identity";
+import { relativeTime, workspaceInk } from "./node-identity";
 import { groupByWhen } from "./shelf-model";
 import { ShelfNotes, useShelfStacks } from "./shelf-stacks";
 import { useShelfGather } from "./shelf-gather";
-import { treeFailureMessage, useTreeActions, useTreeQuickView, type TreeNode } from "./tree-client";
+import { applyOrder, useDragReorder } from "@/components/ui/use-drag-reorder";
+import { useSpectraPreferences } from "../settings/preference-store";
+import { treeFailureMessage, useTreeActions, useTreeQuickView, useWorkspaceTallies, type TreeNode } from "./tree-client";
 import { useLoadOnApproach } from "./use-load-on-approach";
 
 /*
@@ -62,7 +64,7 @@ function places(nodes: readonly TreeNode[], book: ClassBook) {
       ? classWorkspaceIdentity(node, book)
       : {
           ...classIdentity({ providerClassId: node.nodeId, title: node.name }),
-          ink: node.workspace?.color ?? "var(--ink-violet)",
+          ink: workspaceInk(node.workspace?.color),
         };
     const subject = isClass && identity.subject;
     (subject ? subjects : others).push({ node, identity, subject });
@@ -72,6 +74,16 @@ function places(nodes: readonly TreeNode[], book: ClassBook) {
 }
 
 const bar = "block animate-pulse rounded-full bg-[var(--bg-tertiary)]";
+
+/** What a workspace holds, as people count it; the threads in it aren't its artifacts. */
+function tallyLine(tally: { artifacts: number; threads: number } | undefined, childCount?: number) {
+  if (!tally) return childCount === 0 ? "Empty" : "\u00a0";
+  if (!tally.artifacts && !tally.threads) return childCount ? "Folders only" : "Empty";
+  return [
+    tally.artifacts ? `${tally.artifacts} artifact${tally.artifacts === 1 ? "" : "s"}` : null,
+    tally.threads ? `${tally.threads} thread${tally.threads === 1 ? "" : "s"}` : null,
+  ].filter(Boolean).join(", ");
+}
 
 /**
  * The shelf on its way, in the shelf's own grid: notes where the notes will
@@ -133,8 +145,22 @@ export function LibraryShelf({
   const comingUp = useComingUp(now);
   const [allWorkspaces, setAllWorkspaces] = useState(false);
   const [allLoose, setAllLoose] = useState(false);
-  const workspaces = places(nodes, book);
-  const shownPlaces = allWorkspaces ? workspaces : workspaces.slice(0, WORKSPACES_SHOWN);
+  const { preferences, update: updatePreferences } = useSpectraPreferences();
+  const workspaces = applyOrder(places(nodes, book), (place) => place.node.nodeId, preferences.appearance.workspaceOrder);
+  const tileOrder = useDragReorder({
+    ids: workspaces.map((place) => place.node.nodeId),
+    onReorder: (workspaceOrder) => updatePreferences("appearance", { workspaceOrder }),
+    disabled: Boolean(picking),
+    attribute: "data-workspace-tile",
+  });
+  const tallies = useWorkspaceTallies(
+    workspaces.flatMap(({ node }) => (node.workspace?.workspaceId ? [node.workspace.workspaceId] : [])),
+  );
+  const placeOf = new Map(workspaces.map((place) => [place.node.nodeId, place]));
+  const shownPlaces = (allWorkspaces ? tileOrder.order : tileOrder.order.slice(0, WORKSPACES_SHOWN)).flatMap((nodeId) => {
+    const place = placeOf.get(nodeId);
+    return place ? [place] : [];
+  });
   const actions = useTreeActions();
   const moveInto = (nodeId: string, placeId: string) => {
     if (nodeId === placeId) return;
@@ -169,6 +195,7 @@ export function LibraryShelf({
     <button
       key={node.nodeId}
       type="button"
+      {...tileOrder.itemProps(node.nodeId)}
       data-node-row={node.nodeId}
       data-shelf-place={node.nodeId}
       data-life-launch
@@ -183,9 +210,7 @@ export function LibraryShelf({
       </span>
       <span className="school-tile-foot">
         <span>
-          {node.childCount
-            ? `${node.childCount} item${node.childCount === 1 ? "" : "s"}`
-            : "Empty"}
+          {tallyLine(node.workspace?.workspaceId ? tallies?.[node.workspace.workspaceId] : undefined, node.childCount)}
         </span>
         <span className="ml-auto text-[var(--text-tertiary)]">
           {relativeTime(node.activityAt, now)}
@@ -205,7 +230,7 @@ export function LibraryShelf({
               Workspaces{" "}
               <span className="school-heading-count">{workspaces.length}</span>
             </h2>
-            <div className="school-tiles">
+            <div ref={(node) => void (tileOrder.containerRef.current = node)} className="school-tiles">
               {shownPlaces.map((place) => tile(place))}
               {onNewWorkspace ? (
                 <button

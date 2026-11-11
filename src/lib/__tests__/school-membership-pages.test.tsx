@@ -35,14 +35,13 @@ vi.mock("@/features/spectra/pages/analytics-shell", () => ({
   },
 }));
 
-import AnalyticsPage from "@/app/analytics/page";
-import SchoolPage from "@/app/school/page";
-import ManageBacPage from "@/app/managebac/page";
+import AnalyticsPage from "@/app/(app)/analytics/page";
+import SchoolPage from "@/app/(app)/school/page";
+import ManageBacPage from "@/app/(app)/managebac/page";
 
 // Resolve the server boundary before rendering client children, as Next does.
 async function renderPage(page: typeof SchoolPage) {
-  const shell = await page();
-  const boundary = shell.props.children as ReactElement<{
+  const boundary = (await page()) as ReactElement<{
     children: ReactNode;
   }>;
   const resolve = boundary.type as (props: {

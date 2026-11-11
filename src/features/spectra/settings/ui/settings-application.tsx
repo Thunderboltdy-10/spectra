@@ -21,6 +21,9 @@ import { useSpectraPreferences } from "../preference-store";
 import { preferenceSaveStatus } from "../preference-save-status";
 import type { PreferenceSection, SpectraPreferences } from "../schema";
 import { clearSpectraMemory, exportSpectraMemory } from "../../data/api";
+import { MemoryFilesSettings } from "./memory-files-settings";
+import { RuntimeSettings } from "./runtime-settings";
+import { WorkHomeChoice } from "../../devices/work-home-choice";
 import { downloadDocumentBlob } from "../../components/artifact-studio-file-utils";
 import { COMMAND_TABS } from "../../commands";
 import { SMART_COMPLETION_TARGET } from "../../actions/protocol/semantic-action";
@@ -38,6 +41,8 @@ import { registerSettingsToggleControl } from "../../collaboration/settings-togg
 
 const SECTIONS = [
   { id: "ai", label: "Spectra AI", icon: "agent" },
+  { id: "subscriptions", label: "AI subscriptions", icon: "agents" },
+  { id: "storage", label: "Where work is kept", icon: "devices" },
   { id: "writing", label: "Writing", icon: "edit" },
   { id: "day", label: "Your day", icon: "clock" },
   { id: "appearance", label: "Appearance", icon: "theme" },
@@ -102,11 +107,18 @@ type SectionProps<K extends PreferenceSection> = {
   update: (patch: Partial<SpectraPreferences[K]>) => void;
 };
 
+const ISLAND_CENTRE_OPTIONS = [
+  { value: "page", label: "Middle of the page" },
+  { value: "screen", label: "Middle of the screen" },
+];
+
 function ConversationSettings({ p, update }: SectionProps<"ai">) {
   return (
     <SettingGroup title="Conversations and the island" description="How new messages continue, and how the island at the bottom of every page waits for you.">
       <ToggleRow label="Continue the current conversation" description="When off, an unassigned send begins a new conversation. Explicitly selected conversations still continue." checked={p.continueCurrentConversation} onCheckedChange={(continueCurrentConversation) => update({ continueCurrentConversation })} />
+      <ToggleRow label="Open the thread when I send" description="When off, the answer rises from its tab when it is ready." checked={p.openConversationAfterSend} onCheckedChange={(openConversationAfterSend) => update({ openConversationAfterSend })} />
       <SettingRow label="The dock at rest" description="Show it from the edge keeps the dock hidden until the pointer reaches the bottom of the screen, or you press Ctrl+J. Spectra still shows it when it has a question for you." control={<SelectField ariaLabel="The dock at rest" value={p.islandWake} onChange={(islandWake) => update({ islandWake: islandWake as "prism" | "edge" })} options={ISLAND_WAKE_OPTIONS} />} />
+      <SettingRow label="Where the island sits" description="The middle of the page moves as side columns open and close. The middle of the screen stays put." control={<SelectField ariaLabel="Where the island sits" value={p.islandCentre} onChange={(islandCentre) => update({ islandCentre: islandCentre as "page" | "screen" })} options={ISLAND_CENTRE_OPTIONS} />} />
       <ToggleRow label="Open requests for input" description="Required questions expand automatically while the run waits for you." checked={p.expandRequiredInput} onCheckedChange={(expandRequiredInput) => update({ expandRequiredInput })} />
       <ToggleRow label="Keep completed runs nearby" checked={p.retainCompletedRunTabs} onCheckedChange={(retainCompletedRunTabs) => update({ retainCompletedRunTabs })} />
       {p.retainCompletedRunTabs ? <SettingRow label="Keep completed runs for" control={<SelectField ariaLabel="Keep completed runs for" value={String(p.completedRunRetentionMinutes)} onChange={(next) => update({ completedRunRetentionMinutes: Number(next) })} options={RETENTION_OPTIONS} />} /> : null}
@@ -325,11 +337,16 @@ function PrivacySettings() {
     }
   }
   return (
+    <>
+    <SettingGroup title="What Spectra knows" description="The notes Spectra keeps about you. It writes these itself, and you can change or remove anything.">
+      <MemoryFilesSettings />
+    </SettingGroup>
     <SettingGroup title="Personal context" description="Inspectable controls for the private context Spectra can use across conversations.">
       <SettingRow label="Class shelves" description="Choose which ManageBac classes get their own workspace. Unchosen class work stays in General." control={<Button size="sm" variant="secondary" asChild><Link href="/school">Open School</Link></Button>} />
       <SettingRow label="Export personal context" description="Download a JSON copy for review." control={<Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void exportContext()}>{busy === "export" ? "Preparing…" : "Export"}</Button>} />
       <SettingRow label="Clear personal context" description={confirmClear ? "This removes the private retrieval context Spectra has learned. Your work stays intact." : "Remove retrieval evidence without deleting your work."} control={confirmClear ? <div className="flex items-center gap-1"><Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setConfirmClear(false)}>Cancel</Button><Button size="sm" variant="destructive" disabled={busy !== null} onClick={() => void clearContext()}>{busy === "clear" ? "Clearing…" : "Clear now"}</Button></div> : <Button size="sm" variant="destructive" disabled={busy !== null} onClick={() => setConfirmClear(true)}>Clear context</Button>} />
     </SettingGroup>
+    </>
   );
 }
 
@@ -382,6 +399,8 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
         <PermissionSettings p={preferences.ai} update={updateSection("ai")} />
       </div>
     ),
+    subscriptions: <RuntimeSettings />,
+    storage: <div className="max-w-xl"><WorkHomeChoice /></div>,
     writing: <WritingSettings p={preferences.writing} update={updateSection("writing")} refreshConfirmedPreferences={refreshConfirmedPreferences} />,
     day: <DaySettings p={preferences.notifications} update={updateSection("notifications")} />,
     appearance: <AppearanceSettings p={preferences.appearance} update={updateSection("appearance")} />,

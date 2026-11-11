@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { Icon } from "@/components/icons";
 import { OverflowMenu, type OverflowItem } from "@/components/ui/dropdown-menu";
 import { toast } from "@/components/ui/toast";

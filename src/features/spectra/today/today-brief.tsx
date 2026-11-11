@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Icon } from "@/components/icons";
 import { WorkingMark } from "@/components/ui/skeleton";
 import { workTypeMeta, type PresentedWorkType } from "../artifacts/presentation";
@@ -10,6 +10,7 @@ import { useShowcaseTime } from "../showcase/showcase-time";
 import { dayPart } from "./day-sky";
 import type { TodayAgenda } from "./today-model";
 import { useBriefActions } from "./use-brief-actions";
+import { spectraBus } from "../events";
 import type { BriefState } from "./use-daily-brief";
 
 /*
@@ -27,9 +28,6 @@ const ACTION: Record<BriefSuggestion["kind"], { label: string; done: string }> =
   task: { label: "Open task", done: "Opened" },
   ask: { label: "Ask", done: "Asked" },
 };
-
-/** How many moves show before the rest fold away. */
-const SHOWN_MOVES = 3;
 
 const presented = (key: string | undefined): key is PresentedWorkType => Boolean(key && key in workTypeMeta);
 
@@ -50,6 +48,26 @@ export function TodayBrief({ brief, agenda }: { brief: BriefState; agenda: Today
         </p>
       </section>
     );
+  if (brief.status === "quiet")
+    return (
+      <section aria-label="Your morning" className="morning" data-writing>
+        <p className="morning-writing">
+          Your brief is taking longer than usual.{" "}
+          <button
+            type="button"
+            className="cursor-pointer underline underline-offset-2"
+            onClick={() =>
+              spectraBus.emit("island.compose", {
+                fresh: true,
+                text: "Help me plan ahead: look at what's coming up in my calendar and tasks, and suggest what to do this week.",
+              })
+            }
+          >
+            Plan the week with Spectra
+          </button>
+        </p>
+      </section>
+    );
   if (brief.status !== "ready") return null;
   return <ReadyBrief brief={brief} agenda={agenda} />;
 }
@@ -60,7 +78,6 @@ function ReadyBrief({ brief, agenda }: { brief: Extract<BriefState, { status: "r
   const story = useShowcaseTime();
   const hour = new Date(story ?? Date.now()).getHours();
   const [busy, setBusy] = useState<number | null>(null);
-  const [all, setAll] = useState(false);
   // What is still to do comes first; what was done today sinks to the end, each keeping its place in the brief.
   const moves = brief.suggestions
     .map((suggestion, index) => ({ suggestion, index }))
@@ -82,30 +99,92 @@ function ReadyBrief({ brief, agenda }: { brief: Extract<BriefState, { status: "r
         {brief.earlier ? <p className="morning-earlier">Today&apos;s is on its way.</p> : null}
       </div>
       <div className="morning-body">
-        {brief.recap ? (
-          <div>
-            <h3 className="morning-label">{brief.earlier ? "The day before" : "Yesterday"}</h3>
-            <p className="morning-recap">{brief.recap}</p>
+        {brief.ahead || brief.recap ? (
+          <BriefFold className="morning-story-fold">
+          <div className="morning-story">
+            {brief.ahead ? (
+              <div>
+                <h3 className="morning-label">Coming up</h3>
+                <p className="morning-recap">{brief.ahead}</p>
+              </div>
+            ) : null}
+            {brief.recap ? (
+              <div>
+                <h3 className="morning-label">{brief.earlier ? "The day before" : "Yesterday"}</h3>
+                <p className={brief.ahead ? "morning-recap-small" : "morning-recap"}>{brief.recap}</p>
+              </div>
+            ) : null}
           </div>
+          </BriefFold>
         ) : null}
         {brief.suggestions.length ? (
-          <div>
-            <h3 className="morning-label">{brief.earlier ? "From yesterday" : "For today"}</h3>
+          <BriefFold className="morning-moves-fold">
+            <h3 className="morning-label">{brief.earlier ? "From the last brief" : "For today"}</h3>
             <ul className="morning-moves">
-              {moves.slice(0, all ? undefined : SHOWN_MOVES).map(({ suggestion, index }) => (
+              {moves.map(({ suggestion, index }) => (
                 <Move key={index} suggestion={suggestion} busy={busy === index} onPress={() => press(suggestion, index)} />
               ))}
             </ul>
-            {moves.length > SHOWN_MOVES ? (
-              <button type="button" className="morning-more" aria-expanded={all} onClick={() => setAll((open) => !open)}>
-                {all ? "Show fewer" : `${moves.length - SHOWN_MOVES} more`}
-                <Icon name={all ? "chevronUp" : "chevronDown"} size={12} />
-              </button>
-            ) : null}
-          </div>
+          </BriefFold>
         ) : null}
       </div>
     </section>
+  );
+}
+
+/**
+ * One side of the brief at its height. Whatever does not fit fades into the
+ * page under it and is one scroll, or one press, away. The story and the moves
+ * fold apart: each runs to its own length.
+ */
+function BriefFold({ className, children }: { className: string; children: ReactNode }) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const [atEnd, setAtEnd] = useState(false);
+
+  const measure = () => {
+    const box = scroller.current;
+    const inner = body.current;
+    if (!box || !inner) return;
+    box.style.setProperty("--morning-open-height", `${inner.offsetHeight}px`);
+    const limit = Number.parseFloat(getComputedStyle(box.parentElement!).getPropertyValue("--morning-limit-px")) || 0;
+    const shortest = limit || box.clientHeight;
+    setOverflows(inner.offsetHeight > shortest + 8);
+    setAtEnd(box.scrollTop + box.clientHeight >= box.scrollHeight - 12);
+  };
+
+  useLayoutEffect(measure);
+  useEffect(() => {
+    if (!body.current || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(body.current);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div className={`morning-fold ${className}`} data-open={open || undefined} data-overflows={overflows || undefined} data-end={atEnd || undefined}>
+      <div ref={scroller} className="morning-scroll spectra-thin-scrollbar" onScroll={measure} tabIndex={overflows && !open ? 0 : undefined}>
+        <div ref={body}>
+          {children}
+        </div>
+      </div>
+      {overflows ? (
+        <button
+          type="button"
+          className="morning-fold-toggle"
+          aria-expanded={open}
+          onClick={() => {
+            if (open) scroller.current?.scrollTo({ top: 0 });
+            setOpen((value) => !value);
+          }}
+        >
+          {open ? "Show less" : "Show all"}
+          <Icon name={open ? "chevronUp" : "chevronDown"} size={13} />
+        </button>
+      ) : null}
+    </div>
   );
 }
 

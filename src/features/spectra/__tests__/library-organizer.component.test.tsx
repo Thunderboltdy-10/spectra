@@ -19,7 +19,11 @@ vi.mock("convex/react", () => ({
   useConvexAuth: () => ({ isAuthenticated: true, isLoading: false }),
   useQuery: () => undefined,
   useMutation: () => tree.mutation,
-  useConvex: () => ({ query: vi.fn(async () => null), mutation: tree.mutation }),
+  useConvex: () => ({
+    query: vi.fn(async () => null),
+    mutation: tree.mutation,
+    watchQuery: () => ({ localQueryResult: () => undefined, onUpdate: () => () => {} }),
+  }),
 }));
 vi.mock("../bridge/use-product-online", () => ({ useProductOnline: () => true }));
 vi.mock("next/navigation", () => ({

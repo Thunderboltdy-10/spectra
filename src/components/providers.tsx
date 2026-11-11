@@ -2,6 +2,7 @@
 
 import { Toaster } from "sonner";
 import { CookieConsentManager } from "@/components/cookie-consent-manager";
+import { QuietReturnFocus } from "@/components/quiet-return-focus";
 import { ThemeProvider } from "@/components/theme-provider";
 import { DynamicFavicon } from "@/components/spectra-logo";
 import { GlobalErrorBoundary } from "@/components/global-error-boundary";
@@ -13,11 +14,13 @@ import { SpectraMotionConfig } from "@/features/spectra/motion/motion-primitives
 import { LifeField } from "@/features/spectra/life/life-field";
 import { SchoolLoginSync } from "@/features/spectra/school/school-login-sync";
 import { AccountStorageBoundary } from "./account-storage-boundary";
+import { setKeptQueryClient } from "@/features/spectra/data/use-kept-query";
 import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
 const convexClient = convexUrl ? new ConvexReactClient(convexUrl) : null;
+setKeptQueryClient(convexClient);
 
 function LiveDataProvider({ children }: { children: React.ReactNode }) {
   if (!convexClient) throw new Error("NEXT_PUBLIC_CONVEX_URL is required.");
@@ -50,10 +53,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <DynamicFavicon />
         <LocalComputeCacheController />
         <CookieConsentManager />
+        <QuietReturnFocus />
         <Toaster
           theme="system"
           position="bottom-right"
-          offset={{ bottom: 28, right: 28 }}
+          offset={{ bottom: 104, right: 20 }}
           closeButton
           richColors
           visibleToasts={3}

@@ -16,7 +16,7 @@ describe("N3 Bridge contract", () => {
       "utf8",
     );
     const selectFolder = client.slice(
-      client.indexOf("export async function selectBridgeFolder()"),
+      client.indexOf("export async function selectBridgeFolder(): Promise"),
       client.indexOf("export async function retryBridgeFolder"),
     );
     expect(app).toContain("app.dialog().file().pick_folder(move |selection|");

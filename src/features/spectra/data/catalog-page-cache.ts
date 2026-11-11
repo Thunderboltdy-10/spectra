@@ -21,13 +21,41 @@ type Entry<T> = {
 export function createCatalogPageCache<T extends { _id: string }>(
   fetchPage: (key: string, cursor: string | undefined, signal: AbortSignal) => Promise<CatalogPage<T>>,
   ttlMs = 5 * 60_000,
+  /** Keeps the list across reloads under this browser storage key, for as long as it is fresh. */
+  keptAs?: string,
 ) {
   const entries = new Map<string, Entry<T>>();
+  const keep = (key: string, entry: Entry<T>) => {
+    if (!keptAs || entry.snapshot.status !== "ready") return;
+    try {
+      window.localStorage.setItem(keptAs, JSON.stringify({ key, items: entry.snapshot.items, isDone: entry.snapshot.isDone, cursor: entry.cursor, fetchedAt: entry.fetchedAt }));
+    } catch {
+      // Storage can be full or blocked; the list is just read again.
+    }
+  };
+  const forget = () => {
+    if (!keptAs) return;
+    try {
+      window.localStorage.removeItem(keptAs);
+    } catch {
+      // As above.
+    }
+  };
+  const kept = (key: string): Pick<Entry<T>, "snapshot" | "cursor" | "fetchedAt"> | null => {
+    if (!keptAs || typeof window === "undefined") return null;
+    try {
+      const value = JSON.parse(window.localStorage.getItem(keptAs) ?? "null") as { key: string; items: T[]; isDone: boolean; cursor?: string; fetchedAt: number } | null;
+      if (!value || value.key !== key || Date.now() - value.fetchedAt >= ttlMs) return null;
+      return { snapshot: { items: value.items, status: "ready", isDone: value.isDone, error: null }, cursor: value.cursor, fetchedAt: value.fetchedAt };
+    } catch {
+      return null;
+    }
+  };
   const empty = (): CatalogSnapshot<T> => ({ items: [], status: "idle", isDone: false, error: null });
   const entryFor = (key: string) => {
     let entry = entries.get(key);
     if (!entry) {
-      entry = { snapshot: empty(), fetchedAt: 0, generation: 0, listeners: new Set() };
+      entry = { snapshot: empty(), fetchedAt: 0, generation: 0, listeners: new Set(), ...kept(key) };
       entries.set(key, entry);
     }
     return entry;
@@ -42,6 +70,7 @@ export function createCatalogPageCache<T extends { _id: string }>(
     entry.active = undefined;
     entry.cursor = undefined;
     entry.fetchedAt = 0;
+    forget();
     notify(entry, empty());
   };
   const load = (key: string, options: { more?: boolean; force?: boolean; all?: boolean } = {}): Promise<void> => {
@@ -74,6 +103,7 @@ export function createCatalogPageCache<T extends { _id: string }>(
             entry.fetchedAt = Date.now();
             const keepLoading = options.all && !page.isDone;
             notify(entry, { items: [...rows.values()], status: keepLoading ? "loading" : "ready", isDone: page.isDone, error: null });
+            keep(key, entry);
             if (keepLoading) { cursor = page.continueCursor!; continue; }
             return;
           }

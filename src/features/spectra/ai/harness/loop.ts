@@ -1,3 +1,4 @@
+import { describeToolFailure } from "./failures";
 import { deniedResult } from "./permissions";
 import { mergeSources, type RunSource } from "./sources";
 import {
@@ -90,7 +91,7 @@ export type ModelCaller = (input: {
   onRetry: () => void;
   /** A tool call is being written: its id, name and the arguments so far. */
   onToolDraft?: (draft: { id: string; name: string; arguments: string }) => void;
-  /** The model's private reasoning, streamed only to summarise it in captions. */
+  /** The model's reasoning (or its summary, where a provider gives only that). */
   onReasoning?: (delta: string) => void;
 }) => Promise<ModelTurn>;
 
@@ -116,7 +117,7 @@ export type LoopHooks = {
    * document): the step is named early so the turn never looks frozen.
    */
   onToolDraft?: (draft: { id: string; tool: AnyHarnessTool; label: string }) => void;
-  /** Private reasoning while the model thinks; never shown or stored as is. */
+  /** Reasoning while the model thinks, for the trace. */
   onReasoning?: (delta: string) => void;
   onToolEnd?: (
     step: ToolStepInfo & { outcome: ToolOutcome; durationMs: number },
@@ -135,6 +136,7 @@ export type LoopHooks = {
    */
   checkpoint?: (
     state: LoopState,
+    info?: { ending: boolean },
   ) => Promise<{ steers?: Steer[] } | void> | { steers?: Steer[] } | void;
 };
 
@@ -161,7 +163,16 @@ export type LoopDeps = {
    * Checked at tool boundaries only, so the run resumes from a checkpoint.
    */
   shouldYield?: () => boolean;
+  /** How long one tool call may take before it becomes a tool error. */
+  toolLimitMs?: number;
 };
+
+/**
+ * The loop checks its budgets between turns only, so a tool that never
+ * returns would hold the run forever. Five minutes is well past the slowest
+ * healthy call (a long code run or a large sync).
+ */
+export const TOOL_LIMIT_MS = 5 * 60_000;
 
 export type LoopOutcome =
   | { status: "completed"; state: LoopState }
@@ -247,6 +258,7 @@ type Prepared = {
   category?: PermissionCategory;
   error?: string;
   targets: string[];
+  exclusive?: boolean;
 };
 
 function prepare(call: HarnessToolCall, tools: Map<string, AnyHarnessTool>): Prepared {
@@ -309,7 +321,8 @@ function prepare(call: HarnessToolCall, tools: Map<string, AnyHarnessTool>): Pre
   } catch {
     category = undefined;
   }
-  return { call, tool, args, effect, category, label: safeLabel(tool, args), targets };
+  const exclusive = typeof tool.exclusive === "function" ? tool.exclusive(args) : tool.exclusive;
+  return { call, tool, args, effect, category, label: safeLabel(tool, args), targets, exclusive };
 }
 
 function fallbackLabel(name: string) {
@@ -371,10 +384,10 @@ export async function runHarnessLoop(
   const baseElapsed = state.elapsedMs;
   const elapsed = () => baseElapsed + (now() - segmentStartedAt);
 
-  const checkpoint = async () => {
+  const checkpoint = async (ending = false) => {
     state.elapsedMs = elapsed();
     try {
-      const result = await hooks.checkpoint?.(state);
+      const result = await hooks.checkpoint?.(state, { ending });
       return result && Array.isArray(result.steers) ? result.steers : [];
     } catch {
       return [];
@@ -454,14 +467,34 @@ export async function runHarnessLoop(
     ) {
       outcome = { ok: false, content: deniedResult(prepared.category) };
     } else {
+      const limit = deps.toolLimitMs ?? TOOL_LIMIT_MS;
+      const call = new AbortController();
+      const stopCall = () => call.abort(deps.signal.reason);
+      deps.signal.addEventListener("abort", stopCall, { once: true });
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
+        const limited = (work: Promise<ToolOutcome>) =>
+          Promise.race([
+            work,
+            new Promise<ToolOutcome>((resolve) => {
+              timer = setTimeout(() => {
+                call.abort(new Error("TOOL_LIMIT"));
+                resolve({
+                  ok: false,
+                  content: `${prepared.tool!.name} did not finish within ${Math.round(limit / 60_000) || "a few"} minutes and was stopped. Tell the user it took too long, or try a smaller request.`,
+                });
+              }, limit);
+            }),
+          ]).finally(() => clearTimeout(timer));
         const run = (granted: boolean) =>
-          prepared.tool!.execute(prepared.args!, {
-            signal: deps.signal,
+          limited(prepared.tool!.execute(prepared.args!, {
+            signal: call.signal,
             runId: deps.runId,
             toolCallId: prepared.call.id,
             approved: granted,
-          });
+            ...(granted && state.pending?.toolCallId === prepared.call.id && state.pending.approvalScope
+              ? { approvalScope: state.pending.approvalScope } : {}),
+          }));
         outcome = await run(approved);
         // A tool can discover mid-call that its effect needs approval (a
         // Bridge move that touches desktop files). The user's stored choices
@@ -482,8 +515,10 @@ export async function runHarnessLoop(
           ? { ok: false, content: STOPPED_RESULT }
           : {
               ok: false,
-              content: `${prepared.tool.name} failed: ${error instanceof Error ? error.message : String(error)}`,
+              content: describeToolFailure(prepared.tool.name, error),
             };
+      } finally {
+        deps.signal.removeEventListener("abort", stopCall);
       }
     }
     if (!outcome.pause) {
@@ -564,7 +599,7 @@ export async function runHarnessLoop(
             hooks.onToolStart?.({ call, tool: prepared.tool, args: prepared.args, label: prepared.label, effect: prepared.effect });
             const outcome: ToolOutcome = isAbort(error, deps.signal)
               ? { ok: false, content: STOPPED_RESULT }
-              : { ok: false, content: `${prepared.tool.name} failed: ${error instanceof Error ? error.message : String(error)}` };
+              : { ok: false, content: describeToolFailure(prepared.tool.name, error) };
             finishStep(prepared, outcome, startedAt);
             state.messages.push(toolMessage(call, outcome));
             state.pendingCalls.shift();
@@ -605,9 +640,28 @@ export async function runHarnessLoop(
     const outcomes = new Map<string, ToolOutcome>();
     const chains = new Map<string, Promise<void>>();
     const tasks: Promise<void>[] = [];
+    let deferFollowing = false;
     for (const item of prepared) {
+      if (item.exclusive) {
+        await Promise.all(tasks);
+        if (deferred.size) deferFollowing = true;
+      }
+      if (deferFollowing) {
+        deferred.add(item.call.id);
+        continue;
+      }
       if (asksFirst(item)) {
         deferred.add(item.call.id);
+        if (item.exclusive) deferFollowing = true;
+        continue;
+      }
+      if (item.exclusive) {
+        const outcome = await executeOne(item);
+        if (outcome.pause) {
+          deferred.add(item.call.id);
+          knownPauses.set(item.call.id, outcome.pause);
+          deferFollowing = true;
+        } else outcomes.set(item.call.id, outcome);
         continue;
       }
       const waits = item.targets.flatMap((target) => {
@@ -763,7 +817,7 @@ export async function runHarnessLoop(
         : {}),
     });
     if (!calls.length) {
-      const steers = budgetSpent ? [] : await checkpoint();
+      const steers = budgetSpent ? [] : await checkpoint(true);
       if (steers.length) {
         appendSteers(steers);
         continue;

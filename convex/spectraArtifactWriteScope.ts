@@ -9,6 +9,8 @@ import { isArtifactTypeKey } from "../src/features/spectra/artifacts/registry";
 import { withoutDerivedNativeBinding, withoutFileOwnedFields } from "../src/features/spectra/artifacts/native-binding";
 import { assertPlannerSourceEdit } from "../shared/planner-source.mjs";
 import { isDurableContentRef } from "../shared/durable-content";
+import { unpackOperationInput } from "../shared/operation-content";
+import type { PermissionCategory } from "../src/features/spectra/settings/schema/ai-permissions";
 
 export type ArtifactWriteScope = {
   version: 1;
@@ -23,7 +25,24 @@ export type ArtifactWriteScope = {
   kind: "create" | "update" | "full_content_delete" | "archive";
   baseProducerOperationId?: string;
   creationSourceIdentity?: string;
+  approvalCategories?: PermissionCategory[];
+  /** What the edit means, without how the work happens to be stored: an
+   * approval survives a re-save that changed nothing a person could see. */
+  semanticBaseDigest?: string;
+  semanticResultDigest?: string;
 };
+
+/** The person's Allow, kept when only the work's stored form moved under it. */
+export type AllowedArtifactIntent = { scope: string; base: string; result: string };
+
+/** Content as a person sees it: no file-derived digests, no binding to the file. */
+export async function approvalSemanticDigest(content: unknown): Promise<string> {
+  const comparable = withoutFileOwnedFields(withoutDerivedNativeBinding(content));
+  const plain = comparable && typeof comparable === "object" && !Array.isArray(comparable)
+    ? Object.fromEntries(Object.entries(comparable as Record<string, unknown>).filter(([key]) => key !== "nativeBinding"))
+    : comparable;
+  return artifactScopeDigest(plain);
+}
 
 export function artifactOutput(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -113,19 +132,25 @@ export async function currentArtifactApprovalScope(
   operation: Doc<"spectraOperations">,
   run: Doc<"spectraAiRuns">,
   phase: "presentation" | "effect" = "presentation",
+  options: { tolerateSourceDrift?: boolean } = {},
 ) {
+  const changed = () => new Error("AI_ARTIFACT_APPROVAL_SCOPE_CHANGED: The artifact or proposed edit changed. Prepare a new approval.");
   const scope = preparedArtifactScope(operation);
   const artifactId = scope ? ctx.db.normalizeId("spectraArtifacts", scope.artifactId) : null;
   const artifact = artifactId ? await ctx.db.get(artifactId) : null;
   if (!scope || !artifact || scope.runId !== run._id || scope.operationId !== operation._id ||
       scope.executionId !== run.executionId || operation.executionId !== run.executionId ||
       artifactId !== await artifactOperationTarget(ctx, operation, phase === "effect" ? "effect" : "preparation") ||
-      scope.operationDigest !== await artifactOperationDigest(operation) ||
-      !(phase === "effect"
-        ? await artifactEffectSourceMatches(ctx, scope, run, await artifactSourceIdentity(artifact))
-        : scope.sourceContentIdentity === await artifactSourceIdentity(artifact)))
-    throw new Error("AI_ARTIFACT_APPROVAL_SCOPE_CHANGED: The artifact or proposed edit changed. Prepare a new approval.");
-  return { scope, digest: await artifactScopeDigest(scope), artifact };
+      scope.operationDigest !== await artifactOperationDigest(operation))
+    throw changed();
+  const sourceMatches = phase === "effect"
+    ? await artifactEffectSourceMatches(ctx, scope, run, await artifactSourceIdentity(artifact))
+    : scope.sourceContentIdentity === await artifactSourceIdentity(artifact);
+  // The work's stored form moved (a Bridge re-save, a version snapshot). The
+  // caller may keep the person's intent; the effect is still bound exactly.
+  const sourceDrift = !sourceMatches;
+  if (sourceDrift && !(options.tolerateSourceDrift && phase === "presentation")) throw changed();
+  return { scope, digest: await artifactScopeDigest(scope), artifact, sourceDrift };
 }
 
 export function artifactWriteReceipt(output: unknown): { scope: string; result: unknown; sourceContentIdentity?: string; resultContentDigest?: string } | undefined {
@@ -171,6 +196,7 @@ export type AiArtifactContentEvidence = {
   sourceContentIdentity: string;
   baseContentDigest: string;
   resultContentDigest: string;
+  requestedContentDigest?: string;
   fullContentDeletion: boolean;
 };
 
@@ -219,7 +245,7 @@ async function artifactAdmissionContext(ctx: MutationCtx, args: AdmissionIdentit
   const access = await requireActorArtifactCapability(ctx, actor, args.artifactId, "modify");
   const artifact = access.loaded!.resource as Doc<"spectraArtifacts">;
   const scope = preparedArtifactScope(operation);
-  const input = artifactOutput(operation.input);
+  const input = artifactOutput(unpackOperationInput(operation.input));
   if (!scope || !["artifact.create", "artifact.update"].includes(operation.type) ||
       await artifactOperationTarget(ctx, operation) !== args.artifactId ||
       scope.artifactId !== args.artifactId || scope.runId !== run._id || scope.executionId !== run.executionId ||
@@ -238,20 +264,21 @@ async function assertAdmissionEvidence(ctx: MutationCtx, admission: Awaited<Retu
     throw new Error("AI_ARTIFACT_EVIDENCE_SCOPE_CHANGED");
   const beforeDigest = evidence.baseContentDigest;
   const afterDigest = evidence.resultContentDigest;
+  const requestedDigest = evidence.requestedContentDigest ?? afterDigest;
   if (scope.kind === "create" && (scope.creationSourceIdentity !== admission.creationIdentity ||
-      scope.baseContentDigest !== beforeDigest || scope.resultContentDigest !== afterDigest))
+      scope.baseContentDigest !== beforeDigest || scope.resultContentDigest !== requestedDigest))
     throw new Error("AI_ARTIFACT_CREATION_SOURCE_CHANGED");
   // On the exact prepared base/result, retain the server's classification of
   // the original authored input, before adapters manufacture blank defaults.
   // A rebase must classify again against the actual current content.
   const destructive = scope.kind === "full_content_delete" ||
-    ((beforeDigest !== scope.baseContentDigest || afterDigest !== scope.resultContentDigest) &&
+    ((beforeDigest !== scope.baseContentDigest || requestedDigest !== scope.resultContentDigest) &&
       evidence.fullContentDeletion);
   if (destructive || operation.requiresConfirmation) {
     const sourceMatches = scope.kind === "create"
       ? scope.creationSourceIdentity === admission.creationIdentity
       : await artifactEffectSourceMatches(ctx, scope, run, sourceIdentity);
-    if (!sourceMatches || beforeDigest !== scope.baseContentDigest || afterDigest !== scope.resultContentDigest ||
+    if (!sourceMatches || beforeDigest !== scope.baseContentDigest || requestedDigest !== scope.resultContentDigest ||
         (destructive && scope.kind !== "full_content_delete") || run.approval?.status !== "accepted" ||
         run.approval.executionId !== run.executionId || artifactOutput(operation.output).approvedArtifactScope !== await artifactScopeDigest(scope))
       throw new Error("AI_ARTIFACT_APPROVAL_SCOPE_REQUIRED");
@@ -268,6 +295,25 @@ export async function assertAiArtifactWriteAdmission(ctx: MutationCtx, args: Adm
     beforeContent: args.beforeContent, afterContent: args.afterContent,
   });
   return assertAdmissionEvidence(ctx, admission, evidence);
+}
+
+/** Where a saved result left what was asked for, to make the refusal debuggable. */
+function firstContentDifference(want: unknown, got: unknown, path = ""): string {
+  if (JSON.stringify(want) === JSON.stringify(got)) return "";
+  if (want && got && typeof want === "object" && typeof got === "object") {
+    for (const key of new Set([...Object.keys(want), ...Object.keys(got)])) {
+      const found = firstContentDifference((want as Record<string, unknown>)[key], (got as Record<string, unknown>)[key], `${path}/${key}`);
+      if (found) return found;
+    }
+    return path || "/";
+  }
+  if (typeof want === "string" && typeof got === "string") {
+    let at = 0;
+    while (at < want.length && want[at] === got[at]) at += 1;
+    const near = Math.max(0, at - 30);
+    return `${path || "/"}: wanted "${want.slice(near, at + 50)}", got "${got.slice(near, at + 50)}"`;
+  }
+  return `${path || "/"}: wanted ${JSON.stringify(want)?.slice(0, 80)}, got ${JSON.stringify(got)?.slice(0, 80)}`;
 }
 
 /** Shared content calculation for direct admission and the trusted Node signer.
@@ -293,11 +339,15 @@ export async function buildAiArtifactContentEvidence(args: {
   const expected = resolveArtifactWriteInput(type, before, args.input, args.prompt);
   const afterDigest = await artifactScopeDigest(after);
   const comparable = (content: unknown) => withoutFileOwnedFields(withoutDerivedNativeBinding(content));
-  if (await artifactScopeDigest(comparable(after)) !== await artifactScopeDigest(comparable(expected.content)))
-    throw new Error("AI_ARTIFACT_RESULT_SCOPE_MISMATCH");
+  const comparableAfter = comparable(after);
+  const comparableExpected = comparable(expected.content);
+  if (await artifactScopeDigest(comparableAfter) !== await artifactScopeDigest(comparableExpected))
+    throw new Error(`AI_ARTIFACT_RESULT_SCOPE_MISMATCH: ${firstContentDifference(comparableExpected, comparableAfter)}`);
+  const requestedDigest = await artifactScopeDigest(expected.content);
   return {
     version: 1, operationDigest: args.operationDigest, sourceContentIdentity: args.sourceContentIdentity,
     baseContentDigest: await artifactScopeDigest(before), resultContentDigest: afterDigest,
+    ...(requestedDigest !== afterDigest ? { requestedContentDigest: requestedDigest } : {}),
     fullContentDeletion: classifyArtifactContentWipe(type, before, expected.resolvedContent).fullContentDeletion,
   };
 }

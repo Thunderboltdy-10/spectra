@@ -54,6 +54,22 @@ function styleString(object: PresentationObject, key: string) {
  * A frame is measured, not guessed at: characters per line come from the frame
  * width and the font size, and the line count from the text itself.
  */
+/** Lines a paragraph sets in: words wrap whole, and only a word too long for a line breaks. */
+function wrappedLines(paragraph: string, charsPerLine: number) {
+  let lines = 1;
+  let used = 0;
+  for (const word of paragraph.trim().split(/\s+/)) {
+    if (used && used + 1 + word.length <= charsPerLine) {
+      used += 1 + word.length;
+      continue;
+    }
+    if (used) lines += 1;
+    lines += Math.max(0, Math.ceil(word.length / charsPerLine) - 1);
+    used = word.length % charsPerLine || Math.min(word.length, charsPerLine);
+  }
+  return lines;
+}
+
 /** How tall a text object's words stand at its type size, by average glyph width. */
 export function estimateTextHeight(object: PresentationObject) {
   const text = presentationObjectText(object);
@@ -63,10 +79,7 @@ export function estimateTextHeight(object: PresentationObject) {
     1,
     Math.floor(object.width / (fontSize * AVERAGE_GLYPH_RATIO)),
   );
-  const lines = text.split(/\r?\n/).reduce((total, paragraph) => {
-    const length = paragraph.trim().length;
-    return total + Math.max(1, Math.ceil(length / charsPerLine));
-  }, 0);
+  const lines = text.split(/\r?\n/).reduce((total, paragraph) => total + wrappedLines(paragraph, charsPerLine), 0);
   return lines * fontSize * styleNumber(object, "lineHeight", LINE_HEIGHT_RATIO);
 }
 

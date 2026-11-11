@@ -80,6 +80,7 @@ type CalendarItemShape = Omit<Doc<"calendarItems">, "_id" | "_creationTime"> & {
 export function calendarItemWire(item: CalendarItemShape) {
   return {
     id: item._id,
+    ...(item.seriesId ? { seriesId: item.seriesId } : {}),
     kind: item.kind,
     title: item.title,
     notes: item.notes?.slice(0, CALENDAR_NOTES_CHARS),

@@ -117,8 +117,6 @@ export function startSettingsObservationClient(): () => void {
   });
   const visibility = () => {
     for (const [runId, { executionId }] of runs) void publishInterest(runId, executionId, document.visibilityState !== "visible");
-    if (document.visibilityState !== "visible" && previousFollow)
-      endFollow(previousFollow, "Follow AI paused because this tab is hidden. The task continues.");
   };
   document.addEventListener("visibilitychange", visibility);
   return () => {

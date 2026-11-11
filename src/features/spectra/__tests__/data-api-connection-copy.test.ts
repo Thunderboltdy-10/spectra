@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SPECTRA_REQUEST_UNREACHABLE,
   getSpectraAgentPage,
+  getSpectraOverview,
+  invalidateSpectraCache,
   postSpectra,
   resolveSpectraManageBacIdentity,
 } from "../data/api";
@@ -11,6 +13,77 @@ import { readConvexError } from "../../../../shared/convex-error.mjs";
 import { spectraFailureMessage } from "../data/request";
 
 afterEach(() => vi.unstubAllGlobals());
+
+it("keeps context-only and full overview caches and in-flight reads separate", async () => {
+  invalidateSpectraCache();
+  const fetcher = vi.fn(async (url: string) => Response.json({
+    workspaces: url.includes("includeCatalog=false") ? [] : [{ _id: "workspace_1" }],
+    artifacts: url.includes("includeCatalog=false") ? [] : [{ _id: "artifact_1" }], workspace: null,
+    runs: url.includes("includeRuns=false") ? [] : [{ _id: "run_1" }],
+    resultCards: url.includes("includeRuns=false") ? [] : [{ _id: "card_1" }],
+  }));
+  vi.stubGlobal("fetch", fetcher);
+  try {
+    const [catalog, joined, full] = await Promise.all([
+      getSpectraOverview(undefined, false, false),
+      getSpectraOverview(undefined, false, false),
+      getSpectraOverview(),
+    ]);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls[1]?.[0]).toContain("includeCatalog=false");
+    expect(joined).toBe(catalog);
+    expect(catalog.runs).toEqual([]);
+    expect(catalog.resultCards).toEqual([]);
+    expect(full.runs).toEqual([{ _id: "run_1" }]);
+    expect(full.resultCards).toEqual([{ _id: "card_1" }]);
+    expect(full.artifacts).toBe(catalog.artifacts);
+    expect(full.workspaces).toBe(catalog.workspaces);
+    expect(await getSpectraOverview()).toBe(full);
+    expect(await getSpectraOverview(undefined, false, false)).toBe(catalog);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await getSpectraOverview(undefined, true, false);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect((await getSpectraOverview()).runs).toEqual([{ _id: "run_1" }]);
+  } finally { invalidateSpectraCache(); }
+});
+
+it("reuses full catalogs in Home and retains their original expiry when loading runs later", async () => {
+  invalidateSpectraCache();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+  const fetcher = vi.fn(async (_url: string) => Response.json({ workspaces: [], artifacts: [], workspace: null, runs: [], resultCards: [] }));
+  vi.stubGlobal("fetch", fetcher);
+  try {
+    await getSpectraOverview(undefined, false, false);
+    clock.mockReturnValue(100_000);
+    const full = await getSpectraOverview();
+    expect(fetcher.mock.calls[1]?.[0]).toContain("includeCatalog=false");
+    clock.mockReturnValue(300_999);
+    expect(await getSpectraOverview()).toBe(full);
+    clock.mockReturnValue(301_001);
+    const refreshed = await getSpectraOverview();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(await getSpectraOverview(undefined, false, false)).toBe(refreshed);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  } finally { clock.mockRestore(); invalidateSpectraCache(); }
+});
+
+it.each([false, true])("shares a full read and refreshes the opposite mode after force (includeRuns=%s)", async includeRuns => {
+  invalidateSpectraCache();
+  const fetcher = vi.fn(async (url: string) => Response.json({
+    workspaces: [], workspace: null, runs: [], resultCards: [],
+    artifacts: url.includes("includeCatalog=false") ? [] : [{ _id: `artifact_${fetcher.mock.calls.length}` }],
+  }));
+  vi.stubGlobal("fetch", fetcher);
+  try {
+    const [full, catalog] = await Promise.all([getSpectraOverview(), getSpectraOverview(undefined, false, false)]);
+    expect(catalog).toBe(full);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const fresh = await getSpectraOverview(undefined, true, includeRuns);
+    expect(fresh.artifacts).toEqual([{ _id: "artifact_2" }]);
+    expect((await getSpectraOverview(undefined, false, !includeRuns)).artifacts).toEqual(fresh.artifacts);
+    expect(fetcher).toHaveBeenCalledTimes(includeRuns ? 2 : 3);
+  } finally { invalidateSpectraCache(); }
+});
 
 describe("data API failure wording", () => {
   it("turns the browser's offline error into a sentence a student can act on", async () => {

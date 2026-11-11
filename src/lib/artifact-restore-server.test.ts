@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { planNativeArtifactYjsMutation, readNativeArtifactYjsDocument } from "../features/spectra/work/models/yjs/native-artifact-model";
+import { planArtifactYjsMutation } from "../features/spectra/collaboration/artifact-yjs-model";
 import type { Id } from "../../convex/_generated/dataModel";
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
@@ -114,6 +115,34 @@ describe("server history restore admission", () => {
     expect(await response.json()).toMatchObject({ state: "committed", duplicate: true });
     expect(calls.query).toHaveBeenCalledWith("artifactRestore:head", { request: { ...request, regionIds: ["metadata:title"] } });
     expect(calls.mutation).not.toHaveBeenCalled();
+  });
+
+  it.each(["native", "legacy"])("admits the native readback in the %s room's canonical shape", async (model) => {
+    const document = new Y.Doc();
+    const content = { blocks: [{ id: "p1", type: "paragraph", text: "Current" }] };
+    const current = { title: "Word", summary: "", tags: [], content };
+    document.transact((model === "native" ? planNativeArtifactYjsMutation(document, "document", current, actor)
+      : planArtifactYjsMutation(document, "document", current)).apply);
+    const projectionContent = { blocks: [{ id: "p1", type: "paragraph", text: "Historical" }],
+      nativeBinding: { semanticDigest: "retained-native-digest" } };
+    calls.query.mockResolvedValue({ committed: null, accountId: "owner", artifact: { ...current, blueprintKey: "document" },
+      room: { _id: "room", nextSequence: 2, policyVersion: 0, schemaVersion: 2 }, headHash: "head",
+      nativeRequired: true, whole: true, nativeSource: {}, replicas: [], source: { ...current, content: projectionContent } });
+    calls.bridge.mockImplementation(async (operation: string, wire: {
+      nativeCandidate: { cloud: { projectionContent: unknown } }; append: { projectionJson: string };
+    }) => {
+      if (operation === "load") return { roomId: "room", nextSequence: 2,
+        updates: [{ sequence: 1, update: Buffer.from(Y.encodeStateAsUpdate(document)).toString("base64") }] };
+      expect(wire.nativeCandidate.cloud.projectionContent).toEqual(JSON.parse(wire.append.projectionJson).content);
+      expect(wire.nativeCandidate.cloud.projectionContent).toMatchObject({ nativeProjectionComplete: true,
+        tiptap: { type: "doc" }, nativeBinding: projectionContent.nativeBinding });
+      return committed;
+    });
+    try {
+      await expect(admitArtifactRestore(request, vi.fn().mockResolvedValue({ projectionContent,
+        nativeSource: { hash: "retained-native-hash" }, nativeCandidate: { destination: "cloud", cloud: { projectionContent } } })))
+        .resolves.toEqual(committed);
+    } finally { document.destroy(); }
   });
 
   it.each([

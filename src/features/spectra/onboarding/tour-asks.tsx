@@ -1,18 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useConvexAuth, useQuery } from "convex/react";
-import { api } from "../../../../convex/_generated/api";
+import { useSession } from "@/features/spectra/data/use-session";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { bridgeDownloadUrl, bridgePlatform } from "../bridge/client";
+import { WorkHomeChoice } from "../devices/work-home-choice";
 import type { TourAsk } from "./tour-steps";
 
 /*
- * The two choices the tour asks for while it is on the page they belong to:
- * when the brief and the reminders arrive, and whether to get Bridge on this
- * computer. Both are optional and both can be changed later (Settings, Devices).
+ * The choices the tour asks for while it is on the page they belong to: when
+ * the brief and the reminders arrive, whether to get Bridge on this computer,
+ * and where work is kept. All can be changed later (Settings, Devices).
  */
 
 function TimeChoice({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
@@ -44,8 +44,7 @@ function ReminderTimes() {
 }
 
 function BridgeChoice() {
-  const { isAuthenticated } = useConvexAuth();
-  const connected = useQuery(api.bridge.hasDevice, isAuthenticated ? {} : "skip");
+  const connected = useSession()?.hasDevice;
   // Read after mount: the server cannot tell which computer this is.
   const [download, setDownload] = useState<string | null>(null);
   useEffect(() => setDownload(bridgeDownloadUrl(bridgePlatform())), []);
@@ -65,5 +64,6 @@ function BridgeChoice() {
 }
 
 export function TourAskControl({ ask }: { ask: TourAsk }) {
+  if (ask === "storage") return <WorkHomeChoice compact />;
   return ask === "reminders" ? <ReminderTimes /> : <BridgeChoice />;
 }

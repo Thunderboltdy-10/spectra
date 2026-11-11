@@ -192,7 +192,7 @@ const REPLICA_STATE_WORDS: Record<string, string> = {
   current: "Up to date",
   ahead: "Has newer edits",
   behind: "Waiting for the latest copy",
-  diverged: "Does not match",
+  diverged: "Changed in both places",
   pending: "Saving",
   error: "Could not update",
   unavailable: "Not available here",

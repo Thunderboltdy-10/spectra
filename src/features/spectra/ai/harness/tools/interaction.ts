@@ -13,7 +13,7 @@ export function askUserTool(): HarnessTool<AskArgs> {
   return {
     name: "ask_user",
     description:
-      "Ask the user a question when a reasonable person could not proceed without the answer (which of two similar items, a missing choice that changes the result). Offer 2-4 short options when you can; the user may also type an answer. The run waits for the reply. Do not ask for anything you can find out or sensibly assume.",
+      "Ask a question the user explicitly requests, or one needed to proceed (which of two similar items, a missing choice that changes the result). Offer 2-4 short options when you can; the user may also type an answer. The run waits for the reply. Otherwise do not ask for anything you can find out or sensibly assume.",
     parameters: {
       type: "object",
       properties: {

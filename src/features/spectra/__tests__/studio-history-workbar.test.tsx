@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuizStudio } from "../components/quiz-studio";
 import { FlashcardStudio } from "../components/flashcard-studio";
 import { PlanStudio } from "../components/plan-studio";
-import { TimetableStudio } from "../components/timetable-studio";
 import {
   StudioContractProvider,
   type StudioContract,
@@ -63,7 +62,6 @@ const studios: Array<[string, WorkType, () => ReactNode]> = [
   ["quiz", "quiz", () => <QuizStudio artifactId="work-1" mode="tab" content={{ questions: [] }} onChange={() => {}} />],
   ["flashcards", "flashcard_deck", () => <FlashcardStudio artifactId="work-1" mode="tab" content={{ cards: [] }} onChange={() => {}} />],
   ["plan", "planner_task", () => <PlanStudio mode="tab" title="Plan" content={{ tasks: [] }} onChange={() => {}} readOnly={false} />],
-  ["timetable", "timetable", () => <TimetableStudio artifactId="work-1" artifacts={[]} content={{}} onChange={() => {}} readOnly={false} />],
 ];
 
 beforeEach(() => {

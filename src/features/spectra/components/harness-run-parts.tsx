@@ -16,6 +16,31 @@ import type { HarnessArtifactTouchView, HarnessInputView } from "../ai/stream-ev
  * each). Widgets it drew render in thread-widget.tsx.
  */
 
+/** What was asked and what was said, once it has been answered. */
+export function AnsweredInputs({ answers }: { answers: ReadonlyArray<{ key: string; question: string; label: string }> }) {
+  if (!answers.length) return null;
+  return (
+    <div className="mt-4 grid gap-2.5" data-conversation-action="input-answered">
+      {answers.map((answer) => (
+        <section
+          key={answer.key}
+          aria-label="Answered"
+          className="border-l-2 border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] pl-3"
+        >
+          {answer.question ? (
+            <p className="whitespace-pre-wrap text-caption font-semibold leading-5 text-[var(--text-primary)]">
+              <InlineEmphasis text={answer.question} />
+            </p>
+          ) : null}
+          <p className="mt-0.5 text-micro text-[var(--text-secondary)]">
+            {answer.label === "Allowed" || answer.label === "Not allowed" || answer.label === "Skipped" ? answer.label : `Answered: ${answer.label}`}
+          </p>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 export function HarnessInputPanel({
   input,
   onAnswer,
@@ -169,6 +194,7 @@ export function messageTouches(metadata: Record<string, unknown> | undefined): H
           title: value.title,
           action,
           ...(typeof value.change === "string" && value.change.trim() ? { change: value.change } : {}),
+          ...(action === "edited" && typeof value.region === "string" && value.region ? { region: value.region } : {}),
         },
       ];
     }),
@@ -185,19 +211,34 @@ const ACTION_COPY = { created: "Created", edited: "Edited", referenced: "Used" }
 export function WorkTouchCards({
   touches,
   onOpen,
+  currentTitles,
+  undone = false,
 }: {
   touches: readonly HarnessArtifactTouchView[];
-  onOpen?: (artifactId: string) => void;
+  /** Opens the work; an edit lands on the region it changed. */
+  onOpen?: (artifactId: string, regionId?: string) => void;
+  /** Names as they are now, when known: a work renamed since keeps its new name here. */
+  currentTitles?: ReadonlyMap<string, string>;
+  /** The run was undone: a slip says what became of the work, not what the run did. */
+  undone?: boolean;
 }) {
-  const unique = dedupeTouches(touches);
+  const unique = dedupeTouches(touches).map((touch) => {
+    const title = currentTitles?.get(touch.id);
+    return title && title !== touch.title ? { ...touch, title } : touch;
+  });
   if (unique.length === 0) return null;
   return (
-    <ul className="mt-4 grid gap-2" aria-label="Work from this response">
+    <ul className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-2" aria-label="Work from this response">
       {unique.map((touch) => {
         const meta = (workTypeMeta as Record<string, (typeof workTypeMeta)[keyof typeof workTypeMeta] | undefined>)[touch.type] ?? workTypeMeta.document;
-        const action = ACTION_COPY[touch.action];
+        const reversed = undone && touch.action !== "referenced";
+        const action = reversed ? "Undone" : ACTION_COPY[touch.action];
         // A change that only repeats the action ("Edited", "Edited") says it once.
-        const change = touch.change?.trim() && touch.change.trim().toLowerCase() !== action.toLowerCase() ? touch.change : meta.label;
+        const change = reversed
+          ? touch.action === "created" ? "Moved to the Trash" : "Put back as it was"
+          : touch.change?.trim() && touch.change.trim().toLowerCase() !== action.toLowerCase() ? touch.change : meta.label;
+        // What the undo sent to the Trash doesn't open from here.
+        const opens = reversed && touch.action === "created" ? undefined : onOpen;
         const body = (
           <>
             <span className="work-slip-glyph" aria-hidden>
@@ -210,13 +251,13 @@ export function WorkTouchCards({
                 <span className="truncate">{change}</span>
               </span>
             </span>
-            {onOpen ? <span className="work-slip-open">Open</span> : null}
+            {opens ? <span className="work-slip-open">Open</span> : null}
           </>
         );
         return (
           <li key={touch.id} data-work-slip style={{ "--work-hue": meta.color, "--work-tint": meta.soft } as CSSProperties}>
-            {onOpen ? (
-              <button type="button" onClick={() => onOpen(touch.id)} aria-label={`Open ${touch.title}`} className="work-slip">
+            {opens ? (
+              <button type="button" onClick={() => opens(touch.id, touch.region)} aria-label={`Open ${touch.title}`} className="work-slip">
                 {body}
               </button>
             ) : (

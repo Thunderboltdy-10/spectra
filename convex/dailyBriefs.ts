@@ -18,7 +18,7 @@ import { schoolSetupForAccount } from "./schoolSyncShared";
  *
  * Each student's wake-up time is kept as a schedule; a cron hands the due
  * ones to the app a little before they wake, so the brief is waiting. A
- * reader away for four days stops getting them: their schedule rests, out of
+ * reader away for three days stops getting them: their schedule rests, out of
  * the cron's way, until Home opens again, writes that day's brief there and
  * sets the schedule going.
  */
@@ -31,7 +31,7 @@ export const BRIEF_LEAD_MS = 30 * 60_000;
 const STALE_AFTER_MS = 3 * 60 * 60_000;
 const DISPATCH_BATCH = 50;
 /** Days without opening Home after which the briefs stop. */
-const IDLE_AFTER_MS = 4 * DAY_MS;
+const IDLE_AFTER_MS = 3 * DAY_MS;
 /** Home tells the schedule it was seen at most this often. */
 const SEEN_EVERY_MS = 6 * 60 * 60_000;
 /** Where a resting schedule waits: past any morning the cron will reach before Home sets it again. */
@@ -44,10 +44,22 @@ async function rowOf(ctx: QueryCtx, accountId: Id<"accounts">) {
     .first();
 }
 
+/** Whoever finished setting up gets a brief, with or without a school's systems behind it. */
+function briefAllowed(setup: { tourComplete: boolean; establishedAt: number | null; phase: string }, at: number) {
+  const established = setup.establishedAt !== null && at > setup.establishedAt;
+  return established || (setup.tourComplete && (setup.phase === "ready" || setup.phase === "awaiting_connection"));
+}
+
+/** The end of a "YYYY-MM-DD" day, the latest that day can be anywhere: a query compares with this, not the clock. */
+function endOfDay(day: string) {
+  const start = Date.parse(`${day}T00:00:00Z`);
+  return Number.isFinite(start) ? start + 24 * 60 * 60 * 1_000 : 0;
+}
+
 /** The brief a row keeps from before `day`: its own when it is an earlier day's, else the one it replaced. */
 function earlierBrief(row: Doc<"dailyBriefs">, day: string) {
-  if (row.day < day && row.state === "ready") return { day: row.day, recap: row.recap ?? "", suggestions: row.suggestions ?? [] };
-  if (row.previous && row.previous.day < day) return { day: row.previous.day, recap: row.previous.recap ?? "", suggestions: row.previous.suggestions ?? [] };
+  if (row.day < day && row.state === "ready") return { day: row.day, recap: row.recap ?? "", ahead: row.ahead, suggestions: row.suggestions ?? [] };
+  if (row.previous && row.previous.day < day) return { day: row.previous.day, recap: row.previous.recap ?? "", ahead: row.previous.ahead, suggestions: row.previous.suggestions ?? [] };
   return undefined;
 }
 
@@ -62,15 +74,16 @@ export const today = query({
     const account = await getAuthenticatedAccount(ctx);
     if (!account) return null;
     const setup = await schoolSetupForAccount(ctx, account._id);
-    if (!setup.tourComplete || setup.phase !== "ready") return null;
+    if (!briefAllowed(setup, endOfDay(day))) return null;
     const row = await rowOf(ctx, account._id);
     if (!row) return null;
-    if (row.claimedAt < setup.completedAt!) return null;
+    if (row.claimedAt < (setup.completedAt ?? 0)) return null;
     const previous = row.day === day && row.state === "ready" ? undefined : earlierBrief(row, day);
-    if (row.day !== day) return { state: "absent" as const, claimedAt: 0, recap: undefined, suggestions: [], ...(previous ? { previous } : {}) };
+    if (row.day !== day) return { state: "absent" as const, claimedAt: 0, recap: undefined, ahead: undefined, suggestions: [], ...(previous ? { previous } : {}) };
     return {
       state: row.state,
       recap: row.recap,
+      ahead: row.ahead,
       suggestions: row.suggestions ?? [],
       claimedAt: row.claimedAt,
       ...(previous ? { previous } : {}),
@@ -85,18 +98,19 @@ export const claim = mutation({
     const account = await getAuthenticatedAccount(ctx);
     if (!account) throw new Error("AUTH_ACCOUNT_REQUIRED");
     const setup = await schoolSetupForAccount(ctx, account._id);
-    if (!setup.tourComplete || setup.phase !== "ready") return false;
+    if (!briefAllowed(setup, Date.now())) return false;
+    const completedAt = setup.completedAt ?? 0;
     const now = Date.now();
     const row = await rowOf(ctx, account._id);
     if (row && row.day === day) {
-      if (row.claimedAt >= setup.completedAt!) {
+      if (row.claimedAt >= completedAt) {
         if (row.state === "ready") return false;
         if (now - row.claimedAt < RECLAIM_AFTER_MS) return false;
       }
     }
     // The last brief stays on the page while this one is written.
-    const previous = row && row.claimedAt >= setup.completedAt! ? earlierBrief(row, day) : undefined;
-    const fresh = { day, state: "writing" as const, claimedAt: now, recap: undefined, suggestions: undefined, previous, updatedAt: now };
+    const previous = row && row.claimedAt >= completedAt ? earlierBrief(row, day) : undefined;
+    const fresh = { day, state: "writing" as const, claimedAt: now, recap: undefined, ahead: undefined, suggestions: undefined, previous, updatedAt: now };
     if (row) await ctx.db.patch(row._id, fresh);
     else await ctx.db.insert("dailyBriefs", { accountId: account._id, ...fresh });
     return true;
@@ -107,6 +121,7 @@ export const save = mutation({
   args: {
     day: v.string(),
     recap: v.optional(v.string()),
+    ahead: v.optional(v.string()),
     suggestions: v.optional(v.array(briefSuggestionValidator)),
     failed: v.optional(v.boolean()),
   },
@@ -118,6 +133,7 @@ export const save = mutation({
     await ctx.db.patch(row._id, {
       state: args.failed ? "failed" : "ready",
       recap: args.recap?.slice(0, 600),
+      ahead: args.ahead?.slice(0, 600),
       suggestions: args.suggestions?.slice(0, 5),
       // A failed brief leaves the last one showing; a written one replaces it.
       ...(args.failed ? {} : { previous: undefined }),
@@ -177,7 +193,7 @@ export const dispatchDue = internalMutation({
       .take(DISPATCH_BATCH);
     for (const schedule of due) {
       const setup = await schoolSetupForAccount(ctx, schedule.accountId);
-      if (!setup.tourComplete || setup.phase !== "ready") {
+      if (!briefAllowed(setup, now)) {
         await ctx.db.patch(schedule._id, { nextAt: now + DAY_MS });
         continue;
       }

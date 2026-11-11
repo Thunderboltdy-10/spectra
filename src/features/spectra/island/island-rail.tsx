@@ -32,6 +32,7 @@ export function IslandRail({
   play,
   done,
   raised,
+  settled = false,
   current,
   focusTitle,
   dragging,
@@ -49,6 +50,8 @@ export function IslandRail({
   play: readonly IslandTab[];
   done: readonly IslandTab[];
   raised: boolean;
+  /** Raised with the hand away: only the tabs that want attention stand. */
+  settled?: boolean;
   /** The tab in hand: its card is open, or the composer writes into its thread. */
   current: string | null;
   /** The thread the composer writes into when it has no tab here. */
@@ -103,6 +106,7 @@ export function IslandRail({
       data-island-rail
       data-band-overhang
       data-raised={raised || undefined}
+      data-settled={settled || undefined}
       inert={!raised}
       onKeyDown={onKeyDown}
       style={{ bottom, maxWidth } as CSSProperties}

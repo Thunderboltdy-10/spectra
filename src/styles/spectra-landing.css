@@ -2815,7 +2815,7 @@
 }
 
 .sp-pipe {
-  stroke: color-mix(in oklab, var(--sp-ink, #1c1b20) 9%, #ece7de);
+  stroke: color-mix(in oklab, #1c1b20 9%, #ece7de);
   stroke-width: 12;
 }
 
@@ -2918,7 +2918,7 @@
   place-items: center;
   border-radius: 3px;
   background: #fff;
-  font-size: 10px;
+  font-size: 10px; /* spectra-token-allow: miniature */
   font-weight: 800;
   color: #2b579a;
 }
@@ -3186,7 +3186,7 @@
   place-items: center;
   border-radius: 6px 12px 6px 6px;
   background: color-mix(in oklab, #4f9fe6 14%, #fff);
-  font-size: 10px;
+  font-size: 10px; /* spectra-token-allow: miniature */
   font-weight: 700;
   color: #2c6db0;
 }

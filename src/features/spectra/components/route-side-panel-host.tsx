@@ -29,7 +29,7 @@ import {
 import { launchFrom, useLifeLanding } from "../life/use-life";
 import { threadName } from "../threads/threads-model";
 import { LiveThreadPanel } from "./live-thread-panel";
-import { CompanionSheet, type CompanionTab } from "./work-companion";
+import { rememberFullViewOrigin, requestFullView } from "./full-view-origin";
 import { createLatestStudioLoad } from "./latest-studio-load";
 import { expectLanding } from "../anchors/open-anchor";
 import {
@@ -73,8 +73,6 @@ export function RouteSidePanelHost() {
   const [front, setFront] = useState<"work" | "thread">("work");
   const [workWidth, setWorkWidth] = useState(620);
   const [threadWidth, setThreadWidth] = useState(480);
-  /** The open work's companion, as an inner sheet over it. */
-  const [companion, setCompanion] = useState<{ workId: string; tab: CompanionTab } | null>(null);
   const [workLoad] = useState(() => createLatestStudioLoad(
     (workId, signal) => getSpectraArtifact(workId, { signal }),
   ));
@@ -197,6 +195,8 @@ export function RouteSidePanelHost() {
         window.localStorage,
         transferSideSessionToLibrary(shared, { ...sideSession, workId }),
       );
+      rememberFullViewOrigin(workId, `${window.location.pathname}${window.location.search}`);
+      requestFullView(workId);
       router.push(`/library/${encodeURIComponent(workId)}`);
     },
     [router, sideSession, workLoad],
@@ -346,32 +346,9 @@ export function RouteSidePanelHost() {
           onActivateTab={activateTab}
           onCloseTab={() => closeWork()}
           onDirtyChange={setDirty}
-          onOpenChats={() => setCompanion({ workId: studio.activeArtifact!._id, tab: "conversations" })}
+          onOpenThread={(next) => void loadThread(next.id)}
           executeApplicationCommand={applicationCommandDispatcher}
         />
-        {companion?.workId === studio.activeArtifact._id ? (
-          <CompanionSheet
-            rootRef={workSlot}
-            work={studio.activeArtifact}
-            artifacts={artifacts}
-            tab={companion.tab}
-            onTabChange={(tab) => setCompanion({ workId: companion.workId, tab })}
-            onClose={() => setCompanion(null)}
-            onOpenFull={() => {
-              setCompanion(null);
-              launchFrom(workSlot.current);
-              fullscreen(companion.workId);
-            }}
-            onOpenWork={(next) => {
-              setCompanion(null);
-              void loadWork(next._id);
-            }}
-            onOpenThread={(next) => {
-              setCompanion(null);
-              void loadThread(next.id);
-            }}
-          />
-        ) : null}
         </div>
       ) : null}
       {thread ? (

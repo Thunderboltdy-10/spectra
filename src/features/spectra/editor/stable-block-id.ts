@@ -151,7 +151,12 @@ export const StableBlockId = Extension.create({
           },
         },
         appendTransaction: (transactions, _oldState, newState) => {
-          if (!transactions.some((transaction) => transaction.docChanged))
+          // Identity arrives with a real edit. Stamping what the shared
+          // document just delivered would write on open: every client that
+          // only looked at a document would make a version of it, and two of
+          // them would race to give the same block different ids.
+          const changes = transactions.filter((transaction) => transaction.docChanged);
+          if (!changes.length || changes.every(isYjsOriginDocumentTransaction))
             return null;
           const transaction = newState.tr;
           let changed = false;

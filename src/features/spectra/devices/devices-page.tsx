@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { useConvexAuth, useMutation } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -17,6 +18,7 @@ import {
   DEVICES_HREF,
   pairingFailureMessage,
   unpairBridge,
+  type BridgeFile,
   type BridgeReachability,
 } from "../bridge/client";
 import { Icon } from "@/components/icons";
@@ -25,13 +27,16 @@ import { spectraBus } from "../events";
 import { permissionChoicePatch } from "../settings/schema/ai-permissions";
 import { useSpectraPreferences } from "../settings/preference-store";
 import type { LocalDeviceRequest } from "./actions";
+import { AlreadySyncedNotice } from "./already-synced-notice";
 import { DeviceCard } from "./device-card";
 import { runLocalDeviceAction } from "./device-actions";
 import { devicesModel, nativeWritesChoice, nativeWritesPlan, type CloudOverview, type DeviceView, type NativeWrites } from "./devices-model";
 import { NativeWritesChoice } from "./native-writes-choice";
+import { WorkHomeChoice } from "./work-home-choice";
 import { PairingPanel, THIS_COMPUTER_LIFE_KEY } from "./pairing-panel";
 import { devicePairing } from "./pairing";
 import { firstTipMoment } from "../onboarding/first-tips";
+import { accountStorageMatches, accountStorageRevision } from "@/lib/account-storage-scope";
 
 const BAR_PLAN: readonly CollapseStep[] = [{ hideLabel: "pause" }, { toMenu: "pause" }, { hideLabel: "add" }, { hideLabel: "add-files" }];
 
@@ -68,9 +73,11 @@ export function DevicesPage() {
 
   const [now, setNow] = useState(() => Date.now());
   const [busy, setBusy] = useState<string | null>(null);
+  const [alreadySynced, setAlreadySynced] = useState<BridgeFile[] | null>(null);
   const [notice, setNotice] = useState<string>();
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [removeFiles, setRemoveFiles] = useState(false);
   const [justPaired, setJustPaired] = useState(false);
   const [wantTick, setWantTick] = useState(0);
   const connectParam = useRef(false);
@@ -143,6 +150,7 @@ export function DevicesPage() {
     void runLocalDeviceAction({ action: "add_files" }).then((outcome) => {
       setBusy(null);
       setNotice(outcome.message);
+      noteAlreadySynced(outcome);
     });
   }, [here?.live]);
 
@@ -156,6 +164,12 @@ export function DevicesPage() {
     const outcome = await runLocalDeviceAction(request);
     setBusy(null);
     setNotice(outcome.message);
+    if (request.action === "add_files") noteAlreadySynced(outcome);
+  }
+
+  function noteAlreadySynced(outcome: { data?: unknown }) {
+    const existing = (outcome.data as { existing?: BridgeFile[] } | undefined)?.existing ?? [];
+    setAlreadySynced(existing.length ? existing : null);
   }
 
   function chooseNativeWrites(choice: NativeWrites) {
@@ -165,41 +179,56 @@ export function DevicesPage() {
   }
 
   async function applyNativeWrites(choice: NativeWrites) {
+    const revision = accountStorageRevision();
+    if (!accountStorageMatches(revision)) return;
     const plan = nativeWritesPlan(choice, policy?.contentDirection);
     try {
       if (plan.preset)
         await overridePolicy({ values: POLICY_PRESETS[plan.preset], idempotencyKey: `devices:native-writes:${choice}:${Date.now()}` });
+      if (!accountStorageMatches(revision)) return;
       if (plan.permission) update("ai", permissionChoicePatch(stored, "bridge_files", plan.permission));
       setNotice(choice === "never" ? "Desktop files stay as they are." : choice === "ask" ? "Spectra AI asks before it changes a desktop file." : "Spectra saves changes to your desktop files.");
     } catch (error) {
-      setNotice(failureSentence(error));
+      if (accountStorageMatches(revision)) setNotice(failureSentence(error));
     }
   }
 
   async function confirmAction() {
     if (!confirm) return;
+    const revision = accountStorageRevision();
+    if (!accountStorageMatches(revision)) return;
     setConfirming(true);
     try {
       if (confirm.kind === "native-writes") await applyNativeWrites(confirm.choice);
       else if (confirm.kind === "remove-folder") {
         setBusy(`remove_folder:${confirm.grantId}`);
         const outcome = await runLocalDeviceAction({ action: "remove_folder", grantId: confirm.grantId });
+        if (!accountStorageMatches(revision)) return;
         setNotice(outcome.message);
       } else if (confirm.device.id) {
-        await revokeDevice({ deviceId: confirm.device.id as Id<"bridgeDevices"> });
+        await revokeDevice({ deviceId: confirm.device.id as Id<"bridgeDevices">, removeFiles });
+        if (!accountStorageMatches(revision)) return;
         if (confirm.device.isThisComputer) {
           await unpairBridge();
+          if (!accountStorageMatches(revision)) return;
           local.forgetSession();
           void local.refresh();
         }
-        setNotice(`Removed ${confirm.device.name}. Its files stay on the computer.`);
+        setNotice(
+          removeFiles
+            ? `Removed ${confirm.device.name}. Its files are in Spectra's Trash and still on the computer.`
+            : `Removed ${confirm.device.name}. Its files stay in Spectra and on the computer.`,
+        );
       }
     } catch (error) {
-      setNotice(confirm.kind === "remove-device" ? pairingFailureMessage(error, local.discovery, local.online) : failureSentence(error));
+      if (accountStorageMatches(revision)) setNotice(confirm.kind === "remove-device" ? pairingFailureMessage(error, local.discovery, local.online) : failureSentence(error));
     } finally {
-      setBusy(null);
-      setConfirming(false);
-      setConfirm(null);
+      if (accountStorageMatches(revision)) {
+        setBusy(null);
+        setConfirming(false);
+        setRemoveFiles(false);
+        setConfirm(null);
+      }
     }
   }
 
@@ -272,6 +301,7 @@ export function DevicesPage() {
               <h2 id="devices-list" className="device-section-heading">
                 Your computers
               </h2>
+              {alreadySynced ? <AlreadySyncedNotice files={alreadySynced} onDismiss={() => setAlreadySynced(null)} /> : null}
               <PairingPanel state={pairingState} onCancel={() => pairing.cancel()} onRetry={connect} />
               {here ? (
                 deviceCard(here)
@@ -314,7 +344,8 @@ export function DevicesPage() {
               ) : null}
             </section>
 
-            <aside aria-label="For every device" className="min-w-0 xl:sticky xl:top-6">
+            <aside aria-label="For every device" className="min-w-0 space-y-4">
+              <WorkHomeChoice />
               <NativeWritesChoice value={nativeWrites} disabled={!policy} onChange={chooseNativeWrites} />
             </aside>
           </div>
@@ -341,10 +372,21 @@ export function DevicesPage() {
               : "Spectra may save changes back to the files on your computers, and Spectra AI asks first. This applies to every device."
             : confirm?.kind === "remove-folder"
               ? `${confirm.name} stops syncing. ${confirm.selection === "file" ? "The file stays" : "Its files stay"} on this computer.`
-              : "It stops syncing and Spectra forgets it. Its files stay on the computer; you can connect it again later."
+              : (
+                <span className="flex flex-col gap-3">
+                  <span>It stops syncing. Files stay on the computer, and you can connect it again later.</span>
+                  <label className="flex cursor-pointer items-center gap-2 text-[var(--text-primary)]">
+                    <input type="checkbox" checked={removeFiles} onChange={(event) => setRemoveFiles(event.target.checked)} />
+                    Also move its files in Spectra to the Trash
+                  </label>
+                </span>
+              )
         }
         confirmLabel={confirm?.kind === "native-writes" ? "Allow writes" : confirm?.kind === "remove-folder" ? "Stop using it" : "Remove"}
-        onCancel={() => setConfirm(null)}
+        onCancel={() => {
+          setRemoveFiles(false);
+          setConfirm(null);
+        }}
         onConfirm={() => void confirmAction()}
       />
     </div>

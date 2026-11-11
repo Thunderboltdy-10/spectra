@@ -115,6 +115,60 @@ const DropdownMenuLabel = React.forwardRef<
 ));
 DropdownMenuLabel.displayName = DropdownMenuPrimitive.Label.displayName;
 
+/**
+ * A long group of options folded into one row, which says what is chosen and
+ * opens them in place. Menus stay short; nothing moves to another page.
+ *
+ * As a `heading` the row names what its options have in common (Codex, Claude
+ * Code) and is set apart from them: smaller and quieter, with what it holds
+ * hung from a line under it. Given `open` and `onOpenChange`, the menu decides,
+ * so that opening one group can close the others.
+ */
+function DropdownMenuDisclosure({
+  label,
+  hint,
+  defaultOpen = false,
+  open: openProp,
+  onOpenChange,
+  heading = false,
+  children,
+}: {
+  label: React.ReactNode;
+  /** What is chosen inside, shown while folded. */
+  hint?: React.ReactNode;
+  defaultOpen?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  heading?: boolean;
+  children: React.ReactNode;
+}) {
+  const [openState, setOpenState] = React.useState(defaultOpen);
+  const open = openProp ?? openState;
+  return (
+    <>
+      <DropdownMenuItem
+        aria-expanded={open}
+        data-menu-heading={heading || undefined}
+        className={heading ? "min-h-7 py-1 text-micro font-semibold text-[var(--text-tertiary)] data-[highlighted]:text-[var(--text-primary)]" : undefined}
+        onSelect={(event) => {
+          event.preventDefault();
+          if (openProp === undefined) setOpenState(!open);
+          onOpenChange?.(!open);
+        }}
+      >
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {hint && !open ? <span className="max-w-[9rem] truncate text-micro font-normal text-[var(--text-tertiary)]">{hint}</span> : null}
+        <Icon name="chevronDown" size={heading ? 12 : 14} className={cn("shrink-0 text-[var(--text-tertiary)] transition-transform duration-[var(--motion-fast)]", open && "rotate-180")} />
+      </DropdownMenuItem>
+      <div className="grid transition-[grid-template-rows] duration-[var(--motion-base)] ease-standard" style={{ gridTemplateRows: open ? "1fr" : "0fr" }}>
+        <div className="min-h-0 overflow-hidden">
+          {open ? (heading ? <div className="ml-2.5 border-l border-[var(--border-default)] pl-1">{children}</div> : children) : null}
+        </div>
+      </div>
+    </>
+  );
+}
+
 /** A row that opens related options beside it, to the right where there is room. */
 /*
  * A submenu is a second page of the same menu, set beside it: the same width,
@@ -369,6 +423,7 @@ export {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
+  DropdownMenuDisclosure,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,

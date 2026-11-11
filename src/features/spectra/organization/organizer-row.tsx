@@ -1,5 +1,6 @@
 "use client";
 
+import { useDeviceWorkAwayNote } from "../bridge/device-work-away";
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronRight, Check, MoreHorizontal, Star, Users } from "@/components/icons/glyph-icons";
 import { sharedLabel, workSourceOf } from "./library-note";
@@ -116,6 +117,7 @@ export const OrganizerRow = memo(function OrganizerRow({
     { bars: "[data-node-title]" },
   );
 
+  const away = useDeviceWorkAwayNote(node.source);
   return (
     <div
       ref={rowRef}
@@ -130,6 +132,8 @@ export const OrganizerRow = memo(function OrganizerRow({
       data-life-launch
       data-node-row={node.nodeId}
       data-work-source={workSourceOf(node)}
+      data-device-away={away ? true : undefined}
+      title={away ?? undefined}
       style={{ top, height: ROW_HEIGHT }}
       className={cn(
         "spectra-organizer-row group absolute inset-x-0 flex cursor-default items-center gap-2.5 rounded-chip pl-2 pr-1.5 text-body transition-colors",

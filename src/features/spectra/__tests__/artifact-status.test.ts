@@ -179,3 +179,23 @@ describe("the status control's life moments", () => {
     expect(statusMoment("saved", "saving")).toBeNull();
   });
 });
+
+describe("a file deleted outside Spectra", () => {
+  const GONE: ArtifactStatusReplica & ReplicaTruth = { kind: "local", state: "unavailable", unavailableReason: "missing-on-disk", relativePath: "Biology/Essay.docx" };
+
+  it("says the file is gone, keeps the work, and offers one way to put it back", () => {
+    const presentation = presentSync({ replicas: [{ kind: "cloud", state: "current", lastVerifiedAt: NOW }, GONE], openConflictCount: 0, replicaPendingCount: 0, online: true });
+    expect(presentation).toMatchObject({ key: "file-gone", label: "File deleted", action: { label: "Put it back", kind: "put-back" } });
+    expect(presentation.detail).toBe("The file was deleted or moved out of its folder on this computer. This work is still here in Spectra.");
+    const gone = status({ replicas: [{ kind: "cloud", state: "current", lastVerifiedAt: NOW }, GONE] }, { can: { ...ALL_ACTIONS, "put-back": true } });
+    expect(gone.words).toBe("File deleted");
+    expect(gone.actions[0]).toEqual({ kind: "put-back", label: "Put it back" });
+  });
+
+  it("stays quiet when the file only moved, or is on another computer", () => {
+    const moved = presentSync({ replicas: [{ kind: "cloud", state: "current", lastVerifiedAt: NOW }, GONE, { kind: "local", state: "current", lastVerifiedAt: NOW }], openConflictCount: 0, replicaPendingCount: 0, online: true });
+    expect(moved.key).not.toBe("file-gone");
+    const elsewhere = presentSync({ replicas: [{ kind: "cloud", state: "current", lastVerifiedAt: NOW }, { ...GONE, unavailableReason: "not-on-this-computer" }], openConflictCount: 0, replicaPendingCount: 0, online: true });
+    expect(elsewhere.key).not.toBe("file-gone");
+  });
+});

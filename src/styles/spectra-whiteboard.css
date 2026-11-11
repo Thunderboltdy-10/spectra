@@ -128,7 +128,7 @@
 
 .board-view-edges text {
   fill: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   paint-order: stroke;
   stroke: var(--bg-primary);
   stroke-width: 4px;
@@ -171,13 +171,13 @@
 
 .board-view-placeholder {
   color: var(--text-tertiary);
-  font-size: 13px;
+  font-size: 14px;
   text-align: center;
 }
 
 .board-view-table {
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .board-view-table td {

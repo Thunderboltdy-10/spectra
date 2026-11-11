@@ -28,7 +28,9 @@ async function fixture(input?: Uint8Array) {
   const hash = await sha256Payload(payload);
   const truth = { replicaId: "cloud-source", payloadRef: "retained-source", hash, revision: hash, bytes: payload.byteLength, nativeFormat: "pptx", replicaKind: "cloud", state: "current", compatibilityProfile: "strict-native", url: "https://example.invalid/unused" };
   io.fetchNative.mockResolvedValue({ truth, payload });
-  io.query.mockResolvedValue({ replicas: [{ _id: "local-target", kind: "local", revision: hash, state: "current" }] });
+  io.query.mockImplementation(async (name: string) => name === "syncPolicy:effective"
+    ? { contentDirection: "bidirectional", protectedOriginal: false }
+    : { replicas: [{ _id: "local-target", kind: "local", revision: hash, state: "current" }] });
   return { truth, payload, opened, content: pptxArtifactContent(opened.projection) };
 }
 

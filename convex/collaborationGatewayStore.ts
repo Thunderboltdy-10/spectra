@@ -46,6 +46,8 @@ function projectionExceedsDurableBound(projectionJson: string): boolean {
 
 type GatewayProjection = {
   title: string;
+  /** Present while the room still carries the title a rename replaced. */
+  renamedFromTitle?: string;
   summary?: string;
   tags: string[];
   typeKey: string;
@@ -72,6 +74,7 @@ function artifactProjectionPatch(
 ) {
   return {
     title: projection.title,
+    renamedFromTitle: projection.renamedFromTitle,
     summary: projection.summary,
     tags: projection.tags,
     content: encodeArtifactContentForStorage(
@@ -148,6 +151,8 @@ export async function parseGatewayProjection(
     _id: Id<"spectraArtifacts">;
     blueprintKey: string;
     summary?: string;
+    title?: string;
+    renamedFromTitle?: string;
   },
   authority?: { accountId: Id<"accounts">; policyVersion: number },
   /** A trusted provider merge supplies its exact summary; never a client. */
@@ -206,8 +211,11 @@ export async function parseGatewayProjection(
         content: value.content,
       })
     : rawSummary;
+  // The room hasn't heard about a rename yet: its old title is not a new edit.
+  const renamePending = artifact.renamedFromTitle !== undefined && artifact.title !== undefined && title === artifact.renamedFromTitle;
   return {
-    title,
+    title: renamePending ? artifact.title! : title,
+    ...(renamePending ? { renamedFromTitle: artifact.renamedFromTitle } : {}),
     ...(summary ? { summary } : {}),
     tags: tags as string[],
     typeKey: value.typeKey as string,

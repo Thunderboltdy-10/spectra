@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Minus, Plus } from "lucide-react";
+import { Minus, Plus } from "@/components/icons/glyph-icons";
 import { cn } from "@/lib/utils";
 
 /**

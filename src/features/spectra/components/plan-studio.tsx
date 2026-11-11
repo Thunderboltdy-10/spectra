@@ -1,7 +1,8 @@
 "use client";
 
+import { useLatest, useStudioContextItems } from "./studio-context-menu";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarClock, Download, FileSpreadsheet, Import, Plus, Search, SlidersHorizontal } from "lucide-react";
+import { CalendarClock, Download, FileSpreadsheet, Import, Plus, Search, SlidersHorizontal, Check } from "lucide-react";
 import { AlertCircle, X } from "@/components/icons/glyph-icons";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { currentTimeMs, uniqueToken } from "@/lib/unique-token";
@@ -177,6 +178,28 @@ export function PlanStudio({
     });
   }
 
+  const planVerbs = useLatest({ addTask, addSection, patchTask, plan });
+  useStudioContextItems(({ target }) => {
+    if (!canEdit) return null;
+    const taskId = target.closest("[data-plan-task]")?.getAttribute("data-plan-task");
+    if (taskId) {
+      const task = planVerbs.current.plan.tasks.find((entry) => entry.id === taskId);
+      if (!task) return null;
+      const done = task.status === "done";
+      return [[
+        { key: "task-open", label: "Open step", onSelect: () => setOpenTaskId(taskId) },
+        {
+          key: "task-done",
+          label: done ? "Mark as not done" : "Mark as done",
+          icon: Check,
+          onSelect: () => planVerbs.current.patchTask(taskId, { status: done ? "todo" : "done" }),
+        },
+      ]];
+    }
+    return [[
+      { key: "plan-section", label: "New section", icon: Plus, onSelect: () => planVerbs.current.addSection() },
+    ]];
+  });
   function addSection() {
     const order = plan.sections.reduce((max, section) => Math.max(max, section.order), -1) + 1;
     commit({ ...plan, sections: [...plan.sections, { id: uniqueId("section"), title: `Section ${order + 1}`, order }] });

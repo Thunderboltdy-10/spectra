@@ -15,6 +15,7 @@ import { artifactOperationDigest, artifactOperationTarget, artifactOutput, artif
 import { nativeAiRequestDigest, nativeAiUpdateIdentity } from "../shared/native-ai-commit";
 import { validateNativeSaveReceipt } from "../shared/native-office-contract";
 import { fitsConvexNesting } from "../shared/convex-nesting.mjs";
+import { unpackOperationInput } from "../shared/operation-content";
 import type { AdmittedAiCommit } from "../src/features/spectra/ai/admitted-ai-update";
 
 /** Authenticated physical head for cold Node preparation. Reading this head
@@ -39,7 +40,7 @@ export const head = query({
     const room = receipt ? null : await ctx.db.query("collaborationRooms")
       .withIndex("by_artifact_partition", q => q.eq("artifactId", artifact._id).eq("partitionKey", "root")).unique();
     return { accountId: actor.accountId, artifact, operationDigest, prompt: run.userPrompt,
-      operation: { id: operation._id, type: operation.type, input: operation.input, writeScope: preparedArtifactScope(operation) },
+      operation: { id: operation._id, type: operation.type, input: unpackOperationInput(operation.input), writeScope: preparedArtifactScope(operation) },
       sourceContentIdentity: await artifactSourceIdentity(artifact), room,
       committedResult: receipt?.result ?? null };
   },
@@ -196,10 +197,16 @@ export const commit = internalMutation({
         beforeProjection.schemaVersion !== artifact.schemaVersion || afterProjection.schemaVersion !== artifact.schemaVersion)
       throw new Error("AI_NATIVE_TYPE_MISMATCH");
     const admission = await assertVerifiedAiArtifactWriteAdmission(ctx, identity);
+    if (nativeCandidate?.destination === "bridge" && (!admission.operation.requiresConfirmation ||
+        !admission.scope.approvalCategories?.includes("bridge_files")))
+      throw new Error("AI_ARTIFACT_APPROVAL_SCOPE_REQUIRED");
     const before = { title: beforeProjection.title, summary: beforeProjection.summary,
       content: beforeProjection.content, tags: beforeProjection.tags };
-    await ctx.db.patch(artifact._id, { ...before, contentHash: args.beforeProjectionHash, liveStateVectorHash: append.baseStateVectorHash });
-    await ctx.db.patch(room._id, { lastProjectionSequence: room.nextSequence - 1 });
+    // Usually the row already says this, and rewriting it would run every trigger for nothing.
+    if ((artifact.contentHash ?? null) !== args.beforeProjectionHash || artifact.liveStateVectorHash !== append.baseStateVectorHash)
+      await ctx.db.patch(artifact._id, { ...before, contentHash: args.beforeProjectionHash, liveStateVectorHash: append.baseStateVectorHash });
+    if (room.lastProjectionSequence !== room.nextSequence - 1)
+      await ctx.db.patch(room._id, { lastProjectionSequence: room.nextSequence - 1 });
     await commitHumanCheckpoint(ctx, artifact._id, "Your work before Spectra edited", { kind: "pre_ai_checkpoint" });
     // Without native sources the appender's ordinary AI history boundary is
     // the whole history effect; it already fits oversized snapshots off-row.

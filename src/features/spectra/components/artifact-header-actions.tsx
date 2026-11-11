@@ -19,6 +19,8 @@ export type HeaderCommand = {
   label: string;
   icon: GlyphIcon;
   onSelect: () => void;
+  /** Showing right now: pressing it again puts it away. */
+  pressed?: boolean;
 };
 
 /** What the work's name keeps before a header command gives way. */
@@ -117,7 +119,7 @@ export function ArtifactHeaderActions({
       </span>
       {visible.map((command) => {
         const Glyph = command.icon;
-        return <IconButton key={command.id} label={command.label} onClick={command.onSelect} icon={<Glyph className="size-4" />} />;
+        return <IconButton key={command.id} label={command.label} onClick={command.onSelect} pressed={command.pressed} icon={<Glyph className="size-4" />} />;
       })}
       <span ref={tailRef} className="inline-flex items-center gap-1">
         {status}

@@ -13,7 +13,7 @@ vi.mock("convex/react", () => ({
   useConvexAuth: () => ({ isAuthenticated: session.authenticated }),
   useQuery: (query: unknown, args: unknown) => {
     session.queries(query, args);
-    return args === "skip" ? undefined : session.identity;
+    return args === "skip" || session.identity === undefined ? undefined : { catalog: session.identity };
   },
 }));
 import { api } from "../../../../convex/_generated/api";
@@ -45,7 +45,7 @@ describe("school-scoped reactive reads", () => {
     const args = { artifactId: "saved-artifact" };
     const hook = renderHook(() => useAuthedArgs(args));
     expect(hook.result.current).toBe("skip");
-    expect(session.queries).toHaveBeenCalledWith(api.catalogGraph.identity, {});
+    expect(session.queries).toHaveBeenCalledWith(api.identity.session, {});
     session.identity = {
       accountId: "account",
       schoolId: "school",
@@ -66,14 +66,14 @@ describe("school-scoped reactive reads", () => {
     };
     expect(renderHook(() => useAuthedArgs({})).result.current).toBe("skip");
     expect(session.queries).toHaveBeenCalledWith(
-      api.catalogGraph.identity,
+      api.identity.session,
       "skip",
     );
   });
   it("does not subscribe to membership when the caller explicitly skips", () => {
     expect(renderHook(() => useAuthedArgs("skip")).result.current).toBe("skip");
     expect(session.queries).toHaveBeenCalledWith(
-      api.catalogGraph.identity,
+      api.identity.session,
       "skip",
     );
   });
@@ -85,7 +85,7 @@ it("keeps the catalog identity bootstrap independent of membership", () => {
     args,
   );
   expect(session.queries).toHaveBeenCalledWith(
-    api.catalogGraph.identity,
+    api.identity.session,
     "skip",
   );
   session.authenticated = false;

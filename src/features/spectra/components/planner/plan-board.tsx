@@ -65,6 +65,7 @@ export function PlanBoard({
           {column.tasks.map((task) => (
             <button
               key={task.id}
+              data-plan-task={task.id}
               type="button"
               className="plan-slip"
               data-open={openTaskId === task.id || undefined}

@@ -14,6 +14,7 @@ const production = {
   CLERK_SECRET_KEY: "sk_live_abc",
   CLERK_WEBHOOK_SECRET: "whsec_abc",
   OPENROUTER_API_KEY: "or-key",
+  SPECTRA_AGENT_HUB_URL: "wss://collab.example.com/_spectra/agent-hub",
   SPECTRA_MODEL_ID: "openai/gpt-5.6",
   SPECTRA_REASONING_PROFILE: "xhigh",
   SPECTRA_MODEL_PROVIDER: "OpenAI",

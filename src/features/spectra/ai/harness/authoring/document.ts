@@ -12,6 +12,8 @@ import {
   type PmMark,
   type PmNode,
 } from "./markdown";
+import { closestText, locateAll, resolveRanges, spliceRanges } from "./locate";
+import { pagesNote } from "./page-estimate";
 import { AuthoringError, type IdFactory, defaultIdFactory, record, truncate } from "./shared";
 
 /*
@@ -21,6 +23,8 @@ import { AuthoringError, type IdFactory, defaultIdFactory, record, truncate } fr
  * whose Markdown did not change, so block ids, comments anchors and formatting
  * Markdown cannot express survive untouched sections.
  */
+
+const BLOCK_GAP = "\n\n";
 
 export type DocumentChunk = { id: string; node: PmNode; markdown: string };
 
@@ -92,6 +96,49 @@ function withWholeMarks(node: PmNode, marks: readonly PmMark[]): PmNode {
   return node.content ? { ...node, content: node.content.map((child) => withWholeMarks(child, marks)) } : node;
 }
 
+const unwrittenMarks = (marks: readonly PmMark[] | undefined) =>
+  (marks ?? []).filter((mark) => !WRITTEN_MARKS.has(mark.type));
+
+/**
+ * A small edit to a block with several looks, like a heading in two colours.
+ * The words that stayed keep exactly the look they had, and new words take the
+ * look of the words just before them, the way typing does.
+ */
+function withLookOfOldWords(next: PmNode, old: PmNode): PmNode {
+  const isPlainRun = (node: PmNode) => node.type === "text";
+  if (!next.content?.every(isPlainRun) || !old.content?.every(isPlainRun)) return next;
+  const looks: Array<readonly PmMark[]> = [];
+  for (const run of old.content) for (const _ of Array.from(run.text ?? "")) looks.push(unwrittenMarks(run.marks));
+  const oldChars = old.content.flatMap((run) => Array.from(run.text ?? ""));
+  const newChars = next.content.flatMap((run) => Array.from(run.text ?? ""));
+  if (!oldChars.length || !newChars.length) return next;
+  let prefix = 0;
+  while (prefix < oldChars.length && prefix < newChars.length && oldChars[prefix] === newChars[prefix]) prefix += 1;
+  let suffix = 0;
+  while (
+    suffix < oldChars.length - prefix && suffix < newChars.length - prefix &&
+    oldChars[oldChars.length - 1 - suffix] === newChars[newChars.length - 1 - suffix]
+  ) suffix += 1;
+  const lookAt = (at: number): readonly PmMark[] => {
+    if (at < prefix) return looks[at]!;
+    if (at >= newChars.length - suffix) return looks[oldChars.length - (newChars.length - at)]!;
+    return looks[Math.max(0, prefix - 1)]!;
+  };
+  const content: PmNode[] = [];
+  let at = 0;
+  for (const run of next.content) {
+    const written = (run.marks ?? []).filter((mark) => WRITTEN_MARKS.has(mark.type));
+    for (const char of Array.from(run.text ?? "")) {
+      const marks = [...written, ...lookAt(at)];
+      at += 1;
+      const last = content[content.length - 1];
+      if (last && JSON.stringify(last.marks ?? []) === JSON.stringify(marks)) last.text = `${last.text}${char}`;
+      else content.push({ type: "text", text: char, ...(marks.length ? { marks } : {}) });
+    }
+  }
+  return { ...next, content };
+}
+
 /** Builds document content from Markdown, reusing unchanged nodes of `previous`. */
 export function documentFromMarkdown(
   markdown: string,
@@ -99,18 +146,30 @@ export function documentFromMarkdown(
   ids: IdFactory = defaultIdFactory(),
 ) {
   const before = previous ? documentChunks(previous) : [];
+  // Markdown does not always read back as it was written: a trailing line break
+  // or a Word table comes back reworded, or as several blocks. Each block is
+  // known by how its own Markdown reads back, so one nobody touched is always
+  // recognised, and stays exactly as it was.
+  const readsBackAs = (markdown: string) => parseBlocks(markdown).map(serializeBlock);
   const byMarkdown = new Map<string, DocumentChunk[]>();
+  let widest = 1;
   for (const chunk of before) {
-    const list = byMarkdown.get(chunk.markdown) ?? [];
-    list.push(chunk);
-    byMarkdown.set(chunk.markdown, list);
+    const pieces = KEEP_MARKER.test(chunk.markdown) ? [chunk.markdown] : readsBackAs(chunk.markdown);
+    widest = Math.max(widest, pieces.length);
+    for (const key of new Set([chunk.markdown, pieces.join(BLOCK_GAP)])) {
+      const list = byMarkdown.get(key) ?? [];
+      list.push(chunk);
+      byMarkdown.set(key, list);
+    }
   }
   const byId = new Map(before.map((chunk) => [chunk.id, chunk]));
   const oldIndex = new Map(before.map((chunk, index) => [chunk.id, index]));
   const used = new Set<string>();
   // Unchanged blocks are reused whole; the rest are written fresh for now.
   const entries: Array<{ node: PmNode; reused?: string }> = [];
-  for (const parsed of parseBlocks(markdown)) {
+  const parsedBlocks = parseBlocks(markdown);
+  for (let at = 0; at < parsedBlocks.length; at += 1) {
+    const parsed = parsedBlocks[at]!;
     if (parsed.type === "__keep") {
       const kept = byId.get(String(parsed.attrs?.id));
       if (!kept)
@@ -123,11 +182,17 @@ export function documentFromMarkdown(
       }
       continue;
     }
-    const text = serializeBlock(parsed);
-    const reusable = byMarkdown.get(text)?.find((chunk) => !used.has(chunk.id));
+    let reusable: DocumentChunk | undefined;
+    let span = 1;
+    for (let width = Math.min(widest, parsedBlocks.length - at); width >= 1 && !reusable; width -= 1) {
+      const key = parsedBlocks.slice(at, at + width).map(serializeBlock).join(BLOCK_GAP);
+      reusable = byMarkdown.get(key)?.find((chunk) => !used.has(chunk.id));
+      if (reusable) span = width;
+    }
     if (reusable) {
       used.add(reusable.id);
       entries.push({ node: reusable.node, reused: reusable.id });
+      at += span - 1;
       continue;
     }
     entries.push({ node: parsed });
@@ -153,12 +218,8 @@ export function documentFromMarkdown(
     if (replaced) {
       used.add(replaced.id);
       lastAnchor = oldIndex.get(replaced.id) ?? lastAnchor;
-      nodes.push(
-        withWholeMarks(
-          { ...entry.node, attrs: { ...(replaced.node.attrs ?? {}), ...(entry.node.attrs ?? {}), blockId: replaced.id } },
-          wholeUnwrittenMarks(replaced.node),
-        ),
-      );
+      const rewritten = { ...entry.node, attrs: { ...(replaced.node.attrs ?? {}), ...(entry.node.attrs ?? {}), blockId: replaced.id } };
+      nodes.push(withWholeMarks(withLookOfOldWords(rewritten, replaced.node), wholeUnwrittenMarks(replaced.node)));
       return;
     }
     let id = ids("block");
@@ -181,7 +242,7 @@ export function documentFromMarkdown(
 // ---------------------------------------------------------------- edits
 
 export type DocumentEditOp =
-  | { op: "replace"; find: string; replace: string; all?: boolean }
+  | { op: "replace"; find?: string; from?: string; to?: string; replace?: string; all?: boolean }
   | { op: "insert"; markdown: string; after?: string; before?: string; position?: "start" | "end" }
   | { op: "move_section"; heading: string; after?: string; before?: string; position?: "start" | "end" }
   | { op: "delete_section"; heading: string }
@@ -246,13 +307,34 @@ export function documentSectionMarkdown(markdown: string, heading: string) {
   return markdown.slice(section.start, section.end).trim();
 }
 
+/** Where a place named by a heading, or failing that by unique text, begins and ends. */
+function anchored(markdown: string, anchor: string, label: string) {
+  const all = sections(markdown);
+  const wanted = normaliseTitle(anchor);
+  const exact = all.filter((section) => normaliseTitle(section.title) === wanted);
+  const headed = exact.length ? exact : all.filter((section) => normaliseTitle(section.title).includes(wanted));
+  if (headed.length === 1) return headed[0]!;
+  const found = locateAll(markdown, anchor, "prose");
+  if (found.length === 1) {
+    const before = markdown.lastIndexOf("\n\n", found[0]!.start);
+    const after = markdown.indexOf("\n\n", found[0]!.end);
+    return { start: before < 0 ? 0 : before + 2, end: after < 0 ? markdown.length : after };
+  }
+  if (headed.length > 1 || found.length > 1)
+    throw new AuthoringError(`${label}: "${anchor}" matches more than one place. Quote more of the text, or the full heading.`);
+  const closest = closestText(markdown, anchor);
+  throw new AuthoringError(
+    `${label}: "${anchor}" is neither a heading nor text in the document.${closest ? ` The closest text is: "${closest}".` : ""} Headings: ${all.map((section) => `"${section.title}"`).join(", ") || "none"}.`,
+  );
+}
+
 function insertionPoint(
   markdown: string,
   target: { after?: string; before?: string; position?: "start" | "end" },
   label: string,
 ) {
-  if (target.after) return findSection(markdown, target.after, label).end;
-  if (target.before) return findSection(markdown, target.before, label).start;
+  if (target.after) return anchored(markdown, target.after, label).end;
+  if (target.before) return anchored(markdown, target.before, label).start;
   if (target.position === "start") return 0;
   return markdown.length;
 }
@@ -263,16 +345,6 @@ function spliceBlock(markdown: string, at: number, block: string) {
   return [head, block.trim(), tail].filter(Boolean).join("\n\n");
 }
 
-function countOccurrences(haystack: string, needle: string) {
-  let count = 0;
-  let index = haystack.indexOf(needle);
-  while (index >= 0) {
-    count += 1;
-    index = haystack.indexOf(needle, index + needle.length);
-  }
-  return count;
-}
-
 /** Applies edits to the document's Markdown. Throws naming the failing op. */
 export function applyDocumentEdits(markdown: string, ops: DocumentEditOp[]) {
   let text = markdown;
@@ -280,17 +352,7 @@ export function applyDocumentEdits(markdown: string, ops: DocumentEditOp[]) {
     const label = `Edit ${index + 1} (${op.op})`;
     switch (op.op) {
       case "replace": {
-        if (!op.find) throw new AuthoringError(`${label}: \`find\` is empty.`);
-        const count = countOccurrences(text, op.find);
-        if (!count)
-          throw new AuthoringError(
-            `${label}: \`find\` text was not found. It must match the document's Markdown exactly, including formatting marks. Read the document if unsure.`,
-          );
-        if (count > 1 && !op.all)
-          throw new AuthoringError(
-            `${label}: \`find\` text appears ${count} times. Include more surrounding text, or set "all": true to replace every one.`,
-          );
-        text = op.all ? text.split(op.find).join(op.replace) : text.replace(op.find, () => op.replace);
+        text = spliceRanges(text, resolveRanges(text, op, label, "prose", "the document"), op.replace ?? "");
         break;
       }
       case "insert": {
@@ -341,7 +403,7 @@ export function documentReadback(content: unknown, previous?: unknown) {
   const lines: string[] = [];
   const outline = documentOutline(documentContentToProseMirrorJson(content) as PmNode);
   lines.push(
-    `${chunks.length} blocks, about ${words(markdown)} words${outline.length ? `. Outline: ${outline.map((entry) => `${"#".repeat(entry.level)} ${entry.title}`).join(" / ")}` : ""}.`,
+    `${pagesNote(content)} ${chunks.length} blocks, about ${words(markdown)} words${outline.length ? `. Outline: ${outline.map((entry) => `${"#".repeat(entry.level)} ${entry.title}`).join(" / ")}` : ""}.`,
   );
   const problems: string[] = [];
   chunks.forEach((chunk, index) => {

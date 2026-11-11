@@ -9,6 +9,48 @@ use std::path::Path;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+/// Whether Spectra's cloud answers at all. It runs no function, so it costs nothing.
+pub async fn cloud_reachable(deployment_url: &str) -> bool {
+    let Ok(client) = cloud_client() else { return false };
+    client
+        .get(format!("{}/version", deployment_url.trim_end_matches('/')))
+        .send()
+        .await
+        .is_ok_and(|response| response.status().is_success())
+}
+
+/// Waits on this computer's work signal for as long as the subscription lasts,
+/// calling back with each change. `on_signal(busy, changed)`: `busy` says queued
+/// work is waiting here, `changed` that there is something new to claim.
+pub async fn watch_work_signal(
+    deployment_url: &str,
+    credential: &str,
+    mut on_signal: impl FnMut(bool, bool),
+) -> anyhow::Result<()> {
+    use futures_util::StreamExt;
+    let mut client = convex::ConvexClient::new(deployment_url).await?;
+    let args = BTreeMap::from([("credential".to_string(), convex::Value::from(credential.to_string()))]);
+    let mut subscription = client.subscribe("bridgeSync:workSignal", args).await?;
+    let mut last: Option<convex::Value> = None;
+    while let Some(result) = subscription.next().await {
+        let value = match result {
+            convex::FunctionResult::Value(value) => value,
+            convex::FunctionResult::ErrorMessage(message) => anyhow::bail!(message),
+            convex::FunctionResult::ConvexError(error) => anyhow::bail!(error.message),
+        };
+        let field = |name: &str| match &value {
+            convex::Value::Object(fields) => fields.get(name).cloned().unwrap_or(convex::Value::Null),
+            _ => convex::Value::Null,
+        };
+        let busy = matches!(field("busy"), convex::Value::Boolean(true));
+        let has_work = ["write", "fs", "transition"].iter().any(|name| field(name) != convex::Value::Null);
+        let changed = has_work && last.as_ref() != Some(&value);
+        last = Some(value);
+        on_signal(busy, changed);
+    }
+    Ok(())
+}
+
 const CLOUD_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const CLOUD_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 fn cloud_client() -> anyhow::Result<reqwest::Client> {
@@ -140,6 +182,10 @@ pub struct PairingExchange {
     pub device_id: String,
     pub device_credential: String,
     pub browser_origin: String,
+    pub account_id: String,
+    /// Shown in the tray, so which account this computer serves is always visible.
+    #[serde(default)]
+    pub account_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -147,6 +193,9 @@ pub struct PairingExchange {
 pub struct PairingResume {
     pub device_id: String,
     pub browser_origin: String,
+    pub account_id: String,
+    #[serde(default)]
+    pub account_name: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -185,9 +234,18 @@ async fn mutation<T: for<'de> Deserialize<'de>>(
     path: &str,
     args: serde_json::Value,
 ) -> anyhow::Result<T> {
+    cloud_request(deployment_url, "mutation", path, args).await
+}
+
+async fn cloud_request<T: for<'de> Deserialize<'de>>(
+    deployment_url: &str,
+    kind: &str,
+    path: &str,
+    args: serde_json::Value,
+) -> anyhow::Result<T> {
     let response = cloud_client()?
         .post(format!(
-            "{}/api/mutation",
+            "{}/api/{kind}",
             deployment_url.trim_end_matches('/')
         ))
         .timeout(CLOUD_REQUEST_TIMEOUT)
@@ -225,10 +283,7 @@ async fn mutation<T: for<'de> Deserialize<'de>>(
         return Err(CloudRefused(message).into());
     }
     let response = serde_json::from_str::<ConvexResponse<T>>(&body).map_err(|error| {
-        anyhow::anyhow!(
-            "{path} returned an invalid response: {error}; body={}",
-            body.chars().take(500).collect::<String>()
-        )
+        anyhow::anyhow!("{path} returned an invalid response: {error}")
     })?;
     if response.status != "success" {
         return Err(CloudRefused(
@@ -430,6 +485,31 @@ pub struct ReplicaMigrationPage {
     pub local_only: f64,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentHubTicketResponse {
+    url: Option<String>,
+    ticket: Option<String>,
+    account_id: String,
+}
+
+/// A short-lived ticket for this device's account, or nothing when the deployment has no hub.
+pub async fn agent_hub_ticket(
+    deployment_url: &str,
+    credential: &str,
+) -> anyhow::Result<Option<crate::agent_relay::HubTicket>> {
+    let response: AgentHubTicketResponse = mutation(
+        deployment_url,
+        "bridgeSync:agentHubTicket",
+        serde_json::json!({ "credential": credential }),
+    )
+    .await?;
+    Ok(match (response.url, response.ticket) {
+        (Some(url), Some(ticket)) => Some(crate::agent_relay::HubTicket { url, ticket, account_id: response.account_id }),
+        _ => None,
+    })
+}
+
 pub async fn migrate_cloud_replica_page(
     deployment_url: &str,
     credential: &str,
@@ -518,41 +598,24 @@ pub async fn report_changes(
     Ok(response.results)
 }
 
-pub async fn reconcile_missing_resources(
+/// Tells the cloud these files are gone from the folder. Only they are touched:
+/// a pass over a folder where nothing went missing writes nothing.
+pub async fn report_missing_resources(
     deployment_url: &str,
     credential: &str,
     mount_id: &str,
-    scan_id: &str,
+    local_resource_ids: &[String],
 ) -> anyhow::Result<()> {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct ReconcilePage {
-        continue_cursor: Option<String>,
-        is_done: bool,
-    }
-    let mut cursor: Option<String> = None;
-    loop {
-        let mut args = serde_json::json!({
+    let _: serde_json::Value = mutation(
+        deployment_url,
+        "bridgeSync:reportMissingResources",
+        serde_json::json!({
             "credential": credential,
             "mountId": mount_id,
-            "scanId": scan_id,
-        });
-        if let Some(value) = cursor.as_ref() {
-            args.as_object_mut()
-                .expect("reconcile args are an object")
-                .insert("cursor".into(), serde_json::Value::String(value.clone()));
-        }
-        let page: ReconcilePage =
-            mutation(deployment_url, "bridgeSync:reconcileMissingResources", args).await?;
-        if page.is_done {
-            break;
-        }
-        cursor = page.continue_cursor;
-        anyhow::ensure!(
-            cursor.is_some(),
-            "missing-resource reconciliation did not advance"
-        );
-    }
+            "localResourceIds": local_resource_ids,
+        }),
+    )
+    .await?;
     Ok(())
 }
 
@@ -943,14 +1006,32 @@ pub async fn report_health(
     deployment_url: &str,
     credential: &str,
     report: &DeviceHealthReport,
-) -> anyhow::Result<()> {
-    let _: serde_json::Value = mutation(
+) -> anyhow::Result<String> {
+    mutation(
         deployment_url,
         "bridge:reportHealth",
         health_args(credential, report),
     )
-    .await?;
-    Ok(())
+    .await
+}
+
+/// Explicit legacy migration only; normal editing never needs this cloud read.
+pub async fn owned_stored_works(
+    deployment_url: &str,
+    credential: &str,
+    account_id: &str,
+    artifact_ids: &[String],
+) -> anyhow::Result<Vec<String>> {
+    anyhow::ensure!(!account_id.is_empty() && artifact_ids.len() <= 100, "Stored-work ownership needs an account and at most 100 ids");
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Proof { account_id: String, artifact_ids: Vec<String> }
+    let proof: Proof = cloud_request(deployment_url, "query", "bridgeSync:ownedStoredWorks", serde_json::json!({
+        "credential": credential, "artifactIds": artifact_ids,
+    })).await?;
+    anyhow::ensure!(proof.account_id == account_id, "The stored-work account changed. Try again.");
+    anyhow::ensure!(proof.artifact_ids.iter().all(|id| artifact_ids.contains(id)), "Stored-work ownership returned an unrequested id");
+    Ok(proof.artifact_ids)
 }
 
 /// Convex optional arguments are absent, never null.
@@ -1115,6 +1196,55 @@ pub async fn drain_cloud_queue_holding(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn hub_tickets_carry_the_authenticated_account_and_refuse_old_missing_proofs() {
+        let endpoint = answer_once("200 OK", r#"{"status":"success","value":{"url":"ws://fixture","ticket":"fixture-only","accountId":"account-a"}}"#).await;
+        let ticket = agent_hub_ticket(&endpoint, "fixture-only").await.unwrap().unwrap();
+        assert_eq!(ticket.account_id, "account-a");
+        let endpoint = answer_once("200 OK", r#"{"status":"success","value":{"url":"ws://fixture","ticket":"fixture-only"}}"#).await;
+        assert!(agent_hub_ticket(&endpoint, "fixture-only").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn stored_work_ownership_uses_the_bounded_query_endpoint() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let router = axum::Router::new().route("/api/query", axum::routing::post(|axum::Json(request): axum::Json<serde_json::Value>| async move {
+            assert_eq!(request["path"], "bridgeSync:ownedStoredWorks");
+            assert_eq!(request["args"], serde_json::json!({"credential":"dummy", "artifactIds":["one", "two"]}));
+            axum::Json(serde_json::json!({"status":"success", "value":{"accountId":"account-a", "artifactIds":["one"]}}))
+        }));
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
+        let result = owned_stored_works(&endpoint, "dummy", "account-a", &["one".into(), "two".into()]).await;
+        server.abort();
+        assert_eq!(result.unwrap(), vec!["one"]);
+    }
+
+    #[tokio::test]
+    async fn stored_work_ownership_never_accepts_a_different_account_or_extra_work() {
+        for (body, message) in [
+            (r#"{"status":"success","value":{"accountId":"account-b","artifactIds":["one"]}}"#, "account changed"),
+            (r#"{"status":"success","value":{"accountId":"account-a","artifactIds":["private-other-work"]}}"#, "unrequested"),
+            (r#"{"status":"error","errorMessage":"BRIDGE_CREDENTIAL_INVALID"}"#, "BRIDGE_CREDENTIAL_INVALID"),
+        ] {
+            let endpoint = answer_once("200 OK", body).await;
+            let error = owned_stored_works(&endpoint, "dummy", "account-a", &["one".into()]).await.unwrap_err();
+            assert!(error.to_string().contains(message));
+        }
+        let error = owned_stored_works("http://127.0.0.1:1", "dummy", "account-a", &vec!["one".into(); 101]).await.unwrap_err();
+        assert!(error.to_string().contains("at most 100"));
+    }
+
+    #[tokio::test]
+    async fn a_malformed_cloud_response_does_not_disclose_a_device_credential() {
+        let endpoint = answer_once("200 OK", r#"{"status":"success","value":{"deviceCredential":"fixture-private-device-key"}}"#).await;
+        let error = mutation::<PairingExchange>(&endpoint, "bridge:confirmPairing", serde_json::json!({})).await.unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("bridge:confirmPairing returned an invalid response"));
+        assert!(!message.contains("fixture-private-device-key"));
+        assert!(error.downcast_ref::<CloudRefused>().is_none());
+    }
 
     /// Answers one request with `status` and `body`, then closes.
     async fn answer_once(status: &'static str, body: &'static str) -> String {

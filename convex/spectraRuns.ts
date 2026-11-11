@@ -3,6 +3,7 @@ import { internalMutation, mutation } from "./orgNodeMutation";
 import type { MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
+import { commandCanBeReversed } from "../shared/run-undo";
 import { normalizeMediaType, normalizeSha256 } from "../shared/intake-integrity";
 import { MAX_ATTACHMENT_BYTES, MAX_RUN_ATTACHMENTS } from "../shared/intake-limits";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -16,6 +17,7 @@ import {
   requireArtifactCapability,
 } from "./spectraShared";
 import {
+  ACTIVE_RUN_STATUSES,
   canTransitionRunStatus,
   interruptionRecovery,
   isActiveRunStatus,
@@ -45,6 +47,7 @@ import {
   RESULT_CARD_SUMMARY_READ_MODEL_VERSION,
   RUN_TAB_PROJECTION_VERSION,
   upsertResultCardSummary,
+  lastRunEventSequence,
 } from "./spectraRunProjection";
 import { assertPlatformRunning, platformStopped } from "./platformControls";
 
@@ -201,13 +204,17 @@ const vResultAction = v.object({
 });
 
 function eventStep(type: string, payload: unknown) {
-  if (!["progress", "checkpoint", "operation_result", "caption"].includes(type))
+  if (!["progress", "checkpoint", "operation_result", "caption", "step"].includes(type))
     return undefined;
   const record =
     payload && typeof payload === "object" && !Array.isArray(payload)
       ? (payload as Record<string, unknown>)
       : {};
-  // The AI harness narrates its work as captions; they are the Dock's steps.
+  // What the AI harness is doing now is the Dock's step.
+  if (type === "step")
+    return record.status === "running" && typeof record.label === "string" && record.label.trim()
+      ? record.label.replace(/\*/g, "").trim().slice(0, 240)
+      : undefined;
   if (type === "caption")
     return typeof record.text === "string" && record.text.trim()
       ? record.text.trim().slice(0, 240)
@@ -460,6 +467,7 @@ function durableArtifactWritesArmRunUndo(
   operations: ReadonlyArray<{
     type: string;
     status: string;
+    input?: unknown;
     affected: Array<{ type: string; id: string }>;
     pendingArtifactId?: string;
   }>,
@@ -467,11 +475,13 @@ function durableArtifactWritesArmRunUndo(
   return operations.some(
     (operation) =>
       operation.status === "executed" &&
-      (operation.type === "artifact.create" ||
+      (((operation.type === "artifact.create" ||
         operation.type === "artifact.update") &&
-      operation.affected.some(
-        (item) => item.type === "artifact" && Boolean(item.id),
-      ),
+        operation.affected.some(
+          (item) => item.type === "artifact" && Boolean(item.id),
+        )) ||
+        (operation.type === "app.command" &&
+          commandCanBeReversed((operation.input as { command?: unknown } | undefined)?.command))),
   );
 }
 
@@ -481,6 +491,7 @@ async function durableArtifactWritesArmRunUndoIncludingPending(
   operations: ReadonlyArray<{
     type: string;
     status: string;
+    input?: unknown;
     affected: Array<{ type: string; id: string }>;
     pendingArtifactId?: string;
   }>,
@@ -605,6 +616,7 @@ function assertContinuationSelection(
  * a live lease count, so a crashed worker cannot lock the account out. */
 export const MAX_LIVE_RUNS_PER_ACCOUNT = 4;
 export const MAX_RUNS_PER_ACCOUNT_PER_HOUR = 120;
+const HOUR_MS = 60 * 60_000;
 
 async function assertRunAdmission(
   ctx: MutationCtx,
@@ -619,15 +631,13 @@ async function assertRunAdmission(
         q.eq("ownerAccountId", ownerAccountId).eq("status", status),
       )
       .take(64);
-  const [queued, running, recent] = await Promise.all([
+  const [queued, running, admission] = await Promise.all([
     byStatus("queued"),
     byStatus("running"),
     ctx.db
-      .query("spectraAiRuns")
-      .withIndex("by_account_created", (q) =>
-        q.eq("ownerAccountId", ownerAccountId).gte("createdAt", now - 60 * 60_000),
-      )
-      .take(MAX_RUNS_PER_ACCOUNT_PER_HOUR),
+      .query("spectraRunAdmissions")
+      .withIndex("by_account", (q) => q.eq("accountId", ownerAccountId))
+      .unique(),
   ]);
   const live = [...queued, ...running].filter(
     (run) => (run.leaseExpiresAt ?? 0) > now,
@@ -636,11 +646,27 @@ async function assertRunAdmission(
     throw new Error(
       "Several AI requests are already running. Wait for one to finish, or stop one, before starting another.",
     );
-  if (recent.length >= MAX_RUNS_PER_ACCOUNT_PER_HOUR)
+  // A rolling hour from two hourly counts: this hour's, plus the last hour's
+  // weighted by how much of it still falls within the past sixty minutes.
+  // Reading the hour's runs cost their whole rows, up to 120 of them (E3).
+  const hourStart = Math.floor(now / HOUR_MS) * HOUR_MS;
+  const count = admission?.hourStart === hourStart ? admission.count : 0;
+  const previous =
+    admission?.hourStart === hourStart
+      ? admission.previous
+      : admission?.hourStart === hourStart - HOUR_MS
+        ? admission.count
+        : 0;
+  const recent = count + previous * (1 - (now - hourStart) / HOUR_MS);
+  if (recent >= MAX_RUNS_PER_ACCOUNT_PER_HOUR)
     throw new Error(
       "You have started many AI requests in the last hour. Wait a little before starting another.",
     );
+  const next = { hourStart, count: count + 1, previous };
+  if (admission) await ctx.db.patch(admission._id, next);
+  else await ctx.db.insert("spectraRunAdmissions", { accountId: ownerAccountId, ...next });
 }
+
 
 /** An item named by id, type and title only: a label for the model, never content. */
 const vRunPointer = v.object({ id: v.string(), type: v.string(), title: v.string() });
@@ -850,13 +876,22 @@ export const beginRun = mutation({
       continuationRun = askingRun;
     }
     if (thread) {
+      // The account's active runs are few; the thread's history can be long,
+      // and each run is a large row (E3).
       const activeRuns = (
-        await ctx.db
-          .query("spectraAiRuns")
-          .withIndex("by_thread", (q) => q.eq("threadId", thread!._id))
-          .collect()
+        await Promise.all(
+          ACTIVE_RUN_STATUSES.map((status) =>
+            ctx.db
+              .query("spectraAiRuns")
+              .withIndex("by_account_status", (q) =>
+                q.eq("ownerAccountId", actor._id).eq("status", status),
+              )
+              .take(64),
+          ),
+        )
       )
-        .filter((run) => isActiveRunStatus(run.status))
+        .flat()
+        .filter((run) => run.threadId === thread!._id)
         .sort((left, right) => right.updatedAt - left.updatedAt);
       const activeRun = activeRuns[0] ?? null;
       // A clarification can be answered in ordinary chat text. Resolve the
@@ -895,7 +930,12 @@ export const beginRun = mutation({
       !attachmentSourceRun &&
       thread &&
       !hasIncomingAttachments &&
-      thread.lastRunId
+      thread.lastRunId &&
+      // Most runs carry no files: look for one before reading the whole run.
+      (await ctx.db
+        .query("spectraRunAttachments")
+        .withIndex("by_run_execution", (q) => q.eq("runId", thread!.lastRunId!))
+        .first())
     ) {
       const latestRun = await ctx.db.get(thread.lastRunId);
       if (
@@ -1145,10 +1185,14 @@ export const beginRun = mutation({
     if (workspaceId) {
       await ctx.db.patch(workspaceId, { updatedAt: now, lastActivityAt: now });
     }
-    const openTabs = await ctx.db
-      .query("spectraRunTabs")
-      .withIndex("by_account_updated", (q) => q.eq("ownerAccountId", actor._id))
-      .collect();
+    const [openTabs, conversationTabs] = await Promise.all([
+      ctx.db.query("spectraRunTabs")
+        .withIndex("by_account_selected", (q) => q.eq("ownerAccountId", actor._id).eq("selected", true))
+        .collect(),
+      ctx.db.query("spectraRunTabs")
+        .withIndex("by_account_thread", (q) => q.eq("ownerAccountId", actor._id).eq("threadId", threadId))
+        .collect(),
+    ]);
     await Promise.all(
       openTabs
         .filter(
@@ -1159,7 +1203,7 @@ export const beginRun = mutation({
           ctx.db.patch(tab._id, { selected: false, updatedAt: now }),
         ),
     );
-    const threadTabs = openTabs
+    const threadTabs = conversationTabs
       .filter(
         (tab) => tab.schoolId === actor.schoolId && tab.threadId === threadId,
       )
@@ -1658,7 +1702,7 @@ export const appendEvent = mutation({
       );
       if (existing) return { ignored: true, sequence: existing.sequence };
     }
-    const sequence = (run.eventSequence ?? 0) + 1;
+    const sequence = (await lastRunEventSequence(ctx, run)) + 1;
     const now = Date.now();
     await ctx.db.insert("spectraRunEvents", {
       runId: args.runId,
@@ -1688,8 +1732,11 @@ export const appendEvents = mutation({
   },
   handler: async (ctx, args) => {
     const { run } = await requireOwnedRun(ctx, args.runId);
+    // The worker learns Stop and new messages from its event writes.
+    const stopped = run.executionId !== args.executionId || isTerminalRunStatus(run.status);
+    const signals = { stopped, steerWaiting: !stopped && Boolean(run.steerWaiting) };
     if (run.executionId !== args.executionId || args.events.length === 0)
-      return { ignored: true, sequence: run.eventSequence ?? 0, count: 0 };
+      return { ignored: true, sequence: run.eventSequence ?? 0, count: 0, ...signals };
     const terminalTypes = new Set([
       "final",
       "error",
@@ -1707,7 +1754,7 @@ export const appendEvents = mutation({
         ? args.events.filter((event) => terminalTypes.has(event.type))
         : args.events;
     if (allowed.length === 0)
-      return { ignored: true, sequence: run.eventSequence ?? 0, count: 0 };
+      return { ignored: true, sequence: run.eventSequence ?? 0, count: 0, ...signals };
     // Streaming writes many non-terminal batches; only a batch carrying a
     // terminal event needs the run's history to stay idempotent.
     const needsTerminalCheck = allowed.some((event) =>
@@ -1715,10 +1762,12 @@ export const appendEvents = mutation({
     );
     const existingTerminalTypes = new Set(
       (needsTerminalCheck
-        ? await ctx.db
+        ? // A repeat of a terminal event follows it closely, so the end of the log answers.
+          await ctx.db
             .query("spectraRunEvents")
             .withIndex("by_run_sequence", (q) => q.eq("runId", args.runId))
-            .collect()
+            .order("desc")
+            .take(25)
         : []
       )
         .filter(
@@ -1734,9 +1783,9 @@ export const appendEvents = mutation({
         !existingTerminalTypes.has(event.type),
     );
     if (unique.length === 0)
-      return { ignored: true, sequence: run.eventSequence ?? 0, count: 0 };
+      return { ignored: true, sequence: run.eventSequence ?? 0, count: 0, ...signals };
     const now = Date.now();
-    let sequence = run.eventSequence ?? 0;
+    let sequence = await lastRunEventSequence(ctx, run);
     for (const event of unique) {
       sequence += 1;
       await ctx.db.insert("spectraRunEvents", {
@@ -1748,15 +1797,10 @@ export const appendEvents = mutation({
         createdAt: now,
       });
     }
-    await ctx.db.patch(args.runId, {
-      eventSequence: sequence,
-      heartbeatAt: now,
-      updatedAt: now,
-      ...(dockSummaryAfterEvents(run, unique)
-        ? { dockSummary: dockSummaryAfterEvents(run, unique) }
-        : {}),
-    });
-    return { ignored: false, sequence, count: unique.length };
+    // The worker's own heartbeat keeps the lease; only a change people see touches the run.
+    const dockSummary = dockSummaryAfterEvents(run, unique);
+    if (dockSummary) await ctx.db.patch(args.runId, { eventSequence: sequence, dockSummary, updatedAt: now });
+    return { ignored: false, sequence, count: unique.length, ...signals };
   },
 });
 
@@ -2305,7 +2349,7 @@ export const reconcileStaleRuns = internalMutation({
           }),
         ),
       );
-      const sequence = (run.eventSequence ?? 0) + 1;
+      const sequence = (await lastRunEventSequence(ctx, run)) + 1;
       await ctx.db.insert("spectraRunEvents", {
         runId: run._id,
         executionId: run.executionId ?? "interrupted",
@@ -2444,6 +2488,45 @@ export const hideTab = mutation({
   },
 });
 
+/**
+ * The composer re-selects the conversation it shows on every change; when that
+ * tab is already the open one, up to date and alone, there is nothing to
+ * write, and the run (a large row) need not be read (LAUNCH-REVIEW E3).
+ */
+async function alreadyOpenTab(
+  ctx: MutationCtx,
+  actor: Awaited<ReturnType<typeof requireActor>>,
+  args: { runId?: Id<"spectraAiRuns">; threadId?: Id<"spectraThreads"> },
+) {
+  let runId = args.runId;
+  if (args.threadId) {
+    const thread = await ctx.db.get(args.threadId);
+    if (!thread || thread.ownerAccountId !== actor._id || thread.schoolId !== actor.schoolId || !thread.lastRunId) return false;
+    runId = thread.lastRunId;
+  }
+  if (!runId) return false;
+  const tab = await ctx.db
+    .query("spectraRunTabs")
+    .withIndex("by_account_run", (q) => q.eq("ownerAccountId", actor._id).eq("runId", runId))
+    .first();
+  if (
+    !tab ||
+    !tab.selected ||
+    tab.hiddenAt ||
+    tab.schoolId !== actor.schoolId ||
+    (args.threadId && tab.threadId !== args.threadId) ||
+    tab.projectionVersion !== RUN_TAB_PROJECTION_VERSION ||
+    tab.runSummary?._id !== runId
+  )
+    return false;
+  const [selected, threadTabs] = await Promise.all([
+    ctx.db.query("spectraRunTabs").withIndex("by_account_selected", (q) => q.eq("ownerAccountId", actor._id).eq("selected", true)).take(2),
+    ctx.db.query("spectraRunTabs").withIndex("by_account_thread", (q) => q.eq("ownerAccountId", actor._id).eq("threadId", tab.threadId)).take(8),
+  ]);
+  if (selected.length !== 1 || selected[0]!._id !== tab._id) return false;
+  return threadTabs.every((other) => other._id === tab._id || other.hiddenAt || other.updatedAt < tab.updatedAt);
+}
+
 export const selectTab = mutation({
   args: {
     runId: v.optional(v.id("spectraAiRuns")),
@@ -2451,25 +2534,26 @@ export const selectTab = mutation({
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
-    const tabs = await ctx.db
+    if (await alreadyOpenTab(ctx, actor, args)) return { selected: true };
+    const selectedTabs = await ctx.db
       .query("spectraRunTabs")
-      .withIndex("by_account_updated", (q) => q.eq("ownerAccountId", actor._id))
+      .withIndex("by_account_selected", (q) => q.eq("ownerAccountId", actor._id).eq("selected", true))
       .collect();
     const now = Date.now();
-    const schoolTabs = tabs.filter(
-      (tab) => !tab.schoolId || tab.schoolId === actor.schoolId,
-    );
+    let conversationTabs: Doc<"spectraRunTabs">[] = [];
     let targetRunId = args.runId;
     let targetThreadId = args.threadId;
     let targetRun: Doc<"spectraAiRuns"> | null = null;
 
     if (args.threadId) {
       const thread = await ctx.db.get(args.threadId);
-      if (!thread || thread.schoolId !== actor.schoolId)
+      if (!thread || thread.ownerAccountId !== actor._id || thread.schoolId !== actor.schoolId)
         throw new Error("That conversation is not available.");
       targetThreadId = thread._id;
-      const forThread = schoolTabs
-        .filter((tab) => tab.threadId === thread._id)
+      conversationTabs = await ctx.db.query("spectraRunTabs")
+        .withIndex("by_account_thread", q => q.eq("ownerAccountId", actor._id).eq("threadId", thread._id)).collect();
+      const forThread = conversationTabs
+        .filter((tab) => !tab.schoolId || tab.schoolId === actor.schoolId)
         .sort((a, b) => b.updatedAt - a.updatedAt);
       // Prefer the conversation's latest run. Selecting an older dock tab
       // updates that tab's timestamp, so tab order is not conversation order.
@@ -2479,10 +2563,17 @@ export const selectTab = mutation({
 
     if (targetRunId) {
       targetRun = await ctx.db.get(targetRunId);
-      if (!targetRun || targetRun.schoolId !== actor.schoolId)
+      if (!targetRun || targetRun.ownerAccountId !== actor._id || targetRun.schoolId !== actor.schoolId)
         throw new Error("That run is not available.");
       if (!targetThreadId) targetThreadId = targetRun.threadId;
     }
+
+    if (targetThreadId && !args.threadId)
+      conversationTabs = await ctx.db.query("spectraRunTabs")
+        .withIndex("by_account_thread", q => q.eq("ownerAccountId", actor._id).eq("threadId", targetThreadId!)).collect();
+    const schoolTabs = [...new Map([...selectedTabs, ...conversationTabs]
+      .filter(tab => !tab.schoolId || tab.schoolId === actor.schoolId)
+      .map(tab => [tab._id, tab])).values()];
 
     // Explicit deselect: clear selected flags without requiring a target run.
     if (!args.runId && !args.threadId) {
@@ -2500,8 +2591,8 @@ export const selectTab = mutation({
       return { selected: false, reason: "no_run" as const };
 
     let selected = false;
-    const threadTabs = schoolTabs
-      .filter((tab) => tab.threadId === targetThreadId)
+    const threadTabs = conversationTabs
+      .filter((tab) => !tab.schoolId || tab.schoolId === actor.schoolId)
       .sort((a, b) => b.updatedAt - a.updatedAt);
     const canonical = threadTabs[0];
     for (const tab of schoolTabs) {
@@ -2857,7 +2948,7 @@ export const reviseConfirmation = mutation({
         }),
       ),
     );
-    const sequence = (run.eventSequence ?? 0) + 1;
+    const sequence = (await lastRunEventSequence(ctx, run)) + 1;
     await ctx.db.insert("spectraRunEvents", {
       runId: args.runId,
       executionId: args.executionId,
@@ -2925,7 +3016,7 @@ export const stopRun = mutation({
         ),
     );
     await releaseClaimsForRun(ctx, args.runId, now);
-    const sequence = (run.eventSequence ?? 0) + 1;
+    const sequence = (await lastRunEventSequence(ctx, run)) + 1;
     await ctx.db.patch(args.runId, {
       status: "cancelled",
       outcome: "cancelled",
@@ -3072,6 +3163,23 @@ export const patchResultCard = mutation({
   },
 });
 
+/** Only Undo needs this predecessor; ordinary runs do not load older run state. */
+export const previousForUndo = query({
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string() },
+  handler: async (ctx, args) => {
+    const { run } = await requireOwnedRun(ctx, args.runId);
+    requireCurrentExecution(run.executionId, args.executionId);
+    if (run.status !== "running") throw new Error("AI_APPLICATION_OPERATION_NOT_ACTIVE");
+    if (!run.threadId) return null;
+    const previous = await ctx.db.query("spectraAiRuns")
+      .withIndex("by_thread", (q) => q.eq("threadId", run.threadId).lt("_creationTime", run._creationTime))
+      .order("desc").first();
+    if (!previous || previous.ownerAccountId !== run.ownerAccountId || previous.schoolId !== run.schoolId ||
+        !isTerminalRunStatus(previous.status) || !previous.executionId) return null;
+    return { runId: previous._id, executionId: previous.executionId };
+  },
+});
+
 export const get = query({
   args: { runId: v.id("spectraAiRuns") },
   handler: async (ctx, args) => {
@@ -3147,7 +3255,7 @@ export const resetForRetry = mutation({
       )
     ) {
       throw new Error(
-        "This run may have partially applied changes. Review its details and use a follow-up command instead of retrying.",
+        "Part of this run is already saved, so it can't start over. Send a message to carry on from there.",
       );
     }
     const now = Date.now();
@@ -3181,7 +3289,7 @@ export const resetForRetry = mutation({
           ctx.db.patch(attachment._id, { executionId }),
         ),
     );
-    const sequence = (run.eventSequence ?? 0) + 1;
+    const sequence = (await lastRunEventSequence(ctx, run)) + 1;
     await ctx.db.patch(args.runId, {
       status: "queued",
       finalSummary: undefined,

@@ -509,10 +509,10 @@ describe("native document projection", () => {
             { kind: "text", text: " and " },
             {
               kind: "equation",
-              latex: "x\\ne y",
+              latex: "x\\frobnicate y",
               display: "inline",
               ommlXml: "<m:oMath><m:r><m:t>x≠y</m:t></m:r></m:oMath>",
-              ommlSourceLatex: "x\\ne y",
+              ommlSourceLatex: "x\\frobnicate y",
             },
           ],
         },
@@ -552,7 +552,7 @@ describe("native document projection", () => {
     });
     expect(inlines[2]).toMatchObject({
       kind: "equation",
-      latex: "x\\ne y",
+      latex: "x\\frobnicate y",
       ommlXml: "<m:oMath><m:r><m:t>x≠y</m:t></m:r></m:oMath>",
     });
     expect(compact.blocks[1]).not.toHaveProperty("latex");

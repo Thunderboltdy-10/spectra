@@ -5,25 +5,25 @@ const crons = cronJobs();
 
 crons.interval(
   "reconcile-stale-spectra-runs",
-  { minutes: 2 },
+  { minutes: 5 },
   internal.spectraRuns.reconcileStaleRuns,
   {},
 );
 crons.interval(
   "sweep-stale-bridge-work",
-  { minutes: 2 },
+  { minutes: 15 },
   internal.bridgeSync.sweepStaleBridgeWork,
   {},
 );
 crons.interval(
   "sweep-replica-truth",
-  { minutes: 2 },
+  { minutes: 15 },
   internal.replicas.sweepReplicaTruth,
   {},
 );
 crons.interval(
   "reconcile-legacy-replica-truth",
-  { minutes: 1 },
+  { hours: 6 },
   internal.replicas.reconcileReplicaTruthMigration,
   {},
 );
@@ -40,50 +40,44 @@ crons.interval(
   {},
 );
 crons.daily(
+  "finish-analytics-read-models",
+  { hourUTC: 2, minuteUTC: 40 },
+  internal.analytics.advanceReadModels,
+  {},
+);
+crons.daily(
   "maintain-artifact-snapshots",
   { hourUTC: 2, minuteUTC: 20 },
   internal.artifactSnapshots.maintain,
   {},
 );
 crons.interval(
-  "maintain-private-memory",
-  { minutes: 1 },
-  internal.memory.maintain,
-  {},
-);
-crons.daily(
-  "evaluate-private-memory-safety",
-  { hourUTC: 3, minuteUTC: 10 },
-  internal.memory.evaluateSafety,
-  {},
-);
-crons.interval(
   "deliver-school-announcements",
-  { minutes: 1 },
+  { minutes: 5 },
   internal.administration.processScheduledAnnouncements,
   {},
 );
 crons.interval(
   "advance-school-lifecycle-jobs",
-  { minutes: 2 },
+  { minutes: 10 },
   internal.administration.processLifecycleJobs,
   {},
 );
 crons.interval(
   "resume-account-erasures",
-  { minutes: 5 },
+  { minutes: 15 },
   internal.accountErasure.resumeStalled,
   {},
 );
 crons.interval(
   "build-school-lifecycle-exports",
-  { minutes: 2 },
+  { minutes: 10 },
   internal.administration.processLifecycleExports,
   {},
 );
 crons.interval(
   "maintain-semantic-index",
-  { minutes: 10 },
+  { minutes: 30 },
   internal.semanticIndex.maintain,
   {},
 );
@@ -91,6 +85,12 @@ crons.interval(
   "dispatch-morning-briefs",
   { minutes: 10 },
   internal.dailyBriefs.dispatchDue,
+  {},
+);
+crons.interval(
+  "purge-expired-secret-nonces",
+  { hours: 1 },
+  internal.secretStore.purgeExpiredNonces,
   {},
 );
 export default crons;

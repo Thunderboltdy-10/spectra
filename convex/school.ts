@@ -263,13 +263,13 @@ export const syncStatus = query({
         : mapping?.status !== "verified"
           ? describeSchoolSyncProblem("INTEGRATION_IDENTITY_REQUIRED")
           : null;
-    const now = Date.now();
+    let now: number | undefined;
     const refused = refusedKinds(states);
     const kinds = SCHOOL_SYNC_KINDS.map((kind) => {
       const row = states.find((candidate) => candidate.kind === kind);
       // A run past its watchdog was cut off (the request died, the computer
       // slept): it is not syncing, and the next sync continues where it stopped.
-      const cutOff = row?.state === "running" && row.dueAt !== undefined && row.dueAt <= now ? { ...row, state: "idle" as const } : row;
+      const cutOff = row?.state === "running" && row.dueAt !== undefined && row.dueAt <= (now ??= Date.now()) ? { ...row, state: "idle" as const } : row;
       // A kind stopped by a problem with the whole connection (a refused key)
       // is not stopped once the connection is working again: its next sync
       // simply runs, and the old reason no longer applies.

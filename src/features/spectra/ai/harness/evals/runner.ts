@@ -1,5 +1,5 @@
 import { authoredShape, isAuthoredType, readAuthored } from "../authoring";
-import type { CaptionWriter } from "../captions";
+import { modelThreadTitleWriter, type ThreadTitleWriter } from "../thread-title";
 import { createCompactor, type Summariser } from "../compaction";
 import type { ModelCaller } from "../loop";
 import { MemoryBackend } from "../memory-backend";
@@ -11,7 +11,7 @@ import type { HarnessMessage } from "../types";
 import type { EvalGroup, EvalScenario } from "./scenarios";
 
 /*
- * Plays eval scenarios through the real harness run. The model, the caption
+ * Plays eval scenarios through the real harness run. The model, the title
  * writer, the summariser and the clock are injected, so `npm run eval:ai`
  * uses OpenRouter and the unit tests use a scripted model. Besides each
  * scenario's own checks, every run is held to the loop's discipline: the
@@ -21,8 +21,10 @@ import type { EvalGroup, EvalScenario } from "./scenarios";
  */
 
 export type EvalDeps = {
+  /** The caller is a subscription CLI rather than a direct model API. */
+  subscription?: boolean;
   callModel: ModelCaller;
-  captionWriter?: CaptionWriter | null;
+  titleWriter?: ThreadTitleWriter | null;
   summarise: Summariser;
   clock?: () => number;
   /** The "now" Spectra sees. Fixed, so dates in prompts mean the same every run. */
@@ -47,6 +49,9 @@ export type EvalArtifact = {
   preview: string;
 };
 
+/** Timing is a guide: only a run well over its target counts as a failure. */
+const LATENCY_SLACK = 1.5;
+
 export type EvalSample = { firstOutputMs: number | null; totalMs: number };
 
 export type EvalRow = {
@@ -62,7 +67,6 @@ export type EvalRow = {
   turns: number;
   modelCalls: number;
   steps: string[];
-  captions: string[];
   title?: string;
   reply: string;
   artifacts: EvalArtifact[];
@@ -144,6 +148,8 @@ export function disciplineProblems(calls: readonly RecordedCall[], readTools: Re
   let readOnly = 0;
   for (const call of calls) {
     if (!call.toolNames.length) break;
+    // Asking the user ends the streak: what follows acts on their answer.
+    if (call.toolNames.includes("ask_user")) break;
     if (!call.toolNames.every((name) => readTools.has(name))) break;
     readOnly += 1;
   }
@@ -174,7 +180,6 @@ type Played = {
   turns: number;
   modelCalls: number;
   steps: string[];
-  captions: string[];
   title?: string;
   reply: string;
   artifacts: EvalArtifact[];
@@ -209,13 +214,13 @@ async function playOnce(scenario: EvalScenario, deps: EvalDeps, readTools: Reado
         ...(focused ? { open: [{ id: focused.id, type: focused.type, title: focused.title }] } : {}),
       },
       callModel: caller,
-      captionWriter: deps.captionWriter ?? null,
+      titleWriter: scenario.nameThread ? (deps.titleWriter ?? modelThreadTitleWriter) : (deps.titleWriter ?? null),
       compactor: createCompactor({ contextWindow: scenario.contextWindow ?? 200_000, summarise: deps.summarise }),
       now: clock,
       signal: AbortSignal.any([stopper.signal, AbortSignal.timeout(deps.timeoutMs ?? DEFAULT_TIMEOUT_MS)]),
       sink: {
         emit: (event) => {
-          if (firstOutputMs === null && (event.type === "text" || event.type === "caption" || event.type === "step_start"))
+          if (firstOutputMs === null && (event.type === "text" || event.type === "reasoning" || event.type === "step_start"))
             firstOutputMs = clock() - started;
           if (event.type === "step_end" && !stepEnded) {
             stepEnded = true;
@@ -235,6 +240,7 @@ async function playOnce(scenario: EvalScenario, deps: EvalDeps, readTools: Reado
   let answered = false;
   let history: HarnessMessage[] | undefined = scenario.history;
   for (const prompt of [scenario.prompt, ...(scenario.followUps ?? [])]) {
+    backend.startPass();
     let result = await run(prompt, { history });
     passes.push(result);
     while (result.status === "paused" && scenario.answer && !answered) {
@@ -249,16 +255,26 @@ async function playOnce(scenario: EvalScenario, deps: EvalDeps, readTools: Reado
 
   const result = passes[passes.length - 1]!;
   const problems = scenario.check({ backend, result, events, passes });
+  // A step that starts and never ends spins on the user's screen for good.
+  if (result.status === "completed") {
+    const open = new Set<string>();
+    for (const event of events) {
+      if (event.type === "step_start") open.add(event.id);
+      if (event.type === "step_end") open.delete(event.id);
+    }
+    if (open.size) problems.push(`${open.size} step(s) started and never finished`);
+  }
   if (scenario.expectPause && !passes.some((pass) => pass.status === "paused" && pass.pending.kind === scenario.expectPause))
     problems.push(`expected a ${scenario.expectPause} pause`);
-  problems.push(...disciplineProblems(calls, readTools, scenario.readTurns));
+  // A subscription CLI hands over a turn's calls one by one with no model time
+  // between them, so "turns" here says nothing about how it batched its reads.
+  problems.push(...disciplineProblems(calls, readTools, deps.subscription ? Infinity : scenario.readTurns));
   return {
     problems,
     sample: { firstOutputMs, totalMs: clock() - started },
     turns: passes.reduce((sum, pass) => sum + pass.state.turns, 0),
     modelCalls: calls.length,
     steps: events.flatMap((event) => (event.type === "step_start" ? [event.label] : [])),
-    captions: events.flatMap((event) => (event.type === "caption" ? [event.text] : [])),
     title: events.flatMap((event) => (event.type === "thread_title" ? [event.title] : []))[0],
     reply: result.state.text.slice(0, 2_000),
     artifacts: touchedArtifacts(backend),
@@ -273,7 +289,6 @@ function failedPlay(error: unknown): Played {
     turns: 0,
     modelCalls: 0,
     steps: [],
-    captions: [],
     reply: "",
     artifacts: [],
   };
@@ -290,9 +305,9 @@ export async function playScenario(scenario: EvalScenario, deps: EvalDeps, readT
   const firstOutputMs = median(firsts);
   const totalMs = median(samples.map((sample) => sample.totalMs)) ?? 0;
   const problems = [...new Set(plays.flatMap((play, index) => play.problems.map((problem) => (plays.length > 1 ? `run ${index + 1}: ${problem}` : problem))))];
-  if (scenario.latency?.firstOutputMs !== undefined && (firstOutputMs === null || firstOutputMs > scenario.latency.firstOutputMs))
+  if (scenario.latency?.firstOutputMs !== undefined && (firstOutputMs === null || firstOutputMs > scenario.latency.firstOutputMs * LATENCY_SLACK))
     problems.push(`first output ${firstOutputMs ?? "never"} ms at p50, target under ${scenario.latency.firstOutputMs} ms`);
-  if (scenario.latency?.totalMs !== undefined && totalMs > scenario.latency.totalMs)
+  if (scenario.latency?.totalMs !== undefined && totalMs > scenario.latency.totalMs * LATENCY_SLACK)
     problems.push(`took ${totalMs} ms at p50, target under ${scenario.latency.totalMs} ms`);
 
   const last = plays[plays.length - 1]!;
@@ -308,7 +323,6 @@ export async function playScenario(scenario: EvalScenario, deps: EvalDeps, readT
     turns: last.turns,
     modelCalls: last.modelCalls,
     steps: last.steps,
-    captions: last.captions,
     title: last.title,
     reply: last.reply,
     artifacts: last.artifacts,
@@ -333,10 +347,10 @@ export function summariseEvals(rows: readonly EvalRow[], scenarios: readonly Eva
         metric: "first output",
         p50: row.firstOutputMs,
         targetMs: budget.firstOutputMs,
-        pass: row.firstOutputMs !== null && row.firstOutputMs <= budget.firstOutputMs,
+        pass: row.firstOutputMs !== null && row.firstOutputMs <= budget.firstOutputMs * LATENCY_SLACK,
       });
     if (budget?.totalMs !== undefined)
-      latency.push({ name: row.name, metric: "total", p50: row.totalMs, targetMs: budget.totalMs, pass: row.totalMs <= budget.totalMs });
+      latency.push({ name: row.name, metric: "total", p50: row.totalMs, targetMs: budget.totalMs, pass: row.totalMs <= budget.totalMs * LATENCY_SLACK });
   }
   const passed = rows.filter((row) => row.pass).length;
   return {

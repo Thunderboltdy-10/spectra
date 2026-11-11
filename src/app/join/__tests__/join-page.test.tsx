@@ -9,7 +9,9 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(navigation.search),
 }));
 const clerk = vi.hoisted(() => ({ signOut: vi.fn(async () => {}) }));
-vi.mock("@clerk/nextjs", () => ({ useClerk: () => clerk }));
+vi.mock("@clerk/nextjs", () => ({ useClerk: () => clerk, useUser: () => ({ user: null }) }));
+// The page sits in the landing window, which measures itself.
+globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
 
 function routeResult(body: unknown) {
   return { ok: true, status: 200, json: async () => body };

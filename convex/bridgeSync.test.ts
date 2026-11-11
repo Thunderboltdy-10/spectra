@@ -9,6 +9,7 @@ import { BRIDGE_CLAIM_REDRIVE_MS } from "../shared/replica-truth";
 import { syncRetryAt } from "../shared/sync-retry-policy";
 import { nativeOperationId, type NativeSaveReceipt } from "../shared/native-office-contract";
 import { enqueueStructureRequest } from "./bridgeStructure";
+import { findPrimaryNode } from "./orgTreeShared";
 
 const modules = import.meta.glob("./**/*.ts");
 const credential = "bridge-batch-test-credential-00000001";
@@ -53,6 +54,72 @@ describe("individual file mounts", () => {
       await expect(t.mutation(api.bridgeSync.registerMount, selection({ selectedFile, rootLabel: selectedFile }))).rejects.toThrow();
     }
     await expect(t.mutation(api.bridgeSync.registerMount, selection({ fileCount: 2 }))).rejects.toThrow("BRIDGE_FILE_SELECTION_INVALID");
+  });
+  it("carries a file chosen alone into a folder that later covers it, as one work", async () => {
+    const t = setupTest();
+    const fixture = await seedBridge(t);
+    const fileMount = await t.mutation(api.bridgeSync.registerMount, selection());
+    const resource = { localResourceId: "lr_" + "f".repeat(16), relativePath: "Chosen.docx", size: 12, contentHash: "a".repeat(64), nativeFormat: "docx" };
+    const original = (await t.mutation(api.bridgeSync.discoverResourcesPage, { credential, mountId: fileMount, resources: [resource] })).registrations[0];
+    if (!("workId" in original) || !original.workId) throw new Error("Expected selected file work");
+    const folderMount = await t.mutation(api.bridgeSync.registerMount, {
+      credential, rootLabel: "Unit 1", grantId: "grant_b1", rootKey: "1".repeat(64),
+      scanId: crypto.randomUUID(), fileCount: 1, doubleSyncRisk: false, ownerLockPaths: [],
+    });
+    const again = (await t.mutation(api.bridgeSync.discoverResourcesPage, {
+      credential, mountId: folderMount, resources: [{ ...resource, relativePath: "essays/Chosen.docx" }],
+    })).registrations[0];
+    expect(again).toHaveProperty("workId", original.workId);
+
+    const state = await t.run(async (ctx) => {
+      const replica = await ctx.db.get(original.replicaId!);
+      const folder = await ctx.db.get(folderMount);
+      const node = await ctx.db.query("orgNodes").withIndex("by_account_parent_live_name", (q) => q.eq("accountId", fixture.accountId).eq("parentId", folder!.rootOrgNodeId!)).collect();
+      const account = await ctx.db.get(fixture.accountId);
+      return { replica, retired: await ctx.db.get(fileMount), children: node.map((row) => row.name), account };
+    });
+    expect(state.replica).toMatchObject({ mountId: folderMount, relativePath: "essays/Chosen.docx" });
+    expect(state.retired?.state).toBe("revoked");
+    expect(state.children).toContain("essays");
+
+    const asUser = t.withIdentity({ subject: state.account!.clerkId, email: state.account!.email, emailVerified: true });
+    const [found, missing] = await asUser.query(api.bridge.syncedNodes, {
+      items: [
+        { grantId: "grant_b1", relativePath: "essays/Chosen.docx" },
+        { grantId: "grant_b1", relativePath: "essays/Later.docx" },
+      ],
+    });
+    expect(found).toMatchObject({ name: "Chosen.docx" });
+    expect(missing).toBeNull();
+    const [root] = await asUser.query(api.bridge.syncedNodes, { items: [{ grantId: "grant_b1", relativePath: "" }] });
+    expect(root).toMatchObject({ name: "Unit 1" });
+
+    // Placing it where it already is, or twice, simply holds.
+    const parentOfWork = await t.run(async (ctx) => (await ctx.db.get(found!.nodeId as Id<"orgNodes">))!.parentId);
+    const same = await asUser.mutation(api.orgTree.createReference, { targetNodeId: found!.nodeId as Id<"orgNodes">, parentId: parentOfWork });
+    expect(same.nodeId).toBe(found!.nodeId);
+    const first = await asUser.mutation(api.orgTree.createReference, { targetNodeId: found!.nodeId as Id<"orgNodes">, parentId: root!.nodeId });
+    const second = await asUser.mutation(api.orgTree.createReference, { targetNodeId: found!.nodeId as Id<"orgNodes">, parentId: root!.nodeId });
+    expect(second.nodeId).toBe(first.nodeId);
+  });
+  it("leaves work filed elsewhere where its owner put it when a folder takes it over", async () => {
+    const t = setupTest();
+    const fixture = await seedBridge(t);
+    const fileMount = await t.mutation(api.bridgeSync.registerMount, selection());
+    const resource = { localResourceId: "lr_" + "e".repeat(16), relativePath: "Chosen.docx", size: 12, contentHash: "b".repeat(64), nativeFormat: "docx" };
+    const original = (await t.mutation(api.bridgeSync.discoverResourcesPage, { credential, mountId: fileMount, resources: [resource] })).registrations[0];
+    if (!("workId" in original) || !original.workId) throw new Error("Expected selected file work");
+    const filed = await t.run(async (ctx) => {
+      const node = await findPrimaryNode(ctx, fixture.accountId, "work", String(original.workId));
+      await ctx.db.patch(node!._id, { parentId: null });
+      return node!._id;
+    });
+    const folderMount = await t.mutation(api.bridgeSync.registerMount, {
+      credential, rootLabel: "Unit 2", grantId: "grant_b2", rootKey: "2".repeat(64),
+      scanId: crypto.randomUUID(), fileCount: 1, doubleSyncRisk: false, ownerLockPaths: [],
+    });
+    await t.mutation(api.bridgeSync.discoverResourcesPage, { credential, mountId: folderMount, resources: [{ ...resource, relativePath: "Chosen.docx" }] });
+    expect((await t.run((ctx) => ctx.db.get(filed)))?.parentId).toBeNull();
   });
   it("keeps Library renames independent and preserves the work after re-pairing a retired device", async () => {
     const t = setupTest();
@@ -443,6 +510,12 @@ describe("Bridge write acknowledgement after native observation", () => {
   async function seedWrite(observation: "upload" | "metadata", withReceipt = true) {
     const t = setupTest();
     const fixture = await seedBridge(t);
+    if (observation === "upload" && withReceipt) await t.run(async ctx => {
+      const now = Date.now();
+      await ctx.db.insert("syncPolicies", { accountId: fixture.accountId, scopeKind: "account", scopeId: String(fixture.accountId),
+        preset: "both", contentDirection: "bidirectional", discovery: "auto", structure: "independent", cloudContent: "full",
+        includeGlobs: [], excludeGlobs: [], timing: "continuous", protectedOriginal: false, createdAt: now, updatedAt: now });
+    });
     const hash = async (bytes: string) => Array.from(
       new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(bytes))),
       byte => byte.toString(16).padStart(2, "0"),
@@ -572,6 +645,22 @@ describe("Bridge write acknowledgement after native observation", () => {
     }
     expect(await f.t.mutation(api.bridgeSync.completeWrite, { ...recovered, outcome: "verified", actualRevision: f.targetHash }))
       .toEqual({ state: "verified" });
+  });
+
+  it("keeps explicit non-materializer writes eligible under their existing authorization", async () => {
+    const f = await seedWrite("upload", false);
+    expect(await f.t.mutation(api.bridgeSync.refreshWriteClaim, f.firstClaim)).toEqual({ valid: true });
+  });
+
+  it("refuses an Office materializer claim after desktop writes are disabled", async () => {
+    const f = await seedWrite("upload");
+    await f.t.run(async ctx => {
+      const request = (await ctx.db.get(f.requestId))!;
+      const policy = await ctx.db.query("syncPolicies").withIndex("by_account_scope", q =>
+        q.eq("accountId", request.accountId).eq("scopeKind", "account").eq("scopeId", String(request.accountId))).unique();
+      await ctx.db.patch(policy!._id, { contentDirection: "manual" });
+    });
+    expect(await f.t.mutation(api.bridgeSync.refreshWriteClaim, f.firstClaim)).toEqual({ valid: false });
   });
 
   it.each(["newer-native", "wrong-hash", "unavailable-payload", "wrong-payload"] as const)(
@@ -1398,5 +1487,57 @@ describe("Bridge incremental cloud seam", () => {
     expect(await t.run(async (ctx) => ctx.db.get(lateOperationId))).toMatchObject({
       state: "verified",
     });
+  });
+});
+
+describe("a file deleted outside Spectra", () => {
+  it("is never recreated on its own, and Put it back writes it again from Spectra's copy", async () => {
+    const t = setupTest();
+    const fixture = await seedBridge(t);
+    const discovery = await t.mutation(api.bridgeSync.discoverResourcesPage, {
+      credential,
+      mountId: fixture.mountId,
+      resources: [{ localResourceId: `lr_${"c".repeat(16)}`, relativePath: "Biology/Essay.docx", size: 42, contentHash: "a".repeat(64), nativeFormat: "docx" }],
+    });
+    const registration = discovery.registrations[0];
+    if (!("replicaId" in registration) || !registration.replicaId) throw new Error("Expected a discovered replica");
+    const replicaId: Id<"workReplicas"> = registration.replicaId;
+    const { workId, clerkId } = await t.run(async (ctx) => {
+      const replica = (await ctx.db.get(replicaId))!;
+      const now = Date.now();
+      await ctx.db.patch(replica._id, { state: "current", revision: "a".repeat(64), contentHash: "a".repeat(64) });
+      const cloud = await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", replica.workId).eq("kind", "cloud")).unique();
+      const cloudFields = { state: "current" as const, payloadRef: "payload-cloud", contentHash: "a".repeat(64), revision: "a".repeat(64), updatedAt: now };
+      if (cloud) await ctx.db.patch(cloud._id, cloudFields);
+      else await ctx.db.insert("workReplicas", { accountId: fixture.accountId, workId: replica.workId, kind: "cloud", nativeFormat: "docx", ...cloudFields });
+      const account = (await ctx.db.get(fixture.accountId))!;
+      return { workId: replica.workId, clerkId: account.clerkId };
+    });
+    await t.mutation(api.bridgeSync.reportMissingResources, { credential, mountId: fixture.mountId, localResourceIds: [`lr_${"c".repeat(16)}`] });
+    const writesFor = () => t.run((ctx) => ctx.db.query("bridgeWriteRequests").collect());
+    expect(await t.run((ctx) => ctx.db.get(replicaId))).toMatchObject({ state: "unavailable", unavailableReason: "missing-on-disk" });
+    expect(await writesFor()).toHaveLength(0);
+
+    const me = t.withIdentity({ subject: clerkId, email: "bridge-batch@example.test", emailVerified: true });
+    expect(await me.mutation(api.bridgeSync.putBackFile, { workId })).toEqual({ putBack: 1 });
+    expect(await t.run((ctx) => ctx.db.get(replicaId))).toMatchObject({ state: "pending", unavailableReason: "restoring-from-cloud" });
+    const writes = await writesFor();
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ relativePath: "Biology/Essay.docx", payloadRef: "payload-cloud", state: "pending" });
+    // Bridge creates a missing file only for a `new:` base; the old bytes' hash would be refused (F22).
+    expect(writes[0]!.baseRevision).toMatch(/^new:restore:/);
+    expect((await t.run((ctx) => ctx.db.get(replicaId)))?.revision).toBe(writes[0]!.baseRevision);
+    // Asking twice queues nothing more.
+    await expect(me.mutation(api.bridgeSync.putBackFile, { workId })).rejects.toThrow("FILE_NOT_MISSING");
+    expect(await writesFor()).toHaveLength(1);
+    // Written back, then deleted again: putting it back is a fresh write, not the first one's receipt.
+    await t.run(async (ctx) => {
+      await ctx.db.patch(writes[0]!._id, { state: "verified" });
+      await ctx.db.patch(replicaId, { state: "unavailable", unavailableReason: "missing-on-disk", revision: "a".repeat(64), updatedAt: Date.now() + 1000 });
+    });
+    expect(await me.mutation(api.bridgeSync.putBackFile, { workId })).toEqual({ putBack: 1 });
+    const again = await writesFor();
+    expect(again).toHaveLength(2);
+    expect(again[1]!.baseRevision).not.toBe(writes[0]!.baseRevision);
   });
 });

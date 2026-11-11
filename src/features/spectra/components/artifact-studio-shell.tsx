@@ -346,7 +346,7 @@ export function useArtifactStudioState(
   const closeStudio = useCallback(() => {
     if (activeArtifactId && mode === "split")
       closeObject("artifact", activeArtifactId);
-    else deactivateObject();
+    deactivateObject();
   }, [activeArtifactId, closeObject, deactivateObject, mode]);
 
   const setDirty = useCallback(
@@ -745,6 +745,9 @@ export function StudioSplitShell({
               flexShrink: 0,
               flexBasis: `${width}px`,
               minWidth: 0,
+              // A work carrying its own pane is allotted more than the usual
+              // cap; the row allocation already keeps the page's reserve.
+              maxWidth: width > 880 ? `${width}px` : undefined,
               contain: "inline-size",
               containerType: "inline-size",
             }

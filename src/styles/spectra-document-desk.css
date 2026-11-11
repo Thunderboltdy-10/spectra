@@ -508,7 +508,7 @@
 .spectra-document-sources > button:not(.spectra-document-sources-action) > span {
   grid-row: span 2;
   align-self: start;
-  font-size: 14px;
+  font-size: 15px;
 }
 .spectra-document-outline > button > strong,
 .spectra-document-sources > button:not(.spectra-document-sources-action) > strong {

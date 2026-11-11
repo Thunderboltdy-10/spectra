@@ -26,7 +26,8 @@ function toolResults(messages: HarnessMessage[]) {
 
 function setup(ai: unknown = {}) {
   const backend = new MemoryBackend();
-  const session = createSession({ backend, prompt: "test" });
+  // The commands below name October 2026 dates; the clock stands before them.
+  const session = createSession({ backend, prompt: "test", now: () => Date.UTC(2026, 9, 5, 7, 0) });
   const tools = buildHarnessTools(session);
   const prefs = readPermissionPrefs(ai);
   const run = (turns: ModelTurn[]) =>
@@ -185,8 +186,8 @@ describe("run_command", () => {
     const runnable = new Set([...tools, ...runOnlyTools(session)].map((tool) => tool.name));
     const withExamples = COMMAND_CATALOG.flatMap((entry) => (entry.reach.kind === "tool" ? [{ entry, reach: entry.reach }] : []));
     for (const { entry, reach } of withExamples) {
-      // use_agent is offered only when the user has agents.
-      if (reach.tool !== "use_agent") expect(runnable.has(reach.tool), entry.id).toBe(true);
+      // Optional backend capabilities are offered only when supported.
+      if (!["use_agent", "undo_previous_run"].includes(reach.tool)) expect(runnable.has(reach.tool), entry.id).toBe(true);
     }
     for (const { entry, reach } of withExamples.filter(({ reach }) => reach.appCommand)) {
       expect(reach.example, entry.id).toBeDefined();

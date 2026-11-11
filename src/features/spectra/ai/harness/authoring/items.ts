@@ -1,5 +1,6 @@
 import { plannerTaskBlueprint } from "../../../artifacts/schema/planner-task";
 import { validateQuizForPublishing } from "../../../quiz/interchange";
+import { notFoundMessage } from "./locate";
 import { AuthoringError, type IdFactory, defaultIdFactory, isPlaceholder, list, record, text, truncate } from "./shared";
 
 /*
@@ -47,6 +48,39 @@ function optionalText(target: Record<string, unknown>, key: string, value: unkno
 }
 
 // ---------------------------------------------------------------- flashcards
+
+/**
+ * An option's answer as a comparable key: a number in any common form (1/2,
+ * 0.5, 50%, 1,000, 1.5 × 10^3) with whatever unit follows it, or the words
+ * themselves without case or spacing.
+ */
+function answerKey(option: string) {
+  const plain = option.trim().toLowerCase().replace(/\s+/g, " ");
+  const match = /^([-+−]?)(\d[\d,]*(?:\.\d+)?|\.\d+)(?:\s*\/\s*(\d+(?:\.\d+)?))?(?:\s*(?:[×x*]|e)\s*(?:10\s*\^\s*)?([-+−]?\d+))?\s*(%?)\s*(.*)$/.exec(plain);
+  if (!match) return plain;
+  const [, sign, whole, denominator, exponent, percent, unit] = match;
+  if (/,\d{1,2}(?!\d)/.test(whole!)) return plain;
+  let value = Number(whole!.replace(/,/g, ""));
+  if (denominator) value /= Number(denominator);
+  if (exponent) value *= 10 ** Number(exponent.replace("−", "-"));
+  if (percent) value /= 100;
+  if (sign === "-" || sign === "−") value = -value;
+  if (!Number.isFinite(value)) return plain;
+  return `${Number(value.toPrecision(12))}|${unit}`;
+}
+
+/** The first two options that are one answer written two ways, if any. */
+export function sameAnswerOptions(options: string[]): [string, string] | null {
+  const seen = new Map<string, string>();
+  for (const option of options) {
+    if (!option.trim()) continue;
+    const key = answerKey(option);
+    const earlier = seen.get(key);
+    if (earlier !== undefined) return [earlier, option];
+    seen.set(key, option);
+  }
+  return null;
+}
 
 const DIFFICULTIES = new Set(["easy", "medium", "hard"]);
 
@@ -166,6 +200,9 @@ const quiz: ListKind = {
     }
     // Check the shape the quiz player needs now, so the model fixes it in the same turn.
     const options = list(question.options).map(text);
+    const same = sameAnswerOptions(options);
+    if (same)
+      throw new AuthoringError(`${label}: "${same[0]}" and "${same[1]}" are the same answer in another form. Make every option a different answer.`);
     if ((type === "multiple_choice" || type === "true_false") && !options.includes(text(question.correctAnswer)))
       throw new AuthoringError(`${label}: answer must be exactly one of the options (${options.map((option) => `"${option}"`).join(", ") || "no options given"}).`);
     if (type === "select_all" && list(question.correctAnswers).some((answer) => !options.includes(text(answer))))
@@ -333,7 +370,7 @@ export function applyListEdits(type: string, content: unknown, ops: ListEditOp[]
         let count = 0;
         for (const item of items)
           for (const field of kind.textFields) count += text(item[field]).split(op.find).length - 1;
-        if (!count) throw new AuthoringError(`${label}: \`find\` text was not found.`);
+        if (!count) throw new AuthoringError(notFoundMessage(label, "find", op.find, items.flatMap((item) => kind.textFields.map((field) => text(item[field]))).join("\n"), "any item"));
         if (count > 1 && !op.all) throw new AuthoringError(`${label}: \`find\` text appears ${count} times. Set "all": true or include more text.`);
         items = items.map((item) => {
           const copy = { ...item };
@@ -368,6 +405,14 @@ export function applyListEdits(type: string, content: unknown, ops: ListEditOp[]
 }
 
 /** A new quiz or deck from items plus optional settings. */
+/** A complete quiz, open for attempts. One with problems stays closed until they are fixed. */
+export function openQuizForPractice(content: unknown): Record<string, unknown> | null {
+  const next = { ...record(content) };
+  if (quiz.problems(next).length || !list(next.questions).length) return null;
+  quiz.publish!(next, true);
+  return next;
+}
+
 export function listFromSpec(type: string, spec: { items: Record<string, unknown>[]; settings?: Record<string, unknown> }, ids: IdFactory = defaultIdFactory()) {
   const kind = LIST_KINDS[type];
   if (!kind) throw new AuthoringError(`${type} is not a list artifact.`);

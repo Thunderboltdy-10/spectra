@@ -56,10 +56,8 @@ async function renderPanel() {
     <ArtifactCommentsPanel
       open
       artifactId="artifact-1"
-      artifactTitle="Essay"
       currentAccountId="me"
       regions={[{ regionId: "artifact:structure", label: "Whole work" }]}
-      onClose={() => {}}
     />,
   );
   await act(async () => {});

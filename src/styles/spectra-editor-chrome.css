@@ -392,7 +392,7 @@
   padding: 10px 12px;
   background: var(--card-paper);
   color: var(--text-primary);
-  font-size: 10.5px;
+  font-size: 10.5px; /* spectra-token-allow: miniature */
   line-height: 1.3;
 }
 .rail-thumb-kicker {
@@ -400,7 +400,7 @@
   justify-content: space-between;
   gap: 6px;
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 10px; /* spectra-token-allow: miniature */
   white-space: nowrap;
 }
 .rail-thumb-kicker > :first-child {
@@ -444,7 +444,7 @@
   place-items: center;
   border: 1px solid var(--card-border);
   border-radius: 50%;
-  font-size: 7px;
+  font-size: 7px; /* spectra-token-allow: miniature */
   font-weight: 600;
 }
 .rail-thumb-options[data-many] > li > span:first-child {
@@ -548,7 +548,7 @@ svg.rail-thumb {
   stroke-width: 1;
 }
 .rail-thumb-node[data-kind="note"] {
-  fill: color-mix(in oklab, var(--rail-ink, var(--accent-yellow, #e9c46a)) 18%, var(--card-paper));
+  fill: color-mix(in oklab, var(--rail-ink, var(--accent-gold)) 18%, var(--card-paper));
   stroke: none;
 }
 .rail-thumb-node[data-kind="frame"] {

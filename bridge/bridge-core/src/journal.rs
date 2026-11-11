@@ -1,3 +1,4 @@
+use crate::locks::Locked;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -125,7 +126,7 @@ impl Journal {
     }
 
     fn migrate(&self) -> anyhow::Result<()> {
-        self.connection.lock().unwrap().execute_batch(
+        self.connection.locked().execute_batch(
             "PRAGMA journal_mode=WAL;
              PRAGMA synchronous=FULL;
              CREATE TABLE IF NOT EXISTS resources (
@@ -177,7 +178,7 @@ impl Journal {
              );",
         )?;
         let has_grant_id = {
-            let connection = self.connection.lock().unwrap();
+            let connection = self.connection.locked();
             let mut statement = connection.prepare("PRAGMA table_info(resources)")?;
             let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
             columns
@@ -186,13 +187,13 @@ impl Journal {
                 .any(|column| column == "grant_id")
         };
         if !has_grant_id {
-            self.connection.lock().unwrap().execute(
+            self.connection.locked().execute(
                 "ALTER TABLE resources ADD COLUMN grant_id TEXT NOT NULL DEFAULT ''",
                 [],
             )?;
         }
         {
-            let connection = self.connection.lock().unwrap();
+            let connection = self.connection.locked();
             let mut statement = connection.prepare("PRAGMA table_info(native_ack_queue)")?;
             let columns = statement
                 .query_map([], |row| row.get::<_, String>(1))?
@@ -213,7 +214,7 @@ impl Journal {
                 )?;
             }
         }
-        self.connection.lock().unwrap().execute_batch(
+        self.connection.locked().execute_batch(
             "CREATE INDEX IF NOT EXISTS resources_by_grant_path
                ON resources(grant_id, path_key);
              CREATE INDEX IF NOT EXISTS resources_by_grant_generation
@@ -240,7 +241,7 @@ impl Journal {
     }
 
     pub fn upsert_resource(&self, resource: &ResourceRecord) -> anyhow::Result<()> {
-        self.connection.lock().unwrap().execute(
+        self.connection.locked().execute(
             "INSERT INTO resources(
                local_resource_id,grant_id,path_key,volume,file_index,content_hash,
                revision,available,unavailable_reason,last_seen_generation
@@ -297,8 +298,7 @@ impl Journal {
     ) -> anyhow::Result<Option<ResourceRecord>> {
         Ok(self
             .connection
-            .lock()
-            .unwrap()
+            .locked()
             .query_row(
                 "SELECT local_resource_id,grant_id,path_key,volume,file_index,content_hash,
                     revision,available,unavailable_reason,last_seen_generation
@@ -316,8 +316,7 @@ impl Journal {
     ) -> anyhow::Result<Option<ResourceRecord>> {
         Ok(self
             .connection
-            .lock()
-            .unwrap()
+            .locked()
             .query_row(
                 "SELECT local_resource_id,grant_id,path_key,volume,file_index,content_hash,
                     revision,available,unavailable_reason,last_seen_generation
@@ -329,7 +328,7 @@ impl Journal {
     }
 
     pub fn resources_for_grant(&self, grant_id: &str) -> anyhow::Result<Vec<ResourceRecord>> {
-        let connection = self.connection.lock().unwrap();
+        let connection = self.connection.locked();
         let mut statement = connection.prepare(
             "SELECT local_resource_id,grant_id,path_key,volume,file_index,content_hash,
                     revision,available,unavailable_reason,last_seen_generation
@@ -347,7 +346,7 @@ impl Journal {
         after_resource_id: Option<&str>,
         limit: usize,
     ) -> anyhow::Result<Vec<ResourceRecord>> {
-        let connection = self.connection.lock().unwrap();
+        let connection = self.connection.locked();
         let mut statement = connection.prepare(
             "SELECT local_resource_id,grant_id,path_key,volume,file_index,content_hash,
                     revision,available,unavailable_reason,last_seen_generation
@@ -376,7 +375,7 @@ impl Journal {
         // `Unit_1` (or renaming `notes` to `Notes`) marked the files of
         // `Unit 1` (or of the renamed folder itself) unavailable.
         let prefix = format!("{exact}/");
-        let connection = self.connection.lock().unwrap();
+        let connection = self.connection.locked();
         let mut statement = connection.prepare(
             "SELECT local_resource_id,grant_id,path_key,volume,file_index,content_hash,
                     revision,available,unavailable_reason,last_seen_generation
@@ -396,7 +395,7 @@ impl Journal {
         local_resource_id: &str,
         stat: &VerifiedStat,
     ) -> anyhow::Result<()> {
-        self.connection.lock().unwrap().execute(
+        self.connection.locked().execute(
             "INSERT INTO resource_stats(local_resource_id,size,modified_ns,content_hash,verified_at_ns)
              VALUES(?,?,?,?,?)
              ON CONFLICT(local_resource_id) DO UPDATE SET
@@ -416,8 +415,7 @@ impl Journal {
     pub fn verified_stat(&self, local_resource_id: &str) -> anyhow::Result<Option<VerifiedStat>> {
         Ok(self
             .connection
-            .lock()
-            .unwrap()
+            .locked()
             .query_row(
                 "SELECT size,modified_ns,content_hash,verified_at_ns
                  FROM resource_stats WHERE local_resource_id=?",
@@ -440,7 +438,7 @@ impl Journal {
         reason: &str,
         generation: u64,
     ) -> anyhow::Result<()> {
-        self.connection.lock().unwrap().execute(
+        self.connection.locked().execute(
             "UPDATE resources SET available=0, unavailable_reason=?, last_seen_generation=?
              WHERE local_resource_id=?",
             params![reason, generation as i64, local_resource_id],
@@ -453,7 +451,7 @@ impl Journal {
         local_resource_id: &str,
         revision: Option<&str>,
     ) -> anyhow::Result<()> {
-        self.connection.lock().unwrap().execute(
+        self.connection.locked().execute(
             "UPDATE resources SET revision=COALESCE(?,revision) WHERE local_resource_id=?",
             params![revision, local_resource_id],
         )?;
@@ -473,7 +471,7 @@ impl Journal {
         }
         let now = unix_ms();
         let op_id = format!("op_{}", uuid::Uuid::new_v4().simple());
-        self.connection.lock().unwrap().execute(
+        self.connection.locked().execute(
             "INSERT INTO ops(op_id,idempotency_key,kind,resource_id,state,base_revision,pre_hash,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
             params![op_id, key, kind, resource_id, OpState::Intent.as_str(), base_revision, pre_hash, now, now],
         )?;
@@ -488,7 +486,7 @@ impl Journal {
         post_hash: Option<&str>,
         error: Option<(&str, &str)>,
     ) -> anyhow::Result<()> {
-        let changed = self.connection.lock().unwrap().execute(
+        let changed = self.connection.locked().execute(
             "UPDATE ops SET state=?, post_hash=COALESCE(?,post_hash), error_code=?, error_message=?, updated_at=? WHERE op_id=?",
             params![state.as_str(), post_hash, error.map(|e| e.0), error.map(|e| e.1), unix_ms(), op_id],
         )?;
@@ -497,7 +495,7 @@ impl Journal {
     }
 
     pub fn by_key(&self, key: &str) -> anyhow::Result<Option<JournalOp>> {
-        let connection = self.connection.lock().unwrap();
+        let connection = self.connection.locked();
         connection.query_row(
             "SELECT op_id,idempotency_key,kind,resource_id,state,base_revision,pre_hash,post_hash,error_code FROM ops WHERE idempotency_key=?",
             [key], |row| Ok(JournalOp { op_id: row.get(0)?, idempotency_key: row.get(1)?, kind: row.get(2)?, resource_id: row.get(3)?, state: OpState::parse(&row.get::<_, String>(4)?).map_err(|_| rusqlite::Error::InvalidQuery)?, base_revision: row.get(5)?, pre_hash: row.get(6)?, post_hash: row.get(7)?, error_code: row.get(8)? })
@@ -505,7 +503,7 @@ impl Journal {
     }
 
     pub fn pending_ops(&self) -> anyhow::Result<Vec<JournalOp>> {
-        let connection = self.connection.lock().unwrap();
+        let connection = self.connection.locked();
         let mut statement = connection.prepare("SELECT op_id,idempotency_key,kind,resource_id,state,base_revision,pre_hash,post_hash,error_code FROM ops WHERE state IN ('intent','performed') ORDER BY created_at")?;
         let rows = statement.query_map([], |row| {
             Ok(JournalOp {
@@ -525,7 +523,7 @@ impl Journal {
     }
 
     pub fn diagnostic_log(&self, limit: usize) -> anyhow::Result<String> {
-        let connection = self.connection.lock().unwrap();
+        let connection = self.connection.locked();
         let mut statement = connection.prepare("SELECT op_id,idempotency_key,kind,resource_id,state,base_revision,pre_hash,post_hash,error_code FROM ops ORDER BY updated_at DESC LIMIT ?")?;
         let rows = statement.query_map([limit.clamp(1, 2_000) as i64], |row| {
             Ok(JournalOp {
@@ -550,7 +548,7 @@ impl Journal {
     }
 
     pub fn compact_verified(&self, older_than_ms: i64) -> anyhow::Result<usize> {
-        let mut connection = self.connection.lock().unwrap();
+        let mut connection = self.connection.locked();
         let tx = connection.transaction()?;
         tx.execute(
             "INSERT OR REPLACE INTO checkpoints(resource_id,last_op_id,post_hash,compacted_at)
@@ -568,7 +566,7 @@ impl Journal {
     }
 
     pub fn set_config(&self, key: &str, value: &str) -> anyhow::Result<()> {
-        self.connection.lock().unwrap().execute(
+        self.connection.locked().execute(
             "INSERT OR REPLACE INTO config(key,value) VALUES(?,?)",
             params![key, value],
         )?;
@@ -577,7 +575,7 @@ impl Journal {
 
     /// Commit related settings together, before publishing a new pairing.
     pub fn set_configs(&self, values: &[(&str, &str)]) -> anyhow::Result<()> {
-        let mut connection = self.connection.lock().unwrap();
+        let mut connection = self.connection.locked();
         let tx = connection.transaction()?;
         for (key, value) in values {
             tx.execute(
@@ -595,7 +593,7 @@ impl Journal {
         key: &str,
         relative_path: &str,
     ) -> anyhow::Result<String> {
-        let connection = self.connection.lock().unwrap();
+        let connection = self.connection.locked();
         connection.execute(
             "INSERT OR IGNORE INTO structure_targets(idempotency_key,relative_path) VALUES(?,?)",
             params![key, relative_path],
@@ -609,8 +607,7 @@ impl Journal {
     pub fn config(&self, key: &str) -> anyhow::Result<Option<String>> {
         Ok(self
             .connection
-            .lock()
-            .unwrap()
+            .locked()
             .query_row("SELECT value FROM config WHERE key=?", [key], |row| {
                 row.get(0)
             })
@@ -618,14 +615,13 @@ impl Journal {
     }
     pub fn delete_config(&self, key: &str) -> anyhow::Result<()> {
         self.connection
-            .lock()
-            .unwrap()
+            .locked()
             .execute("DELETE FROM config WHERE key=?", [key])?;
         Ok(())
     }
 
     pub fn config_prefix(&self, prefix: &str) -> anyhow::Result<Vec<(String, String)>> {
-        let connection = self.connection.lock().unwrap();
+        let connection = self.connection.locked();
         let mut statement =
             connection.prepare("SELECT key,value FROM config WHERE key LIKE ? ORDER BY key")?;
         let rows =
@@ -634,7 +630,7 @@ impl Journal {
     }
 
     pub fn enqueue(&self, op_id: &str, direction: &str, payload: &str) -> anyhow::Result<()> {
-        self.connection.lock().unwrap().execute(
+        self.connection.locked().execute(
             "INSERT INTO queue(op_id,direction,payload,available_at)
              SELECT ?,?,?,? WHERE NOT EXISTS(
                SELECT 1 FROM queue WHERE op_id=? AND direction=?
@@ -647,7 +643,7 @@ impl Journal {
     /// Pending deliveries belong to the connection that authorized them. Keep
     /// operation history, but never replay its queue under a later pairing.
     pub fn retire_pairing_work(&self) -> anyhow::Result<()> {
-        let mut connection = self.connection.lock().unwrap();
+        let mut connection = self.connection.locked();
         let tx = connection.transaction()?;
         tx.execute(
             "UPDATE ops SET state='failed', error_code='device-unpaired', updated_at=?
@@ -660,7 +656,7 @@ impl Journal {
         Ok(())
     }
     pub fn due_queue(&self, limit: usize) -> anyhow::Result<Vec<QueueItem>> {
-        let connection = self.connection.lock().unwrap();
+        let connection = self.connection.locked();
         let mut statement = connection.prepare("SELECT id,op_id,direction,payload,attempts,available_at FROM queue WHERE available_at <= ? OR available_at > ? ORDER BY id LIMIT ?")?;
         let (now, horizon) = due_window();
         let rows =
@@ -678,8 +674,7 @@ impl Journal {
     }
     pub fn acknowledge_queue(&self, id: i64) -> anyhow::Result<()> {
         self.connection
-            .lock()
-            .unwrap()
+            .locked()
             .execute("DELETE FROM queue WHERE id=?", [id])?;
         Ok(())
     }
@@ -701,7 +696,7 @@ impl Journal {
             claim_generation.unwrap_or(0),
             claim_token.unwrap_or("legacy")
         );
-        self.connection.lock().unwrap().execute(
+        self.connection.locked().execute(
             "INSERT OR IGNORE INTO native_ack_queue(
                ack_key,request_id,claim_generation,claim_token,outcome,
                actual_revision,error_code,error_message,available_at
@@ -722,7 +717,7 @@ impl Journal {
     }
 
     pub fn due_native_acks(&self, limit: usize) -> anyhow::Result<Vec<NativeAckItem>> {
-        let connection = self.connection.lock().unwrap();
+        let connection = self.connection.locked();
         let mut statement = connection.prepare(
             "SELECT id,request_id,claim_generation,claim_token,outcome,
                     actual_revision,error_code,error_message,attempts,available_at,kind,actual_relative_path
@@ -766,7 +761,7 @@ impl Journal {
             claim_generation.unwrap_or(0),
             claim_token.unwrap_or("legacy")
         );
-        self.connection.lock().unwrap().execute(
+        self.connection.locked().execute(
             "INSERT OR IGNORE INTO native_ack_queue(
                ack_key,request_id,claim_generation,claim_token,outcome,
                actual_relative_path,error_code,error_message,available_at,kind
@@ -788,14 +783,13 @@ impl Journal {
 
     pub fn acknowledge_native_ack(&self, id: i64) -> anyhow::Result<()> {
         self.connection
-            .lock()
-            .unwrap()
+            .locked()
             .execute("DELETE FROM native_ack_queue WHERE id=?", [id])?;
         Ok(())
     }
 
     pub fn retry_native_ack(&self, id: i64, delay: Duration) -> anyhow::Result<()> {
-        self.connection.lock().unwrap().execute(
+        self.connection.locked().execute(
             "UPDATE native_ack_queue SET attempts=attempts+1, available_at=? WHERE id=?",
             params![unix_ms() + delay.as_millis() as i64, id],
         )?;
@@ -808,7 +802,7 @@ impl Journal {
         resource_id: &str,
         post_hash: Option<&str>,
     ) -> anyhow::Result<()> {
-        let mut connection = self.connection.lock().unwrap();
+        let mut connection = self.connection.locked();
         let tx = connection.transaction()?;
         tx.execute(
             "UPDATE ops SET state='verified', post_hash=COALESCE(?,post_hash),
@@ -826,7 +820,7 @@ impl Journal {
         Ok(())
     }
     pub fn fail_queue(&self, item: &QueueItem, code: &str, message: &str) -> anyhow::Result<()> {
-        let mut connection = self.connection.lock().unwrap();
+        let mut connection = self.connection.locked();
         let tx = connection.transaction()?;
         tx.execute(
             "UPDATE ops SET state='failed', error_code=?, error_message=?, updated_at=?
@@ -840,14 +834,14 @@ impl Journal {
     /// Holds a queued change back without counting an attempt: its folder is
     /// paused, so nothing failed.
     pub fn defer_queue(&self, id: i64, delay: Duration) -> anyhow::Result<()> {
-        self.connection.lock().unwrap().execute(
+        self.connection.locked().execute(
             "UPDATE queue SET available_at=? WHERE id=?",
             params![unix_ms() + delay.as_millis() as i64, id],
         )?;
         Ok(())
     }
     pub fn retry_queue(&self, id: i64, delay: Duration) -> anyhow::Result<()> {
-        self.connection.lock().unwrap().execute(
+        self.connection.locked().execute(
             "UPDATE queue SET attempts=attempts+1, available_at=? WHERE id=?",
             params![unix_ms() + delay.as_millis() as i64, id],
         )?;

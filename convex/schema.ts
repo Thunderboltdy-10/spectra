@@ -45,6 +45,9 @@ export default defineSchema({
     .index("by_status", ["status"]),
 
   accounts: defineTable({
+    /** Where new work is kept. Unset until they've been asked. */
+    workStorage: v.optional(v.union(v.literal("device_backup"), v.literal("device_only"), v.literal("cloud"))),
+    workBackupEveryHours: v.optional(v.number()),
     clerkId: v.string(),
     email: v.string(),
     emailVerified: v.boolean(),
@@ -85,9 +88,11 @@ export default defineSchema({
     state: v.union(v.literal("writing"), v.literal("ready"), v.literal("failed")),
     claimedAt: v.number(),
     recap: v.optional(v.string()),
+    /** What matters next; the part of the brief that's always there. */
+    ahead: v.optional(v.string()),
     suggestions: v.optional(v.array(briefSuggestionValidator)),
     /** The last day's brief, kept on the page until this day's is ready. */
-    previous: v.optional(v.object({ day: v.string(), recap: v.optional(v.string()), suggestions: v.optional(v.array(briefSuggestionValidator)) })),
+    previous: v.optional(v.object({ day: v.string(), recap: v.optional(v.string()), ahead: v.optional(v.string()), suggestions: v.optional(v.array(briefSuggestionValidator)) })),
     updatedAt: v.number(),
   }).index("by_account", ["accountId"]),
 
@@ -1444,6 +1449,8 @@ export default defineSchema({
     pendingProvider: v.optional(providerProjectionIntent),
     providerReceipt: v.optional(providerProjectionReceipt),
     overlayHash: v.optional(v.string()),
+    /** A timetable slot's lessons exist up to `through` for this version of the slot. */
+    lessonWindow: v.optional(v.object({ hash: v.string(), through: v.string() })),
     state: v.union(
       v.literal("active"),
       v.literal("detached"),
@@ -1661,6 +1668,8 @@ export default defineSchema({
     officialDeadlineItemId: v.optional(v.id("calendarItems")),
     linkedArtifactIds: v.array(v.id("spectraArtifacts")),
     recurrence: v.optional(v.string()),
+    /** Shared by the events of one repeating lesson. Each is a real event, so one can move or go alone. */
+    seriesId: v.optional(v.string()),
     legacyArtifactId: v.optional(v.id("spectraArtifacts")),
     legacyEventId: v.optional(v.string()),
     /** Caller-owned identity for retrying one scheduled work-block request. */
@@ -1689,7 +1698,8 @@ export default defineSchema({
     .index("by_plan_task", ["planArtifactId", "planTaskId"])
     .index("by_task_item", ["taskItemId"])
     .index("by_legacy_event", ["legacyArtifactId", "legacyEventId"])
-    .index("by_schedule_idempotency", ["ownerAccountId", "idempotencyKey"]),
+    .index("by_schedule_idempotency", ["ownerAccountId", "idempotencyKey"])
+    .index("by_account_series", ["ownerAccountId", "seriesId"]),
 
   // Calendar discovery never needs the payload-bearing planner/timetable
   // artifact or the canonical calendar row. These two compact tables are
@@ -2064,7 +2074,34 @@ export default defineSchema({
     .index("by_workspace", ["workspaceId", "createdAt"])
     .index("by_phase_updated", ["phase", "updatedAt"]),
 
+  deviceBackups: defineTable({
+    accountId: v.id("accounts"),
+    storeId: v.string(),
+    storageId: v.id("_storage"),
+    bytes: v.number(),
+    works: v.number(),
+    /** Holds every work rather than what changed since the last one. */
+    full: v.boolean(),
+    createdAt: v.number(),
+    /** The computer's name when it was backed up, so a restore can say where from. */
+    computerName: v.optional(v.string()),
+    /** Stores whose works this backup carries edits for, after they moved there. */
+    handOverTo: v.optional(v.array(v.string())),
+  })
+    .index("by_account", ["accountId", "createdAt"])
+    .index("by_account_store", ["accountId", "storeId", "createdAt"]),
+
   spectraArtifacts: defineTable({
+    /** Kept on a computer through Spectra Bridge rather than here. */
+    storageHome: v.optional(v.literal("device")),
+    /** Which computer's store has it. */
+    storageStoreId: v.optional(v.string()),
+    /** Its words reached that store once; from then on a missing copy is never re-seeded empty. */
+    storageSeeded: v.optional(v.boolean()),
+    /** Counts moves between a computer and the cloud: each move starts a fresh live history. */
+    storageEpoch: v.optional(v.number()),
+    // Set by a rename until the live document says something else.
+    renamedFromTitle: v.optional(v.string()),
     ownerAccountId: v.id("accounts"),
     schoolId: v.optional(v.id("schools")),
     resourceClass: v.optional(
@@ -2604,6 +2641,7 @@ export default defineSchema({
     .index("by_device_state", ["deviceId", "state"])
     .index("by_device_mount_path", ["deviceId", "mountId", "relativePath"])
     .index("by_work_kind", ["workId", "kind"])
+    .index("by_work_kind_account", ["workId", "kind", "accountId"])
     .index("by_payload_ref", ["payloadRef"])
     .index("by_pending_payload_ref", ["pendingPayloadRef"])
     .index("by_projection_base_payload_ref", ["projectionBasePayloadRef"])
@@ -2658,6 +2696,7 @@ export default defineSchema({
     .index("by_account_key", ["accountId", "idempotencyKey"])
     .index("by_account_key_replica", ["accountId", "idempotencyKey", "replicaId"])
     .index("by_work_created", ["workId", "createdAt"])
+    .index("by_work_account_created", ["workId", "accountId", "createdAt"])
     .index("by_state_updated", ["state", "updatedAt"]),
 
   syncConflicts: defineTable({
@@ -2696,6 +2735,8 @@ export default defineSchema({
     resolvedAt: v.optional(v.number()),
   })
     .index("by_work_state", ["workId", "state"])
+    .index("by_work_account_state", ["workId", "accountId", "state"])
+    .index("by_request_account_state", ["resolutionRequestId", "accountId", "state"])
     .index("by_account_state", ["accountId", "state"])
     .index("by_local_payload_ref", ["localPayloadRef"])
     .index("by_spectra_payload_ref", ["spectraPayloadRef"])
@@ -2892,6 +2933,47 @@ export default defineSchema({
     .index("by_account_updated", ["accountId", "updatedAt"])
     .index("by_artifact_updated", ["artifactId", "updatedAt"])
     .index("by_kind_updated", ["kind", "updatedAt"]),
+
+  // The notes Spectra keeps about a user (shared/memory-files.ts). This row is
+  // everything always loaded, so a run start reads one small document.
+  spectraMemoryHeads: defineTable({
+    accountId: v.id("accounts"),
+    schoolId: v.id("schools"),
+    about: v.string(),
+    preferences: v.string(),
+    topics: v.array(
+      v.object({
+        slug: v.string(),
+        title: v.string(),
+        summary: v.string(),
+        chars: v.number(),
+        updatedAt: v.number(),
+      }),
+    ),
+    updatedAt: v.number(),
+  }).index("by_account", ["accountId"]),
+
+  spectraMemoryTopics: defineTable({
+    accountId: v.id("accounts"),
+    slug: v.string(),
+    title: v.string(),
+    summary: v.string(),
+    content: v.string(),
+    updatedAt: v.number(),
+  }).index("by_account_slug", ["accountId", "slug"]),
+
+  /** What a run changed in the memory files, so undoing the run can put it back. */
+  spectraMemoryChanges: defineTable({
+    accountId: v.id("accounts"),
+    runId: v.string(),
+    file: v.union(v.literal("about"), v.literal("preferences"), v.literal("topic")),
+    slug: v.optional(v.string()),
+    before: v.any(),
+    after: v.any(),
+    at: v.number(),
+  })
+    .index("by_run", ["runId"])
+    .index("by_account_at", ["accountId", "at"]),
 
   memoryPreferences: defineTable({
     accountId: v.id("accounts"),
@@ -4340,6 +4422,8 @@ export default defineSchema({
       runId: v.optional(v.id("spectraAiRuns")),
       reason: v.optional(v.string()),
     }),
+    /** Taken away by someone: an automatic link is not offered again. */
+    dismissedAt: v.optional(v.number()),
     createdBy: v.union(v.literal("user"), v.literal("ai"), v.literal("system")),
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     createdAt: v.number(),
@@ -4766,6 +4850,8 @@ export default defineSchema({
     ),
     lastRetryKey: v.optional(v.string()),
     eventSequence: v.optional(v.number()),
+    /** A message arrived during this run; the worker learns it from its next event write. */
+    steerWaiting: v.optional(v.boolean()),
     traceDegraded: v.optional(v.boolean()),
     approval: v.optional(
       v.object({
@@ -4809,6 +4895,16 @@ export default defineSchema({
     .index("by_thread", ["threadId"])
     .index("by_artifact", ["artifactId"])
     .index("by_status_lease", ["status", "leaseExpiresAt"]),
+
+  /** How many runs each account started this hour and last: the hourly ceiling reads one row, not the runs. */
+  spectraRunAdmissions: defineTable({
+    accountId: v.id("accounts"),
+    /** Start of the current hour, ms. */
+    hourStart: v.number(),
+    count: v.number(),
+    /** Runs started in the hour before `hourStart`. */
+    previous: v.number(),
+  }).index("by_account", ["accountId"]),
 
   spectraRunJobs: defineTable({
     runId: v.id("spectraAiRuns"),
@@ -5126,6 +5222,15 @@ export default defineSchema({
    * open question or approval, the user's answer, and messages the user sent
    * while the run worked. One row per run (spectraHarness.ts).
    */
+  // The loop's transcript at its last checkpoint: large, so it lives apart from
+  // the small bookkeeping row, which every tool call and steer touches.
+  spectraHarnessCheckpoints: defineTable({
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+    state: v.any(),
+    updatedAt: v.number(),
+  }).index("by_run", ["runId"]),
+
   spectraHarnessStates: defineTable({
     runId: v.id("spectraAiRuns"),
     ownerAccountId: v.id("accounts"),
@@ -5259,6 +5364,7 @@ export default defineSchema({
   })
     .index("by_account_updated", ["ownerAccountId", "updatedAt"])
     .index("by_account_run", ["ownerAccountId", "runId"])
+    .index("by_account_selected", ["ownerAccountId", "selected"])
     .index("by_account_thread", ["ownerAccountId", "threadId"])
     .index("by_account_workspace", [
       "ownerAccountId",

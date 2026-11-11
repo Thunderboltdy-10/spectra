@@ -179,7 +179,7 @@ export function deriveLiveDockTab(source: LiveDockTabSource) {
     source.run.finalSummary ||
     source.card?.summary ||
     "What should Spectra use to continue?";
-  const inputRequest =
+  const inputRequest = source.run.status === "cancelled" || source.run.status === "failed" ? null : (
     source.inputRequest ??
     (source.run.status === "awaiting_confirmation"
       ? {
@@ -194,13 +194,13 @@ export function deriveLiveDockTab(source: LiveDockTabSource) {
           )
           ? { kind: "file" as const, prompt: clarification }
           : { kind: "short_answer" as const, prompt: clarification }
-        : null);
+        : null));
   const checkpointSummary = distinct(
     source.checkpointSummary ?? source.recentSteps?.at(-1),
     title,
   );
   let state: LiveDockTruthState;
-  if (inputRequest || source.run.decision === "clarify") state = "needs_input";
+  if (inputRequest) state = "needs_input";
   else if (source.run.status === "queued" || source.run.status === "running")
     state =
       source.run.phase === "checking"

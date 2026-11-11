@@ -63,7 +63,8 @@ function visibilityReader(ctx: Ctx, actor: Actor, removal: boolean, reuseLoadedS
       if (source.mappedAccountId !== currentActor.accountId || source.audienceScope !== "mapped_user") return false;
       // A kind (or a class's kind) the student turned Off shows nothing, even a row a purge hasn't reached yet.
       preferences ??= loadSyncPreferences(ctx, currentActor.accountId, integration._id);
-      if (hiddenByPreferences(await preferences, source, Date.now())) return false;
+      // Only legacy records without a stored kind need time-based classification.
+      if (hiddenByPreferences(await preferences, source, source.syncKind ? 0 : Date.now())) return false;
     } else if (source.audienceScope === "mapped_user") {
       return false;
     } else if (source.audienceScope === "authorized_staff") {

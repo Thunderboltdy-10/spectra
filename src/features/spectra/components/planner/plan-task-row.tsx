@@ -46,6 +46,7 @@ export function PlanTaskRow({
 
   return (
     <li
+      data-plan-task={task.id}
       className="plan-row"
       data-status={task.status}
       data-open={open || undefined}

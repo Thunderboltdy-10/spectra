@@ -15,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/ui/field";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { WORKSPACE_INKS, workspaceInk } from "../organization/node-identity";
 
 /**
  * The shell's modal dialogs, one voice (ARCHITECTURE-PLATFORM §3).
@@ -107,10 +108,39 @@ function TypeSentence({ sentence }: { sentence: string }) {
   );
 }
 
+/** The colour a workspace carries through the Library and its rail. */
+export function WorkspaceColorPicker({ value, onChange }: { value: string; onChange: (color: string) => void }) {
+  const current = workspaceInk(value);
+  return (
+    <>
+      <span className="text-micro font-semibold text-[var(--text-tertiary)]">Colour</span>
+      <div className="mt-2 flex flex-wrap gap-2" role="radiogroup" aria-label="Workspace colour">
+        {WORKSPACE_INKS.map(([ink, label]) => (
+          <button
+            key={ink}
+            type="button"
+            role="radio"
+            aria-checked={current === ink}
+            aria-label={label}
+            title={label}
+            onClick={() => onChange(ink)}
+            className="flex size-8 cursor-pointer items-center justify-center rounded-full border border-[var(--border-default)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cyan)]"
+            style={current === ink ? { borderColor: ink, boxShadow: `0 0 0 1px ${ink}` } : undefined}
+          >
+            <span className="size-5 rounded-full" style={{ background: ink }} />
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
 export function WorkspaceEditDialog({
   open,
   icon,
   onIconChange,
+  color,
+  onColorChange,
   title,
   onTitleChange,
   description,
@@ -124,6 +154,8 @@ export function WorkspaceEditDialog({
   open: boolean;
   icon: string;
   onIconChange: (key: string) => void;
+  color: string;
+  onColorChange: (color: string) => void;
   title: string;
   onTitleChange: (value: string) => void;
   description: string;
@@ -167,6 +199,9 @@ export function WorkspaceEditDialog({
               </button>
             ))}
           </div>
+        </div>
+        <div className="mt-4">
+          <WorkspaceColorPicker value={color} onChange={onColorChange} />
         </div>
         <div className="mt-4">
           <Field label="Workspace name">

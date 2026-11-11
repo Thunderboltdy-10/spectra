@@ -16,7 +16,8 @@ import { AGENDA_DAYS, splitAgenda, type TodayAgenda } from "./today-model";
  * page. `null` means still loading.
  */
 
-const RECENT_WORKS = 3;
+/** Enough to show more without asking again. */
+const RECENT_WORKS = 24;
 const RECENT_THREADS = 12;
 
 export type TodayData = {
@@ -31,7 +32,7 @@ export type TodayData = {
 };
 
 export function useToday(): TodayData {
-  const [now, setNow] = useState<number | null>(null);
+  const [clock, setClock] = useState<number | null>(null);
   const name = useAccountName();
   const [threads, setThreads] = useState<SpectraThread[] | null>(null);
   const [works, setWorks] = useState<SpectraArtifact[] | null>(null);
@@ -39,12 +40,33 @@ export function useToday(): TodayData {
   const [agendaFailed, setAgendaFailed] = useState(false);
   const [needsSchool, setNeedsSchool] = useState(false);
   const story = useShowcaseTime();
+  const now = clock === null ? null : story ?? clock;
+  const day = now === null ? null : startOfLocalDay(now);
 
   useEffect(() => {
+    if (story !== null) {
+      setClock(story);
+      return;
+    }
+    const tick = () => {
+      if (document.visibilityState === "visible") setClock(Date.now());
+    };
+    tick();
+    const timer = window.setInterval(tick, 60_000);
+    window.addEventListener("focus", tick);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", tick);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [story]);
+
+  useEffect(() => {
+    if (day === null) return;
     const controller = new AbortController();
     const live = () => !controller.signal.aborted;
-    const at = story ?? Date.now();
-    setNow(at);
+    const at = story ?? day;
 
     const loadThreads = () =>
       void getSpectraThreads({ limit: RECENT_THREADS })
@@ -53,7 +75,7 @@ export function useToday(): TodayData {
     loadThreads();
     const offThreads = spectraBus.on("threads.changed", loadThreads);
 
-    void getSpectraOverview()
+    void getSpectraOverview(undefined, false, false)
       .then((overview) => {
         if (!live()) return;
         if (overview.needsSchool) {
@@ -76,7 +98,11 @@ export function useToday(): TodayData {
 
     const from = startOfLocalDay(at);
     void fetchCalendarOverview(from, addLocalDays(from, AGENDA_DAYS), { signal: controller.signal, maxPages: 2 })
-      .then(({ overview }) => live() && setAgenda(splitAgenda(overview.items, overview.unscheduledTasks, at)))
+      .then(({ overview }) => {
+        if (!live()) return;
+        setAgenda(splitAgenda(overview.items, overview.unscheduledTasks, at));
+        setAgendaFailed(false);
+      })
       .catch((error) => {
         if (!live()) return;
         if (readConvexError(error).code === "AUTH_NO_SCHOOL") setNeedsSchool(true);
@@ -87,7 +113,7 @@ export function useToday(): TodayData {
       controller.abort();
       offThreads();
     };
-  }, [story]);
+  }, [day, story]);
 
   return { now, name, threads, works, agenda, agendaFailed, needsSchool };
 }

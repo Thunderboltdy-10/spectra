@@ -18,6 +18,7 @@ import {
   type BridgeDiscovery,
   type BridgePlatform,
 } from "../bridge/client";
+import { accountStorageMatches, accountStorageRevision } from "@/lib/account-storage-scope";
 
 export type PairingRequest = (input: { browserOrigin: string }) => Promise<{
   challenge: string;
@@ -74,29 +75,31 @@ export const PAIRING_COPY = {
 export function createPairing(deps: PairingDeps) {
   let state: PairingState = { phase: "idle" };
   let run = 0;
+  let revision = accountStorageRevision();
   let wanted = false;
   const listeners = new Set<() => void>();
   const set = (next: PairingState) => {
     state = next;
     for (const listener of listeners) listener();
   };
-  const busy = () => ["checking", "download", "requesting", "confirming"].includes(state.phase);
+  const current = (token: number) => token === run && accountStorageMatches(revision);
+  const busy = () => current(run) && ["checking", "download", "requesting", "confirming"].includes(state.phase);
 
   async function pair(token: number, request: PairingRequest): Promise<PairingState> {
     set({ phase: "requesting" });
     const origin = deps.origin();
     const offer = await request({ browserOrigin: origin });
-    if (token !== run) return state;
+    if (!current(token)) return state;
     await deps.offer({ ...offer, browserOrigin: origin });
-    if (token !== run) return state;
+    if (!current(token)) return state;
     set({ phase: "confirming", shortCode: offer.shortCode, expiresAt: offer.expiresAt });
-    while (token === run) {
+    while (current(token)) {
       if (deps.now() >= offer.expiresAt) {
         set({ phase: "failed", message: PAIRING_COPY.expired });
         return state;
       }
       const result = await deps.status(offer.challenge);
-      if (token !== run) return state;
+      if (!current(token)) return state;
       if (result?.paired && result.sessionToken) {
         deps.persist(result.sessionToken);
         set({ phase: "paired", at: deps.now() });
@@ -114,7 +117,7 @@ export function createPairing(deps: PairingDeps) {
   async function begin(token: number, request: PairingRequest): Promise<PairingState> {
     set({ phase: "checking" });
     let found = await deps.discover();
-    if (token !== run) return state;
+    if (!current(token)) return state;
     if (found.kind === "port-taken") {
       set({ phase: "failed", message: PAIRING_COPY.portTaken });
       return state;
@@ -129,13 +132,13 @@ export function createPairing(deps: PairingDeps) {
       set({ phase: "download", platform, url });
       const until = deps.now() + PAIRING_DOWNLOAD_WAIT_MS;
       while (found.kind !== "running") {
-        if (token !== run) return state;
+        if (!current(token)) return state;
         if (deps.now() >= until) {
           set({ phase: "failed", message: PAIRING_COPY.waitedTooLong });
           return state;
         }
         await deps.wait(PAIRING_DOWNLOAD_POLL_MS);
-        if (token !== run) return state;
+        if (!current(token)) return state;
         found = await deps.discover();
       }
     }
@@ -161,13 +164,16 @@ export function createPairing(deps: PairingDeps) {
     async start(request: PairingRequest): Promise<PairingState> {
       if (busy()) return state;
       const token = ++run;
+      revision = accountStorageRevision();
       // The user asked for Bridge on this computer, so Spectra may look for it.
       deps.enableDiscovery();
       try {
         return await begin(token, request);
       } catch (error) {
-        if (token === run) set({ phase: "failed", message: pairingFailureMessage(error) });
+        if (current(token)) set({ phase: "failed", message: pairingFailureMessage(error) });
         return state;
+      } finally {
+        if (token === run && !current(token)) set({ phase: "idle" });
       }
     },
     /** Stop waiting; the flow goes back to the start. */
@@ -198,10 +204,30 @@ export function createPairing(deps: PairingDeps) {
 
 export type Pairing = ReturnType<typeof createPairing>;
 
+const REJOIN_WAIT_MS = 20_000;
+
+/**
+ * Connects this browser using its signed-in account's web challenge. Bridge
+ * resumes that account or completes its first connection without a native code.
+ * Runs apart from the Devices page's flow, which never sees it.
+ */
+export async function rejoinBridge(request: PairingRequest): Promise<boolean> {
+  const pairing = createPairing(browserDeps);
+  const timer = setTimeout(() => pairing.cancel(), REJOIN_WAIT_MS);
+  try {
+    return (await pairing.start(request)).phase === "paired";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 let shared: Pairing | null = null;
+let sharedRevision: string | undefined;
 
 /** The one pairing flow for this browser tab. */
 export function devicePairing(): Pairing {
+  const revision = accountStorageRevision();
+  if (sharedRevision !== revision) { shared?.cancel(); shared = null; sharedRevision = revision; }
   shared ??= createPairing(browserDeps);
   return shared;
 }

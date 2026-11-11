@@ -1,6 +1,8 @@
+import type { MemoryHead } from "../../../../../../shared/memory-files";
 import { DEFAULT_PERMISSION_PREFS, readPermissionPrefs, type PermissionPrefs } from "@/features/spectra/ai/harness/permissions";
-import type { EnvironmentInput, EnvironmentPlace, EnvironmentPointer } from "@/features/spectra/ai/harness/prompt";
+import type { EnvironmentInput, EnvironmentPlace, EnvironmentPointer, EnvironmentRecentWork } from "@/features/spectra/ai/harness/prompt";
 import { notesMessage } from "@/features/spectra/ai/harness/compaction";
+import { claudeModelAlias } from "@/features/spectra/ai/model-config";
 import type { HarnessContentPart, HarnessMessage } from "@/features/spectra/ai/harness/types";
 import type { PreparedAttachment, RunPointers } from "./contract";
 import { rows } from "./effects";
@@ -19,8 +21,6 @@ import { query } from "./io";
 const HISTORY_MESSAGES = 80;
 const HISTORY_MESSAGE_CHARS = 8_000;
 const ATTACHMENT_TEXT_CHARS = 60_000;
-const MEMORY_INDEX_ENTRIES = 12;
-const MEMORY_ENTRY_CHARS = 200;
 const POINTERS = 12;
 const SELECTION_CHARS = 1_000;
 /** A Bridge seen this recently is treated as online. */
@@ -90,14 +90,66 @@ export function normalizePointers(value: unknown): RunPointers {
   };
 }
 
-export async function readPermissions(actorClerkId: string): Promise<PermissionPrefs> {
+export type RunPreferences = {
+  permissions: PermissionPrefs;
+  runtime: {
+    provider: unknown;
+    model?: string;
+    reasoning?: "low" | "medium" | "high";
+    /** What to try, in order, when the chosen runtime can't answer. */
+    then: Array<"codex" | "claude" | "spectra">;
+    /** Each subscription's chosen model, for when the run moves to it. */
+    models: { codex?: string; claude?: string };
+  };
+};
+
+const RUNTIMES = new Set(["codex", "claude", "spectra"]);
+
+const UNREACHABLE_STATES = new Set(["signed-out", "not-installed", "no-bridge", "error"]);
+
+/** What the client said it can't reach. A hint only: it can reorder the person's own runtimes, nothing more. */
+export function normalizeUnreachable(value: unknown): Array<{ runtime: "codex" | "claude"; state: "signed-out" | "not-installed" | "no-bridge" | "error" }> {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 2).flatMap((entry) => {
+    const row = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
+    return (row.runtime === "codex" || row.runtime === "claude") && typeof row.state === "string" && UNREACHABLE_STATES.has(row.state)
+      ? [{ runtime: row.runtime, state: row.state as "signed-out" | "not-installed" | "no-bridge" | "error" }]
+      : [];
+  });
+}
+
+/** The stored order, or Spectra's model when there is none. */
+export function runtimeOrder(value: unknown): RunPreferences["runtime"]["then"] {
+  if (!Array.isArray(value)) return ["spectra"];
+  return [...new Set(value.filter((item): item is "codex" | "claude" | "spectra" => typeof item === "string" && RUNTIMES.has(item)))];
+}
+
+/** The account's settings a run obeys: one read for all of them. */
+export async function readRunPreferences(actorClerkId: string): Promise<RunPreferences> {
   const layers = await query<unknown & object, Array<{ scope: string; values: unknown }> | null>("accountPreferences:layers", {
     actorClerkId,
     deviceId: "spectra-ai-harness",
   }).catch(() => null);
   const account = (layers ?? []).find((layer) => layer.scope === "account");
   const values = account?.values && typeof account.values === "object" ? (account.values as Record<string, unknown>) : {};
-  return layers ? readPermissionPrefs(values.ai) : DEFAULT_PERMISSION_PREFS;
+  const ai = values.ai && typeof values.ai === "object" ? (values.ai as Record<string, unknown>) : {};
+  const provider = ai.runtime === "codex" || ai.runtime === "claude" ? ai.runtime : "spectra";
+  const models = {
+    ...(typeof ai.codexModel === "string" && ai.codexModel ? { codex: ai.codexModel } : {}),
+    ...(typeof ai.claudeModel === "string" && ai.claudeModel ? { claude: claudeModelAlias(ai.claudeModel) } : {}),
+  };
+  const model = provider === "spectra" ? undefined : models[provider];
+  return {
+    permissions: layers ? readPermissionPrefs(values.ai) : DEFAULT_PERMISSION_PREFS,
+    runtime: {
+      provider,
+      ...(model ? { model } : {}),
+      // D7: Medium unless the person chose otherwise.
+      reasoning: ai.thinking === "low" || ai.thinking === "high" ? ai.thinking : "medium",
+      then: runtimeOrder(ai.runtimeThen),
+      models,
+    },
+  };
 }
 
 /** This thread's earlier turns, oldest first. Never another thread's. */
@@ -157,19 +209,10 @@ export function attachmentParts(attachments: PreparedAttachment[] | undefined): 
   return parts;
 }
 
-/** A short, query-free index of what the user asked Spectra to remember. */
-export async function readMemoryIndex(actorClerkId: string) {
-  const listed = await query<unknown & object, { preferences?: { enabled?: boolean }; claims?: unknown } | null>("memory:listMine", {
-    actorClerkId,
-    status: "active",
-    limit: MEMORY_INDEX_ENTRIES,
-  }).catch(() => null);
-  if (!listed || listed.preferences?.enabled === false) return [];
-  return rows(listed.claims)
-    .map((claim) => text(claim.proposition).replace(/\s+/g, " ").trim())
-    .filter(Boolean)
-    .slice(0, MEMORY_INDEX_ENTRIES)
-    .map((entry) => (entry.length > MEMORY_ENTRY_CHARS ? `${entry.slice(0, MEMORY_ENTRY_CHARS)}…` : entry));
+/** What is always loaded of Spectra's notes about the user. One small read. */
+export async function readMemoryHead(actorClerkId: string): Promise<MemoryHead> {
+  const head = await query<unknown & object, MemoryHead>("spectraMemory:head", { actorClerkId }).catch(() => null);
+  return head ?? { enabled: false, about: "", preferences: "", topics: [] };
 }
 
 export async function readBridgeStatus(actorClerkId: string, now: number) {
@@ -230,17 +273,35 @@ async function describePointers(actorClerkId: string, items: EnvironmentPointer[
   });
 }
 
+/** What the user worked on last, so a request that names one of these needs no search. */
+async function readRecentWorks(actorClerkId: string): Promise<EnvironmentRecentWork[]> {
+  const page = await query<unknown & object, { page?: unknown } | null>("orgTree:quickViewPage", {
+    actorClerkId,
+    view: "recent",
+    kinds: ["work"],
+    paginationOpts: { numItems: 12, cursor: null },
+  }).catch(() => null);
+  const rows = Array.isArray(page?.page) ? (page.page as Array<Record<string, unknown>>) : [];
+  return rows.flatMap((row) => {
+    const id = text(row.sourceId);
+    if (!id) return [];
+    const path = Array.isArray(row.parentPath) ? row.parentPath.filter((entry): entry is string => typeof entry === "string") : [];
+    return [{ id, type: text(row.typeKey), title: text(row.name) || "Untitled", ...(path.length ? { location: path.join(" / ") } : {}) }];
+  });
+}
+
 export async function buildEnvironment(request: EnvironmentRequest): Promise<Omit<EnvironmentInput, "permissions" | "timeZone">> {
   const now = request.now ?? Date.now();
   const pointed = [...(request.open ?? []), ...(request.references ?? [])];
-  const [me, memory, bridge, places, described] = await Promise.all([
+  const [me, memory, bridge, places, described, recent] = await Promise.all([
     query<unknown & object, { name?: string; schoolRole?: string } | null>("identity:me", {
       actorClerkId: request.actorClerkId,
     }).catch(() => null),
-    readMemoryIndex(request.actorClerkId),
+    readMemoryHead(request.actorClerkId),
     readBridgeStatus(request.actorClerkId, now),
     readPlaces(request.actorClerkId, request.workspaceId),
     describePointers(request.actorClerkId, pointed),
+    readRecentWorks(request.actorClerkId),
   ]);
   const describedById = new Map(described.map((item) => [item.id, item]));
   const withDescription = (items: EnvironmentPointer[] | undefined) =>
@@ -257,9 +318,10 @@ export async function buildEnvironment(request: EnvironmentRequest): Promise<Omi
     ...(request.selection ? { selection: request.selection } : {}),
     ...(request.references?.length ? { references: withDescription(request.references) } : {}),
     ...(bridge ? { bridge } : {}),
+    ...(recent.length ? { recent } : {}),
     ...(places.places.length ? { places: places.places } : {}),
     ...(places.here ? { here: places.here } : {}),
-    ...(memory.length ? { memory } : {}),
+    ...(memory.about || memory.preferences || memory.topics.length ? { memory } : {}),
     ...(request.attachments?.length ? { attachments: request.attachments.map((attachment) => attachment.name) } : {}),
   };
 }

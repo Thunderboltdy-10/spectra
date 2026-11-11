@@ -6,6 +6,7 @@ import { CalendarDays, ChevronLeft, ChevronRight } from "@/components/icons/glyp
 import type { SpectraArtifactEmbed } from "../data/api";
 import { LiveCodeRuntime } from "./live-code-runtime";
 import { PublishedCodeRuntime } from "./published-code-runtime";
+import { ViewOnlyCover } from "./view-only-cover";
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { embedCapabilityEnabled } from "../capabilities";
 import { ArtifactEmbedQuiz } from "./artifact-embed-quiz";
@@ -279,6 +280,11 @@ function FlashcardFace({ content }: { content: Record<string, unknown> }) {
             fallback="Empty card"
             className="work-embed-card-words"
           />
+          {revealed && card.explanation ? (
+            <small>
+              <SpectraStoredText value={textFrom(card.explanation, 600)} inline />
+            </small>
+          ) : null}
         </span>
       </button>
       <Stepper
@@ -420,7 +426,7 @@ export function EmbedFace({ embed }: { embed: SpectraArtifactEmbed }) {
       return <AgentFace content={content} />;
     case "code": {
       const allowInteraction = embedCapabilityEnabled("code", embed.effectiveInteraction ?? embed.interaction, "runtime.interact");
-      return embed.runtimeBuild ? (
+      const runtime = embed.runtimeBuild ? (
         <PublishedCodeRuntime
           title={source.title ?? "Interactive visualisation"}
           build={embed.runtimeBuild}
@@ -439,6 +445,8 @@ export function EmbedFace({ embed }: { embed: SpectraArtifactEmbed }) {
           resources={embed.runtimeResources}
         />
       );
+      // Controls that look live but do nothing here say so, and point to where they work.
+      return allowInteraction ? runtime : <ViewOnlyCover workId={source.artifactId}>{runtime}</ViewOnlyCover>;
     }
     default:
       return null;

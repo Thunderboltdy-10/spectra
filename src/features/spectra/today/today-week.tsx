@@ -65,7 +65,7 @@ export function TodayWeek({ agenda, failed, now }: { agenda: TodayAgenda | null;
 
   const days = useMemo(() => {
     const entries = new Map<number, Entry[]>();
-    for (const item of [...(agenda?.today ?? []), ...(agenda?.upcoming ?? [])]) {
+    for (const item of [...(agenda?.today ?? []), ...(agenda?.week ?? agenda?.upcoming ?? [])]) {
       if (item.startAt === undefined) continue;
       const day = dayKey(item.startAt);
       const match = classOf(item.title, item.startAt);

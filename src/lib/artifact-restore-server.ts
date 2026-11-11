@@ -17,6 +17,7 @@ import { planArtifactYjsMutation, planArtifactYjsRestore, readArtifactYjsDocumen
   type ArtifactLiveValue } from "../features/spectra/collaboration/artifact-yjs-model";
 import { planNativeArtifactYjsMutation, planNativeArtifactYjsRestore,
   readNativeArtifactYjsDocument } from "../features/spectra/work/models/yjs/native-artifact-model";
+import { workYjsAdapter } from "../features/spectra/work/models/yjs/registry";
 
 type RestoreApi = ApiFromModules<{ restore: typeof import("../../convex/artifactRestore") }>;
 type RestoreHead = Exclude<FunctionReturnType<RestoreApi["restore"]["head"]>, { committed: object }>;
@@ -93,6 +94,14 @@ export async function admitArtifactRestore(request: RestoreRequest, prepareNativ
       nativePreparation = await prepareNative({ artifactId: request.artifactId, current, desired, regionIds: selected,
         historicalSource: head.whole ? head.nativeSource : null,
         nativeFormat: head.artifact.nativeFormat ?? head.replicas.find(replica => replica.nativeFormat)?.nativeFormat });
+      // Compare the native readback in the same canonical shape the room uses.
+      const adapter = workYjsAdapter(typeKey);
+      const readback = adapter.createDocument(nativePreparation.projectionContent);
+      try { nativePreparation.projectionContent = adapter.project(readback); }
+      finally { readback.destroy(); }
+      const candidate = nativePreparation.nativeCandidate;
+      if (candidate.destination === "bridge") candidate.queue.projectionContent = nativePreparation.projectionContent;
+      else if (candidate.destination === "cloud") candidate.cloud.projectionContent = nativePreparation.projectionContent;
       desired = { ...desired, content: nativePreparation.projectionContent };
     }
     const plan = nativeModel ? planNativeArtifactYjsMutation(document, typeKey, desired, actor)

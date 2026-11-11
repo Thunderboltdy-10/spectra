@@ -1,4 +1,5 @@
 import { storeArtifactContent } from "@/lib/convex-server";
+import { deviceStoreCall, reachableDeviceStore } from "@/lib/device-store";
 import { throwIfAborted } from "./abort";
 import { executeRegisteredCalendarMutation } from "./calendar-command";
 import { normalizeCalendarCommand } from "@/features/spectra/calendar/domain/command";
@@ -7,6 +8,8 @@ import { executeReferenceInsertion } from "./reference-command";
 import { executeEmbedCommand } from "./embed-command";
 import type { RestoreRequest } from "@/lib/artifact-restore-server";
 import { act, mutate, query } from "./io";
+
+const DEVICE_WORK_TYPES = new Set(["document", "flashcard_deck", "quiz", "presentation", "sheets", "code", "whiteboard"]);
 import {
   authorityPublicMessage,
   authorityRequiresNotice,
@@ -195,12 +198,16 @@ export async function executeApplicationCommand(
     const overview = await query<Record<string, never>, CloudOverview | null>("bridge:overview", {});
     return { devices: describeDevicesForAi(overview, Date.now()) };
   }
+  if (command === "read_computer_names") {
+    return await readComputerNames(typeof parsed.path === "string" ? parsed.path : "");
+  }
   if (command === "control_device" || command === "pair_device") {
     // These run on the user's computer, through the Spectra page open there
     // and its local Bridge; the page reports the result on Devices.
     const action = command === "pair_device" ? "pair" : String(parsed.action);
     const grantId = typeof parsed.grantId === "string" ? parsed.grantId : undefined;
     const deviceId = typeof parsed.deviceId === "string" ? parsed.deviceId : undefined;
+    const path = typeof parsed.path === "string" ? parsed.path : undefined;
     onUiEvent?.({
       key: "devices_action",
       payload: {
@@ -208,6 +215,7 @@ export async function executeApplicationCommand(
         actionId: `${executionId}:${operationId ?? action}`,
         ...(grantId ? { grantId } : {}),
         ...(deviceId ? { deviceId } : {}),
+        ...(path ? { path } : {}),
         note: action === "pair" ? "Connecting this computer" : "Working on your computer",
       },
     });
@@ -218,7 +226,9 @@ export async function executeApplicationCommand(
       message:
         action === "pair"
           ? "Spectra is connecting the computer the user has it open on. The user confirms the code on the computer; check with devices status afterwards."
-          : "Sent to Spectra on the user's computer, which runs it through Bridge. The Devices page shows the result; check with devices status.",
+          : action === "sync_path"
+            ? "A prompt is open on the user's computer. It comes in only if they agree there; check with devices status, then find it with search."
+            : "Sent to Spectra on the user's computer, which runs it through Bridge. The Devices page shows the result; check with devices status.",
     };
   }
   if (command === "remove_device") {
@@ -557,51 +567,10 @@ export async function executeApplicationCommand(
         ...(targetId ? { targetId } : {}),
         ...(region ? { region } : {}),
         note: `Opening ${destination}`,
+        requestedAt: Date.now(),
       },
     });
     return { ok: true, status: "requested", destination, ...(targetId ? { targetId } : {}), message: "Navigation requested. The destination view reports its own readiness." };
-  }
-  if (command === "write_memory") {
-    const action = String(parsed.action ?? "create");
-    if (action === "forget") {
-      const memoryId = typeof parsed.memoryId === "string" ? parsed.memoryId : "";
-      if (!memoryId) throw new Error("MEMORY_ID_REQUIRED");
-      const memory = await applyMutation("memory:forget", { actorClerkId, claimId: memoryId });
-      onUiEvent?.({
-        key: "memory_written",
-        payload: { targetId: memoryId, note: "Forgot a private memory" },
-      });
-      return { ok: true, memory };
-    }
-    const content = String(parsed.content ?? "").trim();
-    if (!content) throw new Error("MEMORY_CONTENT_REQUIRED");
-    if (action === "create") {
-      const memory = await applyMutation("memory:remember", {
-        actorClerkId,
-        proposition: content,
-        scope: "private_global",
-        claimType: "inferred_preference",
-        sourceType: "user_statement",
-        captureReason: "You explicitly asked Spectra to remember this.",
-      });
-      onUiEvent?.({
-        key: "memory_written",
-        payload: { targetId: "memory", note: "Saved a private memory" },
-      });
-      return { ok: true, memory };
-    }
-    const memoryId = typeof parsed.memoryId === "string" ? parsed.memoryId : "";
-    if (!memoryId) throw new Error("MEMORY_ID_REQUIRED");
-    const memory = await applyMutation("memory:correct", {
-      actorClerkId,
-      claimId: memoryId,
-      proposition: content,
-    });
-    onUiEvent?.({
-      key: "memory_written",
-      payload: { targetId: memoryId, note: "Revised a private memory" },
-    });
-    return { ok: true, memory };
   }
   if (command === "change_sharing") {
     const resourceType = String(parsed.resourceType ?? "artifact");
@@ -788,6 +757,35 @@ export async function executeApplicationCommand(
  * commits the restored version. The request id is the operation's, so a
  * retried operation replays its receipt instead of restoring twice.
  */
+/**
+ * The names in the ordinary places on the person's computer: names and kinds,
+ * one level, read-only. Bridge decides what is reachable.
+ */
+async function readComputerNames(path: string) {
+  const settings = await query<Record<string, never>, { accountId: string }>("deviceWorks:settings", {}).catch(() => null);
+  if (!settings) return { available: false, message: "Spectra can't tell whose computer this is right now." };
+  try {
+    return { available: true, ...(await deviceStoreCall<Record<string, unknown>>(settings.accountId, "computerNames", { path })) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (/unknown request/i.test(message))
+      return { available: false, message: "This computer's Spectra Bridge needs updating before Spectra can see file names. Offer devices update." };
+    if (/DEVICE_STORE_UNAVAILABLE|connect|timed? ?out|socket|closed/i.test(message))
+      return { available: false, message: "Spectra Bridge isn't reachable on the user's computer right now. Suggest opening it, or devices pair if it was never set up." };
+    return { available: false, message: message || "That path couldn't be read." };
+  }
+}
+
+/** New work goes to the person's computer whenever Bridge answers, unless they chose the cloud. */
+async function deviceHomeForNewWork(blueprintKey: string) {
+  if (!DEVICE_WORK_TYPES.has(blueprintKey)) return undefined;
+  const settings = await query<Record<string, never>, { accountId: string; storage: string | null }>(
+    "deviceWorks:settings", {},
+  ).catch(() => null);
+  if (!settings || settings.storage === "cloud") return undefined;
+  return (await reachableDeviceStore(settings.accountId)) ?? undefined;
+}
+
 async function restoreVersion(input: {
   runId: string;
   operationId: string;
@@ -1148,6 +1146,7 @@ export async function executeOperation(
     // Never write or finalize a default/empty shell as a completed create.
     assertCreateContentNotHollow(input.blueprintKey, input.content, "create");
     const summary = (input.summary ?? "").trim() || input.title;
+    const storageStoreId = await deviceHomeForNewWork(input.blueprintKey);
     const pending = await mutate<unknown & object, { artifactId: string; nodeId?: string }>(
       "spectraArtifacts:createPending",
       {
@@ -1158,6 +1157,7 @@ export async function executeOperation(
         runId,
         threadId: context.threadId,
         executionId: context.executionId,
+        ...(storageStoreId ? { storageStoreId } : {}),
       },
     );
     await mutate("spectraOperations:attachPendingArtifact", {
@@ -1183,24 +1183,53 @@ export async function executeOperation(
       resolveDesired: () => ({ title: input.title, summary, content: input.content, tags: input.tags }),
     });
     await markArtifactEffect(actorClerkId, runId, pending.artifactId, context, "create", mutationResult.changedRegionIds ?? [], ["/"]);
-    // The Yjs acknowledgement can arrive before the Convex projection is
-    // written. Wait briefly so a saved creation is not reported as failed.
-    const deadline = Date.now() + 10_000;
+    // The work is saved from here on: the Yjs acknowledgement just arrives before
+    // the Convex projection is written. Telling the model it failed now would
+    // only make it write a second copy, so a slow projection finishes behind the run.
+    const finalize = () =>
+      (storageStoreId
+        ? mutate("deviceWorks:finishCreate", {
+            artifactId: pending.artifactId,
+            runId,
+            executionId: context.executionId,
+            title: input.title,
+            summary,
+            tags: input.tags,
+          })
+        : mutate("spectraArtifacts:finalizePendingLive", {
+            actorClerkId,
+            artifactId: pending.artifactId,
+            runId,
+            executionId: context.executionId,
+            summary,
+          })) as Promise<Record<string, unknown>>;
+    const stillSyncing = (error: unknown) =>
+      /has not finished synchronizing|synchronized AI version is unavailable/i.test(error instanceof Error ? error.message : String(error));
+    const startedFinalizing = Date.now();
+    let wait = 300;
     for (;;) {
       try {
-        output = (await mutate("spectraArtifacts:finalizePendingLive", {
-          actorClerkId,
-          artifactId: pending.artifactId,
-          runId,
-          executionId: context.executionId,
-          summary,
-        })) as Record<string, unknown>;
+        output = await finalize();
         break;
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const waiting = /has not finished synchronizing|synchronized AI version is unavailable/i.test(message);
-        if (!waiting || Date.now() >= deadline) throw error;
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        if (!stillSyncing(error)) throw error;
+        if (Date.now() - startedFinalizing >= 4_000) {
+          output = { artifactId: pending.artifactId };
+          void (async () => {
+            while (Date.now() - startedFinalizing < 90_000) {
+              await new Promise((resolve) => setTimeout(resolve, 2_000));
+              try {
+                await finalize();
+                return;
+              } catch (late) {
+                if (!stillSyncing(late)) return;
+              }
+            }
+          })();
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        wait = Math.min(wait * 1.5, 1_200);
       }
     }
     if ("performance" in mutationResult && mutationResult.performance) {
@@ -1211,13 +1240,14 @@ export async function executeOperation(
     if (typeof output.nodeId === "string") affected.push({ type: "workspaceItem", id: output.nodeId });
   } else if (operation.type === "artifact.update") {
     const input = operation.input;
-    const artifact = await query<{ actorClerkId: string; artifactId: string }, { blueprintKey: string; nativeFormat?: string }>(
+    const artifact = await query<{ actorClerkId: string; artifactId: string }, { blueprintKey: string; nativeFormat?: string; storageHome?: "device" }>(
       "spectraArtifacts:get",
       { actorClerkId, artifactId: input.artifactId },
     );
+    const onDevice = artifact.storageHome === "device";
     if (artifact.blueprintKey !== input.blueprintKey)
       throw new Error("The artifact update blueprint does not match the live artifact.");
-    const replicaTruth = await query<
+    const replicaTruth = onDevice ? null : await query<
       { workId: string },
       { replicas: Array<{ kind?: string; state?: string; nativeFormat?: string }> }
     >("replicas:forWork", { workId: input.artifactId }).catch(() => null);
@@ -1252,8 +1282,15 @@ export async function executeOperation(
         content: input.content ?? current.content,
       }),
     });
-    const { performance, ...receipt } = mutationResult as typeof mutationResult & { performance?: unknown };
-    output = receipt as Record<string, unknown>;
+    const { performance, acceptedFrontier, ...receipt } = mutationResult as typeof mutationResult & {
+      performance?: unknown;
+      acceptedFrontier?: { sequence: number };
+    };
+    // The journal keeps that the edit was admitted, not two more copies of the document.
+    output = { ...receipt, ...(acceptedFrontier ? { acceptedSequence: acceptedFrontier.sequence } : {}) } as Record<string, unknown>;
+    // F12: the file on the computer is written after this, by Bridge, once Office lets go of it.
+    if (officeKind && (onDevice || localNative) && mutationResult.changedRegionIds?.some(isNativeContentRegion))
+      output.desktopFile = "pending";
     if (performance) await context.onUiEvent?.({ key: "artifact_performance", payload: { performance, committedAt: Date.now() } });
     const changedPaths =
       input.content !== null
@@ -1272,7 +1309,14 @@ export async function executeOperation(
     const live = admitted
       ? null
       : await readLiveArtifactValue({ artifactId: input.artifactId, timeoutMs: 5_000 }).catch(() => null);
-    if (live)
+    if (onDevice) {
+      // The words stay on the computer; only what lists show comes up here.
+      await mutate("deviceWorks:touch", {
+        artifactId: input.artifactId,
+        ...(live ? { title: live.title, ...(live.summary !== undefined ? { summary: live.summary } : {}), tags: live.tags } : {}),
+        edited: true,
+      }).catch(() => null);
+    } else if (live)
       await mutate("spectraArtifacts:stageAiPatch", {
         actorClerkId,
         artifactId: input.artifactId,
@@ -1314,12 +1358,15 @@ export async function executeOperation(
   } else {
     throw new Error(`The harness does not apply ${operation.type} operations.`);
   }
+  // The effect has happened; a receipt that cannot be written does not undo it.
   await mutate("spectraOperations:markExecuted", {
     actorClerkId,
     operationId,
     executionId: context.executionId,
     output,
     affected,
+  }).catch((error) => {
+    console.error("spectra.operation.receipt", { operationId, error: error instanceof Error ? error.message : String(error) });
   });
   return { affected, output };
 }

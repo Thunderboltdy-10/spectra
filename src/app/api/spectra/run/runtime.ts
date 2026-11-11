@@ -1,5 +1,5 @@
+import { revertRun } from "./harness/revert-run";
 import { getSpectraModelId } from "@/features/spectra/ai/model-config";
-import { applyAiArtifactMutation } from "@/features/spectra/ai/yjs-artifact-operation";
 import { withSpectraRequestLog } from "@/features/spectra/ai/run-log";
 import { prepareAttachments as prepareRunAttachments } from "@/features/spectra/compute/files/attachment-preprocessor";
 import { createNdjsonResponse } from "@/features/spectra/runs/streaming/ndjson-response";
@@ -7,7 +7,7 @@ import { requireActor } from "@/lib/auth-server";
 import { errorStatus } from "@/lib/route-handler";
 import { NextRequest } from "next/server";
 import { asOwner, verifyScheduledCallback } from "@/lib/scheduled-callback";
-import { runHarnessAttempt, type AttemptMode, type AttemptParams } from "./harness/attempt";
+import { runHarnessAttempt, stopLiveAttempt, type AttemptMode, type AttemptParams } from "./harness/attempt";
 import { AGENT_UNAVAILABLE, AGENT_UNAVAILABLE_MESSAGE } from "./harness/agents";
 import { loadRunAttachments, persistRunAttachments } from "./harness/attachments";
 import type {
@@ -20,11 +20,12 @@ import type {
   RunState,
   Surface,
 } from "./harness/contract";
-import { normalizePointers } from "./harness/environment";
+import { normalizePointers, normalizeUnreachable } from "./harness/environment";
 import { mutate, query } from "./harness/io";
 import { latestCard, publicError, streamCard } from "./harness/report";
 import { handleUiObserverRequest, uiObserverSchema } from "./harness/ui-observer-request";
 
+import { runRelayInvite } from "@/features/spectra/ai/harness/run-relay";
 /*
  * The Spectra run route. One harness loop does the work (harness/attempt.ts);
  * this file admits requests, owns the run lifecycle actions (run, answer,
@@ -63,6 +64,8 @@ function payloadFrom(value: unknown): RunPayload {
     ...normalizePointers(payload),
     timeZone: text(payload.timeZone),
     agentId: text(payload.agentId),
+    relayId: text(payload.relayId),
+    unreachable: normalizeUnreachable(payload.unreachable),
   };
 }
 
@@ -155,13 +158,19 @@ async function dispatch(input: {
   prelude: (emit: (event: unknown) => void) => void;
 }) {
   if (scheduledExecution()) {
+    const relayId = crypto.randomUUID();
     await mutate("spectraRuns:scheduleExecution", {
       runId: input.runId,
       resultCardId: input.resultCardId,
       executionId: input.executionId,
-      payload: { ...input.payload, ...(input.attachments ? { withAttachments: input.attachments.length > 0 } : {}) },
+      payload: { ...input.payload, relayId, ...(input.attachments ? { withAttachments: input.attachments.length > 0 } : {}) },
     });
-    return ndjson(async (emit) => input.prelude(emit));
+    return ndjson(async (emit) => {
+      input.prelude(emit);
+      // The worker's events go past this response: the page listens for them.
+      const invite = runRelayInvite(input.runId, input.executionId, relayId);
+      if (invite) emit(invite);
+    });
   }
   return ndjson(async (emit) => {
     input.prelude(emit);
@@ -515,6 +524,7 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
         ...pointers,
         timeZone: body.timeZone,
         ...(chosenAgentId ? { agentId: chosenAgentId } : {}),
+        unreachable: normalizeUnreachable(body.unreachable),
       },
       attachments,
       prelude,
@@ -551,6 +561,7 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
     } catch (error) {
       return new Response(publicError(error), { status: 409 });
     }
+    stopLiveAttempt(runId, stopped.executionId ?? expectedExecutionId);
     await settleForRun(actor.clerkId, runId, stopped.executionId, "failed");
     return new Response(null, { status: 204 });
   }
@@ -647,71 +658,7 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
     });
   }
 
-  if (action === "revert") {
-    let state: RunDetail;
-    try {
-      state = await query<{ actorClerkId: string; runId: string }, RunDetail>("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
-    } catch (error) {
-      return new Response(publicError(error), { status: errorStatus(error) });
-    }
-    if (!["completed", "failed", "cancelled"].includes(state.run.status))
-      return new Response("Undo is available after Spectra finishes this run.", { status: 409 });
-    let plan: {
-      restored: Array<{ artifactId: string; snapshot: { title?: string; summary?: string | null; content?: unknown; tags?: string[] } }>;
-      blocked: Array<{ artifactId: string; reason: string }>;
-    };
-    try {
-      plan = await mutate<{ runId: string }, typeof plan>("changeGroups:revertPlanForRun", { runId });
-    } catch (error) {
-      return new Response(publicError(error), { status: errorStatus(error) });
-    }
-    if (plan.restored.length === 0)
-      return new Response(
-        plan.blocked[0]?.reason ??
-          "This run did not keep a snapshot that can be undone. Archive created work from Library if you want to remove it.",
-        { status: 409 },
-      );
-    const restored: string[] = [];
-    const failed: string[] = [];
-    for (const item of plan.restored) {
-      const snapshot = item.snapshot ?? {};
-      try {
-        await applyAiArtifactMutation({
-          artifactId: item.artifactId,
-          runId,
-          // restore:* ids are human Undo fencing, never AI claim identities.
-          operationId: `restore:${runId}:${item.artifactId}`,
-          executionId: expectedExecutionId,
-          checkpointBeforeAi: false,
-          claimActorKind: "human",
-          resolveDesired: (current) => ({
-            title: snapshot.title ?? current.title,
-            summary: typeof snapshot.summary === "string" ? snapshot.summary : current.summary,
-            content: snapshot.content ?? current.content,
-            tags: snapshot.tags ?? current.tags,
-          }),
-        });
-        restored.push(item.artifactId);
-      } catch (error) {
-        failed.push(error instanceof Error ? publicError(error) : "Spectra could not restore that earlier copy.");
-      }
-    }
-    if (restored.length === 0)
-      return new Response(failed[0] ?? plan.blocked[0]?.reason ?? "Spectra could not undo this run.", { status: 409 });
-    await Promise.all(
-      state.cards.map((card) =>
-        mutate("spectraRuns:patchResultCard", {
-          resultCardId: card._id,
-          executionId: expectedExecutionId,
-          summary: "Restored the earlier copy of this work.",
-          actions: [...card.actions.filter((entry) => entry.key !== "revert"), { key: "undone", label: "Undone" }].filter(
-            (entry, index, all) => all.findIndex((candidate) => candidate.key === entry.key) === index,
-          ),
-        }).catch(() => null),
-      ),
-    );
-    return Response.json({ restored: restored.length, blocked: plan.blocked, failed });
-  }
+  if (action === "revert") return revertRun(actor.clerkId, runId, expectedExecutionId);
 
   return new Response("Unknown action", { status: 400 });
 }

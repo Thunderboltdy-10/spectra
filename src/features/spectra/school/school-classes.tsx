@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { EmptyState, LoadingRows } from "@/components/ui/page-state";
@@ -14,7 +15,7 @@ import { fetchMyClassCandidates, type ClassShelfCandidate } from "../components/
 import { selectSpectraManageBacClasses } from "../data/api";
 import { useAuthedArgs } from "../data/use-authed-args";
 import type { ClassIdentity } from "../../../../shared/class-identity";
-import { CLASS_KIND_ORDER, MODE_LABEL, sentenceOf, type SchoolClass, type SchoolTask } from "./school-model";
+import { CLASS_KIND_ORDER, MODE_LABEL, hasSchoolTaskSnapshot, sentenceOf, type SchoolClass, type SchoolTask, type SchoolSyncStatus } from "./school-model";
 import { DetailHeading } from "./school-task-details";
 import { TaskTicket } from "./school-tickets";
 import { inkStyle, useClassBook } from "./use-class-book";
@@ -48,7 +49,7 @@ export function ClassTile({
 }: {
   cls: SchoolClass;
   identity: ClassIdentity;
-  due: number;
+  due?: number;
   selected: boolean;
   small?: boolean;
   onSelect: () => void;
@@ -73,7 +74,7 @@ export function ClassTile({
         due ? <span className="school-tile-due">{due}</span> : null
       ) : (
         <span className="school-tile-foot">
-          {due ? <span className="school-tile-due">{due} to do</span> : <span>Nothing due</span>}
+          {due ? <span className="school-tile-due">{due} to do</span> : due === 0 ? <span>Nothing due</span> : null}
           {cls.selected ? null : <span>Not syncing</span>}
         </span>
       )}
@@ -81,7 +82,7 @@ export function ClassTile({
   );
 }
 
-export function ClassesSection({ selectedId, onSelect, onOpenSync }: { selectedId: string | null; onSelect: (providerClassId: string) => void; onOpenSync: () => void }) {
+export function ClassesSection({ status, selectedId, onSelect, onOpenSync }: { status: SchoolSyncStatus | undefined; selectedId: string | null; onSelect: (providerClassId: string) => void; onOpenSync: () => void }) {
   const book = useClassBook();
   const { counts } = useDueByClass();
   if (book.loading)
@@ -115,7 +116,7 @@ export function ClassesSection({ selectedId, onSelect, onOpenSync }: { selectedI
           key={cls.providerClassId}
           cls={cls}
           identity={identity}
-          due={counts.get(cls.providerClassId) ?? 0}
+          due={counts.get(cls.providerClassId) || (hasSchoolTaskSnapshot(status) && cls.selected && cls.modes.current_tasks !== "off" ? 0 : undefined)}
           small={small}
           selected={selectedId === cls.providerClassId}
           onSelect={() => onSelect(cls.providerClassId)}
@@ -155,11 +156,13 @@ export function ClassesSection({ selectedId, onSelect, onOpenSync }: { selectedI
 
 export function ClassDetails({
   providerClassId,
+  status,
   now,
   onSelectTask,
   onNotice,
 }: {
   providerClassId: string;
+  status: SchoolSyncStatus | undefined;
   now: number;
   onSelectTask: (recordId: string) => void;
   onNotice: (message: string) => void;
@@ -250,7 +253,7 @@ export function ClassDetails({
         />
       </div>
 
-      <section className="school-detail-section">
+      {due.length || (hasSchoolTaskSnapshot(status) && item.selected && item.modes.current_tasks !== "off") ? <section className="school-detail-section">
         <DetailHeading>{due.length ? "To do" : "Nothing due in this class"}</DetailHeading>
         {due.length ? (
           <div className="grid gap-2">
@@ -259,7 +262,7 @@ export function ClassDetails({
             ))}
           </div>
         ) : null}
-      </section>
+      </section> : null}
 
       <details className="school-detail-section group">
         <summary className="flex cursor-pointer list-none items-center gap-2 font-display text-subhead font-medium text-[var(--text-primary)] [&::-webkit-details-marker]:hidden">

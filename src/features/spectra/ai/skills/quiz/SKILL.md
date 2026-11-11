@@ -15,7 +15,7 @@ is never a graded or high-stakes test.
 | `multiple_choice` | One right answer among plausible options |
 | `select_all` | Several correct options; say "Select all that apply" |
 | `true_false` | Quick checks of a single claim; use sparingly |
-| `short_answer` / `fill_blank` | Recall of a term without options to lean on |
+| `short_answer` / `fill_blank` | Recall of a term without options to lean on. `correctAnswer` is the shortest right answer ("36 cm"); the reasoning goes in `explanation` |
 | `numeric` | Calculations; state the unit in the prompt |
 | `ordering` | Sequences: stages, events, steps |
 | `matching` | Pairs: terms and definitions, causes and effects |
@@ -28,6 +28,7 @@ is never a graded or high-stakes test.
 - Distractors are wrong for a reason a learner might believe: a common misconception, a
   related term, a calculation slip. Avoid joke options and "all of the above".
 - Keep options similar in length and form, so the right one does not stand out.
+- No two options may be the same answer in another form: 0.5 and 1/2, 50% and 0.5, 3 m and 3.0 m.
 - The explanation teaches: why the right answer is right and why the tempting wrong answer is
   wrong.
 - Mix recall with application and reasoning. Order questions from easier to harder.

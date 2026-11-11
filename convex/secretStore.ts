@@ -1,5 +1,6 @@
 import { internalMutation, internalQuery } from "./functions";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import {
   getAccountByClerkId,
   getActiveMembership,
@@ -81,6 +82,19 @@ export const reserveNonce = internalMutation({
       expiresAt: args.expiresAt,
       createdAt: Date.now(),
     });
+  },
+});
+
+/** A used nonce only matters until its request expires. */
+export const purgeExpiredNonces = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const expired = await ctx.db
+      .query("secretBridgeNonces")
+      .withIndex("by_expiry", (q) => q.lt("expiresAt", Date.now() - 60 * 60_000))
+      .take(500);
+    await Promise.all(expired.map((row) => ctx.db.delete(row._id)));
+    if (expired.length === 500) await ctx.scheduler.runAfter(60_000, internal.secretStore.purgeExpiredNonces, {});
   },
 });
 

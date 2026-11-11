@@ -21,7 +21,7 @@ import {
   evaluateArtifactAccessForActorWithSummary,
 } from "./authorityShared";
 import { releaseSnapshotObject } from "./artifactSnapshots";
-import { RUN_TAB_PROJECTION_VERSION } from "./spectraRunProjection";
+import { lastRunEventSequence, RUN_TAB_PROJECTION_VERSION } from "./spectraRunProjection";
 
 const vOrigin = v.union(
   v.literal("chat"),
@@ -859,7 +859,7 @@ export const selectMessageChoice = mutation({
     if (message.runId) {
       const run = await ctx.db.get(message.runId);
       if (run) {
-        const sequence = (run.eventSequence ?? 0) + 1;
+        const sequence = (await lastRunEventSequence(ctx, run)) + 1;
         await ctx.db.insert("spectraRunEvents", {
           runId: run._id,
           executionId: run.executionId ?? "choice",

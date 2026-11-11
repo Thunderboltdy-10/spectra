@@ -1,10 +1,11 @@
 import { v } from "convex/values";
 import { query } from "./functions";
+import { internal } from "./_generated/api";
 import { internalMutation, mutation } from "./orgNodeMutation";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
-import { createFolderNode, placeSourceNode, purgeSourceNodes, trashNode, findPrimaryNode, moveNode, renameNode, restoreTrashedNode, ensureGeneralNode } from "./orgTreeShared";
+import { createFolderNode, placeSourceNode, purgeNode, purgeSourceNodes, trashNode, findPrimaryNode, moveNode, renameNode, restoreTrashedNode, ensureGeneralNode, artifactSummaryFor, ARTIFACT_SUMMARY_READ_MODEL_VERSION } from "./orgTreeShared";
 import { z } from "zod";
 import {
   activeReplicaWriteTarget,
@@ -16,6 +17,7 @@ import { assertPayloadWriteAllowed, computeEffectivePolicy } from "./syncPolicy"
 import { decideMissingResourceAction, policyIncludesPath } from "../shared/sync-policy";
 import type { SyncPolicyValues } from "../shared/sync-policy";
 import { formatByteCount } from "../shared/human-format";
+import { agentHubTicket as signTicketFor } from "../shared/agent-hub-ticket.mjs";
 import { classWorkspaceNodes, matchClass, mountPathBase } from "./bridgePlacement";
 import {
   BRIDGE_CLAIM_REDRIVE_MS,
@@ -91,6 +93,68 @@ async function requireDevice(ctx: Parameters<typeof getActorForAccountId>[0], cr
   if (!actor) throw new Error("BRIDGE_ACCOUNT_UNAVAILABLE");
   return { device, actor };
 }
+
+/**
+ * What a Bridge waits on. A live subscription costs nothing while nothing
+ * changes, so the Bridge only claims work when there is some. `busy` means
+ * this computer has queued work to retry; a pending transition only wakes it,
+ * since another computer may be the one holding that file.
+ */
+export const workSignal = query({
+  args: { credential: v.string() },
+  handler: async (ctx, args) => {
+    const credentialHash = await digest(z.string().min(32).max(256).parse(args.credential));
+    const device = await ctx.db.query("bridgeDevices").withIndex("by_credential_hash", (q) => q.eq("credentialHash", credentialHash)).unique();
+    if (!device || device.state !== "active") throw new Error("BRIDGE_CREDENTIAL_INVALID");
+    const [write, fs, transition] = await Promise.all([
+      ctx.db.query("bridgeWriteRequests").withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "pending")).first(),
+      ctx.db.query("bridgeFsRequests").withIndex("by_device_state", (q) => q.eq("deviceId", device._id).eq("state", "pending")).first(),
+      ctx.db.query("storageStrategyTransitions").withIndex("by_account_state", (q) => q.eq("accountId", device.accountId).eq("state", "pending")).first(),
+    ]);
+    return {
+      busy: Boolean(write || fs),
+      write: write?._id ?? null,
+      fs: fs?._id ?? null,
+      transition: transition?._id ?? null,
+    };
+  },
+});
+
+const AGENT_HUB_TICKET_MS = 10 * 60_000;
+
+/** One-time legacy migration: only the paired account's explicit work ids. */
+export const ownedStoredWorks = query({
+  args: { credential: v.string(), artifactIds: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    z.array(z.string()).max(100).parse(args.artifactIds);
+    const { device } = await requireDevice(ctx, args.credential);
+    const artifactIds: Id<"spectraArtifacts">[] = [];
+    for (const id of new Set(args.artifactIds)) {
+      const artifactId = ctx.db.normalizeId("spectraArtifacts", id);
+      if (!artifactId) continue;
+      const summary = await artifactSummaryFor(ctx, artifactId);
+      const owner = summary?.readModelVersion === ARTIFACT_SUMMARY_READ_MODEL_VERSION
+        ? summary.ownerAccountId : (await ctx.db.get(artifactId))?.ownerAccountId;
+      if (owner === device.accountId) artifactIds.push(artifactId);
+    }
+    return { accountId: device.accountId, artifactIds };
+  },
+});
+
+/**
+ * A short-lived ticket for the agent hub, for the Bridge that holds this
+ * device's credential. It names the account the hub may route to this computer.
+ */
+export const agentHubTicket = mutation({
+  args: { credential: v.string() },
+  handler: async (ctx, args) => {
+    const { device } = await requireDevice(ctx, args.credential);
+    const url = process.env.SPECTRA_AGENT_HUB_URL?.trim();
+    const secret = process.env.SPECTRA_COLLAB_BRIDGE_KEY;
+    if (!url || !secret) return { url: null, ticket: null, accountId: device.accountId };
+    return { url, ticket: await signTicketFor(String(device.accountId), secret, AGENT_HUB_TICKET_MS), accountId: device.accountId };
+  },
+});
 
 type BridgeActor = NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>;
 
@@ -246,6 +310,38 @@ async function failWriteForMissingWork(
   await failStorageTransitionForRequest(ctx, request, DELETED_WORK_ERROR, now);
 }
 
+/**
+ * A replica moving to the folder that now covers it. The earlier selection
+ * retires once nothing is left in it, so Devices lists the file in one place.
+ */
+async function takeOverFromMount(
+  ctx: MutationCtx,
+  actor: { accountId: Id<"accounts">; schoolId: Id<"schools"> },
+  deviceId: Id<"bridgeDevices">,
+  replica: Doc<"workReplicas">,
+  mount: Doc<"bridgeMounts">,
+  relativePath: string,
+  node: Doc<"orgNodes"> | null,
+) {
+  const previous = replica.mountId ? await ctx.db.get(replica.mountId) : null;
+  if (!previous || previous.deviceId !== deviceId) return;
+  const now = Date.now();
+  await ctx.db.patch(replica._id, { mountId: mount._id, relativePath, updatedAt: now });
+  if (node && node.deletedAt === undefined && node.parentId === previous.rootOrgNodeId && mount.rootOrgNodeId) {
+    const parts = relativePath.replaceAll("\\", "/").split("/").filter(Boolean);
+    parts.pop();
+    const base = await mountPathBase(ctx, actor.accountId, mount.rootOrgNodeId, parts);
+    const parent = await ensureFolderPath(ctx, actor.accountId, actor.schoolId, base, parts);
+    if (node.parentId !== parent) await moveNode(ctx, node, { parentId: parent });
+  }
+  if (previous.state === "active") {
+    const left = await ctx.db.query("workReplicas")
+      .withIndex("by_device_mount_path", (q) => q.eq("deviceId", deviceId).eq("mountId", previous._id))
+      .first();
+    if (!left) await ctx.db.patch(previous._id, { state: "revoked", updatedAt: now });
+  }
+}
+
 export const registerMount = mutation({
   args: { credential: v.string(), rootLabel: v.string(), selectedFile: v.optional(v.string()), grantId: v.string(), rootKey: v.string(), scanId: v.string(), fileCount: v.number(), doubleSyncRisk: v.boolean(), ownerLockPaths: v.array(v.string()) },
   handler: async (ctx, args) => {
@@ -333,104 +429,210 @@ export const registerMount = mutation({
 });
 
 /** Reconcile resources absent from a completed scan without deleting bytes. */
-export const reconcileMissingResources = mutation({
+/** A file the Bridge can no longer find in its folder: restore it or mark it gone. */
+async function markReplicaMissing(
+  ctx: MutationCtx,
+  actor: BridgeActor,
+  mountId: Id<"bridgeMounts">,
+  replica: Doc<"workReplicas">,
+) {
+    if (!(await hasArtifactModify(ctx, actor, replica.workId))) return "skipped" as const;
+    const policy = await computeEffectivePolicy(ctx, actor.accountId, { account: String(actor.accountId), mount: String(mountId), item: String(replica.workId) });
+    const cloud = await ctx.db.query("workReplicas")
+      .withIndex("by_work_kind", (q) => q.eq("workId", replica.workId).eq("kind", "cloud"))
+      .unique();
+    const action = decideMissingResourceAction(policy.structure, Boolean(cloud?.payloadRef && cloud.contentHash));
+    if (action === "restore-to-disk" && await queueRestoreToDisk(ctx, actor, replica, cloud)) return "restoring" as const;
+    const reason = action === "ask" ? "missing-awaiting-decision" : "missing-on-disk";
+    await ctx.db.patch(replica._id, { state: "unavailable", unavailableReason: reason, updatedAt: Date.now() });
+    return "unavailable" as const;
+}
+
+/** Writes Spectra's copy back to where a local file was. False when there is nothing to write. */
+async function queueRestoreToDisk(
+  ctx: MutationCtx,
+  actor: BridgeActor,
+  replica: Doc<"workReplicas">,
+  cloud: Doc<"workReplicas"> | null,
+) {
+    if (!(cloud?.payloadRef && cloud.contentHash && replica.deviceId && replica.mountId && replica.localResourceId && replica.relativePath)) return false;
+    {
+      // The file is gone, so the write creates it rather than replacing the
+      // bytes it used to have: Bridge creates a file only for a `new:` base, and
+      // refuses one if anything appeared at that path meanwhile (F22). Each
+      // disappearance gets its own base, so putting it back a second time is a
+      // new write rather than the first one's finished receipt.
+      const restoreBase = `new:restore:${replica._id}:${replica.updatedAt}`;
+      const idempotencyKey = await deriveSyncIdempotencyKey({
+        workId: String(replica.workId),
+        target: localMaterializationTarget(String(replica.mountId), replica.relativePath),
+        baseRevision: restoreBase,
+        targetRevision: cloud.contentHash,
+        direction: "cloud-to-local",
+      });
+      const existing = await bridgeWriteForTarget(ctx, {
+        accountId: actor.accountId,
+        idempotencyKey,
+        replicaId: replica._id,
+        workId: replica.workId,
+        baseRevision: restoreBase,
+        targetRevision: cloud.revision,
+      });
+      if (!existing) {
+        const now = Date.now();
+        await ctx.db.insert("bridgeWriteRequests", {
+          accountId: actor.accountId,
+          workId: replica.workId,
+          replicaId: replica._id,
+          deviceId: replica.deviceId,
+          mountId: replica.mountId,
+          localResourceId: replica.localResourceId,
+          relativePath: replica.relativePath,
+          payloadRef: cloud.payloadRef,
+          baseRevision: restoreBase,
+          targetRevision: cloud.revision,
+          contentHash: cloud.contentHash,
+          idempotencyKey,
+          regionIds: [],
+          partNames: [],
+          projectionBaseContent: cloud.projectionBaseContent,
+          projectionBaseContentHash: cloud.projectionBaseContentHash,
+          projectionBaseTextIndex: cloud.projectionBaseTextIndex,
+          projectionBaseFidelityMap: cloud.projectionBaseFidelityMap,
+          state: "pending",
+          retryAt: now,
+          attemptCount: 0,
+          expiresAt: now + BRIDGE_WRITE_EXPIRES_MS,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await ctx.db.insert("syncOperations", {
+          accountId: actor.accountId,
+          workId: replica.workId,
+          replicaId: replica._id,
+          idempotencyKey,
+          direction: "cloud-to-local",
+          revisionBefore: restoreBase,
+          revisionAfter: cloud.revision,
+          state: "pending",
+          actorKind: "restore",
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      await ctx.db.patch(replica._id, { state: "pending", unavailableReason: "restoring-from-cloud", revision: restoreBase, updatedAt: Date.now() });
+      return true;
+    }
+}
+
+const MISSING_REASONS = new Set(["missing-on-disk", "missing-awaiting-decision"]);
+
+/** The person's one action for a file deleted outside Spectra: write it back. */
+export const putBackFile = mutation({
+  args: { workId: v.id("spectraArtifacts") },
+  handler: async (ctx, { workId }) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    if (!(await hasArtifactModify(ctx, actor, workId))) throw new Error("ACCESS_DENIED");
+    const replicas = await ctx.db.query("workReplicas")
+      .withIndex("by_work_kind", (q) => q.eq("workId", workId).eq("kind", "local"))
+      .take(20);
+    const missing = replicas.filter((replica) =>
+      replica.accountId === actor.accountId && replica.state === "unavailable" && MISSING_REASONS.has(replica.unavailableReason ?? ""));
+    if (!missing.length) throw new Error("FILE_NOT_MISSING");
+    const cloud = await ctx.db.query("workReplicas")
+      .withIndex("by_work_kind", (q) => q.eq("workId", workId).eq("kind", "cloud"))
+      .unique();
+    let putBack = 0;
+    for (const replica of missing) if (await queueRestoreToDisk(ctx, actor, replica, cloud)) putBack += 1;
+    if (!putBack) throw new Error("FILE_PUT_BACK_UNAVAILABLE");
+    return { putBack };
+  },
+});
+
+/** The Bridge names what went missing; files still there are not touched. */
+export const reportMissingResources = mutation({
   args: {
     credential: v.string(),
     mountId: v.id("bridgeMounts"),
-    scanId: v.string(),
-    cursor: v.optional(v.string()),
+    localResourceIds: v.array(v.string()),
   },
   handler: async (ctx, args) => {
     const { device, actor } = await requireDevice(ctx, args.credential);
     const mount = await ctx.db.get(args.mountId);
-    if (!mount || mount.deviceId !== device._id || mount.accountId !== actor.accountId || mount.lastScanId !== args.scanId) throw new Error("MOUNT_SCAN_NOT_CURRENT");
-    const page = await ctx.db.query("workReplicas")
-      .withIndex("by_mount", (q) => q.eq("mountId", mount._id))
-      .paginate({ cursor: args.cursor ?? null, numItems: 100 });
+    if (!mount || mount.deviceId !== device._id || mount.accountId !== actor.accountId) throw new Error("MOUNT_NOT_ACTIVE");
+    if (args.localResourceIds.length > 100) throw new Error("DISCOVERY_PAGE_SIZE_INVALID");
     let unavailable = 0;
     let restoring = 0;
-    for (const replica of page.page) {
-      if (replica.kind !== "local" || replica.lastSeenScanId === args.scanId || replica.state === "unavailable") continue;
-      if (!(await hasArtifactModify(ctx, actor, replica.workId))) continue;
-      const policy = await computeEffectivePolicy(ctx, actor.accountId, { account: String(actor.accountId), mount: String(mount._id), item: String(replica.workId) });
-      const cloud = await ctx.db.query("workReplicas")
-        .withIndex("by_work_kind", (q) => q.eq("workId", replica.workId).eq("kind", "cloud"))
-        .unique();
-      const action = decideMissingResourceAction(policy.structure, Boolean(cloud?.payloadRef && cloud.contentHash));
-      if (action === "restore-to-disk" && cloud?.payloadRef && cloud.contentHash && replica.deviceId && replica.mountId && replica.localResourceId && replica.relativePath) {
-        const idempotencyKey = await deriveSyncIdempotencyKey({
-          workId: String(replica.workId),
-          target: localMaterializationTarget(String(replica.mountId), replica.relativePath),
-          baseRevision: replica.revision,
-          targetRevision: cloud.contentHash,
-          direction: "cloud-to-local",
-        });
-        const existing = await bridgeWriteForTarget(ctx, {
-          accountId: actor.accountId,
-          idempotencyKey,
-          replicaId: replica._id,
-          workId: replica.workId,
-          baseRevision: replica.revision,
-          targetRevision: cloud.revision,
-        });
-        if (!existing) {
-          const now = Date.now();
-          await ctx.db.insert("bridgeWriteRequests", {
-            accountId: actor.accountId,
-            workId: replica.workId,
-            replicaId: replica._id,
-            deviceId: replica.deviceId,
-            mountId: replica.mountId,
-            localResourceId: replica.localResourceId,
-            relativePath: replica.relativePath,
-            payloadRef: cloud.payloadRef,
-            baseRevision: replica.revision,
-            targetRevision: cloud.revision,
-            contentHash: cloud.contentHash,
-            idempotencyKey,
-            regionIds: [],
-            partNames: [],
-            projectionBaseContent: cloud.projectionBaseContent,
-            projectionBaseContentHash: cloud.projectionBaseContentHash,
-            projectionBaseTextIndex: cloud.projectionBaseTextIndex,
-            projectionBaseFidelityMap: cloud.projectionBaseFidelityMap,
-            state: "pending",
-            retryAt: now,
-            attemptCount: 0,
-            expiresAt: now + BRIDGE_WRITE_EXPIRES_MS,
-            createdAt: now,
-            updatedAt: now,
-          });
-          await ctx.db.insert("syncOperations", {
-            accountId: actor.accountId,
-            workId: replica.workId,
-            replicaId: replica._id,
-            idempotencyKey,
-            direction: "cloud-to-local",
-            revisionBefore: replica.revision,
-            revisionAfter: cloud.revision,
-            state: "pending",
-            actorKind: "restore",
-            createdAt: now,
-            updatedAt: now,
-          });
-        }
-        await ctx.db.patch(replica._id, { state: "pending", unavailableReason: "restoring-from-cloud", updatedAt: Date.now() });
-        restoring += 1;
-        continue;
+    for (const localResourceId of args.localResourceIds) {
+      const replicas = await ctx.db.query("workReplicas")
+        .withIndex("by_device_resource", (q) => q.eq("deviceId", device._id).eq("localResourceId", localResourceId))
+        .take(10);
+      for (const replica of replicas) {
+        if (replica.mountId !== mount._id || replica.kind !== "local" || replica.state === "unavailable") continue;
+        const result = await markReplicaMissing(ctx, actor, mount._id, replica);
+        if (result === "unavailable") unavailable += 1;
+        if (result === "restoring") restoring += 1;
       }
-      const reason = action === "ask" ? "missing-awaiting-decision" : "missing-on-disk";
-      await ctx.db.patch(replica._id, { state: "unavailable", unavailableReason: reason, updatedAt: Date.now() });
-      unavailable += 1;
     }
-    return {
-      unavailable,
-      restoring,
-      continueCursor: page.continueCursor,
-      isDone: page.isDone,
-    };
+    return { unavailable, restoring };
   },
 });
+
+const OFFICE_FORMATS = new Set(["docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm", "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam", "spectra-pkg"]);
+const isOfficeFormat = (format: string) => OFFICE_FORMATS.has(format.toLowerCase());
+const formatOfPath = (path: string) => path.split(".").pop()?.toLowerCase() ?? "";
+
+/**
+ * Takes out what folders imported before sync became Office-only. The files on
+ * the computer are untouched: this removes Spectra's listing of them, and any
+ * folder that held nothing else. Run once per deployment:
+ *   npx convex run bridgeSync:purgeNonOfficeResources
+ */
+export const purgeNonOfficeResources = internalMutation({
+  args: { cursor: v.optional(v.union(v.string(), v.null())), removed: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const page = await ctx.db.query("workReplicas").paginate({ cursor: args.cursor ?? null, numItems: 100 });
+    let removed = args.removed ?? 0;
+    const parents = new Set<Id<"orgNodes">>();
+    for (const replica of page.page) {
+      if (replica.kind !== "local" || !replica.relativePath || isOfficeFormat(formatOfPath(replica.relativePath))) continue;
+      const work = await ctx.db.get(replica.workId);
+      if (work && (work.resourceClass !== "resource" || isOfficeFormat(work.nativeFormat ?? ""))) continue;
+      if (work) {
+        const node = await findPrimaryNode(ctx, work.ownerAccountId, "work", String(work._id));
+        if (node?.parentId) parents.add(node.parentId);
+        await purgeSourceNodes(ctx, "work", String(work._id));
+        await ctx.db.delete(work._id);
+      }
+      await ctx.db.delete(replica._id);
+      removed += 1;
+    }
+    for (const parentId of parents) await removeEmptyImportedFolders(ctx, parentId);
+    if (page.isDone) return { removed };
+    await ctx.scheduler.runAfter(0, internal.bridgeSync.purgeNonOfficeResources, { cursor: page.continueCursor, removed });
+    return { removed, continuing: true };
+  },
+});
+
+async function removeEmptyImportedFolders(ctx: MutationCtx, start: Id<"orgNodes">) {
+  let current: Id<"orgNodes"> | null = start;
+  while (current) {
+    const folder: Doc<"orgNodes"> | null = await ctx.db.get(current);
+    if (!folder || folder.kind !== "folder" || (folder.childCount ?? 1) > 0) return;
+    const child = await ctx.db.query("orgNodes")
+      .withIndex("by_account_parent_order", (q) => q.eq("accountId", folder.accountId).eq("parentId", folder._id))
+      .first();
+    if (child) return;
+    const isMountRoot = await ctx.db.query("bridgeMounts")
+      .withIndex("by_account_state", (q) => q.eq("accountId", folder.accountId))
+      .filter((q) => q.eq(q.field("rootOrgNodeId"), folder._id))
+      .first();
+    if (isMountRoot) return;
+    current = folder.parentId;
+    await purgeNode(ctx, folder);
+  }
+}
 
 /** Re-drive structure claims. Replica byte writes are compensated by
  * replicas:sweepReplicaTruth so there is exactly one owner for that machine. */
@@ -453,6 +655,9 @@ export const sweepStaleBridgeWork = internalMutation({
   },
 });
 
+/** How long an unchanged file's replica goes between writes of its last-verified time. */
+const REPLICA_VERIFY_REFRESH_MS = 24 * 60 * 60 * 1000;
+
 const discoveredResourceSchema = z.object({
   localResourceId: z.string().regex(/^lr_[a-f0-9]+$/),
   relativePath: z.string().min(1).max(1024).refine((value) => !value.startsWith("/") && !/^[A-Za-z]:/.test(value) && !value.split(/[\\/]/).includes("..")),
@@ -468,6 +673,7 @@ async function discoverResourceForMount(
   mount: Doc<"bridgeMounts"> & { rootOrgNodeId: Id<"orgNodes"> },
   input: z.infer<typeof discoveredResourceSchema>,
 ) {
+    if (!isOfficeFormat(input.nativeFormat)) return { skipped: true as const, reason: "filtered" as const };
     if (mount.selectedFile && input.relativePath !== mount.selectedFile) throw new Error("BRIDGE_FILE_SELECTION_PATH_NOT_ALLOWED");
     const isOfficeOwnerLock = input.relativePath.replaceAll("\\", "/").split("/").pop()?.startsWith("~$") ?? false;
     if (isOfficeOwnerLock) {
@@ -526,6 +732,12 @@ async function discoverResourceForMount(
         existingReplica._id,
       );
       const nativePayloadAllowed = policy.cloudContent === "full";
+      // One file on this computer is one work, however it first came in. When a
+      // folder takes over a file chosen alone or a smaller folder, the work comes
+      // along: it joins its neighbours unless it was filed somewhere on purpose.
+      if (existingReplica.mountId && existingReplica.mountId !== mount._id) {
+        await takeOverFromMount(ctx, actor, device._id, existingReplica, mount, input.relativePath, existingNode);
+      }
       const changed = Boolean(input.contentHash && input.contentHash !== existingReplica.contentHash);
       const previousPath = existingReplica.relativePath;
       const verifiedAt = Date.now();
@@ -538,6 +750,7 @@ async function discoverResourceForMount(
       // current revision is an ordinary edit for Spectra to take in.
       const localBase = existingReplica.baseRevision ?? existingReplica.contentHash ?? existingReplica.revision;
       const replicasDisagree = Boolean(
+        (changed || existingReplica.state !== "behind") &&
         input.contentHash &&
         existingCloud?.contentHash &&
         input.contentHash !== existingCloud.contentHash &&
@@ -548,6 +761,8 @@ async function discoverResourceForMount(
         ? "diverged" as const
         : activeWrite
           ? "pending" as const
+          : !changed && existingReplica.state === "behind"
+            ? "behind" as const
           : !input.contentHash
             ? "ahead" as const
             : existingCloud?.payloadRef && existingCloud.contentHash === input.contentHash
@@ -555,7 +770,15 @@ async function discoverResourceForMount(
               : nativePayloadAllowed
                 ? "ahead" as const
                 : "current" as const;
-      await ctx.db.patch(existingReplica._id, {
+      const unchanged =
+        !changed &&
+        existingReplica.mountId === mount._id &&
+        existingReplica.localResourceId === input.localResourceId &&
+        existingReplica.relativePath === input.relativePath &&
+        existingReplica.state === nextState &&
+        existingReplica.errorCode !== "office-locked" &&
+        verifiedAt - (existingReplica.lastVerifiedAt ?? 0) < REPLICA_VERIFY_REFRESH_MS;
+      if (!unchanged) await ctx.db.patch(existingReplica._id, {
         mountId: mount._id,
         localResourceId: input.localResourceId,
         relativePath: input.relativePath,
@@ -571,7 +794,6 @@ async function discoverResourceForMount(
           ? { unavailableReason: undefined, errorCode: undefined, errorMessage: undefined, errorAt: undefined }
           : {}),
         lastVerifiedAt: input.contentHash ? verifiedAt : existingReplica.lastVerifiedAt,
-        lastSeenScanId: mount.lastScanId,
         updatedAt: verifiedAt,
       });
       if (
@@ -705,7 +927,7 @@ async function discoverResourceForMount(
     const parentId = await ensureFolderPath(ctx, actor.accountId, actor.schoolId, base, parts);
     const now = Date.now();
     const workId = await ctx.db.insert("spectraArtifacts", { ownerAccountId: actor.accountId, schoolId: actor.schoolId, blueprintKey: "resource", resourceClass: "resource", nativeFormat: input.nativeFormat, compatibilityProfile: "strict-native", title, summary: formatByteCount(input.size), content: null, schemaVersion: 1, contentHash: input.contentHash, tags: [], status: "active", createdFrom: { source: "manual" }, createdAt: now, updatedAt: now });
-    const replicaId = await ctx.db.insert("workReplicas", { accountId: actor.accountId, workId, kind: "local", deviceId: device._id, mountId: mount._id, localResourceId: input.localResourceId, relativePath: input.relativePath, nativeFormat: input.nativeFormat, revision: input.contentHash ?? `discovered:${input.localResourceId}`, contentHash: input.contentHash, state: input.contentHash && mountPolicy.cloudContent !== "full" ? "current" : "ahead", lastVerifiedAt: input.contentHash ? now : undefined, lastSeenScanId: mount.lastScanId, updatedAt: now });
+    const replicaId = await ctx.db.insert("workReplicas", { accountId: actor.accountId, workId, kind: "local", deviceId: device._id, mountId: mount._id, localResourceId: input.localResourceId, relativePath: input.relativePath, nativeFormat: input.nativeFormat, revision: input.contentHash ?? `discovered:${input.localResourceId}`, contentHash: input.contentHash, state: input.contentHash && mountPolicy.cloudContent !== "full" ? "current" : "ahead", lastVerifiedAt: input.contentHash ? now : undefined, updatedAt: now });
     await placeSourceNode(ctx, { accountId: actor.accountId, schoolId: actor.schoolId, kind: "work", sourceId: String(workId), name: title, target: { parentId }, typeKey: "resource", placedByAccountId: actor.accountId });
     if (discoveryRequest) await ctx.db.delete(discoveryRequest._id);
     return {
@@ -1116,10 +1338,10 @@ export const commitPayloadUpload = mutation({
         if (pendingOperation?.actorKind === "ai" && pendingOperation.runId)
           await settleRunNativeOutcome(ctx, pendingOperation.runId);
         const resolving = await ctx.db.query("syncConflicts")
-          .withIndex("by_work_state", (q) => q.eq("workId", replica.workId).eq("state", "resolving-spectra"))
+          .withIndex("by_request_account_state", (q) => q.eq("resolutionRequestId", activeWrite._id).eq("accountId", activeWrite.accountId).eq("state", "resolving-spectra"))
           .take(50);
         await Promise.all(resolving
-          .filter((conflict) => conflict.resolutionRequestId === activeWrite._id)
+          .filter((conflict) => conflict.workId === replica.workId && conflict.resolutionRequestId === activeWrite._id)
           .map((conflict) => ctx.db.patch(conflict._id, {
             state: "open",
             resolutionRequestId: undefined,
@@ -1435,6 +1657,12 @@ export const refreshWriteClaim = mutation({
         !activeReplicaWriteTarget(replica, mount, device) || !replica ||
         replica.mountId !== request.mountId || replica.deviceId !== request.deviceId ||
         !(await writeRevisionStillApplicable(ctx, request, replica))) return { valid: false };
+    // Office saves follow the current writeback policy. Explicit new-file,
+    // storage and protected-original actions have their own user admission.
+    if (request.nativeReceipt) {
+      const policy = await computeEffectivePolicy(ctx, actor.accountId, { item: String(request.workId), mount: String(request.mountId) });
+      if (policy.contentDirection !== "bidirectional" && policy.contentDirection !== "spectra-to-local") return { valid: false };
+    }
     await ctx.db.patch(request._id, { claimedAt: now, updatedAt: now });
     return { valid: true };
   },
@@ -1736,10 +1964,10 @@ export const completeWrite = mutation({
         await ctx.db.patch(strategyTransition._id, { state: "verified", updatedAt: now });
       }
       const resolvingConflicts = await ctx.db.query("syncConflicts")
-        .withIndex("by_work_state", (q) => q.eq("workId", request.workId).eq("state", "resolving-spectra"))
+        .withIndex("by_request_account_state", (q) => q.eq("resolutionRequestId", request._id).eq("accountId", request.accountId).eq("state", "resolving-spectra"))
         .take(50);
       await Promise.all(resolvingConflicts
-        .filter((conflict) => conflict.resolutionRequestId === request._id)
+        .filter((conflict) => conflict.workId === request.workId && conflict.resolutionRequestId === request._id)
         .map((conflict) => ctx.db.patch(conflict._id, { state: "resolved-spectra", resolvedAt: now, updatedAt: now })));
       return completion("verified");
     }
@@ -1782,10 +2010,10 @@ export const completeWrite = mutation({
       });
     }
     const resolvingConflicts = await ctx.db.query("syncConflicts")
-      .withIndex("by_work_state", (q) => q.eq("workId", request.workId).eq("state", "resolving-spectra"))
+      .withIndex("by_request_account_state", (q) => q.eq("resolutionRequestId", request._id).eq("accountId", request.accountId).eq("state", "resolving-spectra"))
       .take(50);
     await Promise.all(resolvingConflicts
-      .filter((conflict) => conflict.resolutionRequestId === request._id)
+      .filter((conflict) => conflict.workId === request.workId && conflict.resolutionRequestId === request._id)
       .map((conflict) => ctx.db.patch(conflict._id, { state: "open", resolutionRequestId: undefined, errorCode: args.errorCode ?? "resolution-write-failed", updatedAt: now })));
     return completion(conflicted ? "conflicted" : "failed");
   },

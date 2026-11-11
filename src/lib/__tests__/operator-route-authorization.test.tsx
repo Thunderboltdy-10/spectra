@@ -44,7 +44,7 @@ vi.mock("@/features/spectra/pages/school-admin-shell", () => ({
 }));
 vi.mock("next/navigation", () => ({ redirect: navigation.redirect }));
 
-import SchoolAdminPage from "@/app/admin/page";
+import SchoolAdminPage from "@/app/(app)/admin/page";
 import {
   GET as getAdministration,
   POST as postAdministration,

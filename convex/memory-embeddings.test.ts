@@ -200,12 +200,15 @@ describe("bounded, currently authorized candidate retrieval", () => {
   it("uses exact OR partitions in the real action and returns literal fallback on provider failure", async () => {
     const f = await fixture();
     const { claimId } = await remember(f, "The heliostat reflector is silver.");
-    await stamp(f, claimId);
+    const embedding = await lease(f, claimId);
+    await f.t.mutation(internal.memory.completeEmbedding, { ...embedding, vector });
     const fetcher = vi.fn(async () => Response.json({ model: "text-embedding-3-small", provider: "OpenAI", data: [{ index: 0, embedding: vector }] }));
     vi.stubGlobal("fetch", fetcher);
     const semantic = await f.reader.action(api.memory.contextForRun, { queryText: "sunlight redirector alloy" }) as FunctionReturnType<typeof internal.memory.contextForRunBase>;
     expect(semantic.retrieval.status).toBe("semantic_and_literal");
     expect(semantic.selectedClaimIds).toEqual([claimId]);
+    await vi.advanceTimersByTimeAsync(0);
+    await f.t.finishInProgressScheduledFunctions();
     fetcher.mockImplementation(async () => new Response("not available", { status: 503 }));
     const pending = f.reader.action(api.memory.contextForRun, { queryText: "heliostat material" });
     await vi.advanceTimersByTimeAsync(1_000); // the interactive query retries a 503 once after a short backoff

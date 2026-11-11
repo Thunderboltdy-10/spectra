@@ -1,5 +1,5 @@
 import { ensureImportedNativePayload } from "@/features/spectra/lenses/native-payload-server";
-import { queueHumanNativeMaterialization, commitHumanCloudMaterialization } from "@/lib/native-materialization-server";
+import { queueHumanNativeMaterialization, commitHumanCloudMaterialization, writableNativeReplica } from "@/lib/native-materialization-server";
 import { hydrateContentForWrite } from "@/lib/convex-server";
 import { reconcileNativeRevision } from "@/lib/native-reconciliation-server";
 import { NextResponse } from "next/server";
@@ -69,6 +69,7 @@ type WorkTruth = {
     revision: string;
     state: string;
     payloadRef?: string;
+    mountId?: Id<"bridgeMounts">;
   }>;
   recentOperations?: RecentNativeOperation[];
 };
@@ -266,9 +267,7 @@ async function materializeDocxArtifactAttempt(
     before: opened.preservedCarry.safePayload ?? payload, after: next.preservedCarry.safePayload ?? output,
     intent: { format: "docx", projection: opened.projection, operations },
   });
-  const local = workTruth.replicas.find(
-    (replica) => replica.kind === "local" && replica.state !== "unavailable",
-  );
+  const local = await writableNativeReplica(workId, workTruth.replicas);
   const changedPartNames = comparison.parts.filter((part) => part.verdict !== "identical").map((part) => `/${part.name}`);
   const nativeReceipt: NativeSaveReceipt = {
     kind: "native-office-save",
@@ -280,7 +279,13 @@ async function materializeDocxArtifactAttempt(
     baseRevision: truth.revision,
     resultRevision: hash,
     targets: { regionIds, partNames: changedPartNames },
-    semantic: { baseDigest: opened.projection.nativeBinding.semanticDigest, resultDigest: requestedDigest, readbackDigest },
+    // The request is proven above, allowing for what only Word holds. What the
+    // receipt attests from here on is the file itself, which is what gets stored.
+    semantic: {
+      baseDigest: opened.projection.nativeBinding.semanticDigest,
+      resultDigest: nextProjection.nativeBinding.semanticDigest,
+      readbackDigest: nextProjection.nativeBinding.semanticDigest,
+    },
     preservedPartNames: comparison.parts.filter((part) => part.verdict === "identical").map((part) => `/${part.name}`),
     state: local ? "pending" : "cloud_saved",
   };
@@ -548,6 +553,7 @@ export async function POST(request: Request) {
         const externalNeedsActivation = shouldActivateExternalNativeRevision({
           operations: workTruth.recentOperations,
           localHash: local.truth.hash,
+          localState: local.truth.state,
           cloudHash: truth.hash,
         });
         if (externalNeedsActivation) {

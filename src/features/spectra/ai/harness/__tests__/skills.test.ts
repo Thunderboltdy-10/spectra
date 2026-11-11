@@ -17,7 +17,8 @@ describe("skills as folders", () => {
 
   it("has a craft skill for every artifact type plus design, frontend-design, teaching and research", () => {
     const names = SKILL_INDEX.map((entry) => entry.name);
-    for (const type of Object.keys(AUTHORING_FORMATS)) expect(names).toContain(type);
+    // A retired timetable keeps its format only so old ones can be read.
+    for (const type of Object.keys(AUTHORING_FORMATS).filter((key) => key !== "timetable")) expect(names).toContain(type);
     for (const name of ["spectra-design", "frontend-design", "teaching", "research"]) expect(names).toContain(name);
   });
 

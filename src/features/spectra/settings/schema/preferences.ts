@@ -22,14 +22,29 @@ const generalSchema = z.object({
 
 const aiSchema = z.object({
   continueCurrentConversation: z.boolean().default(true),
+  /** "Open the thread when I send" (LAUNCH-REVIEW D3): the card opens over its tab at send; off, the answer peeks from the tab. */
   openConversationAfterSend: z.boolean().default(false),
   showLiveDockProgress: z.boolean().default(true),
   /** The island at rest: the prism (default), or nothing until the pointer reaches the bottom edge. */
   islandWake: z.enum(["prism", "edge"]).default("prism"),
+  /** The middle the island keeps to: of the page between the columns, or of the whole screen. */
+  islandCentre: z.enum(["page", "screen"]).default("page"),
   autoRouteSpecialists: z.boolean().default(true),
   parallelSafeReads: z.boolean().default(true),
   researchDepth: z.enum(["automatic", "quick", "verified", "deep"]).default("automatic"),
-  reasoningProfile: z.enum(["configured_maximum", "balanced", "fast"]).default("configured_maximum"),
+  /** Whose inference runs this person's work: Spectra's, or their own Codex or Claude Code. */
+  runtime: z.enum(["spectra", "codex", "claude"]).default("spectra"),
+  /** False until this person picks one, so their own subscription can become the default when it's found. */
+  runtimeChosen: z.boolean().default(false),
+  /** What to try, in order, when the chosen runtime can't answer. Empty stops the run. */
+  runtimeThen: z.array(z.enum(["codex", "claude", "spectra"])).max(3).default(["spectra"]),
+  /** Empty is the CLI's default for this account. */
+  codexModel: z.string().max(120).default(""),
+  claudeModel: z.string().max(120).default(""),
+  thinking: z.enum(["low", "medium", "high"]).default("medium"),
+  /** How fast the work plays on this person's screen. The edit is saved either way. */
+  workSpeed: z.enum(["slow", "medium", "fast"]).default("fast"),
+  followSpeed: z.enum(["slow", "medium", "fast"]).default("fast"),
   reversibleLowRiskAutonomy: z.boolean().default(true),
   notifyRequiredInput: z.boolean().default(true),
   notifyRunCompletion: z.boolean().default(true),
@@ -83,6 +98,10 @@ const appearanceSchema = z.object({
   streamingReveal: z.boolean().default(true),
   activeTailShimmer: z.boolean().default(true),
   sidebarDefault: z.enum(["remember", "expanded", "collapsed"]).default("remember"),
+  /** The sidebar's destinations in the order this person dragged them to; empty is Spectra's order. */
+  railOrder: z.array(z.string().max(32)).max(20).default([]),
+  /** Library's workspace tiles, the same way. */
+  workspaceOrder: z.array(z.string().max(64)).max(300).default([]),
 });
 
 const computeSchema = z.object({

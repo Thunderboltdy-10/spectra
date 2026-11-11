@@ -1,18 +1,28 @@
 "use client";
 
 import { OpenAnchorScope } from "../anchors/use-open-anchor";
+import { VersionStage, VersionTimeline } from "./history/version-history";
+import { textOf } from "./history/readable-version";
+import { fullViewOrigin } from "./full-view-origin";
+import { StudioPane, StudioPaneToolProvider, useStudioPane, type StudioPaneKind } from "./studio-pane";
 import {
-  AuthorMark,
-  VersionChanges,
-  timelineAuthors,
-  versionAuthor,
-} from "./history/version-changes";
+  editorVerb,
+  pasteAtCaret,
+  StudioMenuRegistry,
+  useStudioContextMenu,
+  type StudioMenuGroup,
+} from "./studio-context-menu";
+import { WorkConversations, WorkDetails } from "./work-companion";
+import { WorkOrigin } from "./work-origin";
 import { useWorkAvailability } from "./use-work-availability";
 
 import { Tooltip } from "@/components/ui/tooltip";
 import { DismissibleArtifactNotice } from "./dismissible-artifact-notice";
-import { useQuery } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
+import { useCalmQuery } from "../data/use-calm-query";
 import { toast } from "@/components/ui/toast";
+import { DeviceWorkAway, useDeviceWorkAway } from "../bridge/device-work-away";
+import { useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { describeFailure } from "@/components/ui/truthful-state";
@@ -25,9 +35,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import {
   AlertCircle,
-  Archive,
   Bold,
-  BookOpen,
   CalendarCheck2,
   Code2,
   Copy,
@@ -35,6 +43,7 @@ import {
   Eye,
   FileDown,
   FileText,
+  ExternalLink,
   History,
   Italic,
   Link2,
@@ -46,17 +55,18 @@ import {
   MessageSquare,
   MessageSquarePlus,
   MessagesSquare,
-  PanelRight,
   Play,
-  Plus,
   RotateCcw,
   Share2,
   Sigma,
   Underline as UnderlineIcon,
   X,
+  ArrowLeft,
+  Info,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import NextLink from "next/link";
+import { usePathname } from "next/navigation";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import {
   Children,
@@ -65,6 +75,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -84,6 +95,9 @@ import { beginCreation, useLifeLanding, useLifeReturn } from "../life/use-life";
 import { artifactStatusOf, type ArtifactStatusActionKind } from "./artifact-status";
 import { humanizeNativeError, humanizePublicFailure } from "../bridge/humanize";
 import { useBridgeHealth } from "../bridge/use-bridge";
+import { useSettledTransportState } from "../collaboration/use-settled-transport-state";
+import { documentContentFromJson } from "./document-content";
+import { mergeFallbackDocumentEdit } from "./document-fallback-merge";
 import { mountsForConnectedDevice } from "../bridge/mount-selection";
 import { useSyncPresentation } from "../bridge/use-sync-presentation";
 import { DEVICES_HREF, openBridgeFile, revealBridgeFile } from "../bridge/client";
@@ -163,17 +177,16 @@ import { useLocalOnlyCollaboration } from "../collaboration/local-only";
 import { usePresencePreview } from "../collaboration/scoped-hooks";
 import type { SpeculativeBlockText } from "../editor/ai-speculation-decoration";
 import { documentPerformancePreview } from "../collaboration/document-performance-preview";
+import { committedPerformancesFor } from "../collaboration/committed-performances";
 import { boxOf, carryWork } from "../collaboration/carry-work";
 import { useInteractionPresence } from "../collaboration/use-interaction-presence";
 import { contextSourceRegistry } from "../context";
 import {
   copySpectraArtifact,
-  getSpectraArtifactLinks,
   getSpectraArtifactVersions,
   getSpectraArtifactVersion,
   postSpectra,
   type SpectraArtifact,
-  type SpectraArtifactLink,
   type SpectraArtifactVersion,
   type SpectraArtifactVersionSummary,
 } from "../data/api";
@@ -183,13 +196,10 @@ import { SharedPeopleButton } from "./share/shared-people";
 import type { SpectraCommandOutcome } from "../events/contracts";
 import { StudioViewportContext, withStudioViewportReady } from "./studio-viewport-ready";
 import {
-  normalizePresentationContent,
   presentationObjectText,
   type PresentationObject,
 } from "../presentation/model";
-import { normalizeSheetsContent, parseAddress } from "../sheets/model";
-import { sharedTimetableContent } from "../timetable/model";
-import { normalizeWhiteboardContent } from "../whiteboard/model";
+import { normalizeSheetsContent } from "../sheets/model";
 import { encodeDocumentRelativeSelection } from "../work/models/yjs";
 import { getWorkDefinition, workCan, type WorkType } from "../work/registry";
 import {
@@ -228,7 +238,6 @@ import {
 import { InlineReferencePicker } from "./inline-reference-picker";
 import { ArtifactEmbedsPanel } from "./artifact-embeds-panel";
 import { ArtifactDraftRecovery, describeLocalRecoveryFailure } from "./artifact-draft-recovery";
-import { ChatBrowserButton } from "./chat-browser-panel";
 import {
   WorkbarMenuAction,
   WorkbarSelect,
@@ -278,12 +287,6 @@ import { ContextSourceBoundary } from "./context-source-boundary";
 import { ThreadConversation } from "./conversation-surface";
 import { SandboxedArtifactRuntime } from "./sandboxed-artifact-runtime";
 import { canPublishAgentArtifact } from "./agent-publish-gates";
-import {
-  artifactPlacements,
-  formatRelativeTime,
-  formatShortDate,
-  linkedArtifacts,
-} from "./spectra-view-model";
 import { requestSpectra } from "../data/request";
 import { threadHref } from "../chat/home-routes";
 import { firstTipMoment } from "../onboarding/first-tips";
@@ -296,6 +299,8 @@ const DocumentStudio = dynamic(
   () => import("./document-studio").then((module) => module.DocumentStudio),
   { loading: StudioTypePlaceholder },
 );
+const AI_MARK_LIFETIME_MS = 10 * 60_000;
+
 const FlashcardStudio = dynamic(
   () => import("./flashcard-studio").then((module) => withStudioViewportReady(module.FlashcardStudio)),
   { loading: StudioTypePlaceholder },
@@ -325,114 +330,18 @@ const WhiteboardStudio = dynamic(
   () => import("./whiteboard-studio").then((module) => withStudioViewportReady(module.WhiteboardStudio)),
   { loading: StudioTypePlaceholder },
 );
-const TimetableStudio = dynamic(
-  () => import("./timetable-studio").then((module) => withStudioViewportReady(module.TimetableStudio)),
-  { loading: StudioTypePlaceholder },
-);
+/** Timetables moved into the Calendar, so an old link lands there. */
+function TimetableMoved() {
+  const router = useRouter();
+  useEffect(() => {
+    router.replace("/calendar");
+  }, [router]);
+  return <p className="px-6 py-10 text-[var(--text-secondary)]">Timetables now live in your Calendar. Taking you there.</p>;
+}
 const AgentFoundry = dynamic(
   () => import("./agent-foundry").then((module) => withStudioViewportReady(module.AgentFoundry)),
   { loading: StudioTypePlaceholder },
 );
-
-const WAVE_C_BLUEPRINTS = new Set([
-  "presentation",
-  "sheets",
-  "code",
-  "whiteboard",
-  "timetable",
-]);
-
-function waveCIdentityStats(
-  blueprintKey: SpectraArtifact["blueprintKey"],
-  content: unknown,
-): Array<[string, string]> | null {
-  switch (blueprintKey) {
-    case "presentation": {
-      const deck = normalizePresentationContent(content);
-      const minutes = Math.max(1, Math.ceil(deck.slides.length * 0.75));
-      const complexity =
-        deck.slides.length > 14
-          ? "Complex"
-          : deck.slides.length > 6
-            ? "Medium"
-            : "Light";
-      return [
-        [String(deck.slides.length), "Slides"],
-        [`~${minutes} min`, "Est. time"],
-        [complexity, "Complexity"],
-      ];
-    }
-    case "sheets": {
-      const workbook = normalizeSheetsContent(content);
-      const sheet =
-        workbook.sheets.find((item) => item.id === workbook.activeSheetId) ??
-        workbook.sheets[0];
-      if (!sheet) return null;
-      const addresses = Object.keys(sheet.cells ?? {});
-      let maxRow = 0;
-      let maxCol = 0;
-      for (const address of addresses) {
-        const coordinate = parseAddress(address);
-        if (!coordinate) continue;
-        maxRow = Math.max(maxRow, coordinate.row + 1);
-        maxCol = Math.max(maxCol, coordinate.column + 1);
-      }
-      const chartCount = (sheet.charts ?? []).length;
-      return [
-        [String(maxRow || addresses.length), "Rows"],
-        [String(maxCol || 1), "Columns"],
-        [String(chartCount), chartCount === 1 ? "Chart" : "Charts"],
-      ];
-    }
-    case "code": {
-      const project = normalizeCodeContent(content);
-      const lines = project.files.reduce(
-        (total, file) => total + file.source.split("\n").length,
-        0,
-      );
-      const runtimeLabel =
-        project.runtime === "none"
-          ? "Source"
-          : project.runtime === "python"
-            ? "Python"
-            : "Browser";
-      return [
-        [String(project.files.length), "Files"],
-        [String(lines), "Lines"],
-        [runtimeLabel, "Runtime"],
-      ];
-    }
-    case "whiteboard": {
-      const board = normalizeWhiteboardContent(content);
-      const pageCount = board.pages.length;
-      return [
-        [String(pageCount), pageCount === 1 ? "Page" : "Pages"],
-        [String(board.nodes.length), "Objects"],
-        [String(board.edges.length), "Links"],
-      ];
-    }
-    case "timetable": {
-      const shared = sharedTimetableContent(content);
-      const eventCount = shared.events.length;
-      const layerCount = shared.layers.filter((layer) => layer.visible).length;
-      const viewLabel =
-        shared.view?.kind === "month"
-          ? "Month"
-          : shared.view?.kind === "day"
-            ? "Day"
-            : shared.view?.kind === "agenda"
-              ? "Agenda"
-              : "Week";
-      return [
-        [String(eventCount), "Events"],
-        [String(layerCount), "Calendars"],
-        [viewLabel, "View"],
-      ];
-    }
-    default:
-      return null;
-  }
-}
 
 
 function pointerSegments(path: string) {
@@ -963,6 +872,7 @@ function ReadonlyArtifactSnapshot({
       ) : null}
       {blueprintKey === "planner_task" ? (
         <div className="mt-6 space-y-4">
+          {typeof body.description === "string" && body.description ? <SpectraStoredText value={body.description} /> : null}
           <section className="rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
             <div className="grid grid-cols-2 gap-4 text-micro">
               <div>
@@ -1123,7 +1033,7 @@ function ReadonlyArtifactSnapshot({
                 top: `${10 + ((index * 31) % 72)}%`,
               }}
             >
-              {String(
+              {humanValue(
                 node.text ?? node.content ?? node.label ?? node.type ?? "Node",
               )}
             </div>
@@ -1253,549 +1163,6 @@ function MetricSnapshot({
   );
 }
 
-function historyKind(version: SpectraArtifactVersion) {
-  if (version.name) return version.name;
-  if (version.source === "ai") return "AI edit";
-  if (version.source === "restore" || version.source === "revert")
-    return "Restored version";
-  if (version.source === "checkpoint") return "User checkpoint";
-  if (version.source === "import") return "Imported version";
-  if (version.source === "migration") return "Migrated version";
-  return "User edit";
-}
-
-function HistoryComparisonOverlay({
-  artifact,
-  current,
-  versions,
-  selected,
-  changes,
-  versionChanges,
-  selectedRegions,
-  busyVersionId,
-  listLoading,
-  listError,
-  hasMore,
-  previewLoading,
-  previewError,
-  readOnly,
-  onSelect,
-  onLoadMore,
-  onRetryList,
-  onSelectedRegionsChange,
-  onRestore,
-  onCreateCheckpoint,
-  onClose,
-}: {
-  artifact: SpectraArtifact;
-  current: ArtifactSnapshot;
-  versions: SpectraArtifactVersionSummary[];
-  selected: SpectraArtifactVersion | null;
-  changes: HumanChange[];
-  /** What the selected version itself changed, from its parent to it. */
-  versionChanges: HumanChange[];
-  selectedRegions: Set<string>;
-  busyVersionId: string | null;
-  listLoading: boolean;
-  listError: string | null;
-  hasMore: boolean;
-  previewLoading: boolean;
-  previewError: string | null;
-  readOnly: boolean;
-  onSelect: (version: SpectraArtifactVersionSummary) => void;
-  onLoadMore: () => void;
-  onRetryList: () => void;
-  onSelectedRegionsChange: (regions: Set<string>) => void;
-  onRestore: (
-    version: SpectraArtifactVersion,
-    regions?: readonly string[],
-  ) => void;
-  onCreateCheckpoint: (name: string) => Promise<void>;
-  onClose: () => void;
-}) {
-  const [view, setView] = useState<"changed" | "side" | "live">("changed");
-  const authors = useMemo(() => timelineAuthors(versions), [versions]);
-  const [split, setSplit] = useState(50);
-  const [checkpointOpen, setCheckpointOpen] = useState(false);
-  const [checkpointName, setCheckpointName] = useState("");
-  const [checkpointBusy, setCheckpointBusy] = useState(false);
-  const [checkpointError, setCheckpointError] = useState<string | null>(null);
-  const comparisonRef = useRef<HTMLDivElement>(null);
-
-  function startResize(event: React.PointerEvent<HTMLButtonElement>) {
-    event.preventDefault();
-    const element = comparisonRef.current;
-    if (!element) return;
-    const move = (pointer: PointerEvent) => {
-      const bounds = element.getBoundingClientRect();
-      setSplit(
-        Math.max(
-          30,
-          Math.min(70, ((pointer.clientX - bounds.left) / bounds.width) * 100),
-        ),
-      );
-    };
-    const stop = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", stop);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", stop);
-  }
-
-  async function createCheckpoint() {
-    const name = checkpointName.trim();
-    if (!name) return;
-    setCheckpointBusy(true);
-    setCheckpointError(null);
-    try {
-      await onCreateCheckpoint(name);
-      setCheckpointName("");
-      setCheckpointOpen(false);
-    } catch (error) {
-      setCheckpointError(
-        error instanceof Error
-          ? error.message
-          : "Could not create this checkpoint.",
-      );
-    } finally {
-      setCheckpointBusy(false);
-    }
-  }
-
-  return (
-    <section
-      className="absolute inset-0 z-composer-dock flex min-h-0 flex-col bg-[var(--bg-primary)] pb-[88px]"
-      aria-label="Version history comparison"
-    >
-      <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-[var(--border-default)] bg-[var(--bg-elevated)] px-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <History className="h-4 w-4 text-[var(--text-secondary)]" />
-          <span className="text-ui font-medium text-[var(--text-secondary)]">
-            Comparing versions
-          </span>
-          {selected ? (
-            <span className="truncate rounded-chip bg-[color-mix(in_oklab,var(--brand-primary)_8%,var(--bg-secondary))] px-2 py-1 text-caption font-medium text-[var(--brand-primary)]">
-              Previewing {historyKind(selected)} from{" "}
-              {new Date(selected.createdAt).toLocaleString()}
-            </span>
-          ) : null}
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="flex h-9 items-center gap-1.5 rounded-control px-2.5 text-ui font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
-        >
-          <X className="h-3.5 w-3.5" />
-          Close comparison
-        </button>
-      </header>
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_330px]">
-        <main className="flex min-h-0 flex-col border-r border-[var(--border-default)]">
-          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-2.5">
-            <div className="min-w-0">
-              <h2 className="truncate font-display text-editor font-semibold text-[var(--text-primary)]">
-                {artifact.title}
-              </h2>
-              <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
-                This earlier version is for reference only. Your current work stays editable after you close the comparison.
-              </p>
-            </div>
-<div role="tablist" aria-label="How to look at this version" className="flex rounded-control border border-[var(--border-default)] p-0.5">
-              {(
-                [
-                  ["changed", "What changed"],
-                  ["side", "Side by side"],
-                  ["live", `Against live${changes.length ? ` (${changes.length})` : ""}`],
-                ] as const
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  role="tab"
-                  aria-selected={view === key}
-                  onClick={() => setView(key)}
-                  className={`h-7 rounded-chip px-2.5 text-micro font-medium transition ${view === key ? "bg-[var(--bg-secondary)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-          {selected?.after ? (
-            view === "changed" ? (
-              <VersionChanges version={selected} changes={versionChanges} />
-            ) : view === "live" ? (
-              <div className="min-h-0 flex-1 space-y-2 overflow-auto p-4">
-                {changes.map((change, index) => (
-                  <article
-                    key={`${index}:${change.label}`}
-                    className="overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)]"
-                  >
-                    <header className="border-b border-[var(--border-subtle)] px-3 py-2">
-                      <label className="flex cursor-pointer items-center gap-2 text-micro font-semibold text-[var(--text-primary)]">
-                        <input
-                          type="checkbox"
-                          disabled={!change.regionId || readOnly}
-                          checked={Boolean(
-                            change.regionId &&
-                            selectedRegions.has(change.regionId),
-                          )}
-                          onChange={(event) => {
-                            if (!change.regionId) return;
-                            const next = new Set(selectedRegions);
-                            if (event.target.checked) next.add(change.regionId);
-                            else next.delete(change.regionId);
-                            onSelectedRegionsChange(next);
-                          }}
-                          className="h-3.5 w-3.5 accent-[var(--accent-cyan)]"
-                        />
-                        {change.label}
-                      </label>
-                    </header>
-                    <div className="grid md:grid-cols-2">
-                      <div className="border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--danger)_3%,var(--bg-primary))] p-3 md:border-b-0 md:border-r">
-                        <div className="mb-1.5 text-micro font-semibold text-[var(--danger)]">
-                          Selected version
-                        </div>
-                        <pre className="whitespace-pre-wrap break-words font-sans text-micro leading-4 text-[var(--text-secondary)]">
-                          {change.before}
-                        </pre>
-                      </div>
-                      <div className="bg-[color-mix(in_oklab,var(--accent-cyan)_3%,var(--bg-primary))] p-3">
-                        <div className="mb-1.5 text-micro font-semibold text-[var(--accent-cyan)]">
-                          Current live
-                        </div>
-                        <pre className="whitespace-pre-wrap break-words font-sans text-micro leading-4 text-[var(--text-primary)]">
-                          {change.after}
-                        </pre>
-                      </div>
-                    </div>
-                  </article>
-                ))}
-                {changes.length === 0 ? (
-                  <div className="flex min-h-[260px] items-center justify-center text-micro text-[var(--text-secondary)]">
-                    This version matches your current work.
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <div
-                ref={comparisonRef}
-                className="grid min-h-0 flex-1 overflow-hidden"
-                style={{ gridTemplateColumns: `${split}% 8px minmax(0,1fr)` }}
-              >
-                <section className="min-h-0 overflow-auto">
-                  <div className="sticky top-0 z-chrome flex items-center justify-between border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,transparent)] px-4 py-2 backdrop-blur">
-                    <span className="text-micro font-semibold text-[var(--text-primary)]">
-                      {historyKind(selected)}
-                    </span>
-                    <span className="rounded-chip bg-[color-mix(in_oklab,var(--brand-primary)_8%,var(--bg-secondary))] px-1.5 py-0.5 text-micro font-medium text-[var(--brand-primary)]">
-                      Preview only
-                    </span>
-                  </div>
-                  <ReadonlyArtifactSnapshot
-                    artifactId={artifact._id}
-                    blueprintKey={artifact.blueprintKey}
-                    snapshot={selected.after}
-                  />
-                </section>
-                <button
-                  type="button"
-                  onPointerDown={startResize}
-                  onKeyDown={(event) => {
-                    if (event.key === "ArrowLeft")
-                      setSplit((value) => Math.max(30, value - 2));
-                    if (event.key === "ArrowRight")
-                      setSplit((value) => Math.min(70, value + 2));
-                  }}
-                  className="group relative cursor-col-resize border-x border-[var(--border-subtle)] bg-[var(--bg-secondary)] outline-none focus:bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-secondary))]"
-                  aria-label="Resize version comparison"
-                  aria-valuemin={30}
-                  aria-valuemax={70}
-                  aria-valuenow={Math.round(split)}
-                  role="separator"
-                >
-                  <span className="absolute left-1/2 top-1/2 h-8 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--border-strong)] group-hover:bg-[var(--accent-cyan)]" />
-                </button>
-                <section className="min-h-0 overflow-auto">
-                  <div className="sticky top-0 z-chrome flex items-center justify-between border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,transparent)] px-4 py-2 backdrop-blur">
-                    <span className="text-micro font-semibold text-[var(--text-primary)]">
-                      Current live version
-                    </span>
-                    <span className="rounded-chip bg-[color-mix(in_oklab,var(--success)_8%,var(--bg-secondary))] px-1.5 py-0.5 text-micro font-medium text-[var(--success)]">
-                      Live
-                    </span>
-                  </div>
-                  <ReadonlyArtifactSnapshot
-                    artifactId={artifact._id}
-                    blueprintKey={artifact.blueprintKey}
-                    snapshot={current}
-                  />
-                </section>
-              </div>
-            )
-          ) : previewLoading ? (
-            <div role="status" className="flex min-h-0 flex-1 items-center justify-center gap-2 p-8 text-micro text-[var(--text-secondary)]">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Loading saved version…
-            </div>
-          ) : previewError ? (
-            <div role="alert" className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-micro text-[var(--text-secondary)]">
-              <p>{previewError}</p>
-              {selected ? <button type="button" onClick={() => onSelect(selected)} className="h-8 rounded-control border border-[var(--border-default)] px-3">Retry preview</button> : null}
-            </div>
-          ) : selected ? (
-            <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center">
-              <div className="max-w-[380px]">
-                <AlertCircle className="mx-auto h-5 w-5 text-[var(--warning)]" />
-                <h4 className="mt-3 text-micro font-semibold text-[var(--text-primary)]">
-                  This version cannot be rendered
-                </h4>
-                <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">
-                  Its retained snapshot is{" "}
-                  {selected.snapshotState === "corrupt"
-                    ? "damaged"
-                    : "unavailable"}
-                  . Later history remains intact and this version cannot be
-                  restored until repaired.
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-micro text-[var(--text-secondary)]">
-              Select a version from the timeline.
-            </div>
-          )}
-          <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3">
-            <div>
-              <div className="text-micro font-semibold text-[var(--text-primary)]">
-                Restore creates a new version
-              </div>
-              <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
-                Nothing in the later timeline is overwritten or deleted.
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={
-                  !selected?.after ||
-                  readOnly ||
-                  selectedRegions.size === 0 ||
-                  Boolean(busyVersionId)
-                }
-                onClick={() =>
-                  selected?.after && onRestore(selected, [...selectedRegions])
-                }
-                className="h-8 rounded-control border border-[var(--border-default)] px-3 text-micro font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
-              >
-                Restore {selectedRegions.size} selected
-              </button>
-              <button
-                type="button"
-                disabled={
-                  !selected?.after || readOnly || Boolean(busyVersionId)
-                }
-                onClick={() => selected?.after && onRestore(selected)}
-                className="inline-flex h-8 items-center gap-1.5 rounded-control bg-[var(--brand-primary)] px-3 text-micro font-semibold text-[var(--text-inverse)] disabled:opacity-35"
-              >
-                {busyVersionId ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <RotateCcw className="h-3.5 w-3.5" />
-                )}
-                Restore as new version
-              </button>
-            </div>
-          </footer>
-        </main>
-        <aside className="flex min-h-0 flex-col bg-[var(--bg-elevated)]">
-          <header className="flex shrink-0 items-center justify-between border-b border-[var(--border-default)] px-4 py-3">
-            <div>
-              <h3 className="text-caption font-semibold text-[var(--text-primary)]">
-                Version history
-              </h3>
-              <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
-                {versions.length} versions loaded{hasMore ? ", more further back" : ""}
-              </p>
-              {authors.length > 1 ? (
-                <ul aria-label="Who worked on this" className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-micro text-[var(--text-secondary)]">
-                  {authors.map((author) => (
-                    <li key={author.name} className="min-w-0 max-w-full">
-                      <AuthorMark author={author} />
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-            {!readOnly ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setCheckpointOpen((value) => !value);
-                  setCheckpointError(null);
-                }}
-                className="flex h-7 items-center gap-1 rounded-chip px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-              >
-                <Plus className="h-3 w-3" />
-                Checkpoint
-              </button>
-            ) : null}
-          </header>
-          {checkpointOpen ? (
-            <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
-              <label
-                className="text-micro font-semibold text-[var(--text-tertiary)]"
-                htmlFor="history-checkpoint-name"
-              >
-                Checkpoint name
-              </label>
-              <div className="mt-1.5 flex gap-1.5">
-                <input
-                  id="history-checkpoint-name"
-                  value={checkpointName}
-                  onChange={(event) => {
-                    setCheckpointName(event.target.value.slice(0, 180));
-                    setCheckpointError(null);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") void createCheckpoint();
-                  }}
-                  autoFocus
-                  placeholder="e.g. Before teacher review"
-                  className="h-8 min-w-0 flex-1 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-micro text-[var(--text-primary)] outline-none focus:border-[var(--border-strong)]"
-                />
-                <button
-                  type="button"
-                  disabled={!checkpointName.trim() || checkpointBusy}
-                  onClick={() => void createCheckpoint()}
-                  className="h-8 rounded-control bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-35"
-                >
-                  {checkpointBusy ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    "Create"
-                  )}
-                </button>
-              </div>
-              {checkpointError ? (
-                <p
-                  role="alert"
-                  className="mt-2 text-micro leading-4 text-[var(--danger)]"
-                >
-                  {checkpointError}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-          <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-            <div className="relative mb-1 flex gap-3 rounded-control px-3 py-2.5">
-              <span className="relative z-chrome mt-1.5 h-2 w-2 rounded-full bg-[var(--success)]" />
-              <div className="absolute bottom-[-8px] left-[18px] top-5 w-px bg-[var(--border-default)]" />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-micro font-semibold text-[var(--text-primary)]">
-                    Live
-                  </span>
-                  <span className="text-micro text-[var(--text-tertiary)]">
-                    Now
-                  </span>
-                </div>
-                <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
-                  Current synchronized state
-                </p>
-              </div>
-            </div>
-            {versions.map((version, index) => {
-              const selectedVersion = selected?._id === version._id;
-              const author = versionAuthor(version);
-              // Who made it leads; the kind is said only when the author does not already say it.
-              const kind = historyKind(version);
-              const plainEdit = kind === "AI edit" || kind === "User edit";
-              return (
-                <button
-                  type="button"
-                  key={version._id}
-                  onClick={() => onSelect(version)}
-                  disabled={busyVersionId !== null}
-                  className={`relative flex w-full gap-3 rounded-control border px-3 py-2.5 text-left ${selectedVersion ? "border-[color-mix(in_oklab,var(--brand-primary)_50%,var(--border-default))] bg-[color-mix(in_oklab,var(--brand-primary)_5%,var(--bg-primary))]" : "border-transparent hover:bg-[var(--bg-hover)]"}`}
-                >
-                  <span
-                    aria-hidden
-                    className="relative z-chrome mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[var(--bg-elevated)]"
-                    style={
-                      author.ai
-                        ? { boxShadow: `inset 0 0 0 1.5px ${author.color}` }
-                        : { background: author.color }
-                    }
-                  />
-                  {index < versions.length - 1 ? (
-                    <span className="absolute bottom-[-8px] left-[18px] top-5 w-px bg-[var(--border-default)]" />
-                  ) : null}
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-center justify-between gap-2">
-                      <span className="truncate text-micro font-semibold text-[var(--text-primary)]">
-                        {author.name}
-                      </span>
-                      <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
-                        {new Date(version.createdAt).toLocaleString([], {
-                          day: "2-digit",
-                          month: "short",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                    </span>
-                    {plainEdit ? null : (
-                      <span className="mt-0.5 block truncate text-micro font-medium text-[var(--text-secondary)]">
-                        {kind}
-                      </span>
-                    )}
-                    {version.summary ? (
-                      <span className="mt-1 block line-clamp-2 text-micro leading-3.5 text-[var(--text-tertiary)]">
-                        {version.summary}
-                      </span>
-                    ) : null}
-                  </span>
-                </button>
-              );
-            })}
-            {listError ? (
-              <div role="alert" className="px-4 py-3 text-micro text-[var(--text-secondary)]">
-                <p>{listError}</p>
-                <button type="button" onClick={onRetryList} disabled={listLoading} className="mt-2 h-8 rounded-control border border-[var(--border-default)] px-3">Retry history</button>
-              </div>
-            ) : null}
-            {listLoading ? (
-              <p role="status" className="px-4 py-3 text-micro text-[var(--text-secondary)]">Loading history…</p>
-            ) : hasMore && !listError ? (
-              <button type="button" onClick={onLoadMore} className="m-2 h-8 rounded-control border border-[var(--border-default)] px-3 text-micro text-[var(--text-primary)]">Load older versions</button>
-            ) : null}
-            {versions.length === 0 && !listLoading && !listError ? (
-              <div className="px-4 py-10 text-center text-micro leading-5 text-[var(--text-tertiary)]">
-                Meaningful human and AI editing sessions will appear here.
-              </div>
-            ) : null}
-          </div>
-        </aside>
-      </div>
-    </section>
-  );
-}
-
-/**
- * What a person reads in a version: not the editor's internal mirror (the
- * rich-text tree beside its blocks) or the native package hashes.
- */
-function readableSnapshot(snapshot: ArtifactSnapshot): ArtifactSnapshot {
-  const { nativeSources: _sources, ...readable } = snapshot as ArtifactSnapshot & { nativeSources?: unknown };
-  const content = record(readable.content);
-  if (!("tiptap" in content)) return readable;
-  const { tiptap: _tiptap, ...rest } = content;
-  return { ...readable, content: rest };
-}
-
 type HumanChange = {
   label: string;
   before: string;
@@ -1811,8 +1178,9 @@ function humanizeKey(value: string) {
     .replace(/^./, (character) => character.toUpperCase());
 }
 
-function humanValue(value: unknown) {
+function humanValue(value: unknown, storedRichText = false) {
   if (value == null || value === "") return "Not set";
+  if (storedRichText) return textOf(value, 0, true) || "Not set";
   if (
     typeof value === "string" ||
     typeof value === "number" ||
@@ -1821,20 +1189,22 @@ function humanValue(value: unknown) {
     return String(value);
   if (Array.isArray(value) && value.every((item) => typeof item === "string"))
     return value.join(", ") || "None";
-  return JSON.stringify(value, null, 2);
+  return textOf(value) || "Not set";
 }
 
 function humanFieldLabel(path: string[]) {
   const clean = path[0] === "content" ? path.slice(1) : path;
   if (clean[0] === "cards" && /^\d+$/.test(clean[1] ?? ""))
-    return `Card ${Number(clean[1]) + 1} · ${clean.slice(2).map(humanizeKey).join(" · ") || "Content"}`;
+    return `Card ${Number(clean[1]) + 1}, ${clean.slice(2).map(humanizeKey).join(", ") || "Content"}`;
   if (clean[0] === "questions" && /^\d+$/.test(clean[1] ?? ""))
-    return `Question ${Number(clean[1]) + 1} · ${clean.slice(2).map(humanizeKey).join(" · ") || "Content"}`;
+    return `Question ${Number(clean[1]) + 1}, ${clean.slice(2).map(humanizeKey).join(", ") || "Content"}`;
   if (clean[0] === "blocks" && /^\d+$/.test(clean[1] ?? ""))
-    return `Document block ${Number(clean[1]) + 1} · ${clean.slice(2).map(humanizeKey).join(" · ") || "Content"}`;
+    return clean.slice(2).filter((key) => key !== "text").length
+      ? `Part ${Number(clean[1]) + 1}, ${clean.slice(2).filter((key) => key !== "text").map(humanizeKey).join(", ")}`
+      : `Part ${Number(clean[1]) + 1}`;
   if (clean[0] === "subtasks" && /^\d+$/.test(clean[1] ?? ""))
-    return `Subtask ${Number(clean[1]) + 1} · ${clean.slice(2).map(humanizeKey).join(" · ") || "Content"}`;
-  return clean.map(humanizeKey).join(" · ") || "Work";
+    return `Subtask ${Number(clean[1]) + 1}, ${clean.slice(2).map(humanizeKey).join(", ") || "Content"}`;
+  return clean.map(humanizeKey).join(", ") || "Work";
 }
 
 function humanDiff(
@@ -1891,8 +1261,8 @@ function humanDiff(
       return;
     changes.push({
       label: humanFieldLabel(path),
-      before: humanValue(before),
-      after: humanValue(after),
+      before: humanValue(before, path[0] === "content" && (blueprintKey === "quiz" || blueprintKey === "flashcard_deck")),
+      after: humanValue(after, path[0] === "content" && (blueprintKey === "quiz" || blueprintKey === "flashcard_deck")),
       path,
     });
   };
@@ -2611,6 +1981,40 @@ const TRANSIENT_COLLABORATION_FAILURE =
 /** Saving retries quietly this long before it says anything (users should practically never see it). */
 const QUIET_SAVE_WINDOW_MS = 45_000;
 
+/** Another tab moved this work to Trash while it was open here (F17). */
+function TrashedWorkNotice({ artifactId, trashedNodeId }: { artifactId: string; trashedNodeId: string }) {
+  const restore = useMutation(api.orgTree.restore);
+  const [restoring, setRestoring] = useState(false);
+  return (
+    <div className="relative z-dropdown h-0 shrink-0">
+      <DismissibleArtifactNotice
+        artifactId={artifactId}
+        identity={`trashed:${trashedNodeId}`}
+        role="alert"
+        className="spectra-collaboration-notice absolute right-3 top-2 flex items-center gap-2"
+      >
+        <span className="min-w-0 flex-1">
+          This work is in Trash. What you type is kept and comes back if you restore it.
+        </span>
+        <button
+          type="button"
+          disabled={restoring}
+          className="shrink-0 rounded-chip border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-micro font-medium"
+          onClick={() => {
+            setRestoring(true);
+            void restore({ nodeIds: [trashedNodeId as never] })
+              .then(() => toast.success("Restored from Trash."))
+              .catch(() => toast.error("Couldn't restore it. Try again from Trash in Library."))
+              .finally(() => setRestoring(false));
+          }}
+        >
+          {restoring ? "Restoring…" : "Restore"}
+        </button>
+      </DismissibleArtifactNotice>
+    </div>
+  );
+}
+
 export function ArtifactStudio({
   mode,
   artifact,
@@ -2620,6 +2024,7 @@ export function ArtifactStudio({
   panelOverlay,
   sourceLabel,
   onPanelWidthChange,
+  onPaneRoomChange,
   onClose,
   onCloseTab,
   onExpand,
@@ -2627,7 +2032,7 @@ export function ArtifactStudio({
   onShare,
   onDirtyChange,
   onContinueThread,
-  onOpenChats,
+  onOpenThread,
   continuedThreadId,
   compact = false,
   instanceKey,
@@ -2644,6 +2049,8 @@ export function ArtifactStudio({
   panelOverlay?: boolean;
   sourceLabel: string;
   onPanelWidthChange?: (width: number) => void;
+  /** The extra width the work's own pane (comments, history…) needs beside the page; 0 when shut. */
+  onPaneRoomChange?: (room: number) => void;
   onClose: () => void;
   onExpand: (artifact: SpectraArtifact) => void;
   onActivateTab: (artifactId: string) => void;
@@ -2652,15 +2059,22 @@ export function ArtifactStudio({
   onShare?: (artifact: SpectraArtifact) => void;
   onDirtyChange: (artifactId: string, dirty: boolean) => void;
   onContinueThread?: (threadId: string, title: string) => void;
-  onOpenChats?: () => void;
+  /** Opens a conversation about this work where the surface keeps conversations. */
+  onOpenThread?: (thread: { id: string; title: string }) => void;
   continuedThreadId?: string | null;
   compact?: boolean;
   /** Names a copy edited in place inside another work, so close requests reach only it. */
   instanceKey?: string;
   executeApplicationCommand?: ApplicationCommandDispatcher;
 }) {
+  const deviceWorkAway = useDeviceWorkAway(artifact);
   const router = useRouter();
   const width = panelWidth ?? 720;
+  // The same subscription the editor holds; Convex shares it. It says when this work went to Trash elsewhere.
+  const replicaTruth = useCalmQuery(
+    api.replicas.forWork,
+    useAuthedArgs(artifact.blueprintKey === "thread_reference" ? "skip" : { workId: artifact._id as never }),
+  );
   const handleClose = useCallback(
     () => (mode === "tab" ? onCloseTab(artifact._id) : onClose()),
     [artifact._id, mode, onClose, onCloseTab],
@@ -2806,7 +2220,6 @@ export function ArtifactStudio({
               }}
               icon={Maximize2}
             />
-            {onOpenChats ? <ChatBrowserButton onClick={onOpenChats} label="Browse chats about this work" /> : null}
             <IconButton label="Close" onClick={handleClose} icon={X} />
           </div>
         </header>
@@ -2821,15 +2234,20 @@ export function ArtifactStudio({
           )}
         </div>
       </div>
+    ) : deviceWorkAway ? (
+      <DeviceWorkAway title={artifact.title} reason={deviceWorkAway} />
     ) : (
       <div className="flex h-full min-h-0 flex-col bg-transparent">
+        {replicaTruth?.trashedNodeId ? (
+          <TrashedWorkNotice artifactId={artifact._id} trashedNodeId={replicaTruth.trashedNodeId} />
+        ) : null}
         <ArtifactStudioEditor
           // Editor identity must remain stable while its clean/dirty state
           // changes. A key derived from `dirtyIds` remounted this tree on the
           // first keystroke, restoring the server snapshot and making every
           // artifact editor appear non-interactive. Remote revisions are
           // reconciled by ArtifactStudioEditor's snapshot effects.
-          key={`${artifact._id}:editor`}
+          key={`${artifact._id}:editor:${artifact.storageHome ?? "cloud"}:${artifact.storageEpoch ?? 0}`}
           mode={mode}
           artifact={artifact}
           artifacts={artifacts}
@@ -2846,7 +2264,8 @@ export function ArtifactStudio({
           onArchive={handleArchive}
           onShare={onShare ? () => onShare(artifact) : undefined}
           onDirtyChange={handleDirtyChange}
-          onOpenChats={onOpenChats}
+          onOpenThread={onOpenThread}
+          onPaneRoomChange={onPaneRoomChange}
           compact={compact}
           instanceKey={instanceKey}
           executeApplicationCommand={executeApplicationCommand}
@@ -2906,7 +2325,8 @@ function ArtifactStudioEditor({
   onArchive,
   onShare,
   onDirtyChange,
-  onOpenChats,
+  onOpenThread,
+  onPaneRoomChange,
   compact,
   instanceKey,
   executeApplicationCommand,
@@ -2922,7 +2342,9 @@ function ArtifactStudioEditor({
   onArchive?: () => Promise<void> | void;
   onShare?: () => void;
   onDirtyChange: (dirty: boolean) => void;
-  onOpenChats?: () => void;
+  /** Opens a conversation about this work where the surface keeps conversations. */
+  onOpenThread?: (thread: { id: string; title: string }) => void;
+  onPaneRoomChange?: (room: number) => void;
   compact: boolean;
   instanceKey?: string;
   executeApplicationCommand?: ApplicationCommandDispatcher;
@@ -2933,7 +2355,7 @@ function ArtifactStudioEditor({
     () => ({ artifactId: artifact._id, onReady: setEditorReady }),
     [artifact._id],
   );
-  const replicaTruth = useQuery(
+  const replicaTruth = useCalmQuery(
     api.replicas.forWork,
     useAuthedArgs({
       workId: artifact._id as never,
@@ -3005,6 +2427,7 @@ function ArtifactStudioEditor({
           ) && artifact.nativeFormat
         ? String(artifact.updatedAt)
         : null,
+    artifact.storageEpoch,
   );
   // A document or code body typed into before its room binds is rebuilt under the writer's
   // hands, which reordered and dropped characters. Hold typing for the short
@@ -3033,6 +2456,11 @@ function ArtifactStudioEditor({
     recoveryAdoptionRequest.current?.abort();
     recoveryAdoptionRequest.current = null;
   }, [artifact._id]);
+  // Said once per work, quietly: the work still opens.
+  const liveNotice = live.notice;
+  useEffect(() => {
+    if (liveNotice) toast.info(liveNotice, { id: `history-notice:${artifact._id}` });
+  }, [liveNotice, artifact._id]);
   const liveRecovery = useMemo(
     () =>
       describeFailure(
@@ -3149,8 +2577,9 @@ function ArtifactStudioEditor({
   const baselineRef = useRef(baseline);
   baselineRef.current = baseline;
   const [dirty, setDirty] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [commentsOpen, setCommentsOpen] = useState(false);
+  /** The one pane everything about this work opens in (see studio-pane). */
+  const [paneKind, setPaneKind] = useState<StudioPaneKind | null>(null);
+  const historyOpen = paneKind === "history";
   const [requestedComment, setRequestedComment] = useState<{
     id: string;
     body: string;
@@ -3166,7 +2595,7 @@ function ArtifactStudioEditor({
     const removeOpen = spectraBus.handle("comments.open", (input) => {
       if (input.artifactId !== artifact._id) return;
       setRequestedComment(null);
-      setCommentsOpen(true);
+      setPaneKind("comments");
       return {
         status: "completed",
         message: "Comments opened.",
@@ -3184,7 +2613,7 @@ function ArtifactStudioEditor({
         resolve,
           reject,
         });
-        setCommentsOpen(true);
+        setPaneKind("comments");
       });
     });
     // "/ Reference" and Insert › Reference a work: find the work to add by name or meaning.
@@ -3199,14 +2628,11 @@ function ArtifactStudioEditor({
       removeReference();
     };
   }, [artifact._id]);
-  const [embedsOpen, setEmbedsOpen] = useState(false);
   /** "/ Reference" asks for the work in a small search at the caret. */
   const [referencePicker, setReferencePicker] = useState<{ at: { x: number; y: number }; stackOnto?: string } | null>(null);
   const detailsEligible =
     artifact.blueprintKey !== "planner_task" &&
     artifact.blueprintKey !== "thread_reference";
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const detailsPinnedRef = useRef(false);
   const [aiHighlightDismissed, setAiHighlightDismissed] = useState(false);
   const [versions, setVersions] = useState<SpectraArtifactVersionSummary[]>([]);
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
@@ -3266,14 +2692,13 @@ function ArtifactStudioEditor({
       setVersions(current => cursor === undefined ? result.versions :
         [...new Map([...current, ...result.versions].map(version => [version._id, version])).values()]);
       setHistoryCursor(result.isDone ? null : result.continueCursor);
-      if (cursor === undefined && result.versions[0]) void selectHistoryVersion(result.versions[0]);
     } catch (error) {
       if (!request.signal.aborted)
         setHistoryError(error instanceof Error ? error.message : "Could not load version history.");
     } finally {
       if (!request.signal.aborted) setHistoryLoading(false);
     }
-  }, [artifact._id, selectHistoryVersion]);
+  }, [artifact._id]);
   useEffect(() => {
     historyActiveArtifactRef.current = historyOpen ? artifact._id : null;
     if (historyOpen) void loadHistoryPage();
@@ -3336,10 +2761,11 @@ function ArtifactStudioEditor({
     });
   }, []);
 
+  useEffect(() => setPaneKind(null), [artifact._id]);
+  // A comment asked for and then walked away from is not left waiting.
   useEffect(() => {
-    detailsPinnedRef.current = false;
-    setDetailsOpen(false);
-  }, [artifact._id, detailsEligible]);
+    if (paneKind !== "comments") setRequestedComment(null);
+  }, [paneKind]);
 
   useEffect(() => {
     if (mode !== "tab") return;
@@ -3371,6 +2797,8 @@ function ArtifactStudioEditor({
   const localSyncKeysRef = useRef(new Set<string>());
   const syncingRef = useRef(false);
   const nativeFallbackEditedRef = useRef(false);
+  /** What an unbound editor held when someone first typed in it. */
+  const nativeFallbackSeedRef = useRef<unknown>(null);
   const reconciliationFrameRef = useRef<number | null>(null);
   const nativeBodyBinding =
     artifact.blueprintKey === "document" || artifact.blueprintKey === "code";
@@ -3480,13 +2908,14 @@ function ArtifactStudioEditor({
   const incomingLiveTagDraft = live.liveValue.tags.join(", ");
   const incomingReactBody = nativeBodyBinding ? null : content;
   const incomingLiveSummary = humanSummary(live.liveValue.summary);
+  const incomingTitle = artifact.renamedFromTitle === live.liveValue.title ? artifact.title : live.liveValue.title;
   const incomingSummary =
     workType &&
     isGeneratedArtifactSummary(incomingLiveSummary, workType) &&
     isGeneratedArtifactSummary(humanSummary(artifact.summary), workType)
       ? refreshGeneratedArtifactSummary({
           blueprintKey: workType,
-          title: live.liveValue.title,
+          title: incomingTitle,
           content: live.liveValue.content,
           currentSummary: incomingLiveSummary,
           nextSummary: artifact.summary,
@@ -3494,7 +2923,7 @@ function ArtifactStudioEditor({
       : incomingLiveSummary;
   const incomingSnapshot = useMemo(
     () => ({
-      title: live.liveValue.title,
+      title: incomingTitle,
       summary: incomingSummary,
       tagDraft: incomingLiveTagDraft,
       // Native document/code editors already consume their Yjs types directly.
@@ -3510,7 +2939,7 @@ function ArtifactStudioEditor({
       incomingLiveTagDraft,
       incomingReactBody,
       incomingSummary,
-      live.liveValue.title,
+      incomingTitle,
       nativeBodyBinding,
       nativeProjectionOverrideRef,
       nativeProjectionReady,
@@ -3696,22 +3125,44 @@ function ArtifactStudioEditor({
         // Sheets plan cell writes against the room itself, and document/code
         // bodies are bound natively; every other body is replayed onto the
         // room's current value so a peer's unabsorbed edit is not reverted.
+        //
+        // A document edited while its room was out of reach is the exception:
+        // the editor held a copy that may be behind the room, so only what was
+        // typed there is carried over, never the copy itself.
+        const fallbackEdited = nativeBodyBinding && nativeFallbackEditedRef.current;
         const liveContent =
-          nativeBodyBinding ||
+          (nativeBodyBinding && !fallbackEdited) ||
           artifact.blueprintKey === "sheets" ||
           !live.modelSnapshot.initialized
             ? undefined
             : (live.flushSnapshot?.() ?? undefined)?.content;
+        const fallbackMerge =
+          fallbackEdited && artifact.blueprintKey === "document" && liveContent !== undefined
+            ? mergeFallbackDocumentEdit({
+                seed: documentJsonFromContent(nativeFallbackSeedRef.current ?? baselineRef.current.content, titled.title),
+                draft: documentJsonFromContent(snapshot.content, titled.title),
+                live: documentJsonFromContent(liveContent, titled.title),
+              })
+            : null;
+        if (fallbackMerge && !fallbackMerge.changed) nativeFallbackEditedRef.current = false;
+        const fallbackContent = fallbackMerge?.changed
+          ? (await import("./document-studio")).withDocumentFormatting(
+              documentContentFromJson(fallbackMerge.json, liveContent),
+              fallbackMerge.json,
+            )
+          : null;
         const nextLiveValue = {
           title: persistableTitle(snapshot.title),
           ...(snapshot.summary.trim()
             ? { summary: snapshot.summary.trim() }
             : {}),
-          content: draftContentForLiveWrite({
-            baseline: baselineRef.current.content,
-            draft: snapshot.content,
-            live: liveContent,
-          }),
+          content: fallbackMerge
+            ? (fallbackContent ?? liveContent)
+            : draftContentForLiveWrite({
+                baseline: (fallbackEdited ? nativeFallbackSeedRef.current : null) ?? baselineRef.current.content,
+                draft: snapshot.content,
+                live: liveContent,
+              }),
           tags: tagsFromDraft(snapshot.tagDraft),
         };
         // Document and code bodies are already committed through their native
@@ -3816,14 +3267,6 @@ function ArtifactStudioEditor({
       snapshotKey,
     ],
   );
-  const previewVersionChanges = useMemo(() => {
-    if (!previewVersion?.after || !previewVersion.before) return [];
-    return humanDiff(
-      readableSnapshot(previewVersion.after),
-      readableSnapshot(previewVersion.before),
-      artifact.blueprintKey,
-    );
-  }, [artifact.blueprintKey, previewVersion]);
   const previewDiff = useMemo(() => {
     if (!previewVersion?.after) return [];
     return humanDiff(
@@ -3835,7 +3278,10 @@ function ArtifactStudioEditor({
       },
       previewVersion.after,
       artifact.blueprintKey,
-    ).map((change) => {
+    )
+      // The rich-text tree mirrors the blocks, and its attributes are not read.
+      .filter((change) => !change.path.includes("tiptap") && !change.path.includes("attrs") && change.before !== change.after)
+      .map((change) => {
       if (change.regionId) return change;
       if (change.path[0] === "title")
         return { ...change, regionId: "metadata:title" };
@@ -3884,14 +3330,25 @@ function ArtifactStudioEditor({
           ),
     [artifact.aiEffects, artifact.aiState, live.state, previewClock],
   );
+  // A run keeps touching what it writes. Marks with no touch for this long were
+  // left behind by a run that is long gone, and must not read as work under way.
+  const aiMarkIsCurrent = useMemo(() => {
+    const touched = Math.max(
+      artifact.aiPreview?.startedAt ?? 0,
+      ...(artifact.aiEffects ?? []).map((effect) => effect.updatedAt ?? 0),
+    );
+    return !previewClock || previewClock - touched < AI_MARK_LIFETIME_MS;
+  }, [artifact.aiEffects, artifact.aiPreview?.startedAt, previewClock]);
   const liveWorkingAiEffects = useMemo(
     () =>
-      activeAiEffects.filter(
-        (effect) =>
-          effect.state !== "settling" &&
-          (artifact.aiState === "creating" || artifact.aiState === "updating"),
-      ),
-    [activeAiEffects, artifact.aiState],
+      aiMarkIsCurrent
+        ? activeAiEffects.filter(
+            (effect) =>
+              effect.state !== "settling" &&
+              (artifact.aiState === "creating" || artifact.aiState === "updating"),
+          )
+        : [],
+    [activeAiEffects, aiMarkIsCurrent, artifact.aiState],
   );
   const presencePreviewState = usePresencePreview(live.transport);
   const activeAiCollaborator = presencePreviewState.aiCollaborator;
@@ -4017,6 +3474,7 @@ function ArtifactStudioEditor({
     return [...new Set([...withoutCoarse, linePath])];
   })();
   const aiPreviewActive =
+    aiMarkIsCurrent &&
     Boolean(artifact.aiPreview) &&
     (artifact.aiState === "creating" || artifact.aiState === "updating");
   /**
@@ -4587,8 +4045,59 @@ function ArtifactStudioEditor({
    * provisional value is visible while the peer is still typing, and vanishes
    * on its own if their operation never lands.
    */
-  const showingDocumentPerformance = artifact.blueprintKey === "document" && followAi.following && Boolean(presencePreview);
-  const documentPerformanceContent = useMemo(() => showingDocumentPerformance ? documentPerformancePreview(durableEditorContent) : null, [showingDocumentPerformance, durableEditorContent]);
+  // The first opening of a work the AI just wrote plays it being written. The
+  // finished text must not show first, nor between one performance and the
+  // next: the page stays on the performance from opening until the hand has
+  // finished, since every swap would rebuild the editor and flash the document.
+  const [replayingFirstOpening, setReplayingFirstOpening] = useState(
+    () =>
+      artifact.blueprintKey === "document" &&
+      committedPerformancesFor(artifact._id).length > 0,
+  );
+  const replayBodySeenRef = useRef(false);
+  const performanceBodyPresent =
+    (followAi.following || replayingFirstOpening) && Boolean(presencePreview);
+  useEffect(() => {
+    if (!replayingFirstOpening) return;
+    if (presencePreview) {
+      replayBodySeenRef.current = true;
+      return;
+    }
+    const timer = window.setTimeout(
+      () => setReplayingFirstOpening(false),
+      replayBodySeenRef.current ? 700 : 2_500,
+    );
+    return () => window.clearTimeout(timer);
+  }, [presencePreview, replayingFirstOpening]);
+  const [performanceHeld, setPerformanceHeld] = useState(false);
+  useEffect(() => {
+    if (performanceBodyPresent) {
+      setPerformanceHeld(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setPerformanceHeld(false), 450);
+    return () => window.clearTimeout(timer);
+  }, [performanceBodyPresent]);
+  const showingDocumentPerformance =
+    artifact.blueprintKey === "document" &&
+    (replayingFirstOpening || performanceBodyPresent || performanceHeld);
+  const lastPerformanceContentRef = useRef<unknown>(null);
+  const documentPerformanceContent = useMemo(() => {
+    if (!showingDocumentPerformance) {
+      lastPerformanceContentRef.current = null;
+      return null;
+    }
+    if (!performanceBodyPresent) {
+      // Between performances: what was last on the page, never the room's text.
+      return (
+        lastPerformanceContentRef.current ??
+        documentPerformancePreview({ ...record(durableEditorContent), blocks: [] })
+      );
+    }
+    const preview = documentPerformancePreview(durableEditorContent);
+    lastPerformanceContentRef.current = preview;
+    return preview;
+  }, [performanceBodyPresent, showingDocumentPerformance, durableEditorContent]);
   const editorContent = useMemo(() => {
     if (remoteSpeculation.size === 0) return durableEditorContent;
     let documentBlocksAreSpeculative = false;
@@ -4812,6 +4321,101 @@ function ArtifactStudioEditor({
     anchor?: NonNullable<CollaborationPresence["cursor"]>["anchor"];
   } | null>(null);
   const studioSurfaceRef = useRef<HTMLDivElement>(null);
+  /* The last words of every right-click: what any place in any work can do. */
+  const studioMenu = useStudioContextMenu(({ target, x, y, selection }) => {
+    const link = target.closest("a[href]");
+    const href = link?.getAttribute("href") ?? "";
+    const editor = target.closest('[contenteditable="true"], .cm-content');
+    const canWriteHere = Boolean(editor) && !readOnly;
+    const region = target.closest("[data-anchor-region]")?.getAttribute("data-anchor-region")
+      ?? target.closest("[data-block-id]")?.getAttribute("data-block-id")
+      ?? undefined;
+    const groups: StudioMenuGroup[] = [];
+    if (href) {
+      groups.push([
+        { key: "link-open", label: "Open link", icon: ExternalLink, onSelect: () => window.open(href, "_blank", "noopener,noreferrer") },
+        { key: "link-copy", label: "Copy link", icon: Link2, onSelect: () => void navigator.clipboard?.writeText(href) },
+      ]);
+    }
+    groups.push([
+      ...(selection && canWriteHere ? [{ key: "cut", label: "Cut", hint: "Ctrl X", onSelect: () => void editorVerb("cut") }] : []),
+      ...(selection
+        ? [{
+            key: "copy",
+            label: "Copy",
+            icon: Copy,
+            hint: "Ctrl C",
+            onSelect: () => void navigator.clipboard?.writeText(selection),
+          }]
+        : []),
+      ...(canWriteHere ? [{ key: "paste", label: "Paste", hint: "Ctrl V", onSelect: () => void pasteAtCaret(editor) }] : []),
+    ]);
+    groups.push([
+      {
+        key: "ask",
+        label: selection ? "Ask Spectra about this" : "Ask Spectra about this work",
+        icon: MessageSquare,
+        onSelect: () =>
+          spectraBus.emit("island.compose", {
+            text: selection ? `\u201c${selection.slice(0, 280)}\u201d\n\n` : "",
+            references: [{ id: artifact._id, type: artifact.blueprintKey, title: artifact.title }],
+          }),
+      },
+      {
+        key: "comment",
+        label: selection ? "Comment on this" : "Add a comment",
+        icon: MessageSquarePlus,
+        onSelect: () => {
+          setActiveCommentRegionId(region);
+          setRequestedComment(null);
+          setPaneKind("comments");
+        },
+      },
+      ...(!readOnly
+        ? [{ key: "reference", label: "Add a reference here", icon: Link2, onSelect: () => setReferencePicker({ at: { x, y } }) }]
+        : []),
+    ]);
+    groups.push([
+      { key: "about", label: "About this work", icon: Info, onSelect: () => setPaneKind("about") },
+      { key: "history", label: "Version history", icon: History, onSelect: () => setPaneKind("history") },
+    ]);
+    return groups;
+  });
+  const pane = useStudioPane({
+    surfaceRef: studioSurfaceRef,
+    surface: mode === "tab" && !compact ? "full" : "panel",
+    kind: paneKind,
+    onKind: setPaneKind,
+    narrow: paneKind === "history",
+    stageMin: workType ? getWorkDefinition(workType).responsive.minInlineSize : 360,
+  });
+  /* A work beside a conversation asks for the pane's room, so the page keeps
+     its own floor beside Comments or History instead of turning into a strip.
+     Where the row cannot give it, the work covers the page until the pane shuts. */
+  const paneRoom = mode === "split" && !compact ? pane.requested : 0;
+  const onPaneRoomChangeRef = useRef(onPaneRoomChange);
+  onPaneRoomChangeRef.current = onPaneRoomChange;
+  useEffect(() => {
+    onPaneRoomChangeRef.current?.(paneRoom);
+  }, [paneRoom]);
+  useEffect(() => () => onPaneRoomChangeRef.current?.(0), []);
+  /* A version on show sits over the page and leaves the work's own heading,
+     and the buttons in it, where they are. */
+  const [stageTop, setStageTop] = useState(0);
+  useLayoutEffect(() => {
+    if (!historyOpen) return;
+    const main = presenceSurfaceRef.current;
+    if (main) setStageTop(main.offsetTop);
+  }, [historyOpen, previewVersion?._id]);
+  const pathname = usePathname();
+  /* On its own page away from the Library, or brought there from elsewhere,
+     a work offers the way back to where it was opened from. */
+  const backTo = useMemo(() => {
+    if (mode !== "tab" || compact) return null;
+    const origin = fullViewOrigin(artifact._id);
+    if (origin) return { href: origin };
+    return /^\/(library|workspace)(\/|$)/.test(pathname ?? "") ? null : { href: null };
+  }, [artifact._id, compact, mode, pathname]);
   // Things in the work form, unform and leave wakes in the field.
   useEditorFieldMoments(studioSurfaceRef);
   // Opened from a card or a row, the work grows out of it (MOTION.md, "Shared elements"), wherever it opens.
@@ -5220,30 +4824,27 @@ function ArtifactStudioEditor({
           target.tagName === "TEXTAREA" ||
           target.isContentEditable)
       ) {
+        // Typing in the pane: the first Escape leaves the box, the next closes the pane.
+        if (target.closest(".studio-pane") || (pane.open && studioSurfaceRef.current?.contains(target))) target.blur();
         return;
       }
       // Capture while overlays still exist. A bubble listener runs after Radix
       // closes the menu, so Escape on More would close the whole studio.
       if (
+        (document.querySelector('[data-escape-claim]') && (!pane.open || target?.closest('[data-escape-claim]'))) ||
         document.querySelector(
           // A work edited in place inside another, any modal (presenting, a
           // rehearsal's report), or an editor holding a selection that Escape
           // should let go of (`data-escape-claim`) takes Escape for itself.
-          '[data-escape-claim], [data-state="open"][aria-haspopup], [role="menu"][data-state="open"], [role="listbox"][data-state="open"], [role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"], details[open], [aria-expanded="true"][aria-haspopup], .slash-command-portal, .spectra-document-studio[data-focus], [data-embed-editor]',
+          '[data-state="open"][aria-haspopup], [role="menu"][data-state="open"], [role="listbox"][data-state="open"], [role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"], details[open], [aria-expanded="true"][aria-haspopup], .slash-command-portal, .spectra-document-studio[data-focus], [data-embed-editor]',
         )
       ) {
         return;
       }
-      if (historyOpen) {
-        setHistoryOpen(false);
-        return;
-      }
-      if (commentsOpen) {
-        setCommentsOpen(false);
-        return;
-      }
-      if (embedsOpen) {
-        setEmbedsOpen(false);
+      if (pane.open) {
+        // One step back at a time: a version on show goes first, then the pane.
+        if (historyOpen && previewVersion) setPreviewVersion(null);
+        else pane.close();
         return;
       }
       // Escape puts away a panel laid over the page; a work open as its own
@@ -5262,7 +4863,7 @@ function ArtifactStudioEditor({
     };
     // requestStudioClose reads latest dirty/panel flags via this effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- close handler closes over latest studio state
-  }, [artifact._id, commentsOpen, dirty, embedsOpen, historyOpen, instanceKey, live.unsynchronizedChanges, mode]);
+  }, [artifact._id, dirty, historyOpen, instanceKey, live.unsynchronizedChanges, mode, pane.close, pane.open, previewVersion]);
 
   const shellHistoryEnabled =
     !readOnly && SHELL_HISTORY_TYPES.has(artifact.blueprintKey);
@@ -5392,6 +4993,7 @@ function ArtifactStudioEditor({
       contentHistoryRef.current.record(latestContentRef.current, next);
       publishContentHistory();
     }
+    const previousContent = latestContentRef.current;
     latestContentRef.current = next;
     userHasEditedRef.current = true;
     reconcilingRemoteRef.current = false;
@@ -5402,7 +5004,10 @@ function ArtifactStudioEditor({
         artifact.blueprintKey === "code") &&
       !live.modelSnapshot.initialized
     )
+    {
+      if (!nativeFallbackEditedRef.current) nativeFallbackSeedRef.current = previousContent;
       nativeFallbackEditedRef.current = true;
+    }
     if (isArtifactTypeKey(artifact.blueprintKey)) {
       try {
         const regions = changedArtifactRegionIds(
@@ -5590,6 +5195,13 @@ function ArtifactStudioEditor({
       // The server closes preceding history and admits this exact restore in
       // one transaction. No optimistic restore is authored in the local Y.Doc.
       const requestId = pendingRestoreRequestRef.current.requestId;
+      if (version._id.startsWith("device:")) {
+        // Bridge writes it back into the room, and the open document follows.
+        await postSpectra({ action: "restoreDeviceVersion", artifactId: artifact._id, versionId: version._id, requestId });
+        pendingRestoreRequestRef.current = null;
+        if (restoreSelectionRef.current.artifactId === artifact._id) setPaneKind(null);
+        return;
+      }
       const result = await postSpectra<{
         state: "committed" | "unchanged";
         receipt: { versionId?: string; roomId?: string; sequence?: number; updateDigest?: string };
@@ -5606,7 +5218,7 @@ function ArtifactStudioEditor({
         throw new Error("The restore was not confirmed. Try again to recover its result.");
       pendingRestoreRequestRef.current = null;
       if (restoreSelectionRef.current.artifactId === artifact._id) {
-        setHistoryOpen(false);
+        setPaneKind(null);
         // Consume the exact admitted server delta through the provider path,
         // which does not create another authored restore or another append.
         try {
@@ -5618,12 +5230,9 @@ function ArtifactStudioEditor({
         catch { setLiveConflict({ message: "This version was restored. Reconnect to display the latest changes." }); }
       }
     } catch (error) {
-      setLiveConflict({
-        message:
-          error instanceof Error
-            ? error.message
-            : "This restore could not be applied safely.",
-      });
+      const message = error instanceof Error ? error.message : "This restore could not be applied safely.";
+      setLiveConflict({ message });
+      toast.error(message);
     } finally {
       restoreInFlightRef.current = false;
       setHistoryBusy(null);
@@ -5666,11 +5275,6 @@ function ArtifactStudioEditor({
     setDismissedRemoteKey(null);
   }
 
-  // Plans provide their own List/Board/Timeline surface with a task detail
-  // panel; nesting the generic details rail beside it creates an unusable
-  // three-column editor.
-  const showDetails =
-    detailsOpen && !compact && artifact.blueprintKey !== "planner_task";
   const contentMode = compact ? ("split" as const) : mode;
   const editorLayoutClass = "block";
   // The scrollport's padding lives in CSS so one rule can reserve room for the
@@ -5729,6 +5333,7 @@ function ArtifactStudioEditor({
     },
     [setActivePresence],
   );
+  const settledTransportState = useSettledTransportState(live.state);
   const presentation = useSyncPresentation(
     replicaTruth
       ? {
@@ -5746,7 +5351,7 @@ function ArtifactStudioEditor({
       : null,
     {
       queuedChangeCount: live.unsynchronizedChanges,
-      transportState: live.state,
+      transportState: settledTransportState,
       dirty: dirty || syncBusy,
       nativeActivity: Boolean(nativeMaterialization),
       nativeBridgeAvailable:
@@ -5761,6 +5366,7 @@ function ArtifactStudioEditor({
   const statusNow = useNow(30_000);
   useEffect(() => firstTipMoment("work"), []);
   const [statusActionBusy, setStatusActionBusy] = useState(false);
+  const putBackFile = useMutation(api.bridgeSync.putBackFile);
   const [statusCompareOpen, setStatusCompareOpen] = useState(false);
   const statusLocalReplica = replicaTruth?.replicas.find(
     (replica) => replica.kind === "local",
@@ -5805,6 +5411,7 @@ function ArtifactStudioEditor({
           retry: !readOnly,
           "sign-in": true,
           reconnect: true,
+          "put-back": !readOnly,
           "keep-spectra": Boolean(nativeConflict) && !readOnly,
           "keep-office": Boolean(nativeConflict) && !readOnly,
           compare: historyIsMine || Boolean(nativeConflict?.previews?.length),
@@ -5832,6 +5439,14 @@ function ArtifactStudioEditor({
     ],
   );
   const handleStatusAction = (kind: ArtifactStatusActionKind) => {
+    if (kind === "put-back") {
+      setStatusActionBusy(true);
+      void putBackFile({ workId: artifact._id as never })
+        .then(() => toast.success("Putting the file back in its folder."))
+        .catch(() => toast.error("The file couldn't be put back. Check that this computer's Bridge is running."))
+        .finally(() => setStatusActionBusy(false));
+      return;
+    }
     if (kind === "retry") {
       void save();
       return;
@@ -5845,7 +5460,7 @@ function ArtifactStudioEditor({
       return;
     }
     if (kind === "history") {
-      setHistoryOpen(true);
+      setPaneKind("history");
       return;
     }
     if (kind === "review-draft") {
@@ -5868,7 +5483,7 @@ function ArtifactStudioEditor({
       if (nativeConflict?.previews?.length) {
         setStatusCompareOpen((open) => !open);
       } else {
-        setHistoryOpen(true);
+        setPaneKind("history");
       }
       return;
     }
@@ -5909,27 +5524,30 @@ function ArtifactStudioEditor({
         ))}
       </div>
     ) : null;
-  const headerCommands: HeaderCommand[] = [
-    {
-      id: "comments",
-      label: "Comments",
-      icon: MessageSquare,
-      onSelect: () => setCommentsOpen(true),
-    },
-    ...(onOpenChats
-      ? [
-          {
-            id: "chats",
-            label: "Browse chats about this work",
-            icon: MessagesSquare,
-            onSelect: onOpenChats,
-          },
-        ]
-      : []),
-    ...(mode === "split" && !compact
-      ? [{ id: "open-full", label: "Open full", icon: Maximize2, onSelect: onExpand }]
-      : []),
+  const togglePane = (kind: StudioPaneKind) => setPaneKind((shown) => (shown === kind ? null : kind));
+  const paneKinds: StudioPaneKind[] = [
+    ...(detailsEligible ? (["about"] as const) : []),
+    "comments",
+    ...(detailsEligible ? (["threads"] as const) : []),
+    "references",
+    ...(historyIsMine ? (["history"] as const) : []),
   ];
+  // A work on its own page has room for these in the row; held in a side panel
+  // they join the rest under More.
+  const paneInRow = mode === "tab" && !compact;
+  const headerCommands: HeaderCommand[] = paneInRow
+    ? [
+        { id: "comments", label: "Comments", icon: MessageSquare, pressed: paneKind === "comments", onSelect: () => togglePane("comments") },
+        ...(detailsEligible
+          ? [
+              { id: "threads", label: "Threads about this work", icon: MessagesSquare, pressed: paneKind === "threads", onSelect: () => togglePane("threads") },
+              { id: "about", label: "About this work", icon: Info, pressed: paneKind === "about", onSelect: () => togglePane("about") },
+            ]
+          : []),
+      ]
+    : mode === "split" && !compact
+      ? [{ id: "open-full", label: "Open full", icon: Maximize2, onSelect: onExpand }]
+      : [];
   const syncTruth = useMemo(
     () => ({ state: presentation.state, label: presentation.label }),
     [presentation.label, presentation.state],
@@ -5947,43 +5565,12 @@ function ArtifactStudioEditor({
     [contractType],
   );
   const studioDensity = useStudioDensity(studioSurfaceRef, responsiveContract);
-  const loadVersionHistory = useCallback(() => {
-    setHistoryOpen(true);
+  const showInspector = useCallback((panel: StudioInspectorPanel) => {
+    setPaneKind(panel === "details" ? "about" : panel);
   }, []);
-  const showInspector = useCallback(
-    (panel: StudioInspectorPanel) => {
-      if (panel === "history") {
-        loadVersionHistory();
-        return;
-      }
-      if (panel === "comments") {
-        setCommentsOpen(true);
-        return;
-      }
-      if (panel === "references") {
-        setEmbedsOpen(true);
-        return;
-      }
-      detailsPinnedRef.current = true;
-      setDetailsOpen(true);
-    },
-    [loadVersionHistory],
-  );
-  const hideInspector = useCallback(() => {
-    setHistoryOpen(false);
-    setCommentsOpen(false);
-    setEmbedsOpen(false);
-    setDetailsOpen(false);
-  }, []);
-  const openInspector: StudioInspectorPanel | null = historyOpen
-    ? "history"
-    : commentsOpen
-      ? "comments"
-      : embedsOpen
-        ? "references"
-        : showDetails
-          ? "details"
-          : null;
+  const hideInspector = pane.close;
+  const openInspector: StudioInspectorPanel | null =
+    paneKind === "about" ? "details" : paneKind === "history" || paneKind === "comments" || paneKind === "references" ? paneKind : null;
   const inspector = useMemo(
     () => ({ open: openInspector, show: showInspector, hide: hideInspector }),
     [hideInspector, openInspector, showInspector],
@@ -6123,6 +5710,7 @@ function ArtifactStudioEditor({
           </div>
         </div>
         ) : null}
+        {instanceKey ? null : <WorkOrigin work={artifact} />}
       </div>
     </div>
   );
@@ -6133,6 +5721,8 @@ function ArtifactStudioEditor({
       ref={studioSurfaceRef}
       className="spectra-artifact-studio relative flex h-full min-h-0 flex-col"
       data-artifact-id={artifact._id}
+      {...pane.surfaceProps}
+      onContextMenu={studioMenu.onContextMenu}
       onPointerMove={handlePresencePointerMove}
       onPointerLeave={clearPresenceCursor}
       onPointerDownCapture={noteStudioInteraction}
@@ -6192,8 +5782,10 @@ function ArtifactStudioEditor({
           ? "typing"
           : undefined)
       }
-      style={{ "--studio-accent": meta.color } as CSSProperties}
+      style={{ "--studio-accent": meta.color, ...pane.surfaceStyle } as CSSProperties}
     >
+      <StudioMenuRegistry.Provider value={studioMenu.registry}>
+      <StudioPaneToolProvider value={pane.toolHost}>
       {/* Legacy coarse cursors are only for peers on the pre-v2 protocol.
           Anyone publishing a semantic frame is rendered by InteractionLayer,
           which is what keeps a peer from appearing twice. */}
@@ -6212,18 +5804,32 @@ function ArtifactStudioEditor({
       <header className="spectra-artifact-header relative z-chrome flex shrink-0 flex-col bg-transparent">
         <div className="spectra-artifact-header-topline flex min-w-0 items-start justify-between gap-3">
           <div className="spectra-artifact-identity-cluster flex min-w-0 flex-1 items-start gap-3">
-            <span
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control border border-[color-mix(in_oklab,currentColor_24%,transparent)] bg-[color-mix(in_oklab,currentColor_9%,var(--bg-elevated))]"
-              style={{ color: meta.color }}
-            >
-              <Icon className="h-4 w-4" />
-            </span>
+            {backTo ? (
+              <IconButton
+                label="Back"
+                icon={ArrowLeft}
+                onClick={() => (backTo.href ? router.push(backTo.href) : void requestStudioClose())}
+              />
+            ) : null}
+            {mode === "tab" ? (
+              <span className="flex h-8 w-6 shrink-0 items-center justify-center" style={{ color: meta.color }}>
+                <Icon className="h-[22px] w-[22px]" />
+              </span>
+            ) : (
+              <span
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control border border-[color-mix(in_oklab,currentColor_24%,transparent)] bg-[color-mix(in_oklab,currentColor_9%,var(--bg-elevated))]"
+                style={{ color: meta.color }}
+              >
+                <Icon className="h-4 w-4" />
+              </span>
+            )}
             <div className={`min-w-0 flex-1${headedByTask ? " self-center" : ""}`}>
               <span className="spectra-artifact-kind block truncate text-micro font-semibold text-[var(--text-tertiary)]">
                 {/* One planner work reads as what it is now: a task, or a plan of several. */}
                 {artifact.blueprintKey === "planner_task" ? "Task" : meta.label}
               </span>
-              {headedByTask ? null : identityBlock}
+              {/* A task heads its own page, but still says where it lives, like every other work. */}
+              {headedByTask ? (instanceKey ? null : <WorkOrigin work={artifact} />) : identityBlock}
             </div>
           </div>
           <ArtifactHeaderActions
@@ -6336,34 +5942,32 @@ function ArtifactStudioEditor({
                     <Share2 className="h-4 w-4" /> Share work
                   </WorkbarMenuAction>
                 ) : null}
-                <WorkbarMenuAction
-                  onSelect={() => {
-                    setEmbedsOpen(true);
-                  }}
-                >
+                {paneInRow ? null : (
+                  <>
+                    <WorkbarMenuAction onSelect={() => togglePane("comments")}>
+                      <MessageSquare className="h-4 w-4" /> Comments
+                    </WorkbarMenuAction>
+                    {detailsEligible ? (
+                      <>
+                        <WorkbarMenuAction onSelect={() => togglePane("threads")}>
+                          <MessagesSquare className="h-4 w-4" /> Threads about this work
+                        </WorkbarMenuAction>
+                        <WorkbarMenuAction onSelect={() => togglePane("about")}>
+                          <Info className="h-4 w-4" /> About this work
+                        </WorkbarMenuAction>
+                      </>
+                    ) : null}
+                  </>
+                )}
+                <WorkbarMenuAction onSelect={() => togglePane("references")}>
                   <Link2 className="h-4 w-4" /> References
                 </WorkbarMenuAction>
-                {artifact.blueprintKey !== "planner_task" ? (
-                  <WorkbarMenuAction
-                    onSelect={() => {
-                      detailsPinnedRef.current = true;
-                      setDetailsOpen((open) => !open);
-                    }}
-                  >
-                    <PanelRight className="h-4 w-4" />
-                    {detailsOpen ? "Close details" : "Open details"}
-                  </WorkbarMenuAction>
-                ) : null}
                 <WorkbarMenuAction onSelect={() => void makeCopy()}>
                   <Copy className="h-4 w-4" /> Make a copy
                 </WorkbarMenuAction>
                 {/* History, and who changed what, is the author's alone. */}
                 {historyIsMine ? (
-                  <WorkbarMenuAction
-                    onSelect={() => {
-                      loadVersionHistory();
-                    }}
-                  >
+                  <WorkbarMenuAction onSelect={() => togglePane("history")}>
                     <History className="h-4 w-4" /> Version history
                   </WorkbarMenuAction>
                 ) : null}
@@ -6420,7 +6024,7 @@ function ArtifactStudioEditor({
       {!permissionReadOnly &&
       isCollaborativeArtifact &&
       dirty &&
-      (live.state === "reconnecting" || live.state === "unsynchronized") ? (
+      (settledTransportState === "reconnecting" || settledTransportState === "unsynchronized") ? (
         <div className="relative z-dropdown h-0 shrink-0">
           <DismissibleArtifactNotice
             artifactId={artifact._id}
@@ -6767,17 +6371,7 @@ function ArtifactStudioEditor({
                 />
               ) : null}
               {artifact.blueprintKey === "timetable" ? (
-                <TimetableStudio
-                  key={`${artifact._id}:timetable`}
-                  artifactId={artifact._id}
-                  artifacts={artifacts}
-                  content={editorContent}
-                  onChange={editorChange}
-                  aiChangedPaths={highlightPaths}
-                  readOnly={readOnly}
-                  synchronizationReady={presentation.ready}
-                  onActiveRegionChange={handleActiveRegionChange}
-                />
+                <TimetableMoved />
               ) : null}
               {artifact.blueprintKey === "agent" ? (
                 <AgentFoundry
@@ -6802,18 +6396,6 @@ function ArtifactStudioEditor({
             </StudioContractProvider>
             </StudioViewportContext.Provider>
           </section>
-          {showDetails ? (
-            <div className="spectra-studio-inspector-overlay">
-              <StudioDetails
-                artifact={artifact}
-                artifacts={artifacts}
-                tagDraft={tagDraft}
-                onTagDraftChange={(value) => changeBase({ tagDraft: value })}
-                onArchive={onArchive}
-                onOpenArtifact={onOpenArtifact}
-              />
-            </div>
-          ) : null}
         </div>
       </section>
       {/* Pinned to the pane, not to the scrolling content: the reason an edit
@@ -6831,47 +6413,6 @@ function ArtifactStudioEditor({
         onSave={() => void saveAndClose()}
         onDiscard={() => void discardAndClose()}
         onKeepEditing={() => setUnsavedCloseOpen(false)}
-      />
-      <ArtifactCommentsPanel
-        open={commentsOpen}
-        artifactId={artifact._id}
-        artifactTitle={title || artifact.title}
-        regions={commentRegions}
-        preferredRegionId={activeCommentRegionId}
-        currentAccountId={currentAccountId}
-        relativePosition={commentRelativePosition}
-        wordComments={wordComments}
-        requestedComment={requestedComment}
-        onRequestedCommentResult={(error) => {
-          const pending = requestedComment;
-          setRequestedComment(null);
-          if (error) pending?.reject?.(error);
-          else
-            pending?.resolve?.({
-              status: "completed",
-              message: "Comment added.",
-              data: { artifactId: artifact._id },
-            });
-        }}
-        onClose={() => {
-          setCommentsOpen(false);
-          setRequestedComment(null);
-        }}
-      />
-      <ArtifactEmbedsPanel
-        open={embedsOpen}
-        containerId={artifact._id}
-        containerTitle={title || artifact.title}
-        containerWorkType={
-          isArtifactTypeKey(artifact.blueprintKey)
-            ? artifact.blueprintKey
-            : undefined
-        }
-        compatibilityProfile={studioContract.compatibilityProfile}
-        artifacts={artifacts}
-        regions={commentRegions}
-        onOpenSource={onOpenArtifact}
-        onClose={() => setEmbedsOpen(false)}
       />
       {referencePicker ? (
         <InlineReferencePicker
@@ -6970,38 +6511,102 @@ function ArtifactStudioEditor({
           ) : null}
         </DialogContent>
       </Dialog>
-      {historyOpen ? (
-        <HistoryComparisonOverlay
-          artifact={artifact}
-          current={{
-            title,
-            summary: summary || undefined,
-            content,
-            tags: tagsFromDraft(tagDraft),
-          }}
-          versions={versions.filter(version => version.artifactId === artifact._id)}
-          selected={previewVersion?.artifactId === artifact._id ? previewVersion : null}
-          changes={previewDiff}
-          versionChanges={previewVersionChanges}
+      {historyOpen && previewVersion?.artifactId === artifact._id ? (
+        <VersionStage
+          key={previewVersion._id}
+          blueprintKey={artifact.blueprintKey}
+          version={previewVersion}
+          liveChanges={previewDiff}
           selectedRegions={selectedRestoreRegions}
-          busyVersionId={historyBusy}
-          listLoading={historyLoading}
-          listError={historyError}
-          hasMore={historyCursor !== null}
-          previewLoading={previewLoading}
-          previewError={previewError}
           readOnly={readOnly}
-          onSelect={(version) => void selectHistoryVersion(version)}
-          onLoadMore={() => { if (historyCursor) void loadHistoryPage(historyCursor); }}
-          onRetryList={() => void loadHistoryPage(historyCursor ?? undefined)}
+          busy={historyBusy !== null}
+          loading={previewLoading}
+          error={previewError}
+          fills={pane.stageFills}
+          style={pane.stageFills ? undefined : { top: stageTop, right: pane.width }}
+          renderSnapshot={(snapshot) => (
+            <ReadonlyArtifactSnapshot artifactId={artifact._id} blueprintKey={artifact.blueprintKey} snapshot={snapshot} />
+          )}
           onSelectedRegionsChange={setSelectedRestoreRegions}
-          onRestore={(version, regionIds) =>
-            void restoreVersion(version, regionIds)
-          }
-          onCreateCheckpoint={createNamedCheckpoint}
-          onClose={() => setHistoryOpen(false)}
+          onRestore={(regionIds) => void restoreVersion(previewVersion, regionIds)}
+          onRetry={() => void selectHistoryVersion(previewVersion)}
+          onBack={() => setPreviewVersion(null)}
         />
       ) : null}
+      <StudioPane pane={pane} kinds={paneKinds} onKind={setPaneKind}>
+        {paneKind === "about" ? (
+          <WorkDetails
+            work={artifact}
+            tags={tagsFromDraft(tagDraft)}
+            onTagsChange={readOnly ? undefined : (tags) => changeBase({ tagDraft: tags.join(", ") })}
+            onArchive={onArchive ? () => void onArchive() : undefined}
+          >
+            <FileStorageControls artifactId={artifact._id} artifactTitle={artifact.title} embedded />
+          </WorkDetails>
+        ) : paneKind === "comments" ? (
+          <ArtifactCommentsPanel
+            open
+            artifactId={artifact._id}
+            regions={commentRegions}
+            preferredRegionId={activeCommentRegionId}
+            currentAccountId={currentAccountId}
+            relativePosition={commentRelativePosition}
+            wordComments={wordComments}
+            requestedComment={requestedComment}
+            onRequestedCommentResult={(error) => {
+              const pending = requestedComment;
+              setRequestedComment(null);
+              if (error) pending?.reject?.(error);
+              else
+                pending?.resolve?.({
+                  status: "completed",
+                  message: "Comment added.",
+                  data: { artifactId: artifact._id },
+                });
+            }}
+          />
+        ) : paneKind === "threads" ? (
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-6">
+            <WorkConversations
+              work={artifact}
+              onOpenThread={(thread) => (onOpenThread ? onOpenThread(thread) : router.push(threadHref(thread.id)))}
+            />
+          </div>
+        ) : paneKind === "references" ? (
+          <ArtifactEmbedsPanel
+            containerId={artifact._id}
+            containerWorkType={isArtifactTypeKey(artifact.blueprintKey) ? artifact.blueprintKey : undefined}
+            compatibilityProfile={studioContract.compatibilityProfile}
+            artifact={artifact}
+            artifacts={artifacts}
+            regions={commentRegions}
+            onOpenSource={onOpenArtifact}
+          />
+        ) : paneKind === "history" ? (
+          <VersionTimeline
+            versions={versions.filter((version) => version.artifactId === artifact._id)}
+            selectedId={previewVersion?._id ?? null}
+            disabled={historyBusy !== null}
+            loading={historyLoading}
+            error={historyError}
+            hasMore={historyCursor !== null}
+            canName={!readOnly}
+            onSelect={(version) => void selectHistoryVersion(version)}
+            onSelectNow={() => {
+              previewRequestRef.current?.abort();
+              setPreviewVersion(null);
+            }}
+            onLoadMore={() => {
+              if (historyCursor) void loadHistoryPage(historyCursor);
+            }}
+            onRetry={() => void loadHistoryPage(historyCursor ?? undefined)}
+            onName={createNamedCheckpoint}
+          />
+        ) : null}
+      </StudioPane>
+      </StudioPaneToolProvider>
+      </StudioMenuRegistry.Provider>
+      {studioMenu.element}
     </div>
     </OpenAnchorScope>
   );
@@ -7283,647 +6888,6 @@ function ThreadReferenceStudio({ content }: { content: unknown }) {
         </div>
       </div>
     </div>
-  );
-}
-
-function StudioDetails({
-  artifact,
-  artifacts,
-  tagDraft,
-  onTagDraftChange,
-  onArchive,
-  onOpenArtifact,
-}: {
-  artifact: SpectraArtifact;
-  artifacts: SpectraArtifact[];
-  tagDraft: string;
-  onTagDraftChange: (value: string) => void;
-  onArchive?: () => Promise<void> | void;
-  onOpenArtifact: (artifactId: string) => void;
-}) {
-  const meta = workTypeMeta[artifact.blueprintKey];
-  const Icon = meta.icon;
-  const placements = artifactPlacements(artifact);
-  const detailWaveStats = WAVE_C_BLUEPRINTS.has(artifact.blueprintKey)
-    ? waveCIdentityStats(artifact.blueprintKey, artifact.content)
-    : null;
-  const detailWaveTitle =
-    artifact.blueprintKey === "presentation"
-      ? "Presentation metrics"
-      : artifact.blueprintKey === "sheets"
-        ? "Sheet overview"
-        : artifact.blueprintKey === "code"
-          ? "Project overview"
-          : artifact.blueprintKey === "whiteboard"
-            ? "Board overview"
-            : "Calendar overview";
-  const links = linkedArtifacts(artifact, artifacts);
-  const [durableLinks, setDurableLinks] = useState<SpectraArtifactLink[]>([]);
-  const [linkingId, setLinkingId] = useState<string | null>(null);
-  const [linkPickerOpen, setLinkPickerOpen] = useState(false);
-  const [newTag, setNewTag] = useState("");
-  const [tagEditorOpen, setTagEditorOpen] = useState(false);
-  const [duplicating, setDuplicating] = useState(false);
-  const [detailsTab, setDetailsTab] = useState<"details" | "history">(
-    "details",
-  );
-  const [historyVersions, setHistoryVersions] = useState<
-    SpectraArtifactVersionSummary[]
-  >([]);
-  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState<string | null>(null);
-  const historyRequestRef = useRef<AbortController | null>(null);
-  const loadHistoryPage = useCallback(async (cursor?: string) => {
-    historyRequestRef.current?.abort();
-    const request = new AbortController();
-    historyRequestRef.current = request;
-    setHistoryLoading(true);
-    setHistoryError(null);
-    if (cursor === undefined) {
-      setHistoryVersions([]);
-      setHistoryCursor(null);
-    }
-    try {
-      const result = await getSpectraArtifactVersions(artifact._id, 20, cursor, request.signal);
-      if (request.signal.aborted) return;
-      setHistoryVersions(current => cursor === undefined ? result.versions :
-        [...new Map([...current, ...result.versions].map(version => [version._id, version])).values()]);
-      setHistoryCursor(result.isDone ? null : result.continueCursor);
-    } catch (error) {
-      if (!request.signal.aborted)
-        setHistoryError(error instanceof Error ? error.message : "Could not load version history.");
-    } finally {
-      if (!request.signal.aborted) setHistoryLoading(false);
-    }
-  }, [artifact._id]);
-  const visibleTags = tagsFromDraft(tagDraft);
-  const detailDeckCards =
-    artifact.blueprintKey === "flashcard_deck"
-      ? deckCards(artifact.content)
-      : [];
-  const detailDeckSections = new Set(
-    detailDeckCards.map((card) => card.section ?? "Section 1"),
-  ).size;
-  useEffect(() => {
-    void getSpectraArtifactLinks(artifact._id)
-      .then((result) => setDurableLinks(result.links))
-      .catch(() => setDurableLinks([]));
-  }, [artifact._id]);
-  useEffect(() => {
-    if (detailsTab !== "history") return;
-    void loadHistoryPage();
-    return () => historyRequestRef.current?.abort();
-  }, [detailsTab, loadHistoryPage]);
-  const linkedIds = new Set(
-    durableLinks.flatMap((link) =>
-      link.artifact?.id ? [link.artifact.id] : [],
-    ),
-  );
-  const suggestions = artifacts
-    .filter(
-      (candidate) =>
-        candidate._id !== artifact._id && !linkedIds.has(candidate._id),
-    )
-    .map((candidate) => {
-      const sharedWorkspace = artifactPlacements(candidate).some((placement) =>
-        placements.some(
-          (source) => source.workspaceId === placement.workspaceId,
-        ),
-      );
-      const sharedTags = candidate.tags.filter((tag) =>
-        artifact.tags.includes(tag),
-      ).length;
-      const titleWords = artifact.title
-        .toLowerCase()
-        .split(/\W+/)
-        .filter((word) => word.length > 3);
-      const titleMatch = titleWords.some((word) =>
-        `${candidate.title} ${candidate.summary ?? ""}`
-          .toLowerCase()
-          .includes(word),
-      );
-      return {
-        candidate,
-        score:
-          Number(sharedWorkspace) * 5 +
-          sharedTags * 3 +
-          Number(titleMatch) * 2 +
-          Number(candidate.blueprintKey === artifact.blueprintKey),
-      };
-    })
-    .filter((item) => item.score > 0)
-    .sort(
-      (a, b) =>
-        b.score - a.score || b.candidate.updatedAt - a.candidate.updatedAt,
-    )
-    .slice(0, 3);
-
-  async function confirmLink(target: SpectraArtifact) {
-    setLinkingId(target._id);
-    try {
-      await postSpectra({
-        action: "createArtifactLink",
-        sourceArtifactId: artifact._id,
-        targetArtifactId: target._id,
-        relationType: "related",
-        workspaceId: placements[0]?.workspaceId,
-        explanation: "Confirmed from a suggested link",
-      });
-      const result = await getSpectraArtifactLinks(artifact._id);
-      setDurableLinks(result.links);
-    } finally {
-      setLinkingId(null);
-    }
-  }
-  async function removeLink(linkId: string) {
-    await postSpectra({ action: "removeArtifactLink", linkId });
-    const result = await getSpectraArtifactLinks(artifact._id);
-    setDurableLinks(result.links);
-  }
-  async function duplicateCurrentArtifact() {
-    setDuplicating(true);
-    const creation = beginCreation();
-    try {
-      const result = await postSpectra<{ artifactId: string }>({
-        action: "createArtifact",
-        blueprintKey: artifact.blueprintKey,
-        title: `${artifact.title} copy`,
-        summary: artifact.summary,
-        content: artifact.content,
-        tags: artifact.tags,
-        workspaceId: placements[0]?.workspaceId,
-      });
-      spectraBus.emit("workspace.refreshRequested", {});
-      creation.land();
-      onOpenArtifact(result.artifactId);
-    } catch (error) {
-      creation.cancel();
-      throw error;
-    } finally {
-      setDuplicating(false);
-    }
-  }
-  return (
-    <aside className="spectra-studio-details overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)]">
-      <div className="grid grid-cols-2 border-b border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 pt-1">
-        <button
-          type="button"
-          onClick={() => setDetailsTab("details")}
-          className={`h-11 border-b-2 text-caption font-semibold ${detailsTab === "details" ? "border-[var(--text-primary)] text-[var(--text-primary)]" : "border-transparent text-[var(--text-secondary)]"}`}
-        >
-          Details
-        </button>
-        <button
-          type="button"
-          onClick={() => setDetailsTab("history")}
-          className={`h-11 border-b-2 text-caption font-semibold ${detailsTab === "history" ? "border-[var(--text-primary)] text-[var(--text-primary)]" : "border-transparent text-[var(--text-secondary)]"}`}
-        >
-          Activity
-        </button>
-      </div>
-      {detailsTab === "details" ? (
-        <div className="space-y-3 p-3">
-          <SideCard title="Blueprint">
-            <div className="flex items-center gap-2 text-caption font-semibold text-[var(--text-primary)]">
-              <Icon className="h-4 w-4" style={{ color: meta.color }} />
-              {meta.label}
-            </div>
-          </SideCard>
-          <SideCard title="Placement">
-            <div className="space-y-2">
-              {placements.length > 0 ? (
-                placements.map((placement) => (
-                  <div
-                    key={placement.nodeId}
-                    className="rounded-control px-1 py-1 text-caption font-medium text-[var(--text-primary)]"
-                  >
-                    {placement.workspaceTitle}
-                    <div className="text-micro font-normal text-[var(--text-secondary)]">
-                      Workspace
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-ui text-[var(--text-secondary)]">
-                  Library inbox
-                </div>
-              )}
-            </div>
-          </SideCard>
-          <FileStorageControls
-            artifactId={artifact._id}
-            artifactTitle={artifact.title}
-            embedded
-          />
-          {detailWaveStats?.length ? (
-            <SideCard title={detailWaveTitle}>
-              <div className="grid grid-cols-3 divide-x divide-[var(--border-subtle)] text-center">
-                {detailWaveStats.map(([value, label]) => (
-                  <div key={label} className="px-1">
-                    <strong className="block font-sans text-ui font-semibold tracking-[-0.01em] text-[var(--text-primary)]">
-                      {value}
-                    </strong>
-                    <span className="text-micro text-[var(--text-tertiary)]">
-                      {label}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </SideCard>
-          ) : null}
-          {artifact.blueprintKey === "flashcard_deck" ? (
-            <SideCard title="Deck metrics">
-              <div className="grid grid-cols-3 divide-x divide-[var(--border-subtle)] text-center">
-                <div>
-                  <strong className="block font-display text-body text-[var(--text-primary)]">
-                    {detailDeckCards.length}
-                  </strong>
-                  <span className="text-micro text-[var(--text-tertiary)]">
-                    Cards
-                  </span>
-                </div>
-                <div>
-                  <strong className="block font-display text-body text-[var(--text-primary)]">
-                    {detailDeckSections}
-                  </strong>
-                  <span className="text-micro text-[var(--text-tertiary)]">
-                    Sections
-                  </span>
-                </div>
-                <div>
-                  <strong className="block font-display text-body text-[var(--text-primary)]">
-                    ~{Math.max(1, Math.round(detailDeckCards.length * 0.75))}{" "}
-                    min
-                  </strong>
-                  <span className="text-micro text-[var(--text-tertiary)]">
-                    Study time
-                  </span>
-                </div>
-              </div>
-            </SideCard>
-          ) : null}
-          <SideCard title="Linked work">
-            <div className="space-y-2">
-              {durableLinks.slice(0, 8).map((link) =>
-                link.artifact ? (
-                  <div
-                    key={link._id}
-                    className="group rounded-control px-1 py-1.5 text-micro text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-                    data-link-direction={link.direction}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-cyan)]" />
-                      <span className="min-w-0 flex-1 truncate font-medium">
-                        {link.artifact.title}
-                      </span>
-                      <span className="text-micro text-[var(--text-tertiary)]">
-                        {link.direction === "incoming" ? "←" : "→"}{" "}
-                        {link.relationType.replaceAll("_", " ")}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => void removeLink(link._id)}
-                        className="text-[var(--text-tertiary)] opacity-0 transition hover:text-[var(--danger)] group-hover:opacity-100"
-                        aria-label={`Remove link to ${link.artifact.title}`}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  </div>
-                ) : null,
-              )}
-              {links.slice(0, 4).map(({ artifact: linked }) => {
-                const linkedMeta = workTypeMeta[linked.blueprintKey];
-                const LinkedIcon = linkedMeta.icon;
-                return (
-                  <div
-                    key={linked._id}
-                    className="flex items-center gap-2 text-caption text-[var(--text-primary)]"
-                  >
-                    <LinkedIcon
-                      className="h-4 w-4"
-                      style={{ color: linkedMeta.color }}
-                    />
-                    <span className="min-w-0 flex-1 truncate">
-                      {linked.title}
-                    </span>
-                  </div>
-                );
-              })}
-              {links.length === 0 && durableLinks.length === 0 ? (
-                <div className="text-caption text-[var(--text-secondary)]">
-                  No confirmed links yet.
-                </div>
-              ) : null}
-              <button
-                type="button"
-                className="inline-flex h-7 items-center gap-1.5 rounded-chip px-1.5 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                onClick={() => setLinkPickerOpen((open) => !open)}
-                aria-expanded={linkPickerOpen}
-              >
-                <Plus className="h-3 w-3" /> Link work
-              </button>
-              {linkPickerOpen ? (
-                <div className="space-y-1 border-t border-[var(--border-subtle)] pt-2">
-                  {suggestions.map(({ candidate }) => (
-                    <div
-                      key={candidate._id}
-                      className="flex items-center gap-2 rounded-chip px-1 py-1 text-micro"
-                    >
-                      <span className="min-w-0 flex-1 truncate text-[var(--text-secondary)]">
-                        {candidate.title}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={linkingId === candidate._id}
-                        className="text-[var(--accent-cyan)]"
-                        onClick={() => void confirmLink(candidate)}
-                      >
-                        {linkingId === candidate._id ? "Linking…" : "Add"}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </SideCard>
-          {suggestions.length > 0 ? (
-            <details
-              open
-              className="spectra-related-artifacts rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3"
-            >
-              <summary className="text-micro font-semibold text-[var(--text-tertiary)]">
-                Related suggestions · {suggestions.length}
-              </summary>
-              <div className="space-y-1.5">
-                {suggestions.map(({ candidate }) => (
-                  <div
-                    key={candidate._id}
-                    className="group flex items-center gap-2 rounded-control px-1.5 py-1.5 hover:bg-[var(--bg-primary)]"
-                  >
-                    <span className="min-w-0 flex-1 truncate text-micro text-[var(--text-secondary)]">
-                      {candidate.title}
-                    </span>
-                    <button
-                      type="button"
-                      disabled={linkingId === candidate._id}
-                      onClick={() => void confirmLink(candidate)}
-                      className="rounded-chip px-1.5 py-1 text-micro font-medium text-[var(--accent-cyan)] opacity-70 hover:bg-[var(--bg-hover)] group-hover:opacity-100"
-                    >
-                      {linkingId === candidate._id
-                        ? "Linking…"
-                        : "Confirm link"}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </details>
-          ) : null}
-          {artifact.createdFrom ? (
-            <SideCard title="Provenance">
-              <div className="text-micro leading-5 text-[var(--text-secondary)]">
-                <div className="font-medium text-[var(--text-primary)]">
-                  {artifact.createdFrom.contextSummary ??
-                    `Created from ${artifact.createdFrom.source}`}
-                </div>
-                {artifact.createdFrom.sourceArtifactIds?.length ? (
-                  <div className="mt-1">
-                    Used {artifact.createdFrom.sourceArtifactIds.length} source
-                    artifact
-                    {artifact.createdFrom.sourceArtifactIds.length === 1
-                      ? ""
-                      : "s"}
-                  </div>
-                ) : null}
-                {artifact.createdFrom.threadId ? (
-                  <div>Includes conversation context</div>
-                ) : null}
-                {artifact.createdFrom.sourceAttachmentNames?.length ? (
-                  <div>
-                    {artifact.createdFrom.sourceAttachmentNames.length}{" "}
-                    attachment
-                    {artifact.createdFrom.sourceAttachmentNames.length === 1
-                      ? ""
-                      : "s"}
-                  </div>
-                ) : null}
-              </div>
-            </SideCard>
-          ) : null}
-          <SideCard title="Tags">
-            <div className="flex flex-wrap gap-1.5">
-              {visibleTags.map((tag) => (
-                <span
-                  key={tag}
-                  className="inline-flex items-center gap-1 rounded-chip border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1 text-micro font-medium text-[var(--text-secondary)]"
-                  data-artifact-tag={tag}
-                >
-                  <span>{tag}</span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onTagDraftChange(
-                        visibleTags.filter((item) => item !== tag).join(", "),
-                      )
-                    }
-                    aria-label={`Remove ${tag}`}
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
-              ))}
-              <button
-                type="button"
-                className="grid h-7 w-7 place-items-center rounded-chip border border-[var(--border-default)] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                onClick={() => setTagEditorOpen((open) => !open)}
-                aria-label="Add tag"
-                aria-expanded={tagEditorOpen}
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            {tagEditorOpen ? (
-              <div className="mt-2 flex gap-1.5">
-                <input
-                  value={newTag}
-                  onChange={(event) => setNewTag(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && newTag.trim()) {
-                      event.preventDefault();
-                      onTagDraftChange(
-                        Array.from(
-                          new Set([...visibleTags, newTag.trim()]),
-                        ).join(", "),
-                      );
-                      setNewTag("");
-                    }
-                  }}
-                  className="h-8 min-w-0 flex-1 bg-transparent text-micro text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
-                  placeholder="Add a tag"
-                />
-                <button
-                  type="button"
-                  className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--accent-cyan)] hover:bg-[var(--bg-hover)]"
-                  onClick={() => {
-                    if (!newTag.trim()) return;
-                    onTagDraftChange(
-                      Array.from(new Set([...visibleTags, newTag.trim()])).join(
-                        ", ",
-                      ),
-                    );
-                    setNewTag("");
-                  }}
-                  aria-label="Add tag"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ) : null}
-          </SideCard>
-          <SideCard
-            title={
-              artifact.blueprintKey === "flashcard_deck"
-                ? "Metadata"
-                : "Activity"
-            }
-          >
-            <div className="space-y-2 text-micro text-[var(--text-secondary)]">
-              <div className="flex items-center justify-between">
-                <span>Last edited</span>
-                <strong className="font-medium text-[var(--text-primary)]">
-                  {formatRelativeTime(artifact.updatedAt)}
-                </strong>
-              </div>
-              <div className="flex items-center justify-between">
-                <span>Created</span>
-                <strong className="font-medium text-[var(--text-primary)]">
-                  {formatShortDate(artifact.createdAt)}
-                </strong>
-              </div>
-            </div>
-          </SideCard>
-          {artifact.blueprintKey === "flashcard_deck" ||
-          artifact.blueprintKey === "quiz" ? (
-            <SideCard title="Quick actions">
-              <div className="space-y-0.5">
-                {artifact.blueprintKey === "flashcard_deck" ? (
-                  <button
-                    type="button"
-                    className="spectra-inspector-action"
-                    onClick={() =>
-                      void spectraBus.command("deck.study", {
-                        workId: artifact._id,
-                      })
-                    }
-                  >
-                    <BookOpen className="h-3.5 w-3.5" />
-                    Study this deck
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="spectra-inspector-action"
-                    onClick={() =>
-                      void spectraBus.command("quiz.preview", {
-                        workId: artifact._id,
-                      })
-                    }
-                  >
-                    <Eye className="h-3.5 w-3.5" />
-                    Preview quiz
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="spectra-inspector-action"
-                  disabled={duplicating}
-                  onClick={() => void duplicateCurrentArtifact()}
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                  {duplicating
-                    ? "Duplicating…"
-                    : `Duplicate ${artifact.blueprintKey === "quiz" ? "quiz" : "deck"}`}
-                </button>
-                <button
-                  type="button"
-                  className="spectra-inspector-action"
-                  onClick={() => window.print()}
-                >
-                  <FileDown className="h-3.5 w-3.5" />
-                  Export / print
-                </button>
-                {onArchive ? (
-                  <button
-                    type="button"
-                    className="spectra-inspector-action"
-                    onClick={() => void onArchive()}
-                  >
-                    <Archive className="h-3.5 w-3.5" />
-                    Archive {artifact.blueprintKey === "quiz" ? "quiz" : "deck"}
-                  </button>
-                ) : null}
-              </div>
-            </SideCard>
-          ) : null}
-        </div>
-      ) : (
-        <div className="p-3">
-          <SideCard title="History">
-            <div className="space-y-2">
-              {historyVersions.filter(version => version.artifactId === artifact._id).map((version, index) => (
-                <div
-                  key={version._id}
-                  className="rounded-control bg-[var(--bg-primary)] px-3 py-2.5"
-                >
-                  <div className="flex items-center gap-2 text-micro font-semibold text-[var(--text-primary)]">
-                    <History className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
-                    {index === 0
-                      ? "Current saved version"
-                      : version.summary || "Saved version"}
-                  </div>
-                  <div className="mt-1 flex items-center justify-between text-micro text-[var(--text-tertiary)]">
-                    <span>
-                      {historyKind(version)}
-                    </span>
-                    <span>{formatRelativeTime(version.createdAt)}</span>
-                  </div>
-                </div>
-              ))}
-              {historyError ? (
-                <div role="alert" className="text-micro text-[var(--text-secondary)]">
-                  <p>{historyError}</p>
-                  <button type="button" onClick={() => void loadHistoryPage(historyCursor ?? undefined)} disabled={historyLoading} className="mt-2 h-8 rounded-control border border-[var(--border-default)] px-3">Retry history</button>
-                </div>
-              ) : null}
-              {historyLoading ? <p role="status" className="text-micro text-[var(--text-secondary)]">Loading history…</p> : historyCursor && !historyError ? (
-                <button type="button" onClick={() => void loadHistoryPage(historyCursor)} className="h-8 rounded-control border border-[var(--border-default)] px-3 text-micro">Load older versions</button>
-              ) : null}
-              {historyVersions.length === 0 && !historyLoading && !historyError ? (
-                <p className="text-micro leading-5 text-[var(--text-secondary)]">
-                  No saved versions yet.
-                </p>
-              ) : null}
-            </div>
-          </SideCard>
-        </div>
-      )}
-    </aside>
-  );
-}
-
-function SideCard({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section
-      data-spectra-card="side"
-      data-side-card-title={title.toLowerCase().replaceAll(" ", "-")}
-      className="p-4"
-    >
-      <h3 className="mb-3 text-micro font-semibold text-[var(--text-tertiary)]">
-        {title}
-      </h3>
-      {children}
-    </section>
   );
 }
 

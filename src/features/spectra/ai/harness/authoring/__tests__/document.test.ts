@@ -208,7 +208,7 @@ describe("document Markdown", () => {
       ]),
     ).toThrow(/Edit 2 \(replace\): `find` text appears 2 times/);
     expect(() => applyDocumentEdits(base, [{ op: "replace", find: "zeta", replace: "x" }])).toThrow(
-      /Edit 1 \(replace\): `find` text was not found/,
+      /Edit 1 \(replace\): `find` text "zeta" is not in the document/,
     );
     expect(() => applyDocumentEdits(base, [{ op: "move_section", heading: "Missing", position: "end" }])).toThrow(
       /no heading matches "Missing"/,

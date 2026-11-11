@@ -62,7 +62,7 @@ export const dispatch = internalMutation({
     }
     const next = await ctx.db.query("semanticIndexQueue")
       .withIndex("by_status_due", (q) => q.eq("status", "waiting")).first();
-    const nextRun = next ? Math.max(next.dueAt, now + (capacity > 0 ? 250 : 2_000)) : undefined;
+    const nextRun = next ? Math.max(next.dueAt, now + (capacity > 0 ? 5_000 : 15_000)) : undefined;
     await scheduleNext(ctx, nextRun);
     return { started };
   },

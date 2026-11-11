@@ -78,6 +78,9 @@ export type OrgNodeView = {
     owned: boolean;
     shared: boolean;
     aiState?: string;
+    /** Kept on one computer, so it opens only where that computer's Bridge answers. */
+    storageHome?: "device";
+    storageStoreId?: string;
   };
 };
 
@@ -94,12 +97,12 @@ export async function sharedByActor(
   resourceIds: string[],
 ) {
   const uniqueResourceIds = [...new Set(resourceIds)];
-  const now = Date.now();
+  let now: number | undefined;
   const rows = await Promise.all(
     uniqueResourceIds.map(async (resourceId) => {
       const activeInvitations = await Promise.all(
-        (["pending", "accepted"] as const).map((status) =>
-          ctx.db
+        (["pending", "accepted"] as const).map(async (status) => {
+          const invitations = ctx.db
             .query("shareInvitations")
             .withIndex("by_resource_inviter_status", (q) =>
               q
@@ -107,15 +110,13 @@ export async function sharedByActor(
                 .eq("resourceId", resourceId)
                 .eq("inviterAccountId", accountId)
                 .eq("status", status),
-            )
-            .filter((q) =>
-              q.or(
-                q.eq(q.field("expiresAt"), undefined),
-                q.gt(q.field("expiresAt"), now),
-              ),
-            )
-            .first(),
-        ),
+            );
+          for await (const invitation of invitations) {
+            if (invitation.expiresAt === undefined || invitation.expiresAt > (now ??= Date.now()))
+              return invitation;
+          }
+          return null;
+        }),
       );
       return activeInvitations.some(Boolean) ? resourceId : null;
     }),
@@ -245,6 +246,8 @@ export async function hydrateNodes(
               summary?: string;
               updatedAt?: number;
               aiState?: string;
+              storageHome?: "device";
+              storageStoreId?: string;
             }
           | undefined;
         const sharedOut = await sharedOutPromise;
@@ -265,6 +268,9 @@ export async function hydrateNodes(
             (ownerAccountId !== undefined && ownerAccountId !== node.accountId) ||
             sharedOut?.has(node.sourceId) === true,
           aiState: artifactProjection?.aiState,
+          ...(artifactProjection?.storageHome
+            ? { storageHome: artifactProjection.storageHome, storageStoreId: artifactProjection.storageStoreId }
+            : {}),
         };
       } else if (node.kind === "thread") {
         const threadId = ctx.db.normalizeId("spectraThreads", node.sourceId);

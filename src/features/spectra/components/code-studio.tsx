@@ -1,5 +1,6 @@
 "use client";
 
+import { useLatest, useStudioContextItems } from "./studio-context-menu";
 import CodeMirror from "@uiw/react-codemirror";
 import { indentWithTab } from "@codemirror/commands";
 import { css } from "@codemirror/lang-css";
@@ -116,6 +117,7 @@ import {
   buildSpectraSandboxDocument,
   type SpectraSandboxAsset,
   type SpectraSandboxFrameMessage,
+  isBenignRuntimeError,
 } from "../embed/sandbox-protocol";
 import {
   SandboxedArtifactRuntime,
@@ -155,6 +157,25 @@ type RunState =
   | "cancelled";
 
 type CodeSurface = "preview" | "code" | "split";
+
+const surfaceKey = (artifactId: string) => `spectra:code-surface:${artifactId}`;
+
+function rememberedSurface(artifactId: string): CodeSurface | null {
+  try {
+    const value = window.localStorage.getItem(surfaceKey(artifactId));
+    return value === "preview" || value === "code" || value === "split" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberSurface(artifactId: string, surface: CodeSurface) {
+  try {
+    window.localStorage.setItem(surfaceKey(artifactId), surface);
+  } catch {
+    // Only a convenience: the studio still opens on the default.
+  }
+}
 
 /**
  * The registry owns which views exist and who may enter them, so the studio
@@ -464,14 +485,19 @@ export function CodeStudio({
   // as it was; that is not a reason to put it back.
   const seenIncomingKeyRef = useRef(codeContentKey(incoming));
   const [activeFileId, setActiveFileId] = useState(incoming.entryFileId);
-  // Code and what it makes open side by side unless the work asked otherwise.
-  const [surface, setSurface] = useState<CodeSurface>(
-    incoming.visualisation.openMode === "preview"
-      ? "preview"
-      : incoming.visualisation.openMode === "source"
-        ? "code"
-        : "split",
-  );
+  // Full screen shows code and what it makes side by side. The panel has room for
+  // one, so it opens on what the code makes, when it makes something.
+  const [surface, setSurface] = useState<CodeSurface>(() => {
+    const makesSomething =
+      incoming.runtime !== "none" && incoming.runtime !== "python" && incoming.visualisation.enabled !== false;
+    const chosen = rememberedSurface(artifactId);
+    // The split only exists at full width; narrower, it reads as the code.
+    if (chosen === "split" && contract.surface !== "full") return "code";
+    if (chosen && (chosen === "code" || makesSomething)) return chosen;
+    const mode = incoming.visualisation.openMode;
+    if (mode === "preview" || mode === "source") return mode === "preview" ? "preview" : "code";
+    return makesSomething ? "preview" : "code";
+  });
   const [sourceMode, setSourceMode] = useState<"code" | "parameters">("code");
   const [fileQuery, setFileQuery] = useState("");
   const [pendingSearchTarget, setPendingSearchTarget] = useState<{
@@ -982,6 +1008,27 @@ export function CodeStudio({
     }
   }
 
+  const fileVerbs = useLatest({ duplicateFile, files: workbook.files });
+  useStudioContextItems(({ target }) => {
+    const fileId = target.closest("[data-studio-item]")?.getAttribute("data-studio-item");
+    if (!fileId || readOnly) return null;
+    const only = fileVerbs.current.files.length === 1;
+    return [[
+      {
+        key: "file-rename",
+        label: "Rename",
+        icon: Pencil,
+        onSelect: () => {
+          const file = fileVerbs.current.files.find((entry) => entry.id === fileId);
+          if (!file) return;
+          setRenameDraft(file.path);
+          setRenamingFileId(fileId);
+        },
+      },
+      { key: "file-copy", label: "Duplicate", icon: Copy, onSelect: () => fileVerbs.current.duplicateFile(fileId) },
+      { key: "file-delete", label: "Delete", icon: Trash2, danger: true, disabled: only, onSelect: () => setDeleteFileId(fileId) },
+    ]];
+  });
   function deleteFile() {
     if (!deleteFileId || workbook.files.length === 1) return;
     const nextFiles = workbook.files.filter((file) => file.id !== deleteFileId);
@@ -1519,6 +1566,7 @@ export function CodeStudio({
         `${event.status === "passed" ? "Passed" : "Failed"}: ${event.name}${event.message ? `. ${event.message}` : ""}`,
       );
     } else if (event.type === "spectra:error") {
+      if (isBenignRuntimeError(event.message)) return;
       if (exportJob) {
         setExportError(event.message);
         setExportJob(null);
@@ -2354,12 +2402,9 @@ export function CodeStudio({
   // under it — or the preview's min-content blows the panel across the library.
   const splitPreviewOpen = surface === "split" && isFullscreen;
   const selectSurface = (next: CodeSurface) => {
+    rememberSurface(artifactId, next);
     setSurface(next);
     setSettingsOpen(false);
-    mutate((draft) => {
-      draft.visualisation.openMode =
-        next === "code" ? "source" : next === "preview" ? "preview" : "split";
-    });
   };
   const panelModes: WorkbarModeSpec[] = [
     {
@@ -2692,7 +2737,7 @@ export function CodeStudio({
             />
           ) : undefined
         }
-        primary={{
+        primary={surface === "preview" && running ? undefined : {
           label: running ? "Stop" : "Run",
           icon: running ? CircleStop : Play,
           requires: "execute",

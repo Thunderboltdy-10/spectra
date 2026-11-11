@@ -64,13 +64,26 @@ async function fixture(format: "docx" | "xlsx", changed: boolean, local = true) 
     compatibilityProfile: "strict-native", url: "https://example.invalid/unused",
   };
   io.fetchNative.mockResolvedValue({ truth, payload });
-  io.query.mockResolvedValue({ replicas: local ? [
+  const metadata = { replicas: local ? [
     { _id: "local-target", kind: "local", revision: hash, state: "current" },
-  ] : [] });
+  ] : [] };
+  io.query.mockImplementation(async (name: string) => name === "syncPolicy:effective"
+    ? { contentDirection: "bidirectional", protectedOriginal: false } : metadata);
   return { truth, payload, content, materialize: format === "docx" ? materializeDocxArtifact : materializeOfficeArtifact };
 }
 
 describe("Native preparation before atomic admission", () => {
+  it.each(["docx", "xlsx"] as const)("keeps %s edits in Spectra when desktop writes are disabled", async (format) => {
+    const f = await fixture(format, true);
+    const original = io.query.getMockImplementation()!;
+    io.query.mockImplementation(async (...args) => args[0] === "syncPolicy:effective"
+      ? { contentDirection: "manual", protectedOriginal: false } : original(...args));
+    const result = await f.materialize(workId, f.content, options);
+    expect(result.state).toBe("prepared");
+    if (result.state !== "prepared") throw new Error("Expected prepared content");
+    expect(result.nativeCandidate.destination).toBe("cloud");
+    expect(io.mutation).not.toHaveBeenCalled();
+  });
   it.each(["docx", "xlsx"] as const)("rejects %s preparation before effects when replica metadata disappears", async (format) => {
     const f = await fixture(format, true);
     io.query.mockResolvedValue(null);

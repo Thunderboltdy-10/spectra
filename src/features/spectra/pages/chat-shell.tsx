@@ -1,9 +1,10 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { requestFullView } from "../components/full-view-origin";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { useQuery } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { useAuthedArgs } from "../data/use-authed-args";
@@ -23,7 +24,6 @@ import { ConversationSurface } from "../components/conversation-surface";
 import { ProductErrorState } from "../components/product-state";
 import { useProvideIslandEngine } from "../island/engine";
 import { CrossfadeText } from "../motion";
-import { ComposerArtifactDock } from "../components/composer-artifact-dock";
 import { GlobalSearch } from "../components/context-controls";
 import {
   StudioSplitPlaceholder,
@@ -129,7 +129,7 @@ export function ChatShell() {
         (nextThreadId ?? null) === activeThreadRef.current;
       // The overview hydrates independently; a selected thread must not wait
       // for the work and workspace catalog. The thread column reads its own list.
-      const catalogs = getSpectraOverview().then((overview) => {
+      const catalogs = getSpectraOverview(undefined, false, false).then((overview) => {
         if (!isCurrentLoad()) return;
         setWorkspaces(overview.workspaces);
         setArtifacts((current) => {
@@ -397,8 +397,10 @@ export function ChatShell() {
             targetId: artifactId,
             view: "artifact",
             navigate: () => {
-              if (surface === "full")
+              if (surface === "full") {
+                requestFullView(artifactId);
                 router.push(`/library/${encodeURIComponent(artifactId)}`);
+              }
               else openArtifact(artifactId);
             },
           });
@@ -441,6 +443,9 @@ export function ChatShell() {
   }, [focusedArtifact, setVisibleArtifactIds]);
   const scopedWorkspaceId = chatWorkspaceId ?? detail?.thread.workspaceId;
 
+  const openAfterSendRef = useRef(preferences.ai?.openConversationAfterSend ?? false);
+  openAfterSendRef.current = preferences.ai?.openConversationAfterSend ?? false;
+  const [homeQuiet, setHomeQuiet] = useState(false);
   const runEngine = useSpectraRun({
     surface: "chat",
     workspaceId: scopedWorkspaceId,
@@ -450,6 +455,13 @@ export function ChatShell() {
     currentView: "conversation",
     initialCards: [],
     onThreadReady: async (id) => {
+      // Sent from Home with "Open the thread when I send" off: Home stays where
+      // it is and the answer rises from its tab on the island (ISLAND.md, "Sending").
+      if (!activeThreadRef.current && !openAfterSendRef.current) {
+        setHomeQuiet(true);
+        setComposerThread(null);
+        return;
+      }
       setComposerThread({
         id,
         title:
@@ -585,9 +597,17 @@ export function ChatShell() {
   );
 
   const studioBeside = studio.isOpen && studio.mode !== "tab";
+  useEffect(() => {
+    if (!studioBeside) return;
+    const root = document.documentElement;
+    root.style.setProperty("--spectra-side-width", `${Math.round(studioPanelWidth)}px`);
+    return () => void root.style.removeProperty("--spectra-side-width");
+  }, [studioBeside, studioPanelWidth]);
   const column = useThreadColumn(studioBeside);
   // Home is this page before a thread: the day lifts away once one is sent or opened, and comes back with a new one.
-  const started = Boolean(threadId || detail || runEngine.liveExchange || loading);
+  // A run left to answer in the background from Home does not take the page.
+  const quietLive = homeQuiet && (!threadId || (runEngine.liveExchange?.threadId !== undefined && runEngine.liveExchange.threadId !== threadId));
+  const started = Boolean(threadId || detail || (runEngine.liveExchange && !quietLive) || loading);
   const [leadState, setLeadState] = useState<"shown" | "leaving" | "gone">(requestedThreadId ? "gone" : "shown");
   useEffect(() => {
     if (started && leadState === "shown") setLeadState("leaving");
@@ -700,6 +720,7 @@ export function ChatShell() {
         ) : null}
         <ConversationSurface
           detail={detail}
+          artifacts={artifacts}
           threadId={threadId ?? undefined}
           loading={loading}
           lead={
@@ -733,7 +754,7 @@ export function ChatShell() {
               />
             ) : undefined
           }
-          liveExchange={runEngine.liveExchange}
+          liveExchange={quietLive ? null : runEngine.liveExchange}
           workspaces={workspaces}
           onOpenArtifact={openArtifact}
           onOpenWorkspace={(workspaceId) =>
@@ -813,17 +834,6 @@ export function ChatShell() {
           executeApplicationCommand={applicationCommandDispatcher}
         />
       ) : null}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-chrome bg-transparent px-5 pb-24 pt-2 sm:px-8">
-        <div className="pointer-events-auto mx-auto max-w-[820px] spectra-live-stack">
-          <ComposerArtifactDock
-            artifacts={artifacts}
-            cards={runEngine.cards}
-            threadId={composerThread?.id ?? threadId ?? undefined}
-            onOpen={openArtifact}
-          />
-        </div>
-      </div>
-
       {runsOpen ? <ChatRunsPanel onClose={closeRuns} /> : null}
     </div>
   );

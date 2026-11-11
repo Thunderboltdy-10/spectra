@@ -1,9 +1,11 @@
 ﻿"use client";
 
+import { StudioToolPane } from "./studio-pane";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { uniqueToken } from "@/lib/unique-token";
 import type { Editor, JSONContent } from "@tiptap/core";
 import Collaboration from "@tiptap/extension-collaboration";
+import { LocalTrailingParagraph } from "../editor/local-trailing-paragraph";
 import { isLocalCollaborativeDocumentChange } from "../editor/collaboration-change";
 import { applyDocumentStudioProjection } from "../editor/document-studio-projection";
 import Highlight from "@tiptap/extension-highlight";
@@ -40,11 +42,12 @@ import {
   AlertCircle,
   ChevronDown,
   Highlighter,
-  History,
   ListOrdered,
   Pencil,
   Search,
   X,
+  Trash2,
+  Link2,
 } from "lucide-react";
 import {
   useCallback,
@@ -56,6 +59,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { useStudioContextItems, useLatest, type StudioMenuGroup } from "./studio-context-menu";
 import type * as Y from "yjs";
 import { toast } from "@/components/ui/toast";
 import { SpectraTiptapAutocomplete } from "../compute/autocomplete";
@@ -107,7 +111,11 @@ import {
 import { Endnote, Footnote, SpectraNotes } from "../editor/document-notes";
 import { academicSelection, executeAcademicEditorOperations } from "../editor/document-academic-commands";
 import type { DocumentAcademicOperation } from "../commands/office/document-academic-operations";
-import { documentBlocksFromJson } from "../lenses/document-projection";
+import {
+  documentBlocksFromJson,
+  paragraphAttrsFromFormat,
+  paragraphFormatFromAttrs,
+} from "../lenses/document-projection";
 import { nextWordNoteId, type WordTextAnchor } from "../lenses/docx-academic-schema";
 import type { WordSource } from "../lenses/docx-citation-schema";
 import { CitationSourcePickers } from "./document-citation-pickers";
@@ -115,7 +123,11 @@ import { DocumentSpreadSheets, spreadStyle, useDocumentCanvas, useDocumentSpread
 import { DocumentStatusRail, useDocumentZoom, usePageCount, useSheetFit } from "./document-status-rail";
 import { editNoteText } from "../editor/note-text-edit";
 import {
+  AllCaps,
   PageBreak,
+  SmallCaps,
+  Subscript,
+  Superscript,
   ParagraphFrame,
   SectionBreak,
 } from "../editor/document-structure";
@@ -289,6 +301,13 @@ function blockRunFormat(node: JSONContent) {
       fontSizePoints: pointsFromCssSize(style.fontSize),
       color: wordHex(style.color),
       shading: wordHex(attributesOf("highlight").color),
+      verticalAlign: marks.some((mark) => mark.type === "superscript")
+        ? "superscript"
+        : marks.some((mark) => mark.type === "subscript")
+          ? "subscript"
+          : null,
+      smallCaps: marks.some((mark) => mark.type === "smallCaps") || null,
+      allCaps: marks.some((mark) => mark.type === "allCaps") || null,
     };
   };
   const first = read(texts[0]!);
@@ -306,6 +325,9 @@ function blockRunFormat(node: JSONContent) {
     "fontSizePoints",
     "color",
     "shading",
+    "verticalAlign",
+    "smallCaps",
+    "allCaps",
   ] as const) {
     const value = agreed(key);
     if (value !== undefined) format[key] = value;
@@ -315,36 +337,7 @@ function blockRunFormat(node: JSONContent) {
 
 /** Paragraph properties, shaped the way the DOCX lens writes `w:pPr`. */
 function blockParagraphFormat(node: JSONContent) {
-  const attrs = (node.attrs ?? {}) as Record<string, unknown>;
-  const alignment =
-    attrs.textAlign === "center" ||
-    attrs.textAlign === "right" ||
-    attrs.textAlign === "justify"
-      ? attrs.textAlign
-      : "left";
-  const numeric = (value: unknown) => {
-    const size = Number(value);
-    return Number.isFinite(size) && size > 0 ? size : 0;
-  };
-  // Indent keeps its sign. A Word style may outdent a heading into the left
-  // margin — `ProductHead` in the Microsoft test asset sits 2.26in out — and
-  // reporting that as level 0 would ask the lens to pull it back on the next
-  // save, changing a page nobody touched.
-  const level = (value: unknown) => {
-    const size = Number(value);
-    return Number.isFinite(size) ? Math.round(size) : 0;
-  };
-  return {
-    alignment,
-    lineSpacing: numeric(attrs.lineSpacing) || 1,
-    spacingAfterPoints: numeric(attrs.spacingAfter),
-    indentLevel: level(attrs.indentLevel),
-    border:
-      typeof attrs.frameBorder === "string" && attrs.frameBorder !== "none"
-        ? attrs.frameBorder
-        : null,
-    shading: wordHex(attrs.frameShading),
-  };
+  return paragraphFormatFromAttrs(node.attrs);
 }
 
 /**
@@ -630,37 +623,22 @@ function withEditorFormatting(
           ? [markFor("highlight", { color: `#${runFormat.shading}` })]
           : []),
       ];
-      const alignment = paragraphFormat.alignment;
-      const spacing = Number(paragraphFormat.lineSpacing);
-      const after = Number(paragraphFormat.spacingAfterPoints);
-      const indent = Number(paragraphFormat.indentLevel);
       const attrs = {
         ...node.attrs,
-        ...(alignment === "center" ||
-        alignment === "right" ||
-        alignment === "justify"
-          ? { textAlign: alignment }
-          : {}),
-        ...(Number.isFinite(spacing) && spacing > 0 && spacing !== 1
-          ? { lineSpacing: spacing }
-          : {}),
-        ...(Number.isFinite(after) && after > 0 ? { spacingAfter: after } : {}),
-        ...(Number.isFinite(indent) && indent !== 0
-          ? { indentLevel: indent }
-          : {}),
-        ...(typeof paragraphFormat.border === "string" &&
-        paragraphFormat.border !== "none"
-          ? { frameBorder: paragraphFormat.border }
-          : {}),
-        ...(typeof paragraphFormat.shading === "string"
-          ? { frameShading: `#${paragraphFormat.shading}` }
-          : {}),
+        ...paragraphAttrsFromFormat(paragraphFormat),
       };
       // Marks are applied to the text the block already holds; nothing is
-      // inserted, so a block with no text keeps its shape.
+      // inserted, so a block with no text keeps its shape. A run that already
+      // has a mark of its own keeps it.
       const applyMarks = (child: JSONContent): JSONContent =>
         child.type === "text"
-          ? { ...child, marks: [...(child.marks ?? []), ...marks] }
+          ? {
+              ...child,
+              marks: [
+                ...(child.marks ?? []),
+                ...marks.filter((mark) => !child.marks?.some((own) => own.type === mark.type)),
+              ],
+            }
           : {
               ...child,
               ...(child.content
@@ -941,6 +919,7 @@ export function DocumentStudio({
   const editorReadyForUserChanges = useRef(false);
   const lastDecorationKeyRef = useRef<string>("");
   const editorJsonKeyRef = useRef(JSON.stringify(initialContent));
+  const lastBoundJsonRef = useRef<JSONContent | null>(null);
   /** Filled once the command set exists; the slash menu reads it on each open. */
   const slashDispatchRef = useRef<SlashCommandDispatcher>({
     run: () => undefined,
@@ -1023,7 +1002,9 @@ export function DocumentStudio({
           link: false,
           underline: false,
           undoRedo: collaborationDocument ? false : undefined,
+          trailingNode: false,
         }),
+        LocalTrailingParagraph,
         ...(collaborationDocument
           ? [
               Collaboration.configure({
@@ -1080,6 +1061,10 @@ export function DocumentStudio({
         PageBreak,
         SectionBreak,
         ParagraphFrame,
+        Superscript,
+        Subscript,
+        SmallCaps,
+        AllCaps,
         Footnote,
         Endnote,
         SpectraNotes,
@@ -1127,7 +1112,9 @@ export function DocumentStudio({
         // TipTap packages resolve through mixed @tiptap/core versions in this
         // workspace; cast keeps the editor API usable under production typecheck.
       ] as never[],
-      content: collaborationDocument ? undefined : initialContent,
+      // Away from the room it shows the newest thing this page saw, never the
+      // version it first opened with.
+      content: collaborationDocument ? undefined : (lastBoundJsonRef.current ?? initialContent),
       editable: !readOnly,
       immediatelyRender: false,
       editorProps: {
@@ -1204,7 +1191,8 @@ export function DocumentStudio({
         );
         if (
           (!editorReadyForUserChanges.current && !referenceMigration) ||
-          readOnly
+          readOnly ||
+          !transaction.docChanged
         )
           return;
         const localChange =
@@ -1557,9 +1545,17 @@ export function DocumentStudio({
   );
 
   useEffect(() => {
+    if (!editor || !collaborationDocument) return;
+    return () => {
+      if (!editor.isDestroyed) lastBoundJsonRef.current = editor.getJSON();
+    };
+  }, [collaborationDocument, editor]);
+
+  useEffect(() => {
     // Read is a mode, not a permission: it puts the document down without
     // pretending the reader lost access to it.
-    editor?.setEditable(!readOnly && !binding && docMode !== "read");
+    // Quietly: changing whether it can be edited is not an edit to the document.
+    editor?.setEditable(!readOnly && !binding && docMode !== "read", false);
   }, [binding, docMode, editor, readOnly]);
 
   // Binding the room builds a new editor. A writer who clicked in while it
@@ -2732,6 +2728,35 @@ export function DocumentStudio({
         withEdit(() =>
           editor!.chain().focus().setParagraphSpacing(points).run(),
         ),
+      ...(typeof blockAttrs.spacingBefore === "number"
+        ? { spacingBefore: blockAttrs.spacingBefore }
+        : {}),
+      setSpacingBefore: (points) =>
+        withEdit(() =>
+          editor!.chain().focus().setParagraphSpacingBefore(points).run(),
+        ),
+      ...(typeof blockAttrs.firstLineIndent === "number"
+        ? { firstLineIndent: blockAttrs.firstLineIndent }
+        : {}),
+      setFirstLineIndent: (points) =>
+        withEdit(() =>
+          editor!.chain().focus().setParagraphFirstLine(points).run(),
+        ),
+      superscript: {
+        active: Boolean(editor?.isActive("superscript")),
+        toggle: () =>
+          withEdit(() => editor!.chain().focus().toggleMark("superscript").run()),
+      },
+      subscript: {
+        active: Boolean(editor?.isActive("subscript")),
+        toggle: () =>
+          withEdit(() => editor!.chain().focus().toggleMark("subscript").run()),
+      },
+      smallCaps: {
+        active: Boolean(editor?.isActive("smallCaps")),
+        toggle: () =>
+          withEdit(() => editor!.chain().focus().toggleMark("smallCaps").run()),
+      },
       border:
         typeof blockAttrs.frameBorder === "string"
           ? blockAttrs.frameBorder
@@ -3164,6 +3189,40 @@ export function DocumentStudio({
       studioContract.role,
     ],
   );
+  const runDocumentCommandLatest = useLatest((id: string) => void runDocumentCommand(id));
+  useStudioContextItems(({ target, selection }) => {
+    if (target.closest("[data-reference-id]") || !target.closest(".ProseMirror")) return null;
+    const run = (id: string) => () => runDocumentCommandLatest.current(id);
+    const groups: StudioMenuGroup[] = [];
+    if (canEdit && target.closest("td, th")) {
+      groups.push([
+        { key: "row-before", label: "Insert row above", onSelect: run("document.table.row.before") },
+        { key: "row-after", label: "Insert row below", onSelect: run("document.table.row.after") },
+        { key: "column-before", label: "Insert column left", onSelect: run("document.table.column.before") },
+        { key: "column-after", label: "Insert column right", onSelect: run("document.table.column.after") },
+      ]);
+      groups.push([
+        { key: "merge", label: "Merge cells", disabled: !editor?.can().mergeCells(), onSelect: run("document.table.merge") },
+        { key: "split", label: "Split cell", disabled: !editor?.can().splitCell(), onSelect: run("document.table.split") },
+        { key: "row-delete", label: "Delete row", icon: Trash2, onSelect: run("document.table.row.delete") },
+        { key: "column-delete", label: "Delete column", icon: Trash2, onSelect: run("document.table.column.delete") },
+      ]);
+    }
+    // Formatting is on the floating bar that opens with this menu.
+    if (canEdit && target.closest("a[href]")) {
+      groups.push([
+        { key: "link-edit", label: "Edit link", icon: Link2, onSelect: run("insert.link") },
+        { key: "unlink", label: "Remove link", onSelect: run("insert.link.remove") },
+      ]);
+    } else if (canEdit && !selection && !target.closest("td, th")) {
+      groups.push([
+        { key: "insert-table", label: "Insert table", onSelect: run("insert.table") },
+        { key: "insert-image", label: "Insert image", onSelect: run("insert.image") },
+        { key: "insert-divider", label: "Insert divider", onSelect: run("insert.divider") },
+      ]);
+    }
+    return groups;
+  });
   const runDocumentCommand = async (id: string, value?: CommandParam) => {
     const entry = documentCommandMap.get(id);
     if (!entry) return false;
@@ -3761,13 +3820,8 @@ export function DocumentStudio({
             </aside>
           ) : null}
           {sourcesOpen ? (
-            <aside className="spectra-document-sources spectra-panel-enter">
-              <header>
-                <strong>Sources</strong>
-                <button type="button" aria-label="Close sources" onClick={() => setSourcesOpen(false)}>
-                  <X className="h-4 w-4" />
-                </button>
-              </header>
+            <StudioToolPane id="document-sources" title="Sources" onClose={() => setSourcesOpen(false)}>
+            <div className="spectra-document-sources" data-in-pane>
               {sourceNavigator.unresolved.length ? (
                 <div className="spectra-document-sources-problem" role="alert">
                   <AlertCircle className="h-3.5 w-3.5" />
@@ -3827,17 +3881,12 @@ export function DocumentStudio({
                   Insert references
                 </button>
               )}
-            </aside>
+            </div>
+            </StudioToolPane>
           ) : null}
           {revisionsOpen ? (
-            <aside className="spectra-document-revisions spectra-panel-enter" aria-label="Word review">
-              <header>
-                <History className="h-3.5 w-3.5" />
-                <strong>Tracked changes</strong>
-                <button type="button" aria-label="Close Word review" onClick={() => setRevisionsOpen(false)}>
-                  <X className="h-4 w-4" />
-                </button>
-              </header>
+            <StudioToolPane id="document-revisions" title="Tracked changes" onClose={() => setRevisionsOpen(false)}>
+            <div className="spectra-document-revisions" data-in-pane aria-label="Word review">
               {editableRevisions.map(({ block, item }) => (
                 <div key={`${block.id}:${item.revisionId}:${item.revisionKind}`}>
                   <strong>{item.revisionKind === "ins" ? "Insertion" : "Deletion"} · {item.author || "Word"}</strong>
@@ -3919,7 +3968,8 @@ export function DocumentStudio({
                   ))}
                 </div>
               ) : null}
-            </aside>
+            </div>
+            </StudioToolPane>
           ) : null}
           {/* The document is a page on the desk (EDITORS.md, "Document"):
               the running head and foot are printed on the paper, and the one

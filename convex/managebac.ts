@@ -2,6 +2,7 @@ import { query } from "./functions";
 import { internalMutation, mutation } from "./orgNodeMutation";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
+import { SCHOOL_SYNC_IDLE_AFTER_MS } from "../shared/school-sync-rest";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { writeAuditEvent } from "./auditShared";
@@ -462,6 +463,21 @@ async function abandonPass(
 async function closePass(ctx: MutationCtx, syncRunId: Id<"externalSyncRuns">) {
   await ctx.scheduler.runAfter(0, internal.managebac.purgeSyncSeenKeys, { syncRunId });
 }
+
+/** Sets a returning student's resting syncs going; the claim still checks each one is wanted. */
+export const resumeRestedSyncs = internalMutation({
+  args: { accountId: v.id("accounts") },
+  handler: async (ctx, { accountId }) => {
+    const states = await ctx.db
+      .query("schoolSyncStates")
+      .withIndex("by_account_integration_kind", (q) => q.eq("accountId", accountId))
+      .take(32);
+    const now = Date.now();
+    for (const state of states)
+      if (state.state === "idle" && state.dueAt === undefined)
+        await ctx.db.patch(state._id, { state: "queued", dueAt: now, dueTrigger: "schedule", updatedAt: now });
+  },
+});
 
 export const purgeSyncSeenKeys = internalMutation({
   args: { syncRunId: v.id("externalSyncRuns") },
@@ -1955,6 +1971,14 @@ async function claimStudentJob(
       continue;
     }
     const trigger = state.dueTrigger ?? "schedule";
+    // Nobody has been here for days: nothing is read for them until they return.
+    if (trigger === "schedule") {
+      const account = await ctx.db.get(state.accountId);
+      if (now - (account?.lastSeenAt ?? 0) > SCHOOL_SYNC_IDLE_AFTER_MS) {
+        await writeSyncState(ctx, scope, { state: "idle", dueAt: undefined, dueTrigger: undefined });
+        continue;
+      }
+    }
     const preferences = await loadSyncPreferences(ctx, state.accountId, integration._id);
     if (!preferences.hasAny(state.kind) || (trigger === "schedule" && !preferences.hasAuto(state.kind))) {
       await writeSyncState(ctx, scope, { state: "idle", dueAt: undefined, dueTrigger: undefined });
@@ -2775,7 +2799,7 @@ async function ensureClassWorkspace(
     if (existingWorkspace) {
       const previouslyProjectedTitle =
         existingWorkspace.sourceContext?.projectedTitle;
-      await ctx.db.patch(existingWorkspace._id, {
+      const changedWorkspace = await patchIfChanged(ctx, existingWorkspace, {
         ...(previouslyProjectedTitle &&
         existingWorkspace.title === previouslyProjectedTitle
           ? { title: projectedTitle }
@@ -2787,8 +2811,8 @@ async function ensureClassWorkspace(
       });
       /* The tree names the workspace too; a class renamed in ManageBac is
          renamed in the Library, not only on its own page. */
-      await ensureWorkspaceNode(ctx, (await ctx.db.get(existingWorkspace._id))!);
-      await ctx.db.patch(existing._id, {
+      if (changedWorkspace) await ensureWorkspaceNode(ctx, (await ctx.db.get(existingWorkspace._id))!);
+      await patchIfChanged(ctx, existing, {
         recordId: source._id,
         sourceHash: source.sourceHash,
         state: "active",
@@ -3076,7 +3100,7 @@ async function ensureTimetableProjection(
   });
   const now = Date.now();
   if (existing) {
-    await ctx.db.patch(existing._id, {
+    await patchIfChanged(ctx, existing, {
       projectionId: String(calendar.itemId),
       providerKey,
       sourceHash: source.sourceHash,
@@ -3111,7 +3135,10 @@ async function ensureTimetableProjection(
  */
 const LESSON_DAYS_BEFORE = 14;
 const LESSON_DAYS_AFTER = 56;
+/** A slot's window is only extended once it has this few days left beyond the usual reach. */
+const LESSON_WINDOW_SLACK_DAYS = 7;
 const DAY_MS = 24 * 60 * 60_000;
+const lessonDate = (day: number) => new Date(day).toISOString().slice(0, 10);
 
 function timetableCycleDay(source: Doc<"externalRecords">) {
   if (source.recordType !== "timetable") return undefined;
@@ -3124,6 +3151,29 @@ type TimetableContext = {
   classNames: Map<string, string>;
   periods: Map<string, Doc<"calendarPeriodMaps">>;
 };
+const RECORD_SEEN_STAMP_MS = 7 * DAY_MS;
+
+function sameValue(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (typeof left !== "object" || typeof right !== "object" || !left || !right) return false;
+  if (Array.isArray(left) !== Array.isArray(right)) return false;
+  const a = left as Record<string, unknown>;
+  const b = right as Record<string, unknown>;
+  return [...new Set([...Object.keys(a), ...Object.keys(b)])].every((key) => sameValue(a[key], b[key]));
+}
+
+/** Writes only when a field other than the timestamp differs, so an unchanged sync reruns no subscription. */
+async function patchIfChanged<Table extends "externalProjections" | "spectraWorkspaces">(
+  ctx: MutationCtx,
+  row: Doc<Table>,
+  fields: Partial<Doc<Table>>,
+) {
+  const current = row as unknown as Record<string, unknown>;
+  const differs = Object.entries(fields).some(([key, value]) => key !== "updatedAt" && !sameValue(current[key], value));
+  if (differs) await ctx.db.patch(row._id as Id<"externalProjections">, fields as never);
+  return differs;
+}
+
 const timetableContexts = new WeakMap<MutationCtx, Map<string, TimetableContext>>();
 
 /** What every slot of one student needs, read once per mutation. */
@@ -3205,17 +3255,21 @@ function lessonDates(
   return dates;
 }
 
+function slotLessons(ctx: MutationCtx, sourceId: Id<"externalRecords">) {
+  return ctx.db
+    .query("calendarItems")
+    .withIndex("by_source_record", (q) => q.eq("sourceRecordId", sourceId))
+    .take(500);
+}
+
 /** Retire a slot's lessons: every one, or those in the window it was just placed in that it no longer meets on. */
 async function retireLessons(
   ctx: MutationCtx,
   sourceId: Id<"externalRecords">,
   accountId: Id<"accounts">,
-  keep?: { keys: Set<string>; from: number },
+  keep?: { keys: Set<string>; from: number; items: Doc<"calendarItems">[] },
 ) {
-  const items = await ctx.db
-    .query("calendarItems")
-    .withIndex("by_source_record", (q) => q.eq("sourceRecordId", sourceId))
-    .take(500);
+  const items = keep?.items ?? await slotLessons(ctx, sourceId);
   const now = Date.now();
   for (const item of items) {
     if (item.ownerAccountId !== accountId || !item.sourceLocked || item.status === "removed") continue;
@@ -3244,27 +3298,55 @@ async function ensureTimetableLessons(
   const period = context.periods.get(periodKey);
   const now = Date.now();
   const sourceKey = projectionSourceKey(source);
-  const dates = period
-    ? lessonDates(
-        normalized,
-        cycleDay,
-        context.cycleLengths.get(source.academicPeriodKey ?? "") ?? Math.max(5, cycleDay),
-        period.weekdays,
-        now,
-      )
-    : [];
+  const cycleLength = context.cycleLengths.get(source.academicPeriodKey ?? "") ?? Math.max(5, cycleDay);
   const title =
     (source.providerClassId && context.classNames.get(source.providerClassId)) || "Class";
   // A lesson changes when its class name or period time does, not only its slot.
   const sourceHash = [
+    "series",
     source.sourceHash,
     title,
+    cycleLength,
     period ? `${period.startMinutes}-${period.endMinutes}-${period.timezone}` : "",
   ].join("|").slice(0, 180);
+  const providerKey = `timetable:${sourceKey}`;
+  const today = Math.floor(now / DAY_MS) * DAY_MS;
+  const existing = (
+    await ctx.db
+      .query("externalProjections")
+      .withIndex("by_record_type", (q) =>
+        q.eq("recordId", source._id).eq("projectionType", "timetable_event"),
+      )
+      .collect()
+  ).find((item) => item.schoolId === integration.schoolId && item.accountId === accountId);
+  // Most syncs change nothing here: the lessons are already on the calendar and
+  // far enough ahead, so this slot costs one read and no writes.
+  if (
+    existing?.state === "active" &&
+    existing.lessonWindow?.hash === sourceHash &&
+    existing.lessonWindow.through >= lessonDate(today + (LESSON_DAYS_AFTER - LESSON_WINDOW_SLACK_DAYS) * DAY_MS)
+  )
+    return { projection: existing, created: false };
+
+  const dates = period
+    ? lessonDates(normalized, cycleDay, cycleLength, period.weekdays, now)
+    : [];
+  const lessonWindow = { hash: sourceHash, through: lessonDate(today + LESSON_DAYS_AFTER * DAY_MS) };
+  const seriesId = `lessons:${source._id}`;
+  const lessonsNow = await slotLessons(ctx, source._id);
+  const lessonByKey = new Map(lessonsNow.map((item) => [item.sourceKey, item]));
   const keys = new Set<string>();
   let firstItemId: Id<"calendarItems"> | undefined;
   let created = false;
   for (const date of dates) {
+    const key = `${sourceKey}:${date}:official_event`.slice(0, 500);
+    keys.add(key);
+    const known = lessonByKey.get(key);
+    // A lesson someone took off stays off until the slot itself changes.
+    if (known?.sourceHash === sourceHash) {
+      firstItemId ??= known._id;
+      continue;
+    }
     const lesson = await upsertSourceCalendarItem(ctx, {
       ownerAccountId: accountId,
       schoolId: integration.schoolId,
@@ -3274,6 +3356,7 @@ async function ensureTimetableLessons(
       sourceUrl: source.provenanceUrl,
       fetchedAt: source.fetchedAt,
       recordType: source.recordType,
+      seriesId,
       normalized: {
         title,
         date,
@@ -3282,29 +3365,21 @@ async function ensureTimetableLessons(
         classId: source.providerClassId,
       },
     });
-    keys.add(`${sourceKey}:${date}:official_event`.slice(0, 500));
     firstItemId ??= lesson.itemId;
     created ||= lesson.created;
   }
   await retireLessons(ctx, source._id, accountId, {
     keys,
-    from: Math.floor(now / DAY_MS) * DAY_MS - LESSON_DAYS_BEFORE * DAY_MS,
+    from: today - LESSON_DAYS_BEFORE * DAY_MS,
+    items: lessonsNow,
   });
 
-  const providerKey = `timetable:${sourceKey}`;
-  const existing = (
-    await ctx.db
-      .query("externalProjections")
-      .withIndex("by_record_type", (q) =>
-        q.eq("recordId", source._id).eq("projectionType", "timetable_event"),
-      )
-      .collect()
-  ).find((item) => item.schoolId === integration.schoolId && item.accountId === accountId);
   if (existing) {
     await ctx.db.patch(existing._id, {
       ...(firstItemId ? { projectionId: String(firstItemId) } : {}),
       providerKey,
       sourceHash: source.sourceHash,
+      lessonWindow,
       state: "active",
       updatedAt: now,
     });
@@ -3319,6 +3394,7 @@ async function ensureTimetableLessons(
     projectionId: firstItemId ? String(firstItemId) : "",
     providerKey,
     sourceHash: source.sourceHash,
+    lessonWindow,
     state: "active",
     bootstrapVersion: integration.bootstrapVersion,
     createdAt: now,
@@ -3450,7 +3526,7 @@ async function ensureResourceProjection(
      the tree holds identities, and a provider resource has none here until it
      becomes a real artifact. */
   if (existing) {
-    await ctx.db.patch(existing._id, {
+    await patchIfChanged(ctx, existing, {
       recordId: source._id,
       sourceHash: source.sourceHash,
       providerKey,
@@ -3476,18 +3552,22 @@ async function ensureResourceProjection(
   return { projection: (await ctx.db.get(projectionId))!, created: true };
 }
 
+const classRecordsByPage = new WeakMap<MutationCtx, Doc<"externalRecords">[]>();
+
 async function ensureSourceRelations(
   ctx: MutationCtx,
   integration: Doc<"schoolIntegrations">,
   source: Doc<"externalRecords">,
 ) {
   if (!source.providerClassId || source.recordType === "class") return;
-  const classCandidates = await ctx.db
+  const known = classRecordsByPage.get(ctx);
+  const classCandidates = known ?? await ctx.db
     .query("externalRecords")
     .withIndex("by_integration_type", (q) =>
       q.eq("integrationId", integration._id).eq("recordType", "class"),
     )
     .take(500);
+  classRecordsByPage.set(ctx, classCandidates);
   const target = classCandidates.find(
     (item) =>
       item.schoolId === integration.schoolId &&
@@ -4171,14 +4251,24 @@ export const commitNormalizedPage = mutation({
       let source: Doc<"externalRecords">;
       if (existing?.sourceHash === input.sourceHash && !existing.tombstone) {
         counts.unchanged += 1;
-        await ctx.db.patch(existing._id, {
-          syncKind,
-          sourceIdentityKey: canonicalKey,
-          sourceState: "available",
-          sourceStateAt: now,
-          sourceStateReason: undefined,
-          updatedAt: now,
-        });
+        // Nothing new: leave the row alone, so a daily sync of hundreds of
+        // records writes nothing. A week-old stamp is still refreshed, which
+        // keeps a concurrent pass from taking the record for one that vanished.
+        if (
+          existing.syncKind !== syncKind ||
+          existing.sourceIdentityKey !== canonicalKey ||
+          existing.sourceState !== "available" ||
+          existing.sourceStateReason !== undefined ||
+          now - (existing.sourceStateAt ?? 0) > RECORD_SEEN_STAMP_MS
+        )
+          await ctx.db.patch(existing._id, {
+            syncKind,
+            sourceIdentityKey: canonicalKey,
+            sourceState: "available",
+            sourceStateAt: now,
+            sourceStateReason: undefined,
+            updatedAt: now,
+          });
         source = (await ctx.db.get(existing._id))!;
       } else if (existing) {
         const previousNormalized = existing.normalized;

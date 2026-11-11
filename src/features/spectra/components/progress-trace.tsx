@@ -1,17 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertCircle, Check, ChevronDown } from "@/components/icons/glyph-icons";
+import { ChevronDown } from "@/components/icons/glyph-icons";
 import { WorkingMark } from "@/components/ui/skeleton";
-import { Icon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import { transitionFor, useSpectraMotion } from "../motion";
 import { CrossfadeText } from "../motion/motion-primitives";
 import type { SpectraLiveExchange } from "../ai/use-spectra-run";
 import type { AnsweredInput } from "../ai/harness-exchange";
 import { InlineEmphasis } from "./inline-emphasis";
-import { pastTenseProgressTitle } from "./progress-title";
+import { failedProgressTitle, pastTenseProgressTitle } from "./progress-title";
 
 const groupOpenByKey = new Map<string, boolean>();
 // When a trace saw its run finish, so a remount still says how long it worked.
@@ -23,12 +22,111 @@ export function openTraceWhenShown(persistKey: string) {
 }
 
 /** "8s", "1m 20s", "1h 4m": how long Spectra has been at it. */
+/** "Finished with Claude Code" when the run moved off the person's runtime; the last one is named. */
+export function finishedWithLabel(steps: ReadonlyArray<{ id: string; title: string }>) {
+  const moved = [...steps].reverse().find((step) => step.id.startsWith("runtime-move:"));
+  return moved ? moved.title.replace(/^Continued with /, "Finished with ") : undefined;
+}
+
 export function workedDuration(milliseconds: number) {
   const seconds = Math.max(1, Math.round(milliseconds / 1000));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+/**
+ * The thinking as it was written, block by block: a bold line is what the next
+ * paragraphs are about. A heading about the machinery (a guide being loaded, an
+ * escaped quote) says nothing to the reader, so only its paragraphs stay.
+ */
+export function thinkingBlocks(text: string) {
+  const blocks: Array<{ heading: boolean; text: string }> = [];
+  // Headings can arrive with nothing between them: each still starts a block.
+  for (const raw of text.replace(/\*\*\s*\*\*/g, "\n\n").replace(/\*\*([^*\n]{2,100})\*\*\s*(?=\S)/g, "**$1**\n\n").split(/\n\s*\n/)) {
+    const block = raw.trim();
+    if (!block) continue;
+    const heading = /^\*\*([^*\n]{2,100})\*\*$/.exec(block)?.[1]?.trim();
+    if (heading) {
+      if (!/\\|guidance|\bskills?\b|\btools?\b|system prompt/i.test(heading)) blocks.push({ heading: true, text: heading });
+      continue;
+    }
+    blocks.push({ heading: false, text: block.replace(/\*\*/g, "") });
+  }
+  return blocks;
+}
+
+/**
+ * What the list shows of the steps: a run of the same action is one line with a
+ * count, and something that failed on the way to a later success is left out: the
+ * work went on past it, and the reply says if anything is still not done.
+ */
+export function visibleTraceSteps<T extends { id: string; kind?: string; title?: string; status?: string }>(steps: T[], active: boolean) {
+  const shown: Array<T & { repeats?: number }> = [];
+  steps.forEach((step, index) => {
+    const recovered = step.status === "error"
+      && (active || steps.slice(index + 1).some((later) => later.kind !== "thinking" && later.status !== "error"));
+    if (recovered) return;
+    const last = shown[shown.length - 1];
+    if (last && step.kind !== "thinking" && last.kind !== "thinking" && last.title === step.title && last.status === step.status) {
+      shown[shown.length - 1] = { ...last, id: step.id, repeats: (last.repeats ?? 1) + 1 };
+      return;
+    }
+    shown.push(step);
+  });
+  return shown;
+}
+
+/** A paragraph of thinking: as tall as it needs up to a limit, following the words as they come. */
+function ThinkingParagraph({ text, streaming }: { text: string; streaming: boolean }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [tall, setTall] = useState(false);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    setTall(element.scrollHeight > element.clientHeight + 1);
+    if (streaming) element.scrollTop = element.scrollHeight;
+  }, [text, streaming]);
+  return (
+    <p ref={ref} tabIndex={tall ? 0 : undefined} data-following={(streaming && tall) || undefined} className="spectra-thinking-body">
+      {text}
+    </p>
+  );
+}
+
+/** One stretch of the model's thinking, written out as it comes. */
+function ThinkingPart({
+  step,
+  streaming,
+}: {
+  step: SpectraLiveExchange["steps"][number];
+  streaming: boolean;
+}) {
+  const blocks = thinkingBlocks(step.summary ?? "");
+  if (!blocks.length) return null;
+  return (
+    <div className="space-y-1">
+      {blocks.map((block, index) => {
+        const last = index === blocks.length - 1;
+        if (block.heading)
+          return (
+            <div key={index} className="spectra-trace-line">
+              <span aria-hidden className="spectra-thinking-mark" />
+              <span className={cn("min-w-0 flex-1 text-caption font-medium text-[var(--text-secondary)]", streaming && last && "thinking-wave")}>
+                {block.text}
+              </span>
+            </div>
+          );
+        return (
+          <div key={index} className="spectra-trace-line">
+            {index === 0 ? <span aria-hidden className="spectra-thinking-mark" /> : <span aria-hidden className="spectra-thinking-indent" />}
+            <ThinkingParagraph text={block.text} streaming={streaming && last} />
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export function ProgressTrace({
@@ -38,10 +136,13 @@ export function ProgressTrace({
   summary,
   compact = false,
   persistKey,
-  caption,
   answers,
   startedAt,
   endedAt,
+  workedMs,
+  finishedWith = finishedWithLabel(steps),
+  continuation = false,
+  current = true,
 }: {
   steps: SpectraLiveExchange["steps"];
   active: boolean;
@@ -52,14 +153,20 @@ export function ProgressTrace({
   compact?: boolean;
   /** Remember open/closed across remounts (dock hover, thread traces). */
   persistKey?: string;
-  /** The past-tense caption naming what the finished run did. */
-  caption?: string;
   /** Questions and approvals already answered: one line each. */
   answers?: AnsweredInput[];
   /** When the run began; with it the header reads "Working for 12s", then "Worked for 1m 20s". */
   startedAt?: number;
   /** When the run settled, if known; otherwise the moment this trace saw it finish. */
   endedAt?: number;
+  /** The time it actually worked, waits for the person left out, once the run has saved it. */
+  workedMs?: number;
+  /** "Finished with Claude Code" when the run moved to another runtime. */
+  finishedWith?: string;
+  /** Work done after the reply began: sits among the words and carries no clock. */
+  continuation?: boolean;
+  /** False once the reply has moved on past this work, so it folds where it is. */
+  current?: boolean;
 }) {
   /* The trace is run feedback, so it runs on the completion/reveal grammar:
      steps entering are `reveal`, the group opening is `morph`, and the whole
@@ -68,22 +175,11 @@ export function ProgressTrace({
   const reduceMotion = motionLevel.reduced;
   const revealTransition = transitionFor("reveal", motionLevel.level);
   const morphTransition = transitionFor("morph", motionLevel.level);
-  const thinking = active && !hasOutput;
-  // The steps show while Spectra works, so its thinking is what it is doing, not a light; once the answer
-  // comes they fold under their caption. A choice the user made holds.
+  // The steps and the thinking show for as long as Spectra works, written
+  // replies between them included, then fold away. A choice the user made holds.
   const [chosenOpen, setChosenOpen] = useState(() => (persistKey ? groupOpenByKey.get(persistKey) : undefined));
-  const groupOpen = chosenOpen ?? thinking;
-  const [openIds, setOpenIds] = useState<Set<string>>(() => new Set());
-  const [userTouched, setUserTouched] = useState<Set<string>>(() => new Set());
-  // Steps seen working here: when one finishes, its light settles into a tick that draws itself.
-  const [ranHere, setRanHere] = useState<Set<string>>(() => new Set());
-  const [displayOrder, setDisplayOrder] = useState<string[]>(() =>
-    steps.map((step) => step.id),
-  );
-  const completedAtRef = useRef<Map<string, number>>(new Map());
-  const pendingReorderRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const prevRunningRef = useRef<string | null>(null);
-  const finished = !thinking && (steps.length > 0 || hasOutput);
+  const groupOpen = chosenOpen ?? (active && current);
+  const finished = !active && (steps.length > 0 || hasOutput);
   const [now, setNow] = useState(() => Date.now());
   // The clock runs for the whole turn, writing included, so a long silent
   // stretch still visibly moves and the total matches the saved reply's.
@@ -108,144 +204,71 @@ export function ProgressTrace({
     setSawFinish(at);
   }, [active, finished, persistKey, endedAt, sawFinish]);
 
-  useEffect(() => {
-    const running = steps.find((step) => step.status === "running");
-    const runningId = running?.id ?? null;
-    const previous = prevRunningRef.current;
-    if (runningId !== previous) {
-      setOpenIds((current) => {
-        const next = new Set(current);
-        if (previous && !userTouched.has(previous)) next.delete(previous);
-        if (runningId && !userTouched.has(runningId)) next.add(runningId);
-        return next;
-      });
-      prevRunningRef.current = runningId;
-    }
-    const fresh = steps.filter((step) => step.status === "running" && !ranHere.has(step.id));
-    if (fresh.length) setRanHere((current) => new Set([...current, ...fresh.map((step) => step.id)]));
-    for (const step of steps) {
-      if (step.status !== "running" && !completedAtRef.current.has(step.id)) {
-        completedAtRef.current.set(step.id, Date.now());
-      }
-      if (step.status === "running") completedAtRef.current.delete(step.id);
-    }
-  }, [steps, userTouched, ranHere]);
-
-  useEffect(() => {
-    const ids = steps.map((step) => step.id);
-    setDisplayOrder((current) => {
-      const kept = current.filter((id) => ids.includes(id));
-      const missing = ids.filter((id) => !kept.includes(id));
-      return missing.length === 0 && kept.length === current.length
-        ? current
-        : [...kept, ...missing];
-    });
-  }, [steps]);
-
-  useEffect(() => {
-    if (pendingReorderRef.current) {
-      clearTimeout(pendingReorderRef.current);
-      pendingReorderRef.current = null;
-    }
-    if (steps.length < 2) return;
-    const byId = new Map(steps.map((step) => [step.id, step]));
-    pendingReorderRef.current = setTimeout(() => {
-      pendingReorderRef.current = null;
-      setDisplayOrder((current) => {
-        const now = Date.now();
-        const ranked = [...current].sort((a, b) => {
-          const stepA = byId.get(a);
-          const stepB = byId.get(b);
-          if (!stepA || !stepB) return 0;
-          const doneA =
-            stepA.status !== "running" &&
-            (completedAtRef.current.get(a) ?? 0) <= now - 1000;
-          const doneB =
-            stepB.status !== "running" &&
-            (completedAtRef.current.get(b) ?? 0) <= now - 1000;
-          if (doneA !== doneB) return doneA ? -1 : 1;
-          if (doneA && doneB) {
-            return (
-              (completedAtRef.current.get(a) ?? 0) -
-              (completedAtRef.current.get(b) ?? 0)
-            );
-          }
-          return current.indexOf(a) - current.indexOf(b);
-        });
-        return ranked.every((id, index) => id === current[index])
-          ? current
-          : ranked;
-      });
-    }, 1050);
-    return () => {
-      if (pendingReorderRef.current) {
-        clearTimeout(pendingReorderRef.current);
-        pendingReorderRef.current = null;
-      }
-    };
-  }, [steps]);
+  // Only the small hover preview is short enough to need its own scrolling.
+  const listRef = useRef<HTMLDivElement>(null);
+  const followRef = useRef(true);
+  useLayoutEffect(() => {
+    const element = listRef.current;
+    if (compact && active && element && followRef.current) element.scrollTop = element.scrollHeight;
+  }, [active, compact, steps]);
 
   const settledAt = endedAt ?? sawFinish;
-  const timed = startedAt !== undefined && (active || settledAt !== undefined);
-  if (!thinking && !timed && steps.length === 0 && !summary?.trim() && !caption?.trim() && !answers?.length) return null;
+  const timed = !continuation && startedAt !== undefined && (active || settledAt !== undefined);
+  if (!active && !timed && steps.length === 0 && !summary?.trim() && !answers?.length) return null;
 
-  const orderedSteps = displayOrder
-    .map((id) => steps.find((step) => step.id === id))
-    .filter((step): step is (typeof steps)[number] => Boolean(step));
-
-  function toggleStep(id: string) {
-    setUserTouched((current) => new Set(current).add(id));
-    setOpenIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  // A step shows only once a caption or a tool has something true to say;
-  // until then the header alone says Spectra is thinking.
+  const visibleSteps = visibleTraceSteps(steps, active);
+  if (continuation && !visibleSteps.length) return null;
   const expandable = steps.length > 0;
-  const showTraceToggle = thinking || expandable || timed;
+  const showTraceToggle = active || expandable || timed;
   // The header says what Spectra is doing now, then what it did.
   const runningStep = [...steps].reverse().find((step) => step.status === "running");
-  const headline = timed
+  const headline = continuation
+    ? active && current && runningStep
+      ? runningStep.title
+      : visibleSteps.every((step) => step.kind === "thinking")
+        ? "Thought"
+        : visibleSteps.length === 1
+          ? pastTenseProgressTitle(visibleSteps[0]!.title, true)
+          : `${visibleSteps.length} steps`
+    : timed
     ? finished
       ? "Worked for"
       : "Working for"
     : finished
-      ? caption?.trim() || (steps.length ? pastTenseProgressTitle(steps.at(-1)!.title, true) : "Done")
+      ? steps.length ? pastTenseProgressTitle(steps.at(-1)!.title, true) : "Done"
       : runningStep?.title || steps.at(-1)?.title || "Thinking";
-  const elapsed = timed ? workedDuration((active ? Math.max(now, startedAt!) : settledAt!) - startedAt!) : null;
+  const elapsed = timed
+    ? workedDuration(!active && workedMs !== undefined ? workedMs : (active ? Math.max(now, startedAt!) : settledAt!) - startedAt!)
+    : null;
 
   return (
     <div
-      className={cn(compact ? "py-0.5" : "mb-3 py-1")}
+      className={cn(compact ? "py-0.5" : continuation ? "my-3 py-0.5" : "mb-3 py-1")}
       aria-label="Spectra progress"
     >
       {showTraceToggle ? (
         <button
           type="button"
-          disabled={!expandable}
           onClick={() => {
+            if (!expandable) return;
             const next = !groupOpen;
             if (persistKey) groupOpenByKey.set(persistKey, next);
             setChosenOpen(next);
           }}
-          className="mb-1.5 flex w-full min-w-0 items-center gap-1.5 py-0.5 text-left"
+          className={cn("mb-1.5 flex w-full min-w-0 items-center gap-1.5 py-0.5 text-left", expandable ? "cursor-pointer" : "cursor-default")}
           aria-expanded={expandable ? groupOpen : undefined}
-          title={finished && timed ? caption?.trim() : undefined}
         >
           <span
             className={cn(
               "min-w-0 truncate text-caption font-medium tracking-[-0.01em] text-[var(--text-secondary)] opacity-70",
-              // While Spectra works, the skeleton's band of light passes along the caption.
-              !finished && "thinking-wave",
+              // While Spectra works, the skeleton's band of light passes along the header.
+              !finished && current && "thinking-wave",
             )}
           >
             {/* Present tense becomes past tense with a quick cross-fade. */}
             <CrossfadeText value={headline} primitive="completion" />
             {elapsed ? <span className="tabular-nums"> {elapsed}</span> : null}
+            {finished && timed && finishedWith ? <span> · {finishedWith}</span> : null}
           </span>
           {expandable ? (
             <ChevronDown
@@ -268,108 +291,44 @@ export function ProgressTrace({
             className="overflow-hidden"
           >
             <div
-              className={cn(
-                "relative space-y-1.5",
-                compact && "spectra-live-dock-progress max-h-40 overflow-y-auto pr-1",
-              )}
+              ref={listRef}
+              onScroll={
+                compact
+                  ? (event) => {
+                      const element = event.currentTarget;
+                      followRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
+                    }
+                  : undefined
+              }
+              className={cn("relative pr-1", compact && "spectra-trace-list spectra-live-dock-progress max-h-40 overflow-y-auto")}
             >
-              <AnimatePresence initial={false}>
-                {orderedSteps.map((step) => {
-                  const open = openIds.has(step.id);
-                  const hasDetail = Boolean(
-                    step.summary?.trim() &&
-                    step.summary.trim().toLocaleLowerCase() !==
-                      step.title.trim().toLocaleLowerCase(),
-                  );
-                  return (
-                    <motion.div
-                      key={step.id}
-                      layout={!reduceMotion}
-                      initial={reduceMotion ? false : { opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={reduceMotion ? undefined : { opacity: 0, y: -4 }}
-                      transition={{
-                        layout: morphTransition,
-                        opacity: revealTransition,
-                        y: revealTransition,
-                      }}
-                      className="py-1.5"
-                    >
-                      <div className="flex w-full items-center gap-2 text-left">
-                        {step.status === "running" ? (
-                          <WorkingMark />
-                        ) : step.status === "error" ? (
-                          <AlertCircle className="h-3.5 w-3.5 text-[var(--danger)]" />
-                        ) : (
-                          <Icon name="check" size={14} animate={ranHere.has(step.id)} className="text-[var(--success)]" />
+              {visibleSteps.map((step, index) => (
+                <motion.div
+                  key={step.id}
+                  initial={reduceMotion || !active ? false : { opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={revealTransition}
+                  className="py-1"
+                >
+                  {step.kind === "thinking" ? (
+                    <ThinkingPart step={step} streaming={active && step.status === "running" && index === visibleSteps.length - 1} />
+                  ) : (
+                    <div className="spectra-trace-line">
+                      {active && step.status === "running" ? <WorkingMark /> : <span aria-hidden className="spectra-thinking-mark" />}
+                      <span
+                        title={step.summary}
+                        className={cn(
+                          "min-w-0 flex-1 truncate text-caption font-medium text-[var(--text-secondary)]",
+                          active && step.status === "running" && "thinking-wave",
                         )}
-                        <span
-                          className={cn(
-                            "min-w-0 flex-1 truncate text-micro font-semibold text-[var(--text-secondary)]",
-                            step.status === "running" && "thinking-wave",
-                          )}
-                        >
-                          {pastTenseProgressTitle(
-                            step.title,
-                            step.status !== "running",
-                          )}
-                        </span>
-                        {hasDetail ? (
-                          <button
-                            type="button"
-                            onClick={() => toggleStep(step.id)}
-                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-chip hover:bg-[var(--bg-hover)]"
-                            aria-expanded={open}
-                            aria-label={`${open ? "Hide" : "Show"} details for ${step.title}`}
-                          >
-                            <ChevronDown
-                              className={cn(
-                                "h-3.5 w-3.5 text-[var(--text-tertiary)] transition-transform duration-[var(--motion-base)] ease-standard",
-                                open ? "rotate-180" : "rotate-0",
-                              )}
-                            />
-                          </button>
-                        ) : null}
-                      </div>
-                      <AnimatePresence initial={false}>
-                        {open && hasDetail && step.summary ? (
-                          <motion.p
-                            key={`${step.id}:summary`}
-                            initial={
-                              reduceMotion ? false : { height: 0, opacity: 0 }
-                            }
-                            animate={{ height: "auto", opacity: 1 }}
-                            exit={
-                              reduceMotion
-                                ? undefined
-                                : { height: 0, opacity: 0 }
-                            }
-                            transition={revealTransition}
-                            className="overflow-hidden"
-                          >
-                            {/* One line per step behind the caption, never run together. */}
-                            {step.summary
-                              .split("\n")
-                              .map((line) => pastTenseProgressTitle(line, step.status !== "running"))
-                              .filter(Boolean)
-                              .map((line, index) => (
-                                <span
-                                  key={index}
-                                  className={cn(
-                                    "ml-5 block text-micro leading-4 text-[var(--text-tertiary)]",
-                                    index === 0 && "mt-1",
-                                  )}
-                                >
-                                  {line}
-                                </span>
-                              ))}
-                          </motion.p>
-                        ) : null}
-                      </AnimatePresence>
-                    </motion.div>
-                  );
-                })}
-              </AnimatePresence>
+                      >
+                        {step.status === "error" ? failedProgressTitle(step.title) : pastTenseProgressTitle(step.title, step.status !== "running")}
+                        {step.repeats ? <span className="ml-1 font-normal text-[var(--text-tertiary)]">{step.repeats} times</span> : null}
+                      </span>
+                    </div>
+                  )}
+                </motion.div>
+              ))}
             </div>
           </motion.div>
         ) : null}
@@ -377,8 +336,8 @@ export function ProgressTrace({
       {answers?.length ? (
         <ul className="mb-1.5 space-y-1" aria-label="Your answers">
           {answers.map((answer) => (
-            <li key={answer.toolCallId} className="flex min-w-0 items-center gap-2 text-micro text-[var(--text-secondary)]">
-              <Check className="h-3.5 w-3.5 shrink-0 text-[var(--success)]" />
+            <li key={answer.toolCallId} className="flex min-w-0 items-center gap-2 text-caption text-[var(--text-secondary)]">
+              <span aria-hidden className="spectra-thinking-mark" />
               <span className="min-w-0 truncate">
                 {answer.question ? (
                   <span className="text-[var(--text-tertiary)]">
@@ -411,11 +370,13 @@ export function ProgressTrace({
  */
 export function WorkedForReveal({
   durationMs,
+  finishedWith,
   loading,
   error,
   onReveal,
 }: {
   durationMs: number;
+  finishedWith?: string;
   loading: boolean;
   error?: string;
   onReveal: () => void;
@@ -424,13 +385,15 @@ export function WorkedForReveal({
     <div className="mb-3 py-1">
       <button
         type="button"
-        onClick={onReveal}
-        disabled={loading}
+        onClick={() => {
+          if (!loading) onReveal();
+        }}
+        aria-busy={loading}
         aria-expanded={false}
-        className="mb-1.5 flex min-w-0 items-center gap-1.5 py-0.5 text-left"
+        className="mb-1.5 flex min-w-0 cursor-pointer items-center gap-1.5 py-0.5 text-left"
       >
         <span className={cn("min-w-0 truncate text-caption font-medium tracking-[-0.01em] text-[var(--text-secondary)] opacity-70", loading && "thinking-wave")}>
-          {error ? "The steps did not load. Try again" : <>Worked for <span className="tabular-nums">{workedDuration(durationMs)}</span></>}
+          {error ? "The steps did not load. Try again" : <>Worked for <span className="tabular-nums">{workedDuration(durationMs)}</span>{finishedWith ? ` · ${finishedWith}` : null}</>}
         </span>
         <ChevronDown className="h-3.5 w-3.5 text-[var(--text-tertiary)] opacity-70" />
       </button>

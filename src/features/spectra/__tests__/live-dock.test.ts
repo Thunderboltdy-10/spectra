@@ -33,6 +33,14 @@ function source(overrides: Partial<LiveDockTabSource> = {}): LiveDockTabSource {
 }
 
 describe("Live Dock V2", () => {
+  it.each(["cancelled", "failed"])("does not reopen stale questions after %s", (status) => {
+    for (const inputRequest of [undefined, { kind: "short_answer" as const, prompt: "Choose a subject" }]) {
+      const model = deriveLiveDockTab(source({ run: { status, decision: "clarify", retryable: true }, inputRequest }));
+      expect(model.state).toBe(status === "cancelled" ? "cancelled" : "paused");
+      expect(model.inputRequest).toBeNull();
+    }
+  });
+
   it("keeps send and panel visibility independent", () => {
     expect(shouldAutoOpenConversationAfterSend()).toBe(false);
     const shell = read("src/features/spectra/pages/spectra-shell.tsx");
@@ -301,7 +309,8 @@ describe("Live Dock V2", () => {
     expect(tabs).toContain("window.setTimeout(");
     expect(tabs).not.toContain("window.setInterval(");
     expect(tabs).toContain("activePollSignature");
-    expect(tabs).toContain('spectraBus.on("run.changed", () => void refreshRunTabs())');
+    expect(tabs).toContain('spectraBus.on("run.changed", readAfterBurst)');
+    expect(tabs).toContain("BUS_READ_EVERY_MS = 1_000");
     expect(tabs).toContain("let refreshGeneration = 0;");
     expect(tabs).toContain("if (generation < appliedRefreshGeneration) return;");
     expect(tabs).not.toContain("refreshRunTabs(), 180_000");

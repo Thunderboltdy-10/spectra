@@ -68,14 +68,14 @@ export type StudioPresentationState =
   | "error";
 
 export type SyncPresentation = {
-  key: SyncTruth["key"] | "read-only" | "live" | "access";
+  key: SyncTruth["key"] | "read-only" | "live" | "access" | "device" | "file-gone";
   state: StudioPresentationState;
   label: string;
   detail: string;
   tone: SyncTruth["tone"];
   action?: {
     label: string;
-    kind: "retry" | "reconnect" | "review-conflict" | "sign-in";
+    kind: "retry" | "reconnect" | "review-conflict" | "sign-in" | "put-back";
   };
   ready: boolean;
 };
@@ -295,6 +295,52 @@ export function isPresentationReady(key: SyncPresentation["key"]): boolean {
   );
 }
 
+const DEVICE_PROBLEMS: Record<string, { label: string; action?: SyncPresentation["action"] }> = {
+  COLLABORATION_DEVICE_MISSING: { label: "Not on this computer", action: { label: "Bring it back", kind: "reconnect" } },
+  COLLABORATION_DEVICE_ELSEWHERE: { label: "On another computer" },
+  COLLABORATION_DEVICE_UNAVAILABLE: { label: "Bridge isn't answering", action: { label: "Open Devices", kind: "reconnect" } },
+};
+
+/** A work kept on a computer that can't be opened here says why, in its own words. */
+export function deviceProblem(transportError: string | undefined): SyncPresentation | null {
+  const match = /^(COLLABORATION_DEVICE_[A-Z]+):\s*([^]*)$/.exec(transportError ?? "");
+  const known = match ? DEVICE_PROBLEMS[match[1]!] : undefined;
+  if (!match || !known) return null;
+  return {
+    key: "device",
+    state: "error",
+    label: known.label,
+    detail: match[2]!.trim(),
+    tone: "warning",
+    ...(known.action ? { action: known.action } : {}),
+    ready: false,
+  };
+}
+
+const FILE_GONE_REASONS = new Set(["missing-on-disk", "missing-awaiting-decision"]);
+
+/**
+ * A desktop file deleted, or moved out of its folder, outside Spectra. The
+ * work is safe in Spectra and is never written back on its own; the person
+ * gets one action to put the file back. A file that only moved has a live
+ * local copy again, so nothing is said.
+ */
+function fileGone(replicas: readonly ReplicaTruth[]): SyncPresentation | null {
+  const locals = replicas.filter((replica) => replica.kind === "local");
+  if (!locals.some((replica) => replica.state === "unavailable" && FILE_GONE_REASONS.has(replica.unavailableReason ?? ""))) return null;
+  if (locals.some((replica) => replica.state !== "unavailable")) return null;
+  if (!replicas.some((replica) => replica.kind === "cloud" && replica.state !== "unavailable")) return null;
+  return {
+    key: "file-gone",
+    state: "offline",
+    label: "File deleted",
+    detail: "The file was deleted or moved out of its folder on this computer. This work is still here in Spectra.",
+    tone: "warning",
+    action: { label: "Put it back", kind: "put-back" },
+    ready: true,
+  };
+}
+
 export function presentSync(input: PresentSyncInput): SyncPresentation {
   if (input.readOnly) {
     return {
@@ -331,6 +377,10 @@ export function presentSync(input: PresentSyncInput): SyncPresentation {
       ready: false,
     };
   }
+  const device = deviceProblem(input.transportError);
+  if (device) return device;
+  const gone = fileGone(input.replicas);
+  if (gone) return gone;
 
   const truth = selectSyncTruth({
     replicas: input.replicas,

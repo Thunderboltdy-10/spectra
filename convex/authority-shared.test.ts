@@ -2,9 +2,10 @@
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
-import { evaluateAccessForActor, evaluateAccessForActorWithLoadedResource } from "./authorityShared";
+import { evaluateAccessForActor, evaluateAccessForActorWithLoadedResource, evaluateArtifactAccessForActor } from "./authorityShared";
 import { getActorForAccountId } from "./identityShared";
 import type { Id } from "./_generated/dataModel";
+import { observeDatabase } from "../scripts/perf-read-ledger";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -172,6 +173,27 @@ async function evaluateLoaded(
 }
 
 describe("authority discovery read reuse", () => {
+  it("keeps owner metadata reads independent of recipient grants", async () => {
+    const t = convexTest(schema, modules);
+    const fixture = await seedAuthorityFixture(t);
+    const actor = await actorFor(t, fixture.ownerId);
+    const measure = () => t.run(async (ctx) => {
+      const observed = observeDatabase(ctx.db);
+      const access = await evaluateArtifactAccessForActor({ ...ctx, db: observed.db }, actor, fixture.artifactId);
+      return { access, ...observed.snapshot() };
+    });
+    const sparse = await measure();
+    for (let index = 0; index < 12; index++) {
+      await grant(t, fixture, "artifact", fixture.artifactId, "read");
+    }
+    const shared = await measure();
+    expect(shared.access).toEqual(sparse.access);
+    expect(shared.access).toMatchObject({ allowed: true, reason: "owner", level: "modify", sources: [{ kind: "owner" }] });
+    expect(shared.serializedDocumentBytes).toBe(sparse.serializedDocumentBytes);
+    expect(shared.reads.filter((read) => read.table === "accessGrants")).toEqual([]);
+    expect(shared.writes).toBe(0);
+  });
+
   it("keeps owner access semantics when the artifact row is preloaded", async () => {
     const t = convexTest(schema, modules);
     const fixture = await seedAuthorityFixture(t);

@@ -25,7 +25,8 @@ export type IconProps = Omit<SVGProps<SVGSVGElement>, "name"> & {
 export function Icon({ name, size = 16, accent, animate, label, className, style, ...props }: IconProps) {
   const id = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const spectrum = `${id}-spectrum`;
-  const glyph = GLYPHS[name];
+  // A name from data that has no glyph shows a neutral mark rather than taking the page down.
+  const glyph = GLYPHS[name] ?? GLYPHS.info;
   return (
     <svg
       viewBox="0 0 20 20"

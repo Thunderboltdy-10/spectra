@@ -346,6 +346,36 @@ const done: Glyph = () => (
 
 const add: Glyph = () => <path d="M10 4.25v11.5M4.25 10h11.5" />;
 
+const remove: Glyph = () => <path d="M4.25 10h11.5" />;
+
+/** Order changed: two crossing paths, one landing in the accent. */
+const shuffle: Glyph = () => (
+  <>
+    <path d="M3 6h2.6c1.4 0 2.3.6 3 1.7l2.8 4.6c.7 1.1 1.6 1.7 3 1.7H17" />
+    <path d="M3 14h2.6c1.1 0 1.9-.4 2.5-1.1M11.9 7.1c.6-.7 1.4-1.1 2.5-1.1H17" />
+    <AccentLine d="M15 4l2 2-2 2" />
+    <path d="M15 12l2 2-2 2" />
+  </>
+);
+
+/** Clear: an eraser on its edge, the wiped line in the accent. */
+const erase: Glyph = () => (
+  <>
+    <Sheet d="M11.2 3.6l4.7 4.7a1 1 0 0 1 0 1.4l-6.1 6.1H6.6l-2.5-2.5a1 1 0 0 1 0-1.4z" />
+    <Fine d="M7.4 7.4l4.7 4.7" opacity={0.7} />
+    <AccentLine d="M9.8 15.8h6.45" />
+  </>
+);
+
+/** A panel along the bottom of a window. */
+const bottomPanel: Glyph = () => (
+  <>
+    <Paper d="M2.75 12.25h14.5v2a2 2 0 0 1-2 2H4.75a2 2 0 0 1-2-2z" opacity={0.16} />
+    <path d={box(2.75, 3.75, 14.5, 12.5, 2)} />
+    <path d="M2.75 12.25h14.5" />
+  </>
+);
+
 const share: Glyph = () => (
   <>
     <Sheet d="M7.25 7.25h-1.5a1.5 1.5 0 0 0-1.5 1.5v6.5a1.5 1.5 0 0 0 1.5 1.5h8.5a1.5 1.5 0 0 0 1.5-1.5v-6.5a1.5 1.5 0 0 0-1.5-1.5h-1.5" />
@@ -1180,6 +1210,10 @@ export const GLYPHS = {
   chevronUp,
   arrowRight,
   retry,
+  remove,
+  shuffle,
+  erase,
+  bottomPanel,
   play,
   stop,
   copy,
@@ -1255,7 +1289,7 @@ export const ICON_FAMILIES: { family: string; names: IconName[] }[] = [
   { family: "Status", names: ["saved", "saving", "offline", "syncing", "locked", "readOnly", "versions", "problem", "info", "done", "working", "clock", "shield", "help"] },
   {
     family: "Actions",
-    names: ["add", "share", "filter", "sort", "search", "attach", "send", "more", "close", "collapse", "expand", "pin", "undoSpectra", "openSide", "openFull", "external", "check", "chevronDown", "chevronRight", "trash", "pause", "link", "bell", "people", "image", "star", "sidebar", "sidePanel", "mail", "chevronLeft", "chevronUp", "arrowRight", "retry", "play", "stop", "copy", "download", "edit", "grip"],
+    names: ["add", "share", "filter", "sort", "search", "attach", "send", "more", "close", "collapse", "expand", "pin", "undoSpectra", "openSide", "openFull", "external", "check", "chevronDown", "chevronRight", "trash", "pause", "link", "bell", "people", "image", "star", "sidebar", "sidePanel", "mail", "chevronLeft", "chevronUp", "arrowRight", "retry", "remove", "shuffle", "erase", "bottomPanel", "play", "stop", "copy", "download", "edit", "grip"],
   },
   { family: "Account", names: ["theme", "keyboard", "signOut", "analytics"] },
   {

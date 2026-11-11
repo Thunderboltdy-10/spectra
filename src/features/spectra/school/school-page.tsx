@@ -1,7 +1,7 @@
 "use client";
 
 import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { useQuery } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { PanelTabs, SidePanel } from "@/components/ui/side-panel";
 import { describeFailure } from "@/components/ui/truthful-state";
 import { api } from "../../../../convex/_generated/api";
 import type { SchoolSyncKind } from "../../../../shared/school-sync";
-import { getAdministration, type AdministrationIdentity } from "../administration/api";
+import { readIdentity } from "../administration/identity";
 import { ArtifactStatusControl } from "../components/artifact-status-control";
 import { syncSpectraManageBac } from "../data/api";
 import { useAuthedArgs } from "../data/use-authed-args";
@@ -19,7 +19,7 @@ import { useLifeLanding } from "../life/use-life";
 import { openWorkInSide } from "../components/side-open";
 import { ClassDetails, ClassesSection } from "./school-classes";
 import { useOpenSchoolTask } from "./open-school-task";
-import { ago, groupCurrentTasks, schoolStatus, sentenceOf, type SchoolSyncStatus } from "./school-model";
+import { ago, groupCurrentTasks, hasSchoolTaskSnapshot, schoolStatus, sentenceOf, type SchoolSyncStatus } from "./school-model";
 import { Overview } from "./school-overview";
 import { SyncSection } from "./school-sync";
 import { TasksSection, type TaskView } from "./school-tasks";
@@ -92,7 +92,7 @@ export function SchoolPage() {
     else if (cls) setSelection({ kind: "class", id: cls });
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
     let live = true;
-    void getAdministration<AdministrationIdentity>("identity")
+    void readIdentity()
       .then((identity) => live && setAdmin(identity?.membership?.role === "school_admin"))
       .catch(() => undefined);
     return () => {
@@ -165,7 +165,7 @@ export function SchoolPage() {
 
   return (
     <main className="spectra-wave-y relative isolate flex h-full min-h-0 flex-1" data-spectra-app-surface="true" data-school-page>
-      <div className="min-w-0 flex-1 overflow-y-auto">
+      <div className="spectra-page-scroll min-w-0 flex-1 overflow-y-auto">
         <PageBody>
           <PageHeader title="School" description={summary(current?.tasks, status, now)} commands={commands} plan={BAR_PLAN} barLabel="School commands" />
           <PanelTabs label="School sections" tabs={SECTIONS} value={section} onChange={(id) => go(id as Section)} />
@@ -189,6 +189,7 @@ export function SchoolPage() {
             ) : section === "tasks" ? (
               <TasksSection
                 now={now}
+                status={status}
                 view={taskView}
                 onViewChange={setTaskView}
                 selectedId={openedTask}
@@ -199,7 +200,7 @@ export function SchoolPage() {
                 onOpenSync={() => go("sync")}
               />
             ) : section === "classes" ? (
-              <ClassesSection selectedId={selection?.kind === "class" ? selectedId : null} onSelect={(id) => select({ kind: "class", id })} onOpenSync={() => go("sync")} />
+              <ClassesSection status={status} selectedId={selection?.kind === "class" ? selectedId : null} onSelect={(id) => select({ kind: "class", id })} onOpenSync={() => go("sync")} />
             ) : (
               <SyncSection now={now} preferences={preferences} status={status} syncingKind={syncing} onSync={(kind) => void sync(kind)} onNotice={setNotice} />
             )}
@@ -208,7 +209,7 @@ export function SchoolPage() {
       </div>
       {selection ? (
         <SidePanel id="school.chosen" title="Class" icon="school" stageMin={600} onClose={() => setSelection(null)}>
-          <Chosen selection={selection} now={now} onSelect={select} onNotice={setNotice} />
+          <Chosen selection={selection} status={status} now={now} onSelect={select} onNotice={setNotice} />
         </SidePanel>
       ) : null}
     </main>
@@ -217,7 +218,8 @@ export function SchoolPage() {
 
 /** The header's line: what needs doing, and how fresh it is. */
 function summary(tasks: Parameters<typeof groupCurrentTasks>[0] | undefined, status: SchoolSyncStatus | undefined, now: number) {
-  if (!tasks || status?.connection.state === "not_connected") return undefined;
+  if (!tasks || !hasSchoolTaskSnapshot(status))
+    return status?.connection.problem?.message ?? status?.kinds.find(kind => kind.kind === "current_tasks")?.problem?.message;
   const groups = groupCurrentTasks(tasks, now);
   const count = (key: string) => groups.find((group) => group.key === key)?.tasks.length ?? 0;
   const late = count("late");
@@ -230,11 +232,13 @@ function summary(tasks: Parameters<typeof groupCurrentTasks>[0] | undefined, sta
 
 function Chosen({
   selection,
+  status,
   now,
   onSelect,
   onNotice,
 }: {
   selection: ClassSelection;
+  status: SchoolSyncStatus | undefined;
   now: number;
   onSelect: (next: Selection) => void;
   onNotice: (message: string) => void;
@@ -245,7 +249,7 @@ function Chosen({
   return (
     <div ref={ref} key={selection.id}>
       <SectionBoundary label="This class">
-        <ClassDetails providerClassId={selection.id} now={now} onSelectTask={(id) => onSelect({ kind: "task", id })} onNotice={onNotice} />
+        <ClassDetails providerClassId={selection.id} status={status} now={now} onSelectTask={(id) => onSelect({ kind: "task", id })} onNotice={onNotice} />
       </SectionBoundary>
     </div>
   );

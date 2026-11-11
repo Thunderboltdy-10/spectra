@@ -31,6 +31,7 @@ import {
   type CalendarOverview,
 } from "../domain/model";
 import { fetchCalendarOverview, mergeCalendarPages, type CalendarContinuation } from "../data/overview-client";
+import { exportCalendarFile, importCalendarFile } from "./calendar-transfer";
 import {
   addLocalDays,
   endOfLocalDay,
@@ -58,8 +59,16 @@ const WORKDAY_START_HOUR = 7;
 const HOURS = 24;
 const MIN_DAYS = 1;
 const MAX_DAYS = 10;
-/** The days the week narrows to while a work stands open beside it. */
+/** The fewest days the week narrows to while a work stands open beside it. */
 const BESIDE_SIDE_DAYS = 3;
+/** A day column narrower than this stops reading; `fitDayWidth` never goes under it. */
+const READABLE_DAY_PX = 88;
+const HOURS_COLUMN_PX = 54;
+
+/** How many days fit side by side in the scroller at a readable width. */
+export function daysThatFit(scrollerWidth: number) {
+  return Math.max(MIN_DAYS, Math.floor((scrollerWidth - HOURS_COLUMN_PX) / READABLE_DAY_PX));
+}
 const EXTEND_DAYS = 7;
 const MAX_LOADED_DAYS = 42;
 const SCROLL_LOAD_PX = 280;
@@ -80,7 +89,7 @@ const MONTHS = [
 
 /** Each day's width so `span` days fill the scroller beside the hours column; set on it as `--day-width`. */
 function fitDayWidth(scroller: HTMLElement, span: number) {
-  const width = Math.max(88, (scroller.clientWidth - 54) / span);
+  const width = Math.max(READABLE_DAY_PX, (scroller.clientWidth - HOURS_COLUMN_PX) / span);
   scroller.style.setProperty("--day-width", `${width}px`);
   return width;
 }
@@ -403,6 +412,19 @@ type ResizeGesture = {
 
 /** `startAt` opens the calendar on that day instead of this week's Monday (the landing page shows the days ahead). */
 /** `still`: a picture of the calendar (the landing page), where a wheel always scrolls the page around it. */
+const STALE_SYNC_EVERY_MS = 15 * 60_000;
+
+function staleSyncIsDue() {
+  try {
+    const key = "spectra.calendar.staleSyncAt";
+    if (Date.now() - Number(window.sessionStorage.getItem(key) ?? 0) < STALE_SYNC_EVERY_MS) return false;
+    window.sessionStorage.setItem(key, String(Date.now()));
+  } catch {
+    // Without storage it asks once per visit, as the ref already limits it to.
+  }
+  return true;
+}
+
 export function CalendarApplication({ startAt, still = false }: { startAt?: number; still?: boolean } = {}) {
   const initialStart = startAt ?? startOfLocalWeek(Date.now());
   const [daySpan, setDaySpanState] = useState(7);
@@ -412,6 +434,7 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
   const [refreshing, setRefreshing] = useState(false);
   const [continuation, setContinuation] = useState<CalendarContinuation | null>(null);
   const overviewRequestRef = useRef<AbortController | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [error, setError] = useState("");
   const [needsSchool, setNeedsSchool] = useState(false);
   const [opened, setOpened] = useState<OpenedCalendarItem | null>(null);
@@ -461,6 +484,10 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
           const merged = mergeCalendarPages(current, incoming);
           merged.migration.complete = (merged.migration.pageComplete ?? false) && incoming.migration.complete;
           return merged;
+        }
+        // A fresh full-range read replaces removed rows; extensions and later pages still merge.
+        if (incoming.range.from <= visibleRange.from && incoming.range.to >= visibleRange.to) {
+          return { ...incoming, items: mergeById(current.items.filter((item) => item.id.startsWith("pending:")), incoming.items) };
         }
         const retainFrom = addLocalDays(visibleRange.from, -EXTEND_DAYS);
         const retainTo = addLocalDays(visibleRange.to, EXTEND_DAYS);
@@ -541,6 +568,7 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
   useEffect(() => {
     if (overview?.sourceState.kind !== "stale" || staleSyncRef.current) return;
     staleSyncRef.current = true;
+    if (!staleSyncIsDue()) return;
     void syncSpectraManageBac()
       .then(() => load("merge", visibleRange.from, visibleRange.to))
       .catch(() => {
@@ -1028,7 +1056,9 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
     setDaySpanState(span);
     const scroller = scrollerRef.current;
     const anchor = around === undefined ? -1 : daysRef.current.indexOf(startOfLocalDay(around));
-    const index = anchor >= 0 ? Math.max(0, anchor - (span > 1 ? 1 : 0)) : daysRef.current.findIndex((day) => day === focusedStartRef.current);
+    const near = anchor >= 0 ? Math.max(0, anchor - (span > 1 ? 1 : 0)) : daysRef.current.findIndex((day) => day === focusedStartRef.current);
+    const monday = span === 7 && near >= 0 ? daysRef.current.indexOf(startOfLocalWeek(daysRef.current[near]!)) : -1;
+    const index = monday >= 0 ? monday : near;
     // The resize that follows realigns on the focused day, so it must already be the new one.
     const start = daysRef.current[index];
     if (start !== undefined) {
@@ -1048,14 +1078,25 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
       spectraBus.subscribe("side.open", () => {
         const open = Boolean(spectraBus.getQuery("side.open"));
         if (open && wideSpan.current === null && daySpanRef.current > BESIDE_SIDE_DAYS) {
-          wideSpan.current = daySpanRef.current;
           // Narrow around what was opened here; something opened from
           // elsewhere (a thread, a search) keeps today in view when it shows.
           const today = startOfLocalDay(Date.now());
           const first = focusedStartRef.current;
           const todayShows = today >= first && today < addLocalDays(first, daySpanRef.current);
-          changeDaySpan(BESIDE_SIDE_DAYS, openedOn.current ?? (todayShows ? today : undefined));
+          const around = openedOn.current ?? (todayShows ? today : undefined);
           openedOn.current = undefined;
+          // The shell settles first (the rail gives way, a panel may float);
+          // then the week keeps every day that still reads, never under three.
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              const scroller = scrollerRef.current;
+              if (!scroller || !spectraBus.getQuery("side.open") || wideSpan.current !== null) return;
+              const span = Math.max(BESIDE_SIDE_DAYS, Math.min(daySpanRef.current, daysThatFit(scroller.clientWidth)));
+              if (span >= daySpanRef.current) return;
+              wideSpan.current = daySpanRef.current;
+              changeDaySpan(span, around);
+            }),
+          );
         } else if (!open && wideSpan.current !== null) {
           changeDaySpan(wideSpan.current);
           wideSpan.current = null;
@@ -1142,6 +1183,31 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
     return () => scroller.removeEventListener("wheel", onWheel);
   }, [changeDaySpan, error, overview, still]);
 
+  const importCalendar = async (file: File) => {
+    const toastId = toast(`Bringing in ${file.name}`);
+    try {
+      const report = await importCalendarFile(file, timezone, (event) => calendarPost({ action: "createPersonalItem", ...event }));
+      const parts = [
+        report.added ? `Added ${report.added} ${report.added === 1 ? "event" : "events"}.` : "Nothing new to add.",
+        report.alreadyThere ? `${report.alreadyThere} already on your calendar.` : "",
+        report.leftOut ? `${report.leftOut} more left out: import a shorter file for those.` : "",
+      ];
+      toast.success(parts.filter(Boolean).join(" "), { id: toastId });
+      if (report.added) void load("merge", visibleRange.from, visibleRange.to, true);
+    } catch (nextError) {
+      toast.error(describeFailure(nextError, { fallback: "That file couldn't be read. Try an .ics or .csv file." }).message, { id: toastId });
+    }
+  };
+
+  const exportCalendar = async () => {
+    try {
+      const count = await exportCalendarFile(timezone);
+      toast.success(`Exported ${count} ${count === 1 ? "event" : "events"}.`);
+    } catch (nextError) {
+      toast.error(describeFailure(nextError, { fallback: "Check your connection, then try exporting again." }).message);
+    }
+  };
+
   const commands: BarCommand[] = [
     { id: "add", icon: "add", label: "Add", pinned: true, onSelect: () => setComposerOpen(true) },
     {
@@ -1151,6 +1217,8 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
       active: layersOpen,
       onSelect: () => setLayersOpen((open) => !open),
     },
+    { id: "import", icon: "upload", label: "Import", onSelect: () => importInputRef.current?.click() },
+    { id: "export", icon: "download", label: "Export", onSelect: () => void exportCalendar() },
     {
       id: "refresh",
       icon: "retry",
@@ -1296,6 +1364,20 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
           )}
         </section>
 
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".ics,.csv,text/calendar,text/csv"
+          className="sr-only"
+          tabIndex={-1}
+          aria-label="Import a calendar file"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void importCalendar(file);
+          }}
+        />
+
         <CalendarComposer
           open={composerOpen}
           onClose={() => setComposerOpen(false)}
@@ -1341,7 +1423,7 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
   );
 }
 
-const CALENDAR_BAR_PLAN = [{ hideLabel: "layers" }, { toMenu: "refresh" }, { toMenu: "layers" }] as const;
+const CALENDAR_BAR_PLAN = [{ toMenu: "export" }, { toMenu: "import" }, { hideLabel: "layers" }, { toMenu: "refresh" }, { toMenu: "layers" }] as const;
 
 /** While the week loads: its days as ghosts, so it opens with what is in it rather than empty. */
 function CalendarWeekGhost({ span }: { span: number }) {

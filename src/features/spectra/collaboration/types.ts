@@ -177,6 +177,8 @@ export type CollaborationTransportSnapshot = {
   unsynchronizedChanges: number;
   presence: CollaborationPresence[];
   error?: string;
+  /** Something worth a quiet word, not a failure: part of the history couldn't be read. */
+  notice?: string;
   recoveryConflict?: NativeRecoveryConflict;
   durableAnchor?: DurableRoomAnchor;
 };
@@ -188,6 +190,8 @@ export type CollaborationSyncSnapshot = {
   displayName?: string;
   unsynchronizedChanges: number;
   error?: string;
+  /** Something worth a quiet word, not a failure: part of the history couldn't be read. */
+  notice?: string;
   recoveryConflict?: NativeRecoveryConflict;
   durableAnchor?: DurableRoomAnchor;
 };

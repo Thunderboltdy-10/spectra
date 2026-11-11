@@ -70,11 +70,33 @@ vi.mock("@hocuspocus/provider", () => ({
 }));
 
 import { HocuspocusArtifactTransport } from "../collaboration/hocuspocus-transport";
+import { bindAccountStorageScope } from "@/lib/account-storage";
+import { persistBridgeSession } from "../bridge/client";
 import { rememberCommittedPerformance } from "../collaboration/committed-performances";
 import { performancePatches } from "../collaboration/performance";
 import { initializeNativeArtifactDocument } from "../../../../scripts/collaboration-native-projection.mjs";
 
 describe("P5.I2 Hocuspocus transport lifecycle", () => {
+  it("never seeds old-account native work after its transport is destroyed during a late cloud session", async () => {
+    bindAccountStorageScope("deployment/account-A");
+    persistBridgeSession("session-A");
+    let finish!: (response: Response) => void;
+    const fetcher = vi.fn((url: string, init?: RequestInit) => {
+      if (url === "/api/spectra/collaboration/token") return new Promise<Response>(resolve => { finish = resolve; });
+      const method = JSON.parse(String(init?.body)).method;
+      return Promise.resolve(Response.json({ result: method === "summary" ? { storeId: "old-shared-store", works: 0 } : { seeded: true } }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const transport = new HocuspocusArtifactTransport("private-account-a-work");
+    const connecting = transport.connect();
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    transport.destroy();
+    bindAccountStorageScope("deployment/account-B");
+    persistBridgeSession("session-B");
+    finish(Response.json({ token: "cloud-session-A", documentName: "artifact:root", provider: "self_hosted_yjs", url: "ws://fixture", expiresInMs: 60_000, level: "modify", accountId: "account-A", device: { storeId: "old-shared-store", seed: { typeKey: "document", title: "A private work", tags: [], schemaVersion: 1, content: { blocks: [] } } } }));
+    await connecting;
+    expect(fetcher.mock.calls.filter(([url]) => url.includes("/v1/works/call"))).toHaveLength(0);
+  });
   beforeEach(() => {
     vi.stubGlobal("crypto", webcrypto);
     window.sessionStorage.clear();

@@ -1,4 +1,5 @@
 import { query } from "./functions";
+import { packOperationInput, unpackOperationInput } from "../shared/operation-content";
 import { mutation } from "./orgNodeMutation";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
@@ -124,6 +125,8 @@ export const recordPlan = mutation({
         requiresConfirmation: v.boolean(),
       }),
     ),
+    /** The harness tool call behind these operations, recorded with them. */
+    toolCallId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const run = await requireOwnedRun(ctx, args.runId);
@@ -134,7 +137,7 @@ export const recordPlan = mutation({
     if (!first) return { operationIds: [] };
     const rootId = await ctx.db.insert("spectraOperations", {
       runId: args.runId, executionId: args.executionId, planIndex: 0,
-      actorType: "ai", type: first.type, status: "proposed", input: first.input,
+      actorType: "ai", type: first.type, status: "proposed", input: packOperationInput(first.input),
       affected: [], requiresConfirmation: first.requiresConfirmation, createdAt: now,
     });
     const followingIds = await Promise.all(
@@ -147,14 +150,38 @@ export const recordPlan = mutation({
           actorType: "ai",
           type: operation.type,
           status: "proposed",
-          input: operation.input,
+          input: packOperationInput(operation.input),
           affected: [],
           requiresConfirmation: operation.requiresConfirmation,
           createdAt: now,
         }),
       ),
     );
-    return { operationIds: [rootId, ...followingIds] };
+    const operationIds = [rootId, ...followingIds];
+    // In the same transaction, so a crash can never leave a plan its tool call
+    // does not know about, and approvals can always find what they approve.
+    if (args.toolCallId) {
+      const state = await ctx.db
+        .query("spectraHarnessStates")
+        .withIndex("by_run", (q) => q.eq("runId", args.runId))
+        .unique();
+      const known: Record<string, unknown> =
+        state?.executionId === args.executionId && state.toolOperations && typeof state.toolOperations === "object"
+          ? (state.toolOperations as Record<string, unknown>)
+          : {};
+      const toolOperations = { ...known, [args.toolCallId]: operationIds };
+      if (state) await ctx.db.patch(state._id, { executionId: args.executionId, toolOperations, updatedAt: now });
+      else
+        await ctx.db.insert("spectraHarnessStates", {
+          runId: args.runId,
+          ownerAccountId: run.ownerAccountId,
+          executionId: args.executionId,
+          state: null,
+          toolOperations,
+          updatedAt: now,
+        });
+    }
+    return { operationIds };
   },
 });
 
@@ -180,7 +207,7 @@ export const conflictForOperation = query({
       executionId: operation.executionId,
       operationId: operation._id,
       operationType: operation.type,
-      input: operation.input,
+      input: unpackOperationInput(operation.input),
       conflict: operation.conflict,
       claimStatus: claim.status,
       artifactType: artifact.blueprintKey,
@@ -352,7 +379,7 @@ export const markExecuted = mutation({
     const authorityKeys = [
       "pendingApplicationScope", "approvedApplicationScope", "applicationWriteReceipt",
       "artifactWriteScope", "pendingArtifactScope", "approvedArtifactScope", "artifactWriteReceipt",
-      "clarificationDraft",
+      "clarificationDraft", "allowedArtifactIntent",
     ];
     const reported = args.output && typeof args.output === "object" && !Array.isArray(args.output)
       ? { ...args.output } as Record<string, unknown> : undefined;

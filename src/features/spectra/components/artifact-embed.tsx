@@ -1,5 +1,6 @@
 "use client";
 
+import { useEmbedFromDevice } from "./use-embed-from-device";
 import { ArrowUpRight, Check, RotateCw, AlertCircle, FileQuestion, Laptop, LockKeyhole, Maximize2, Minimize2, Pencil, Pin, Plus, Radio, Send, X } from "@/components/icons/glyph-icons";
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { motion } from "framer-motion";
@@ -12,6 +13,7 @@ import { RetainedPinRecovery } from "./retained-pin-recovery";
 import { shouldMountArtifactEmbedRuntime } from "./artifact-embed-runtime";
 import { EmbedFace } from "./artifact-embed-faces";
 import { OverflowMenu, type OverflowItem } from "@/components/ui/dropdown-menu";
+import { useStudioContextItems, type StudioMenuItem } from "./studio-context-menu";
 
 export { whiteboardPreviewNodes, type WhiteboardPreviewNode } from "./artifact-embed-faces";
 
@@ -119,7 +121,7 @@ function EmbedStatus({
 }
 
 export function ArtifactEmbed({
-  embed,
+  embed: reference,
   busy = false,
   onOpenSource,
   onRetry,
@@ -162,8 +164,16 @@ export function ArtifactEmbed({
   /** Take this work off a stacked card, onto one of its own. */
   onUnstack?: () => void;
 }) {
+  const embed = useEmbedFromDevice(reference);
   const rootRef = useRef<HTMLElement | null>(null);
   const faceRef = useRef<HTMLDivElement | null>(null);
+  // Right-clicking a reference offers what its own menu does.
+  const menuItems = useRef<StudioMenuItem[]>([]);
+  useStudioContextItems(({ target }) => {
+    const place = target.closest("[data-reference-id]");
+    if (place?.getAttribute("data-reference-id") !== embed.embedId) return null;
+    return [menuItems.current];
+  });
   const openTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(openTimer.current), []);
   const isCode = embed.source?.blueprintKey === "code";
@@ -305,6 +315,14 @@ export function ArtifactEmbed({
     else if (action === "unstack") onUnstack?.();
     else onRemove?.();
   };
+  menuItems.current = embedActions.map((item) => ({
+    key: `embed-${item.key}`,
+    label: item.label,
+    icon: typeof item.icon === "string" ? undefined : item.icon,
+    hint: item.hint,
+    disabled: item.disabled,
+    onSelect: () => runAction(item.key),
+  }));
 
   const sized = expanded
     ? {

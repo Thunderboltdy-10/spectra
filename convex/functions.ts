@@ -7,6 +7,7 @@ import {
   query as generatedQuery,
 } from "./_generated/server";
 import { toWordedConvexError } from "../shared/convex-error.mjs";
+import { withReadOnce } from "./readOnce";
 
 /*
  * Spectra's function builders. Every Convex function is defined with these, not
@@ -33,19 +34,23 @@ function wordedHandler(handler: Handler): Handler {
   };
 }
 
-function worded<Builder>(builder: Builder): Builder {
+function worded<Builder>(builder: Builder, wrap: (handler: Handler) => Handler = wordedHandler): Builder {
   const register = builder as unknown as (definition: Definition) => unknown;
   return ((definition: Definition) =>
     register(
       typeof definition === "function"
-        ? wordedHandler(definition)
-        : { ...definition, handler: wordedHandler(definition.handler) },
+        ? wrap(definition)
+        : { ...definition, handler: wrap(definition.handler) },
     )) as Builder;
 }
 
-export const query = worded(generatedQuery);
-export const internalQuery = worded(generatedInternalQuery);
-export const mutation = worded(generatedMutation);
-export const internalMutation = worded(generatedInternalMutation);
+/** Functions with a database read each document once (see readOnce.ts). */
+const readingOnce = (handler: Handler): Handler =>
+  wordedHandler((ctx, ...args) => handler(withReadOnce(ctx as { db: unknown }), ...args));
+
+export const query = worded(generatedQuery, readingOnce);
+export const internalQuery = worded(generatedInternalQuery, readingOnce);
+export const mutation = worded(generatedMutation, readingOnce);
+export const internalMutation = worded(generatedInternalMutation, readingOnce);
 export const action = worded(generatedAction);
 export const internalAction = worded(generatedInternalAction);

@@ -52,6 +52,27 @@ function setup(backend = new MemoryBackend(), ai: unknown = {}) {
 }
 
 describe("harness tools", () => {
+  it("tells the model which listed and searched work is kept on a computer", async () => {
+    const { backend, run } = setup();
+    let results: unknown[] = [];
+    backend.listLibrary = async () => [
+      { id: "node-1", artifactId: "local-1", kind: "work", title: "Photosynthesis.docx", onComputer: true },
+      { id: "node-2", artifactId: "cloud-1", kind: "work", title: "Cloud notes" },
+    ];
+    backend.search = async () => ({ hits: [{ kind: "artifact", id: "local-1", title: "Photosynthesis.docx", typeLabel: "Document", onComputer: true }], mode: "hybrid" });
+    const outcome = await run(scripted([
+      { text: "", toolCalls: [call("list", "list_library", { query: "photosynthesis" }), call("search", "search", { query: "photosynthesis" })] },
+      messages => {
+        results = messages.filter(message => message.role === "tool").map(message => message.content);
+        return { text: "Found the file.", toolCalls: [] };
+      },
+    ]).caller);
+    expect(outcome.status).toBe("completed");
+    expect(results).toHaveLength(2);
+    for (const result of results) expect(result).toMatch(/Photosynthesis\.docx[^\n]*kept on a computer/);
+    expect(results[0]).not.toMatch(/Cloud notes[^\n]*kept on a computer/);
+  });
+
   it("every tool has an effect, a prose description and a label without ids", () => {
     const { tools } = setup();
     const names = tools.map((tool) => tool.name);
@@ -104,6 +125,22 @@ describe("harness tools", () => {
     expect(lastTool(outcome.state.messages)).toMatch(/1\. Organelle 1\?/);
   });
 
+  it("never lets the reply claim a desktop file is saved before Bridge writes it (F12)", async () => {
+    const backend = new MemoryBackend({ artifacts: [{ id: "doc1", type: "document", title: "Notes", content: authorNew("document", { markdown: "Hello there." }, { timeZone: "UTC" }).content }] });
+    const update = backend.updateArtifact.bind(backend);
+    backend.updateArtifact = async (input) => {
+      await update(input);
+      return { ok: true, content: "", desktopFilePending: true };
+    };
+    const { run } = setup(backend);
+    const model = scripted([
+      { text: "", toolCalls: [call("e1", "edit_artifact", { id: "doc1", operations: [{ op: "replace", find: "Hello", replace: "Hi" }] })] },
+      { text: "Done.", toolCalls: [] },
+    ]);
+    const outcome = await run(model.caller);
+    expect(lastTool(outcome.state.messages)).toMatch(/^Saved \*Notes\* in Spectra\. The file on their computer has not taken the change yet/);
+  });
+
   it("returns authoring errors to the model and saves nothing", async () => {
     const backend = new MemoryBackend({ artifacts: [{ id: "doc1", type: "document", title: "Essay", content: authorNew("document", { markdown: "Hello" }, { timeZone: "UTC" }).content }] });
     const { run } = setup(backend);
@@ -113,7 +150,7 @@ describe("harness tools", () => {
       { text: "Could not find it.", toolCalls: [] },
     ]);
     const outcome = await run(model.caller);
-    expect(lastTool(outcome.state.messages)).toMatch(/Edit 1 \(replace\): `find` text was not found/);
+    expect(lastTool(outcome.state.messages)).toMatch(/Edit 1 \(replace\): `find` text "Goodbye" is not in the document/);
     expect(JSON.stringify(backend.artifacts.get("doc1")!.content)).toBe(before);
   });
 
@@ -295,9 +332,6 @@ describe("harness tools", () => {
     ["release_agent", { agentId: "ag1", action: "publish" }, { command: "release_agent", args: { agentId: "ag1", action: "publish" } }],
     ["release_agent", { agentId: "ag1", action: "rollback", releaseId: "r2" }, { command: "release_agent", args: { agentId: "ag1", action: "rollback", releaseId: "r2" } }],
     ["release_agent", { agentId: "ag1", action: "suspend", releaseId: "r3" }, { command: "release_agent", args: { agentId: "ag1", action: "suspend", releaseId: "r3" } }],
-    ["remember", { content: "Prefers short answers." }, { command: "write_memory", args: { action: "create", content: "Prefers short answers." } }],
-    ["remember", { content: "Prefers worked examples.", memoryId: "m1" }, { command: "write_memory", args: { action: "revise", content: "Prefers worked examples.", memoryId: "m1" } }],
-    ["forget_memory", { memoryId: "m1" }, { command: "write_memory", args: { action: "forget", memoryId: "m1" } }],
     ["run_agent_checks", { agentId: "ag1" }, { command: "run_agent_checks", args: { agentId: "ag1" } }],
     ["run_agent_bench", { agentId: "ag1", prompt: "Mark my essay" }, { command: "run_agent_bench", args: { agentId: "ag1", prompt: "Mark my essay" } }],
     ["compile_agent", { agentId: "ag1" }, { command: "compile_agent", args: { agentId: "ag1" } }],
@@ -605,5 +639,17 @@ describe("harness tools", () => {
     expect(() => named("managebac").parse!({ action: "set_sync_mode", kind: "grades", mode: "follow" })).toThrow(/classId/);
     expect(() => named("manage_conversation").parse!({})).toThrow(/title, pinned, archived or placeId/);
     expect(() => named("calendar").parse!({ action: "complete_block", itemId: "b1" })).toThrow(/expectedRevision/);
+  });
+
+  it("refuses a calendar start that has already passed, unless it logs what happened", () => {
+    // Tuesday 10 November 2026, 19:21 in Madrid.
+    const session = createSession({ backend: new MemoryBackend(), prompt: "test", now: () => Date.parse("2026-11-10T18:21:00Z") });
+    const calendar = buildHarnessTools(session).find((entry) => entry.name === "calendar")!;
+    expect(() => calendar.parse!({ action: "add_event", title: "Revise", start: "2026-11-10T17:00", end: "2026-11-10T18:00" })).toThrow(
+      "That time has already passed. It is 19:21 on Tuesday.",
+    );
+    expect(() => calendar.parse!({ action: "schedule_task", taskId: "t", start: "2026-11-09T10:00", end: "2026-11-09T11:00" })).toThrow(/already passed/);
+    expect(calendar.parse!({ action: "add_event", title: "Ran 5 km", start: "2026-11-10T07:00", alreadyHappened: true })).toMatchObject({ alreadyHappened: true });
+    expect(() => calendar.parse!({ action: "add_event", title: "Call", start: "2026-11-10T20:00" })).not.toThrow();
   });
 });

@@ -24,7 +24,7 @@ const DELAYS: Record<string, number> = {
   "spectraThreads:listMessages": 80,
   // An action that embeds the prompt through OpenRouter, then searches.
   "memory:contextForRun": 500,
-  "memory:listMine": 70,
+  "spectraMemory:head": 70,
   "bridge:devices": 40,
   "collab:readLive": 350,
   "clerk:getSessionList": 150,
@@ -87,8 +87,8 @@ function result(name: string, args: Record<string, unknown>): unknown {
       return { name: "Ada", schoolRole: "student" };
     case "memory:contextForRun":
       return { text: "" };
-    case "memory:listMine":
-      return { claims: [] };
+    case "spectraMemory:head":
+      return { enabled: true, about: "", preferences: "", topics: [] };
     case "bridge:devices":
       return [];
     case "spectraHarness:saveCheckpoint":
@@ -158,7 +158,7 @@ vi.mock("@/features/spectra/ai/harness/model", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/features/spectra/ai/harness/model")>();
   return {
     ...original,
-    openRouterModelCaller: async ({ onText }: { onText: (delta: string) => void }) => {
+    createOpenRouterCaller: () => async ({ onText }: { onText: (delta: string) => void }) => {
       record("model:call");
       await sleep(MODEL_FIRST_TOKEN_MS);
       onText("Hi!");

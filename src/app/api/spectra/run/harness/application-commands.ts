@@ -23,6 +23,8 @@ const calendarTime = {
   startLocal: z.string().optional(),
   endLocal: z.string().optional(),
   disambiguation: z.enum(["earlier", "later"]).optional(),
+  /** True only when the request logs something that already happened. */
+  alreadyHappened: z.boolean().optional(),
 };
 
 export const NAVIGATION_DESTINATIONS = ["library", "calendar", "settings", "devices", "workspace", "artifact", "agents", "school", "analytics"] as const;
@@ -55,14 +57,17 @@ const COMMANDS: Record<string, ApplicationCommand> = {
     authority: "content",
   },
   read_devices: { input: z.object({}), authority: "navigation" },
+  read_computer_names: { input: z.object({ path: z.string().trim().max(1000).default("") }), authority: "navigation" },
   control_device: {
     input: z
       .object({
         action: z.enum(LOCAL_DEVICE_ACTIONS),
         grantId: z.string().trim().min(1).max(200).optional(),
         deviceId: z.string().trim().min(1).max(200).optional(),
+        path: z.string().trim().min(1).max(1000).optional(),
       })
       .superRefine((value, ctx) => {
+        if (value.action === "sync_path" && !value.path) ctx.addIssue({ code: "custom", path: ["path"], message: "path is required." });
         if (FOLDER_ACTIONS.has(value.action) && !value.grantId) ctx.addIssue({ code: "custom", path: ["grantId"], message: "A folder grant id is required." });
       }),
     authority: "navigation",
@@ -141,15 +146,6 @@ const COMMANDS: Record<string, ApplicationCommand> = {
   change_sync_policy: {
     input: z.object({ targetIds: z.array(z.string()).min(1).max(100), patch: z.record(z.string(), z.unknown()) }),
     authority: "local_file",
-  },
-  write_memory: {
-    input: z
-      .object({ action: z.enum(["create", "revise", "forget"]), content: z.string().min(1).max(10_000).optional(), memoryId: z.string().optional() })
-      .superRefine((value, ctx) => {
-        if (value.action !== "forget" && !value.content) ctx.addIssue({ code: "custom", path: ["content"], message: "What to remember is required." });
-        if (value.action !== "create" && !value.memoryId) ctx.addIssue({ code: "custom", path: ["memoryId"], message: "A memory id is required." });
-      }),
-    authority: "memory",
   },
   change_sharing: {
     input: z
@@ -299,6 +295,7 @@ const COMMANDS: Record<string, ApplicationCommand> = {
       notes: z.string().max(20_000).optional(),
       allDay: z.boolean().optional(),
       linkedArtifactIds: z.array(z.string()).max(24).optional(),
+      alsoAtLocal: z.array(z.object({ startLocal: z.string(), endLocal: z.string().optional() })).max(200).optional(),
     }),
   },
   move_calendar_block: {
@@ -316,7 +313,7 @@ const COMMANDS: Record<string, ApplicationCommand> = {
   },
   // Finishing or removing an item is the user's own reversible calendar work.
   complete_calendar_block: { input: z.object({ itemId: z.string().min(1), expectedRevision: z.number() }), authority: "content" },
-  remove_calendar_event: { input: z.object({ itemId: z.string().min(1) }), authority: "content" },
+  remove_calendar_event: { input: z.object({ itemId: z.string().min(1), andFollowing: z.boolean().optional() }), authority: "content" },
 };
 
 export const APPLICATION_COMMAND_NAMES = Object.keys(COMMANDS);

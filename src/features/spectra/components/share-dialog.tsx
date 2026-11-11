@@ -23,6 +23,7 @@ export function ShareDialog({
   title,
   onClose,
   onChanged,
+  beforeShare,
 }: {
   open: boolean;
   resourceType: ShareableResourceType;
@@ -30,8 +31,10 @@ export function ShareDialog({
   title: string;
   onClose: () => void;
   onChanged?: () => void | Promise<void>;
+  /** A work kept on this computer: it moves online with the first invitation or link, and the dialog says so first. */
+  beforeShare?: () => Promise<void>;
 }) {
-  const access = useShareAccess({ open, resourceType, resourceId, onChanged });
+  const access = useShareAccess({ open, resourceType, resourceId, onChanged, beforeShare });
   const hasAccess = useMemo(
     () => new Set(access.shares.flatMap((share) => (share.account ? [share.account.accountId] : []))),
     [access.shares],
@@ -46,6 +49,7 @@ export function ShareDialog({
             {resourceType === "workspace"
               ? "Invite people from your school. Once they accept, what you share in it shows in their Library, inside their own class when it is the same one."
               : `Invite people from your school. They can open and read the ${NOUN[resourceType]} once they accept; you choose who can edit.`}
+            {beforeShare ? " It is kept on this computer now, so inviting someone or making a link moves it online for them to open." : null}
           </DialogDescription>
         </header>
         <div className="share-body">

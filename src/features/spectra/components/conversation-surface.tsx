@@ -2,6 +2,7 @@
 
 import { buttonVariants } from "@/components/ui/button";
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -10,7 +11,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { Code2, Loader2, ShieldCheck, AlertCircle, Bot, Check, ChevronDown, ExternalLink, FileText, FolderPlus, MessageSquare, ArrowDown, CircleDot, GitCompareArrows, Undo2, Wrench } from "@/components/icons/glyph-icons";
+import { Code2, Loader2, ShieldCheck, AlertCircle, Bot, Check, ChevronDown, ExternalLink, FileText, FolderPlus, Star, ArrowDown, CircleDot, GitCompareArrows, Undo2, Wrench } from "@/components/icons/glyph-icons";
 import { toast } from "@/components/ui/toast";
 import { SpectraMark } from "@/components/spectra-mark";
 import { PrismLoader, type PrismOptics } from "@/components/spectra-prism-optic";
@@ -22,7 +23,7 @@ import { SelectField } from "@/components/ui/select";
 import { useSpectraRun, type SpectraLiveExchange } from "../ai/use-spectra-run";
 import { isSettledAiRunStatus, isWorkingAiRunStatus } from "../core";
 import { operationCounts, useRunLedger } from "../collaboration/run-ledger";
-import { openTraceWhenShown, ProgressTrace, WorkedForReveal } from "./progress-trace";
+import { finishedWithLabel, openTraceWhenShown, ProgressTrace, WorkedForReveal } from "./progress-trace";
 import {
   clearSpectraRunAgent,
   getSpectraOperationConflict,
@@ -39,7 +40,7 @@ import {
   type SpectraThreadTrace,
   type SpectraWorkspace,
 } from "../data/api";
-import { useQuery } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
@@ -53,9 +54,12 @@ import { isReplyEmbedRegion, replyEmbedRegion } from "../../../../shared/artifac
 import { publicSpectraFailureText } from "../runs/live-dock";
 import { BatchedChoiceBlock, ChoiceBlock } from "./conversation-choice";
 import { compareConflictRegions } from "../collaboration/region-text";
-import { HarnessInputPanel, WorkTouchCards, messageTouches } from "./harness-run-parts";
+import { Icon } from "@/components/icons";
+import { runTabCard, useRunTabs } from "../island/run-tabs";
+import { AnsweredInputs, HarnessInputPanel, WorkTouchCards, messageTouches } from "./harness-run-parts";
 import { HarnessWidgets, messageWidgets } from "./thread-widget";
-import { applyHarnessEvent, isHarnessExchangeEvent, type HarnessAnswerValue, type HarnessExchangeFields } from "../ai/harness-exchange";
+import { answerLabel, forgetAnswered, liveAnswerKey, noteAnswered, useAnsweredNotes } from "../ai/answered-inputs";
+import { applyHarnessEvent, isHarnessExchangeEvent, replyBlocks, type HarnessAnswerValue, type HarnessExchangeFields } from "../ai/harness-exchange";
 import { parseSpectraStreamEvent, type HarnessArtifactTouchView } from "../ai/stream-events";
 
 function operationLabel(
@@ -172,15 +176,13 @@ function RunDetailsDisclosure({
   run,
   state,
   onLoad,
-  caption,
 }: {
   run?: Pick<SpectraRun, "status" | "phase">;
   state?: TraceLoadState;
   onLoad: () => void;
-  caption?: string;
 }) {
   if (state?.trace) return null;
-  const status = state?.error ?? caption ?? runDetailsStatusCopy(run);
+  const status = state?.error ?? runDetailsStatusCopy(run);
   return (
     <div className="mt-3 flex flex-wrap items-center gap-2">
       {status ? (
@@ -754,11 +756,18 @@ function ReplyWork({
   runId,
   touches,
   onOpen,
+  currentTitles,
+  undone,
+  onUndo,
 }: {
   threadId?: string;
   runId?: string;
   touches: readonly HarnessArtifactTouchView[];
-  onOpen?: (artifactId: string) => void;
+  onOpen?: (artifactId: string, regionId?: string) => void;
+  currentTitles?: ReadonlyMap<string, string>;
+  undone?: boolean;
+  /** Offered when the run can still be reversed. */
+  onUndo?: () => void;
 }) {
   const region = runId ? replyEmbedRegion(runId) : undefined;
   const container = useArtifactEmbedContainer("thread", threadId ?? "", Boolean(threadId && region));
@@ -776,7 +785,13 @@ function ReplyWork({
           region={(regionId) => regionId === region}
         />
       ) : null}
-      <WorkTouchCards touches={shown.size ? touches.filter((touch) => !shown.has(touch.id)) : touches} onOpen={onOpen} />
+      <WorkTouchCards touches={shown.size ? touches.filter((touch) => !shown.has(touch.id)) : touches} onOpen={onOpen} currentTitles={currentTitles} undone={undone} />
+      {onUndo ? (
+        <button type="button" onClick={onUndo} className="reply-undo">
+          <Icon name="undoSpectra" size={15} aria-hidden />
+          Undo Spectra&apos;s changes
+        </button>
+      ) : null}
     </>
   );
 }
@@ -1100,12 +1115,15 @@ function harnessTraceFields(trace: SpectraThreadTrace): HarnessExchangeFields | 
   const events = (trace.events ?? []).filter(
     (event) => !trace.run.executionId || event.executionId === trace.run.executionId,
   );
-  if (!events.some((event) => event.type === "caption" || event.type === "step")) return null;
-  let fields: HarnessExchangeFields = { steps: [] };
+  if (!events.some((event) => event.type === "caption" || event.type === "step" || event.type === "reasoning_delta")) return null;
+  let fields: HarnessExchangeFields = { steps: [], written: 0 };
   for (const row of [...events].sort((a, b) => a.sequence - b.sequence)) {
     try {
       const event = parseSpectraStreamEvent(row.payload);
-      if (isHarnessExchangeEvent(event)) fields = applyHarnessEvent(fields, event, row.createdAt);
+      if (event.type === "text_delta") fields = { ...fields, written: (fields.written ?? 0) + event.content.length };
+      // The last one is the whole reply, which by then has no more work after it.
+      else if (event.type === "text_replace") fields = { ...fields, written: event.content.length };
+      else if (isHarnessExchangeEvent(event)) fields = applyHarnessEvent(fields, event, row.createdAt);
     } catch {
       // A malformed row never hides the rest of the trace.
     }
@@ -1116,21 +1134,106 @@ function harnessTraceFields(trace: SpectraThreadTrace): HarnessExchangeFields | 
     : fields;
 }
 
-function PersistedProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
+/** What a run did while this page watched it, so the reply keeps its shape once it is saved. */
+const watchedRuns = new Map<string, { steps: SpectraLiveExchange["steps"]; answers?: SpectraLiveExchange["answers"]; startedAt: number }>();
+
+function rememberWatchedRun(exchange: SpectraLiveExchange) {
+  if (!exchange.runId) return null;
+  watchedRuns.delete(exchange.runId);
+  watchedRuns.set(exchange.runId, { steps: exchange.steps, answers: exchange.answers, startedAt: exchange.startedAt });
+  if (watchedRuns.size > 40) watchedRuns.delete(watchedRuns.keys().next().value!);
+  return null;
+}
+
+/**
+ * A reply in the order it happened: the words the run wrote, with the work done
+ * between them sitting where it was done. Each stretch folds when the reply moves
+ * past it, and the run's time shows only on the first.
+ */
+function ChronologicalReply({
+  content,
+  steps,
+  answers,
+  active,
+  hasOutput,
+  persistKey,
+  startedAt,
+  endedAt,
+  workedMs,
+  renderText,
+}: {
+  content: string;
+  steps: SpectraLiveExchange["steps"];
+  answers?: SpectraLiveExchange["answers"];
+  active: boolean;
+  hasOutput: boolean;
+  persistKey: string;
+  startedAt?: number;
+  endedAt?: number;
+  workedMs?: number;
+  renderText: (text: string, last: boolean) => ReactNode;
+}) {
+  const blocks = replyBlocks(content, steps);
+  const lastIndex = blocks.length - 1;
+  return (
+    <>
+      {blocks.map((block, index) =>
+        block.kind === "text" ? (
+          <Fragment key={index}>{renderText(block.text, index === lastIndex)}</Fragment>
+        ) : (
+          <ProgressTrace
+            key={index}
+            steps={block.steps}
+            answers={index === 0 ? answers : undefined}
+            active={active}
+            hasOutput={hasOutput}
+            persistKey={index === 0 ? persistKey : `${persistKey}:${index}`}
+            startedAt={index === 0 ? startedAt : undefined}
+            endedAt={index === 0 ? endedAt : undefined}
+            workedMs={index === 0 ? workedMs : undefined}
+            finishedWith={index === 0 ? finishedWithLabel(steps) : undefined}
+            continuation={index > 0}
+            current={index === lastIndex}
+          />
+        ),
+      )}
+    </>
+  );
+}
+
+/** Questions a finished run asked, each with its answer, as they were at the time. */
+function SavedAnswers({ trace }: { trace: SpectraThreadTrace }) {
+  const answers = useMemo(() => harnessTraceFields(trace)?.answers ?? [], [trace]);
+  return <AnsweredInputs answers={answers.map((answer) => ({ ...answer, key: answer.toolCallId }))} />;
+}
+
+function PersistedProgressTrace({ trace, workedMs }: { trace: SpectraThreadTrace; workedMs?: number }) {
   const harness = harnessTraceFields(trace);
   if (harness)
     return (
       <ProgressTrace
         steps={harness.steps}
-        caption={harness.caption}
         answers={harness.answers}
         active={trace.run.status === "queued" || trace.run.status === "running"}
         hasOutput={Boolean(trace.run.finalSummary) || !["queued", "running"].includes(trace.run.status)}
         persistKey={trace.run._id}
         {...traceTiming(trace)}
+        workedMs={workedMs}
       />
     );
   return <LegacyProgressTrace trace={trace} />;
+}
+
+/** The time a saved reply's run actually worked, when the run recorded it. */
+function messageWorkedMs(metadata: unknown) {
+  const value = metadata && typeof metadata === "object" ? (metadata as { workedMs?: unknown }).workedMs : undefined;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/** "Finished with Claude Code" when the saved reply's run moved off the person's runtime. */
+function messageFinishedWith(metadata: unknown) {
+  const value = metadata && typeof metadata === "object" ? (metadata as { finishedWith?: unknown }).finishedWith : undefined;
+  return typeof value === "string" && value ? `Finished with ${value}` : undefined;
 }
 
 /** When a stored run began and settled: its last event, or its last change. */
@@ -1402,7 +1505,7 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
             {feedbackSent ? (
               <Check className="h-2.5 w-2.5" />
             ) : (
-              <MessageSquare className="h-2.5 w-2.5" />
+              <Star className="h-2.5 w-2.5" />
             )}
             {feedbackSent ? "Feedback sent" : "Rate"}
           </button>
@@ -1695,8 +1798,11 @@ function LiveContentReveal({
   );
 }
 
+const NO_ARTIFACTS: readonly SpectraArtifact[] = [];
+
 export function ConversationSurface({
   detail,
+  artifacts = NO_ARTIFACTS,
   threadId,
   loading = false,
   loadError,
@@ -1716,6 +1822,8 @@ export function ConversationSurface({
   onAnswer,
 }: {
   detail: SpectraThreadDetail | null;
+  /** The catalog, when the host has one: result slips name works as they are now. */
+  artifacts?: readonly SpectraArtifact[];
   threadId?: string;
   loading?: boolean;
   /** A retryable refresh notice that must remain visible beside old messages. */
@@ -1728,7 +1836,7 @@ export function ConversationSurface({
   onCardAction?: Parameters<typeof ResultCardStack>[0]["onAction"];
   onCardRevise?: Parameters<typeof ResultCardStack>[0]["onRevise"];
   workspaces?: SpectraWorkspace[];
-  onOpenArtifact?: (artifactId: string) => void;
+  onOpenArtifact?: (artifactId: string, regionId?: string) => void;
   onOpenWorkspace?: (workspaceId: string) => void;
   compact?: boolean;
   liveExchange?: SpectraLiveExchange | null;
@@ -1740,10 +1848,28 @@ export function ConversationSurface({
   const observedThreadId = threadId ?? detail?.thread._id;
   // Approvals and retries the thread can act on. The open question of the
   // run shown live is answered in its own panel, not repeated as a card.
+  const answeredNotes = useAnsweredNotes();
+  const liveAnswerKeys = new Set(answeredNotes.map((note) => note.key));
+  const openLiveInput =
+    liveExchange?.input && liveExchange.runId && !liveAnswerKeys.has(liveAnswerKey(liveExchange.runId, liveExchange.input.toolCallId))
+      ? liveExchange.input
+      : null;
+  const liveAnswers = liveExchange?.runId
+    ? [
+        // The note carries the words of the question even when the run's own event arrives first.
+        ...answeredNotes.filter((note) => note.runId === liveExchange.runId),
+        ...(liveExchange.answers ?? [])
+          .map((answer) => ({ ...answer, key: liveAnswerKey(liveExchange.runId!, answer.toolCallId) }))
+          .filter((answer) => !liveAnswerKeys.has(answer.key)),
+      ]
+    : [];
   const actionableCards = (activeCards ?? []).filter(
     (card) =>
       card.actions.some((action) => DECISION_ACTIONS.has(action.key)) &&
-      !(liveExchange?.input && card.runId === liveExchange.runId),
+      !(liveExchange?.input && card.runId === liveExchange.runId) &&
+      // A failed run already says so, with its own retry, in the thread above.
+      !(card.actions.every((action) => action.key === "retry" || !DECISION_ACTIONS.has(action.key)) &&
+        detail?.traces.some((trace) => trace.run._id === card.runId && trace.run.status === "failed")),
   );
   const observedActiveExecution = useQuery(
     api.spectraThreads.getActiveExecution,
@@ -1753,6 +1879,7 @@ export function ConversationSurface({
         : "skip",
     ),
   );
+  const currentTitles = useMemo(() => new Map(artifacts.map((artifact) => [artifact._id, artifact.title] as const)), [artifacts]);
   const renderedDetail = useMemo(() => {
     if (!detail || observedActiveExecution === undefined) return detail;
     return {
@@ -1875,6 +2002,14 @@ export function ConversationSurface({
       }
     },
     [observedThreadId, renderedDetail?.thread._id],
+  );
+  const runTabs = useRunTabs();
+  const runTabCardByRun = useMemo(
+    () => new Map(runTabs.flatMap((tab) => {
+      const card = runTabCard(tab);
+      return card ? [[tab.runId, card] as const] : [];
+    })),
+    [runTabs],
   );
   const traceByRun = useMemo(
     () => {
@@ -2100,8 +2235,54 @@ export function ConversationSurface({
                     !persistedAssistantRunIds.has(message.runId)),
               );
               const touches = message.role === "assistant" ? messageTouches(message.metadata) : [];
-              const savedCaption =
-                typeof message.metadata?.caption === "string" ? message.metadata.caption : undefined;
+              // A trace loads when it's opened; the thread's tab already knows about its latest run.
+              const tabCard = message.runId ? runTabCardByRun.get(message.runId) : undefined;
+              const runCards = trace
+                ? trace.cards.map((card) => ({
+                    id: card._id,
+                    runId: card.runId,
+                    status: card.status,
+                    title: card.title,
+                    summary: card.summary,
+                    variant: card.variant,
+                    actions: card.actions,
+                    provenance: card.provenance,
+                    updatedAt: card.updatedAt,
+                  }))
+                : tabCard ? [tabCard] : [];
+              const undone = runCards.some((card) => card.actions.some((action) => action.key === "undone"));
+              // The work behind a reply, however this page knows about it. Without
+              // any of these the reply shows "Worked for", which loads it on request.
+              const replyWork = (() => {
+                if (message.role !== "assistant" || !message.runId) return null;
+                if (
+                  liveExchange && liveExchange.runId === message.runId &&
+                  !visibleMessages.slice(messageIndex + 1).some((other) => other.role === "assistant" && other.runId === message.runId)
+                )
+                  return {
+                    steps: liveExchange.steps,
+                    answers: liveExchange.answers,
+                    active: liveExchange.status !== "failed" && liveExchange.status !== "waiting" && liveExchange.status !== "stopped",
+                    startedAt: liveExchange.startedAt as number | undefined,
+                    endedAt: undefined as number | undefined,
+                  };
+                if (trace) {
+                  const fields = harnessTraceFields(trace);
+                  if (fields)
+                    return {
+                      steps: fields.steps,
+                      answers: fields.answers,
+                      active: trace.run.status === "queued" || trace.run.status === "running",
+                      ...traceTiming(trace),
+                    };
+                  return null;
+                }
+                const watched = !activeRun ? watchedRuns.get(message.runId) : undefined;
+                return watched
+                  ? { steps: watched.steps, answers: watched.answers, active: false, startedAt: watched.startedAt, endedAt: message.createdAt }
+                  : null;
+              })();
+              const undoable = !undone && onCardAction ? runCards.find((card) => card.actions.some((action) => action.key === "revert")) : undefined;
               const conversationCards = (trace?.cards ?? []).flatMap((card) => {
                 const repeatsAnswer = Boolean(message.content.trim()) &&
                   card.summary?.trim() === message.content.trim();
@@ -2194,16 +2375,17 @@ export function ConversationSurface({
                   ) : (
                     <div className="relative pl-9">
                       <ReplyMark />
-                      {trace && trace.run.providerUsed !== "Spectra" ? (
-                        <PersistedProgressTrace trace={trace} />
-                      ) : !trace && !activeRun && message.runId ? (
+                      {replyWork ? null : trace ? (
+                        <PersistedProgressTrace trace={trace} workedMs={messageWorkedMs(message.metadata)} />
+                      ) : !activeRun && message.runId ? (
                         (() => {
                           const asked = visibleMessages.find((other) => other.role === "user" && other.runId === message.runId);
                           if (!asked || message.createdAt <= asked.createdAt) return null;
                           const runId = message.runId;
                           return (
                             <WorkedForReveal
-                              durationMs={message.createdAt - asked.createdAt}
+                              durationMs={messageWorkedMs(message.metadata) ?? message.createdAt - asked.createdAt}
+                              finishedWith={messageFinishedWith(message.metadata)}
                               loading={traceState?.loading === true}
                               error={traceState?.error}
                               onReveal={() => {
@@ -2214,23 +2396,47 @@ export function ConversationSurface({
                           );
                         })()
                       ) : null}
-                      <SpectraRichContent
-                        content={message.content}
-                        sources={messageSources(message)}
-                        className={cn(
-                          "text-body leading-7 text-[var(--text-primary)]",
-                          !compact && "sm:text-subhead",
-                        )}
-                      />
+                      {replyWork ? (
+                        <ChronologicalReply
+                          content={message.content}
+                          steps={replyWork.steps}
+                          answers={replyWork.answers}
+                          active={replyWork.active}
+                          hasOutput
+                          persistKey={message.runId!}
+                          startedAt={replyWork.startedAt}
+                          endedAt={replyWork.endedAt}
+                          workedMs={messageWorkedMs(message.metadata)}
+                          renderText={(text) => (
+                            <SpectraRichContent
+                              content={text}
+                              sources={messageSources(message)}
+                              className={cn(
+                                "text-body leading-7 text-[var(--text-primary)]",
+                                !compact && "sm:text-subhead",
+                              )}
+                            />
+                          )}
+                        />
+                      ) : (
+                        <SpectraRichContent
+                          content={message.content}
+                          sources={messageSources(message)}
+                          className={cn(
+                            "text-body leading-7 text-[var(--text-primary)]",
+                            !compact && "sm:text-subhead",
+                          )}
+                        />
+                      )}
                       {/* A finished reply is its own account; the trace is offered only while its run is still live. */}
                       {shouldOfferTrace && activeRun && message.runId ? (
                         <RunDetailsDisclosure
                           run={activeRun}
                           state={traceState}
-                          caption={savedCaption}
                           onLoad={() => void requestRunTrace(message.runId!)}
                         />
                       ) : null}
+                      {trace ? <SavedAnswers trace={trace} /> : null}
                       {message.role === "assistant" ? (
                         <HarnessWidgets widgets={messageWidgets(message.metadata)} threadId={observedThreadId} onOpenArtifact={onOpenArtifact} />
                       ) : null}
@@ -2239,6 +2445,10 @@ export function ConversationSurface({
                         runId={message.role === "assistant" ? message.runId : undefined}
                         touches={touches}
                         onOpen={onOpenArtifact}
+                        currentTitles={currentTitles}
+                        undone={undone}
+                        // With no slips, only a loaded trace supplies a result card with this control.
+                        onUndo={undoable && (touches.length || !trace) ? () => onCardAction?.(undoable, "revert") : undefined}
                       />
                       {(() => {
                         const choices = messageChoices(
@@ -2266,7 +2476,10 @@ export function ConversationSurface({
                             choiceTitle,
                             ...(batchSelections ? { batchSelections } : {}),
                           });
+                          noteAnswered({ key: `message:${message._id}`, messageId: message._id, question: "", label: choiceTitle });
                           spectraBus.emit("threads.changed", {});
+                          // The island's copy of this question is settled too.
+                          if (message.runId) void postSpectra({ action: "hideRunTab", runId: message.runId }).catch(() => undefined);
                           await onChoice?.({
                             title: choiceTitle,
                             key: choiceKey,
@@ -2406,9 +2619,10 @@ export function ConversationSurface({
                 <article className={cn("relative", compact ? "mb-7" : "mb-10")}>
                   <div className="relative pl-9">
                     <ReplyMark optics={LIVE_OPTICS[liveExchange.status]} />
-                    <ProgressTrace
+                    {rememberWatchedRun(liveExchange)}
+                    <ChronologicalReply
+                      content={liveExchange.content}
                       steps={liveExchange.steps}
-                      caption={liveExchange.caption}
                       answers={liveExchange.answers}
                       active={liveExchange.status !== "failed" && liveExchange.status !== "waiting" && liveExchange.status !== "stopped"}
                       hasOutput={
@@ -2418,15 +2632,15 @@ export function ConversationSurface({
                       }
                       persistKey={liveExchange.runId ?? liveExchange.id}
                       startedAt={liveExchange.startedAt}
+                      renderText={(text, last) => (
+                        <LiveContentReveal
+                          content={text}
+                          streaming={last && liveExchange.status === "streaming"}
+                          compact={compact}
+                          sources={liveExchange.sources}
+                        />
+                      )}
                     />
-                    {liveExchange.content ? (
-                      <LiveContentReveal
-                        content={liveExchange.content}
-                        streaming={liveExchange.status === "streaming"}
-                        compact={compact}
-                        sources={liveExchange.sources}
-                      />
-                    ) : null}
                     <HarnessWidgets widgets={liveExchange.widgets} threadId={observedThreadId} onOpenArtifact={onOpenArtifact} />
                     <ReplyWork
                       threadId={observedThreadId}
@@ -2434,11 +2648,18 @@ export function ConversationSurface({
                       touches={liveExchange.artifacts ?? []}
                       onOpen={onOpenArtifact}
                     />
-                    {liveExchange.input && liveExchange.runId && onAnswer ? (
+                    <AnsweredInputs answers={liveAnswers} />
+                    {openLiveInput && liveExchange.runId && onAnswer ? (
                       <HarnessInputPanel
-                        key={liveExchange.input.toolCallId}
-                        input={liveExchange.input}
-                        onAnswer={(value) => onAnswer(liveExchange.runId!, liveExchange.input!.toolCallId, value)}
+                        key={openLiveInput.toolCallId}
+                        input={openLiveInput}
+                        onAnswer={async (value) => {
+                          const key = liveAnswerKey(liveExchange.runId!, openLiveInput.toolCallId);
+                          noteAnswered({ key, runId: liveExchange.runId!, question: openLiveInput.question, label: answerLabel(openLiveInput, value) });
+                          const accepted = await onAnswer(liveExchange.runId!, openLiveInput.toolCallId, value);
+                          if (!accepted) forgetAnswered(key);
+                          return accepted;
+                        }}
                       />
                     ) : null}
                     {liveExchange.runId ? (
@@ -2531,10 +2752,10 @@ export function ConversationSurface({
               behavior: "smooth",
             });
           }}
-          className="absolute bottom-28 left-1/2 z-chrome flex h-9 -translate-x-1/2 items-center gap-1.5 rounded-chip bg-[var(--bg-elevated)] px-3 text-micro font-medium text-[var(--text-secondary)] shadow-card hover:text-[var(--text-primary)]"
+          aria-label="Go to the latest message"
+          className="absolute bottom-28 right-4 z-chrome grid size-8 place-items-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] shadow-card transition-colors hover:text-[var(--text-primary)]"
         >
           <ArrowDown className="h-3.5 w-3.5" />
-          Latest
         </button>
       ) : null}
     </div>
@@ -2551,7 +2772,7 @@ export function ThreadConversation({
   threadId: string;
   compact?: boolean;
   liveExchange?: SpectraLiveExchange | null;
-  onOpenArtifact?: (artifactId: string) => void;
+  onOpenArtifact?: (artifactId: string, regionId?: string) => void;
   onOpenWorkspace?: (workspaceId: string) => void;
 }) {
   const [detail, setDetail] = useState<SpectraThreadDetail | null>(null);

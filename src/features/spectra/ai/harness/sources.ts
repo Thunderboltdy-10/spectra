@@ -1,7 +1,7 @@
 /*
  * What a run read, so its reply can cite it. A work's source id is its own id;
  * a web page's is a short hash of its address, stable across a paused or
- * resumed run. The model writes `[[cite:SOURCE:WHERE|Label]]`, and the saved
+ * resumed run. The model writes `[[cite:SOURCE|Label]]`, and the saved
  * reply keeps only the sources it actually cited, which is what makes a
  * citation verified: it names something the run really read.
  */
@@ -29,7 +29,7 @@ export function mergeSources(current: readonly RunSource[] = [], next: readonly 
   return [...byId.values()].slice(-MAX_RUN_SOURCES);
 }
 
-const CITE = /\[\[cite:([^:\]|]+):/g;
+const CITE = /\[\[cite:([^:\]|]+)/g;
 
 /** For plain-text places (run summaries, notifications): citations drop out, a reference reads as its label. */
 export function withoutCitations(text: string) {

@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { followRunRelay, isRunRelayInvite, type RunRelayInvite } from "./run-relay-client";
+import { closeLocalRunStream, localRunStream, publishLocalRunEvent, subscribeLocalRunStreams } from "./local-run-streams";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import { uniqueToken } from "@/lib/unique-token";
 import {
@@ -28,8 +30,10 @@ import {
 import { publishArtifactAiActivity } from "../collaboration/artifact-ai-activity";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { spectraBus } from "../events";
+import { getRunTabs, isActiveRunStatus, refreshRunTabs } from "../island/run-tabs";
 import { isRetryableRunStatus } from "./run-lifecycle";
 import { observeUiRun, stopObservingUiRun, uiObserverForRun } from "../collaboration/settings-observation-client";
+import { knownUnreachableRuntimes } from "./use-agent-runtime";
 
 /**
  * Artifact ids the run feed has published coarse activity for, per run, so a
@@ -160,7 +164,8 @@ function feedLedger(event: ReturnType<typeof parseSpectraStreamEvent>): void {
     default:
       break;
   }
-  spectraBus.emit("run.changed", { runId });
+  if (event.type !== "text_delta" && event.type !== "text_replace" && event.type !== "reasoning_delta")
+    spectraBus.emit("run.changed", { runId });
 }
 
 export type SpectraRunSurface = "chat" | "workspace" | "artifacts" | "artifact";
@@ -174,8 +179,10 @@ export type SpectraLiveExchange = Omit<HarnessExchangeFields, "steps"> & {
     id: string;
     title: string;
     summary?: string;
+    kind?: "thinking";
     status: "running" | "done" | "error";
     createdAt: number;
+    textAt?: number;
   }>;
   /** "waiting": the run asked a question or for approval and is paused. "stopped": the user stopped it; what it showed stays. */
   status: "starting" | "streaming" | "waiting" | "failed" | "stopped";
@@ -371,6 +378,15 @@ const STOP_FAILURE_COPY = {
   signedOut: "Sign in again to stop this run.",
 };
 
+/** What the run showed, finished as it stood. */
+function stoppedExchange(exchange: SpectraLiveExchange): SpectraLiveExchange {
+  return {
+    ...exchange,
+    status: "stopped",
+    steps: exchange.steps.map((step) => (step.status === "running" ? { ...step, status: "done" as const } : step)),
+  };
+}
+
 export function useSpectraRun({
   surface,
   workspaceId,
@@ -425,15 +441,18 @@ export function useSpectraRun({
     string | null
   >(null);
   const liveExchangeRef = useRef<SpectraLiveExchange | null>(null);
-  const [liveExchange, setLiveExchange] = useState<SpectraLiveExchange | null>(
-    null,
-  );
+  // A stopped run stays stopped: a late event from its stream, or a quiet
+  // continuation that had not heard of the stop yet, must never show the same
+  // exchange Working again (F09). A new exchange is unaffected.
+  const [liveExchange, setLiveExchange] = useReducer(keepStoppedExchange, null);
   useEffect(() => {
     liveExchangeRef.current = liveExchange;
   }, [liveExchange]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const promptByRun = useRef(new Map<string, string>());
   const streamCoveredRuns = useRef(new Set<string>());
+  const engineIdentity = useRef({});
+  const localStreamPositions = useRef(new Map<string, number>());
   const dismissedCardIds = useRef(new Set<string>());
   const activeRequests = useRef(
     new Map<AbortController, { runId: string | null; exchangeId?: string }>(),
@@ -502,6 +521,19 @@ export function useSpectraRun({
           }
         : card,
     );
+    // Another view (the rail, another tab) stopped the run this view is
+    // showing: its saved card says so, and the live strip follows (F09).
+    const stoppedRuns = new Set(
+      incoming.filter((card) => card.status === "cancelled").map((card) => card.runId),
+    );
+    if (stoppedRuns.size) {
+      stoppedRuns.forEach((runId) => activeRunIds.current.delete(runId));
+      setLiveExchange((current) =>
+        current?.runId && stoppedRuns.has(current.runId) && current.status !== "stopped"
+          ? stoppedExchange(current)
+          : current,
+      );
+    }
     if (previousScopeKey.current !== scopeKey) {
       previousScopeKey.current = scopeKey;
       if (surface === "chat") {
@@ -558,6 +590,141 @@ export function useSpectraRun({
       tab.run.executionId &&
       eventCursors.current.get(tab.runId)?.settledExecutionId === tab.run.executionId,
     );
+    const applyObserved = (
+      tab: SpectraRunTab,
+      observedRun: SpectraRunTab["run"],
+      event: ReturnType<typeof parseSpectraStreamEvent>,
+      sequence?: number,
+    ) => {
+      feedLedger(event);
+      if (
+        event.type === "run_created" ||
+        event.type === "result_card" ||
+        event.type === "confirmation_required" ||
+        event.type === "final"
+      )
+        upsert(event.card);
+      if (event.type === "input_required" && event.card) upsert(event.card);
+      if (event.type === "thread_title") spectraBus.emit("threads.changed", {});
+      if (event.type === "artifact_touched") void onDataChanged?.();
+      if (
+        event.type === "text_delta" ||
+        event.type === "text_replace" ||
+        event.type === "progress" ||
+        event.type === "operation_preview" ||
+        event.type === "status" ||
+        isExchangeEvent(event)
+      ) {
+        setLiveExchange((current) => {
+          const base =
+            current?.runId === tab.runId
+              ? current
+              : {
+                  id: `durable:${tab.runId}`,
+                  runId: tab.runId,
+                  threadId: tab.threadId,
+                  prompt: observedRun.userPrompt,
+                  content: "",
+                  steps: [],
+                  status: "streaming" as const,
+                  startedAt: observedRun.createdAt,
+                };
+          if (event.type === "text_delta")
+            return {
+              ...base,
+              content: base.content + event.content,
+              status: "streaming",
+            };
+          if (event.type === "text_replace")
+            return {
+              ...base,
+              content: event.content,
+              status: "streaming",
+            };
+          if (event.type === "progress")
+            return appendStep(
+              base,
+              event.detail
+                ? `${event.title} · ${event.detail}`
+                : event.title,
+            );
+          if (event.type === "status")
+            return appendStep(
+              { ...base, status: "streaming" },
+              event.message,
+            );
+          if (event.type === "operation_preview" && event.preview)
+            return appendStep(
+              base,
+              operationPreviewMessage(event.preview),
+            );
+          return applyExchangeEvent(base, event);
+        });
+      }
+      if (event.type === "artifact_patch")
+        dispatchArtifactPatch(event.artifactId, event.patch);
+      if (
+        event.type === "run_created" ||
+        event.type === "thread_ready" ||
+        event.type === "agent_routed" ||
+        event.type === "operation_preview" ||
+        event.type === "operation_result" ||
+        event.type === "confirmation_required" ||
+        event.type === "approval_accepted" ||
+        event.type === "approval_rejected" ||
+        event.type === "choice_selected" ||
+        event.type === "interrupted" ||
+        event.type === "final"
+      )
+        void onDataChanged?.();
+      // Durable history can replay an older attempt's terminal event
+      // while a retry is already active. Its card keeps the history;
+      // only the live request path raises a toast for a current failure.
+      // A stopped run keeps its live view until the saved reply replaces it.
+      if (event.type === "error" || event.type === "interrupted")
+        setLiveExchange((current) =>
+          current?.runId === tab.runId ? null : current,
+        );
+      if (
+        event.type === "error" ||
+        event.type === "stopped" ||
+        event.type === "interrupted" ||
+        event.type === "final"
+      ) {
+        eventCursors.current.set(tab.runId, {
+            sequence: sequence ?? eventCursors.current.get(tab.runId)?.sequence ?? 0,
+            settledExecutionId: observedRun.executionId,
+          });
+        setObservedContinuationRunId((current) =>
+          current === tab.runId ? null : current,
+        );
+      }
+      if (event.type === "confirmation_required")
+        setLiveExchange((current) =>
+          current?.runId === tab.runId ? null : current,
+        );
+      if (event.type === "final") {
+        setLiveExchange((current) =>
+          current?.runId === tab.runId ? null : current,
+        );
+        void onFinal?.({
+          runId: tab.runId,
+          summary: event.summary,
+          prompt:
+            promptByRun.current.get(tab.runId) ?? observedRun.userPrompt,
+        });
+      }
+    };
+    /** Another engine on this page holds the run's stream: read what it received. */
+    const followLocalStream = (tab: SpectraRunTab) => {
+      const stream = localRunStream(tab.runId);
+      if (!stream || stream.origin === engineIdentity.current) return false;
+      let next = localStreamPositions.current.get(tab.runId) ?? 0;
+      for (; next < stream.events.length; next += 1)
+        applyObserved(tab, tab.run, stream.events[next]!);
+      localStreamPositions.current.set(tab.runId, next);
+      return true;
+    };
     const poll = async () => {
       if (polling) {
         pollAgain = true;
@@ -628,7 +795,7 @@ export function useSpectraRun({
         // A locally owned stream can still be retrying; it retains authority.
         for (const tab of relevant) {
           if (
-            (tab.run.status !== "failed" && tab.run.status !== "cancelled") ||
+            (tab.run.status !== "failed" && tab.run.status !== "cancelled" && tab.run.status !== "completed") ||
             !tab.run.executionId ||
             activeRunIds.current.has(tab.runId) ||
             hasSettledExecution(tab) ||
@@ -664,7 +831,10 @@ export function useSpectraRun({
             (eventCursors.current.has(tab.runId) &&
               !hasSettledExecution(tab)),
         );
+        for (const tab of relevant)
+          if (hasSettledExecution(tab)) streamCoveredRuns.current.delete(tab.runId);
         for (const tab of observed) {
+          if (followLocalStream(tab)) continue;
           // The initial POST is only an acknowledgement; the worker may finish
           // after that response closes. Let durable polling take over as soon
           // as a run reaches a user-input state even if the initiating request
@@ -714,121 +884,7 @@ export function useSpectraRun({
             } catch {
               continue;
             }
-            feedLedger(event);
-            if (
-              event.type === "run_created" ||
-              event.type === "result_card" ||
-              event.type === "confirmation_required" ||
-              event.type === "final"
-            )
-              upsert(event.card);
-            if (event.type === "input_required" && event.card) upsert(event.card);
-            if (event.type === "thread_title") spectraBus.emit("threads.changed", {});
-            if (event.type === "artifact_touched") void onDataChanged?.();
-            if (
-              event.type === "text_delta" ||
-              event.type === "text_replace" ||
-              event.type === "progress" ||
-              event.type === "operation_preview" ||
-              event.type === "status" ||
-              isExchangeEvent(event)
-            ) {
-              setLiveExchange((current) => {
-                const base =
-                  current?.runId === tab.runId
-                    ? current
-                    : {
-                        id: `durable:${tab.runId}`,
-                        runId: tab.runId,
-                        threadId: tab.threadId,
-                        prompt: observedRun.userPrompt,
-                        content: "",
-                        steps: [],
-                        status: "streaming" as const,
-                        startedAt: observedRun.createdAt,
-                      };
-                if (event.type === "text_delta")
-                  return {
-                    ...base,
-                    content: base.content + event.content,
-                    status: "streaming",
-                  };
-                if (event.type === "text_replace")
-                  return {
-                    ...base,
-                    content: event.content,
-                    status: "streaming",
-                  };
-                if (event.type === "progress")
-                  return appendStep(
-                    base,
-                    event.detail
-                      ? `${event.title} · ${event.detail}`
-                      : event.title,
-                  );
-                if (event.type === "status")
-                  return appendStep(
-                    { ...base, status: "streaming" },
-                    event.message,
-                  );
-                if (event.type === "operation_preview" && event.preview)
-                  return appendStep(
-                    base,
-                    operationPreviewMessage(event.preview),
-                  );
-                return applyExchangeEvent(base, event);
-              });
-            }
-            if (event.type === "artifact_patch")
-              dispatchArtifactPatch(event.artifactId, event.patch);
-            if (
-              event.type === "run_created" ||
-              event.type === "thread_ready" ||
-              event.type === "agent_routed" ||
-              event.type === "operation_preview" ||
-              event.type === "operation_result" ||
-              event.type === "confirmation_required" ||
-              event.type === "approval_accepted" ||
-              event.type === "approval_rejected" ||
-              event.type === "choice_selected" ||
-              event.type === "interrupted" ||
-              event.type === "final"
-            )
-              void onDataChanged?.();
-            // Durable history can replay an older attempt's terminal event
-            // while a retry is already active. Its card keeps the history;
-            // only the live request path raises a toast for a current failure.
-            // A stopped run keeps its live view until the saved reply replaces it.
-            if (event.type === "error" || event.type === "interrupted")
-              setLiveExchange((current) =>
-                current?.runId === tab.runId ? null : current,
-              );
-            if (
-              event.type === "error" ||
-              event.type === "stopped" ||
-              event.type === "interrupted" ||
-              event.type === "final"
-            ) {
-              eventCursors.current.set(tab.runId, { sequence: row.sequence, settledExecutionId: observedRun.executionId });
-              setObservedContinuationRunId((current) =>
-                current === tab.runId ? null : current,
-              );
-            }
-            if (event.type === "confirmation_required")
-              setLiveExchange((current) =>
-                current?.runId === tab.runId ? null : current,
-              );
-            if (event.type === "final") {
-              setLiveExchange((current) =>
-                current?.runId === tab.runId ? null : current,
-              );
-              void onFinal?.({
-                runId: tab.runId,
-                summary: event.summary,
-                prompt:
-                  promptByRun.current.get(tab.runId) ?? observedRun.userPrompt,
-              });
-            }
+            applyObserved(tab, observedRun, event, row.sequence);
           }
           // Retain the sequence and settled execution through refreshes. The
           // next attempt resumes after this cursor; this one is no longer polled.
@@ -847,7 +903,7 @@ export function useSpectraRun({
             poll,
             document.visibilityState === "visible"
               ? observedActive
-                ? 750
+                ? 4_000
                 : 180_000
               : 60_000,
           );
@@ -867,11 +923,21 @@ export function useSpectraRun({
       "threads.changed",
       requestDurablePoll,
     );
+    const removeLocalStreams = subscribeLocalRunStreams((runId, closed) => {
+      if (!localStreamPositions.current.has(runId)) return;
+      const tab = tabSnapshot.find((candidate) => candidate.runId === runId);
+      if (tab) followLocalStream(tab);
+      if (!closed) return;
+      localStreamPositions.current.delete(runId);
+      // Everything up to here was shown, so the durable log picks up after it.
+      streamCoveredRuns.current.add(runId);
+    });
     void poll();
     return () => {
       disposed = true;
       if (timer) window.clearTimeout(timer);
       removeThreadsChanged();
+      removeLocalStreams();
     };
   }, [
     artifactId,
@@ -924,17 +990,18 @@ export function useSpectraRun({
       let buffer = "";
       let changed = false;
       let sawInput = false;
-      while (true) {
-        const { value, done } = await reader.read();
-        buffer += decoder.decode(value, { stream: !done });
-        const lines = buffer.split("\n");
-        // Process a final NDJSON event even when the response closes without a
-        // trailing newline; otherwise the terminal card/final event is lost.
-        buffer = done ? "" : lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          const event = parseSpectraStreamEvent(JSON.parse(line));
+      let relayInvite: RunRelayInvite | null = null;
+      /** True once the run has reached a point where this request is finished. */
+      const handleLine = (line: string): boolean => {
+          const raw: unknown = JSON.parse(line);
+          if (isRunRelayInvite(raw)) {
+            relayInvite = raw;
+            return false;
+          }
+          const event = parseSpectraStreamEvent(raw);
           feedLedger(event);
+          if (event.type === "run_created" || event.type === "result_card") requestRunId = event.runId;
+          if (requestRunId) publishLocalRunEvent(engineIdentity.current, requestRunId, event);
           if (
             event.type === "error" ||
             event.type === "stopped" ||
@@ -1062,6 +1129,12 @@ export function useSpectraRun({
           }
           if (event.type === "stopped" || event.type === "interrupted")
             changed = requestReachedTerminal = true;
+          if (event.type === "stopped")
+            setLiveExchange((current) =>
+              current && (!liveExchangeId || current.id === liveExchangeId)
+                ? stoppedExchange(current)
+                : current,
+            );
           if (event.type === "operation_preview" && event.preview) {
             const operationTitle = operationPreviewMessage(event.preview);
             setCards((current) =>
@@ -1204,10 +1277,34 @@ export function useSpectraRun({
           }
           if (event.type === "final" || event.type === "confirmation_required")
             changed = requestReachedTerminal = true;
+          return requestReachedTerminal || sawInput ||
+            event.type === "error" || event.type === "stopped" || event.type === "interrupted";
+      };
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          buffer += decoder.decode(value, { stream: !done });
+          const lines = buffer.split("\n");
+          // Process a final NDJSON event even when the response closes without a
+          // trailing newline; otherwise the terminal card/final event is lost.
+          buffer = done ? "" : lines.pop() ?? "";
+          for (const line of lines) if (line.trim()) handleLine(line);
+          if (done) break;
         }
-        if (done) break;
+        // The POST only acknowledged a scheduled worker. Its events arrive here
+        // as they happen, and the saved log takes over if this ever ends early.
+        if (relayInvite && !requestReachedTerminal && !sawInput)
+          await followRunRelay(relayInvite, controller.signal, handleLine);
+      } finally {
+        if (requestRunId) closeLocalRunStream(requestRunId);
       }
-      if (changed) await onDataChanged?.();
+      // Give the page a moment to bring the saved answer in, so the live one
+      // does not blink out; a slow refresh must never hold the run open.
+      if (changed)
+        await Promise.race([
+          Promise.resolve(onDataChanged?.()).catch(() => undefined),
+          new Promise((resolve) => setTimeout(resolve, 1_200)),
+        ]);
       if (requestReachedTerminal)
         setLiveExchange((current) =>
           current && (!liveExchangeId || current.id === liveExchangeId)
@@ -1360,6 +1457,7 @@ export function useSpectraRun({
             currentView,
             timeZone: userTimeZone(),
             attachments,
+            ...(knownUnreachableRuntimes().length ? { unreachable: knownUnreachableRuntimes() } : {}),
           },
           optimisticCardId,
           exchangeId,
@@ -1605,7 +1703,9 @@ export function useSpectraRun({
                 signedOut: "Sign in again to undo this run.",
               }),
             );
-          toast.success("Restored the earlier copy of this work.");
+          const undone = (await response.json().catch(() => ({}))) as { summary?: string; notes?: string[] };
+          toast.success(undone.summary ?? "Undone.", undone.notes?.length ? { description: undone.notes.join(" ") } : undefined);
+          void refreshRunTabs(true);
           spectraBus.emit("threads.changed", {});
           await onDataChanged?.();
         } catch (error) {
@@ -1667,7 +1767,7 @@ export function useSpectraRun({
         const exchangeId = shown?.runId === runId ? shown.id : `answer:${uniqueToken()}`;
         setLiveExchange((current) =>
           current?.runId === runId
-            ? { ...current, id: exchangeId, status: "streaming" }
+            ? { ...current, id: exchangeId, status: "streaming", input: current.input?.toolCallId === toolCallId ? undefined : current.input }
             : {
                 id: exchangeId,
                 runId,
@@ -1776,11 +1876,7 @@ export function useSpectraRun({
         current &&
         ((!targetRunId && current.id === submissionKey) ||
           current.runId === targetRunId)
-          ? {
-              ...current,
-              status: "stopped",
-              steps: current.steps.map((step) => (step.status === "running" ? { ...step, status: "done" as const } : step)),
-            }
+          ? stoppedExchange(current)
           : current,
       );
       if (targetRunId)
@@ -1902,6 +1998,7 @@ export function useSpectraRun({
           exchangeId,
         );
       } catch (error) {
+        setLiveExchange((current) => (current?.id === exchangeId ? null : current));
         toast.error(
           error instanceof Error ? error.message : "Could not retry run.",
         );
@@ -1911,6 +2008,49 @@ export function useSpectraRun({
     },
     [consume, resolveDisplayedRunVersion],
   );
+
+  /*
+   * The server has the last word on whether a run is going. The observer above
+   * only follows runs that belong to this page's thread or surface, so a run
+   * begun here and finished under another thread would otherwise count up with
+   * a Stop button for ever. The shared tabs are already being read, so they
+   * answer first, and the run itself is asked only now and then.
+   */
+  const watchedRunId = liveExchange && liveExchange.status !== "stopped" && liveExchange.status !== "failed"
+    ? liveExchange.runId ?? observedContinuationRunId
+    : observedContinuationRunId;
+  useEffect(() => {
+    if (!watchedRunId) return;
+    let stopped = false;
+    let checks = 0;
+    let timer: number | undefined;
+    const settle = () => {
+      setLiveExchange((current) => (current?.runId === watchedRunId ? null : current));
+      setObservedContinuationRunId((current) => (current === watchedRunId ? null : current));
+      activeRunIds.current.delete(watchedRunId);
+      publishActiveRuns();
+      stopObservingUiRun(watchedRunId, true);
+      clearRunFeedActivity(watchedRunId);
+      void onDataChanged?.();
+    };
+    const check = async () => {
+      checks += 1;
+      const tab = getRunTabs().find((candidate) => candidate.runId === watchedRunId);
+      if (tab && !isActiveRunStatus(tab.run.status)) {
+        if (!activeRunIds.current.has(watchedRunId)) return settle();
+      } else if (!tab || checks % 4 === 0) {
+        const detail = await getSpectraRunDetail(watchedRunId).catch(() => null);
+        if (stopped) return;
+        if (detail && !isActiveRunStatus(detail.run.status) && !activeRunIds.current.has(watchedRunId)) return settle();
+      }
+      if (!stopped) timer = window.setTimeout(() => void check(), 5_000);
+    };
+    timer = window.setTimeout(() => void check(), 5_000);
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+    };
+  }, [onDataChanged, publishActiveRuns, watchedRunId]);
 
   const submitting =
     !stopSuppressed &&
@@ -1954,4 +2094,24 @@ export function useSpectraRun({
       submitting,
     ],
   );
+}
+
+type LiveExchangeUpdate =
+  | SpectraLiveExchange
+  | null
+  | ((current: SpectraLiveExchange | null) => SpectraLiveExchange | null);
+
+function keepStoppedExchange(
+  current: SpectraLiveExchange | null,
+  update: LiveExchangeUpdate,
+): SpectraLiveExchange | null {
+  const next = typeof update === "function" ? update(current) : update;
+  if (
+    current?.status === "stopped" &&
+    next &&
+    next.id === current.id &&
+    (next.status === "streaming" || next.status === "starting")
+  )
+    return current;
+  return next;
 }

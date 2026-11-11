@@ -47,15 +47,23 @@ export async function readQuery<TArgs extends object, TResult>(
   }
 }
 
+/** Two writes met on the same row. Neither was saved, so sending it again is safe. */
+const WRITE_CONFLICT = /optimistic ?concurrency|OCC|changed while this mutation|write conflict/i;
+const CONFLICT_RETRIES = 5;
+
 export async function mutate<TArgs extends object, TResult>(
   name: string,
   args: TArgs,
 ) {
-  try {
-    return await convexMutation<TArgs, TResult>(name, args);
-  } catch (error) {
-    if (!missingFunction(error)) throw error;
-    return convexMutation<TArgs, TResult>(withJsExtension(name), args);
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await convexMutation<TArgs, TResult>(name, args);
+    } catch (error) {
+      if (missingFunction(error)) return convexMutation<TArgs, TResult>(withJsExtension(name), args);
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt >= CONFLICT_RETRIES || !WRITE_CONFLICT.test(message)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 80 + Math.random() * 120));
+    }
   }
 }
 

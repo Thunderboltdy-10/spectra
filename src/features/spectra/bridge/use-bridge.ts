@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { accountStorageMatches, accountStorageRevision } from "@/lib/account-storage-scope";
 import {
   BRIDGE_DISCOVERY_STORAGE_KEY,
   BRIDGE_SESSION_STORAGE_KEY,
@@ -12,6 +13,7 @@ import {
   clearBridgeStatusCache,
   disableBridgeDiscovery,
   discoverBridge,
+  loadBridgeSession,
   loadBridgeStatusCache,
   persistBridgeStatusCache,
   presentBridgeReachability,
@@ -25,7 +27,7 @@ type BridgeProbe = { discovery: BridgeDiscovery; status: BridgeStatus | null };
 
 /** Several surfaces read Bridge at once; they share one probe at a time. */
 const PROBE_REUSE_MS = 2_000;
-let sharedProbe: { promise: Promise<BridgeProbe>; settledAt: number | null } | null =
+let sharedProbe: { promise: Promise<BridgeProbe>; settledAt: number | null; revision: string } | null =
   null;
 
 /**
@@ -34,22 +36,27 @@ let sharedProbe: { promise: Promise<BridgeProbe>; settledAt: number | null } | n
  * has never connected Bridge.
  */
 export function probeBridge(options: { fresh?: boolean } = {}): Promise<BridgeProbe> {
+  const revision = accountStorageRevision();
   if (!bridgeDiscoveryEnabled())
     return Promise.resolve({ discovery: { kind: "not-set-up" }, status: null });
   const reusable =
     sharedProbe &&
+    sharedProbe.revision === revision &&
     (sharedProbe.settledAt === null ||
       (!options.fresh && Date.now() - sharedProbe.settledAt < PROBE_REUSE_MS));
   if (reusable && sharedProbe) return sharedProbe.promise;
-  const entry: { promise: Promise<BridgeProbe>; settledAt: number | null } = {
+  const entry: { promise: Promise<BridgeProbe>; settledAt: number | null; revision: string } = {
+    revision,
     settledAt: null,
-    promise: (async () => {
+    promise: (async (): Promise<BridgeProbe> => {
       const discovery = await discoverBridge();
+      if (!accountStorageMatches(revision)) return { discovery: { kind: "not-set-up" }, status: null };
       // Do not probe the authenticated status endpoint when the local
       // process is absent (the common local --no-bridge mode). Besides
       // avoiding needless work, this prevents stale sessions from turning a
       // healthy Spectra page into a stream of 401 console errors.
       const status = discovery.kind === "running" ? await bridgeStatus() : null;
+      if (!accountStorageMatches(revision)) return { discovery: { kind: "not-set-up" }, status: null };
       return { discovery, status };
     })().finally(() => {
       entry.settledAt = Date.now();
@@ -88,6 +95,7 @@ export function useBridgeHealth() {
   useEffect(() => {
     let disposed = false;
     let misses = 0;
+    let wasRunning = false;
     let timer: number | null = null;
     let nextDueAt = 0;
     const cached = loadBridgeStatusCache();
@@ -112,17 +120,26 @@ export function useBridgeHealth() {
       }, delay);
     };
     const check = async (fresh: boolean) => {
+      const revision = accountStorageRevision();
       if (fresh) misses = 0;
       const next = await probeBridge({ fresh });
-      if (disposed) return;
+      if (disposed || !accountStorageMatches(revision)) return;
       misses = next.discovery.kind === "running" ? 0 : misses + 1;
       if (next.discovery.kind === "not-set-up") misses = 0;
-      setDiscovery(next.discovery);
-      setHealth(next.discovery.kind === "running" ? next.discovery.health : null);
+      // Bridge is busy, not gone: one slow answer doesn't disconnect anything.
+      const running = next.discovery.kind === "running";
+      const session = Boolean(loadBridgeSession());
+      const slow = session && (running ? !next.status : wasRunning && misses <= 2);
+      if (running) wasRunning = true;
+      else if (!slow) wasRunning = false;
+      if (running || !slow) {
+        setDiscovery(next.discovery);
+        setHealth(running && next.discovery.kind === "running" ? next.discovery.health : null);
+      }
       if (next.status) {
         persistBridgeStatusCache(next.status);
         setStatus(next.status);
-      } else unpair();
+      } else if (!slow) unpair();
       setChecked(true);
       schedule();
     };

@@ -168,7 +168,7 @@ export function SlideTextField({
   });
 
   useEffect(() => {
-    editor?.setEditable(editable);
+    editor?.setEditable(editable, false);
   }, [editable, editor]);
 
   useEffect(() => {

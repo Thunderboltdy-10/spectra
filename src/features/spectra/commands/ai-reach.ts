@@ -246,6 +246,16 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
 
   // Work
   {
+    id: "conversation.undo_previous_run",
+    area: "conversation",
+    title: "Undo the previous Spectra run",
+    description: "Reverse the preceding run in this thread using its saved state, preserving later human edits.",
+    keywords: ["undo that", "revert", "previous change"],
+    server: ["spectraRunUndo:reverseWrites"],
+    reach: tool("undo_previous_run"),
+  },
+
+  {
     id: "work.create",
     area: "work",
     title: "Create work",
@@ -540,7 +550,7 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     id: "calendar.add_event",
     area: "calendar",
     title: "Add a calendar event",
-    description: "Add a personal event to the calendar: title, start, end?, allDay?, notes?.",
+    description: "Add a personal event to the calendar: title, start, end?, allDay?, notes?, alreadyHappened? (only to log something that already happened).",
     keywords: ["schedule", "meeting", "appointment", "remind", "book"],
     server: ["calendar:createPersonalItem"],
     reach: tool("calendar", { fixed: { action: "add_event" }, appCommand: "create_calendar_personal_event", example: { title: "Dentist", start: "2026-10-06T09:00" } }),
@@ -609,6 +619,22 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     description: "Read the user's computers connected through Spectra Bridge: each one's state, folders, last sync and any problem, with ids for the other device actions.",
     keywords: ["bridge", "computer", "desktop", "laptop", "sync status", "folders", "is my computer connected", "explain a problem"],
     reach: tool("devices", { fixed: { action: "status" }, appCommand: "read_devices", example: {} }),
+  },
+  {
+    id: "devices.list_names",
+    area: "devices",
+    title: "See file names on a computer",
+    description: "Read the names of files and folders in Documents, Desktop, Downloads and OneDrive on the user's computer, one level at a time. Names only, never contents. Use it to offer syncing something relevant.",
+    keywords: ["files on my computer", "what files do i have", "find a file", "my documents", "downloads", "desktop files"],
+    reach: tool("devices", { fixed: { action: "list_names" }, appCommand: "read_computer_names", example: { path: "Documents" } }),
+  },
+  {
+    id: "devices.sync_path",
+    area: "devices",
+    title: "Sync a file or folder by name",
+    description: "After the user agrees, ask to bring a file or folder from list_names into Spectra. A prompt on the computer decides; it only comes in if they agree there.",
+    keywords: ["sync this file", "bring it in", "import from my computer", "add this to spectra"],
+    reach: tool("devices", { fixed: { action: "sync_path" }, appCommand: "control_device", example: { path: "Documents/IB/Lab report.docx" } }),
   },
   {
     id: "devices.pair",
@@ -903,8 +929,8 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     description: "Save or correct something lasting about the user.",
     keywords: ["note", "keep in mind", "preference"],
     ui: ["app.memory.write"],
-    server: ["memory:remember", "memory:correct"],
-    reach: tool("remember", { appCommand: "write_memory", example: { content: "Prefers short answers." } }),
+    server: ["spectraMemory:update"],
+    reach: tool("update_memory", { example: { file: "preferences", add: "Everywhere: prefers short answers." } }),
   },
   {
     id: "memory.forget",
@@ -912,8 +938,8 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     title: "Forget a memory",
     description: "Erase one saved memory for good when the user asks Spectra to forget it.",
     keywords: ["forget", "erase memory", "delete memory"],
-    server: ["memory:forget"],
-    reach: tool("forget_memory", { appCommand: "write_memory", example: { memoryId: "memory-1" } }),
+    server: ["spectraMemory:update"],
+    reach: tool("update_memory", { example: { file: "topic", slug: "mit-interview", remove: true } }),
   },
   {
     id: "memory.manage",
@@ -1049,7 +1075,31 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
  * Public Convex functions that are not user actions: protocols, the AI's own
  * run machinery, uploads and housekeeping. Each says why.
  */
+const DEVICE_WORK_PLUMBING = "Moving and backing up work on this computer is the owner's own choice on the Devices page; the AI writes to device work through its normal artifact tools.";
+
 export const SERVER_PLUMBING: Readonly<Record<string, string>> = {
+  "spectraArtifactLinks:establish":
+    "Keeps the links a work's own references imply; Spectra links work through spectraArtifactLinks:create.",
+  "deviceWorks:choose": DEVICE_WORK_PLUMBING,
+  "deviceWorks:adoptRestored": DEVICE_WORK_PLUMBING,
+  "deviceWorks:touch": DEVICE_WORK_PLUMBING,
+  "deviceWorks:finishCreate": DEVICE_WORK_PLUMBING,
+  "deviceWorks:movedToDevice": DEVICE_WORK_PLUMBING,
+  "deviceWorks:movedToCloud": DEVICE_WORK_PLUMBING,
+  "deviceWorks:backupUploadUrl": DEVICE_WORK_PLUMBING,
+  "deviceWorks:recordBackup": DEVICE_WORK_PLUMBING,
+  "deviceWorks:deleteBackups": DEVICE_WORK_PLUMBING,
+  "landingRequests:submit": "The public landing page's request form; nobody is signed in there.",
+  "landingRequests:setStatus": "Operators triage landing page requests from the admin page.",
+  "memory:remember": "The older memory store, kept for settings; the AI writes its notes through update_memory.",
+  "memory:correct": "The older memory store, kept for settings; the AI writes its notes through update_memory.",
+  "memory:forget": "The older memory store, kept for settings; the AI writes its notes through update_memory.",
+  "spectraHarness:takeSteers": "The run loop collects messages the user sent while it worked.",
+  "spectraHarness:discardCheckpoint": "The run loop drops a resume checkpoint it no longer needs.",
+  "spectraRunUndo:bringBackCalendarItem": "Undo puts back calendar events the run removed.",
+  "spectraRunUndo:recordReversal": "Records a completed conversational Undo for the current run after checking the prior run's reversal.",
+  "spectraRunUndo:restoreSettingsLayer": "Undo puts back settings the run changed.",
+  "spectraMemory:clear": "Settings clears the AI's notes on the user's own request.",
   "artifactAssets:*": "Upload protocol for work assets.",
   "artifactContent:*": "Upload protocol for work content.",
   "artifactEmbeds:confirmPlacement": "Confirms a provisional placement against the saved version that holds it; the change-group writer does this for Spectra's own placements.",

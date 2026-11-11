@@ -1,12 +1,16 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useConvexAuth, useQuery } from "convex/react";
+import { useConvexAuth } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { api } from "../../../../convex/_generated/api";
 import { spectraBus } from "../events";
+import { setRunLive } from "../data/use-calm-query";
 
 /** Several changes in a burst (a run writing its reply) refresh once. */
 const SETTLE_MS = 800;
+/** While a run is live its own stream shows its progress, so the lists can wait. */
+const SETTLE_DURING_RUN_MS = 20_000;
 
 type Pulse = { threadsAt: number; live: string[] };
 
@@ -29,17 +33,21 @@ export function LivePulseMount() {
 
   useEffect(() => {
     if (!pulse) return;
+    setRunLive(pulse.live.length > 0);
     const before = seen.current;
     seen.current = pulse;
     if (!before) return;
     const moved = new Set([...pulse.live, ...before.live].filter((entry) => !pulse.live.includes(entry) || !before.live.includes(entry)));
     for (const runId of new Set([...moved].map((entry) => entry.split(":")[0]!))) spectraBus.emit("run.changed", { runId });
     if (pulse.threadsAt === before.threadsAt && !moved.size) return;
+    // A run's writes only move the timestamp: keep the pending refresh rather than restart it.
+    const quiet = !moved.size && pulse.live.length > 0;
+    if (quiet && timer.current) return;
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
       timer.current = null;
       spectraBus.emit("threads.changed", {});
-    }, SETTLE_MS);
+    }, quiet ? SETTLE_DURING_RUN_MS : SETTLE_MS);
   }, [pulse]);
 
   return null;

@@ -12,7 +12,7 @@ it("caps an account's live AI runs across fresh threads and per hour", async () 
   const t = convexTest(schema, modules);
   for (const name of ["orgNodeCountByType", "orgNodeCountByWorkspace", "orgNodeCountByParent"])
     aggregateTest.register(t, name);
-  const { accountId, schoolId } = await t.run(async (ctx) => {
+  const { accountId } = await t.run(async (ctx) => {
     const now = Date.now();
     const schoolId = await ctx.db.insert("schools", {
       name: "Admission School", slug: "admission-school", verifiedDomains: [], status: "active",
@@ -47,13 +47,19 @@ it("caps an account's live AI runs across fresh threads and per hour", async () 
     const now = Date.now();
     for (const run of await ctx.db.query("spectraAiRuns").collect())
       await ctx.db.patch(run._id, { status: "completed", leaseExpiresAt: undefined });
-    for (let index = 0; index < 120; index++)
-      await ctx.db.insert("spectraAiRuns", {
-        ownerAccountId: accountId, schoolId, sourceSurface: "chat", status: "completed",
-        userPrompt: "earlier", submissionKey: `earlier-${index}`, createdAt: now - 1_000, updatedAt: now,
-      });
+    // The hour's count lives on one small row, not in the runs themselves.
+    const hour = Math.floor(now / 3_600_000) * 3_600_000;
+    const row = await ctx.db.query("spectraRunAdmissions").withIndex("by_account", (q) => q.eq("accountId", accountId)).unique();
+    if (row) await ctx.db.patch(row._id, { hourStart: hour, count: 120, previous: 0 });
+    else await ctx.db.insert("spectraRunAdmissions", { accountId, hourStart: hour, count: 120, previous: 0 });
   });
   await expect(begin("after-burst")).rejects.toThrow("many AI requests in the last hour");
+  // The last hour's starts weigh less as it slides away.
+  await t.run(async (ctx) => {
+    const row = await ctx.db.query("spectraRunAdmissions").withIndex("by_account", (q) => q.eq("accountId", accountId)).unique();
+    await ctx.db.patch(row!._id, { hourStart: row!.hourStart - 3_600_000, count: 60, previous: 0 });
+  });
+  await expect(begin("after-burst")).resolves.toMatchObject({ created: true });
 });
 
 it("records only the names and kinds of a message's files, and only so many", async () => {

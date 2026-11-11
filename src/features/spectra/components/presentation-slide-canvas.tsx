@@ -28,6 +28,7 @@ import type { SpectraArtifact, SpectraArtifactAsset } from "../data/api";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { SpectraRichContent } from "./spectra-rich-content";
 import { SlideTextField } from "./slide-text-field";
+import { SlideDiagram } from "./presentation-slide-diagram";
 
 /**
  * One slide drawn at the deck's own scale. The studio writes on it; the rail,
@@ -356,10 +357,12 @@ function PresentationObjectView({
     }
     const frame = window.requestAnimationFrame(() => {
       const element = textRef.current;
+      // A line's last sliver past the frame isn't lost text: the same give the audit allows.
+      const give = element ? Math.max(1, (parseFloat(getComputedStyle(element).fontSize) || 0) * 0.35) : 1;
       setTextOverflow(
         Boolean(
           element &&
-          (element.scrollHeight > element.clientHeight + 1 ||
+          (element.scrollHeight > element.clientHeight + give ||
             element.scrollWidth > element.clientWidth + 1),
         ),
       );
@@ -405,6 +408,7 @@ function PresentationObjectView({
   return (
     <div
       className="presentation-object"
+      data-object-id={compact ? undefined : object.id}
       {...(path ? targetAttrs(path) : {})}
       data-spectra-part={selected && !compact ? "grip" : undefined}
       data-selected={selected || undefined}
@@ -497,7 +501,9 @@ function PresentationObjectView({
           data-shape={String(
             styleValue(object, "shape", "rounded-rectangle"),
           )}
+          data-has-text={presentationObjectText(object) ? "true" : undefined}
           style={{
+            ...textStyle,
             background: String(styleValue(object, "fill", "#dfeee4")),
             borderColor: String(styleValue(object, "stroke", "#82b79b")),
             borderWidth: `${Number(styleValue(object, "strokeWidth", 1))}px`,
@@ -583,7 +589,10 @@ function PresentationObjectView({
           ) : null}
         </div>
       ) : object.type === "table" ? (
-        <table className="presentation-table">
+        <table
+          className="presentation-table"
+          style={{ fontSize: `${Number(styleValue(object, "fontSize", 21)) / 10}cqw` }}
+        >
           <tbody>
             {tableRows(object).map((row, rowIndex) => (
               <tr key={rowIndex}>
@@ -608,6 +617,8 @@ function PresentationObjectView({
             ))}
           </tbody>
         </table>
+      ) : object.type === "embed" && typeof (objectContent.diagram as { code?: unknown } | undefined)?.code === "string" ? (
+        <SlideDiagram code={(objectContent.diagram as { code: string }).code} alt={object.altText} compact={compact} />
       ) : object.type === "embed" && objectContent.nativeObject ? (
         <NativeObjectCard object={object} asset={asset} />
       ) : object.type === "embed" ? (

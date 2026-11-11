@@ -50,11 +50,25 @@ const WORKSPACE: NodeIdentity = {
   label: "Workspace",
 };
 
+export const WORKSPACE_INKS = [
+  ["var(--ink-violet)", "Violet"],
+  ["var(--ink-blue)", "Blue"],
+  ["var(--ink-green)", "Green"],
+  ["var(--ink-orange)", "Orange"],
+  ["var(--ink-red)", "Red"],
+  ["var(--ink-yellow)", "Yellow"],
+] as const;
+
+/** The colour a workspace is drawn in. Workspaces once stored the raw word "cyan". */
+export function workspaceInk(color: string | undefined) {
+  return !color || color === "cyan" ? WORKSPACE_INKS[0][0] : color;
+}
+
 export function nodeIdentity(node: TreeNode, open = false): NodeIdentity {
   if (node.kind === "folder")
     return open ? { ...FOLDER, icon: FolderOpen } : FOLDER;
   if (node.kind === "workspace") {
-    const colour = node.workspace?.color;
+    const colour = node.workspace ? workspaceInk(node.workspace.color) : undefined;
     return colour
       ? {
           ...WORKSPACE,
@@ -64,7 +78,8 @@ export function nodeIdentity(node: TreeNode, open = false): NodeIdentity {
       : WORKSPACE;
   }
   if (node.kind === "thread") return THREAD;
-  if (node.kind === "link") return REFERENCE;
+  if (node.kind === "link")
+    return node.target?.kind === "folder" || node.target?.kind === "workspace" ? FOLDER : REFERENCE;
   const key = node.source?.blueprintKey as
     | ArtifactCardView["blueprintKey"]
     | undefined;

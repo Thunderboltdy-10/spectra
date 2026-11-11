@@ -87,6 +87,23 @@ describe("a message joins the run it belongs to", () => {
   });
   afterEach(() => {
     delete process.env.SPECTRA_APP_URL;
+    vi.unstubAllEnvs();
+  });
+
+  it("gives each answer dispatch its own relay channel on the same execution", async () => {
+    vi.stubEnv("SPECTRA_COLLAB_TOKEN_SECRET", "launch-relay-fixture-key-".repeat(2));
+    const first = await post({ action: "answer", runId: "run-1", executionId: "exec-1", toolCallId: "approve-1", answer: { kind: "approval", allowed: true } });
+    const second = await post({ action: "answer", runId: "run-1", executionId: "exec-1", toolCallId: "approve-2", answer: { kind: "approval", allowed: true } });
+    const schedules = named("spectraRuns:scheduleExecution");
+    const relayIds = schedules.map(call => (call.args.payload as Record<string, unknown>).relayId);
+    expect(relayIds).toEqual([expect.any(String), expect.any(String)]);
+    expect(relayIds[0]).not.toBe(relayIds[1]);
+    for (const [index, result] of [first, second].entries()) {
+      const invite = result.events.find(event => event.type === "live_relay");
+      expect(invite).toBeDefined();
+      const claims = JSON.parse(Buffer.from(String(invite!.ticket).split(".")[0], "base64url").toString());
+      expect(claims.sub).toBe(`run-1:exec-1:${relayIds[index]}`);
+    }
   });
 
   it("joins a working run at its next turn, with its files", async () => {

@@ -1,3 +1,4 @@
+import { shortAnswerMatches } from "../shared/quiz-answer-match";
 import { mutation, query } from "./functions";
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
@@ -296,7 +297,7 @@ function questionResult(question: QuizQuestion, response: unknown) {
                   actualArray.every(
                     (value, index) => value === expectedArray[index],
                   )
-                : normalized(response) === normalized(question.correctAnswer);
+                : shortAnswerMatches(response, question.correctAnswer);
   return {
     questionId: question.id,
     correct,
@@ -402,16 +403,26 @@ export const start = mutation({
   args: {
     artifactId: v.id("spectraArtifacts"),
     clientAttemptId: v.string(),
+    /** The questions of a quiz kept on the owner's computer, which Spectra doesn't hold. */
+    deviceContent: v.optional(v.any()),
+    /** Trying your own quiz where it is shown, before it has been published. */
+    ownDraft: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const { actor, artifact } = await requireArtifactCapability(
+    const { actor, artifact: stored } = await requireArtifactCapability(
       ctx,
       args.artifactId,
       "use",
     );
-    if (artifact.blueprintKey !== "quiz" || artifact.status !== "active")
+    if (stored.blueprintKey !== "quiz" || stored.status !== "active")
       throw new Error("QUIZ_PRACTICE_UNAVAILABLE");
-    if (record(artifact.content).published !== true)
+    const own = stored.ownerAccountId === actor.accountId;
+    const onDevice = stored.storageHome === "device";
+    if (onDevice && !own) throw new Error("QUIZ_PRACTICE_UNAVAILABLE");
+    // An expected answer rather than a failure: the caller reads the quiz from Bridge and asks again.
+    if (onDevice && args.deviceContent === undefined) return { keptOnDevice: true as const };
+    const artifact = onDevice ? { ...stored, content: args.deviceContent } : stored;
+    if (!onDevice && record(artifact.content).published !== true && !(own && args.ownDraft))
       throw new Error("QUIZ_PRACTICE_NOT_PUBLISHED: This quiz is still publishing. Try again in a moment.");
     const clientAttemptId = args.clientAttemptId.trim().slice(0, 180);
     if (clientAttemptId.length < 8) throw new Error("QUIZ_ATTEMPT_ID_INVALID");

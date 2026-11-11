@@ -1,0 +1,22 @@
+{
+  "offScaleFontSizes": {
+    "src/styles/spectra-admin.css": 3,
+    "src/styles/spectra-agent-interview.css": 3,
+    "src/styles/spectra-agent.css": 1,
+    "src/styles/spectra-app.css": 8,
+    "src/styles/spectra-chat-page.css": 1,
+    "src/styles/spectra-desk.css": 3,
+    "src/styles/spectra-devices.css": 3,
+    "src/styles/spectra-editor-chrome.css": 2,
+    "src/styles/spectra-editors.css": 1,
+    "src/styles/spectra-embeds.css": 10,
+    "src/styles/spectra-flashcards.css": 3,
+    "src/styles/spectra-landing.css": 26,
+    "src/styles/spectra-library.css": 1,
+    "src/styles/spectra-quiz.css": 1,
+    "src/styles/spectra-school.css": 4,
+    "src/styles/spectra-share.css": 1,
+    "src/styles/spectra-task.css": 2,
+    "src/styles/spectra-today.css": 4
+  }
+}

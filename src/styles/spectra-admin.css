@@ -637,7 +637,7 @@
 .admin-head p {
   grid-column: 1 / -1;
   max-width: 64ch;
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.5;
   color: var(--text-secondary);
 }
@@ -651,7 +651,7 @@
   align-items: center;
   gap: 4px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--text-secondary);
   text-decoration: underline;
@@ -703,7 +703,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-secondary);
 }
@@ -725,7 +725,7 @@
   color: var(--brand-primary);
 }
 .admin-tally-detail {
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.4;
   color: var(--text-tertiary);
 }
@@ -764,12 +764,12 @@
   gap: 2px;
 }
 .admin-need strong {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--text-primary);
 }
 .admin-need span {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text-secondary);
 }
 
@@ -848,7 +848,7 @@ a.admin-line:focus-visible {
 .admin-ledger-empty {
   padding: 14px 2px;
   border-bottom: 1px solid var(--border-subtle);
-  font-size: 13.5px;
+  font-size: 14px;
   color: var(--text-tertiary);
 }
 
@@ -894,7 +894,7 @@ a.admin-line:focus-visible {
   max-width: 72ch;
   align-items: flex-start;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.5;
   color: var(--text-tertiary);
 }
@@ -915,7 +915,7 @@ a.admin-line:focus-visible {
   flex-direction: column;
   justify-content: space-between;
   margin-top: -6px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -947,7 +947,7 @@ a.admin-line:focus-visible {
   grid-column: 2;
   justify-content: space-between;
   padding-top: 6px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-tertiary);
 }
 .admin-chart-choice {
@@ -958,7 +958,7 @@ a.admin-line:focus-visible {
 }
 .admin-chart-choice button {
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--text-tertiary);
   outline: none;
@@ -997,7 +997,7 @@ a.admin-line:focus-visible {
   color: var(--text-primary);
 }
 .admin-form-label small {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-tertiary);
 }
 .admin-form input:not([type="checkbox"]),
@@ -1031,7 +1031,7 @@ a.admin-line:focus-visible {
   padding: 6px 20px;
   border-bottom: 1px solid var(--card-border);
   background: color-mix(in oklab, var(--card-paper) 90%, var(--brand-primary));
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
 }
 .admin-operator strong {
@@ -1058,4 +1058,58 @@ a.admin-line:focus-visible {
   .admin-line-main {
     flex-basis: 100%;
   }
+}
+
+/* --- Analytics ------------------------------------------------------------
+   One person's own month: said in a sentence, counted on the sheet, then laid
+   out day by day. Same paper and ledgers as the admin pages. */
+.analytics-lead {
+  max-width: 34ch;
+  font-family: var(--font-display);
+  font-size: clamp(24px, 3vw, 32px);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  text-wrap: pretty;
+}
+.analytics-mix {
+  display: flex;
+  height: 10px;
+  gap: 2px;
+  margin-bottom: 14px;
+  overflow: hidden;
+  border-radius: 5px;
+}
+.analytics-mix span {
+  min-width: 3px;
+  background: var(--mix-color);
+  transition: flex-grow var(--motion-base) var(--ease-standard);
+}
+.analytics-row-label {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+.analytics-row-label i {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 3px;
+  background: var(--mix-color);
+}
+.analytics-chart-bars[data-few] .admin-chart-bar {
+  max-width: 56px;
+}
+.analytics-chart-bars[data-few] {
+  justify-content: space-around;
+}
+.analytics-chart-empty {
+  display: grid;
+  height: 200px;
+  place-items: center;
+  border-bottom: 1px solid var(--border-default);
+  font-size: var(--text-ui);
+  color: var(--text-tertiary);
 }

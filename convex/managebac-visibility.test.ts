@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -64,6 +64,39 @@ async function fixture() {
 }
 
 describe("current single-record ManageBac visibility", () => {
+  it.each(["classes", "current_tasks"] as const)("keeps stored %s visibility independent of the clock", async syncKind => {
+    const f = await fixture();
+    await f.t.run(ctx => ctx.db.patch(f.recordId, {
+      recordType: syncKind === "classes" ? "membership" : "assignment",
+      audienceScope: "mapped_user", mappedAccountId: f.accountId, syncKind,
+    }));
+    await f.t.run(async ctx => {
+      const source = (await ctx.db.get(f.recordId))!;
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => { throw new Error("Stored School kind must not read the clock"); });
+      try { expect(await createManagebacQueryVisibilityReader(ctx, f.actor).canReadRecord(source)).toBe(true); }
+      finally { clock.mockRestore(); }
+    });
+  });
+
+  it("still uses time to hide an unclassified legacy task after it enters the archive", async () => {
+    const f = await fixture();
+    const dueAt = Date.UTC(2026, 10, 1);
+    await f.t.run(async ctx => {
+      await ctx.db.patch(f.recordId, { recordType: "assignment", audienceScope: "mapped_user",
+        mappedAccountId: f.accountId, normalized: { dueAt } });
+      await ctx.db.insert("schoolSyncPreferences", { accountId: f.accountId, schoolId: f.schoolId, integrationId: f.integrationId,
+        kind: "past_tasks", mode: "off", updatedAt: dueAt });
+    });
+    for (const [now, allowed] of [[dueAt, true], [dueAt + 8 * 86_400_000, false]] as const) {
+      await f.t.run(async ctx => {
+        const source = (await ctx.db.get(f.recordId))!;
+        const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+        try { expect(await createManagebacQueryVisibilityReader(ctx, f.actor).canReadRecord(source)).toBe(allowed); }
+        finally { clock.mockRestore(); }
+      });
+    }
+  });
+
   it("reuses a query's loaded source without dropping current authority checks", async () => {
     const f = await fixture();
     await f.t.run(async ctx => {

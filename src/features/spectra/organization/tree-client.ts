@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
+import { useMutation, usePaginatedQuery } from "convex/react";
+import { useQuery } from "@/features/spectra/data/use-kept-query";
 import type { FunctionReference } from "convex/server";
+import { newWorkStoreId, seedNewDeviceWork } from "../bridge/device-works";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { readConvexError } from "../../../../shared/convex-error.mjs";
@@ -67,6 +69,8 @@ export type TreeNode = {
     owned: boolean;
     shared: boolean;
     aiState?: string;
+    storageHome?: "device";
+    storageStoreId?: string;
   };
   /** Present on flat listings (search, quick views) so a row stays locatable. */
   parentPath?: string[];
@@ -91,6 +95,19 @@ const EMPTY_LIVE_IDENTITIES: LiveIdentity[] = [];
 
 const ROOT = "root";
 const nodeArg = (parentId: string | null) => (parentId ?? ROOT) as string;
+
+/** How many artifacts and threads each workspace holds. */
+export function useWorkspaceTallies(workspaceIds: readonly string[]) {
+  const key = [...workspaceIds].sort().join(",");
+  const ids = useMemo(() => (key ? key.split(",") : []), [key]);
+  return useQuery(api.orgTree.workspaceTallies, ids.length ? { workspaceIds: ids } : "skip") ?? null;
+}
+
+/** A place to go into: a folder or workspace, or a reference to one. */
+export function isPlaceNode(node: TreeNode): boolean {
+  if (node.kind === "folder" || node.kind === "workspace") return true;
+  return node.kind === "link" && (node.target?.kind === "folder" || node.target?.kind === "workspace");
+}
 
 /** The children of one folder, paginated so a 2k-item folder still opens fast. */
 export function useTreeChildren(
@@ -322,8 +339,9 @@ export function useTreeActions() {
         summary?: string;
         content?: unknown;
         parentId: string | null;
-      }) =>
-        createWork({
+      }) => {
+        const storageStoreId = newWorkStoreId(input.blueprintKey);
+        return createWork({
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           blueprintKey: input.blueprintKey as any,
           title: input.title,
@@ -331,7 +349,12 @@ export function useTreeActions() {
           content: input.content,
           source: "manual",
           parentNodeId: (input.parentId ?? ROOT) as Id<"orgNodes"> | "root",
-        }),
+          ...(storageStoreId ? { storageStoreId } : {}),
+        }).then(async (created) => {
+          if (created && storageStoreId) await seedNewDeviceWork(created as { artifactId: string; schemaVersion?: number }, input);
+          return created;
+        });
+      },
     }),
     [
       createFolder,

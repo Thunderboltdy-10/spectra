@@ -1,11 +1,12 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { mutation, query } from "./functions";
+import { mutation as projectedMutation } from "./orgNodeMutation";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
 import { applicationApprovalScope } from "./spectraApplicationWriteScope";
-import { currentArtifactApprovalScope } from "./spectraArtifactWriteScope";
+import { currentArtifactApprovalScope, preparedArtifactScope, type AllowedArtifactIntent } from "./spectraArtifactWriteScope";
 import { requireCurrentExecution } from "./spectraRunLifecycle";
 import { mergeUiObserverInterest } from "./spectraUiObservation";
 import { vUiObserverInterest } from "./spectraUiObservationSchema";
@@ -49,6 +50,13 @@ async function stateRow(ctx: QueryCtx | MutationCtx, runId: Id<"spectraAiRuns">)
     .unique();
 }
 
+async function checkpointRow(ctx: QueryCtx | MutationCtx, runId: Id<"spectraAiRuns">) {
+  return ctx.db
+    .query("spectraHarnessCheckpoints")
+    .withIndex("by_run", (q) => q.eq("runId", runId))
+    .unique();
+}
+
 /** The operations recorded for one tool call. */
 function operationIdsFor(row: Doc<"spectraHarnessStates"> | null, toolCallId: string) {
   const entry = record(row?.toolOperations)[toolCallId];
@@ -63,9 +71,10 @@ export const load = query({
     await ownedRun(ctx, args.runId);
     const row = await stateRow(ctx, args.runId);
     if (!row) return null;
+    const checkpoint = await checkpointRow(ctx, args.runId);
     return {
       executionId: row.executionId,
-      state: row.state,
+      state: checkpoint?.executionId === row.executionId ? checkpoint.state : row.state,
       toolOperations: row.toolOperations ?? {},
       pending: row.pending ?? null,
       answer: row.answer ?? null,
@@ -75,8 +84,10 @@ export const load = query({
 });
 
 /**
- * The checkpoint at a tool boundary: about one write per tool call. Returns
- * (and clears) the messages the user sent meanwhile; they join the next turn.
+ * The checkpoint: the attempt saves one every few seconds of work, and whenever
+ * it pauses, yields or fails. Returns (and clears) the messages the user sent
+ * meanwhile; they join the next turn. The bookkeeping row is only written when
+ * something in it changed.
  */
 export const saveCheckpoint = mutation({
   args: {
@@ -93,9 +104,21 @@ export const saveCheckpoint = mutation({
     const now = Date.now();
     const row = await stateRow(ctx, args.runId);
     const steers = row?.executionId === args.executionId ? (row.steers ?? []) : [];
+    const checkpoint = await checkpointRow(ctx, args.runId);
+    if (checkpoint) await ctx.db.patch(checkpoint._id, { executionId: args.executionId, state: args.state, updatedAt: now });
+    else await ctx.db.insert("spectraHarnessCheckpoints", { runId: args.runId, executionId: args.executionId, state: args.state, updatedAt: now });
+    const unchanged =
+      row &&
+      row.executionId === args.executionId &&
+      !row.state &&
+      !steers.length &&
+      args.toolOperations === undefined &&
+      args.pending === undefined &&
+      !args.clearPending;
+    if (unchanged) return { steers: [], active: ACTIVE.has(run.status) };
     const patch = {
       executionId: args.executionId,
-      state: args.state,
+      state: null,
       ...(args.toolOperations !== undefined
         ? { toolOperations: args.toolOperations }
         : row && row.executionId !== args.executionId
@@ -113,10 +136,38 @@ export const saveCheckpoint = mutation({
         ownerAccountId: actor._id,
         ...patch,
       });
+    if (run.steerWaiting) await ctx.db.patch(run._id, { steerWaiting: false });
     return {
       steers: steers.map((steer) => ({ text: steer.text, ...(steer.attachmentIds?.length ? { attachmentIds: steer.attachmentIds } : {}) })),
       active: ACTIVE.has(run.status),
     };
+  },
+});
+
+/** The messages the user sent meanwhile, without saving a checkpoint. */
+export const takeSteers = mutation({
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string() },
+  handler: async (ctx, args) => {
+    const { run } = await ownedRun(ctx, args.runId);
+    const row = await stateRow(ctx, args.runId);
+    const steers = row?.executionId === args.executionId ? (row.steers ?? []) : [];
+    if (row && steers.length) await ctx.db.patch(row._id, { steers: [], updatedAt: Date.now() });
+    if (run.steerWaiting) await ctx.db.patch(run._id, { steerWaiting: false });
+    return {
+      steers: steers.map((steer) => ({ text: steer.text, ...(steer.attachmentIds?.length ? { attachmentIds: steer.attachmentIds } : {}) })),
+      active: ACTIVE.has(run.status),
+    };
+  },
+});
+
+/** A finished run's transcript is in its thread; the checkpoint has done its job. */
+export const discardCheckpoint = mutation({
+  args: { runId: v.id("spectraAiRuns") },
+  handler: async (ctx, args) => {
+    await ownedRun(ctx, args.runId);
+    const checkpoint = await checkpointRow(ctx, args.runId);
+    if (checkpoint) await ctx.db.delete(checkpoint._id);
+    return null;
   },
 });
 
@@ -180,6 +231,7 @@ export const queueSteer = mutation({
       steers: [...(row.steers ?? []), { text, ...(attachmentIds.length ? { attachmentIds } : {}), createdAt: Date.now() }].slice(-10),
       updatedAt: Date.now(),
     });
+    await ctx.db.patch(run._id, { steerWaiting: true });
     return { queued: true, threadId: run.threadId ?? null };
   },
 });
@@ -231,14 +283,15 @@ export const joinableRun = query({
 });
 
 /** The category a recorded operation asks under, decided by the server. */
-function operationCategory(operation: Doc<"spectraOperations">): PermissionCategory | null {
-  if (operation.type !== "app.command") return "permanent_delete";
+function operationCategories(operation: Doc<"spectraOperations">): PermissionCategory[] {
+  if (operation.type !== "app.command") return preparedArtifactScope(operation)?.approvalCategories ?? ["permanent_delete"];
   const input = record(operation.input);
-  return applicationApprovalCategory(String(input.command), record(input.args));
+  const category = applicationApprovalCategory(String(input.command), record(input.args));
+  return category ? [category] : [];
 }
 
 /** The user's stored choice: full control, or "Always allow" this category, unless they set it to Never. */
-async function storedAllows(ctx: QueryCtx | MutationCtx, accountId: Id<"accounts">, run: Doc<"spectraAiRuns">, category: PermissionCategory) {
+async function storedPermissionDecision(ctx: QueryCtx | MutationCtx, accountId: Id<"accounts">, run: Doc<"spectraAiRuns">, category: PermissionCategory) {
   const layer = await ctx.db
     .query("accountPreferences")
     .withIndex("by_account_scope_key", (q) =>
@@ -246,10 +299,10 @@ async function storedAllows(ctx: QueryCtx | MutationCtx, accountId: Id<"accounts
     )
     .unique();
   const ai = record(record(layer?.values).ai);
-  if (Array.isArray(ai.permissionDeny) && ai.permissionDeny.includes(category)) return false;
-  if (ai.permissionFullControl === true) return true;
-  if (Array.isArray(ai.permissionAllow) && ai.permissionAllow.includes(category)) return true;
-  return threadAllows(ctx, run, category);
+  if (Array.isArray(ai.permissionDeny) && ai.permissionDeny.includes(category)) return "deny";
+  if (ai.permissionFullControl === true) return "allow";
+  if (Array.isArray(ai.permissionAllow) && ai.permissionAllow.includes(category)) return "allow";
+  return await threadAllows(ctx, run, category) ? "allow" : "ask";
 }
 
 /** An "Allow" given in a thread covers the same kind of step for the rest of that thread. */
@@ -307,7 +360,7 @@ async function addAlwaysAllow(ctx: MutationCtx, accountId: Id<"accounts">, categ
  * must still match, exactly as for a confirmation. The run is re-queued so a
  * worker can resume it from the checkpoint.
  */
-export const answer = mutation({
+export const answer = projectedMutation({
   args: {
     runId: v.id("spectraAiRuns"),
     executionId: v.string(),
@@ -338,6 +391,12 @@ export const answer = mutation({
     if (pending.kind !== args.answer.kind)
       throw new Error("HARNESS_INPUT_CHANGED: This question changed. Refresh and answer again.");
     const now = Date.now();
+    const resumeCards = async () => {
+      const cards = await ctx.db.query("spectraResultCards")
+        .withIndex("by_run", q => q.eq("runId", args.runId)).collect();
+      for (const card of cards)
+        await ctx.db.patch(card._id, { status: "queued", actions: [], updatedAt: now });
+    };
     if (args.answer.kind === "question") {
       if (run.status !== "awaiting_resolution")
         throw new Error("HARNESS_INPUT_CHANGED: This question was already answered in another view.");
@@ -365,6 +424,7 @@ export const answer = mutation({
         heartbeatAt: now,
         updatedAt: now,
       });
+      await resumeCards();
       return { alreadyAnswered: false, label: text || String(chosen?.label ?? "") };
     }
     const approvalOpen =
@@ -393,9 +453,19 @@ export const answer = mutation({
           throw new Error("AI_APPLICATION_APPROVAL_SCOPE_CHANGED: The proposed targets changed. Ask Spectra to prepare a new approval.");
         await ctx.db.patch(operation._id, { output: { ...output, approvedApplicationScope: scope } });
       } else if (operation.type === "artifact.update" || operation.type === "artifact.create" || operation.type === "artifact.archive") {
-        const { digest } = await currentArtifactApprovalScope(ctx, operation, run);
+        const { digest, scope, sourceDrift } = await currentArtifactApprovalScope(ctx, operation, run, "presentation", { tolerateSourceDrift: true });
         if (output.pendingArtifactScope !== digest)
           throw new Error("AI_ARTIFACT_APPROVAL_SCOPE_CHANGED: The proposed edit changed. Ask Spectra to prepare a new approval.");
+        if (sourceDrift) {
+          // F08: the work was re-saved under the approval (a Bridge sync, a
+          // version snapshot). Keep what the person allowed; the run prepares
+          // the edit again and applies it only if it still means the same.
+          if (!scope.semanticBaseDigest || !scope.semanticResultDigest)
+            throw new Error("AI_ARTIFACT_APPROVAL_SCOPE_CHANGED: The proposed edit changed. Ask Spectra to prepare a new approval.");
+          const intent: AllowedArtifactIntent = { scope: digest, base: scope.semanticBaseDigest, result: scope.semanticResultDigest };
+          await ctx.db.patch(operation._id, { output: { ...output, allowedArtifactIntent: intent } });
+          continue;
+        }
         await ctx.db.patch(operation._id, { output: { ...output, approvedArtifactScope: digest } });
       }
     }
@@ -422,6 +492,7 @@ export const answer = mutation({
       heartbeatAt: now,
       updatedAt: now,
     });
+    await resumeCards();
     return { alreadyAnswered: false, label: args.answer.allowed ? "Allowed" : "Not allowed" };
   },
 });
@@ -455,18 +526,26 @@ export const ensureApproved = mutation({
       // Ordinary writes need no approval; only asking effects are checked.
       if (!operation.requiresConfirmation) continue;
       const output = record(operation.output);
-      const scope =
-        operation.type === "app.command"
-          ? await applicationApprovalScope(ctx, operation, run)
-          : (await currentArtifactApprovalScope(ctx, operation, run)).digest;
-      const approvedByUser =
-        run.approval?.status === "accepted" &&
-        run.approval.executionId === args.executionId &&
-        (output.approvedApplicationScope ?? output.approvedArtifactScope) === scope;
+      const artifactScope = operation.type === "app.command" ? null : await currentArtifactApprovalScope(ctx, operation, run);
+      const scope = artifactScope ? artifactScope.digest : await applicationApprovalScope(ctx, operation, run);
+      const accepted = run.approval?.status === "accepted" && run.approval.executionId === args.executionId;
+      let approvedByUser = accepted && (output.approvedApplicationScope ?? output.approvedArtifactScope) === scope;
+      const intent = record(output.allowedArtifactIntent);
+      if (!approvedByUser && accepted && artifactScope && typeof intent.base === "string") {
+        // Prepared again on the re-saved work: the Allow carries over only to the same edit.
+        if (intent.base !== artifactScope.scope.semanticBaseDigest || intent.result !== artifactScope.scope.semanticResultDigest)
+          throw new Error("AI_APPROVAL_WORK_CHANGED: The work changed while the person was deciding, so this edit was not made.");
+        await ctx.db.patch(operation._id, { output: { ...output, allowedArtifactIntent: undefined, pendingArtifactScope: scope, approvedArtifactScope: scope } });
+        approvedByUser = true;
+      }
+      const categories = operationCategories(operation);
+      if (!categories.length && !approvedByUser) throw new Error("AI_PERMISSION_REQUIRED: Ask the user first.");
+      for (const category of categories) {
+        const decision = await storedPermissionDecision(ctx, actor._id, run, category);
+        if (decision === "deny") throw new Error("AI_PERMISSION_REQUIRED: This change is set to Never in Settings.");
+        if (!approvedByUser && decision !== "allow") throw new Error("AI_PERMISSION_REQUIRED: Ask the user first.");
+      }
       if (approvedByUser) continue;
-      const category = operationCategory(operation);
-      if (!category || !(await storedAllows(ctx, actor._id, run, category)))
-        throw new Error("AI_PERMISSION_REQUIRED: Ask the user first.");
       if (operation.type === "app.command") {
         await ctx.db.patch(operation._id, { output: { ...output, pendingApplicationScope: scope, approvedApplicationScope: scope } });
       } else {

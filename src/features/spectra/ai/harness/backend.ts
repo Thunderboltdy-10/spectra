@@ -1,3 +1,4 @@
+import type { MemoryChange, MemoryChangeResult } from "../../../../../shared/memory-files";
 import type { ArtifactTypeKey } from "../../artifacts/types";
 import type { AgentBenchState } from "./agent-bench";
 import type { AgentCompilationState } from "./agent-compilation";
@@ -36,11 +37,13 @@ export type LibraryItem = {
   /** The artifact id for work items (what create/edit/read take). */
   artifactId?: string;
   location?: string;
+  /** Existing storage metadata; does not imply a linked desktop file. */
+  onComputer?: boolean;
   updatedAt?: number;
 };
 
 /** What a search hit is: a piece of work, a chat, a calendar item, a school record or a memory. */
-export type SearchKind = "artifact" | "thread" | "event" | "school" | "memory";
+export type SearchKind = "artifact" | "thread" | "event" | "school";
 
 export type SearchHit = {
   kind: SearchKind;
@@ -62,6 +65,7 @@ export type SearchHit = {
   /** The workspace the item lives in, when the user can open it. */
   workspace?: string;
   ownership?: "mine" | "shared" | "school";
+  onComputer?: boolean;
   updatedAt?: number;
   /** When it happens: an event start or a due date. */
   timeAt?: number;
@@ -69,7 +73,7 @@ export type SearchHit = {
 
 export type SearchRequest = {
   query: string;
-  /** Leave out to search everything, memory included. */
+  /** Leave out to search everything. */
   kinds?: SearchKind[];
   limit: number;
 };
@@ -100,6 +104,10 @@ export type CommandResult = {
   uiEvents?: ToolOutcome["uiEvents"];
   /** The command discovered an effect that needs approval (desktop files). */
   pause?: ToolOutcome["pause"];
+  /** An artifact edit: the first region it changed. */
+  region?: string;
+  /** An artifact edit saved in Spectra whose desktop file Bridge has yet to write. */
+  desktopFilePending?: boolean;
 };
 
 export type ThreadReadRequest = {
@@ -139,7 +147,7 @@ export interface HarnessBackend {
       approved: boolean;
     },
     signal: AbortSignal,
-  ): Promise<void>;
+  ): Promise<CommandResult | void>;
   listLibrary(
     input: { query?: string; type?: string; folderId?: string; limit: number },
     signal: AbortSignal,
@@ -167,12 +175,18 @@ export interface HarnessBackend {
   readAgentCompilation(input: { agentId: string }, signal: AbortSignal): Promise<AgentCompilationState | null>;
   /** School records: deadlines, resources, timetable, classes, past tasks, grades, CAS, or one task or CAS experience by recordId. */
   readSchoolData(input: { purpose: string; classId?: string; recordId?: string }, signal: AbortSignal): Promise<string>;
+  /** One of the agent's longer notes about the user; null when there is no such topic. */
+  readMemoryTopic(slug: string, signal: AbortSignal): Promise<{ title: string; summary: string; content: string } | null>;
+  /** Change the agent's notes about the user. Why it could not is in the result. */
+  updateMemory(change: MemoryChange, signal: AbortSignal): Promise<MemoryChangeResult>;
   runCommand(request: CommandRequest, signal: AbortSignal): Promise<CommandResult>;
   /**
    * Record a command before the run pauses to ask, so the user's approval
    * binds to exactly this change. Optional: the in-memory backend needs none.
    */
   stageCommand?(request: CommandRequest, signal: AbortSignal): Promise<void>;
+  /** Reverse the immediately preceding run in this thread using its saved undo state. */
+  undoPreviousRun?(input: { approved: boolean; approvalScope?: string }, signal: AbortSignal): Promise<CommandResult>;
   /**
    * Hand the rest of this run to one of the user's agents: returns its
    * instructions, or null when it is unavailable. Optional.
@@ -182,5 +196,5 @@ export interface HarnessBackend {
   stageArtifactUpdate?(
     input: { id: string; type: ArtifactTypeKey; title?: string; content: Record<string, unknown>; toolCallId: string },
     signal: AbortSignal,
-  ): Promise<void>;
+  ): Promise<CommandResult | void>;
 }

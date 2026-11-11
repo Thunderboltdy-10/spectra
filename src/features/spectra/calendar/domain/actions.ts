@@ -37,7 +37,7 @@ export type CalendarSemanticAction =
 
 export type CalendarActionPostcondition = {
   itemId: string;
-  kind: "scheduled_work_block" | "personal_event";
+  kind: "scheduled_work_block" | "personal_event" | "task" | "milestone" | "reminder";
   startAt: number;
   endAt: number;
   linkedTask: boolean;
@@ -95,7 +95,11 @@ export function verifyCalendarActionPostcondition(
       linkedTask: false,
     };
   }
-  if (item.kind !== "scheduled_work_block")
+  if (item.kind !== "scheduled_work_block" && item.kind !== "personal_event" &&
+      item.kind !== "task" && item.kind !== "milestone" && item.kind !== "reminder")
+    throw new Error("CALENDAR_POSTCONDITION_KIND_MISMATCH");
+  if (item.kind !== "scheduled_work_block" &&
+      (action.type === "calendar.schedule_task" || item.sourceLocked))
     throw new Error("CALENDAR_POSTCONDITION_KIND_MISMATCH");
   if (item.startAt === undefined || item.endAt === undefined)
     throw new Error("CALENDAR_POSTCONDITION_TIME_MISSING");
@@ -104,7 +108,8 @@ export function verifyCalendarActionPostcondition(
   if (item.startAt !== expectedStart || item.endAt !== action.endAt)
     throw new Error("CALENDAR_POSTCONDITION_TIME_MISMATCH");
   const linkedTask = Boolean(item.taskItemId || item.planTaskId);
-  if (!linkedTask) throw new Error("CALENDAR_POSTCONDITION_TASK_MISSING");
+  if (item.kind === "scheduled_work_block" && !linkedTask)
+    throw new Error("CALENDAR_POSTCONDITION_TASK_MISSING");
   return {
     itemId: item.id,
     kind: item.kind,

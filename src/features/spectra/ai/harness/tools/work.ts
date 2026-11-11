@@ -216,7 +216,7 @@ function approveAgentSkillsTool(session: HarnessSession): HarnessTool<ApproveSki
         };
       if (!approval.approved.length)
         return { ok: false, content: `No drafted skill of *${current.title}* is waiting for approval: they were approved already.` };
-      await session.backend.updateArtifact(
+      const updated = await session.backend.updateArtifact(
         {
           id: current.id,
           type: current.type,
@@ -226,6 +226,7 @@ function approveAgentSkillsTool(session: HarnessSession): HarnessTool<ApproveSki
         },
         ctx.signal,
       );
+      if (updated && (!updated.ok || updated.pause)) return updated;
       const names = approval.approved.map((skill) => skill.name);
       const change = `Approved ${names.length} skill${names.length === 1 ? "" : "s"}`;
       return {

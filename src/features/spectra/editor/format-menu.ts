@@ -8,12 +8,16 @@ import { NodeSelection, Plugin, PluginKey, TextSelection, type EditorState } fro
  * outside the selection moves the caret there first (or picks the picture or
  * table it landed on), as a right-click does in Word; Shift and right-click
  * still give the browser's own menu. The bar closes when the selection moves,
- * the words change, or on Escape.
+ * the words change, or on Escape. The studio's right-click menu opens under
+ * it, the way Word pairs its mini toolbar with its menu.
  */
 
 const formatMenuKey = new PluginKey<boolean>("formatMenu");
 /** The floating bar's own plugin key (BubbleMenu's `pluginKey`), told to show and hide. */
 export const FORMAT_BAR_KEY = "formatBar";
+
+/** A right-click the floating bar answered, which the studio's own menu still may. */
+export const formatBarClicks = new WeakSet<Event>();
 
 /** Whether a right-click asked for the floating bar and it still stands. */
 export function formatMenuOpen(state: EditorState) {
@@ -39,6 +43,7 @@ export const FormatMenu = Extension.create({
             contextmenu(view, event) {
               if (event.shiftKey || !view.editable) return false;
               event.preventDefault();
+              formatBarClicks.add(event);
               const transaction = view.state.tr.setMeta(formatMenuKey, true).setMeta(FORMAT_BAR_KEY, "show");
               const at = view.posAtCoords({ left: event.clientX, top: event.clientY });
               const { from, to } = view.state.selection;

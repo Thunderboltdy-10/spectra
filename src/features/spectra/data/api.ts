@@ -1,3 +1,4 @@
+import type { MemoryChange, MemoryChangeResult, MemoryHead } from "../../../../shared/memory-files";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import type { CompilerStageState as FoundryCompilerStageState } from "../agents/foundry/compiler";
 import type { CompiledAgentResult } from "../agents/foundry/foundry-document";
@@ -358,6 +359,13 @@ export type SpectraWorkspaceManifestReport = {
 
 export type SpectraArtifact = {
   _id: string;
+  /** Kept on a computer through Spectra Bridge. */
+  storageHome?: "device";
+  storageStoreId?: string;
+  /** Counts moves between a computer and the cloud; each starts a fresh live history. */
+  storageEpoch?: number;
+  /** Set after a rename until the live document catches up: this title in the document is out of date. */
+  renamedFromTitle?: string;
   blueprintKey: SpectraBlueprintKey;
   resourceClass?: "artifact" | "resource" | "thread_reference";
   nativeFormat?: string;
@@ -677,6 +685,10 @@ export type SpectraResultCard = {
   provenance?: {
     artifactIds?: string[];
     artifactTitles?: string[];
+    /** Of `artifactIds`, the ones this run made. */
+    createdIds?: string[];
+    /** Where each edited work changed first, so opening it lands there (LAUNCH-REVIEW F5). */
+    regions?: Array<{ artifactId: string; regionId: string }>;
     threadId?: string;
     workspaceId?: string;
     workspaceTitle?: string;
@@ -864,6 +876,8 @@ export type SpectraArtifactEmbed =
   canRequestAccess?: boolean;
   accessRequest?: { requestId: string; status: "pending"; createdAt: number };
   source?: {
+    /** Kept on the owner's computer: the contents come from Bridge, not this row. */
+    storageHome?: "device";
     artifactId: string;
     title: string;
     summary?: string;
@@ -1003,8 +1017,11 @@ const workspaceCache = new Map<
   string,
   { value: SpectraOverview["workspace"]; cachedAt: number }
 >();
+const overviewReads = new Map<string, Promise<SpectraOverview>>();
 const CACHE_TTL = 5 * 60_000;
 const FIRST_PAINT_FETCH_TTL_MS = 1_100;
+/** Messages, steering and the like leave the lists alone, so they keep their cached pages. */
+const CATALOG_ACTIONS = /workspace|artifact|agent|import|placement|folder|move|share|invit|delete|archive|restore|rename|create|duplicate/i;
 const CACHE_LOCAL_ACTIONS = new Set([
   "hideResultCard",
   "keepResultCard",
@@ -1050,17 +1067,40 @@ async function readJson<T>(response: Response): Promise<T> {
   return payload as T;
 }
 
-export async function getSpectraOverview(workspaceId?: string, force = false) {
-  const key = workspaceId ?? "home";
+export async function getSpectraOverview(workspaceId?: string, force = false, includeRuns = true) {
+  const scope = workspaceId ?? "home";
+  const key = `${scope}${includeRuns ? "" : ":catalog"}`;
+  if (force) overviewCache.delete(includeRuns ? `${scope}:catalog` : scope);
   const cached = overviewCache.get(key);
   if (!force && cached && Date.now() - cached.cachedAt < CACHE_TTL)
     return cached.value;
+  if (!force && !includeRuns) {
+    const full = overviewCache.get(scope);
+    if (full && Date.now() - full.cachedAt < CACHE_TTL) return full.value;
+    const fullRead = overviewReads.get(scope);
+    if (fullRead) return fullRead;
+  }
+  const pendingCatalog = !force && includeRuns && !workspaceId ? overviewReads.get(`${scope}:catalog`) : undefined;
+  if (pendingCatalog) await pendingCatalog.catch(() => undefined);
+  const priorCatalog = !force && includeRuns && !workspaceId ? overviewCache.get(`${scope}:catalog`) : undefined;
+  const catalog = priorCatalog && Date.now() - priorCatalog.cachedAt < CACHE_TTL ? priorCatalog : undefined;
   const params = new URLSearchParams({ action: "overview" });
   if (workspaceId) params.set("workspaceId", workspaceId);
-  const value = await readJson<SpectraOverview>(
-    await requestSpectra(`/api/spectra?${params.toString()}`, { cache: "no-store" }),
-  );
-  overviewCache.set(key, { value, cachedAt: Date.now() });
+  if (!includeRuns) params.set("includeRuns", "false");
+  if (catalog) params.set("includeCatalog", "false");
+  // A forced read has to see what just changed, so it never joins one already under way.
+  const joined = force ? undefined : overviewReads.get(key);
+  const reading = joined ?? requestSpectra(`/api/spectra?${params.toString()}`, { cache: "no-store" })
+    .then(readJson<SpectraOverview>)
+    .then(value => catalog ? { ...catalog.value, runs: value.runs, resultCards: value.resultCards } : value);
+  if (!joined && !force) {
+    overviewReads.set(key, reading);
+    void reading.catch(() => undefined).finally(() => {
+      if (overviewReads.get(key) === reading) overviewReads.delete(key);
+    });
+  }
+  const value = await reading;
+  overviewCache.set(key, { value, cachedAt: catalog?.cachedAt ?? Date.now() });
   if (workspaceId && value.workspace)
     workspaceCache.set(workspaceId, {
       value: value.workspace,
@@ -1098,7 +1138,9 @@ export function getSpectraWorkspaceMetadata(workspaceId: string, signal?: AbortS
   const params = new URLSearchParams({ action: "workspaceMetadata", workspaceId });
   return requestSpectra(`/api/spectra?${params}`, { cache: "no-store", signal }).then(readJson<{ workspace: SpectraWorkspace | null }>);
 }
-export const spectraWorkspaceCatalog = createCatalogPageCache<SpectraWorkspace>((_key, cursor, signal) => getSpectraWorkspacePage(cursor, signal));
+// Workspaces change here or rarely: anything done here invalidates this, so a reload
+// starts from the kept list rather than scanning for it again.
+export const spectraWorkspaceCatalog = createCatalogPageCache<SpectraWorkspace>((_key, cursor, signal) => getSpectraWorkspacePage(cursor, signal), 30 * 60_000, "spectra.workspace.catalog.v1");
 export const spectraAgentCatalog = createCatalogPageCache<SpectraArtifact>((_key, cursor, signal) => getSpectraAgentPage(cursor, signal));
 
 export async function exportSpectraWorkspaceManifest(workspaceId: string) {
@@ -1130,11 +1172,28 @@ export async function getSpectraArtifacts(params?: {
   );
 }
 
+/** A row for work on this computer holds its name; the rest comes from Bridge. */
+async function withDeviceBody<T extends SpectraArtifact | null>(artifact: T): Promise<T> {
+  if (artifact?.storageHome !== "device") return artifact;
+  const { readDeviceWork } = await import("../bridge/device-works");
+  const stored = await readDeviceWork(artifact._id);
+  if (!stored) return artifact;
+  return {
+    ...artifact,
+    ...(stored.title ? { title: stored.title } : {}),
+    ...(stored.summary ? { summary: stored.summary } : {}),
+    ...(stored.tags ? { tags: stored.tags } : {}),
+    ...(stored.content !== undefined && stored.content !== null ? { content: stored.content } : {}),
+    ...(stored.schemaVersion ? { schemaVersion: stored.schemaVersion } : {}),
+  };
+}
+
 export async function getSpectraArtifact(artifactId: string, options?: { signal?: AbortSignal }) {
   const qs = new URLSearchParams({ action: "artifact", artifactId });
-  return readJson<{ artifact: SpectraArtifact }>(
+  const { artifact } = await readJson<{ artifact: SpectraArtifact }>(
     await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal: options?.signal }),
   );
+  return { artifact: await withDeviceBody(artifact) };
 }
 
 export async function getSpectraArtifactForDeepLink(artifactId: string, options?: { signal?: AbortSignal }) {
@@ -1146,7 +1205,8 @@ export async function getSpectraArtifactForDeepLink(artifactId: string, options?
     if (payload?.error?.code === "AUTH_RESOURCE_FORBIDDEN")
       return { artifact: null };
   }
-  return readJson<{ artifact: SpectraArtifact | null }>(response);
+  const { artifact } = await readJson<{ artifact: SpectraArtifact | null }>(response);
+  return { artifact: await withDeviceBody(artifact) };
 }
 
 export async function getSpectraArtifactUserState(artifactId: string) {
@@ -1247,6 +1307,20 @@ export async function forgetSpectraMemory(claimId: string) {
     action: "forgetMemory",
     claimId,
   });
+}
+
+export async function getSpectraMemoryFiles() {
+  return readJson<MemoryHead>(await requestSpectra("/api/spectra?action=memoryFiles", { cache: "no-store" }));
+}
+
+export async function getSpectraMemoryTopic(slug: string) {
+  return readJson<{ title: string; summary: string; content: string } | null>(
+    await requestSpectra(`/api/spectra?action=memoryTopic&slug=${encodeURIComponent(slug)}`, { cache: "no-store" }),
+  );
+}
+
+export async function updateSpectraMemoryFile(change: MemoryChange) {
+  return postSpectra<MemoryChangeResult>({ action: "updateMemoryFile", ...change });
 }
 
 export async function clearSpectraMemory(confirmation: string) {
@@ -1672,11 +1746,23 @@ export async function getSpectraQuizResponseSummary(artifactId: string) {
 export async function startSpectraQuizPractice(input: {
   artifactId: string;
   clientAttemptId: string;
+  ownDraft?: boolean;
 }) {
-  return postSpectra<SpectraQuizPracticeAttempt>({
-    action: "startQuizPractice",
-    ...input,
-  });
+  const start = (deviceContent?: unknown) =>
+    postSpectra<SpectraQuizPracticeAttempt | { keptOnDevice: true }>({
+      action: "startQuizPractice",
+      ...input,
+      ...(deviceContent !== undefined ? { deviceContent } : {}),
+    });
+  const first = await start();
+  if (!("keptOnDevice" in first)) return first;
+  // Marking happens in Spectra, so a quiz kept on this computer brings its questions along.
+  const { readDeviceWork } = await import("../bridge/device-works");
+  const stored = await readDeviceWork(input.artifactId);
+  if (!stored?.content) throw new Error("Open Spectra Bridge on the computer this quiz is kept on, then try again.");
+  const started = await start(stored.content);
+  if ("keptOnDevice" in started) throw new Error("This quiz could not be started.");
+  return started;
 }
 
 export async function saveSpectraQuizPracticeResponse(input: {
@@ -1966,6 +2052,8 @@ export async function getSpectraArtifactVersions(
   cursor?: string,
   signal?: AbortSignal,
 ) {
+  const { isDeviceWork, deviceVersionPage } = await import("../bridge/device-works");
+  if (isDeviceWork(artifactId)) return deviceVersionPage(artifactId, limit) as Promise<SpectraArtifactVersionPage>;
   const qs = new URLSearchParams({
     action: "artifactVersions",
     artifactId,
@@ -1982,6 +2070,9 @@ export async function getSpectraArtifactVersion(
   versionId: string,
   signal?: AbortSignal,
 ) {
+  const { deviceVersion } = await import("../bridge/device-works");
+  if (versionId.startsWith("device:"))
+    return { version: (await deviceVersion(artifactId, versionId)) as SpectraArtifactVersion | null };
   const qs = new URLSearchParams({ action: "artifactVersion", artifactId, versionId });
   return readJson<{ version: SpectraArtifactVersion | null }>(
     await requestSpectra(`/api/spectra?${qs.toString()}`, { cache: "no-store", signal }),
@@ -2632,7 +2723,7 @@ export async function postSpectra<T>(body: JsonRecord) {
   );
   if (
     typeof body.action !== "string" ||
-    !CACHE_LOCAL_ACTIONS.has(body.action)
+    (!CACHE_LOCAL_ACTIONS.has(body.action) && CATALOG_ACTIONS.test(body.action))
   ) {
     invalidateSpectraCache({
       workspaceId:

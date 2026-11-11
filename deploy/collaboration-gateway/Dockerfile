@@ -13,6 +13,8 @@ ENV SPECTRA_COLLAB_HOST=0.0.0.0
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY scripts/collaboration-gateway.mjs \
+     scripts/agent-hub.mjs \
+     scripts/run-relay.mjs \
      scripts/collaboration-artifact-projection.mjs \
      scripts/collaboration-canonical-room.mjs \
      scripts/serve-collaboration-gateway.mjs \
@@ -35,6 +37,7 @@ COPY shared/collaboration-framing.mjs \
      shared/document-projection.mjs \
      shared/durable-dependencies.mjs \
      shared/convex-error.mjs \
+     shared/agent-hub-ticket.mjs \
      shared/convex-nesting.mjs \
      shared/planner-source.mjs \
      shared/yjs-collections.mjs \

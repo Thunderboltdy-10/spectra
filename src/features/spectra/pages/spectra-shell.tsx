@@ -1,6 +1,7 @@
 "use client";
 
 import { distinctHubTabs, hubTabsWithoutWorkspace, workSetLabel, type WorkspaceHubTab } from "./hub-tabs";
+import { takeFullViewRequest } from "../components/full-view-origin";
 import { subscribeShellWorkAvailability } from "../components/use-work-availability";
 import { retireShellArtifactLocation } from "./shell-location";
 
@@ -46,7 +47,6 @@ import { createShellArtifactAccess } from "../components/shell-artifact-access";
 import { SelectionActionBar } from "../components/context-controls";
 import { InvitationStrip } from "../components/invitation-strip";
 import { WorkbenchInspectorTabs } from "../components/workbench-inspector-tabs";
-import { CompanionSheet, WorkCompanionPanel, type CompanionTab } from "../components/work-companion";
 import { RunDetailPanel } from "../components/run-detail-panel";
 import { LiveThreadPanel } from "../components/live-thread-panel";
 import { ChatBrowserPanel } from "../components/chat-browser-panel";
@@ -75,10 +75,12 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import {
   ArtifactDeleteDialog,
   WorkspaceDeleteDialog,
+  WorkspaceColorPicker,
   WorkspaceEditDialog,
   workspaceIconChoices,
 } from "../components/shell-dialogs";
 import { LibraryOrganizer } from "../organization/library-organizer";
+import { WORKSPACE_INKS, workspaceInk } from "../organization/node-identity";
 import { LibraryShelfSkeleton } from "../organization/library-shelf";
 import { LoadingRows } from "@/components/ui/page-state";
 import {
@@ -149,6 +151,7 @@ import {
   SIDEBAR_EXPANDED_PX,
   SIDEBAR_RAILED_PX,
   WORKBENCH_CONTENT_RESERVE_PX,
+  stageMinimumFor,
   type WorkbenchPaneSpec,
 } from "../components/split-presentation";
 import {
@@ -939,10 +942,12 @@ export function SpectraShell({
   const [newWorkspaceTitle, setNewWorkspaceTitle] = useState("");
   const [newWorkspaceDescription, setNewWorkspaceDescription] = useState("");
   const [newWorkspaceIcon, setNewWorkspaceIcon] = useState("Sparkles");
+  const [newWorkspaceColor, setNewWorkspaceColor] = useState<string>(WORKSPACE_INKS[0][0]);
   const [workspaceEditOpen, setWorkspaceEditOpen] = useState(false);
   const [workspaceEditTitle, setWorkspaceEditTitle] = useState("");
   const [workspaceEditDescription, setWorkspaceEditDescription] = useState("");
   const [workspaceEditIcon, setWorkspaceEditIcon] = useState("Sparkles");
+  const [workspaceEditColor, setWorkspaceEditColor] = useState<string>(WORKSPACE_INKS[0][0]);
   const [workspaceEditClass, setWorkspaceEditClass] = useState(false);
   const [hubTabs, setHubTabs] = useState<WorkspaceHubTab[]>(() => [
     { id: "workspace-home-default", label: LIBRARY_TAB_LABEL },
@@ -970,6 +975,9 @@ export function SpectraShell({
     requestedArtifactId,
   );
   const [studioPanelWidth, setStudioPanelWidth] = useState(720);
+  /* Room the open work's own pane (comments, history, references) needs
+     beside its page; the work's floor and width grow by it while it is open. */
+  const [studioPaneRoom, setStudioPaneRoom] = useState(0);
   const [liveThreadPanelWidth, setLiveThreadPanelWidth] = useState(480);
   const [runPanelWidth, setRunPanelWidth] = useState(680);
   const [chatBrowserOpen, setChatBrowserOpen] = useState(false);
@@ -1004,8 +1012,24 @@ export function SpectraShell({
   const [workspaceShareOpen, setWorkspaceShareOpen] = useState(false);
   const [artifactDeletePending, setArtifactDeletePending] =
     useState<SpectraArtifact | null>(null);
-  const [artifactShareTarget, setArtifactShareTarget] =
+  const [artifactShareTarget, setShareDialogTarget] =
     useState<SpectraArtifact | null>(null);
+  const setArtifactShareTarget = setShareDialogTarget;
+  /* Others can't reach this computer, so a work kept on it moves online with
+     the first invitation or link, never just because Share was opened (F18). */
+  const moveShareTargetOnline = async () => {
+    const artifact = artifactShareTarget;
+    if (artifact?.storageHome !== "device") return;
+    try {
+      const { moveWorkToCloud } = await import("../bridge/device-works");
+      await moveWorkToCloud(artifact._id);
+    } catch {
+      throw new Error("Open Spectra Bridge on the computer that holds this work to share it.");
+    }
+    toast.info("Moved online so the people you share with can open it.");
+    spectraBus.emit("workspace.refreshRequested", {});
+    setShareDialogTarget({ ...artifact, storageHome: undefined, storageStoreId: undefined });
+  };
   const invitationCollection = searchParams.get("collection") === "invitations";
   const {
     shareInvitations,
@@ -1533,11 +1557,6 @@ export function SpectraShell({
   );
   const chatBrowserArtifactId = studio.activeArtifactId ?? requestedArtifactId;
   const chatBrowserScope = chatBrowserArtifactId ? "artifact" : selectedWorkspaceId ? "workspace" : "library";
-  /* The companion (SHELL.md): beside fullscreen work it is a collapsible Side
-     panel; for work held in the Side it is an inner sheet over that work. */
-  const [companionTab, setCompanionTab] = useState<CompanionTab>("details");
-  const [companionReveal, setCompanionReveal] = useState(0);
-  const [companionSheetFor, setCompanionSheetFor] = useState<string | null>(null);
   const applicationCommandDispatcher = useMemo(
     () =>
       createApplicationCommandDispatcher({
@@ -1620,7 +1639,7 @@ export function SpectraShell({
     if (studio.mode === "split" && studio.activeArtifact)
       panes.push({
         id: "studio",
-        floor: studioPaneFloor,
+        floor: studioPaneFloor + studioPaneRoom,
         priority: 0,
         overlay: false,
       });
@@ -1650,17 +1669,20 @@ export function SpectraShell({
     studio.mode,
     studio.activeArtifact,
     studioPaneFloor,
+    studioPaneRoom,
     liveThread,
     activeRunPanelId,
     chatBrowserOpen,
   ]);
 
-  /* In tab mode the open work *is* the content column, so the reserve a side
-     panel must leave is the work's own floor, not the library's. */
+  /* The reserve is the page's stage minimum (SHELL.md), so the rail gives way
+     before the page does and a panel floats before the page goes under it. In
+     tab mode the open work *is* the content column, so the reserve is the
+     work's own floor. */
   const workbenchReserve =
     studio.mode === "tab" && studio.activeArtifact
       ? Math.max(WORKBENCH_CONTENT_RESERVE_PX, studioPaneFloor)
-      : WORKBENCH_CONTENT_RESERVE_PX;
+      : stageMinimumFor(pathname);
 
   useEffect(() => {
     const panes = workbenchPanes.map((pane) => ({
@@ -1725,13 +1747,14 @@ export function SpectraShell({
           overlay: paneOverlay[pane.id] ?? false,
           intent:
             pane.id === "studio"
-              ? studioPanelWidth
+              ? studioPanelWidth + studioPaneRoom
               : pane.id === "thread"
                 ? liveThreadPanelWidth
                 : pane.id === "run"
                   ? runPanelWidth
                   : chatBrowserWidth,
           recency: paneRecencyRef.current[pane.id] ?? 0,
+          cap: pane.id === "studio" ? 960 + studioPaneRoom : undefined,
         })),
       }),
     [
@@ -1740,11 +1763,21 @@ export function SpectraShell({
       workbenchPanes,
       paneOverlay,
       studioPanelWidth,
+      studioPaneRoom,
       liveThreadPanelWidth,
       runPanelWidth,
       chatBrowserWidth,
     ],
   );
+  // The island centres on what is left of the stage (ISLAND.md, "Placement").
+  const studioBesideWidth =
+    studio.mode === "split" && studio.activeArtifact && !paneOverlay.studio ? (paneWidths.studio ?? studioPanelWidth) : 0;
+  useEffect(() => {
+    if (!studioBesideWidth) return;
+    const root = document.documentElement;
+    root.style.setProperty("--spectra-side-width", `${Math.round(studioBesideWidth)}px`);
+    return () => void root.style.removeProperty("--spectra-side-width");
+  }, [studioBesideWidth]);
 
   useEffect(() => {
     const removeSettings = spectraBus.handle("settings.change", ({ patch }) => {
@@ -1922,7 +1955,6 @@ export function SpectraShell({
       if (thread) {
         // The Side holds one pane: a conversation takes the chat browser's place.
         setChatBrowserOpen(false);
-        setCompanionSheetFor(null);
         openObject({
           type: "thread",
           id: thread.id,
@@ -2695,6 +2727,7 @@ export function SpectraShell({
       refreshActivatedArtifact,
     );
     const removeRefresh = spectraBus.on("workspace.refreshRequested", refresh);
+    const removeStorageMoved = spectraBus.on("artifact.storageMoved", refreshActivatedArtifact);
     const removeNavigateHome = spectraBus.handle(
       "navigation.home",
       navigateWorkspaceHome,
@@ -2706,6 +2739,7 @@ export function SpectraShell({
       removeAiNavigate();
       removeLensActivated();
       removeRefresh();
+      removeStorageMoved();
       removeNavigateHome();
       removeShare();
     };
@@ -2792,7 +2826,8 @@ export function SpectraShell({
     if (openedDeepLinkRef.current === routeArtifactId) return;
     if (!overview) return;
     openedDeepLinkRef.current = routeArtifactId;
-    void requestArtifactOpen(routeArtifactId, "replace")
+    // "Open full" pressed elsewhere arrives here; it opens full on that one press.
+    void requestArtifactOpen(routeArtifactId, "replace", takeFullViewRequest(routeArtifactId) ? "tab" : "split")
       .catch(() => {
         if (
           artifactIdFromSpectraLocation(
@@ -2996,25 +3031,6 @@ export function SpectraShell({
   // The pending request carries its own fresh body, never a cached list row.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingArtifactOpen, cancelArtifactOpen]);
-
-  /** The chat browser takes the one Side slot a conversation or a run would. */
-  function openChatBrowser() {
-    setActiveRunPanelId(null);
-    setLiveThread(null);
-    setChatBrowserOpen(true);
-  }
-
-  /** Conversations about open work live in its companion. */
-  function openWorkConversations() {
-    const work = studio.activeArtifact;
-    if (!work) return openChatBrowser();
-    setCompanionTab("conversations");
-    setChatBrowserOpen(false);
-    setActiveRunPanelId(null);
-    setLiveThread(null);
-    if (studio.mode === "tab") setCompanionReveal((value) => value + 1);
-    else setCompanionSheetFor(work._id);
-  }
 
   function openArtifactTab(artifact: SpectraArtifact) {
     void requestArtifactOpen(artifact._id, "push", "tab")
@@ -3723,6 +3739,7 @@ export function SpectraShell({
         title,
         description: newWorkspaceDescription.trim() || undefined,
         icon: newWorkspaceIcon,
+        color: newWorkspaceColor,
         parentNodeId: workspaceCreateParentNodeId ?? undefined,
       });
       toast.success("Workspace created.");
@@ -3864,6 +3881,7 @@ export function SpectraShell({
     setWorkspaceEditTitle(workspaceHeader.title);
     setWorkspaceEditDescription(workspaceHeader.description ?? "");
     setWorkspaceEditIcon(workspaceHeader.icon ?? "Sparkles");
+    setWorkspaceEditColor(workspaceInk(workspaceHeader.color));
     setWorkspaceEditClass(workspaceIsClass(workspaceHeader));
     setWorkspaceEditOpen(true);
   }
@@ -3878,6 +3896,7 @@ export function SpectraShell({
         title: workspaceEditTitle.trim(),
         description: workspaceEditDescription.trim(),
         icon: workspaceEditIcon,
+        color: workspaceEditColor,
         ...(workspaceEditClass !== workspaceIsClass(workspaceHeader) ? { isClass: workspaceEditClass } : {}),
       });
       setWorkspaceEditOpen(false);
@@ -4064,12 +4083,15 @@ export function SpectraShell({
               onChanged={async () => {
                 await loadOverview(selectedWorkspaceId, true);
               }}
+              beforeShare={artifactShareTarget.storageHome === "device" ? moveShareTargetOnline : undefined}
             />
           ) : null}
           <WorkspaceEditDialog
             open={workspaceEditOpen && !!workspaceHeader}
             icon={workspaceEditIcon}
             onIconChange={setWorkspaceEditIcon}
+            color={workspaceEditColor}
+            onColorChange={setWorkspaceEditColor}
             title={workspaceEditTitle}
             onTitleChange={setWorkspaceEditTitle}
             description={workspaceEditDescription}
@@ -4142,6 +4164,9 @@ export function SpectraShell({
                   ))}
                 </div>
               </div>
+              <div className="mt-3">
+                <WorkspaceColorPicker value={newWorkspaceColor} onChange={setNewWorkspaceColor} />
+              </div>
               <div className="mt-3 flex justify-end gap-2">
                 <Button
                   variant="secondary"
@@ -4199,7 +4224,7 @@ export function SpectraShell({
                   onContinueThread={(threadId, title) =>
                     toggleContinuedThread(threadId, title)
                   }
-                  onOpenChats={openChatBrowser}
+                  onOpenThread={setLiveThread}
                   executeApplicationCommand={applicationCommandDispatcher}
                 />
               ) : studio.mode === "tab" && studio.activeArtifact ? (
@@ -4226,22 +4251,10 @@ export function SpectraShell({
                       : undefined
                   }
                   onDirtyChange={studio.setDirty}
-                  onOpenChats={openWorkConversations}
+                  onOpenThread={setLiveThread}
                   executeApplicationCommand={applicationCommandDispatcher}
                   compact={false}
                 />
-                {/* A conversation, a run or the chat browser takes the companion's place for a while. */}
-                {liveThread || activeRunPanelId || chatBrowserOpen ? null : (
-                  <WorkCompanionPanel
-                    work={studio.activeArtifact}
-                    artifacts={allArtifacts}
-                    tab={companionTab}
-                    onTabChange={setCompanionTab}
-                    revealKey={companionReveal || null}
-                    onOpenWork={openArtifactTab}
-                    onOpenThread={setLiveThread}
-                  />
-                )}
                 </div>
               ) : (
                 <section
@@ -4404,8 +4417,9 @@ export function SpectraShell({
                         panelOverlay={paneOverlay.studio ?? false}
                         sourceLabel={workspace?.title ?? surfaceLabel}
                         onPanelWidthChange={(next) =>
-                          notePaneIntent("studio", next)
+                          notePaneIntent("studio", Math.max(0, next - studioPaneRoom))
                         }
+                        onPaneRoomChange={setStudioPaneRoom}
                         onClose={closeActiveStudio}
                         onExpand={openArtifactTab}
                         onActivateTab={activateArtifactTab}
@@ -4417,27 +4431,9 @@ export function SpectraShell({
                             : undefined
                         }
                         onDirtyChange={studio.setDirty}
-                        onOpenChats={openWorkConversations}
+                        onOpenThread={setLiveThread}
                         executeApplicationCommand={applicationCommandDispatcher}
                         compact={false}
-                      />
-                    ) : null}
-                    {studio.mode === "split" &&
-                    studio.activeArtifact &&
-                    companionSheetFor === studio.activeArtifact._id ? (
-                      <CompanionSheet
-                        rootRef={workbenchRowRef}
-                        work={studio.activeArtifact}
-                        artifacts={allArtifacts}
-                        tab={companionTab}
-                        onTabChange={setCompanionTab}
-                        onClose={() => setCompanionSheetFor(null)}
-                        onOpenFull={() => {
-                          setCompanionSheetFor(null);
-                          if (studio.activeArtifact) openArtifactTab(studio.activeArtifact);
-                        }}
-                        onOpenWork={(work) => openArtifactPanel(work)}
-                        onOpenThread={setLiveThread}
                       />
                     ) : null}
                     {!workSetIsolated && tiledArtifacts.length > 0 ? (

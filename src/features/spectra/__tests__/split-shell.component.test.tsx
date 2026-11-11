@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { StudioSplitShell } from "../components/artifact-studio-shell";
+import { StudioSplitShell, useArtifactStudioState } from "../components/artifact-studio-shell";
+import { useSpectraContextStore } from "@/stores/spectra-context-store";
+import type { SpectraArtifact } from "../data/api";
 beforeEach(() => {
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
   vi.stubGlobal("PointerEvent", MouseEvent);
@@ -15,6 +17,25 @@ beforeEach(() => {
   });
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+it("leaves the studio when closing a side work without activating a retained tab", () => {
+  useSpectraContextStore.setState({ openObjects: [], activeOpenObjectKey: null, dirtyArtifactIds: [] });
+  const works: SpectraArtifact[] = ["tab", "side"].map((_id) => ({
+    _id, blueprintKey: "document", title: _id, tags: [], status: "active", createdAt: 1, updatedAt: 1,
+  }));
+  const { result } = renderHook(() => useArtifactStudioState("test", works));
+  act(() => result.current.openTab(works[0]!));
+  act(() => result.current.openSplit(works[1]!));
+  act(() => result.current.closeStudio());
+  expect(result.current.mode).toBe("closed");
+  expect(result.current.tabs.map((tab) => tab.artifactId)).toEqual(["tab"]);
+  act(() => result.current.openTab(works[1]!));
+  act(() => result.current.closeTab("side"));
+  expect(result.current.activeArtifactId).toBe("tab");
+  act(() => result.current.closeStudio());
+  expect(result.current.mode).toBe("closed");
+  useSpectraContextStore.setState({ openObjects: [], activeOpenObjectKey: null });
+});
 function route(onWidthChange:(width:number)=>void, width = 420, padding = 0) {
   return <div className="spectra-global-stage" style={{paddingLeft:padding,paddingRight:padding}}><main/><div className="spectra-wave-y"><StudioSplitShell width={width} onWidthChange={onWidthChange} ariaLabel="Live chat"><p>Conversation</p></StudioSplitShell></div></div>;
 }

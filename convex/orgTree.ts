@@ -43,6 +43,7 @@ import {
   type OrgNode,
 } from "./orgTreeShared";
 import { hydrateNodes, type OrgNodeView } from "./orgTreeViews";
+import { orgNodeCountByWorkspace } from "./orgNodeAggregates";
 import { enqueueStructureRequest } from "./bridgeStructure";
 import { treePagination } from "./orgTreePagination";
 
@@ -594,6 +595,10 @@ export const quickViewPage = query({
       ? await ctx.db.query("orgNodes")
         .withIndex("by_account_live_pinned_name", (q) => q.eq("accountId", actor.accountId).eq("deletedAt", undefined).eq("pinned", true))
         .paginate(paging.options)
+      : args.kinds?.length === 1
+        ? await ctx.db.query("orgNodes")
+          .withIndex("by_account_live_kind_activity", (q) => q.eq("accountId", actor.accountId).eq("deletedAt", undefined).eq("kind", args.kinds![0]!))
+          .order("desc").paginate(paging.options)
       : await ctx.db.query("orgNodes")
         .withIndex("by_account_live_activity", (q) => q.eq("accountId", actor.accountId).eq("deletedAt", undefined))
         .order("desc").paginate(paging.options);
@@ -605,7 +610,7 @@ export const quickViewPage = query({
       if (scopeId && !ancestors.some((node) => node._id === scopeId)) continue;
       const view = (await hydrateNodes(ctx, [row], { withChildCounts: true, withSource: true, accountId: actor.accountId }))[0];
       if (!view || (args.view === "shared" && view.source?.shared !== true)) continue;
-      if (row.kind === "work" && row.sourceId) {
+      if (row.kind === "work" && row.sourceId && !(view.source?.available && view.source.owned)) {
         const artifactId = normalizeArtifactId(ctx, row.sourceId);
         const access = artifactId
           ? await evaluateArtifactAccessForActor(ctx, actor, artifactId)
@@ -620,6 +625,63 @@ export const quickViewPage = query({
       page.push({ ...view, parentPath: ancestors.map((node) => node.name) });
     }
     return paging.result({ ...result, page });
+  },
+});
+
+/* Tasks live on the calendar and references in their threads; neither is work to pick up. */
+const NOT_RECENT_WORK = new Set(["planner_task", "thread_reference", "timetable"]);
+
+/**
+ * The works touched last, for the sidebar: a short walk down the activity
+ * index that stops as soon as it has enough. Read once when needed rather than
+ * subscribed to, since every checkpoint moves this index.
+ */
+export const recentWorks = query({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    const limit = Math.min(Math.max(Math.floor(args.limit ?? 5), 1), 12);
+    const rows = await ctx.db
+      .query("orgNodes")
+      .withIndex("by_account_live_kind_activity", (q) => q.eq("accountId", actor.accountId).eq("deletedAt", undefined).eq("kind", "work"))
+      .order("desc")
+      .take(60);
+    const seen = new Set<string>();
+    const works: Array<{ workId: string; title: string; typeKey: string | null; activityAt: number }> = [];
+    for (const row of rows) {
+      if (works.length >= limit) break;
+      if (row.kind !== "work" || !row.sourceId || seen.has(row.sourceId) || NOT_RECENT_WORK.has(row.typeKey ?? "")) continue;
+      seen.add(row.sourceId);
+      const view = (await hydrateNodes(ctx, [row], { withSource: true }))[0];
+      if (!view?.source?.available) continue;
+      if (!view.source.owned) {
+        const artifactId = normalizeArtifactId(ctx, row.sourceId);
+        const access = artifactId ? await evaluateArtifactAccessForActor(ctx, actor, artifactId) : null;
+        if (!access?.allowed || !access.capabilities.includes("read")) continue;
+      }
+      works.push({
+        workId: row.sourceId,
+        title: view.source.title ?? row.name,
+        typeKey: view.source.blueprintKey ?? row.typeKey ?? null,
+        activityAt: Math.max(row.activityAt ?? row.updatedAt, view.source.updatedAt ?? 0),
+      });
+    }
+    return works;
+  },
+});
+
+/** The Library row that places each named work; ids that are not works are left out. */
+export const rowsForWorks = query({
+  args: { ids: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    const rows: Record<string, string> = {};
+    for (const id of new Set(args.ids.slice(0, 200))) {
+      const workId = ctx.db.normalizeId("spectraArtifacts", id);
+      const node = workId ? await findPrimaryNode(ctx, actor.accountId, "work", workId) : null;
+      if (node) rows[id] = node._id;
+    }
+    return rows;
   },
 });
 
@@ -767,7 +829,11 @@ export const createReference = mutation({
 
 /** Soft delete: the node and its subtree go to trash, restorable as one. */
 export const trash = mutation({
-  args: { nodeIds: v.array(v.id("orgNodes")) },
+  args: {
+    nodeIds: v.array(v.id("orgNodes")),
+    /** Spectra AI's deletions stop here: the work goes to Trash and can come back, the file on the computer is never asked for. */
+    leaveFiles: v.optional(v.boolean()),
+  },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
     if (args.nodeIds.length > 200)
@@ -786,7 +852,7 @@ export const trash = mutation({
       /* Only a work that just entered Trash asks for its file: trashing one
          already there (a stale second tab, a retried request) changes
          nothing, so it must not queue another deletion of the file. */
-      if (sourceWorkId && sourcePath && trashed.trashed > 0) await enqueueStructureRequest(ctx, actor.accountId, sourceWorkId, "delete", sourcePath, undefined, node._id);
+      if (sourceWorkId && sourcePath && trashed.trashed > 0 && !args.leaveFiles) await enqueueStructureRequest(ctx, actor.accountId, sourceWorkId, "delete", sourcePath, undefined, node._id);
       results.push(trashed);
     }
     return { trashed: results };
@@ -994,6 +1060,32 @@ export const ensureAccountRoots = mutation({
       workspaceNodesCreated: created,
       rootCount: roots.length,
     };
+  },
+});
+
+/** How many works and threads each workspace holds, however deep they sit in its folders. */
+export const workspaceTallies = query({
+  args: { workspaceIds: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    const ids = [...new Set(args.workspaceIds)].slice(0, 60);
+    if (!ids.length) return {};
+    const counts = await orgNodeCountByWorkspace.countBatch(
+      ctx,
+      ids.flatMap((id) => [
+        { namespace: actor.accountId, bounds: { prefix: ["live-card", id] as [string, string] } },
+        { namespace: actor.accountId, bounds: { prefix: ["live-card", id, "thread"] as [string, string, string] } },
+        { namespace: actor.accountId, bounds: { prefix: ["live-card", id, "link"] as [string, string, string] } },
+      ]),
+    );
+    return Object.fromEntries(
+      ids.map((id, index) => {
+        const all = counts[index * 3] ?? 0;
+        const threads = counts[index * 3 + 1] ?? 0;
+        const links = counts[index * 3 + 2] ?? 0;
+        return [id, { artifacts: Math.max(0, all - threads - links), threads }];
+      }),
+    ) as Record<string, { artifacts: number; threads: number }>;
   },
 });
 

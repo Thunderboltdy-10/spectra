@@ -1,6 +1,7 @@
 "use client";
 
 import { useLayoutEffect, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { useAccountStorageReady } from "../account-storage-boundary";
 import { AccountConnectionState } from "../account-connection-state";
 import { captureSpectraNavigation, useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
@@ -15,37 +16,33 @@ import { IslandHost } from "@/features/spectra/island/island-host";
 import { spectraObjectKey, useSpectraContextStore } from "@/stores/spectra-context-store";
 import { artifactIdFromSpectraLocation } from "@/features/spectra/pages/shell-location";
 import { ProductOfflineBanner } from "@/features/spectra/bridge/product-offline-banner";
-import { BridgeDiscoveryMount } from "@/features/spectra/bridge/bridge-discovery-mount";
+import { BridgeConnection, BridgeDiscoveryMount } from "@/features/spectra/bridge/bridge-discovery-mount";
 import { LivePulseMount } from "@/features/spectra/threads/live-pulse-mount";
 import { TourMount } from "@/features/spectra/onboarding/tour";
 import { SchoolSetupMount } from "@/features/spectra/school/school-setup-mount";
 import { FirstTipsMount } from "@/features/spectra/onboarding/first-tips";
 import { AppChoreographyMount } from "@/features/spectra/collaboration/app-choreography-host";
 import { spectraBus } from "@/features/spectra/events";
-import { Rail } from "./rail";
+import { Rail, rememberLibraryPlace } from "./rail";
 
-type AppShellProps = {
-  children: ReactNode;
-  fullBleed?: boolean;
-  noScroll?: boolean;
-  contentClassName?: string;
-  /** The page keeps open works as tabs (the Library and its workspaces). */
-  workTabs?: boolean;
-};
+const under = (pathname: string, roots: readonly string[]) =>
+  roots.some((root) => pathname === root || pathname.startsWith(`${root}/`));
 
-export function AppShell(props: AppShellProps) {
+/** Pages that manage their own scrolling. */
+const FIXED_PAGES = ["/agents", "/calendar", "/home", "/library", "/workspace"];
+/** Pages that keep open works as tabs. */
+const TABBED_PAGES = ["/library", "/workspace"];
+
+export function AppShell({ children }: { children: ReactNode }) {
   const ready = useAccountStorageReady();
-  return ready ? <AppShellContent {...props} /> : <AccountConnectionState />;
+  return ready ? <AppShellContent>{children}</AppShellContent> : <AccountConnectionState />;
 }
 
-function AppShellContent({
-  children,
-  fullBleed = false,
-  noScroll = false,
-  contentClassName,
-  workTabs = false,
-}: AppShellProps) {
+function AppShellContent({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const noScroll = under(pathname, FIXED_PAGES);
+  const workTabs = under(pathname, TABBED_PAGES);
 
   useLayoutEffect(() => {
     // The persisted work session is deliberately restored after mount. This
@@ -59,7 +56,10 @@ function AppShellContent({
      (spectra-field.css), so they agree before and after hydration. */
   return (
     <div
-      onClickCapture={captureSpectraNavigation}
+      onClickCapture={(event) => {
+        rememberLibraryPlace();
+        captureSpectraNavigation(event);
+      }}
       style={{
         minHeight: "100dvh",
         ...(noScroll ? { height: "100dvh", overflow: "hidden" } : {}),
@@ -96,17 +96,11 @@ function AppShellContent({
         )}
         <ProductOfflineBanner />
         <BridgeDiscoveryMount />
+        <BridgeConnection />
         <LivePulseMount />
         <AppChoreographyMount />
         <ViewportReadinessMount />
-        <div
-          style={{ minHeight: 0 }}
-          className={cn(
-            "spectra-global-stage flex min-h-0 flex-1 overflow-hidden",
-            !fullBleed && "px-8 py-6",
-            contentClassName,
-          )}
-        >
+        <div style={{ minHeight: 0 }} className="spectra-global-stage flex min-h-0 flex-1 overflow-hidden">
           <div className="relative min-h-0 min-w-0 flex-1" data-spectra-app-surface="true">
             {children}
           </div>

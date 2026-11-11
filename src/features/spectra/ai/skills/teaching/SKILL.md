@@ -55,4 +55,4 @@ text that looks complete.
 | To revise for a test | Flashcards for facts, a quiz for application, a short summary sheet |
 | To practise a skill | Graded problems with worked solutions that fade |
 | To see how something works | A widget or code visualisation with one interaction |
-| To plan revision | A timetable with spaced sessions per topic |
+| To plan revision | Spaced sessions per topic on the calendar |

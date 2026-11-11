@@ -85,6 +85,7 @@ export function deployEnvProblems(env) {
     add("CLERK_SECRET_KEY must be a production (sk_live_) key.");
   if (!value(env, "CLERK_WEBHOOK_SECRET")) add("CLERK_WEBHOOK_SECRET is missing (Clerk account sync).");
   if (!value(env, "OPENROUTER_API_KEY")) add("OPENROUTER_API_KEY is missing (all AI features).");
+  if (!value(env, "SPECTRA_AGENT_HUB_URL")) add("SPECTRA_AGENT_HUB_URL is missing (Codex and Claude Code through the Bridge).");
   for (const problem of modelProblems(env)) add(problem);
 
   const key = Buffer.from(value(env, "SPECTRA_MASTER_ENCRYPTION_KEY"), "base64");

@@ -433,11 +433,12 @@ export function SurfaceSelectToggle({ selecting, onToggle }: { selecting: boolea
       data-library-select
       aria-pressed={selecting}
       title={selecting ? "Stop picking" : "Pick several works to ask about or lay side by side"}
+      aria-label={selecting ? "Done picking" : "Select"}
       onClick={onToggle}
       className={cn(controlClass, selecting && controlActiveClass)}
     >
       <CheckSquare className="size-3.5" />
-      {selecting ? "Done" : "Select"}
+      <span className="surface-bar-label">{selecting ? "Done" : "Select"}</span>
     </button>
   );
 }

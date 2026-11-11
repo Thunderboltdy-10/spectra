@@ -73,6 +73,8 @@ export type Body = {
   /** Items the user referenced with @ in this message. */
   references?: RunPointer[];
   submissionKey?: string;
+  /** Runtimes this computer said it can't reach as the person sent. */
+  unreachable?: unknown;
   /**
    * The agent for this message. A string chooses that agent from the start
    * and keeps it for the thread; null switches the thread back to Auto;

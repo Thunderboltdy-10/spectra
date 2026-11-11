@@ -29,6 +29,17 @@ export const SIDEBAR_RAILED_PX = 76;
 /** Width the library/workspace canvas keeps while any panel sits beside it. */
 export const WORKBENCH_CONTENT_RESERVE_PX = 420;
 
+/**
+ * The width each page keeps before the shell gives way (SHELL.md, "Width
+ * rules"): first the chrome rails, then the Side floats over the stage.
+ */
+export function stageMinimumFor(pathname: string) {
+  if (/^\/calendar(\/|$)/.test(pathname)) return 640;
+  if (/^\/managebac(\/|$)/.test(pathname)) return 600;
+  if (/^\/(library|workspace)(\/|$)/.test(pathname)) return 560;
+  return WORKBENCH_CONTENT_RESERVE_PX;
+}
+
 /** Floor for the conversation and run side panels (their controls and
  *  message bubbles stop working below this). */
 export const SIDE_PANEL_FLOOR_PX = 360;
@@ -131,6 +142,8 @@ export interface WorkbenchPaneAllocation extends WorkbenchPaneSpec {
   intent: number;
   /** Larger means more recently dragged; explicit choices outrank priority. */
   recency: number;
+  /** The widest this panel grows; 960 unless it carries its own side pane. */
+  cap?: number;
 }
 
 /**
@@ -174,7 +187,7 @@ export function allocateWorkbenchPanes({
   );
   for (const pane of order) {
     if (slack <= 0) break;
-    const want = Math.max(0, Math.min(pane.intent, 960) - pane.floor);
+    const want = Math.max(0, Math.min(pane.intent, pane.cap ?? 960) - pane.floor);
     const give = Math.min(want, slack);
     result[pane.id] += give;
     slack -= give;

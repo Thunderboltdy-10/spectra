@@ -41,6 +41,18 @@ let activePollAttempt = 0;
 let activePollSignature = "";
 const pollDemands = new Map<string, number>();
 const listeners = new Set<(tabs: SpectraRunTab[]) => void>();
+/*
+ * Polling only asks what changed since the last read, so each tick costs the
+ * few tabs that moved rather than the whole list. A full read still happens on
+ * mount, on a thread change, on return to the page, and now and then, so a tab
+ * hidden from another device goes away too.
+ */
+const FIRST_POLL_DELAY_MS = 3_000;
+const POLL_OVERLAP_MS = 10_000;
+const POLL_CHANGED_LIMIT = 20;
+const FULL_READ_EVERY_POLLS = 12;
+let lastFullReadAt = 0;
+let pollsSinceFullRead = 0;
 
 export function isActiveRunStatus(status: string) {
   return activeStatuses.has(status);
@@ -85,10 +97,11 @@ function schedulePoll() {
     activePollAttempt,
     `run-tabs:${signature}`,
     SYNC_RETRY_POLICY.activeRunPollMaxDelayMs,
+    FIRST_POLL_DELAY_MS,
   );
   pollTimer = window.setTimeout(() => {
     pollTimer = null;
-    void refreshRunTabs();
+    void refreshRunTabs(false, true);
   }, delay);
 }
 
@@ -118,18 +131,32 @@ function islandWindowStart() {
   return Math.floor((Date.now() - ISLAND_IDLE_MS) / HOUR_MS) * HOUR_MS;
 }
 
-export function refreshRunTabs(force = false) {
+/** Changed tabs over the list: each thread has one tab, newest first. */
+function mergeTabs(current: SpectraRunTab[], changed: SpectraRunTab[]) {
+  const byThread = new Map(current.map((tab) => [tab.threadId, tab]));
+  for (const tab of changed) byThread.set(tab.threadId, tab);
+  return [...byThread.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+export function refreshRunTabs(force = false, changedOnly = false) {
   if (sharedRefresh && !force) return sharedRefresh;
   if (force) {
     invalidateSpectraRunTabsCache();
     sharedRefresh = null;
   }
   const generation = ++refreshGeneration;
-  const pending = getSpectraRunTabs({ limit: ISLAND_TABS, since: islandWindowStart(), force })
+  const delta = changedOnly && !force && lastFullReadAt > 0 && pollsSinceFullRead < FULL_READ_EVERY_POLLS;
+  const startedAt = Date.now();
+  const pending = (delta
+    ? getSpectraRunTabs({ limit: POLL_CHANGED_LIMIT, since: lastFullReadAt - POLL_OVERLAP_MS })
+    : getSpectraRunTabs({ limit: ISLAND_TABS, since: islandWindowStart(), force })
+  )
     .then((result) => {
       if (generation < appliedRefreshGeneration) return;
       appliedRefreshGeneration = generation;
-      sharedTabs = result.runTabs;
+      sharedTabs = delta ? mergeTabs(sharedTabs, result.runTabs) : result.runTabs;
+      pollsSinceFullRead = delta ? pollsSinceFullRead + 1 : 0;
+      lastFullReadAt = startedAt;
       listeners.forEach((listener) => listener(sharedTabs));
     })
     .catch(() => undefined)
@@ -148,6 +175,7 @@ export function clearRunTabs() {
   sharedRefresh = null;
   clearPoll();
   sharedTabs = [];
+  lastFullReadAt = 0;
   listeners.forEach((listener) => listener(sharedTabs));
 }
 
@@ -194,18 +222,57 @@ export function runTabSource(tab: SpectraRunTab): LiveDockTabSource {
 
 /** The live run tabs: fetched once, refreshed when threads or runs change,
  * polled while any of them is moving (or `demand` names one about to). */
+let busReaders = 0;
+let leaveBus: (() => void) | null = null;
+
+/*
+ * A burst of changes (a run writing its reply, several tabs moving) is one
+ * read: at most one a second, after the first change, so the read sees them
+ * all (LAUNCH-REVIEW E3).
+ */
+const BUS_READ_EVERY_MS = 1_000;
+let busTimer: ReturnType<typeof setTimeout> | null = null;
+
+function readAfterBurst() {
+  if (busTimer) return;
+  busTimer = setTimeout(() => {
+    busTimer = null;
+    void refreshRunTabs(false, true);
+  }, BUS_READ_EVERY_MS);
+}
+
+/** The first reader joins the bus and the last leaves it. */
+function joinRunTabsBus() {
+  busReaders += 1;
+  if (!leaveBus) {
+    const removeThreads = spectraBus.on("threads.changed", readAfterBurst);
+    const removeRun = spectraBus.on("run.changed", readAfterBurst);
+    leaveBus = () => {
+      removeThreads();
+      removeRun();
+      if (busTimer) clearTimeout(busTimer);
+      busTimer = null;
+    };
+  }
+  return () => {
+    busReaders -= 1;
+    if (busReaders === 0) {
+      leaveBus?.();
+      leaveBus = null;
+    }
+  };
+}
+
 export function useRunTabs({ enabled = true, demand }: { enabled?: boolean; demand?: string | null } = {}) {
   const [tabs, setTabs] = useState(sharedTabs);
   useEffect(() => {
     if (!enabled) return;
     const unsubscribe = subscribeRunTabs(setTabs);
     void refreshRunTabs();
-    const removeThreads = spectraBus.on("threads.changed", () => void refreshRunTabs(true));
-    const removeRun = spectraBus.on("run.changed", () => void refreshRunTabs());
+    const leave = joinRunTabsBus();
     return () => {
       unsubscribe();
-      removeThreads();
-      removeRun();
+      leave();
     };
   }, [enabled]);
   const moving = enabled && tabs.some((tab) => activeStatuses.has(tab.run.status));

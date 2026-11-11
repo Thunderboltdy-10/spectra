@@ -286,7 +286,7 @@ body {
   max-width: 48ch;
   margin-top: 3px;
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -299,7 +299,7 @@ body {
   border-radius: var(--control-radius);
   background: var(--brand-primary);
   color: #fff;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 620;
 }
 
@@ -387,7 +387,7 @@ body {
   min-width: 0;
   overflow: hidden;
   color: var(--text-primary);
-  font-size: 12.5px;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -418,7 +418,7 @@ body {
   display: block;
   margin-bottom: 5px;
   font-family: var(--font-display);
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text-primary);
 }
 
@@ -426,7 +426,7 @@ body {
   margin: 0 auto;
   max-width: 44ch;
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -437,7 +437,7 @@ body {
   border-radius: var(--control-radius);
   background: var(--bg-elevated);
   color: var(--text-primary);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -467,7 +467,7 @@ body {
   align-items: center;
   justify-content: space-between;
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .spectra-deck-viewer-context strong {
@@ -541,13 +541,13 @@ body {
 .spectra-deck-viewer-card > small {
   max-width: 560px;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.55;
 }
 
 .spectra-deck-viewer-card > em {
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
 }
 
@@ -559,65 +559,24 @@ body {
 
 /* Final inspector and deck metadata overrides. */
 
-.spectra-studio-details {
-  height: calc(100dvh - 148px) !important;
-  margin-top: -20px !important;
-  overflow-y: auto !important;
-  overscroll-behavior: contain;
-  transform: translateY(-20px);
-}
+
+
+
 
 .spectra-artifact-studio[data-blueprint="flashcard_deck"]
-  .spectra-studio-details
-  > div:last-child {
-  max-height: none !important;
-  overflow: visible !important;
-}
-
-.spectra-artifact-studio[data-blueprint="flashcard_deck"]
-  .spectra-related-artifacts,
-.spectra-artifact-studio[data-blueprint="flashcard_deck"]
-  .spectra-studio-details
-  > div
-  > section:nth-of-type(5) {
+  .spectra-related-artifacts {
   display: none !important;
 }
 
-.spectra-inspector-action {
-  display: flex;
-  width: 100%;
-  height: 27px;
-  align-items: center;
-  gap: 8px;
-  border-radius: var(--chip-radius);
-  padding: 0 3px;
-  font-size: var(--text-micro);
-  color: var(--text-secondary);
-  text-align: left;
-}
 
-.spectra-inspector-action:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
 
-.spectra-inspector-action:disabled {
-  opacity: 0.48;
-}
 
-.spectra-studio-details {
-  height: calc(100dvh - 148px);
-  margin-top: -20px;
-  overflow-y: auto !important;
-  overscroll-behavior: contain;
-}
 
-.spectra-artifact-studio[data-studio-mode="split"] .spectra-studio-details {
-  height: auto !important;
-  max-height: none;
-  margin-top: 0 !important;
-  transform: none;
-}
+
+
+
+
+
 
 /* The responsive contract (S3). Every studio adapts to the pane it occupies,
    never to the window: a studio in an 850px panel inside a 1440px display is
@@ -820,35 +779,15 @@ body {
 }
 
 .spectra-artifact-studio[data-blueprint="flashcard_deck"]
-  .spectra-related-artifacts,
-.spectra-artifact-studio[data-blueprint="flashcard_deck"]
-  .spectra-studio-details
-  > div
-  > section:nth-of-type(5) {
+  .spectra-related-artifacts {
   display: none !important;
 }
 
-.spectra-inspector-action {
-  display: flex;
-  width: 100%;
-  height: 27px;
-  align-items: center;
-  gap: 8px;
-  border-radius: var(--chip-radius);
-  padding: 0 3px;
-  font-size: var(--text-micro);
-  color: var(--text-secondary);
-  text-align: left;
-}
 
-.spectra-inspector-action:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
 
-.spectra-inspector-action:disabled {
-  opacity: 0.48;
-}
+
+
+
 
 /* Reference 03: compact, full-height formative quiz authoring surface. */
 .spectra-artifact-studio[data-blueprint="quiz"] .spectra-artifact-main {
@@ -869,70 +808,33 @@ body {
   background: transparent;
 }
 
-.spectra-studio-details [data-spectra-card="side"] {
-  padding: 12px;
-}
 
-.spectra-studio-details [data-spectra-card="side"] > h3 {
-  margin-bottom: 8px;
-  font-size: var(--text-micro);
-  line-height: 12px;
-}
 
-.spectra-studio-details > div:last-child {
-  gap: 10px;
-}
 
-.spectra-artifact-studio[data-blueprint="quiz"]
-  .spectra-studio-details
-  .spectra-related-artifacts {
-  margin-top: -10px;
-  border-top: 0;
-  border-radius: 0 0 var(--control-radius) var(--control-radius);
-  padding: 4px 12px 10px;
-}
 
-.spectra-artifact-studio[data-blueprint="quiz"]
-  .spectra-studio-details
-  .spectra-related-artifacts
-  > summary {
-  display: none;
-}
 
-.spectra-artifact-studio[data-blueprint="quiz"]
-  .spectra-studio-details
-  > div
-  > section:nth-of-type(4) {
-  display: none;
-}
+
+
+
+
+
+
 
 .spectra-flashcard-studio textarea:not(.editor-sheet *, .spectra-deck-study *) {
   font-family: var(--font-sans);
 }
 
-.spectra-studio-details {
-  border-radius: var(--control-radius) !important;
-  background: #faf9f8 !important;
-}
 
-.spectra-studio-details [data-spectra-card="side"] {
-  border-radius: var(--control-radius);
-  box-shadow: none;
-}
+
+
 
 .spectra-flashcard-studio textarea:not(.editor-sheet *, .spectra-deck-study *) {
   font-family: var(--font-sans);
 }
 
-.spectra-studio-details {
-  border-radius: var(--control-radius) !important;
-  background: #faf9f8 !important;
-}
 
-.spectra-studio-details [data-spectra-card="side"] {
-  border-radius: var(--control-radius);
-  box-shadow: none;
-}
+
+
 
 /* Spectra whiteboard — a quiet spatial surface with deliberate, artifact-aware work. */
 .whiteboard-studio {
@@ -1255,7 +1157,7 @@ body {
   table-layout: fixed;
   border-collapse: collapse;
   color: #34423b;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .whiteboard-node td {
@@ -1274,7 +1176,7 @@ body {
   top: -29px;
   left: 2px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.01em;
 }
@@ -1324,7 +1226,7 @@ body {
   gap: 7px;
   padding: 14px;
   color: #727d77;
-  font-size: 12px;
+  font-size: 13px;
   text-align: center;
 }
 
@@ -1342,7 +1244,7 @@ body {
 
 .whiteboard-embed-node strong {
   color: #2d3933;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .whiteboard-embed-node small {
@@ -1418,7 +1320,7 @@ body {
 }
 
 .whiteboard-panel > header strong {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 750;
 }
 
@@ -1442,7 +1344,7 @@ body {
   border-radius: var(--control-radius);
   outline: 0;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .whiteboard-panel > input:focus {
@@ -1482,7 +1384,7 @@ body {
 
 .whiteboard-panel button strong {
   overflow: hidden;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 680;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1533,7 +1435,7 @@ body {
   align-items: center;
   justify-content: flex-start;
   color: var(--brand-ink);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
 }
 
@@ -1628,7 +1530,7 @@ body {
   border-radius: var(--card-radius);
   background: rgba(255, 255, 255, 0.96);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
   box-shadow: 0 8px 22px rgba(39, 52, 45, 0.09);
   backdrop-filter: blur(14px);
@@ -1704,7 +1606,7 @@ body {
 
 .whiteboard-inspector > div:first-child strong {
   overflow: hidden;
-  font-size: 12px;
+  font-size: 13px;
   text-overflow: ellipsis;
   text-transform: capitalize;
   white-space: nowrap;
@@ -1748,7 +1650,7 @@ body {
   outline: 0;
   background: var(--bg-elevated);
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* The inspector's icon buttons are 28px squares, and Spectra's Select renders a
@@ -1756,6 +1658,8 @@ body {
 .whiteboard-inspector [role="combobox"] {
   width: 100%;
   height: 32px;
+  justify-content: space-between;
+  text-align: left;
 }
 
 .whiteboard-color-fields input[type="color"] {
@@ -1781,7 +1685,7 @@ body {
   border-radius: var(--card-radius);
   background: #fff6f4;
   color: #8d4036;
-  font-size: 11px;
+  font-size: 12px;
   box-shadow: 0 10px 26px rgba(81, 42, 36, 0.1);
 }
 
@@ -1826,7 +1730,7 @@ body {
   width: auto;
   padding: 0 11px;
   border-color: #e2e5df;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* A newly created node or edge materialises once, in place. Updates and
@@ -1897,1081 +1801,6 @@ body {
 
   .whiteboard-minimap {
     display: none;
-  }
-}
-
-/* Spectra timetable — dense academic time with calm hierarchy and honest authority. */
-.timetable-studio {
-  position: relative;
-  display: flex;
-  min-height: 0;
-  flex: 1 1 auto;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-}
-
-.timetable-personal-sync {
-  position: absolute;
-  z-index: 32;
-  top: 66px;
-  right: 14px;
-  display: inline-flex;
-  max-width: min(390px, calc(100% - 28px));
-  min-height: 30px;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 10px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-chip);
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 8px 22px rgba(37, 50, 42, 0.09);
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 650;
-  backdrop-filter: blur(12px);
-}
-
-.timetable-personal-sync[data-error="true"] {
-  border-color: #e7c2bb;
-  color: #a34e42;
-}
-
-.timetable-body {
-  display: grid;
-  min-height: 0;
-  flex: 1 1 auto;
-  grid-template-columns: minmax(0, 1fr) 225px;
-  overflow: hidden;
-}
-
-.timetable-body > main {
-  min-width: 0;
-  overflow: auto;
-  background: var(--bg-elevated);
-}
-
-.timetable-overview {
-  overflow-y: auto;
-  padding: 12px;
-  border-left: 1px solid var(--border-default);
-  background: var(--bg-secondary);
-}
-
-.timetable-overview > section {
-  margin-bottom: 10px;
-  padding: 12px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--card-radius);
-  background: var(--bg-elevated);
-}
-
-.timetable-overview section > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 9px;
-  color: var(--text-secondary);
-}
-
-.timetable-overview section > header strong {
-  color: var(--text-primary);
-  font-size: var(--text-micro);
-  font-weight: 760;
-}
-
-.timetable-overview > section > button {
-  display: grid;
-  width: 100%;
-  grid-template-columns: 7px minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-  padding: 7px 5px;
-  border-radius: var(--control-radius);
-  text-align: left;
-}
-
-.timetable-overview > section > button:hover {
-  background: var(--bg-tertiary);
-}
-
-.timetable-overview > section > button > i {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-pill);
-}
-
-.timetable-overview > section > button span {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.timetable-overview > section > button strong {
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: var(--text-micro);
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.timetable-overview > section > button small,
-.timetable-focus-progress small {
-  margin-top: 2px;
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-
-.timetable-focus-progress header span {
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-}
-
-.timetable-focus-progress > div {
-  height: 5px;
-  overflow: hidden;
-  margin: 8px 0 5px;
-  border-radius: var(--radius-pill);
-  background: var(--bg-tertiary);
-}
-
-.timetable-focus-progress > div i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: #28a778;
-}
-
-.timetable-week {
-  min-width: 720px;
-}
-
-.timetable-week-header,
-.timetable-all-day {
-  display: grid;
-  grid-template-columns: 60px repeat(var(--day-count), minmax(90px, 1fr));
-}
-
-.timetable-week-header {
-  position: sticky;
-  z-index: 12;
-  top: 0;
-  min-height: 51px;
-  border-bottom: 1px solid var(--border-default);
-  background: rgba(255, 255, 255, 0.97);
-}
-
-.timetable-week-header > button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border-left: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-}
-
-.timetable-week-header > button span {
-  font-size: var(--text-micro);
-  font-weight: 650;
-}
-
-.timetable-week-header > button strong {
-  display: inline-flex;
-  width: 25px;
-  height: 25px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-pill);
-  color: var(--text-primary);
-  font-size: 11px;
-}
-
-.timetable-week-header > button[data-today="true"] strong {
-  background: var(--brand-primary);
-  color: #fff;
-  box-shadow: 0 4px 10px rgba(85, 67, 187, 0.22);
-}
-
-.timetable-all-day {
-  min-height: 54px;
-  border-bottom: 1px solid var(--border-default);
-}
-
-.timetable-all-day > span {
-  padding: 12px 8px;
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  text-align: right;
-}
-
-.timetable-all-day > div {
-  min-width: 0;
-  padding: 6px 5px;
-  border-left: 1px solid var(--border-subtle);
-}
-
-.timetable-time-grid {
-  display: grid;
-  grid-template-columns: 60px repeat(var(--day-count), minmax(90px, 1fr));
-}
-
-.timetable-hours {
-  position: relative;
-  background: var(--bg-elevated);
-}
-
-.timetable-hours time {
-  position: absolute;
-  right: 9px;
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  transform: translateY(-50%);
-}
-
-.timetable-day-column {
-  position: relative;
-  border-left: 1px solid var(--border-default);
-  background: var(--bg-elevated);
-}
-
-.timetable-day-column > i {
-  position: absolute;
-  right: 0;
-  left: 0;
-  height: 1px;
-  background: var(--bg-tertiary);
-}
-
-.timetable-day-column:hover {
-  background: linear-gradient(
-    rgba(111, 90, 225, 0.018),
-    rgba(111, 90, 225, 0.018)
-  );
-}
-
-.timetable-event-position {
-  position: absolute;
-  right: 5px;
-  left: 5px;
-  min-height: 23px;
-}
-
-.timetable-event {
-  position: relative;
-  display: flex;
-  width: 100%;
-  height: 100%;
-  min-height: 23px;
-  overflow: hidden;
-  flex-direction: column;
-  gap: 2px;
-  padding: 7px 7px 5px 9px;
-  border: 0;
-  border-left: 2px solid var(--event-color);
-  border-radius: var(--chip-radius);
-  background: color-mix(in oklab, var(--event-color) 10%, white);
-  color: color-mix(in oklab, var(--event-color) 76%, var(--text-primary));
-  text-align: left;
-  box-shadow: inset 0 0 0 1px
-    color-mix(in oklab, var(--event-color) 12%, transparent);
-  transition:
-    box-shadow var(--motion-fast) var(--ease-standard),
-    transform var(--motion-fast) var(--ease-standard);
-}
-
-.timetable-event:hover {
-  z-index: 3;
-  box-shadow:
-    inset 0 0 0 1px color-mix(in oklab, var(--event-color) 22%, transparent),
-    0 7px 18px rgba(44, 54, 48, 0.11);
-  transform: translateY(-1px);
-}
-
-.timetable-event strong {
-  overflow: hidden;
-  font-size: var(--text-micro);
-  font-weight: 720;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.timetable-event time,
-.timetable-event small {
-  overflow: hidden;
-  font-size: var(--text-micro);
-  line-height: 1.3;
-  opacity: 0.84;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.timetable-event[data-compact="true"] {
-  justify-content: center;
-  gap: 0;
-  padding: 3px 5px 3px 7px;
-}
-
-.timetable-event[data-status="removed"] {
-  filter: grayscale(0.6);
-  opacity: 0.58;
-}
-
-.timetable-event-recurrence,
-.timetable-event-source {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 9px;
-  height: 9px;
-  opacity: 0.7;
-}
-
-.timetable-event-source {
-  top: auto;
-  bottom: 4px;
-}
-
-.timetable-event[data-conflict="true"] {
-  box-shadow:
-    inset 0 0 0 1px color-mix(in oklab, #d9822b 40%, transparent),
-    0 2px 8px rgba(176, 96, 28, 0.08);
-}
-
-.timetable-event-conflict {
-  position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 10px;
-  height: 10px;
-  color: #b96b22;
-}
-
-.timetable-event-source + .timetable-event-conflict {
-  right: 17px;
-}
-
-.timetable-now {
-  position: absolute;
-  z-index: 7;
-  right: 0;
-  left: 0;
-  height: 1px;
-  background: #f06565;
-  pointer-events: none;
-}
-
-.timetable-now::before {
-  position: absolute;
-  top: -3px;
-  left: -3px;
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius-pill);
-  background: #f06565;
-  content: "";
-}
-
-.timetable-now span {
-  position: absolute;
-  top: -8px;
-  left: -50px;
-  color: #e64f4f;
-  font-size: var(--text-micro);
-  font-weight: 700;
-}
-
-.timetable-month {
-  display: grid;
-  min-width: 720px;
-  min-height: 690px;
-  grid-template-columns: repeat(7, minmax(96px, 1fr));
-  grid-template-rows: 34px repeat(6, minmax(105px, 1fr));
-  background: var(--bg-tertiary);
-  gap: 1px;
-}
-
-.timetable-month > strong {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-elevated);
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-
-.timetable-month > section {
-  min-width: 0;
-  overflow: hidden;
-  padding: 5px;
-  background: var(--bg-elevated);
-}
-
-.timetable-month > section[data-outside="true"] {
-  background: var(--bg-secondary);
-  opacity: 0.58;
-}
-
-.timetable-month > section > button:first-child {
-  display: inline-flex;
-  width: 24px;
-  height: 24px;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 3px;
-  border-radius: var(--radius-pill);
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 680;
-}
-
-.timetable-month > section[data-today="true"] > button:first-child {
-  background: var(--brand-primary);
-  color: #fff;
-}
-
-.timetable-month .timetable-event {
-  height: 21px;
-  min-height: 21px;
-  margin-bottom: 3px;
-}
-
-.timetable-month > section > small {
-  display: block;
-  padding-left: 5px;
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 650;
-}
-
-.timetable-agenda {
-  min-height: 660px;
-  padding: 18px clamp(16px, 4vw, 52px) 40px;
-  background: var(--bg-primary);
-}
-
-.timetable-agenda > section {
-  margin-bottom: 21px;
-}
-
-.timetable-agenda > section > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 7px;
-  padding: 0 4px 8px;
-  border-bottom: 1px solid var(--border-default);
-}
-
-.timetable-agenda > section > header strong {
-  font-family: var(--font-display);
-  font-size: 15px;
-}
-
-.timetable-agenda > section > header span {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-
-.timetable-agenda > section > button {
-  display: grid;
-  width: 100%;
-  grid-template-columns: 4px 72px minmax(0, 1fr) auto;
-  gap: 11px;
-  align-items: center;
-  padding: 10px 8px;
-  border-bottom: 1px solid var(--border-subtle);
-  text-align: left;
-}
-
-.timetable-agenda > section > button:hover {
-  background: var(--bg-tertiary);
-}
-
-.timetable-agenda > section > button > i {
-  width: 4px;
-  height: 34px;
-  border-radius: var(--radius-pill);
-}
-
-.timetable-agenda time {
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 650;
-}
-
-.timetable-agenda button span {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.timetable-agenda button strong {
-  color: var(--text-primary);
-  font-size: 11px;
-}
-
-.timetable-agenda button small {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-
-.timetable-empty {
-  display: flex;
-  min-height: 360px;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 7px;
-  color: var(--text-tertiary);
-  text-align: center;
-}
-
-.timetable-empty strong {
-  color: var(--text-primary);
-  font-size: 12px;
-}
-
-.timetable-empty span {
-  max-width: 280px;
-  font-size: var(--text-micro);
-}
-
-.timetable-linked-work {
-  padding: 14px;
-  border-top: 1px solid var(--border-default);
-  background: var(--bg-secondary);
-}
-
-.timetable-linked-work > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 9px;
-}
-
-.timetable-linked-work > header strong {
-  font-size: var(--text-micro);
-  font-weight: 750;
-}
-
-.timetable-linked-work > header span {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-
-.timetable-linked-work > div {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 7px;
-}
-
-.timetable-linked-work button {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  min-width: 0;
-  padding: 9px 10px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--control-radius);
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  text-align: left;
-}
-
-.timetable-linked-work button span {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.timetable-linked-work button strong {
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: var(--text-micro);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.timetable-linked-work button small {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  text-transform: capitalize;
-}
-
-.timetable-layers-popover,
-.timetable-add-popover,
-.timetable-import-report {
-  position: absolute;
-  z-index: var(--z-chrome);
-  top: 53px;
-  right: 160px;
-  width: 250px;
-  padding: 10px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--card-radius);
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 18px 42px rgba(35, 47, 40, 0.14);
-  backdrop-filter: blur(16px);
-}
-
-.timetable-layers-popover header,
-.timetable-import-report > div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 2px 3px 9px;
-}
-
-.timetable-layers-popover header strong,
-.timetable-import-report strong {
-  font-size: 11px;
-  font-weight: 750;
-}
-
-.timetable-layers-popover header button,
-.timetable-import-report button {
-  display: inline-flex;
-  width: 27px;
-  height: 27px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--control-radius);
-}
-
-.timetable-layers-popover > label {
-  display: grid;
-  grid-template-columns: 16px 8px minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  padding: 7px 5px;
-  border-radius: var(--control-radius);
-}
-
-.timetable-layers-popover > label:hover {
-  background: var(--bg-tertiary);
-}
-
-.timetable-layers-popover > label > i {
-  width: 7px;
-  height: 7px;
-  border-radius: 2px;
-}
-
-.timetable-layers-popover > label span {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.timetable-layers-popover > label strong {
-  color: var(--text-primary);
-  font-size: var(--text-micro);
-}
-
-.timetable-layers-popover > label small {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  text-transform: capitalize;
-}
-
-.timetable-layers-popover > button {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 7px;
-  margin-top: 6px;
-  padding: 8px 6px;
-  border-top: 1px solid var(--border-subtle);
-  color: var(--brand-ink);
-  font-size: var(--text-micro);
-  font-weight: 650;
-}
-
-.timetable-add-popover {
-  right: 14px;
-  width: 260px;
-}
-
-.timetable-add-popover > button {
-  display: grid;
-  width: 100%;
-  grid-template-columns: 24px minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-  padding: 9px 7px;
-  border-radius: var(--control-radius);
-  color: var(--brand-ink);
-  text-align: left;
-}
-
-.timetable-add-popover > button:hover {
-  background: var(--brand-wash);
-}
-
-.timetable-add-popover span {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.timetable-add-popover strong {
-  color: var(--text-primary);
-  font-size: var(--text-micro);
-}
-
-.timetable-add-popover small {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-
-.timetable-import-report {
-  top: 65px;
-  right: 14px;
-  width: 310px;
-}
-
-.timetable-import-report > div {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 8px;
-  padding: 0;
-  color: #23835f;
-}
-
-.timetable-import-report[data-error="true"] > div {
-  color: #a74d40;
-}
-
-.timetable-import-report span {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.timetable-import-report small {
-  margin-top: 2px;
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  line-height: 1.4;
-}
-
-.timetable-import-report ul {
-  margin: 8px 0 0 24px;
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  line-height: 1.5;
-}
-
-.timetable-event-editor {
-  position: absolute;
-  z-index: calc(var(--z-chrome) + 10);
-  top: 8px;
-  right: 8px;
-  bottom: 8px;
-  display: grid;
-  width: 320px;
-  align-content: start;
-  gap: 11px;
-  overflow-y: auto;
-  padding: 14px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--surface-radius);
-  background: rgba(255, 255, 255, 0.985);
-  box-shadow: -12px 0 42px rgba(35, 47, 40, 0.15);
-  backdrop-filter: blur(18px);
-}
-
-.timetable-event-editor > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 9px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.timetable-event-editor > header span {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.timetable-event-editor > header i {
-  width: 7px;
-  height: 20px;
-  border-radius: var(--radius-pill);
-}
-
-.timetable-event-editor > header strong {
-  font-size: 11px;
-  font-weight: 750;
-}
-
-.timetable-event-editor > header button {
-  display: inline-flex;
-  width: 28px;
-  height: 28px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--control-radius);
-  color: var(--text-secondary);
-}
-
-.timetable-event-editor > label {
-  display: grid;
-  gap: 5px;
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 720;
-}
-
-.timetable-event-editor > label:has(svg) {
-  grid-template-columns: auto 1fr;
-  align-items: center;
-}
-
-.timetable-event-editor input:not([type="checkbox"]),
-.timetable-event-editor select,
-.timetable-event-editor textarea {
-  width: 100%;
-  min-width: 0;
-  border: 1px solid var(--border-default);
-  border-radius: var(--control-radius);
-  outline: 0;
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  font-size: var(--text-micro);
-  font-weight: 450;
-  letter-spacing: normal;
-  text-transform: none;
-}
-
-.timetable-event-editor input,
-.timetable-event-editor select {
-  height: 34px;
-  padding: 0 8px;
-}
-
-.timetable-event-editor textarea {
-  min-height: 72px;
-  resize: vertical;
-  padding: 8px;
-  line-height: 1.45;
-}
-
-.timetable-event-date-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
-}
-
-.timetable-event-date-fields label {
-  display: grid;
-  gap: 5px;
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 720;
-}
-
-.timetable-color-field > span {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.timetable-color-field input[type="color"] {
-  width: 42px;
-  min-width: 42px;
-  padding: 3px;
-  cursor: pointer;
-}
-
-.timetable-color-field button {
-  display: inline-flex;
-  height: 31px;
-  align-items: center;
-  padding: 0 9px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--control-radius);
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 650;
-}
-
-.timetable-color-field button:hover:not(:disabled) {
-  border-color: #cbc4f3;
-  background: #f4f2ff;
-  color: var(--brand-ink);
-}
-
-.timetable-color-field button:disabled {
-  opacity: 0.42;
-}
-
-.timetable-source-overlay-time {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  padding: 10px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--card-radius);
-  background: #f7fbf8;
-}
-
-.timetable-source-overlay-time .timetable-check-field {
-  padding: 0;
-}
-
-.timetable-source-overlay-time p {
-  margin: 0;
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  line-height: 1.45;
-}
-
-.timetable-event-editor .timetable-check-field {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  text-transform: none;
-}
-
-.timetable-source-warning {
-  padding: 8px 9px;
-  border: 1px solid #efc98a;
-  border-radius: var(--control-radius);
-  background: #fff8e9;
-  color: #825d1f;
-  font-size: var(--text-micro);
-  line-height: 1.45;
-}
-
-.timetable-event-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.timetable-event-links span {
-  display: inline-flex;
-  max-width: 100%;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 7px;
-  border-radius: var(--control-radius);
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-}
-
-.timetable-event-links span button {
-  display: inline-flex;
-  width: 18px;
-  height: 18px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--chip-radius);
-}
-
-.timetable-delete-event {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-height: 34px;
-  margin-top: 4px;
-  border: 1px solid #efcbc5;
-  border-radius: var(--control-radius);
-  color: #a94f42;
-  font-size: var(--text-micro);
-  font-weight: 680;
-}
-
-.timetable-delete-event:hover {
-  background: #fff5f3;
-}
-
-/* A newly placed event settles into the grid once. Drags and edits are
-   described by the interaction layer, not by replaying placement. */
-.spectra-artifact-studio[data-ai-state="creating"]
-  .timetable-event[data-ai-region="true"],
-.spectra-artifact-studio[data-ai-state="creating"]
-  .timetable-agenda
-  [data-ai-region="true"] {
-  animation: spectra-timetable-place 480ms var(--ease-standard) both;
-}
-
-@keyframes spectra-timetable-place {
-  from {
-    opacity: 0;
-    transform: translateY(5px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@container spectra-studio (max-width: 1100px) {
-  .timetable-body {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .timetable-overview {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-    border-top: 1px solid var(--border-default);
-    border-left: 0;
-  }
-
-  .timetable-overview > section {
-    margin: 0;
-  }
-}
-
-@container spectra-studio (max-width: 760px) {
-  .timetable-overview {
-    grid-template-columns: 1fr;
-  }
-
-  .timetable-event-editor {
-    top: 6px;
-    right: 6px;
-    bottom: 6px;
-    left: 6px;
-    width: auto;
-  }
-
-  .timetable-layers-popover,
-  .timetable-add-popover {
-    top: 97px;
-    right: 8px;
-    left: 8px;
-    width: auto;
-  }
-}
-
-@media print {
-  .timetable-overview,
-  .timetable-event-editor,
-  .timetable-layers-popover,
-  .timetable-add-popover,
-  .timetable-import-report,
-  .timetable-linked-work {
-    display: none !important;
-  }
-
-  .timetable-studio,
-  .timetable-body,
-  .timetable-body > main {
-    display: block;
-    overflow: visible;
-    background: var(--bg-elevated);
   }
 }
 
@@ -3164,10 +1993,10 @@ body {
 
   /* Approved type scale — prefer the `text-micro` … `text-display` utilities
      (wired through `@theme inline`) over arbitrary text-[Npx] values. */
-  --text-micro: 11px;
-  --text-caption: 12px;
-  --text-ui: 13px;
-  --text-body: 14px;
+  --text-micro: 12px;
+  --text-caption: 13px;
+  --text-ui: 14px;
+  --text-body: 15px;
   --text-editor: 16px;
   --text-title: 17px;
   --text-display: 30px;
@@ -3297,10 +2126,10 @@ body {
   --text-editor: 20px;
 }
 :root[data-spectra-interface-text="large"] {
-  --text-micro: 12px;
-  --text-caption: 13px;
-  --text-ui: 14px;
-  --text-body: 15px;
+  --text-micro: 13px;
+  --text-caption: 14px;
+  --text-ui: 15px;
+  --text-body: 16px;
 }
 /* §Motion contract — the one reduced-motion path for every CSS animation.
 
@@ -3556,6 +2385,64 @@ body {
 :focus-visible {
   outline: var(--focus-ring);
   outline-offset: 2px;
+}
+
+/* The element that kept focus while the window was away, reached last by the
+   pointer (quiet-return-focus.tsx): no ring until a key is pressed. */
+[data-quiet-focus]:focus-visible {
+  outline: none !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+}
+
+/* Text fields match :focus-visible on a click too; the caret already says
+   where typing goes, so their border carries focus quietly instead of a ring. */
+:where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="button"], [type="submit"], [type="reset"], [type="color"], [type="file"]), textarea):focus-visible {
+  outline: none;
+  border-color: var(--focus-ring-color);
+}
+
+[contenteditable="true"]:focus-visible {
+  outline: none;
+}
+
+/* The toaster's close: a plain mark inside the word, not a bubble on its corner. */
+[data-sonner-toast] [data-close-button] {
+  top: 50% !important;
+  right: 10px !important;
+  left: auto !important;
+  width: 24px !important;
+  height: 24px !important;
+  border: 0 !important;
+  border-radius: var(--radius-control) !important;
+  background: transparent !important;
+  color: var(--text-tertiary) !important;
+  opacity: 0;
+  transform: translateY(-50%) !important;
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard) !important;
+}
+
+[data-sonner-toast]:hover [data-close-button],
+[data-sonner-toast] [data-close-button]:focus-visible {
+  opacity: 1;
+}
+
+[data-sonner-toast] [data-close-button]:hover {
+  background: var(--bg-tertiary) !important;
+  color: var(--text-primary) !important;
+}
+
+@media (hover: none) {
+  [data-sonner-toast] [data-close-button] {
+    opacity: 1;
+  }
+}
+
+[data-sonner-toast] [data-content] {
+  padding-right: 22px;
 }
 
 /* A caret already says where typing goes: text entry never wears a ring. */
@@ -3917,7 +2804,7 @@ button:disabled {
   padding: 0.55rem 0.7rem;
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
@@ -4315,10 +3202,10 @@ button:not(:disabled),
   transform: translate3d(-2px, -1px, 0);
 }
 
-.spectra-card:focus-within:not(
+.spectra-card:has(:focus-visible:not([data-quiet-focus])):not(
     :has(input:focus, textarea:focus, [contenteditable="true"]:focus)
   ),
-[data-spectra-card]:focus-within:not(
+[data-spectra-card]:has(:focus-visible:not([data-quiet-focus])):not(
     :has(input:focus, textarea:focus, [contenteditable="true"]:focus)
   ) {
   outline: 2px solid color-mix(in oklab, var(--card-focus) 38%, transparent);
@@ -4673,7 +3560,7 @@ button:not(:disabled),
   padding: 3px 3px 3px 12px;
   background: var(--card-paper);
   color: var(--text-primary);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-lg);
   translate: -50% 0;
   transition: left 300ms var(--ease-standard);
   animation: spectra-follow-status-in 320ms var(--ease-standard) both;
@@ -5024,29 +3911,22 @@ button[data-spectra-context-trigger="true"]::after {
 .spectra-artifact-studio[data-blueprint="presentation"] .spectra-artifact-main,
 .spectra-artifact-studio[data-blueprint="sheets"] .spectra-artifact-main,
 .spectra-artifact-studio[data-blueprint="code"] .spectra-artifact-main,
-.spectra-artifact-studio[data-blueprint="whiteboard"] .spectra-artifact-main,
-.spectra-artifact-studio[data-blueprint="timetable"] .spectra-artifact-main {
+.spectra-artifact-studio[data-blueprint="whiteboard"] .spectra-artifact-main {
   background: transparent;
 }
 
 .spectra-artifact-studio[data-blueprint="presentation"] .presentation-studio,
 .spectra-artifact-studio[data-blueprint="sheets"] .spectra-sheets-studio,
 .spectra-artifact-studio[data-blueprint="code"] .code-studio,
-.spectra-artifact-studio[data-blueprint="whiteboard"] .whiteboard-studio,
-.spectra-artifact-studio[data-blueprint="timetable"] .timetable-studio {
+.spectra-artifact-studio[data-blueprint="whiteboard"] .whiteboard-studio {
   margin-top: 2px;
 }
 
-.spectra-artifact-studio[data-blueprint="whiteboard"] .whiteboard-studio,
-.spectra-artifact-studio[data-blueprint="timetable"] .timetable-studio {
+.spectra-artifact-studio[data-blueprint="whiteboard"] .whiteboard-studio {
   border: none;
   border-radius: 0;
   box-shadow: none;
   background: transparent;
-}
-
-.spectra-artifact-studio[data-studio-mode="split"] .timetable-overview {
-  display: none !important;
 }
 
 .code-icon-action:focus-visible,
@@ -5616,11 +4496,12 @@ button[data-spectra-context-trigger="true"]::after {
   border-collapse: collapse;
   color: inherit;
   font-size: 0.85cqw;
+  line-height: 1.25;
 }
 
 .presentation-table td {
   border: 1px solid color-mix(in oklab, currentColor 18%, transparent);
-  padding: 5%;
+  padding: 0.35em 0.6em;
 }
 
 .presentation-object-handle {
@@ -5722,7 +4603,7 @@ button[data-spectra-context-trigger="true"]::after {
   background: transparent;
   padding: 13px 15px 24px;
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.7;
   outline: none;
 }
@@ -5893,7 +4774,7 @@ button[data-spectra-context-trigger="true"]::after {
 
 .presentation-component-library h4 {
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -6398,7 +5279,7 @@ button[data-spectra-context-trigger="true"]::after {
   align-items: center;
   gap: 6px;
   color: #d7d8d2;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .presentation-presenter-actions {
@@ -6491,7 +5372,7 @@ button[data-spectra-context-trigger="true"]::after {
 .presentation-presenter-notes p {
   margin: 8px 0 0;
   color: #e7e8e3;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.45;
   white-space: pre-wrap;
 }
@@ -6505,7 +5386,7 @@ button[data-spectra-context-trigger="true"]::after {
   height: 100%;
   background: #000;
   color: #6f716b;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 @container presentation-studio (max-width: 760px) {
@@ -6587,7 +5468,7 @@ button[data-spectra-context-trigger="true"]::after {
   justify-content: center;
   border-radius: var(--chip-radius);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -6624,7 +5505,7 @@ button[data-spectra-context-trigger="true"]::after {
   background: transparent;
   padding: 0 10px;
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   outline: none;
 }
@@ -6649,7 +5530,7 @@ button[data-spectra-context-trigger="true"]::after {
   padding: 0 10px;
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
   outline: none;
 }
 .sheets-formula-input:focus {
@@ -7028,7 +5909,7 @@ button[data-spectra-context-trigger="true"]::after {
   border: 0;
   background: transparent;
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
   outline: none;
 }
@@ -7172,7 +6053,7 @@ button[data-spectra-context-trigger="true"]::after {
   margin: 0;
   max-width: 46ch;
   color: var(--text-secondary);
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.62;
 }
 
@@ -7201,7 +6082,7 @@ button[data-spectra-context-trigger="true"]::after {
   padding: 10px 12px;
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.6;
   resize: vertical;
   transition:
@@ -7245,7 +6126,7 @@ button[data-spectra-context-trigger="true"]::after {
   padding: 0;
   color: var(--text-secondary);
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 520;
   cursor: pointer;
   transition: color var(--motion-fast) var(--ease-standard);
@@ -7322,7 +6203,7 @@ button[data-spectra-context-trigger="true"]::after {
 .foundry-mission-objective {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.55;
 }
 
@@ -7343,7 +6224,7 @@ button[data-spectra-context-trigger="true"]::after {
   gap: 8px;
   border-radius: var(--radius-input);
   padding: 10px 12px;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
@@ -7424,13 +6305,13 @@ button[data-spectra-context-trigger="true"]::after {
   margin: -4px 0 0;
   max-width: 58ch;
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.6;
 }
 
 .foundry-section.is-answered .foundry-section-prompt {
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
 }
 
@@ -7438,7 +6319,7 @@ button[data-spectra-context-trigger="true"]::after {
   margin: 0;
   max-width: 62ch;
   white-space: pre-wrap;
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.62;
 }
 
@@ -7491,20 +6372,20 @@ button[data-spectra-context-trigger="true"]::after {
   width: auto;
   grid-template-columns: auto auto;
   padding: 6px 11px;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .foundry-choice-label {
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 540;
 }
 
 .foundry-choice-detail {
   grid-column: 1;
   color: var(--text-tertiary);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -7570,7 +6451,7 @@ button[data-spectra-context-trigger="true"]::after {
   align-items: center;
   justify-content: space-between;
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -7589,7 +6470,7 @@ button[data-spectra-context-trigger="true"]::after {
   justify-content: space-between;
   gap: 14px;
   color: var(--text-tertiary);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -7632,14 +6513,14 @@ button[data-spectra-context-trigger="true"]::after {
   margin: 0;
   max-width: 62ch;
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.6;
 }
 
 .foundry-empty {
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.6;
 }
 
@@ -7676,14 +6557,14 @@ button[data-spectra-context-trigger="true"]::after {
 
 .foundry-compile-label {
   color: var(--text-primary);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 550;
   letter-spacing: -0.008em;
 }
 
 .foundry-compile-stale {
   color: var(--foundry-quarantine);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .foundry-compile-rule {
@@ -7725,7 +6606,7 @@ button[data-spectra-context-trigger="true"]::after {
   justify-content: space-between;
   gap: 12px;
   color: var(--text-tertiary);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -7768,7 +6649,7 @@ button[data-spectra-context-trigger="true"]::after {
   border-left: 2px solid var(--foundry-quarantine);
   padding-left: 9px;
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -7820,7 +6701,7 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .foundry-evidence-label {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 570;
   letter-spacing: -0.01em;
 }
@@ -7829,7 +6710,7 @@ button[data-spectra-context-trigger="true"]::after {
   margin: 0;
   color: var(--text-secondary);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -7842,7 +6723,7 @@ button[data-spectra-context-trigger="true"]::after {
   padding: 0;
   list-style: none;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -7861,7 +6742,7 @@ button[data-spectra-context-trigger="true"]::after {
   background: color-mix(in oklab, var(--foundry-quarantine) 10%, transparent);
   padding: 8px 10px;
   color: var(--foundry-quarantine);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
@@ -7913,7 +6794,7 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .foundry-skill-name {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 570;
   letter-spacing: -0.012em;
 }
@@ -7929,7 +6810,7 @@ button[data-spectra-context-trigger="true"]::after {
   margin: 0;
   max-width: 62ch;
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.6;
 }
 
@@ -7940,20 +6821,20 @@ button[data-spectra-context-trigger="true"]::after {
   gap: 4px;
   padding-left: 20px;
   color: var(--text-primary);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
 .foundry-skill-steps > li::marker {
   color: var(--text-tertiary);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .foundry-skill-contract {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
@@ -8071,7 +6952,7 @@ button[data-spectra-context-trigger="true"]::after {
   margin: 0;
   min-width: 0;
   max-width: 70ch;
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 560;
   line-height: 1.5;
   overflow-wrap: anywhere;
@@ -8124,7 +7005,7 @@ button[data-spectra-context-trigger="true"]::after {
   border-radius: var(--radius-input);
   background: var(--card-paper);
   padding: 12px 14px;
-  font-size: 13px;
+  font-size: 14px;
   transition: border-color var(--motion-fast) var(--ease-standard);
 }
 
@@ -8159,7 +7040,7 @@ button[data-spectra-context-trigger="true"]::after {
   background: var(--card-paper-quiet);
   padding: 3px 10px;
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .agent-bench-points,
@@ -8171,7 +7052,7 @@ button[data-spectra-context-trigger="true"]::after {
   gap: 5px;
   padding: 0;
   list-style: none;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -8244,7 +7125,7 @@ button[data-spectra-context-trigger="true"]::after {
 .agent-bench-problem {
   margin: 0;
   color: color-mix(in oklab, var(--danger) 80%, var(--text-primary));
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -8276,7 +7157,7 @@ button[data-spectra-context-trigger="true"]::after {
   align-items: center;
   gap: 8px;
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .agent-bench-row {
@@ -8306,7 +7187,7 @@ button[data-spectra-context-trigger="true"]::after {
 
 .agent-bench-skill > legend {
   padding: 0 0 6px;
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 570;
 }
 
@@ -8321,7 +7202,7 @@ button[data-spectra-context-trigger="true"]::after {
   background: color-mix(in oklab, var(--warning) 10%, transparent);
   padding: 11px 14px 11px 28px;
   color: color-mix(in oklab, var(--warning) 78%, var(--text-primary));
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.55;
 }
 
@@ -8341,13 +7222,13 @@ button[data-spectra-context-trigger="true"]::after {
   gap: 12px;
   border-top: 1px solid var(--foundry-rule);
   padding: 10px 0;
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .foundry-release-number {
   color: var(--foundry-mark);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
@@ -8405,7 +7286,7 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .foundry-ledger-unit {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   opacity: 0.6;
 }
@@ -8432,7 +7313,7 @@ button[data-spectra-context-trigger="true"]::after {
 .foundry-ledger-name {
   overflow: hidden;
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: -0.004em;
   text-overflow: ellipsis;
@@ -8454,7 +7335,7 @@ button[data-spectra-context-trigger="true"]::after {
 .foundry-ledger-note {
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -8488,7 +7369,7 @@ button[data-spectra-context-trigger="true"]::after {
 
 .foundry-ledger-stats dt {
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .foundry-ledger-stats dd {
@@ -8513,7 +7394,7 @@ button[data-spectra-context-trigger="true"]::after {
   padding-left: 12px;
   position: relative;
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -8531,7 +7412,7 @@ button[data-spectra-context-trigger="true"]::after {
 .foundry-ledger-clear {
   margin: 0;
   color: var(--foundry-hold);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -8898,17 +7779,7 @@ button[data-spectra-context-trigger="true"]::after {
   flex-direction: column;
 }
 
-.spectra-studio-inspector-overlay {
-  position: absolute;
-  inset: 12px 12px 12px auto;
-  z-index: 28;
-  width: min(320px, calc(100% - 24px));
-  overflow: auto;
-  border: 1px solid var(--border-default);
-  border-radius: var(--card-radius);
-  background: var(--wave-paper, var(--bg-primary));
-  box-shadow: 0 18px 40px -28px rgba(31, 27, 22, 0.35);
-}
+
 
 .spectra-item-rail {
   display: flex;
@@ -9020,7 +7891,7 @@ button[data-spectra-context-trigger="true"]::after {
 
 .spectra-item-rail-number {
   text-align: center;
-  font-size: 12px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
 }
@@ -9034,7 +7905,7 @@ button[data-spectra-context-trigger="true"]::after {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
 }
@@ -9179,7 +8050,7 @@ button[data-spectra-context-trigger="true"]::after {
   height: 32px;
   place-items: center;
   border-radius: var(--control-radius);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -9212,7 +8083,7 @@ button[data-spectra-context-trigger="true"]::after {
 .spectra-calendar-zoom-label {
   min-width: 4.5rem;
   text-align: center;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
 }
@@ -9221,7 +8092,7 @@ button[data-spectra-context-trigger="true"]::after {
   height: 32px;
   padding: 0 10px;
   border-radius: var(--control-radius);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
 }
@@ -9239,7 +8110,7 @@ button[data-spectra-context-trigger="true"]::after {
   min-width: 0;
   overflow-x: auto;
   overflow-y: auto;
-  padding: 0 12px 24px;
+  padding: 0 12px max(24px, calc(var(--spectra-composer-safe-area, 0px) + 16px));
   overscroll-behavior-x: contain;
 }
 
@@ -9456,7 +8327,7 @@ button[data-spectra-context-trigger="true"]::after {
 
 .spectra-calendar-block-time {
   flex-shrink: 0;
-  font-size: 11.5px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: color-mix(in oklab, var(--block-ink) 65%, var(--text-secondary));
 }
@@ -9466,7 +8337,7 @@ button[data-spectra-context-trigger="true"]::after {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
 }
@@ -9531,17 +8402,9 @@ button[data-spectra-context-trigger="true"]::after {
   backdrop-filter: blur(14px);
 }
 
-.spectra-studio-details {
-  position: sticky;
-  top: 0;
-  align-self: start;
-}
 
-.spectra-studio-details [data-spectra-card="side"] {
-  background: color-mix(in oklab, var(--bg-elevated) 90%, transparent);
-  border: 1px solid var(--wave-hairline, var(--border-default));
-  border-radius: var(--card-radius);
-}
+
+
 
 /* Flat quiz studio — fields live on the panel surface, not nested paper. */
 .spectra-artifact-studio[data-blueprint="quiz"] .spectra-quiz-studio {
@@ -9702,7 +8565,7 @@ button[data-spectra-context-trigger="true"]::after {
   border-radius: var(--control-radius);
   background: color-mix(in oklab, var(--brand-primary) 5%, var(--bg-elevated));
   color: var(--text-secondary);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -9723,7 +8586,7 @@ button[data-spectra-context-trigger="true"]::after {
   border: 1px solid var(--border-default);
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -9731,13 +8594,7 @@ button[data-spectra-context-trigger="true"]::after {
   display: none;
 }
 
-.spectra-artifact-studio[data-studio-mode="split"] .spectra-studio-details {
-  height: auto !important;
-  max-height: none;
-  margin-top: 0 !important;
-  transform: none;
-  border-radius: var(--control-radius);
-}
+
 
 @media print {
   .spectra-artifact-studio[data-blueprint="flashcard_deck"]
@@ -9987,7 +8844,7 @@ button[data-spectra-context-trigger="true"]::after {
   outline: 0;
   background: transparent;
   color: var(--text-primary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .spectra-planner-description > form button {
@@ -10005,21 +8862,11 @@ button[data-spectra-context-trigger="true"]::after {
   min-height: 136px;
 }
 
-.spectra-studio-details {
-  border-radius: var(--surface-radius) !important;
-  box-shadow: 0 18px 48px -42px rgba(35, 27, 18, 0.4);
-}
 
-.spectra-studio-details > div:last-child {
-  max-height: calc(100vh - 250px);
-  overflow-y: auto;
-}
 
-.spectra-studio-details
-  [data-spectra-card="side"]
-  + [data-spectra-card="side"] {
-  margin-top: 12px;
-}
+
+
+
 
 .spectra-conversation {
   background-image: radial-gradient(
@@ -10504,9 +9351,7 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 @media (max-width: 1279px) {
-  .spectra-wave-y .spectra-studio-details {
-    position: static;
-  }
+
   .spectra-wave-y .spectra-artifact-main {
     padding-inline: 12px;
   }
@@ -10552,28 +9397,11 @@ button[data-spectra-context-trigger="true"]::after {
   padding: 12px 20px;
 }
 
-.spectra-artifact-studio[data-blueprint="quiz"]
-  .spectra-studio-details
-  .spectra-related-artifacts {
-  margin-top: -10px;
-  border-top: 0;
-  border-radius: 0 0 var(--control-radius) var(--control-radius);
-  padding: 4px 12px 10px;
-}
 
-.spectra-artifact-studio[data-blueprint="quiz"]
-  .spectra-studio-details
-  .spectra-related-artifacts
-  > summary {
-  display: none;
-}
 
-.spectra-artifact-studio[data-blueprint="quiz"]
-  .spectra-studio-details
-  > div
-  > section:nth-of-type(4) {
-  display: none;
-}
+
+
+
 
 .spectra-artifact-studio[data-blueprint="quiz"] .spectra-artifact-main {
   padding-bottom: 0;
@@ -10610,33 +9438,19 @@ button[data-spectra-context-trigger="true"]::after {
   background: transparent;
 }
 
-.spectra-studio-details [data-spectra-card="side"] {
-  padding: 12px;
-}
 
-.spectra-studio-details [data-spectra-card="side"] > h3 {
-  margin-bottom: 8px;
-  font-size: var(--text-micro);
-  line-height: 12px;
-}
 
-.spectra-studio-details > div:last-child {
-  gap: 10px;
-}
+
+
+
 
 .spectra-flashcard-studio textarea:not(.editor-sheet *, .spectra-deck-study *) {
   font-family: var(--font-sans);
 }
 
-.spectra-studio-details {
-  border-radius: var(--control-radius) !important;
-  background: var(--bg-primary) !important;
-}
 
-.spectra-studio-details [data-spectra-card="side"] {
-  border-radius: var(--control-radius);
-  box-shadow: none;
-}
+
+
 
 /* Token values live only in the canonical `:root` block near the start of this
    file (Phase 13 consolidation). */
@@ -10672,18 +9486,9 @@ body {
   border-color: var(--border-subtle) !important;
 }
 
-.spectra-artifact-studio[data-blueprint="flashcard_deck"]
-  .spectra-studio-details
-  [data-spectra-card="side"] {
-  padding: 10px !important;
-}
 
-.spectra-artifact-studio[data-blueprint="flashcard_deck"]
-  .spectra-studio-details
-  [data-spectra-card="side"]
-  > h3 {
-  margin-bottom: 6px !important;
-}
+
+
 
 .spectra-artifact-studio[data-blueprint="flashcard_deck"]
   [data-side-card-title="tags"]
@@ -10699,59 +9504,24 @@ body {
   display: none;
 }
 
-.spectra-artifact-studio[data-blueprint="flashcard_deck"]
-  .spectra-inspector-action {
-  height: 22px;
-}
 
-.spectra-studio-details {
-  transform: translateY(-20px);
-}
 
-.spectra-artifact-studio[data-blueprint="flashcard_deck"]
-  .spectra-studio-details
-  > div:last-child {
-  max-height: none !important;
-  overflow: visible !important;
-}
 
-.spectra-studio-details {
-  height: calc(100dvh - 148px) !important;
-  margin-top: -20px !important;
-  overflow-y: auto !important;
-  overscroll-behavior: contain;
-}
+
+
+
+
 
 .spectra-artifact-studio[data-blueprint="flashcard_deck"]
-  .spectra-related-artifacts,
-.spectra-artifact-studio[data-blueprint="flashcard_deck"]
-  .spectra-studio-details
-  > div
-  > section:nth-of-type(5) {
+  .spectra-related-artifacts {
   display: none !important;
 }
 
-.spectra-inspector-action {
-  display: flex;
-  width: 100%;
-  height: 27px;
-  align-items: center;
-  gap: 8px;
-  border-radius: var(--chip-radius);
-  padding: 0 3px;
-  font-size: var(--text-micro);
-  color: var(--text-secondary);
-  text-align: left;
-}
 
-.spectra-inspector-action:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
 
-.spectra-inspector-action:disabled {
-  opacity: 0.48;
-}
+
+
+
 
 .spectra-artifact-identity > .hidden.shrink-0.items-center {
   display: none !important;
@@ -10779,8 +9549,8 @@ body {
    left alone: the island's own menus need it to keep its hover. */
 body:has([role="dialog"][aria-modal="true"]) [data-island-root],
 body:has([role="dialog"][aria-modal="true"]) [data-island-root] *,
-body:has([aria-label="Version history comparison"]) [data-island-root],
-body:has([aria-label="Version history comparison"]) [data-island-root] * {
+body:has(.version-stage) [data-island-root],
+body:has(.version-stage) [data-island-root] * {
   pointer-events: none !important;
 }
 
@@ -10868,12 +9638,7 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
   }
 }
 
-.spectra-inspector-action {
-  height: 32px !important;
-  font-size: 13px !important;
-  border-radius: var(--control-radius) !important;
-  padding: 0 8px !important;
-}
+
 
 .spectra-artifact-studio[data-blueprint="presentation"] .presentation-studio {
   border-radius: 0;
@@ -11168,22 +9933,9 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
 }
 
 /* Advanced artifact information is a rail, not a stack of dashboard cards. */
-.spectra-studio-details {
-  border: 0 !important;
-  border-left: 1px solid var(--border-subtle) !important;
-  border-radius: 0 !important;
-  background: var(--bg-secondary) !important;
-  box-shadow: none !important;
-}
 
-.spectra-studio-details [data-spectra-card="side"] {
-  margin-top: 0 !important;
-  border: 0 !important;
-  border-bottom: 1px solid var(--border-subtle) !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
+
+
 
 /* Library layout responds to its actual pane, not the browser viewport. This
    matters whenever work is open beside it: a 1440px window can still leave a
@@ -11265,8 +10017,7 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
 }
 
 /* Numeric UI uses the same calm sans face as surrounding metadata. */
-.tabular-nums,
-.timetable-studio time {
+.tabular-nums {
   font-family:
     var(--font-sans) !important;
   font-weight: 500 !important;
@@ -11276,9 +10027,6 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
 
 /* Editors should feel like familiar productivity software, not oversized
    generated form cards. */
-.timetable-event-editor input:not([type="checkbox"]):not([type="color"]),
-.timetable-event-editor select,
-.timetable-event-editor textarea,
 .spectra-quiz-studio input:not([type="checkbox"]):not([type="radio"]):not(.editor-sheet *),
 .spectra-quiz-studio select:not(.editor-sheet *),
 .spectra-quiz-studio textarea:not(.editor-sheet *) {
@@ -11291,7 +10039,6 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
   font-weight: 400 !important;
 }
 
-.timetable-event-editor label,
 .spectra-quiz-studio label {
   font-family: var(--font-sans);
   font-weight: 500;
@@ -11303,13 +10050,6 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
 
 .spectra-studio-tab-scroller::-webkit-scrollbar {
   display: none;
-}
-
-.timetable-week-header strong {
-  font-family:
-    var(--font-sans) !important;
-  font-weight: 500 !important;
-  font-variant-numeric: tabular-nums;
 }
 
 /* Flashcard rows must not stretch their compact metrics/header tracks simply
@@ -11562,7 +10302,7 @@ body:has([aria-label="Version history comparison"]) [data-island-root] * {
 .spectra-presence-menu-option {
   padding: 4px 7px;
   border-radius: var(--chip-radius);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.4;
   color: var(--text-secondary);
   white-space: nowrap;
@@ -11954,7 +10694,7 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
   border-radius: var(--radius-chip);
   border: 1px solid var(--border-default);
   background: transparent;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.005em;
   color: var(--text-secondary);
@@ -12000,7 +10740,7 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
   border: 1px solid var(--border-default);
   background: var(--bg-elevated);
   box-shadow: var(--shadow-lg);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.35;
   color: var(--text-secondary);
   pointer-events: none;
@@ -12037,7 +10777,7 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
   background: color-mix(in oklab, var(--bg-elevated) 94%, #fff6e7);
   box-shadow: 0 14px 34px -22px rgba(72, 47, 17, 0.55);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.35;
   backdrop-filter: blur(14px) saturate(1.08);
   animation: spectra-held-notice var(--motion-base) var(--ease-standard) both;
@@ -12232,8 +10972,7 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
 .spectra-artifact-main > .presentation-studio,
 .spectra-artifact-main > .spectra-sheets-studio,
 .spectra-artifact-main > .code-studio,
-.spectra-artifact-main > .whiteboard-studio,
-.spectra-artifact-main > .timetable-studio {
+.spectra-artifact-main > .whiteboard-studio {
   min-width: 0;
 }
 
@@ -12865,6 +11604,13 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
   }
 }
 
+/* A long unbroken folder or file name wraps inside the sentence instead of
+   running past the popover's edge (F21). The Where row keeps its ellipsis. */
+.spectra-status-popover-head,
+.spectra-status-details {
+  overflow-wrap: anywhere;
+}
+
 .spectra-status-popover-head {
   display: flex;
   gap: 10px;
@@ -12968,7 +11714,7 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
   gap: 8px;
   padding: 0 4px;
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
@@ -14067,7 +12813,7 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
   flex: 1;
   align-items: center;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-secondary);
 }
@@ -14118,7 +12864,7 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 10px;
-  font-size: 13.5px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
 }
@@ -14132,7 +12878,7 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
 
 .calendar-card-length button {
   padding: 1px 9px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-secondary);
   transition: background var(--motion-fast) var(--ease-standard);
 }
@@ -14150,7 +12896,7 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
 }
 
@@ -14159,7 +12905,7 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
   align-items: center;
   gap: 6px;
   align-self: flex-start;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-secondary);
 }
@@ -14179,7 +12925,7 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
   margin-top: 4px;
   padding-top: 8px;
   border-top: 1px solid var(--border-subtle);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.45;
   color: var(--text-tertiary);
 }
@@ -14502,3 +13248,445 @@ html[data-spectra-carrying] .spectra-presence-actor[data-actor-kind="ai"] {
     animation: none;
   }
 }
+
+/* One stretch of Spectra's reasoning in the trace: a few lines tall, the rest a scroll away. */
+.spectra-trace-line {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  gap: 8px;
+  text-align: left;
+}
+.spectra-thinking-mark,
+.spectra-thinking-indent {
+  width: 14px;
+  height: 1.25rem;
+  flex: none;
+}
+.spectra-thinking-mark {
+  background: radial-gradient(circle, var(--text-tertiary) 0 2px, transparent 2.5px);
+}
+.spectra-thinking-body {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  max-height: 7.5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  font-size: var(--text-caption, 0.8125rem);
+  line-height: 1.25rem;
+  color: var(--text-tertiary);
+}
+.spectra-thinking-body[data-following] {
+  overflow-y: hidden;
+  mask-image: linear-gradient(to bottom, transparent, #000 1.25rem);
+}
+.spectra-thinking-body:focus-visible {
+  outline: 1px solid var(--border-strong, currentColor);
+  outline-offset: 2px;
+}
+.spectra-trace-list {
+  scrollbar-width: thin;
+}
+
+/* ---- The one pane about a work (see studio-pane) ------------------------
+   Beside the page on a work's own screen, over it in a side panel. Whatever it
+   holds, it opens the same way and changes in place. */
+.spectra-artifact-studio[data-pane-resizing] {
+  user-select: none;
+}
+.studio-pane {
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+  z-index: var(--z-chrome);
+  display: flex;
+  max-width: 100%;
+  min-height: 0;
+  flex-direction: column;
+  border-left: 1px solid var(--border-subtle);
+  background: var(--bg-primary);
+}
+.studio-pane:not([data-docked]) {
+  box-shadow: -18px 0 40px -28px color-mix(in oklab, var(--text-primary) 32%, transparent);
+}
+.studio-pane-grip {
+  position: absolute;
+  inset-block: 0;
+  left: -4px;
+  z-index: 1;
+  width: 8px;
+  cursor: col-resize;
+  outline: none;
+  touch-action: none;
+}
+.studio-pane-grip::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+  transition: background-color 120ms;
+}
+.studio-pane-grip:hover::after,
+.spectra-artifact-studio[data-pane-resizing] .studio-pane-grip::after {
+  background: var(--border-strong, var(--border-default));
+}
+.studio-pane-grip:focus-visible::after {
+  background: var(--focus-ring-color);
+}
+.studio-pane-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .spectra-artifact-studio {
+    transition: none;
+  }
+}
+
+/* Where a work is kept, under its description. */
+.work-origin {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+  border-radius: var(--chip-radius);
+  font-size: var(--text-micro);
+  line-height: 18px;
+  color: var(--text-tertiary);
+  text-align: left;
+}
+button.work-origin:hover {
+  color: var(--text-primary);
+}
+.work-origin-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.work-origin-slash {
+  margin-inline: 4px;
+  opacity: 0.55;
+}
+
+/* References */
+.reference-search {
+  display: flex;
+  height: 34px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--control-radius);
+  padding-inline: 10px;
+  color: var(--text-tertiary);
+}
+.reference-search:focus-within {
+  border-color: var(--border-strong, var(--border-default));
+  color: var(--text-secondary);
+}
+.reference-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-size: var(--text-ui);
+  color: var(--text-primary);
+  outline: none;
+}
+.reference-search input::placeholder {
+  color: var(--text-tertiary);
+}
+.reference-section > h3 {
+  margin-bottom: 4px;
+  padding-inline: 8px;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.reference-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--control-radius);
+  padding: 2px 4px 2px 0;
+}
+.reference-row:hover,
+.reference-row:focus-within {
+  background: var(--bg-hover);
+}
+.reference-row-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  border-radius: var(--control-radius);
+  padding: 6px 8px;
+  text-align: left;
+}
+.reference-text-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  border-radius: var(--chip-radius);
+  padding: 2px 8px;
+  font-size: var(--text-caption);
+  color: var(--text-tertiary);
+}
+.reference-text-action:hover {
+  color: var(--text-primary);
+}
+.reference-text-action[data-strong] {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* Version history: the list in the pane, the version over the page. */
+.version-timeline {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 8px 24px;
+}
+.version-day {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-primary);
+  padding: 12px 8px 4px;
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.version-row {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 10px;
+  border-radius: var(--control-radius);
+  padding: 7px 8px;
+  text-align: left;
+}
+.version-row:hover:not(:disabled, [data-selected]) {
+  background: var(--bg-hover);
+}
+.version-row[data-selected] {
+  background: color-mix(in oklab, var(--version-author, var(--text-primary)) 10%, var(--bg-primary));
+}
+.version-row-who {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-ui);
+  line-height: 20px;
+  color: var(--text-primary);
+}
+.version-row[data-named] .version-row-who {
+  font-weight: 600;
+}
+.version-row-what {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-micro);
+  line-height: 16px;
+  color: var(--text-tertiary);
+}
+.version-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex: none;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: var(--version-author, var(--text-tertiary));
+}
+.version-stage {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: calc(var(--z-chrome) - 1);
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--bg-primary);
+}
+.version-stage[data-fills] {
+  inset: 0;
+  z-index: calc(var(--z-chrome) + 1);
+}
+.version-stage-head {
+  display: flex;
+  min-height: 48px;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px 0;
+}
+.version-views {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 8px 12px 0;
+}
+.version-views button {
+  border-radius: var(--chip-radius);
+  padding: 3px 10px;
+  font-size: var(--text-caption);
+  color: var(--text-tertiary);
+}
+.version-views button:hover {
+  color: var(--text-primary);
+}
+.version-views button[aria-selected="true"] {
+  background: var(--bg-hover);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.version-stage-body {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px 20px 96px;
+}
+.version-page {
+  margin-inline: auto;
+  max-width: 44rem;
+}
+.version-part {
+  padding: 4px 8px;
+  border-radius: var(--chip-radius);
+  font-size: var(--text-ui);
+  line-height: 22px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.version-mark {
+  border-radius: 2px;
+  color: inherit;
+}
+.version-mark[data-side="removed"] {
+  background: color-mix(in oklab, var(--danger) 16%, transparent);
+}
+.version-mark[data-side="added"] {
+  background: color-mix(in oklab, var(--success) 18%, transparent);
+}
+.version-part-label {
+  display: block;
+  font-size: var(--text-micro);
+  line-height: 16px;
+  color: var(--text-tertiary);
+}
+.version-fold {
+  margin-block: 2px;
+  padding: 2px 8px;
+  font-size: var(--text-micro);
+  color: var(--text-tertiary);
+}
+.version-note {
+  margin-bottom: 10px;
+  font-size: var(--text-caption);
+  color: var(--text-secondary);
+}
+.version-compare + .version-compare {
+  margin-top: 8px;
+}
+.version-compare-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+.version-compare-sides {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 8px;
+}
+.version-compare-sides h4 {
+  margin-bottom: 2px;
+  font-size: var(--text-micro);
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+.version-compare-sides p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--text-ui);
+  line-height: 21px;
+  color: var(--text-primary);
+}
+
+.work-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--chip-radius);
+  background: var(--bg-hover);
+  padding: 1px 4px 1px 7px;
+  font-size: var(--text-caption);
+  color: var(--text-secondary);
+}
+.work-tag-input {
+  min-width: 5rem;
+  flex: 1;
+  background: transparent;
+  font-size: var(--text-caption);
+  color: var(--text-primary);
+  outline: none;
+}
+.work-tag-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* A work's own tools, once they are held by the pane. */
+.studio-pane-body [data-in-pane] {
+  position: static !important;
+  inset: auto !important;
+  display: flex;
+  width: auto !important;
+  max-width: none !important;
+  min-height: 0;
+  height: auto !important;
+  max-height: none !important;
+  flex: 1;
+  flex-direction: column;
+  overflow-y: auto;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 4px 16px 24px !important;
+  transform: none !important;
+  animation: none !important;
+}
+
+/* A work with a status strip along its foot: the island rests above the strip
+   rather than over the word count. */
+:root:has(.spectra-artifact-studio[data-studio-mode="tab"] .document-rail) [data-island-root] {
+  bottom: 24px;
+}
+

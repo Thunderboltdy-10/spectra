@@ -79,7 +79,7 @@ describe("run sources", () => {
       prompt: "How do light reactions work?",
       environment: { now: 0 },
       permissions: DEFAULT_PERMISSION_PREFS,
-      captionWriter: null,
+      titleWriter: null,
       compactor: null,
       callModel: model([
         {

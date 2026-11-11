@@ -34,7 +34,25 @@ afterEach(() => {
 });
 
 describe("Bridge discovery gate (LV-012)", () => {
-  it("drops remembered local identity after Bridge refuses the browser session", async () => {
+  it("wakes every mounted surface after same-tab manual reconnect with one shared probe", async () => {
+    const fetchMock = vi.fn(async (url) => Response.json(String(url).endsWith("/v1/health")
+      ? { version: "0.1.0", paired: true, protocolVersion: "1.0" }
+      : { version: "0.1.0", paired: true, protocolVersion: "1.0", cloudConnected: true, mounts: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const first = renderHook(() => useBridgeHealth());
+    const second = renderHook(() => useBridgeHealth());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(first.result.current.reachability).toBe("not-set-up");
+    await act(async () => {
+      persistBridgeSession("reconnected-session");
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(first.result.current.reachability).toBe("connected");
+    expect(second.result.current.reachability).toBe("connected");
+    expect(healthCalls(fetchMock)).toBe(1);
+  });
+
+  it("keeps the remembered computer, as not connected, while a refused browser joins again", async () => {
     window.localStorage.setItem(BRIDGE_DISCOVERY_STORAGE_KEY, "enabled");
     window.localStorage.setItem(BRIDGE_SESSION_STORAGE_KEY, "expired-session");
     window.localStorage.setItem(BRIDGE_STATUS_CACHE_KEY, JSON.stringify({
@@ -48,8 +66,8 @@ describe("Bridge discovery gate (LV-012)", () => {
       : new Response("Expired session", { status: 401 })));
     const { result } = renderHook(() => useBridgeHealth());
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-    expect(window.localStorage.getItem(BRIDGE_STATUS_CACHE_KEY)).toBeNull();
-    expect(result.current.status).toBeNull();
+    expect(window.localStorage.getItem(BRIDGE_STATUS_CACHE_KEY)).not.toBeNull();
+    expect(result.current.status).toMatchObject({ deviceId: "old-device", paired: false, cloudConnected: false });
     expect(result.current.reachability).toBe("running");
   });
 
@@ -108,7 +126,7 @@ describe("Bridge discovery gate (LV-012)", () => {
     });
     expect(healthCalls(fetchMock)).toBe(1);
     expect(result.current.reachability).toBe("not-running");
-    // Misses wait 30 s, 60 s, 120 s ... instead of a probe every 15 s.
+    // Misses wait 30 s, then 60 s, instead of a probe every 15 s.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
@@ -126,8 +144,8 @@ describe("Bridge discovery gate (LV-012)", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10 * 60_000);
     });
-    // 120 s, 240 s, then the 5-minute cap: far fewer than forty 15 s polls.
-    expect(healthCalls(fetchMock)).toBeLessThanOrEqual(6);
+    // Held at the one-minute cap: far fewer than forty 15 s polls.
+    expect(healthCalls(fetchMock)).toBeLessThanOrEqual(13);
   });
 
   it("shares one probe between surfaces mounted together", async () => {
@@ -153,11 +171,11 @@ describe("Bridge discovery gate (LV-012)", () => {
     expect(window.localStorage.getItem(BRIDGE_DISCOVERY_STORAGE_KEY)).toBe("enabled");
   });
 
-  it("doubles the wait per miss up to five minutes", () => {
+  it("doubles the wait per miss up to a minute", () => {
     expect(bridgeDiscoveryDelay(0)).toBe(15_000);
     expect(bridgeDiscoveryDelay(1)).toBe(30_000);
-    expect(bridgeDiscoveryDelay(3)).toBe(120_000);
-    expect(bridgeDiscoveryDelay(5)).toBe(300_000);
-    expect(bridgeDiscoveryDelay(50)).toBe(300_000);
+    expect(bridgeDiscoveryDelay(3)).toBe(60_000);
+    expect(bridgeDiscoveryDelay(5)).toBe(60_000);
+    expect(bridgeDiscoveryDelay(50)).toBe(60_000);
   });
 });

@@ -8,6 +8,7 @@ import {
   capabilitiesForLevel,
   evaluateAccess,
   evaluateAccessForActor,
+  evaluateArtifactAccessForActor,
   getVerifiedViewerDomain,
   loadResource,
   requireCapability,
@@ -116,11 +117,12 @@ async function publicRuntimeBuild(
 export const access = query({
   args: { resourceType, resourceId: v.string() },
   handler: async (ctx, args) => {
-    const decision = await evaluateAccess(
-      ctx,
-      args.resourceType,
-      args.resourceId,
-    );
+    const artifactId = args.resourceType === "workspace" ? null : ctx.db.normalizeId("spectraArtifacts", args.resourceId);
+    const actor = artifactId ? await getAuthenticatedActor(ctx) : null;
+    // A work's access is on its summary row; only the generic path loads the body.
+    const decision = artifactId && actor
+      ? await evaluateArtifactAccessForActor(ctx, actor, artifactId, args.resourceType === "agent" ? "agent" : undefined)
+      : await evaluateAccess(ctx, args.resourceType, args.resourceId);
     return {
       allowed: decision.allowed,
       level: decision.level,

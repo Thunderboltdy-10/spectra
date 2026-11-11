@@ -344,7 +344,7 @@
   color: color-mix(in oklab, var(--sheet-ink) 78%, var(--text-primary));
 }
 .sheet-stamp-label {
-  font-size: 10px;
+  font-size: var(--text-micro);
   font-weight: 600;
   line-height: 1;
 }

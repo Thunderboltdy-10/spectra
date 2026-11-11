@@ -17,6 +17,3 @@ export function readIdentity() {
   return reading;
 }
 
-export function forgetIdentityForTests() {
-  kept = null;
-}

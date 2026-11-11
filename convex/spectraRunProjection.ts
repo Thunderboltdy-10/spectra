@@ -228,6 +228,19 @@ function compactProvenance(value: unknown) {
     artifactTitles: Array.isArray(source.artifactTitles)
       ? source.artifactTitles.filter((title): title is string => typeof title === "string").slice(0, 24).map((title) => title.slice(0, 240))
       : undefined,
+    createdIds: Array.isArray(source.createdIds)
+      ? source.createdIds.filter((id): id is string => typeof id === "string").slice(0, 24).map((id) => id.slice(0, 160))
+      : undefined,
+    regions: Array.isArray(source.regions)
+      ? source.regions
+          .flatMap((entry: unknown) => {
+            const region = entry as { artifactId?: unknown; regionId?: unknown } | null;
+            return region && typeof region.artifactId === "string" && typeof region.regionId === "string"
+              ? [{ artifactId: region.artifactId.slice(0, 160), regionId: region.regionId.slice(0, 400) }]
+              : [];
+          })
+          .slice(0, 24)
+      : undefined,
     threadId: bounded(source.threadId, 160),
     workspaceId: bounded(source.workspaceId, 160),
     workspaceTitle: bounded(source.workspaceTitle, 240),

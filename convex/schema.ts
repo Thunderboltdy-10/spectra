@@ -2083,13 +2083,23 @@ export default defineSchema({
     /** Holds every work rather than what changed since the last one. */
     full: v.boolean(),
     createdAt: v.number(),
-  }).index("by_account", ["accountId", "createdAt"]),
+    /** The computer's name when it was backed up, so a restore can say where from. */
+    computerName: v.optional(v.string()),
+    /** Stores whose works this backup carries edits for, after they moved there. */
+    handOverTo: v.optional(v.array(v.string())),
+  })
+    .index("by_account", ["accountId", "createdAt"])
+    .index("by_account_store", ["accountId", "storeId", "createdAt"]),
 
   spectraArtifacts: defineTable({
     /** Kept on a computer through Spectra Bridge rather than here. */
     storageHome: v.optional(v.literal("device")),
     /** Which computer's store has it. */
     storageStoreId: v.optional(v.string()),
+    /** Its words reached that store once; from then on a missing copy is never re-seeded empty. */
+    storageSeeded: v.optional(v.boolean()),
+    /** Counts moves between a computer and the cloud: each move starts a fresh live history. */
+    storageEpoch: v.optional(v.number()),
     // Set by a rename until the live document says something else.
     renamedFromTitle: v.optional(v.string()),
     ownerAccountId: v.id("accounts"),
@@ -4885,6 +4895,16 @@ export default defineSchema({
     .index("by_thread", ["threadId"])
     .index("by_artifact", ["artifactId"])
     .index("by_status_lease", ["status", "leaseExpiresAt"]),
+
+  /** How many runs each account started this hour and last: the hourly ceiling reads one row, not the runs. */
+  spectraRunAdmissions: defineTable({
+    accountId: v.id("accounts"),
+    /** Start of the current hour, ms. */
+    hourStart: v.number(),
+    count: v.number(),
+    /** Runs started in the hour before `hourStart`. */
+    previous: v.number(),
+  }).index("by_account", ["accountId"]),
 
   spectraRunJobs: defineTable({
     runId: v.id("spectraAiRuns"),

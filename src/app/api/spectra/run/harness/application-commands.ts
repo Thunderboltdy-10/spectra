@@ -23,6 +23,8 @@ const calendarTime = {
   startLocal: z.string().optional(),
   endLocal: z.string().optional(),
   disambiguation: z.enum(["earlier", "later"]).optional(),
+  /** True only when the request logs something that already happened. */
+  alreadyHappened: z.boolean().optional(),
 };
 
 export const NAVIGATION_DESTINATIONS = ["library", "calendar", "settings", "devices", "workspace", "artifact", "agents", "school", "analytics"] as const;

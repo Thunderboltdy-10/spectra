@@ -11,7 +11,7 @@ import { formatRelativeTime } from "../components/spectra-view-model";
 import { useClassBook } from "../school/use-class-book";
 import type { SpectraArtifact } from "../data/api";
 import { isActiveRunStatus, useRunTabs } from "../island/run-tabs";
-import { daySentence, greeting } from "./today-model";
+import { daySentence, firstQuestions, greeting } from "./today-model";
 import { TodayBrief } from "./today-brief";
 import { useDailyBrief } from "./use-daily-brief";
 import { TodayThreads } from "./today-threads";
@@ -51,6 +51,15 @@ export function HomeDay({ onAllThreads }: { onAllThreads: () => void }) {
   const previewOf = useWorkPreviews(shownWorks);
   const book = useClassBook();
 
+  // A new account with no thread yet and no brief to show gets three first questions in the brief's rows (F9).
+  const firstBrief = useMemo(() => {
+    if (!now || threads === undefined || threads === null || threads.length > 0) return null;
+    if (brief.status === "ready" || brief.status === "writing") return null;
+    const named = book.classes.find((entry) => entry.selected && !entry.archived) ?? book.classes.find((entry) => !entry.archived);
+    const suggestions = firstQuestions({ agenda, recentWork: recent?.[0] ?? null, className: named?.title ?? null, now });
+    return { status: "ready" as const, day: "first", wakeTime: "", recap: "", suggestions };
+  }, [agenda, book.classes, brief.status, now, recent, threads]);
+
   // Moving threads lead, then the most recent.
   const shownThreads = useMemo(
     () => (threads ? [...threads].sort((a, b) => Number(moving.has(b._id)) - Number(moving.has(a._id))).slice(0, 3) : null),
@@ -77,7 +86,7 @@ export function HomeDay({ onAllThreads }: { onAllThreads: () => void }) {
           </section>
         ) : null}
 
-        {needsSchool ? null : <TodayBrief brief={brief} agenda={agenda} />}
+        {needsSchool ? null : <TodayBrief brief={firstBrief ?? brief} agenda={agenda} />}
 
         {needsSchool ? null : now ? <TodayWeek agenda={agenda} failed={agendaFailed} now={now} /> : <div className="h-[260px]" />}
 

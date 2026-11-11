@@ -23,7 +23,7 @@ import { SelectField } from "@/components/ui/select";
 import { useSpectraRun, type SpectraLiveExchange } from "../ai/use-spectra-run";
 import { isSettledAiRunStatus, isWorkingAiRunStatus } from "../core";
 import { operationCounts, useRunLedger } from "../collaboration/run-ledger";
-import { openTraceWhenShown, ProgressTrace, WorkedForReveal } from "./progress-trace";
+import { finishedWithLabel, openTraceWhenShown, ProgressTrace, WorkedForReveal } from "./progress-trace";
 import {
   clearSpectraRunAgent,
   getSpectraOperationConflict,
@@ -763,7 +763,7 @@ function ReplyWork({
   threadId?: string;
   runId?: string;
   touches: readonly HarnessArtifactTouchView[];
-  onOpen?: (artifactId: string) => void;
+  onOpen?: (artifactId: string, regionId?: string) => void;
   currentTitles?: ReadonlyMap<string, string>;
   undone?: boolean;
   /** Offered when the run can still be reversed. */
@@ -1159,6 +1159,7 @@ function ChronologicalReply({
   persistKey,
   startedAt,
   endedAt,
+  workedMs,
   renderText,
 }: {
   content: string;
@@ -1169,6 +1170,7 @@ function ChronologicalReply({
   persistKey: string;
   startedAt?: number;
   endedAt?: number;
+  workedMs?: number;
   renderText: (text: string, last: boolean) => ReactNode;
 }) {
   const blocks = replyBlocks(content, steps);
@@ -1188,6 +1190,8 @@ function ChronologicalReply({
             persistKey={index === 0 ? persistKey : `${persistKey}:${index}`}
             startedAt={index === 0 ? startedAt : undefined}
             endedAt={index === 0 ? endedAt : undefined}
+            workedMs={index === 0 ? workedMs : undefined}
+            finishedWith={index === 0 ? finishedWithLabel(steps) : undefined}
             continuation={index > 0}
             current={index === lastIndex}
           />
@@ -1203,7 +1207,7 @@ function SavedAnswers({ trace }: { trace: SpectraThreadTrace }) {
   return <AnsweredInputs answers={answers.map((answer) => ({ ...answer, key: answer.toolCallId }))} />;
 }
 
-function PersistedProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
+function PersistedProgressTrace({ trace, workedMs }: { trace: SpectraThreadTrace; workedMs?: number }) {
   const harness = harnessTraceFields(trace);
   if (harness)
     return (
@@ -1214,9 +1218,22 @@ function PersistedProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
         hasOutput={Boolean(trace.run.finalSummary) || !["queued", "running"].includes(trace.run.status)}
         persistKey={trace.run._id}
         {...traceTiming(trace)}
+        workedMs={workedMs}
       />
     );
   return <LegacyProgressTrace trace={trace} />;
+}
+
+/** The time a saved reply's run actually worked, when the run recorded it. */
+function messageWorkedMs(metadata: unknown) {
+  const value = metadata && typeof metadata === "object" ? (metadata as { workedMs?: unknown }).workedMs : undefined;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/** "Finished with Claude Code" when the saved reply's run moved off the person's runtime. */
+function messageFinishedWith(metadata: unknown) {
+  const value = metadata && typeof metadata === "object" ? (metadata as { finishedWith?: unknown }).finishedWith : undefined;
+  return typeof value === "string" && value ? `Finished with ${value}` : undefined;
 }
 
 /** When a stored run began and settled: its last event, or its last change. */
@@ -1819,7 +1836,7 @@ export function ConversationSurface({
   onCardAction?: Parameters<typeof ResultCardStack>[0]["onAction"];
   onCardRevise?: Parameters<typeof ResultCardStack>[0]["onRevise"];
   workspaces?: SpectraWorkspace[];
-  onOpenArtifact?: (artifactId: string) => void;
+  onOpenArtifact?: (artifactId: string, regionId?: string) => void;
   onOpenWorkspace?: (workspaceId: string) => void;
   compact?: boolean;
   liveExchange?: SpectraLiveExchange | null;
@@ -2359,7 +2376,7 @@ export function ConversationSurface({
                     <div className="relative pl-9">
                       <ReplyMark />
                       {replyWork ? null : trace ? (
-                        <PersistedProgressTrace trace={trace} />
+                        <PersistedProgressTrace trace={trace} workedMs={messageWorkedMs(message.metadata)} />
                       ) : !activeRun && message.runId ? (
                         (() => {
                           const asked = visibleMessages.find((other) => other.role === "user" && other.runId === message.runId);
@@ -2367,7 +2384,8 @@ export function ConversationSurface({
                           const runId = message.runId;
                           return (
                             <WorkedForReveal
-                              durationMs={message.createdAt - asked.createdAt}
+                              durationMs={messageWorkedMs(message.metadata) ?? message.createdAt - asked.createdAt}
+                              finishedWith={messageFinishedWith(message.metadata)}
                               loading={traceState?.loading === true}
                               error={traceState?.error}
                               onReveal={() => {
@@ -2388,6 +2406,7 @@ export function ConversationSurface({
                           persistKey={message.runId!}
                           startedAt={replyWork.startedAt}
                           endedAt={replyWork.endedAt}
+                          workedMs={messageWorkedMs(message.metadata)}
                           renderText={(text) => (
                             <SpectraRichContent
                               content={text}
@@ -2753,7 +2772,7 @@ export function ThreadConversation({
   threadId: string;
   compact?: boolean;
   liveExchange?: SpectraLiveExchange | null;
-  onOpenArtifact?: (artifactId: string) => void;
+  onOpenArtifact?: (artifactId: string, regionId?: string) => void;
   onOpenWorkspace?: (workspaceId: string) => void;
 }) {
   const [detail, setDetail] = useState<SpectraThreadDetail | null>(null);

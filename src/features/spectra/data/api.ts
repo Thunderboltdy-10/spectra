@@ -362,6 +362,8 @@ export type SpectraArtifact = {
   /** Kept on a computer through Spectra Bridge. */
   storageHome?: "device";
   storageStoreId?: string;
+  /** Counts moves between a computer and the cloud; each starts a fresh live history. */
+  storageEpoch?: number;
   /** Set after a rename until the live document catches up: this title in the document is out of date. */
   renamedFromTitle?: string;
   blueprintKey: SpectraBlueprintKey;
@@ -683,6 +685,10 @@ export type SpectraResultCard = {
   provenance?: {
     artifactIds?: string[];
     artifactTitles?: string[];
+    /** Of `artifactIds`, the ones this run made. */
+    createdIds?: string[];
+    /** Where each edited work changed first, so opening it lands there (LAUNCH-REVIEW F5). */
+    regions?: Array<{ artifactId: string; regionId: string }>;
     threadId?: string;
     workspaceId?: string;
     workspaceTitle?: string;

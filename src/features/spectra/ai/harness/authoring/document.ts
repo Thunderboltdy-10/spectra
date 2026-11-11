@@ -13,6 +13,7 @@ import {
   type PmNode,
 } from "./markdown";
 import { closestText, locateAll, resolveRanges, spliceRanges } from "./locate";
+import { pagesNote } from "./page-estimate";
 import { AuthoringError, type IdFactory, defaultIdFactory, record, truncate } from "./shared";
 
 /*
@@ -402,7 +403,7 @@ export function documentReadback(content: unknown, previous?: unknown) {
   const lines: string[] = [];
   const outline = documentOutline(documentContentToProseMirrorJson(content) as PmNode);
   lines.push(
-    `${chunks.length} blocks, about ${words(markdown)} words${outline.length ? `. Outline: ${outline.map((entry) => `${"#".repeat(entry.level)} ${entry.title}`).join(" / ")}` : ""}.`,
+    `${pagesNote(content)} ${chunks.length} blocks, about ${words(markdown)} words${outline.length ? `. Outline: ${outline.map((entry) => `${"#".repeat(entry.level)} ${entry.title}`).join(" / ")}` : ""}.`,
   );
   const problems: string[] = [];
   chunks.forEach((chunk, index) => {

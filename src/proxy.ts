@@ -26,8 +26,6 @@ const isPublicRoute = createRouteMatcher([
   // The morning brief's scheduled call is HMAC-signed and acts as its owner;
   // Home's own call still needs the student's session in the route.
   "/api/spectra/brief",
-  // Local diagnostic and Claude Code tool routes; each checks its own condition.
-  "/api/spectra/dev-trace",
   "/api/contact(.*)",
   "/api/health(.*)",
   "/api/webhooks(.*)",

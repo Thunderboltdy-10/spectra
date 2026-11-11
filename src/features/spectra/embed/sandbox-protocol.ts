@@ -732,7 +732,11 @@ export function buildSpectraSandboxDocument({
       if (consoleEntries++ < budgets.maxConsoleEntries) post({ type: 'spectra:console', level, values: values.map(serialize) });
     };
   }
-  window.addEventListener('error', (event) => post({ type: 'spectra:error', code: 'runtime_error', message: String(event.message || 'Embedded runtime failed.').slice(0, 1600), line: Number(event.lineno || 0) || undefined }));
+  window.addEventListener('error', (event) => {
+    // The browser's note that a resize was put off to the next frame: the page still works.
+    if (/ResizeObserver loop/.test(String(event.message || ''))) { event.stopImmediatePropagation(); return; }
+    post({ type: 'spectra:error', code: 'runtime_error', message: String(event.message || 'Embedded runtime failed.').slice(0, 1600), line: Number(event.lineno || 0) || undefined });
+  });
   window.addEventListener('unhandledrejection', (event) => post({ type: 'spectra:error', code: 'unhandled_rejection', message: serialize(event.reason) }));
   document.addEventListener('submit', (event) => { event.preventDefault(); post({ type: 'spectra:interaction', name: 'form.submit' }); });
   document.addEventListener('click', (event) => {
@@ -818,4 +822,13 @@ export function buildSpectraSandboxDocument({
     .join(";");
   const srcDoc = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; connect-src ${connectSource}; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; worker-src 'none'"><title>${cleanTitle}</title><style id="spectra-theme-tokens"></style><style>:root{${themeAliasStyles}}*{box-sizing:border-box}html,body{margin:0;background:transparent;color:var(--spectra-ink);font-family:var(--font-sans,system-ui,sans-serif)}body{padding:18px}button,input,select,textarea{font:inherit}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}html[data-spectra-reduced-motion="true"] *,html[data-spectra-reduced-motion="true"] *::before,html[data-spectra-reduced-motion="true"] *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}${styles.join("\n").replace(/<\/style/gi, "<\\/style")}</style><script>${bootstrap.replace(/<\/script/gi, "<\\/script")}</script></head><body>${body}<script>try{${execution}}catch(error){window.dispatchEvent(new ErrorEvent('error',{message:String(error&&error.message||error),error}));}finally{window.__spectraReady();${testExecution}}</script></body></html>`;
   return { srcDoc, diagnostics, sourceBytes };
+}
+
+/**
+ * Browser notices that are not failures. "ResizeObserver loop completed with
+ * undelivered notifications" only says a resize waited a frame; a graph that
+ * resizes itself raises it while working perfectly (F13).
+ */
+export function isBenignRuntimeError(message: string | undefined) {
+  return /ResizeObserver loop/i.test(message ?? "");
 }

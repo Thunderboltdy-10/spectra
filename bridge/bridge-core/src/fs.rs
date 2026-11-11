@@ -1,3 +1,4 @@
+use crate::locks::{Locked, Recover};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
@@ -93,7 +94,7 @@ impl GrantRegistry {
         grant_id: &str,
         targets: &[&Path],
     ) -> Result<RwLockReadGuard<'_, HashMap<String, Grant>>, FsError> {
-        let grants = self.grants.read().unwrap();
+        let grants = self.grants.reading();
         let grant = grants.get(grant_id).ok_or(FsError::GrantNotFound)?;
         if targets.iter().any(|target| !grant.permits_path(target)) {
             return Err(FsError::GrantEscape);
@@ -102,7 +103,7 @@ impl GrantRegistry {
     }
 
     fn write_lock(&self, target: &Path) -> Arc<Mutex<()>> {
-        let mut locks = self.write_locks.lock().unwrap();
+        let mut locks = self.write_locks.locked();
         locks.retain(|_, lock| lock.strong_count() > 0);
         if let Some(lock) = locks.get(target).and_then(Weak::upgrade) {
             return lock;
@@ -125,8 +126,7 @@ impl GrantRegistry {
         // already here. Nothing about choosing it again should fail.
         if let Some(existing) = self
             .grants
-            .read()
-            .unwrap()
+            .reading()
             .values()
             .filter(|grant| grant.selected_file.is_none() && root.starts_with(&grant.root))
             .min_by_key(|grant| grant.root.components().count())
@@ -141,8 +141,7 @@ impl GrantRegistry {
             selected_file: None,
         };
         self.grants
-            .write()
-            .unwrap()
+            .writing()
             .insert(grant.id.clone(), grant.clone());
         Ok(grant)
     }
@@ -154,8 +153,7 @@ impl GrantRegistry {
         }
         if self
             .grants
-            .read()
-            .unwrap()
+            .reading()
             .values()
             .any(|grant| grant.selected_file.is_none() && selected.starts_with(&grant.root))
         {
@@ -181,7 +179,7 @@ impl GrantRegistry {
         if grant.selected_file.is_some() {
             return Vec::new();
         }
-        let mut grants = self.grants.write().unwrap();
+        let mut grants = self.grants.writing();
         let within = grants
             .values()
             .filter(|other| other.id != grant.id && other.selection_path().starts_with(&grant.root))
@@ -229,7 +227,7 @@ impl GrantRegistry {
 
     /// Which grant already carries this file, and where it sits within it.
     fn synced_file(&self, path: &Path) -> Option<SyncedFile> {
-        let grants = self.grants.read().unwrap();
+        let grants = self.grants.reading();
         let grant = grants
             .values()
             .find(|grant| grant.selected_file.is_some() && grant.selection_path() == path)
@@ -265,7 +263,7 @@ impl GrantRegistry {
             return Err(FsError::GrantEscape);
         }
         let root = root.canonicalize().unwrap_or_else(|_| root.to_owned());
-        let mut grants = self.grants.write().unwrap();
+        let mut grants = self.grants.writing();
         if let Some(existing) = grants
             .values()
             .find(|grant| grant.root == root && grant.selected_file.as_deref() == Some(name))
@@ -291,8 +289,7 @@ impl GrantRegistry {
         let normalized_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
         if let Some(existing) = self
             .grants
-            .read()
-            .unwrap()
+            .reading()
             .values()
             .find(|grant| grant.root == normalized_root && grant.selected_file.is_none())
             .cloned()
@@ -309,26 +306,24 @@ impl GrantRegistry {
             selected_file: None,
         };
         self.grants
-            .write()
-            .unwrap()
+            .writing()
             .insert(grant.id.clone(), grant.clone());
         Ok(grant)
     }
 
     pub fn public_grants(&self) -> Vec<(String, String)> {
         self.grants
-            .read()
-            .unwrap()
+            .reading()
             .values()
             .map(|g| (g.id.clone(), g.label.clone()))
             .collect()
     }
 
     pub fn device_grants(&self) -> Vec<Grant> {
-        self.grants.read().unwrap().values().cloned().collect()
+        self.grants.reading().values().cloned().collect()
     }
     pub fn remove(&self, grant_id: &str) -> Option<Grant> {
-        self.grants.write().unwrap().remove(grant_id)
+        self.grants.writing().remove(grant_id)
     }
 
     pub fn resolve(&self, grant_id: &str, relative: &Path) -> Result<PathBuf, FsError> {
@@ -348,7 +343,7 @@ impl GrantRegistry {
         {
             return Err(FsError::GrantEscape);
         }
-        let grants = self.grants.read().unwrap();
+        let grants = self.grants.reading();
         let grant = grants.get(grant_id).ok_or(FsError::GrantNotFound)?;
         if grant
             .selected_file
@@ -474,7 +469,7 @@ impl<P: Platform> SafeWriter<P> {
         // Distinct replica IDs or requests can still name the same local file.
         // Serialize the check/replace/readback sequence across SafeWriter instances.
         let write_lock = self.grants.write_lock(&target);
-        let _write_guard = write_lock.lock().unwrap();
+        let _write_guard = write_lock.locked();
         let pre_hash = target.exists().then(|| sha256_file(&target)).transpose()?;
         let op = self.journal.begin_intent(
             request.idempotency_key,
@@ -640,7 +635,7 @@ impl<P: Platform> SafeWriter<P> {
     ) -> Result<String, FsError> {
         let target = self.grants.resolve(grant_id, relative_path)?;
         let lock = self.grants.write_lock(&target);
-        let _guard = lock.lock().unwrap();
+        let _guard = lock.locked();
         let pre_hash = target.is_file().then(|| sha256_file(&target)).transpose()?;
         let op = self.journal.begin_intent(
             idempotency_key,
@@ -739,8 +734,8 @@ impl<P: Platform> SafeWriter<P> {
         };
         let first_lock = self.grants.write_lock(first);
         let second_lock = self.grants.write_lock(second);
-        let _first_guard = first_lock.lock().unwrap();
-        let _second_guard = second_lock.lock().unwrap();
+        let _first_guard = first_lock.locked();
+        let _second_guard = second_lock.locked();
         if let Some(existing) = self.journal.by_key(idempotency_key)? {
             if existing.kind != "fs.move" || existing.resource_id.as_deref() != Some(resource_id) {
                 return Err(FsError::StaleRevision);

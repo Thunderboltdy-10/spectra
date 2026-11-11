@@ -99,6 +99,18 @@ repeat:
 **Reasoning.** Turns use the reasoning level from the environment. Reasoning text is never shown raw. The user sees
 progress captions instead (see [Progress captions](#progress-captions)).
 
+## Runtimes
+
+- A run uses the person's runtime: their own Codex or Claude Code through Spectra Bridge, or Spectra's model. The
+  tools, prompt and permissions are the same on each.
+- **The order** (`ai.runtimeThen`, Settings → AI, "If it can't answer"; default Spectra) says what follows when the
+  person's runtime can't answer. Each runtime gets one quiet retry: after a second when it couldn't be reached, at once
+  on a fresh session when it went silent. A refusal (usage limit, signed out) is not retried. Then the next in the order;
+  when the order runs out the run stops with one sentence. Spectra's model runs only when it is in the order
+  (`withRuntimeChain`, `subscription-runtime.ts`). A move keeps the transcript, so only the unfinished turn is redone.
+- Work that runs on a schedule always uses Spectra's model.
+- **Thinking** defaults to Medium; side calls (titles, compaction, captions) run at the lowest level.
+
 ## Context
 
 ### System prompt
@@ -190,8 +202,9 @@ waiting or working, attachments included, joins that run instead of starting a n
 
 - The existing memory system (Convex memory with embeddings) stays.
 - The model sees a short index of what it remembers about the user and reads or writes details with tools.
-- `remember` saves or revises a memory. `forget_memory` erases one by id (found with `search` in `memory`); it is
-  `irreversible` and asks under `permanent_delete`. Clearing every memory, disputing one and memory settings stay
+- `read_memory` opens one of the notes files (about, preferences, a topic). `update_memory` adds to, edits or
+  removes a note at the narrowest scope the person meant; it is a `write` and never asks. Run undo does not reach
+  notes, so the step "Updated my notes" stays in the reply's trace. Clearing every memory and memory settings stay
   the user's.
 
 ## Tools
@@ -207,7 +220,7 @@ Tools are grouped by what the model is doing. Names below are indicative, so pic
 | Operate Spectra | `find_commands`, `run_command` | These cover the shared command registry: settings, navigation, panels, calendar, reminders, Bridge, connections, sharing and ManageBac. |
 | Ask | `ask_user` | A question with optional choices. It pauses the run durably and appears in the island. |
 | Show | `show_widget` | An interactive HTML/SVG visual rendered inline in the thread, sandboxed and themed with Spectra tokens. The user can save it as an artifact. |
-| Know | `load_skill`, `remember`, `forget_memory`, `recall` | See Skills and Memory. |
+| Know | `load_skill`, `read_memory`, `update_memory` | See Skills and Memory. |
 | Track | `update_todos` | An optional visible checklist for long tasks. The model decides whether to use it. |
 
 ### Commands only `run_command` reaches

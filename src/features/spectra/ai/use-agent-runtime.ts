@@ -60,6 +60,40 @@ export function useAgentRuntime() {
   return { status: current, recheck: useCallback(() => refresh(true), []) };
 }
 
+/** Re-asks when the last answer is older than a minute: the composer calls this as it takes focus. */
+export function recheckAgentRuntimeIfStale() {
+  return refresh();
+}
+
+let warmedAt = 0;
+
+/**
+ * Start Codex as the composer takes focus, when this computer said it is
+ * ready: the first turn then finds it connected. At most once a minute.
+ */
+export function warmAgentRuntime(runtime: string) {
+  if (runtime !== "codex" || status?.codex.state !== "ready" || Date.now() - warmedAt < STALE_MS) return;
+  warmedAt = Date.now();
+  void fetch("/api/spectra/agent-runtime", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ runtime }),
+  }).catch(() => undefined);
+}
+
+/**
+ * The runtimes this computer last said it can't reach, for a send to start at
+ * the next in the person's order. Only a fresh answer counts; an unknown or
+ * stale one says nothing and the run finds out itself.
+ */
+export function knownUnreachableRuntimes(): Array<{ runtime: "codex" | "claude"; state: Exclude<AgentProviderStatus["state"], "ready"> }> {
+  if (!status || Date.now() - fetchedAt > STALE_MS) return [];
+  return (["codex", "claude"] as const).flatMap((runtime) => {
+    const state = status?.[runtime]?.state;
+    return state && state !== "ready" ? [{ runtime, state }] : [];
+  });
+}
+
 export const PROVIDER_LABEL = { codex: "Codex", claude: "Claude Code" } as const;
 
 /** What to tell someone about a provider that isn't ready, in the words they need. */

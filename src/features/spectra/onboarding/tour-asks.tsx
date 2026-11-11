@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useConvexAuth } from "convex/react";
-import { useQuery } from "@/features/spectra/data/use-kept-query";
-import { api } from "../../../../convex/_generated/api";
+import { useSession } from "@/features/spectra/data/use-session";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useSpectraPreferences } from "../settings/preference-store";
@@ -46,8 +44,7 @@ function ReminderTimes() {
 }
 
 function BridgeChoice() {
-  const { isAuthenticated } = useConvexAuth();
-  const connected = useQuery(api.bridge.hasDevice, isAuthenticated ? {} : "skip");
+  const connected = useSession()?.hasDevice;
   // Read after mount: the server cannot tell which computer this is.
   const [download, setDownload] = useState<string | null>(null);
   useEffect(() => setDownload(bridgeDownloadUrl(bridgePlatform())), []);

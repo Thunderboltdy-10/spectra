@@ -7,7 +7,7 @@ vi.mock("@/lib/convex-server", () => ({ convexQuery: io.query }));
 vi.mock("@/lib/local-bridge-relay", () => ({ localBridgeRelay: io.local }));
 vi.mock("node:fs", async original => ({ ...await original<typeof import("node:fs")>(), mkdirSync: vi.fn(),
   appendFileSync: (path: string, data: string) => io.traces.push({ path, ...JSON.parse(data) }) }));
-import { runtimeStatus, subscriptionOneShot, subscriptionModelCaller } from "../subscription-runtime";
+import { runtimeStatus, subscriptionOneShot, subscriptionModelCaller, warmRuntime } from "../subscription-runtime";
 import { withRunTrace } from "../run-trace";
 import { emptyLoopState, runHarnessLoop } from "../loop";
 
@@ -151,4 +151,21 @@ it("does not open a CLI socket after status disposal during async preflight", as
   resolve({ token: "dummy", accountId: "owner", query: "deviceId=owner&generation=1" });
   await vi.runAllTimersAsync();
   expect(io.urls).toEqual([]);
+});
+
+it("warms a Codex connection on composer focus so the first turn reuses it", async () => {
+  io.inference = true;
+  await warmRuntime("codex", "warm-owner");
+  expect(io.urls).toHaveLength(1);
+  const caller = subscriptionModelCaller("codex", { accountId: "warm-owner" });
+  await caller({ messages: [{ role: "user", content: "Hi" }], tools: [], toolChoice: "auto", signal: new AbortController().signal, onText: () => undefined, onRetry: () => undefined }).catch(() => undefined);
+  caller.dispose?.();
+  expect(io.urls).toHaveLength(1);
+});
+
+it("does not warm Claude Code or a runtime this computer cannot reach", async () => {
+  await warmRuntime("claude", "warm-owner");
+  expect(io.urls).toHaveLength(0);
+  io.local.mockRejectedValueOnce(new Error("no bridge"));
+  await expect(warmRuntime("codex", "warm-away")).resolves.toBeUndefined();
 });

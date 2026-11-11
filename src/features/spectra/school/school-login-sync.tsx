@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useConvexAuth } from "convex/react";
 import { useQuery } from "@/features/spectra/data/use-kept-query";
+import { useSession } from "@/features/spectra/data/use-session";
 import { usePathname } from "next/navigation";
 import { api } from "../../../../convex/_generated/api";
 import { syncSpectraManageBacOnLogin } from "../data/api";
@@ -10,7 +11,7 @@ import { syncSpectraManageBacOnLogin } from "../data/api";
 /** Membership becomes available after accepting an invite, even without a reload. */
 export function SchoolLoginSync() {
   const { isAuthenticated } = useConvexAuth();
-  const membership = useQuery(api.catalogGraph.identity, isAuthenticated ? {} : "skip");
+  const membership = useSession()?.catalog;
   const setup = useQuery(api.managebac.onboardingStatus, isAuthenticated ? {} : "skip");
   const status = useQuery(api.school.syncStatus, isAuthenticated && membership ? {} : "skip");
   const pathname = usePathname();

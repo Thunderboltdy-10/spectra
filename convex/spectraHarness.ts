@@ -6,7 +6,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { getAuthenticatedActor } from "./identityShared";
 import { applicationApprovalScope } from "./spectraApplicationWriteScope";
-import { currentArtifactApprovalScope, preparedArtifactScope } from "./spectraArtifactWriteScope";
+import { currentArtifactApprovalScope, preparedArtifactScope, type AllowedArtifactIntent } from "./spectraArtifactWriteScope";
 import { requireCurrentExecution } from "./spectraRunLifecycle";
 import { mergeUiObserverInterest } from "./spectraUiObservation";
 import { vUiObserverInterest } from "./spectraUiObservationSchema";
@@ -453,9 +453,19 @@ export const answer = projectedMutation({
           throw new Error("AI_APPLICATION_APPROVAL_SCOPE_CHANGED: The proposed targets changed. Ask Spectra to prepare a new approval.");
         await ctx.db.patch(operation._id, { output: { ...output, approvedApplicationScope: scope } });
       } else if (operation.type === "artifact.update" || operation.type === "artifact.create" || operation.type === "artifact.archive") {
-        const { digest } = await currentArtifactApprovalScope(ctx, operation, run);
+        const { digest, scope, sourceDrift } = await currentArtifactApprovalScope(ctx, operation, run, "presentation", { tolerateSourceDrift: true });
         if (output.pendingArtifactScope !== digest)
           throw new Error("AI_ARTIFACT_APPROVAL_SCOPE_CHANGED: The proposed edit changed. Ask Spectra to prepare a new approval.");
+        if (sourceDrift) {
+          // F08: the work was re-saved under the approval (a Bridge sync, a
+          // version snapshot). Keep what the person allowed; the run prepares
+          // the edit again and applies it only if it still means the same.
+          if (!scope.semanticBaseDigest || !scope.semanticResultDigest)
+            throw new Error("AI_ARTIFACT_APPROVAL_SCOPE_CHANGED: The proposed edit changed. Ask Spectra to prepare a new approval.");
+          const intent: AllowedArtifactIntent = { scope: digest, base: scope.semanticBaseDigest, result: scope.semanticResultDigest };
+          await ctx.db.patch(operation._id, { output: { ...output, allowedArtifactIntent: intent } });
+          continue;
+        }
         await ctx.db.patch(operation._id, { output: { ...output, approvedArtifactScope: digest } });
       }
     }
@@ -516,14 +526,18 @@ export const ensureApproved = mutation({
       // Ordinary writes need no approval; only asking effects are checked.
       if (!operation.requiresConfirmation) continue;
       const output = record(operation.output);
-      const scope =
-        operation.type === "app.command"
-          ? await applicationApprovalScope(ctx, operation, run)
-          : (await currentArtifactApprovalScope(ctx, operation, run)).digest;
-      const approvedByUser =
-        run.approval?.status === "accepted" &&
-        run.approval.executionId === args.executionId &&
-        (output.approvedApplicationScope ?? output.approvedArtifactScope) === scope;
+      const artifactScope = operation.type === "app.command" ? null : await currentArtifactApprovalScope(ctx, operation, run);
+      const scope = artifactScope ? artifactScope.digest : await applicationApprovalScope(ctx, operation, run);
+      const accepted = run.approval?.status === "accepted" && run.approval.executionId === args.executionId;
+      let approvedByUser = accepted && (output.approvedApplicationScope ?? output.approvedArtifactScope) === scope;
+      const intent = record(output.allowedArtifactIntent);
+      if (!approvedByUser && accepted && artifactScope && typeof intent.base === "string") {
+        // Prepared again on the re-saved work: the Allow carries over only to the same edit.
+        if (intent.base !== artifactScope.scope.semanticBaseDigest || intent.result !== artifactScope.scope.semanticResultDigest)
+          throw new Error("AI_APPROVAL_WORK_CHANGED: The work changed while the person was deciding, so this edit was not made.");
+        await ctx.db.patch(operation._id, { output: { ...output, allowedArtifactIntent: undefined, pendingArtifactScope: scope, approvedArtifactScope: scope } });
+        approvedByUser = true;
+      }
       const categories = operationCategories(operation);
       if (!categories.length && !approvedByUser) throw new Error("AI_PERMISSION_REQUIRED: Ask the user first.");
       for (const category of categories) {

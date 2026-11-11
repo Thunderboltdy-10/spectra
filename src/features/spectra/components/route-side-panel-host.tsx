@@ -29,7 +29,7 @@ import {
 import { launchFrom, useLifeLanding } from "../life/use-life";
 import { threadName } from "../threads/threads-model";
 import { LiveThreadPanel } from "./live-thread-panel";
-import { rememberFullViewOrigin } from "./full-view-origin";
+import { rememberFullViewOrigin, requestFullView } from "./full-view-origin";
 import { createLatestStudioLoad } from "./latest-studio-load";
 import { expectLanding } from "../anchors/open-anchor";
 import {
@@ -196,6 +196,7 @@ export function RouteSidePanelHost() {
         transferSideSessionToLibrary(shared, { ...sideSession, workId }),
       );
       rememberFullViewOrigin(workId, `${window.location.pathname}${window.location.search}`);
+      requestFullView(workId);
       router.push(`/library/${encodeURIComponent(workId)}`);
     },
     [router, sideSession, workLoad],

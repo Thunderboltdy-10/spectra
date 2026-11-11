@@ -3599,3 +3599,20 @@ describe("replica truth machine", () => {
     expect(completed).toMatchObject({ state: "verified", claimGeneration: secondClaim.request.claimGeneration });
   });
 });
+
+describe("an open work in another tab (F17)", () => {
+  it("tells the editor when the work went to Trash, and stops once it is back", async () => {
+    const t = setupTest();
+    const fixture = await seedWork(t);
+    const user = t.withIdentity(identity);
+    const nodeId = await t.run((ctx) => ctx.db.insert("orgNodes", {
+      accountId: fixture.accountId, parentId: null, kind: "work", sourceId: fixture.workId,
+      name: "Truth fixture", orderKey: "a", createdAt: Date.now(), updatedAt: Date.now(),
+    }));
+    expect((await user.query(api.replicas.forWork, { workId: fixture.workId }))?.trashedNodeId).toBeUndefined();
+    await t.run((ctx) => ctx.db.patch(nodeId, { deletedAt: Date.now(), trashedRootId: nodeId, isTrashRoot: true }));
+    expect((await user.query(api.replicas.forWork, { workId: fixture.workId }))?.trashedNodeId).toBe(nodeId);
+    await t.run((ctx) => ctx.db.patch(nodeId, { deletedAt: undefined, trashedRootId: undefined, isTrashRoot: undefined }));
+    expect((await user.query(api.replicas.forWork, { workId: fixture.workId }))?.trashedNodeId).toBeUndefined();
+  });
+});

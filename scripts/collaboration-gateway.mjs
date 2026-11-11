@@ -106,8 +106,10 @@ const GATEWAY_PROTOCOL_VERSION = 1;
 const PERSISTENCE_RETRY_MAX_MS = 5_000;
 const PERSISTENCE_REBASE_MAX_ATTEMPTS = 8;
 const GATEWAY_STARTED_AT = Date.now();
-// Deployed, Convex tells the gateway about each permission change, so the sweep is only a backstop.
-const POLICY_SWEEP_MS = process.env.NODE_ENV === "production" ? 60_000 : 30_000;
+// Deployed, Convex tells the gateway about each permission change and each
+// connection's lease expires on its own, so the sweep is only a backstop. Each
+// sweep costs a policy and an authorize action per open artifact (E2).
+const POLICY_SWEEP_MS = process.env.NODE_ENV === "production" ? 5 * 60_000 : 30_000;
 const POLICY_PUSH_MAX_AGE_MS = 60_000;
 const POLICY_PUSH_MAX_BYTES = 64 * 1024;
 const roomLoads = createRoomLoadCache();

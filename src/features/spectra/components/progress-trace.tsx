@@ -22,6 +22,12 @@ export function openTraceWhenShown(persistKey: string) {
 }
 
 /** "8s", "1m 20s", "1h 4m": how long Spectra has been at it. */
+/** "Finished with Claude Code" when the run moved off the person's runtime; the last one is named. */
+export function finishedWithLabel(steps: ReadonlyArray<{ id: string; title: string }>) {
+  const moved = [...steps].reverse().find((step) => step.id.startsWith("runtime-move:"));
+  return moved ? moved.title.replace(/^Continued with /, "Finished with ") : undefined;
+}
+
 export function workedDuration(milliseconds: number) {
   const seconds = Math.max(1, Math.round(milliseconds / 1000));
   if (seconds < 60) return `${seconds}s`;
@@ -133,6 +139,8 @@ export function ProgressTrace({
   answers,
   startedAt,
   endedAt,
+  workedMs,
+  finishedWith = finishedWithLabel(steps),
   continuation = false,
   current = true,
 }: {
@@ -151,6 +159,10 @@ export function ProgressTrace({
   startedAt?: number;
   /** When the run settled, if known; otherwise the moment this trace saw it finish. */
   endedAt?: number;
+  /** The time it actually worked, waits for the person left out, once the run has saved it. */
+  workedMs?: number;
+  /** "Finished with Claude Code" when the run moved to another runtime. */
+  finishedWith?: string;
   /** Work done after the reply began: sits among the words and carries no clock. */
   continuation?: boolean;
   /** False once the reply has moved on past this work, so it folds where it is. */
@@ -225,7 +237,9 @@ export function ProgressTrace({
     : finished
       ? steps.length ? pastTenseProgressTitle(steps.at(-1)!.title, true) : "Done"
       : runningStep?.title || steps.at(-1)?.title || "Thinking";
-  const elapsed = timed ? workedDuration((active ? Math.max(now, startedAt!) : settledAt!) - startedAt!) : null;
+  const elapsed = timed
+    ? workedDuration(!active && workedMs !== undefined ? workedMs : (active ? Math.max(now, startedAt!) : settledAt!) - startedAt!)
+    : null;
 
   return (
     <div
@@ -254,6 +268,7 @@ export function ProgressTrace({
             {/* Present tense becomes past tense with a quick cross-fade. */}
             <CrossfadeText value={headline} primitive="completion" />
             {elapsed ? <span className="tabular-nums"> {elapsed}</span> : null}
+            {finished && timed && finishedWith ? <span> · {finishedWith}</span> : null}
           </span>
           {expandable ? (
             <ChevronDown
@@ -301,6 +316,7 @@ export function ProgressTrace({
                     <div className="spectra-trace-line">
                       {active && step.status === "running" ? <WorkingMark /> : <span aria-hidden className="spectra-thinking-mark" />}
                       <span
+                        title={step.summary}
                         className={cn(
                           "min-w-0 flex-1 truncate text-caption font-medium text-[var(--text-secondary)]",
                           active && step.status === "running" && "thinking-wave",
@@ -354,11 +370,13 @@ export function ProgressTrace({
  */
 export function WorkedForReveal({
   durationMs,
+  finishedWith,
   loading,
   error,
   onReveal,
 }: {
   durationMs: number;
+  finishedWith?: string;
   loading: boolean;
   error?: string;
   onReveal: () => void;
@@ -375,7 +393,7 @@ export function WorkedForReveal({
         className="mb-1.5 flex min-w-0 cursor-pointer items-center gap-1.5 py-0.5 text-left"
       >
         <span className={cn("min-w-0 truncate text-caption font-medium tracking-[-0.01em] text-[var(--text-secondary)] opacity-70", loading && "thinking-wave")}>
-          {error ? "The steps did not load. Try again" : <>Worked for <span className="tabular-nums">{workedDuration(durationMs)}</span></>}
+          {error ? "The steps did not load. Try again" : <>Worked for <span className="tabular-nums">{workedDuration(durationMs)}</span>{finishedWith ? ` · ${finishedWith}` : null}</>}
         </span>
         <ChevronDown className="h-3.5 w-3.5 text-[var(--text-tertiary)] opacity-70" />
       </button>

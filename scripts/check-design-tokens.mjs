@@ -14,7 +14,7 @@
  * Warns (non-failing) on hardcoded hex colors inside className strings and on
  * arbitrary text sizes above the floor, which are migration leftovers.
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const ROOT = process.cwd();
@@ -171,6 +171,71 @@ for (const file of files) {
   const classHex = text.match(/className="[^"]*#[0-9a-fA-F]{6}[^"]*"/);
   if (classHex) {
     warnings.push(`${rel}: hardcoded hex color inside className`);
+  }
+}
+
+/* 9. Every custom property a stylesheet reads is defined somewhere: in a
+      stylesheet, or set from a component's style. An undefined one silently
+      drops the declaration (or falls back to an off-contract value). Library
+      properties (React Flow's --xy-*, Radix's --radix-*) are theirs. */
+const definedProperties = new Set();
+for (const file of files) {
+  const text = readFileSync(file, "utf8");
+  for (const match of text.matchAll(/(--[\w-]+)\s*:/g))
+    definedProperties.add(match[1]);
+  if (!file.endsWith(".css"))
+    for (const match of text.matchAll(/["'`](--[\w-]+)["'`]/g))
+      definedProperties.add(match[1]);
+}
+const LIBRARY_PROPERTY = /^--(xy|radix)-/;
+for (const file of files) {
+  if (!file.endsWith(".css")) continue;
+  const rel = relative(ROOT, file).replaceAll("\\", "/");
+  const text = readFileSync(file, "utf8");
+  for (const match of text.matchAll(/var\(\s*(--[\w-]+)/g)) {
+    const name = match[1];
+    if (definedProperties.has(name) || LIBRARY_PROPERTY.test(name)) continue;
+    const line = text.slice(0, match.index).split("\n").length;
+    failures.push(`${rel}:${line} reads ${name}, which nothing defines`);
+  }
+}
+
+/* 10. Font sizes stay on the scale (spectra-app.css type tokens and
+       LANGUAGE.md): 12 13 14 15 16 17 20 24 30 32 44, plus the 11 px floor.
+       Older stylesheets hold some sizes off it; the baseline records how many
+       per file, and a file may only lose them (`--update-baseline` after a
+       cleanup). Miniatures marked `spectra-token-allow` are exempt. */
+const SCALE = new Set([11, 12, 13, 14, 15, 16, 17, 20, 24, 30, 32, 44]);
+const baselinePath = join(ROOT, "scripts/design-token-baseline.json");
+const baseline = JSON.parse(readFileSync(baselinePath, "utf8"));
+const offScale = {};
+for (const file of files) {
+  if (!file.endsWith(".css")) continue;
+  const rel = relative(ROOT, file).replaceAll("\\", "/");
+  const text = readFileSync(file, "utf8");
+  for (const match of text.matchAll(cssFontSize)) {
+    const size = Number.parseFloat(match[1]);
+    if (SCALE.has(size) || size < 11) continue;
+    if (
+      text
+        .slice(match.index, text.indexOf("\n", match.index))
+        .includes("spectra-token-allow")
+    )
+      continue;
+    offScale[rel] = (offScale[rel] ?? 0) + 1;
+  }
+}
+if (process.argv.includes("--update-baseline")) {
+  const sorted = Object.fromEntries(Object.entries(offScale).sort());
+  writeFileSync(baselinePath, `${JSON.stringify({ offScaleFontSizes: sorted }, null, 2)}\n`);
+  console.log(`design-token baseline written (${Object.keys(sorted).length} files)`);
+} else {
+  for (const [rel, count] of Object.entries(offScale)) {
+    const allowed = baseline.offScaleFontSizes[rel] ?? 0;
+    if (count > allowed)
+      failures.push(
+        `${rel} has ${count} font sizes off the type scale (baseline ${allowed}); use a step of the scale`,
+      );
   }
 }
 

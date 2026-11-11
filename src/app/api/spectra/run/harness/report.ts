@@ -158,11 +158,15 @@ export async function saveAssistantMessage(params: {
   usage?: OpenRouterUsage;
   choices?: SpectraPlan["choices"];
   /** The work this run created, edited or referenced: one card each. */
-  artifacts?: Array<{ id: string; type: string; title: string; action: string; change?: string }>;
+  artifacts?: Array<{ id: string; type: string; title: string; action: string; change?: string; region?: string }>;
   /** Widgets the run showed, so the saved reply shows them again. */
   widgets?: Array<{ id: string; title: string; html: string }>;
   /** The sources the reply cites, so its citations open them. */
   sources?: RunSource[];
+  /** Active time: the working stretches, without waits for the person. */
+  workedMs?: number;
+  /** The runtime the run moved to and finished with, when it moved. */
+  finishedWith?: string;
 }) {
   if (!params.threadId || !params.content.trim()) return;
   await mutate("spectraThreads:appendMessage", {
@@ -184,6 +188,8 @@ export async function saveAssistantMessage(params: {
       ...(params.artifacts?.length ? { artifacts: params.artifacts } : {}),
       ...(params.widgets?.length ? { widgets: params.widgets } : {}),
       ...(params.sources?.length ? { sources: params.sources } : {}),
+      ...(params.workedMs !== undefined ? { workedMs: Math.round(params.workedMs) } : {}),
+      ...(params.finishedWith ? { finishedWith: params.finishedWith } : {}),
     },
   });
 }

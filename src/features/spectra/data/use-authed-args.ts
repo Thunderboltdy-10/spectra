@@ -1,8 +1,7 @@
 "use client";
 
 import { useConvexAuth } from "convex/react";
-import { useQuery } from "@/features/spectra/data/use-kept-query";
-import { api } from "../../../../convex/_generated/api";
+import { useSession } from "@/features/spectra/data/use-session";
 
 /** School reads wait for membership; account reads can bootstrap that identity. */
 export function useAuthedArgs<T>(
@@ -10,12 +9,7 @@ export function useAuthedArgs<T>(
   scope: "school" | "account" = "school",
 ): T | "skip" {
   const { isAuthenticated } = useConvexAuth();
-  const identity = useQuery(
-    api.catalogGraph.identity,
-    isAuthenticated === true && scope === "school" && args !== "skip"
-      ? {}
-      : "skip",
-  );
+  const identity = useSession(scope === "school" && args !== "skip")?.catalog;
   if (scope === "account") return isAuthenticated === true ? args : "skip";
   return isAuthenticated === true && identity ? args : "skip";
 }

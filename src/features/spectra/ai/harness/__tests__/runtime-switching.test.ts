@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mergeReasoningDetail } from "../../openrouter-stream";
 import { createOpenRouterCaller } from "../model";
-import { runtimeFallbackLabel, withRuntimeFallback, type DisposableModelCaller } from "../subscription-runtime";
-import { ProviderUnavailableError, type HarnessMessage, type ModelTurn } from "../types";
+import type { HarnessMessage } from "../types";
 import type { ModelCaller } from "../loop";
 
-const finished = (text: string): ModelTurn => ({ text, toolCalls: [] });
 const request = (onText = vi.fn(), onRetry = vi.fn()) =>
   ({
     messages: [{ role: "user", content: "hi" }] as HarnessMessage[],
@@ -15,63 +13,6 @@ const request = (onText = vi.fn(), onRetry = vi.fn()) =>
     onText,
     onRetry,
   }) as Parameters<ModelCaller>[0];
-
-describe("leaving the user's own runtime", () => {
-  it("never invokes the paid fallback when the runtime is explicitly forced", async () => {
-    vi.stubEnv("SPECTRA_AI_RUNTIME", "codex");
-    const fallback = vi.fn<ModelCaller>();
-    const primary: DisposableModelCaller = async () => { throw new ProviderUnavailableError("Codex is unavailable."); };
-    try {
-      await expect(withRuntimeFallback(primary, fallback, vi.fn())(request())).rejects.toThrow("Codex is unavailable.");
-      expect(fallback).not.toHaveBeenCalled();
-    } finally { vi.unstubAllEnvs(); }
-  });
-
-  it("hands the same transcript to OpenRouter, takes back partial text, and says why once", async () => {
-    const dispose = vi.fn();
-    const primary: DisposableModelCaller = Object.assign(
-      async (input: Parameters<ModelCaller>[0]) => {
-        input.onText("half a sente");
-        throw new ProviderUnavailableError("You've hit your usage limit.");
-      },
-      { dispose },
-    );
-    const seen: HarnessMessage[][] = [];
-    const fallback: ModelCaller = async (input) => {
-      seen.push(input.messages);
-      return finished("whole answer");
-    };
-    const notes: string[] = [];
-    const caller = withRuntimeFallback(primary, fallback, (reason) => notes.push(reason));
-    const input = request();
-    await expect(caller(input)).resolves.toMatchObject({ text: "whole answer" });
-    expect(input.onRetry).toHaveBeenCalledTimes(1);
-    expect(dispose).toHaveBeenCalledTimes(1);
-    expect(seen[0]).toBe(input.messages);
-    expect(runtimeFallbackLabel(notes[0]!)).toMatch(/limit/);
-    // Later calls in the run go straight to OpenRouter.
-    await caller(request());
-    expect(notes).toHaveLength(1);
-    expect(seen).toHaveLength(2);
-  });
-
-  it("does not switch when the user stopped the run", async () => {
-    const controller = new AbortController();
-    const fallback = vi.fn<ModelCaller>();
-    const primary: DisposableModelCaller = async () => {
-      controller.abort();
-      throw new Error("aborted");
-    };
-    const caller = withRuntimeFallback(primary, fallback, () => undefined);
-    await expect(caller({ ...request(), signal: controller.signal })).rejects.toThrow("aborted");
-    expect(fallback).not.toHaveBeenCalled();
-  });
-
-  it("names the login problem so the user knows what to do", () => {
-    expect(runtimeFallbackLabel("Log in to Codex on this computer to use it in Spectra.")).toMatch(/logged in/i);
-    expect(runtimeFallbackLabel("Could not reach the Bridge relay for codex.")).toMatch(/Bridge/);
-  });
-});
 
 describe("the provider's reasoning during a tool loop", () => {
   it("puts streamed pieces back together and keeps encrypted blocks apart", () => {

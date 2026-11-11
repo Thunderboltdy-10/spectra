@@ -26,7 +26,8 @@ function toolResults(messages: HarnessMessage[]) {
 
 function setup(ai: unknown = {}) {
   const backend = new MemoryBackend();
-  const session = createSession({ backend, prompt: "test" });
+  // The commands below name October 2026 dates; the clock stands before them.
+  const session = createSession({ backend, prompt: "test", now: () => Date.UTC(2026, 9, 5, 7, 0) });
   const tools = buildHarnessTools(session);
   const prefs = readPermissionPrefs(ai);
   const run = (turns: ModelTurn[]) =>

@@ -59,6 +59,8 @@ export type MemoryBackendOptions = {
   searchDegraded?: SearchResponse["degraded"];
   /** The id of the conversation in `thread`. */
   threadId?: string;
+  /** Offer undo_previous_run: it restores what the previous pass changed. */
+  undo?: boolean;
 };
 
 export class MemoryBackend implements HarnessBackend {
@@ -70,6 +72,10 @@ export class MemoryBackend implements HarnessBackend {
   readonly settings: Record<string, Record<string, unknown>> = {};
   readonly memories: string[] = [];
   private sequence = 0;
+  /** What each pass changed: every artifact's state before its first change, null when the pass made it. */
+  private readonly passes: Array<Map<string, MemoryArtifact | null>> = [];
+  readonly undone: number[] = [];
+  undoPreviousRun?: HarnessBackend["undoPreviousRun"];
   private readonly prompt: string;
   private readonly threadId: string;
 
@@ -77,6 +83,18 @@ export class MemoryBackend implements HarnessBackend {
     this.timeZone = options.timeZone ?? "Europe/Madrid";
     this.prompt = options.prompt ?? "";
     this.threadId = options.threadId ?? "thread-1";
+    if (options.undo)
+      this.undoPreviousRun = async () => {
+        const previous = this.passes.at(-2);
+        if (!previous?.size) return { ok: false, content: "The previous run changed nothing that can be undone." };
+        for (const [id, before] of previous) {
+          if (before) this.artifacts.set(id, structuredClone(before));
+          else this.artifacts.delete(id);
+        }
+        this.undone.push(previous.size);
+        this.passes.at(-1)?.clear();
+        return { ok: true, content: `Undid the previous run: ${previous.size} work${previous.size === 1 ? "" : "s"} restored. Nothing was left changed.` };
+      };
     for (const seed of options.artifacts ?? []) {
       const id = seed.id ?? this.nextId();
       this.artifacts.set(id, {
@@ -93,6 +111,16 @@ export class MemoryBackend implements HarnessBackend {
     }
   }
 
+  /** A new run begins: what it changes can be undone by the next one. */
+  startPass() {
+    this.passes.push(new Map());
+  }
+
+  private remember(id: string, before: MemoryArtifact | null) {
+    const pass = this.passes.at(-1);
+    if (pass && !pass.has(id)) pass.set(id, before ? structuredClone(before) : null);
+  }
+
   private nextId() {
     this.sequence += 1;
     return `wx${String(this.sequence).padStart(24, "0")}`;
@@ -105,6 +133,7 @@ export class MemoryBackend implements HarnessBackend {
 
   async createArtifact(input: Parameters<HarnessBackend["createArtifact"]>[0]) {
     const id = this.nextId();
+    this.remember(id, null);
     this.artifacts.set(id, {
       id,
       type: input.type,
@@ -119,9 +148,10 @@ export class MemoryBackend implements HarnessBackend {
     return { id, title: input.title };
   }
 
-  async updateArtifact(input: Parameters<HarnessBackend["updateArtifact"]>[0]) {
+  async updateArtifact(input: Parameters<HarnessBackend["updateArtifact"]>[0]): ReturnType<HarnessBackend["updateArtifact"]> {
     const current = this.artifacts.get(input.id);
     if (!current) throw new Error("The artifact no longer exists.");
+    this.remember(input.id, current);
     current.content = resolveArtifactWriteInput(input.type, current.content, { content: input.content }, this.prompt).content;
     if (input.title) current.title = input.title;
     current.revisions += 1;

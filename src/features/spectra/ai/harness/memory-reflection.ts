@@ -88,7 +88,7 @@ export const modelMemoryReflector: MemoryReflector = async (request, signal) => 
       { role: "system", content: SYSTEM },
       { role: "user", content: describe(request) },
     ],
-    reasoning: "low",
+    reasoning: "none",
     maxTokens: 500,
     signal,
     title: "Spectra memory",

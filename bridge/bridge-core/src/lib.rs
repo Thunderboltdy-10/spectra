@@ -3,6 +3,7 @@ pub mod computer_names;
 pub mod fs;
 pub mod identity;
 pub mod journal;
+mod locks;
 pub mod platform;
 pub mod protocol;
 pub mod retry;

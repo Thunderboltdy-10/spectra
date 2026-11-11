@@ -26,7 +26,23 @@ export type ArtifactWriteScope = {
   baseProducerOperationId?: string;
   creationSourceIdentity?: string;
   approvalCategories?: PermissionCategory[];
+  /** What the edit means, without how the work happens to be stored: an
+   * approval survives a re-save that changed nothing a person could see. */
+  semanticBaseDigest?: string;
+  semanticResultDigest?: string;
 };
+
+/** The person's Allow, kept when only the work's stored form moved under it. */
+export type AllowedArtifactIntent = { scope: string; base: string; result: string };
+
+/** Content as a person sees it: no file-derived digests, no binding to the file. */
+export async function approvalSemanticDigest(content: unknown): Promise<string> {
+  const comparable = withoutFileOwnedFields(withoutDerivedNativeBinding(content));
+  const plain = comparable && typeof comparable === "object" && !Array.isArray(comparable)
+    ? Object.fromEntries(Object.entries(comparable as Record<string, unknown>).filter(([key]) => key !== "nativeBinding"))
+    : comparable;
+  return artifactScopeDigest(plain);
+}
 
 export function artifactOutput(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -116,19 +132,25 @@ export async function currentArtifactApprovalScope(
   operation: Doc<"spectraOperations">,
   run: Doc<"spectraAiRuns">,
   phase: "presentation" | "effect" = "presentation",
+  options: { tolerateSourceDrift?: boolean } = {},
 ) {
+  const changed = () => new Error("AI_ARTIFACT_APPROVAL_SCOPE_CHANGED: The artifact or proposed edit changed. Prepare a new approval.");
   const scope = preparedArtifactScope(operation);
   const artifactId = scope ? ctx.db.normalizeId("spectraArtifacts", scope.artifactId) : null;
   const artifact = artifactId ? await ctx.db.get(artifactId) : null;
   if (!scope || !artifact || scope.runId !== run._id || scope.operationId !== operation._id ||
       scope.executionId !== run.executionId || operation.executionId !== run.executionId ||
       artifactId !== await artifactOperationTarget(ctx, operation, phase === "effect" ? "effect" : "preparation") ||
-      scope.operationDigest !== await artifactOperationDigest(operation) ||
-      !(phase === "effect"
-        ? await artifactEffectSourceMatches(ctx, scope, run, await artifactSourceIdentity(artifact))
-        : scope.sourceContentIdentity === await artifactSourceIdentity(artifact)))
-    throw new Error("AI_ARTIFACT_APPROVAL_SCOPE_CHANGED: The artifact or proposed edit changed. Prepare a new approval.");
-  return { scope, digest: await artifactScopeDigest(scope), artifact };
+      scope.operationDigest !== await artifactOperationDigest(operation))
+    throw changed();
+  const sourceMatches = phase === "effect"
+    ? await artifactEffectSourceMatches(ctx, scope, run, await artifactSourceIdentity(artifact))
+    : scope.sourceContentIdentity === await artifactSourceIdentity(artifact);
+  // The work's stored form moved (a Bridge re-save, a version snapshot). The
+  // caller may keep the person's intent; the effect is still bound exactly.
+  const sourceDrift = !sourceMatches;
+  if (sourceDrift && !(options.tolerateSourceDrift && phase === "presentation")) throw changed();
+  return { scope, digest: await artifactScopeDigest(scope), artifact, sourceDrift };
 }
 
 export function artifactWriteReceipt(output: unknown): { scope: string; result: unknown; sourceContentIdentity?: string; resultContentDigest?: string } | undefined {

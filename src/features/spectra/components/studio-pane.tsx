@@ -25,7 +25,8 @@ import { useSpectraMotion } from "../motion/motion-level";
 /*
  * Everything about a piece of work that is not the work itself opens in one
  * pane, the same way for every type of work. A full work gives it room beside
- * the page; work held in a side panel takes it on top, so nothing moves.
+ * the page; work held in a side panel asks its host for the same room and
+ * goes beside the page once it has it, or lies on top while it has not.
  * Pressing another button changes what the pane shows and leaves the pane
  * where it is. A studio's own tools (a sheet's Format, a board's Layers) use
  * the same pane through `StudioToolPane`.
@@ -78,12 +79,44 @@ export const StudioPaneToolProvider = ToolHostContext.Provider;
 
 export type StudioPaneState = ReturnType<typeof useStudioPane>;
 
+/** The widest a pane asks its host for when it needs room beside the page. */
+const REQUEST_MAX = 440;
+
+/**
+ * Where the pane sits and how wide it is. A pane goes beside the page only
+ * while the page keeps its own floor; otherwise it lies on top. A work held in
+ * a side panel asks its host for `requested` more room, so the page beside the
+ * pane stays readable instead of shrinking to a strip.
+ */
+export function studioPaneLayout({
+  surface,
+  surfaceWidth,
+  stored,
+  narrow = false,
+  stageMin,
+}: {
+  surface: "full" | "panel";
+  surfaceWidth: number;
+  stored: number;
+  narrow?: boolean;
+  /** What the page keeps beside the pane: a full work 560, a panel its own floor. */
+  stageMin?: number;
+}) {
+  const limit = surfaceWidth ? Math.max(MIN_WIDTH, surfaceWidth * (narrow ? 0.42 : 0.6)) : 720;
+  const width = Math.round(Math.min(Math.max(stored, narrow ? Math.min(MIN_WIDTH, limit) : MIN_WIDTH), limit));
+  const keep = surface === "full" ? STAGE_MIN : (stageMin ?? STAGE_MIN);
+  const docked = surfaceWidth ? surfaceWidth - width >= keep : surface === "full";
+  const requested = Math.round(Math.min(Math.max(stored, MIN_WIDTH), REQUEST_MAX));
+  return { limit, width, docked, requested };
+}
+
 export function useStudioPane({
   surfaceRef,
   surface,
   kind,
   onKind,
   narrow = false,
+  stageMin,
 }: {
   surfaceRef: RefObject<HTMLElement | null>;
   /** "full" gives the pane room beside the page; "panel" lays it on top. */
@@ -92,6 +125,8 @@ export function useStudioPane({
   onKind: (kind: StudioPaneKind | null) => void;
   /** Keep to a smaller share of the surface, for a pane that has something open beside it. */
   narrow?: boolean;
+  /** In a side panel, the page's own floor: the pane goes beside it once the panel keeps that much. */
+  stageMin?: number;
 }) {
   const [tool, setTool] = useState<Tool | null>(null);
   const toolRef = useRef<Tool | null>(null);
@@ -140,18 +175,17 @@ export function useStudioPane({
   }, [kind]);
 
   const open = Boolean(kind || tool);
-  const limit = surfaceWidth ? Math.max(MIN_WIDTH, surfaceWidth * (narrow ? 0.42 : 0.6)) : 720;
-  const width = Math.round(Math.min(Math.max(stored, narrow ? Math.min(MIN_WIDTH, limit) : MIN_WIDTH), limit));
-  const docked = surface === "full" && (!surfaceWidth || surfaceWidth - width >= STAGE_MIN);
+  const { limit, width, docked, requested } = studioPaneLayout({ surface, surfaceWidth, stored, narrow, stageMin });
   const pushes = open && docked;
 
-  // The island keeps to what is left of the page.
+  // The island keeps to what is left of the page. In a side panel the host
+  // already centres it on what the panel leaves.
   useEffect(() => {
-    if (!pushes) return;
+    if (!pushes || surface !== "full") return;
     const root = document.documentElement;
     root.style.setProperty("--spectra-side-width", `${width}px`);
     return () => void root.style.removeProperty("--spectra-side-width");
-  }, [pushes, width]);
+  }, [pushes, surface, width]);
 
   const close = useCallback(() => {
     toolRef.current?.close();
@@ -168,6 +202,8 @@ export function useStudioPane({
     tool,
     width,
     docked,
+    /** The room a side panel should add for this pane while it is open. */
+    requested: open ? requested : 0,
     resizing,
     limit,
     /** No room beside the pane: a version on show takes the whole surface. */

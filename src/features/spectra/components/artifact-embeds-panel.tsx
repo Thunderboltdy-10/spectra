@@ -321,7 +321,7 @@ export function ArtifactEmbedsPanel({
       setQuery("");
       setSearching(false);
     } catch (error) {
-      failed(error, "Could not add this reference.");
+      failed(error, "Could not add this reference. Try again, or place it from inside the work.");
     } finally {
       setAdding(null);
     }
@@ -341,7 +341,7 @@ export function ArtifactEmbedsPanel({
       setQuery("");
       setSearching(false);
     } catch (error) {
-      failed(error, "Could not link this work.");
+      failed(error, "Could not link this work. Check that you can still open it, then try again.");
     } finally {
       setAdding(null);
     }
@@ -354,7 +354,7 @@ export function ArtifactEmbedsPanel({
       await postSpectra({ action: "removeArtifactLink", linkId: entry._id });
     } catch (error) {
       setLinks(was);
-      failed(error, "Could not remove this link.");
+      failed(error, "Could not remove this link. Try again in a moment.");
     }
   }
 
@@ -371,12 +371,12 @@ export function ArtifactEmbedsPanel({
             "message" in value &&
             typeof value.message === "string",
         );
-        if (dispatched.listeners === 0) throw new Error("The editor is not ready to remove this reference.");
-        if (outcome?.status !== "completed") throw new Error(outcome?.message ?? "The reference could not be removed from the editor.");
+        if (dispatched.listeners === 0) throw new Error("The editor is still opening. Try again once the work has loaded.");
+        if (outcome?.status !== "completed") throw new Error(outcome?.message ?? "The reference is still in the work. Delete it there, or try again.");
       }
       await removeReference({ embedId: embed.embedId as Id<"artifactEmbeds"> });
     } catch (error) {
-      failed(error, "Could not remove this reference.");
+      failed(error, "Could not remove this reference. Try again, or delete it inside the work.");
     }
   }
 
@@ -391,7 +391,7 @@ export function ArtifactEmbedsPanel({
         pinnedVersionId: patch.pinnedVersionId as Id<"spectraArtifactVersions"> | undefined,
       });
     } catch (error) {
-      failed(error, "Could not change this reference.");
+      failed(error, "Could not change this reference. Try again in a moment.");
     }
   }
 
@@ -399,7 +399,7 @@ export function ArtifactEmbedsPanel({
     try {
       await postSpectra({ action: "requestArtifactAccess", embedId: embed.embedId, requestedLevel: "read" });
     } catch (error) {
-      failed(error, "Could not ask for access.");
+      failed(error, "Could not ask for access. Try again, or ask the owner to share it.");
     }
   }
 
@@ -407,7 +407,7 @@ export function ArtifactEmbedsPanel({
     try {
       await postSpectra({ action: "cancelArtifactAccessRequest", requestId });
     } catch (error) {
-      failed(error, "Could not cancel the request.");
+      failed(error, "Could not cancel the request. Try again in a moment.");
     }
   }
 

@@ -49,6 +49,39 @@ function optionalText(target: Record<string, unknown>, key: string, value: unkno
 
 // ---------------------------------------------------------------- flashcards
 
+/**
+ * An option's answer as a comparable key: a number in any common form (1/2,
+ * 0.5, 50%, 1,000, 1.5 × 10^3) with whatever unit follows it, or the words
+ * themselves without case or spacing.
+ */
+function answerKey(option: string) {
+  const plain = option.trim().toLowerCase().replace(/\s+/g, " ");
+  const match = /^([-+−]?)(\d[\d,]*(?:\.\d+)?|\.\d+)(?:\s*\/\s*(\d+(?:\.\d+)?))?(?:\s*(?:[×x*]|e)\s*(?:10\s*\^\s*)?([-+−]?\d+))?\s*(%?)\s*(.*)$/.exec(plain);
+  if (!match) return plain;
+  const [, sign, whole, denominator, exponent, percent, unit] = match;
+  if (/,\d{1,2}(?!\d)/.test(whole!)) return plain;
+  let value = Number(whole!.replace(/,/g, ""));
+  if (denominator) value /= Number(denominator);
+  if (exponent) value *= 10 ** Number(exponent.replace("−", "-"));
+  if (percent) value /= 100;
+  if (sign === "-" || sign === "−") value = -value;
+  if (!Number.isFinite(value)) return plain;
+  return `${Number(value.toPrecision(12))}|${unit}`;
+}
+
+/** The first two options that are one answer written two ways, if any. */
+export function sameAnswerOptions(options: string[]): [string, string] | null {
+  const seen = new Map<string, string>();
+  for (const option of options) {
+    if (!option.trim()) continue;
+    const key = answerKey(option);
+    const earlier = seen.get(key);
+    if (earlier !== undefined) return [earlier, option];
+    seen.set(key, option);
+  }
+  return null;
+}
+
 const DIFFICULTIES = new Set(["easy", "medium", "hard"]);
 
 const flashcards: ListKind = {
@@ -167,6 +200,9 @@ const quiz: ListKind = {
     }
     // Check the shape the quiz player needs now, so the model fixes it in the same turn.
     const options = list(question.options).map(text);
+    const same = sameAnswerOptions(options);
+    if (same)
+      throw new AuthoringError(`${label}: "${same[0]}" and "${same[1]}" are the same answer in another form. Make every option a different answer.`);
     if ((type === "multiple_choice" || type === "true_false") && !options.includes(text(question.correctAnswer)))
       throw new AuthoringError(`${label}: answer must be exactly one of the options (${options.map((option) => `"${option}"`).join(", ") || "no options given"}).`);
     if (type === "select_all" && list(question.correctAnswers).some((answer) => !options.includes(text(answer))))

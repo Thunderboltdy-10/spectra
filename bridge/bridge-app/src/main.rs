@@ -1,16 +1,16 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-mod polling;
 mod pairing_work;
+mod polling;
 
 use sha2::Digest;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use polling::{PollResult, PollScheduler, PollWake, WaitResult};
 use pairing_work::PairingWork;
+use polling::{PollResult, PollScheduler, PollWake, WaitResult};
 use spectra_bridge_core::fs::{
-    FsError, Grant, GrantRegistry, SafeWriter, WriteRequest, resolve_write_target, SyncedFile,
+    FsError, Grant, GrantRegistry, SafeWriter, SyncedFile, WriteRequest, resolve_write_target,
 };
 use spectra_bridge_core::identity::{AdoptionCandidate, adopt, local_resource_id};
 use spectra_bridge_core::journal::{Journal, NativeAckItem, OpState, ResourceRecord};
@@ -27,14 +27,15 @@ use spectra_bridge_core::sync::{
     WriteCompletion, claim_fs_request, claim_pending_payload_upload, claim_write,
     complete_fs_request_with_claim, complete_write_with_claim, detach_mount,
     discover_resources_page, drain_cloud_queue_holding, exchange_pairing, inspect_write_target,
-    migrate_cloud_replica_page, report_missing_resources, refresh_structure_claim,
-    refresh_write_claim, register_mount, report_health, resume_pairing, set_mount_availability,
+    migrate_cloud_replica_page, refresh_structure_claim, refresh_write_claim, register_mount,
+    report_health, report_missing_resources, resume_pairing, set_mount_availability,
     upload_resource_payload,
 };
 use spectra_bridge_core::watcher::{
     MountWatcher, ScanEntry, StabilityTracker, WatcherConfig, file_held_by_office,
-    is_office_lock_file, is_online_only, office_lock_exists, office_lock_paths, relative_key,
-    reusable_hash, scan_selection, stable_file_snapshot,
+    is_held_back_conflict_copy, is_office_lock_file, is_online_only, is_provider_conflict_copy,
+    office_lock_exists, office_lock_paths, relative_key, reusable_hash, scan_selection,
+    stable_file_snapshot,
 };
 use tauri::Manager;
 use tauri::menu::{Menu, MenuItem};
@@ -127,6 +128,21 @@ fn retain_current_mounts(
     reconciled.retain(|mount_id| current_mount_ids.contains(mount_id));
 }
 
+/// A paused folder holds its changes, and a rename or move made while it was
+/// paused may never reach the watcher's queue. Forgetting that the folder was
+/// reconciled makes the first pass after Resume scan it in full (F20).
+fn forget_paused_reconciles(
+    reconciled: &mut HashSet<String>,
+    all_paused: bool,
+    paused_grants: &HashSet<String>,
+) {
+    if all_paused {
+        reconciled.clear();
+    } else {
+        reconciled.retain(|grant_id| !paused_grants.contains(grant_id));
+    }
+}
+
 struct ActiveMountSyncGuard {
     active_mount_syncs: ActiveMountSyncs,
     grant_id: String,
@@ -216,9 +232,10 @@ impl LocalBridgeControl for SpectraLocalControl {
     }
 
     async fn select_mount(&self) -> Result<Option<String>, String> {
-        let _selection = self.selection_gate.try_lock().map_err(|_| {
-            "Finish the current connection or file selection first.".to_string()
-        })?;
+        let _selection = self
+            .selection_gate
+            .try_lock()
+            .map_err(|_| "Finish the current connection or file selection first.".to_string())?;
         let result = select_mount_impl(
             &self.app,
             &self.grants,
@@ -233,9 +250,10 @@ impl LocalBridgeControl for SpectraLocalControl {
     }
 
     async fn select_files(&self) -> Result<FilesSelected, String> {
-        let _selection = self.selection_gate.try_lock().map_err(|_| {
-            "Finish the current connection or file selection first.".to_string()
-        })?;
+        let _selection = self
+            .selection_gate
+            .try_lock()
+            .map_err(|_| "Finish the current connection or file selection first.".to_string())?;
         let result = select_files_impl(
             &self.app,
             &self.grants,
@@ -249,9 +267,10 @@ impl LocalBridgeControl for SpectraLocalControl {
     }
 
     async fn sync_named(&self, path: &str) -> Result<Option<String>, String> {
-        let _selection = self.selection_gate.try_lock().map_err(|_| {
-            "Finish the current connection or file selection first.".to_string()
-        })?;
+        let _selection = self
+            .selection_gate
+            .try_lock()
+            .map_err(|_| "Finish the current connection or file selection first.".to_string())?;
         let result = sync_named_impl(
             path,
             &self.app,
@@ -320,7 +339,11 @@ impl LocalBridgeControl for SpectraLocalControl {
             .selection_gate
             .try_lock()
             .map_err(|_| "Finish the current connection or file selection first.".to_string())?;
-        unpair_this_computer(&self.grants, &self.journal, &self.active_mount_syncs.pairing)?;
+        unpair_this_computer(
+            &self.grants,
+            &self.journal,
+            &self.active_mount_syncs.pairing,
+        )?;
         self.state.forget_pairing();
         self.wake.wake_configuration();
         refresh_tray(&self.app);
@@ -580,7 +603,9 @@ fn unpair_this_computer(
             .delete_config(key)
             .map_err(|error| error.to_string())?;
     }
-    journal.retire_pairing_work().map_err(|error| error.to_string())?;
+    journal
+        .retire_pairing_work()
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -826,8 +851,18 @@ fn taskbar_is_light() -> bool {
 }
 
 struct TrayHandles {
+    account: MenuItem<tauri::Wry>,
     pause: MenuItem<tauri::Wry>,
-    shown: Mutex<Option<(TrayView, bool, u32, bool)>>,
+    shown: Mutex<Option<(TrayView, bool, u32, bool, String)>>,
+}
+
+/// The tray's first line: which Spectra account this computer serves.
+fn tray_account_line(paired: bool, name: Option<&str>) -> String {
+    match (paired, name.map(str::trim).filter(|name| !name.is_empty())) {
+        (false, _) => "Not connected to Spectra".into(),
+        (true, Some(name)) => format!("Connected as {name}"),
+        (true, None) => "Connected to Spectra".into(),
+    }
 }
 
 /// Brings the tray icon, tooltip and Pause/Resume item up to date.
@@ -853,7 +888,16 @@ fn refresh_tray(app: &tauri::AppHandle) {
         .flatten()
         .map(|monitor| monitor.scale_factor())
         .unwrap_or(1.0);
-    let next = (view, light, tray_icon_size(scale), paused);
+    let account = tray_account_line(
+        state.is_paired(),
+        runtime
+            .journal
+            .config("account_name")
+            .ok()
+            .flatten()
+            .as_deref(),
+    );
+    let next = (view, light, tray_icon_size(scale), paused, account);
     let mut shown = handles
         .shown
         .lock()
@@ -861,7 +905,8 @@ fn refresh_tray(app: &tauri::AppHandle) {
     if shown.as_ref() == Some(&next) {
         return;
     }
-    let (view, light, size, paused) = &next;
+    let (view, light, size, paused, account) = &next;
+    let _ = handles.account.set_text(account);
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         if let Ok(icon) = tauri::image::Image::from_bytes(tray_icon_png(*light, view.dot, *size)) {
             let _ = tray.set_icon(Some(icon));
@@ -974,17 +1019,27 @@ fn repair_windows_autostart_command() -> anyhow::Result<()> {
 /// testing can still override these values at process launch. Keeping the
 /// fallback at the app boundary means the bridge never silently returns to a
 /// localhost deployment when it is launched by an installer/autostart entry.
+/// A release Bridge serves only what it was built for: the baked value wins
+/// over anything in the environment. A debug build may be pointed elsewhere.
+fn embedded_setting(running: Option<String>, baked: Option<&str>, debug: bool) -> Option<String> {
+    if debug {
+        running.or_else(|| baked.map(str::to_owned))
+    } else {
+        baked.map(str::to_owned)
+    }
+}
+
 fn configure_embedded_release_environment() {
-    for (name, value) in [
+    for (name, baked) in [
         ("SPECTRA_CONVEX_URL", option_env!("SPECTRA_CONVEX_URL")),
         ("SPECTRA_ORIGINS", option_env!("SPECTRA_ORIGINS")),
     ] {
-        if std::env::var_os(name).is_none() {
-            if let Some(value) = value {
-                // Rust 2024 makes process-wide environment mutation explicit.
-                // This runs before Tauri starts any worker or plugin thread.
-                unsafe { std::env::set_var(name, value) };
-            }
+        let running = std::env::var(name).ok();
+        // Rust 2024 makes process-wide environment mutation explicit.
+        // This runs before Tauri starts any worker or plugin thread.
+        match embedded_setting(running, baked, cfg!(debug_assertions)) {
+            Some(value) => unsafe { std::env::set_var(name, value) },
+            None => unsafe { std::env::remove_var(name) },
         }
     }
 }
@@ -1152,6 +1207,61 @@ fn current_time_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+fn mount_waiting_key(grant_id: &str) -> String {
+    format!("mount_waiting:{grant_id}")
+}
+
+/// Files the last pass named as open in Office or still uploading. When one of
+/// them is free, the folder is checked again in a moment instead of keeping
+/// "0 of 1" until the next repair or the six-hourly reconciliation (F11).
+fn remember_waiting_files(journal: &Journal, grant_id: &str, paths: &[String]) {
+    let key = mount_waiting_key(grant_id);
+    if paths.is_empty() {
+        let _ = journal.delete_config(&key);
+    } else if let Ok(value) = serde_json::to_string(&paths.iter().take(200).collect::<Vec<_>>()) {
+        let _ = journal.set_config(&key, &value);
+    }
+}
+
+/// True when `relative` was waiting and is now free: the folder is rechecked
+/// within a couple of seconds, once per waiting file.
+fn recheck_when_waiting_file_frees(journal: &Journal, grant_id: &str, relative: &str) -> bool {
+    let key = mount_waiting_key(grant_id);
+    let Some(mut waiting) = journal
+        .config(&key)
+        .ok()
+        .flatten()
+        .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
+    else {
+        return false;
+    };
+    let before = waiting.len();
+    let same = |path: &str| {
+        path.replace('\\', "/")
+            .eq_ignore_ascii_case(&relative.replace('\\', "/"))
+    };
+    waiting.retain(|path| !same(path));
+    if waiting.len() == before {
+        return false;
+    }
+    remember_waiting_files(journal, grant_id, &waiting);
+    let retry_key = mount_repair_retry_key(grant_id);
+    let attempts = journal
+        .config(&retry_key)
+        .ok()
+        .flatten()
+        .and_then(|value| serde_json::from_str::<MountRepairRetry>(&value).ok())
+        .map(|retry| retry.attempts)
+        .unwrap_or_default();
+    let retry = MountRepairRetry {
+        attempts,
+        retry_at_ms: current_time_ms().saturating_add(2_000),
+    };
+    serde_json::to_string(&retry)
+        .ok()
+        .is_some_and(|value| journal.set_config(&retry_key, &value).is_ok())
 }
 
 fn clear_mount_repair_retry(journal: &Journal, grant_id: &str) -> Result<(), String> {
@@ -2035,6 +2145,10 @@ struct LocalScan {
     hashed: usize,
     /// Unchanged files the cloud already has at this content.
     reported: HashSet<String>,
+    /// The walk found anything at all, files or folders.
+    saw_entries: bool,
+    /// New files a cloud drive made as conflict copies, left out until renamed.
+    conflict_copies: Vec<String>,
 }
 
 /// The recorded hash of a file that has not moved since it was hashed: same
@@ -2056,6 +2170,68 @@ fn unchanged_hash(journal: &Journal, record: &ResourceRecord, entry: &ScanEntry)
     )
 }
 
+/// Whether the folder lists this name with exactly this spelling. On a
+/// case-insensitive disk an old spelling still opens the renamed file.
+fn listed_with_this_case(path: &std::path::Path) -> bool {
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return true;
+    };
+    match std::fs::read_dir(parent) {
+        Ok(entries) => entries.flatten().any(|entry| entry.file_name() == name),
+        Err(_) => true,
+    }
+}
+
+/// Whether a file missing from this grant's folder can be called deleted: the
+/// folder must be there and, for a folder grant, not come back empty.
+fn folder_can_say_gone(grant: &Grant) -> bool {
+    if !grant.is_available() {
+        return false;
+    }
+    grant.selected_file().is_some()
+        || std::fs::read_dir(grant.device_root()).is_ok_and(|mut entries| entries.next().is_some())
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ScanSight {
+    complete: bool,
+    online_only: usize,
+    saw_entries: bool,
+    /// One chosen file rather than a folder.
+    selection: bool,
+}
+
+/// The files a scan can say are gone. Only a full look can: an unreadable
+/// entry or an online-only file would look deleted. A folder that comes back
+/// with nothing in it while it held files before is treated as not available
+/// (an unplugged drive, an unmounted share), never as everything deleted.
+fn missing_after_scan(
+    sight: ScanSight,
+    records: &[ResourceRecord],
+    generation: u64,
+) -> Vec<String> {
+    if !sight.complete || sight.online_only > 0 {
+        return Vec::new();
+    }
+    let missing = records
+        .iter()
+        .filter(|record| {
+            record.available
+                && record.last_seen_generation < generation
+                && carries_native_payload(&native_format(std::path::Path::new(&record.path_key)))
+        })
+        .map(|record| record.local_resource_id.clone())
+        .collect::<Vec<_>>();
+    if !missing.is_empty() && !sight.saw_entries && !sight.selection {
+        eprintln!(
+            "[sync] a folder came back empty; treating it as not available rather than deleting {} files",
+            missing.len()
+        );
+        return Vec::new();
+    }
+    missing
+}
+
 /// Reads the folder for a full repair pass. A file whose size, modification
 /// time and identity still match the stat its hash was taken under keeps that
 /// hash without being read again; every other file is read and hashed.
@@ -2068,6 +2244,7 @@ fn scan_local_files(
     let scan = scan_selection(&HostPlatform, grant.device_root(), grant.selected_file())
         .map_err(|error| error.to_string())?;
     let mut local = LocalScan {
+        saw_entries: !scan.entries.is_empty() || scan.online_only > 0,
         complete: scan.failures.is_empty(),
         online_only: scan.online_only,
         failed: scan
@@ -2105,6 +2282,15 @@ fn scan_local_files(
             continue;
         }
         let path_key = relative_key(grant.device_root(), &entry_path);
+        if entry.double_sync_risk
+            && !by_path.contains_key(&path_key)
+            && is_provider_conflict_copy(&entry.relative_path, |sibling| {
+                grant.device_root().join(sibling).is_file()
+            })
+        {
+            local.conflict_copies.push(entry.relative_path);
+            continue;
+        }
         let reused = by_path.get(&path_key).and_then(|record| {
             unchanged_hash(journal, record, &entry).map(|hash| (record.clone(), hash))
         });
@@ -2233,6 +2419,7 @@ struct MountPass {
     failed: Vec<String>,
     retrying: Vec<String>,
     unsyncable: Vec<String>,
+    conflict_copies: Vec<String>,
     oversized: usize,
     online_only: usize,
     complete: bool,
@@ -2291,6 +2478,16 @@ fn mount_pass_status(pass: &MountPass, repair_delay_ms: Option<u64>) -> (String,
         notes.push(format!(
             "Spectra is retrying the upload of {}.",
             name_files(&pass.retrying)
+        ));
+    }
+    if !pass.conflict_copies.is_empty() {
+        notes.push(format!(
+            "{} {} a copy your cloud drive made when two edits met, so Spectra left {} out. Rename {} to add {}.",
+            name_files(&pass.conflict_copies),
+            if one(&pass.conflict_copies) { "looks like" } else { "look like" },
+            if one(&pass.conflict_copies) { "it" } else { "them" },
+            if one(&pass.conflict_copies) { "it" } else { "them" },
+            if one(&pass.conflict_copies) { "it" } else { "them" },
         ));
     }
     if !pass.unsyncable.is_empty() {
@@ -2366,9 +2563,12 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
         double_sync_risk,
         online_only,
         reported,
+        saw_entries,
+        conflict_copies,
         ..
     } = scan_local_files(grant, journal, generation)?;
     let mut pass = MountPass {
+        conflict_copies,
         scanned: files.len(),
         unscanned: held.len() + failed.len(),
         held,
@@ -2478,9 +2678,15 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
             {
                 // One file's upload must not hold the folder back: it retries
                 // on its own schedule, and only a file that cannot be queued
-                // waits for the next repair pass.
+                // waits for the next repair pass. A file Office holds open is
+                // named as such, so the student knows closing it is the fix.
                 pass.unsynced += 1;
-                if hand_off_failed_upload(grant, journal, resource, generation) {
+                let path = grant.device_root().join(&resource.relative_path);
+                let held_by_office = file_held_by_office(&path) || office_lock_exists(&path);
+                let handed_off = hand_off_failed_upload(grant, journal, resource, generation);
+                if held_by_office {
+                    pass.held.push(name());
+                } else if handed_off {
                     pass.retrying.push(name());
                 } else {
                     pass.failed.push(name());
@@ -2501,20 +2707,20 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
             )?;
         }
     }
-    // Only a full look at the folder can say a file is gone. Online-only files
-    // are skipped by the scan, so they would look deleted.
     if pass.complete && pass.online_only == 0 {
-        let missing = journal
+        let records = journal
             .resources_for_grant(&grant.id)
-            .map_err(|error| error.to_string())?
-            .into_iter()
-            .filter(|record| {
-                record.available
-                    && record.last_seen_generation < generation
-                    && carries_native_payload(&native_format(std::path::Path::new(&record.path_key)))
-            })
-            .map(|record| record.local_resource_id)
-            .collect::<Vec<_>>();
+            .map_err(|error| error.to_string())?;
+        let missing = missing_after_scan(
+            ScanSight {
+                complete: pass.complete,
+                online_only: pass.online_only,
+                saw_entries,
+                selection: grant.selected_file().is_some(),
+            },
+            &records,
+            generation,
+        );
         for page in missing.chunks(100) {
             report_missing_resources(&deployment, &credential, &mount_id, page)
                 .await
@@ -2535,6 +2741,16 @@ async fn run_sync(grant: &Grant, journal: &Journal) -> Result<(), String> {
     };
     let (detail, synced, total) = mount_pass_status(&pass, repair_delay_ms);
     set_mount_status(journal, &grant.id, "active", &detail, synced, total)?;
+    remember_waiting_files(
+        journal,
+        &grant.id,
+        &pass
+            .held
+            .iter()
+            .chain(pass.retrying.iter())
+            .cloned()
+            .collect::<Vec<_>>(),
+    );
     let _ = journal.set_config(
         &mount_synced_at_key(&grant.id),
         &current_time_ms().to_string(),
@@ -3523,6 +3739,28 @@ fn spawn_grant_watcher(
                     pending_missing.entry(path).or_insert(observed_at);
                     continue;
                 }
+                if !listed_with_this_case(&path) {
+                    // A case-only rename: the old spelling still opens the
+                    // file on Windows and macOS. Its new spelling carries it.
+                    pending_files.remove(&path);
+                    continue;
+                }
+                if is_held_back_conflict_copy(grant.device_root(), &path)
+                    && journal
+                        .resource_by_path(&grant.id, &relative_key(grant.device_root(), &path))
+                        .is_ok_and(|record| record.is_none())
+                {
+                    pending_files.remove(&path);
+                    let _ = set_mount_file_note(
+                        &journal,
+                        &grant.id,
+                        &format!(
+                            "{} looks like a copy your cloud drive made when two edits met, so Spectra left it out. Rename it to add it.",
+                            name_files(&[relative_key(grant.device_root(), &path)]),
+                        ),
+                    );
+                    continue;
+                }
                 if is_online_only(&path) {
                     // Hashing a cloud placeholder downloads it again right
                     // after the student chose 'Free up space'. It syncs once
@@ -3546,6 +3784,13 @@ fn spawn_grant_watcher(
                         );
                     }
                     continue;
+                }
+                if recheck_when_waiting_file_frees(
+                    &journal,
+                    &grant.id,
+                    &relative_key(grant.device_root(), &path),
+                ) {
+                    local_work_queued = true;
                 }
                 if enqueue_unlocked_path(&grant, &journal, &path)
                     .map(|queued| queued > 0)
@@ -3586,13 +3831,19 @@ fn spawn_grant_watcher(
                     Err(_) => failed_paths.push(path.clone()),
                 }
             }
-            let settled_missing = pending_missing
-                .iter()
-                .filter(|(_, first_seen)| {
-                    observed_at.duration_since(**first_seen) >= config.stability_window
-                })
-                .map(|(path, _)| path.clone())
-                .collect::<Vec<_>>();
+            // Files vanishing with their folder (a drive unplugged, a share
+            // unmounted) wait for the folder: they are not available, not gone.
+            let settled_missing = if folder_can_say_gone(&grant) {
+                pending_missing
+                    .iter()
+                    .filter(|(_, first_seen)| {
+                        observed_at.duration_since(**first_seen) >= config.stability_window
+                    })
+                    .map(|(path, _)| path.clone())
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
             for path in settled_missing {
                 let current_generation = match generation {
                     Some(value) => value,
@@ -3739,11 +3990,24 @@ async fn complete_pairing_offer(
     control: &SpectraLocalControl,
     offer: &PairingOffer,
 ) -> Result<(), String> {
-    let SpectraLocalControl { state, journal, grants, active_mount_syncs, wake, .. } = control;
+    let SpectraLocalControl {
+        state,
+        journal,
+        grants,
+        active_mount_syncs,
+        wake,
+        ..
+    } = control;
     let deployment = deployment_for_offer(journal, offer)?;
     let changes = state.relay_changes();
     let generation = *changes.borrow();
-    let still_connecting = || if *changes.borrow() == generation { Ok(()) } else { Err("This connection was cancelled. Connect this computer again.".to_string()) };
+    let still_connecting = || {
+        if *changes.borrow() == generation {
+            Ok(())
+        } else {
+            Err("This connection was cancelled. Connect this computer again.".to_string())
+        }
+    };
     let device_name = this_device_name();
     let installation_id = match journal
         .config("installation_id")
@@ -3775,35 +4039,57 @@ async fn complete_pairing_offer(
         )
         .await
         {
-            Ok(exchange) => Some((exchange.device_id, exchange.browser_origin, exchange.account_id, credential)),
+            Ok(exchange) => Some((
+                exchange.device_id,
+                exchange.browser_origin,
+                exchange.account_id,
+                exchange.account_name,
+                credential,
+            )),
             Err(error) if should_repair_pairing(&error.to_string()) => None,
             Err(error) => return Err(error.to_string()),
         }
-    } else { None };
-    let resuming = resumed.is_some();
-    let (device_id, browser_origin, account_id, credential) = if let Some(exchange) = resumed {
-        exchange
     } else {
-        still_connecting()?;
-        let exchange = exchange_pairing(&deployment, offer, &device_name, &installation_id)
-            .await
-            .map_err(|error| error.to_string())?;
-        still_connecting()?;
-        HostPlatform
-            .store_credential(&exchange.device_id, &exchange.device_credential)
-            .map_err(|error| error.to_string())?;
-        (exchange.device_id, exchange.browser_origin, exchange.account_id, exchange.device_credential)
+        None
     };
+    let resuming = resumed.is_some();
+    let (device_id, browser_origin, account_id, account_name, credential) =
+        if let Some(exchange) = resumed {
+            exchange
+        } else {
+            still_connecting()?;
+            let exchange = exchange_pairing(&deployment, offer, &device_name, &installation_id)
+                .await
+                .map_err(|error| error.to_string())?;
+            still_connecting()?;
+            HostPlatform
+                .store_credential(&exchange.device_id, &exchange.device_credential)
+                .map_err(|error| error.to_string())?;
+            (
+                exchange.device_id,
+                exchange.browser_origin,
+                exchange.account_id,
+                exchange.account_name,
+                exchange.device_credential,
+            )
+        };
     still_connecting()?;
-    let switching = !resuming || journal.config("device_id").map_err(|error| error.to_string())?
-        .is_some_and(|previous| previous != device_id);
+    let switching = !resuming
+        || journal
+            .config("device_id")
+            .map_err(|error| error.to_string())?
+            .is_some_and(|previous| previous != device_id);
     if switching {
         active_mount_syncs.pairing.retire();
-        for grant in grants.device_grants() { grants.remove(&grant.id); }
+        for grant in grants.device_grants() {
+            grants.remove(&grant.id);
+        }
     }
     // A fresh credential retires old authority even if cloud repair reuses
     // the device ID. A verified resume leaves active CLI/room channels alive.
-    if !resuming { state.forget_pairing(); }
+    if !resuming {
+        state.forget_pairing();
+    }
     state.set_device_id(device_id.clone());
     let session_token = state.prepare_pairing_session(&browser_origin);
     // Every browser origin stays joined across restarts, not only the newest.
@@ -3815,19 +4101,43 @@ async fn complete_pairing_offer(
             ("browser_origin", &browser_origin),
             ("browser_session_token", &session_token),
             ("browser_sessions", &browser_sessions),
+            ("account_name", account_name.as_deref().unwrap_or_default()),
         ])
         .map_err(|error| error.to_string())?;
-    let identity = state.pairing_identity().ok_or("This computer is no longer paired")?;
-    prepare_work_account(state, journal, &identity, &deployment, &credential, &account_id).await
-        .map_err(|error| error.to_string())?;
-    if switching { restore_current_grants(grants, journal).map_err(|error| error.to_string())?; }
+    let identity = state
+        .pairing_identity()
+        .ok_or("This computer is no longer paired")?;
+    prepare_work_account(
+        state,
+        journal,
+        &identity,
+        &deployment,
+        &credential,
+        &account_id,
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    if switching {
+        restore_current_grants(grants, journal).map_err(|error| error.to_string())?;
+    }
     state
-        .complete_pairing_with_session_for(&identity, offer.challenge.clone(), browser_origin, &session_token)
+        .complete_pairing_with_session_for(
+            &identity,
+            offer.challenge.clone(),
+            browser_origin,
+            &session_token,
+        )
         .map_err(|error| error.to_string())?;
     if switching {
         active_mount_syncs.pairing.resume();
         for grant in grants.device_grants() {
-            spawn_grant_watcher(grant, grants.clone(), journal.clone(), wake.clone(), active_mount_syncs.clone());
+            spawn_grant_watcher(
+                grant,
+                grants.clone(),
+                journal.clone(),
+                wake.clone(),
+                active_mount_syncs.clone(),
+            );
         }
     }
     Ok(())
@@ -3842,30 +4152,168 @@ struct WorkAccountBinding {
     credential_hash: String,
 }
 
-async fn prepare_work_account(state: &ServerState, journal: &Journal, identity: &spectra_bridge_core::server::LocalRelayIdentity, deployment: &str, credential: &str, account: &str) -> anyhow::Result<()> {
+async fn prepare_work_account(
+    state: &ServerState,
+    journal: &Journal,
+    identity: &spectra_bridge_core::server::LocalRelayIdentity,
+    deployment: &str,
+    credential: &str,
+    account: &str,
+) -> anyhow::Result<()> {
     anyhow::ensure!(state.is_listening(), "Bridge's local listener is not ready");
     let deployment = deployment.trim_end_matches('/');
-    anyhow::ensure!(state.pairing_identity().as_ref() == Some(identity), "Pairing changed while preparing local work");
-    if state.work_account().as_ref().is_some_and(|(cloud, owner)| cloud == deployment && owner == account) { return Ok(()); }
+    anyhow::ensure!(
+        state.pairing_identity().as_ref() == Some(identity),
+        "Pairing changed while preparing local work"
+    );
+    if state
+        .work_account()
+        .as_ref()
+        .is_some_and(|(cloud, owner)| cloud == deployment && owner == account)
+    {
+        return Ok(());
+    }
     let current = || {
         state.pairing_identity().as_ref() == Some(identity)
-            && journal.config("device_id").ok().flatten().as_deref() == Some(identity.device_id.as_str())
-            && journal.config("deployment_url").ok().flatten().as_deref().map(|value| value.trim_end_matches('/')) == Some(deployment)
-            && HostPlatform.read_credential(&identity.device_id).ok().flatten().as_deref() == Some(credential)
+            && journal.config("device_id").ok().flatten().as_deref()
+                == Some(identity.device_id.as_str())
+            && journal
+                .config("deployment_url")
+                .ok()
+                .flatten()
+                .as_deref()
+                .map(|value| value.trim_end_matches('/'))
+                == Some(deployment)
+            && HostPlatform
+                .read_credential(&identity.device_id)
+                .ok()
+                .flatten()
+                .as_deref()
+                == Some(credential)
     };
     anyhow::ensure!(current(), "Pairing changed while preparing local work");
-    let path = spectra_bridge_core::works::default_store_path().ok_or_else(|| anyhow::anyhow!("Local work directory is unavailable"))?;
+    let path = spectra_bridge_core::works::default_store_path()
+        .ok_or_else(|| anyhow::anyhow!("Local work directory is unavailable"))?;
     // Old isolated profiles used the normal work store. Only verified ids are
     // copied from it; the new store still lives inside the configured profile.
-    let legacy = if path.try_exists()? { path.clone() } else {
-        std::env::var_os("LOCALAPPDATA").or_else(|| std::env::var_os("HOME"))
-            .map(std::path::PathBuf::from).map(|root| root.join("Spectra/works/works.db")).unwrap_or_else(|| path.clone())
+    let legacy = if path.try_exists()? {
+        path.clone()
+    } else {
+        std::env::var_os("LOCALAPPDATA")
+            .or_else(|| std::env::var_os("HOME"))
+            .map(std::path::PathBuf::from)
+            .map(|root| root.join("Spectra/works/works.db"))
+            .unwrap_or_else(|| path.clone())
     };
-    state.prepare_work_rooms(identity, path, legacy, deployment.into(), credential.into(), account.into()).await?;
+    state
+        .prepare_work_rooms(
+            identity,
+            path,
+            legacy,
+            deployment.into(),
+            credential.into(),
+            account.into(),
+        )
+        .await?;
     anyhow::ensure!(current(), "Pairing changed while preparing local work");
-    let binding = WorkAccountBinding { device_id: identity.device_id.clone(), deployment: deployment.into(), account_id: account.into(), credential_hash: format!("{:x}", sha2::Sha256::digest(credential.as_bytes())) };
+    let binding = WorkAccountBinding {
+        device_id: identity.device_id.clone(),
+        deployment: deployment.into(),
+        account_id: account.into(),
+        credential_hash: format!("{:x}", sha2::Sha256::digest(credential.as_bytes())),
+    };
     journal.set_config("work_account", &serde_json::to_string(&binding)?)?;
     Ok(())
+}
+
+/// What the Bridge is doing that an update restart would cut off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BridgeActivity {
+    runs: usize,
+    syncs: usize,
+    open_works: usize,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum UpdateGate {
+    Install,
+    /// Works stay open in a tab for days; past the wait they are saved first.
+    SaveOpenWorksThenInstall,
+    Wait,
+}
+
+/// How long an update waits for open works to close before saving them and going ahead.
+const UPDATE_OPEN_WORK_WAIT: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+const UPDATE_IDLE_POLL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// A run or a sync is never interrupted. Open works are waited for, then saved.
+fn update_gate(activity: BridgeActivity, waited: std::time::Duration) -> UpdateGate {
+    if activity.runs > 0 || activity.syncs > 0 {
+        UpdateGate::Wait
+    } else if activity.open_works == 0 {
+        UpdateGate::Install
+    } else if waited >= UPDATE_OPEN_WORK_WAIT {
+        UpdateGate::SaveOpenWorksThenInstall
+    } else {
+        UpdateGate::Wait
+    }
+}
+
+fn bridge_activity(app: &tauri::AppHandle) -> BridgeActivity {
+    let syncs = app
+        .try_state::<BridgeRuntime>()
+        .map(|runtime| {
+            runtime
+                .active_mount_syncs
+                .mounts
+                .lock()
+                .map_or(1, |mounts| mounts.len())
+        })
+        .unwrap_or(0);
+    let open_works = app
+        .try_state::<Arc<ServerState>>()
+        .and_then(|state| state.work_rooms())
+        .map(|rooms| rooms.open_count())
+        .unwrap_or(0);
+    BridgeActivity {
+        runs: spectra_bridge_core::agent_relay::live_sessions(),
+        syncs,
+        open_works,
+    }
+}
+
+static UPDATE_INSTALLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Installs `update` once nothing would be cut off by the restart.
+async fn install_when_idle(app: tauri::AppHandle, update: tauri_plugin_updater::Update) {
+    use std::sync::atomic::Ordering;
+    if UPDATE_INSTALLING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let started = std::time::Instant::now();
+    loop {
+        match update_gate(bridge_activity(&app), started.elapsed()) {
+            UpdateGate::Wait => tokio::time::sleep(UPDATE_IDLE_POLL).await,
+            gate => {
+                if gate == UpdateGate::SaveOpenWorksThenInstall {
+                    let saved = app
+                        .try_state::<Arc<ServerState>>()
+                        .and_then(|state| state.work_rooms())
+                        .map_or(Ok(()), |rooms| rooms.finish_open());
+                    if let Err(error) = saved {
+                        eprintln!("[update] open works could not be saved, waiting: {error:#}");
+                        tokio::time::sleep(UPDATE_IDLE_POLL).await;
+                        continue;
+                    }
+                }
+                if let Err(error) = update.download_and_install(|_, _| {}, || {}).await {
+                    eprintln!("[update] {error}");
+                }
+                break;
+            }
+        }
+    }
+    UPDATE_INSTALLING.store(false, Ordering::Release);
 }
 
 async fn request_bridge_update(app: &tauri::AppHandle) -> Result<String, String> {
@@ -3876,17 +4324,21 @@ async fn request_bridge_update(app: &tauri::AppHandle) -> Result<String, String>
     };
     match updater.check().await {
         Ok(Some(update)) => {
-            update
-                .download_and_install(|_, _| {}, || {})
-                .await
-                .map_err(|_| tray_sentence.to_string())?;
-            Ok("Spectra Bridge is installing the update and will restart.".into())
+            let waits =
+                update_gate(bridge_activity(app), std::time::Duration::ZERO) != UpdateGate::Install;
+            tauri::async_runtime::spawn(install_when_idle(app.clone(), update));
+            Ok(if waits {
+                "Spectra Bridge will update as soon as the work in progress finishes.".into()
+            } else {
+                "Spectra Bridge is installing the update and will restart.".into()
+            })
         }
         Ok(None) | Err(_) => Ok(tray_sentence.into()),
     }
 }
 
-/// Keeps an installed Bridge current without asking. A build from source is never replaced.
+/// Keeps an installed Bridge current without asking, never in the middle of
+/// work. A build from source is never replaced.
 fn start_update_checks(app: tauri::AppHandle) {
     let from_source = std::env::current_exe()
         .map(|path| path.components().any(|part| part.as_os_str() == "target"))
@@ -3899,12 +4351,56 @@ fn start_update_checks(app: tauri::AppHandle) {
         loop {
             if let Ok(updater) = app.updater() {
                 if let Ok(Some(update)) = updater.check().await {
-                    let _ = update.download_and_install(|_, _| {}, || {}).await;
+                    install_when_idle(app.clone(), update).await;
                 }
             }
             tokio::time::sleep(std::time::Duration::from_secs(12 * 60 * 60)).await;
         }
     });
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::{BridgeActivity, UPDATE_OPEN_WORK_WAIT, UpdateGate, update_gate};
+    use std::time::Duration;
+
+    fn activity(runs: usize, syncs: usize, open_works: usize) -> BridgeActivity {
+        BridgeActivity {
+            runs,
+            syncs,
+            open_works,
+        }
+    }
+
+    #[test]
+    fn an_update_waits_for_runs_syncs_and_open_work() {
+        assert_eq!(
+            update_gate(activity(0, 0, 0), Duration::ZERO),
+            UpdateGate::Install
+        );
+        assert_eq!(
+            update_gate(activity(1, 0, 0), Duration::ZERO),
+            UpdateGate::Wait
+        );
+        assert_eq!(
+            update_gate(activity(0, 1, 0), Duration::ZERO),
+            UpdateGate::Wait
+        );
+        assert_eq!(
+            update_gate(activity(0, 0, 2), Duration::ZERO),
+            UpdateGate::Wait
+        );
+        // A run is never cut off, however long the update has waited.
+        assert_eq!(
+            update_gate(activity(1, 0, 0), UPDATE_OPEN_WORK_WAIT * 4),
+            UpdateGate::Wait
+        );
+        // A tab left open for days does not hold updates back forever; its work is saved first.
+        assert_eq!(
+            update_gate(activity(0, 0, 2), UPDATE_OPEN_WORK_WAIT),
+            UpdateGate::SaveOpenWorksThenInstall
+        );
+    }
 }
 
 fn should_repair_pairing(error: &str) -> bool {
@@ -4034,7 +4530,8 @@ async fn sync_named_impl(
     wake: &PollWake,
     active_mount_syncs: &ActiveMountSyncs,
 ) -> Result<Option<String>, String> {
-    let path = spectra_bridge_core::computer_names::resolve(relative).map_err(|error| error.to_string())?;
+    let path = spectra_bridge_core::computer_names::resolve(relative)
+        .map_err(|error| error.to_string())?;
     let (answer_tx, answer_rx) = tokio::sync::oneshot::channel();
     app.dialog()
         .message(format!(
@@ -4128,7 +4625,9 @@ fn persist_file_grant(journal: &Journal, grant: &Grant) -> anyhow::Result<()> {
         "A file grant requires a selected file"
     );
     // Older binaries restore mount: keys only and must not see a parent grant.
-    let device_id = journal.config("device_id")?.filter(|id| !id.is_empty())
+    let device_id = journal
+        .config("device_id")?
+        .filter(|id| !id.is_empty())
         .ok_or_else(|| anyhow::anyhow!("Connect this computer before selecting files"))?;
     journal.set_config(
         &format!("file-mount:{}", grant.id),
@@ -4181,18 +4680,33 @@ fn restore_current_grants(grants: &GrantRegistry, journal: &Journal) -> anyhow::
     let mut persisted = journal.config_prefix("mount:")?;
     persisted.extend(journal.config_prefix("file-mount:")?);
     for (key, value) in persisted {
-        let Ok(config) = serde_json::from_str::<serde_json::Value>(&value) else { continue };
-        if !grant_config_matches_pairing(journal, &config) { continue; }
+        let Ok(config) = serde_json::from_str::<serde_json::Value>(&value) else {
+            continue;
+        };
+        if !grant_config_matches_pairing(journal, &config) {
+            continue;
+        }
         if let (Some(label), Some(path)) = (
             config.get("label").and_then(|value| value.as_str()),
             config.get("path").and_then(|value| value.as_str()),
         ) {
             let (scope, id) = key.split_once(':').expect("persisted grant prefix");
             if scope == "file-mount" {
-                let Some(name) = config.get("selectedFile").and_then(|value| value.as_str()) else { continue };
-                let _ = grants.restore_file_grant(id.to_owned(), label.to_owned(), std::path::Path::new(path), std::path::Path::new(name));
+                let Some(name) = config.get("selectedFile").and_then(|value| value.as_str()) else {
+                    continue;
+                };
+                let _ = grants.restore_file_grant(
+                    id.to_owned(),
+                    label.to_owned(),
+                    std::path::Path::new(path),
+                    std::path::Path::new(name),
+                );
             } else {
-                let _ = grants.restore_device_grant(id.to_owned(), label.to_owned(), std::path::Path::new(path));
+                let _ = grants.restore_device_grant(
+                    id.to_owned(),
+                    label.to_owned(),
+                    std::path::Path::new(path),
+                );
             }
         }
     }
@@ -4305,7 +4819,9 @@ async fn retry_mount_impl(
     wake: &PollWake,
     active_mount_syncs: &ActiveMountSyncs,
 ) -> Result<(), String> {
-    let lease = active_mount_syncs.pairing.lease()
+    let lease = active_mount_syncs
+        .pairing
+        .lease()
         .ok_or_else(|| "Connect this computer before retrying synchronization.".to_string())?;
     let grant = grants
         .device_grants()
@@ -4549,9 +5065,22 @@ async fn run_sync_iteration(
                 state.mark_cloud_seen();
                 let _ = journal.delete_config("health_report_error");
                 if let Some(identity) = work_identity {
-                    match prepare_work_account(state, journal, &identity, deployment, &credential, &account).await {
-                        Ok(()) => { let _ = journal.delete_config("work_store_error"); }
-                        Err(error) => { let _ = journal.set_config("work_store_error", &error.to_string()); }
+                    match prepare_work_account(
+                        state,
+                        journal,
+                        &identity,
+                        deployment,
+                        &credential,
+                        &account,
+                    )
+                    .await
+                    {
+                        Ok(()) => {
+                            let _ = journal.delete_config("work_store_error");
+                        }
+                        Err(error) => {
+                            let _ = journal.set_config("work_store_error", &error.to_string());
+                        }
                     }
                 }
             }
@@ -4567,7 +5096,9 @@ async fn run_sync_iteration(
                         .flatten()
                         .as_deref()
                         == Some(credential.as_str());
-                if still_current && unpair_this_computer(grants, journal, &active_mount_syncs.pairing).is_ok() {
+                if still_current
+                    && unpair_this_computer(grants, journal, &active_mount_syncs.pairing).is_ok()
+                {
                     state.forget_pairing();
                 }
                 return PollResult::Unauthenticated;
@@ -4577,6 +5108,7 @@ async fn run_sync_iteration(
             }
         }
     }
+    forget_paused_reconciles(restored_grants_reconciled, paused, &paused_grants);
     if paused {
         // Changes found on disk wait in the journal until syncing resumes.
         return PollResult::SuccessfulIdle;
@@ -4784,8 +5316,17 @@ async fn agent_hub_ticket_for(
     let credential = HostPlatform
         .read_credential(&device_id)?
         .ok_or_else(|| anyhow::anyhow!("no device credential"))?;
-    anyhow::ensure!(state.local_relay_identity().as_ref().is_some_and(|identity| identity.device_id == device_id)
-        && state.work_account().as_ref().is_some_and(|(cloud, _)| cloud == deployment.trim_end_matches('/')), "Work account is not ready");
+    anyhow::ensure!(
+        state
+            .local_relay_identity()
+            .as_ref()
+            .is_some_and(|identity| identity.device_id == device_id)
+            && state
+                .work_account()
+                .as_ref()
+                .is_some_and(|(cloud, _)| cloud == deployment.trim_end_matches('/')),
+        "Work account is not ready"
+    );
     spectra_bridge_core::sync::agent_hub_ticket(&deployment, &credential).await
 }
 
@@ -4799,7 +5340,12 @@ const CLOUD_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(30
 
 /// Subscribes to this computer's work signal, which replaces asking Spectra for
 /// work on a timer, and keeps "connected" true without running any function.
-async fn run_work_signal(journal: Arc<Journal>, state: Arc<ServerState>, wake: PollWake, signal: Arc<WorkSignal>) {
+async fn run_work_signal(
+    journal: Arc<Journal>,
+    state: Arc<ServerState>,
+    wake: PollWake,
+    signal: Arc<WorkSignal>,
+) {
     use std::sync::atomic::Ordering;
     loop {
         if wake.is_shutdown() {
@@ -4810,14 +5356,20 @@ async fn run_work_signal(journal: Arc<Journal>, state: Arc<ServerState>, wake: P
         let credential = device_id
             .as_deref()
             .and_then(|id| HostPlatform.read_credential(id).ok().flatten());
-        if let (Some(device_id), Some(deployment), Some(credential)) = (device_id, deployment, credential) {
-            let watched = spectra_bridge_core::sync::watch_work_signal(&deployment, &credential, |busy, changed| {
-                signal.live.store(true, Ordering::Relaxed);
-                signal.busy.store(busy, Ordering::Relaxed);
-                if changed {
-                    wake.wake();
-                }
-            });
+        if let (Some(device_id), Some(deployment), Some(credential)) =
+            (device_id, deployment, credential)
+        {
+            let watched = spectra_bridge_core::sync::watch_work_signal(
+                &deployment,
+                &credential,
+                |busy, changed| {
+                    signal.live.store(true, Ordering::Relaxed);
+                    signal.busy.store(busy, Ordering::Relaxed);
+                    if changed {
+                        wake.wake();
+                    }
+                },
+            );
             let watching = async {
                 loop {
                     if spectra_bridge_core::sync::cloud_reachable(&deployment).await {
@@ -4825,7 +5377,8 @@ async fn run_work_signal(journal: Arc<Journal>, state: Arc<ServerState>, wake: P
                     }
                     tokio::time::sleep(CLOUD_CHECK_EVERY).await;
                     if wake.is_shutdown()
-                        || journal.config("device_id").ok().flatten().as_deref() != Some(device_id.as_str())
+                        || journal.config("device_id").ok().flatten().as_deref()
+                            != Some(device_id.as_str())
                     {
                         break;
                     }
@@ -5088,10 +5641,12 @@ fn main() {
             // previously paired account's Devices page.
             let open =
                 MenuItem::with_id(app, "open", "Open Devices in Spectra", true, None::<&str>)?;
+            let account = MenuItem::with_id(app, "account", "Not connected to Spectra", false, None::<&str>)?;
             let pause = MenuItem::with_id(app, "pause", "Pause syncing", true, None::<&str>)?;
             let disconnect = MenuItem::with_id(app, "disconnect", "Disconnect this computer", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Bridge", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &pause, &disconnect, &quit])?;
+            let separator = tauri::menu::PredefinedMenuItem::separator(app)?;
+            let menu = Menu::with_items(app, &[&account, &separator, &open, &pause, &disconnect, &quit])?;
             let tray_journal = journal.clone();
             let tray_wake = sync_wake.clone();
             TrayIconBuilder::with_id(TRAY_ID)
@@ -5133,6 +5688,7 @@ fn main() {
                 })
                 .build(app)?;
             app.manage(TrayHandles {
+                account,
                 pause,
                 shown: Mutex::new(None),
             });
@@ -5158,8 +5714,134 @@ fn main() {
 }
 
 #[cfg(test)]
+mod missing_folder_tests {
+    use super::{ScanSight, missing_after_scan};
+    use spectra_bridge_core::journal::ResourceRecord;
+
+    fn record(id: &str, path: &str) -> ResourceRecord {
+        ResourceRecord {
+            local_resource_id: id.into(),
+            grant_id: "g".into(),
+            path_key: path.into(),
+            volume: None,
+            file_index: None,
+            content_hash: None,
+            revision: None,
+            available: true,
+            unavailable_reason: None,
+            last_seen_generation: 1,
+        }
+    }
+
+    #[test]
+    fn a_folder_that_is_not_there_marks_nothing_missing() {
+        let records = [record("a", "essay.docx"), record("b", "notes.docx")];
+        let sight = |complete, saw_entries, selection| ScanSight {
+            complete,
+            online_only: 0,
+            saw_entries,
+            selection,
+        };
+        // An unreadable root is an incomplete scan.
+        assert!(missing_after_scan(sight(false, false, false), &records, 2).is_empty());
+        // A folder that came back empty (an unmounted share) is not everything deleted.
+        assert!(missing_after_scan(sight(true, false, false), &records, 2).is_empty());
+        // Online-only files would look deleted.
+        assert!(
+            missing_after_scan(
+                ScanSight {
+                    online_only: 1,
+                    ..sight(true, true, false)
+                },
+                &records,
+                2
+            )
+            .is_empty()
+        );
+        // A folder still holding other things says these two are gone.
+        assert_eq!(
+            missing_after_scan(sight(true, true, false), &records, 2),
+            vec!["a", "b"]
+        );
+        // One chosen file that was deleted is reported, as before.
+        assert_eq!(
+            missing_after_scan(sight(true, false, true), &records[..1], 2),
+            vec!["a"]
+        );
+    }
+
+    #[test]
+    fn only_the_new_spelling_of_a_case_rename_is_followed() {
+        let folder = std::env::temp_dir().join(format!("spectra-case-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("essay.docx"), b"x").unwrap();
+        std::fs::rename(folder.join("essay.docx"), folder.join("Essay.docx")).unwrap();
+        assert!(super::listed_with_this_case(&folder.join("Essay.docx")));
+        assert!(!super::listed_with_this_case(&folder.join("essay.docx")));
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn files_that_vanish_with_their_folder_wait_for_it() {
+        let place =
+            std::env::temp_dir().join(format!("spectra-folder-gone-{}", std::process::id()));
+        let folder = place.join("School");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("essay.docx"), b"x").unwrap();
+        let grants = spectra_bridge_core::fs::GrantRegistry::default();
+        let grant = grants
+            .add_native_selection("School".into(), &folder)
+            .unwrap();
+        assert!(super::folder_can_say_gone(&grant));
+        std::fs::remove_file(folder.join("essay.docx")).unwrap();
+        // An emptied folder looks like an unmounted one.
+        assert!(!super::folder_can_say_gone(&grant));
+        std::fs::remove_dir(&folder).unwrap();
+        assert!(!super::folder_can_say_gone(&grant));
+        let _ = std::fs::remove_dir_all(&place);
+    }
+}
+
+#[cfg(test)]
+mod release_environment_tests {
+    use super::embedded_setting;
+
+    #[test]
+    fn a_release_build_ignores_origins_from_the_environment() {
+        let baked = Some("https://spectra.ink");
+        assert_eq!(
+            embedded_setting(Some("http://evil.test".into()), baked, false).as_deref(),
+            baked
+        );
+        assert_eq!(
+            embedded_setting(Some("http://evil.test".into()), None, false),
+            None
+        );
+        assert_eq!(
+            embedded_setting(Some("http://localhost:3001".into()), baked, true).as_deref(),
+            Some("http://localhost:3001")
+        );
+        assert_eq!(embedded_setting(None, baked, true).as_deref(), baked);
+    }
+}
+
+#[cfg(test)]
 mod devices_tests {
     use super::*;
+
+    #[test]
+    fn the_tray_names_the_connected_account() {
+        assert_eq!(
+            tray_account_line(true, Some("Andrew Freeman")),
+            "Connected as Andrew Freeman"
+        );
+        assert_eq!(tray_account_line(true, Some("  ")), "Connected to Spectra");
+        assert_eq!(tray_account_line(true, None), "Connected to Spectra");
+        assert_eq!(
+            tray_account_line(false, Some("Andrew Freeman")),
+            "Not connected to Spectra"
+        );
+    }
 
     fn mount(label: &str, state: &str, paused: bool) -> LocalMountStatus {
         LocalMountStatus {
@@ -5463,11 +6145,15 @@ mod devices_tests {
         let dir = temp_folder("account-grants");
         std::fs::write(dir.join("Chosen.docx"), b"chosen").unwrap();
         journal.set_config("device_id", "a").unwrap();
-        let folder = grants.add_native_selection("A folder".into(), &dir).unwrap();
+        let folder = grants
+            .add_native_selection("A folder".into(), &dir)
+            .unwrap();
         persist_folder_grant(&journal, &folder).unwrap();
         grants.remove(&folder.id);
         journal.set_config("device_id", "b").unwrap();
-        let file = grants.add_native_file_selection(&dir.join("Chosen.docx")).unwrap();
+        let file = grants
+            .add_native_file_selection(&dir.join("Chosen.docx"))
+            .unwrap();
         persist_file_grant(&journal, &file).unwrap();
         grants.remove(&file.id);
         restore_current_grants(&grants, &journal).unwrap();
@@ -5501,7 +6187,10 @@ mod devices_tests {
         let config: serde_json::Value = serde_json::from_str(&saved[0].1).unwrap();
         assert_eq!(config["selectedFile"], "Chosen.docx");
         assert!(grant_config_matches_pairing(&journal, &config));
-        assert_eq!(grant_device_id(&journal, &grant).unwrap(), "device-original");
+        assert_eq!(
+            grant_device_id(&journal, &grant).unwrap(),
+            "device-original"
+        );
         journal
             .set_config("device_id", "device-another-account")
             .unwrap();
@@ -5545,8 +6234,10 @@ mod devices_tests {
     fn unpairing_forgets_folders_and_the_browser_session_but_not_the_installation() {
         let journal = Journal::in_memory().unwrap();
         let grants = GrantRegistry::default();
+        let folder = temp_folder("Biology");
+        std::fs::write(folder.join("Essay.docx"), b"kept").unwrap();
         let grant = grants
-            .add_native_selection("Biology".into(), &temp_folder("Biology"))
+            .add_native_selection("Biology".into(), &folder)
             .unwrap();
         journal
             .set_config(&format!("mount:{}", grant.id), "{}")
@@ -5581,6 +6272,8 @@ mod devices_tests {
             journal.config("installation_id").unwrap().as_deref(),
             Some("install-1")
         );
+        // Removing the device stops syncing; the person's files stay.
+        assert_eq!(std::fs::read(folder.join("Essay.docx")).unwrap(), b"kept");
     }
 
     #[test]
@@ -5634,9 +6327,9 @@ mod devices_tests {
 mod tests {
     use super::{
         ActiveMountSyncGuard, MountRepairRetry, MountSyncs, clear_mount_repair_retry,
-        configured_deployment_url, current_time_ms, mount_repair_retry_due, mount_repair_retry_key,
-        resolve_bridge_data_dir, resolve_deployment_url, retain_current_mounts,
-        schedule_mount_repair_retry,
+        configured_deployment_url, current_time_ms, forget_paused_reconciles,
+        mount_repair_retry_due, mount_repair_retry_key, resolve_bridge_data_dir,
+        resolve_deployment_url, retain_current_mounts, schedule_mount_repair_retry,
     };
     use spectra_bridge_core::journal::Journal;
     use std::collections::HashSet;
@@ -5770,6 +6463,16 @@ mod tests {
     }
 
     #[test]
+    fn resuming_a_folder_scans_it_again_in_full() {
+        let mut reconciled = HashSet::from(["paused".to_owned(), "running".to_owned()]);
+        let paused = HashSet::from(["paused".to_owned()]);
+        forget_paused_reconciles(&mut reconciled, false, &paused);
+        assert_eq!(reconciled, HashSet::from(["running".to_owned()]));
+        forget_paused_reconciles(&mut reconciled, true, &HashSet::new());
+        assert!(reconciled.is_empty());
+    }
+
+    #[test]
     fn removed_mounts_are_dropped_from_reconciliation_state() {
         let mut reconciled = HashSet::from(["removed".to_owned(), "current".to_owned()]);
         retain_current_mounts(&mut reconciled, ["current".to_owned()]);
@@ -5833,8 +6536,10 @@ mod tests {
 
     mod per_file_repair {
         use super::super::{
-            DiscoveredResource, DiscoverySkip, MountPass, classify_discovery_skip,
-            hand_off_failed_upload, mount_pass_status, record_mount_repair_retry, scan_local_files,
+            DiscoveredResource, DiscoverySkip, MountPass, MountRepairRetry,
+            classify_discovery_skip, current_time_ms, hand_off_failed_upload, mount_pass_status,
+            mount_repair_retry_due, mount_repair_retry_key, recheck_when_waiting_file_frees,
+            record_mount_repair_retry, remember_waiting_files, scan_local_files,
             set_mount_file_note, set_mount_status,
         };
         use spectra_bridge_core::fs::{Grant, GrantRegistry};
@@ -6113,6 +6818,42 @@ mod tests {
             assert!(detail.contains("\u{201c}bad:name.docx\u{201d} could not be added"));
             assert!(detail.ends_with("Spectra will check again in 30 seconds."));
             assert_eq!((synced, total), (1, 4));
+        }
+
+        #[test]
+        fn a_file_freed_by_office_rechecks_the_folder_soon() {
+            let journal = Journal::in_memory().unwrap();
+            assert!(!recheck_when_waiting_file_frees(
+                &journal,
+                "g",
+                "essay.docx"
+            ));
+            remember_waiting_files(&journal, "g", &["Biology\\Essay.docx".into()]);
+            assert!(!recheck_when_waiting_file_frees(
+                &journal,
+                "g",
+                "other.docx"
+            ));
+            assert!(!mount_repair_retry_due(&journal, "g"));
+            assert!(recheck_when_waiting_file_frees(
+                &journal,
+                "g",
+                "biology/essay.docx"
+            ));
+            let retry: MountRepairRetry = serde_json::from_str(
+                &journal
+                    .config(&mount_repair_retry_key("g"))
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert!(retry.retry_at_ms <= current_time_ms() + 2_000);
+            // Once per waiting file: the list is now empty.
+            assert!(!recheck_when_waiting_file_frees(
+                &journal,
+                "g",
+                "biology/essay.docx"
+            ));
         }
 
         #[test]

@@ -194,6 +194,7 @@ export function messageTouches(metadata: Record<string, unknown> | undefined): H
           title: value.title,
           action,
           ...(typeof value.change === "string" && value.change.trim() ? { change: value.change } : {}),
+          ...(action === "edited" && typeof value.region === "string" && value.region ? { region: value.region } : {}),
         },
       ];
     }),
@@ -214,7 +215,8 @@ export function WorkTouchCards({
   undone = false,
 }: {
   touches: readonly HarnessArtifactTouchView[];
-  onOpen?: (artifactId: string) => void;
+  /** Opens the work; an edit lands on the region it changed. */
+  onOpen?: (artifactId: string, regionId?: string) => void;
   /** Names as they are now, when known: a work renamed since keeps its new name here. */
   currentTitles?: ReadonlyMap<string, string>;
   /** The run was undone: a slip says what became of the work, not what the run did. */
@@ -255,7 +257,7 @@ export function WorkTouchCards({
         return (
           <li key={touch.id} data-work-slip style={{ "--work-hue": meta.color, "--work-tint": meta.soft } as CSSProperties}>
             {opens ? (
-              <button type="button" onClick={() => opens(touch.id)} aria-label={`Open ${touch.title}`} className="work-slip">
+              <button type="button" onClick={() => opens(touch.id, touch.region)} aria-label={`Open ${touch.title}`} className="work-slip">
                 {body}
               </button>
             ) : (

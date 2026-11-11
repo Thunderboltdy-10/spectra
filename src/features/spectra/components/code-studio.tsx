@@ -117,6 +117,7 @@ import {
   buildSpectraSandboxDocument,
   type SpectraSandboxAsset,
   type SpectraSandboxFrameMessage,
+  isBenignRuntimeError,
 } from "../embed/sandbox-protocol";
 import {
   SandboxedArtifactRuntime,
@@ -1565,6 +1566,7 @@ export function CodeStudio({
         `${event.status === "passed" ? "Passed" : "Failed"}: ${event.name}${event.message ? `. ${event.message}` : ""}`,
       );
     } else if (event.type === "spectra:error") {
+      if (isBenignRuntimeError(event.message)) return;
       if (exportJob) {
         setExportError(event.message);
         setExportJob(null);

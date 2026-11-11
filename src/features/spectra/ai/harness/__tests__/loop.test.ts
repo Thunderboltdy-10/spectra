@@ -707,3 +707,30 @@ describe("runHarnessLoop", () => {
     expect(outcome.state.widgets).toEqual(["2", "3", "4", "5"].map((n) => ({ id: "w" + n, title: "W" + n, html: "<p>W" + n + "</p>" })));
   });
 });
+
+describe("a tool that never returns", () => {
+  it("becomes a tool error after the limit, and its work is told to stop", async () => {
+    let toldToStop = false;
+    const hung = tool({
+      name: "hang",
+      execute: (_args, ctx) =>
+        new Promise(() => {
+          ctx.signal.addEventListener("abort", () => { toldToStop = true; });
+        }),
+    });
+    const model = scripted([
+      { text: "", toolCalls: [call("c1", "hang")] },
+      (messages) => {
+        expect(messages.at(-1)).toMatchObject({ role: "tool", tool_call_id: "c1" });
+        expect(String((messages.at(-1) as { content: string }).content)).toMatch(/did not finish within/);
+        return { text: "It took too long.", toolCalls: [] };
+      },
+    ]);
+    const outcome = await runHarnessLoop(
+      emptyLoopState([user("go")]),
+      deps({ callModel: model.caller, tools: [hung], toolLimitMs: 20 }),
+    );
+    expect(outcome.status).toBe("completed");
+    expect(toldToStop).toBe(true);
+  });
+});

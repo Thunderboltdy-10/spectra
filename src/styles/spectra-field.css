@@ -792,7 +792,7 @@ html[data-life="on"] [data-life-ghost] [data-life-ghost-bar] {
   content: none;
 }
 [data-life-working="arrival"] {
-  animation: life-settle 420ms var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1)) both;
+  animation: life-settle 420ms var(--ease-standard) both;
 }
 
 @keyframes life-settle {

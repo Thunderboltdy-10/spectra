@@ -41,6 +41,7 @@ function syncEqual(
     left.displayName === right.displayName &&
     left.unsynchronizedChanges === right.unsynchronizedChanges &&
     left.error === right.error
+    && left.notice === right.notice
     && left.recoveryConflict === right.recoveryConflict
     && left.durableAnchor === right.durableAnchor
   );
@@ -208,6 +209,7 @@ export class ScopedCollaborationSnapshots {
         : this.sync.error
           ? { error: this.sync.error }
           : {}),
+      ...((patch.notice ?? this.sync.notice) ? { notice: patch.notice ?? this.sync.notice } : {}),
     };
     const syncChanged = !syncEqual(this.sync, nextSync);
     if (syncChanged) this.sync = nextSync;
@@ -248,6 +250,7 @@ export class ScopedCollaborationSnapshots {
       ...(this.sync.accountId ? { accountId: this.sync.accountId } : {}),
       ...(this.sync.displayName ? { displayName: this.sync.displayName } : {}),
       ...(this.sync.error ? { error: this.sync.error } : {}),
+      ...(this.sync.notice ? { notice: this.sync.notice } : {}),
     };
   }
 }

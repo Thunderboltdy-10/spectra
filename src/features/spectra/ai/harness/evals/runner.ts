@@ -1,5 +1,5 @@
 import { authoredShape, isAuthoredType, readAuthored } from "../authoring";
-import type { ThreadTitleWriter } from "../thread-title";
+import { modelThreadTitleWriter, type ThreadTitleWriter } from "../thread-title";
 import { createCompactor, type Summariser } from "../compaction";
 import type { ModelCaller } from "../loop";
 import { MemoryBackend } from "../memory-backend";
@@ -148,6 +148,8 @@ export function disciplineProblems(calls: readonly RecordedCall[], readTools: Re
   let readOnly = 0;
   for (const call of calls) {
     if (!call.toolNames.length) break;
+    // Asking the user ends the streak: what follows acts on their answer.
+    if (call.toolNames.includes("ask_user")) break;
     if (!call.toolNames.every((name) => readTools.has(name))) break;
     readOnly += 1;
   }
@@ -212,7 +214,7 @@ async function playOnce(scenario: EvalScenario, deps: EvalDeps, readTools: Reado
         ...(focused ? { open: [{ id: focused.id, type: focused.type, title: focused.title }] } : {}),
       },
       callModel: caller,
-      titleWriter: deps.titleWriter ?? null,
+      titleWriter: scenario.nameThread ? (deps.titleWriter ?? modelThreadTitleWriter) : (deps.titleWriter ?? null),
       compactor: createCompactor({ contextWindow: scenario.contextWindow ?? 200_000, summarise: deps.summarise }),
       now: clock,
       signal: AbortSignal.any([stopper.signal, AbortSignal.timeout(deps.timeoutMs ?? DEFAULT_TIMEOUT_MS)]),
@@ -238,6 +240,7 @@ async function playOnce(scenario: EvalScenario, deps: EvalDeps, readTools: Reado
   let answered = false;
   let history: HarnessMessage[] | undefined = scenario.history;
   for (const prompt of [scenario.prompt, ...(scenario.followUps ?? [])]) {
+    backend.startPass();
     let result = await run(prompt, { history });
     passes.push(result);
     while (result.status === "paused" && scenario.answer && !answered) {

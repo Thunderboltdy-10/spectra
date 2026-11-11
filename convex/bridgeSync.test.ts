@@ -1489,3 +1489,55 @@ describe("Bridge incremental cloud seam", () => {
     });
   });
 });
+
+describe("a file deleted outside Spectra", () => {
+  it("is never recreated on its own, and Put it back writes it again from Spectra's copy", async () => {
+    const t = setupTest();
+    const fixture = await seedBridge(t);
+    const discovery = await t.mutation(api.bridgeSync.discoverResourcesPage, {
+      credential,
+      mountId: fixture.mountId,
+      resources: [{ localResourceId: `lr_${"c".repeat(16)}`, relativePath: "Biology/Essay.docx", size: 42, contentHash: "a".repeat(64), nativeFormat: "docx" }],
+    });
+    const registration = discovery.registrations[0];
+    if (!("replicaId" in registration) || !registration.replicaId) throw new Error("Expected a discovered replica");
+    const replicaId: Id<"workReplicas"> = registration.replicaId;
+    const { workId, clerkId } = await t.run(async (ctx) => {
+      const replica = (await ctx.db.get(replicaId))!;
+      const now = Date.now();
+      await ctx.db.patch(replica._id, { state: "current", revision: "a".repeat(64), contentHash: "a".repeat(64) });
+      const cloud = await ctx.db.query("workReplicas").withIndex("by_work_kind", (q) => q.eq("workId", replica.workId).eq("kind", "cloud")).unique();
+      const cloudFields = { state: "current" as const, payloadRef: "payload-cloud", contentHash: "a".repeat(64), revision: "a".repeat(64), updatedAt: now };
+      if (cloud) await ctx.db.patch(cloud._id, cloudFields);
+      else await ctx.db.insert("workReplicas", { accountId: fixture.accountId, workId: replica.workId, kind: "cloud", nativeFormat: "docx", ...cloudFields });
+      const account = (await ctx.db.get(fixture.accountId))!;
+      return { workId: replica.workId, clerkId: account.clerkId };
+    });
+    await t.mutation(api.bridgeSync.reportMissingResources, { credential, mountId: fixture.mountId, localResourceIds: [`lr_${"c".repeat(16)}`] });
+    const writesFor = () => t.run((ctx) => ctx.db.query("bridgeWriteRequests").collect());
+    expect(await t.run((ctx) => ctx.db.get(replicaId))).toMatchObject({ state: "unavailable", unavailableReason: "missing-on-disk" });
+    expect(await writesFor()).toHaveLength(0);
+
+    const me = t.withIdentity({ subject: clerkId, email: "bridge-batch@example.test", emailVerified: true });
+    expect(await me.mutation(api.bridgeSync.putBackFile, { workId })).toEqual({ putBack: 1 });
+    expect(await t.run((ctx) => ctx.db.get(replicaId))).toMatchObject({ state: "pending", unavailableReason: "restoring-from-cloud" });
+    const writes = await writesFor();
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ relativePath: "Biology/Essay.docx", payloadRef: "payload-cloud", state: "pending" });
+    // Bridge creates a missing file only for a `new:` base; the old bytes' hash would be refused (F22).
+    expect(writes[0]!.baseRevision).toMatch(/^new:restore:/);
+    expect((await t.run((ctx) => ctx.db.get(replicaId)))?.revision).toBe(writes[0]!.baseRevision);
+    // Asking twice queues nothing more.
+    await expect(me.mutation(api.bridgeSync.putBackFile, { workId })).rejects.toThrow("FILE_NOT_MISSING");
+    expect(await writesFor()).toHaveLength(1);
+    // Written back, then deleted again: putting it back is a fresh write, not the first one's receipt.
+    await t.run(async (ctx) => {
+      await ctx.db.patch(writes[0]!._id, { state: "verified" });
+      await ctx.db.patch(replicaId, { state: "unavailable", unavailableReason: "missing-on-disk", revision: "a".repeat(64), updatedAt: Date.now() + 1000 });
+    });
+    expect(await me.mutation(api.bridgeSync.putBackFile, { workId })).toEqual({ putBack: 1 });
+    const again = await writesFor();
+    expect(again).toHaveLength(2);
+    expect(again[1]!.baseRevision).not.toBe(writes[0]!.baseRevision);
+  });
+});

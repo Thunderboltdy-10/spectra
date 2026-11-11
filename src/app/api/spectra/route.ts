@@ -1404,6 +1404,7 @@ export async function POST(request: NextRequest) {
         ...(typeof body.summary === "string" ? { summary: body.summary } : {}),
         ...(Array.isArray(body.tags) ? { tags: body.tags.filter((tag): tag is string => typeof tag === "string") } : {}),
         ...(body.edited === true ? { edited: true } : {}),
+        ...(body.seeded === true ? { seeded: true } : {}),
       });
       return ok(result);
     }

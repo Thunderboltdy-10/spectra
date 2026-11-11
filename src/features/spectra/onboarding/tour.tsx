@@ -3,9 +3,7 @@
 import { useCallback, useEffect, useEffectEvent } from "react";
 import { usePathname } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
-import { useConvexAuth } from "convex/react";
-import { useQuery } from "@/features/spectra/data/use-kept-query";
-import { api } from "../../../../convex/_generated/api";
+import { useSession } from "@/features/spectra/data/use-session";
 import { spectraBus } from "../events";
 import { useSpectraRouter } from "../hooks/use-spectra-router";
 import { useSpectraPreferences } from "../settings/preference-store";
@@ -30,8 +28,7 @@ type Membership = { status: string; school: { name: string } | null };
 
 function useTourPerson(): TourPerson {
   const { user } = useUser();
-  const { isAuthenticated } = useConvexAuth();
-  const memberships = useQuery(api.memberships.listMine, isAuthenticated ? {} : "skip") as Membership[] | undefined;
+  const memberships = useSession()?.memberships as Membership[] | undefined;
   const school = memberships?.find((membership) => membership.status === "active")?.school?.name ?? null;
   const firstName = user?.firstName?.trim() || user?.fullName?.split(/\s+/)[0] || "there";
   return { firstName, school };

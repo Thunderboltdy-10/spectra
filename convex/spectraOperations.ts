@@ -379,7 +379,7 @@ export const markExecuted = mutation({
     const authorityKeys = [
       "pendingApplicationScope", "approvedApplicationScope", "applicationWriteReceipt",
       "artifactWriteScope", "pendingArtifactScope", "approvedArtifactScope", "artifactWriteReceipt",
-      "clarificationDraft",
+      "clarificationDraft", "allowedArtifactIntent",
     ];
     const reported = args.output && typeof args.output === "object" && !Array.isArray(args.output)
       ? { ...args.output } as Record<string, unknown> : undefined;

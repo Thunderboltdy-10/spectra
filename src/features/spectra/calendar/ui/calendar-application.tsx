@@ -59,8 +59,16 @@ const WORKDAY_START_HOUR = 7;
 const HOURS = 24;
 const MIN_DAYS = 1;
 const MAX_DAYS = 10;
-/** The days the week narrows to while a work stands open beside it. */
+/** The fewest days the week narrows to while a work stands open beside it. */
 const BESIDE_SIDE_DAYS = 3;
+/** A day column narrower than this stops reading; `fitDayWidth` never goes under it. */
+const READABLE_DAY_PX = 88;
+const HOURS_COLUMN_PX = 54;
+
+/** How many days fit side by side in the scroller at a readable width. */
+export function daysThatFit(scrollerWidth: number) {
+  return Math.max(MIN_DAYS, Math.floor((scrollerWidth - HOURS_COLUMN_PX) / READABLE_DAY_PX));
+}
 const EXTEND_DAYS = 7;
 const MAX_LOADED_DAYS = 42;
 const SCROLL_LOAD_PX = 280;
@@ -81,7 +89,7 @@ const MONTHS = [
 
 /** Each day's width so `span` days fill the scroller beside the hours column; set on it as `--day-width`. */
 function fitDayWidth(scroller: HTMLElement, span: number) {
-  const width = Math.max(88, (scroller.clientWidth - 54) / span);
+  const width = Math.max(READABLE_DAY_PX, (scroller.clientWidth - HOURS_COLUMN_PX) / span);
   scroller.style.setProperty("--day-width", `${width}px`);
   return width;
 }
@@ -1070,14 +1078,25 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
       spectraBus.subscribe("side.open", () => {
         const open = Boolean(spectraBus.getQuery("side.open"));
         if (open && wideSpan.current === null && daySpanRef.current > BESIDE_SIDE_DAYS) {
-          wideSpan.current = daySpanRef.current;
           // Narrow around what was opened here; something opened from
           // elsewhere (a thread, a search) keeps today in view when it shows.
           const today = startOfLocalDay(Date.now());
           const first = focusedStartRef.current;
           const todayShows = today >= first && today < addLocalDays(first, daySpanRef.current);
-          changeDaySpan(BESIDE_SIDE_DAYS, openedOn.current ?? (todayShows ? today : undefined));
+          const around = openedOn.current ?? (todayShows ? today : undefined);
           openedOn.current = undefined;
+          // The shell settles first (the rail gives way, a panel may float);
+          // then the week keeps every day that still reads, never under three.
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              const scroller = scrollerRef.current;
+              if (!scroller || !spectraBus.getQuery("side.open") || wideSpan.current !== null) return;
+              const span = Math.max(BESIDE_SIDE_DAYS, Math.min(daySpanRef.current, daysThatFit(scroller.clientWidth)));
+              if (span >= daySpanRef.current) return;
+              wideSpan.current = daySpanRef.current;
+              changeDaySpan(span, around);
+            }),
+          );
         } else if (!open && wideSpan.current !== null) {
           changeDaySpan(wideSpan.current);
           wideSpan.current = null;

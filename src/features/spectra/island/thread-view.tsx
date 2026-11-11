@@ -6,10 +6,8 @@ import { cn } from "@/lib/utils";
 import { followAiActor, useFollowAi } from "../collaboration/follow-ai";
 import { ThreadConversation } from "../components/conversation-surface";
 import { spectraBus } from "../events";
-import { deriveLiveDockTab } from "../runs/live-dock";
 import type { SpectraRunEngine } from "./engine";
 import type { IslandTab } from "./island-model";
-import { runTabCard, runTabSource } from "./run-tabs";
 
 /*
  * The thread view (ISLAND.md): hovering a tab raises its thread above the
@@ -26,12 +24,11 @@ import { runTabCard, runTabSource } from "./run-tabs";
 const CARD_CONTROLS =
   "button, a, input, textarea, select, iframe, [contenteditable='true'], [role='button'], [role='menuitem'], [role='radio'], [role='checkbox'], section[aria-label], figure";
 
-function openWork(workId: string) {
-  void spectraBus.command("work.open", { workId, surface: "panel" });
+function openWork(workId: string, regionId?: string) {
+  void spectraBus.command("work.open", { workId, surface: "panel", ...(regionId ? { region: { id: regionId } } : {}) });
 }
 
 const PLAN: CollapseStep[] = [
-  { hideLabel: "undo" },
   { hideLabel: "follow" },
   { toMenu: "undo" },
 ];
@@ -54,11 +51,8 @@ export const ThreadView = forwardRef<
     onPointerLeave?: () => void;
   }
 >(function ThreadView({ tab, engine, visible, offset, onOpenSide, onOpenPage, onReply, onMinimise, onPointerEnter, onPointerLeave }, ref) {
-  const model = useMemo(() => deriveLiveDockTab(runTabSource(tab.source)), [tab.source]);
   const live = engine?.liveExchange?.runId === tab.runId ? engine.liveExchange : null;
   const moving = tab.status === "working" || tab.state === "needs_input";
-  const card = runTabCard(tab.source);
-  const canUndo = Boolean(card?.actions?.some((action) => action.key === "revert")) && !model.undone;
   const caption = live?.steps.at(-1)?.title.replace(/\*/g, "") ?? (live?.content?.trim() ? "Writing the answer" : tab.caption);
 
   // Following this run: the app opens and shows whatever Spectra works on, until the user does something themselves.
@@ -84,12 +78,10 @@ export const ThreadView = forwardRef<
       ...(moving && engine
         ? [{ id: "stop", icon: "stop", label: "Stop", onSelect: () => void engine.stop(tab.runId) } satisfies BarCommand]
         : []),
-      ...(canUndo && engine && card
-        ? [{ id: "undo", icon: "undoSpectra", label: "Undo Spectra's changes", onSelect: () => void engine.onCardAction(card, "revert") } satisfies BarCommand]
-        : []),
+      // Undo lives once, under the reply beside the work it changed (ReplyWork), not here as well.
       { id: "minimise", icon: "close", label: "Minimise", labelPolicy: "never", onSelect: onMinimise },
     ],
-    [canUndo, card, engine, followed, moving, onMinimise, onOpenPage, onOpenSide, tab.runId],
+    [engine, followed, moving, onMinimise, onOpenPage, onOpenSide, tab.runId],
   );
 
   return (

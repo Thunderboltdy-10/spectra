@@ -27,6 +27,7 @@ vi.mock("convex/react", () => ({
     if (args === "skip") return undefined;
     const name = String((ref as { _name?: string })?._name ?? ref);
     if (/deviceWorks/.test(name)) return undefined;
+    if (/identity:session/.test(name)) return { catalog: { accountId: "account", schoolId: "school", membershipId: "membership" }, hasDevice: true };
     return /syncPolicy/.test(name) ? { contentDirection: "manual" } : h.cloud;
   },
   useMutation: (ref: unknown) => {
@@ -42,6 +43,7 @@ vi.mock("../../../../../convex/_generated/api", () => {
     api: {
       bridge: { syncedNodes: ref("bridge:syncedNodes"), overview: ref("bridge:overview"), requestPairing: ref("bridge:requestPairing"), revokeDevice: ref("bridge:revokeDevice") },
       catalogGraph: { identity: ref("catalogGraph:identity") },
+      identity: { session: ref("identity:session") },
       syncPolicy: { effective: ref("syncPolicy:effective"), overrideAccount: ref("syncPolicy:overrideAccount") },
       deviceWorks: { settings: ref("deviceWorks:settings"), counts: ref("deviceWorks:counts"), onThisComputer: ref("deviceWorks:onThisComputer"), movable: ref("deviceWorks:movable"), backupsToRestore: ref("deviceWorks:backupsToRestore"), choose: ref("deviceWorks:choose"), backupUploadUrl: ref("deviceWorks:backupUploadUrl"), recordBackup: ref("deviceWorks:recordBackup"), adoptRestored: ref("deviceWorks:adoptRestored"), deleteBackups: ref("deviceWorks:deleteBackups") },
     },

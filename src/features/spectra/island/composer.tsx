@@ -39,7 +39,7 @@ import { readCommandAttachment, type CommandAttachment } from "../components/com
 import { getSpectraInstalledAgents, searchSpectra, type SpectraArtifact, type SpectraInstalledAgent } from "../data/api";
 import { useLifeArrival, useLifeDeparture } from "../life/use-life";
 import { useDictation } from "./dictation";
-import { PROVIDER_LABEL, providerProblem, useAgentRuntime } from "../ai/use-agent-runtime";
+import { PROVIDER_LABEL, providerProblem, recheckAgentRuntimeIfStale, useAgentRuntime, warmAgentRuntime } from "../ai/use-agent-runtime";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { applyRuntimeChoice } from "../settings/ui/runtime-settings";
 import { bridgeUnavailableReason, useBridgeAvailability } from "../bridge/availability";
@@ -94,6 +94,8 @@ export const IslandComposer = forwardRef<
     /** The thread it writes into, for its draft and placeholder. */
     draftKey: string;
     placeholder: string;
+    /** What the empty field says once it has the keyboard, when that differs. */
+    focusedPlaceholder?: string;
     /** A run started from here is still going, out of sight. */
     working?: boolean;
     visible: boolean;
@@ -102,10 +104,15 @@ export const IslandComposer = forwardRef<
     onStop?: () => void;
     onCancel: () => void;
   }
->(function IslandComposer({ draftKey, placeholder, visible, busy, working, onSend, onStop, onCancel }, forwarded) {
+>(function IslandComposer({ draftKey, placeholder: restingPlaceholder, focusedPlaceholder, visible, busy, working, onSend, onStop, onCancel }, forwarded) {
+  const [fieldFocused, setFieldFocused] = useState(false);
+  const placeholder = fieldFocused && focusedPlaceholder ? focusedPlaceholder : restingPlaceholder;
   const rootRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Someone on their own Codex or Claude Code gets a fresh answer about it as they start to type.
+  const chosenRuntime = useSpectraPreferences().preferences.ai.runtime;
+  const ownRuntime = chosenRuntime !== "spectra";
   const [text, setText] = useState(() => drafts.get(draftKey) ?? "");
   const [attachments, setAttachments] = useState<CommandAttachment[]>([]);
   const [references, setReferences] = useState<SpectraRunPointer[]>([]);
@@ -326,18 +333,27 @@ export const IslandComposer = forwardRef<
       ) : null}
       <div className="flex items-end gap-1.5 p-2">
         <AgentSwitch label={agentLabel} agent={agent} agentIndex={agentIndex} agents={agents} sends={sends} working={working} onChoose={setAgentIndex} />
+        <div className="relative flex min-w-0 flex-1">
+        {!text ? <PlaceholderLine text={placeholder} /> : null}
         <textarea
           ref={fieldRef}
           data-composer-text
           rows={1}
           value={text}
           aria-label="Message Spectra"
+          // Read out as the field's hint; the line drawn over it crossfades as it changes.
           placeholder={placeholder}
           onChange={(event) => onChange(event.target.value)}
+          onBlur={() => setFieldFocused(false)}
+          onFocus={() => {
+            setFieldFocused(true);
+            if (ownRuntime) void recheckAgentRuntimeIfStale().then(() => warmAgentRuntime(chosenRuntime));
+          }}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
-          className="min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-[7px] text-ui leading-[22px] text-[var(--text-primary)] outline-none placeholder:truncate placeholder:text-[var(--text-tertiary)]"
+          className="min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-[7px] text-ui leading-[22px] text-[var(--text-primary)] outline-none placeholder:text-transparent"
         />
+        </div>
         <input ref={fileRef} type="file" multiple hidden onChange={(event) => void addFiles(event.target.files).then(() => (event.target.value = ""))} />
         <IconButton
           icon={<Icon name="attach" size={21} />}
@@ -548,8 +564,8 @@ function RuntimeControls() {
                       <div className="px-2 pb-1 text-micro font-medium text-[var(--text-tertiary)]">{PROVIDER_LABEL[provider]}</div>
                       <Tooltip label={unavailable} className="flex" side="right">
                         <DropdownMenuItem asChild>
-                          <Link href={DEVICES_HREF} aria-label={`Preferred ${PROVIDER_LABEL[provider]} model. ${unavailable}`} className="opacity-45">
-                            Preferred
+                          <Link href={DEVICES_HREF} className="text-[var(--text-secondary)]">
+                            Open Spectra Bridge to use it
                           </Link>
                         </DropdownMenuItem>
                       </Tooltip>
@@ -563,7 +579,7 @@ function RuntimeControls() {
                     <DropdownMenuDisclosure
                       heading
                       label={PROVIDER_LABEL[provider]}
-                      hint={providerChosen ? modelLabel : undefined}
+                      hint={providerChosen ? modelLabel : "Ready"}
                       defaultOpen={providerChosen}
                     >
                       <DropdownMenuRadioItem value={`${provider}:`}>Preferred</DropdownMenuRadioItem>
@@ -609,4 +625,32 @@ function ComposerChip({ id, departs, ...props }: HTMLAttributes<HTMLSpanElement>
   useLifeArrival(ref, `composer-chip:${id}`, "human", { bars: "span" });
   useLifeDeparture(ref, departs);
   return <span ref={ref} {...props} />;
+}
+
+/**
+ * The empty field's line (LAUNCH-REVIEW F4). One line is reserved: when it
+ * changes, the old words fade out as the new fade in over them, so two are
+ * never readable at once.
+ */
+function PlaceholderLine({ text }: { text: string }) {
+  const [lines, setLines] = useState<{ current: string; leaving: string | null }>({ current: text, leaving: null });
+  if (lines.current !== text) setLines({ current: text, leaving: lines.current });
+  useEffect(() => {
+    if (!lines.leaving) return;
+    const timer = window.setTimeout(() => setLines((state) => ({ ...state, leaving: null })), 200);
+    return () => window.clearTimeout(timer);
+  }, [lines.leaving]);
+  const line = "pointer-events-none absolute inset-x-0 top-0 truncate px-1.5 py-[7px] text-ui leading-[22px] text-[var(--text-tertiary)]";
+  return (
+    <span aria-hidden data-composer-placeholder className="contents">
+      {lines.leaving ? (
+        <span key={`out:${lines.leaving}`} className={cn(line, "island-content-out")}>
+          {lines.leaving}
+        </span>
+      ) : null}
+      <span key={`in:${lines.current}`} className={cn(line, lines.leaving && "island-content-in")}>
+        {lines.current}
+      </span>
+    </span>
+  );
 }

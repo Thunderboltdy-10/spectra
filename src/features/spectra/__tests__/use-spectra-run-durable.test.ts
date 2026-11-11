@@ -305,6 +305,31 @@ describe("Durable run event consumption", () => {
     expect(result.current.activeRunId).toBe("continued");
   });
 
+  it("shows a run stopped from another view as stopped, never Working again (F09)", async () => {
+    source(tab("running"), []);
+    let push!: (event: object) => void;
+    transport.mockImplementation(async (_url?: unknown, init?: RequestInit) => {
+      if (JSON.parse(String(init?.body)).action !== "run") return new Response("{}", { status: 409 });
+      return new Response(new ReadableStream({ start(controller) {
+        push = (event) => controller.enqueue(new TextEncoder().encode(JSON.stringify(event) + "\n"));
+        push({ type: "run_created", runId: "run", card: { id: "card", runId: "run", status: "running", title: "Getting ready", variant: "status", actions: [], updatedAt: 1 } });
+      } }));
+    });
+    const running = { _id: "card", runId: "run", status: "running", title: "Working", summary: "", variant: "status", actions: [], updatedAt: 1 };
+    const { result, rerender } = renderHook(({ cards }) => useSpectraRun({ surface: "chat", threadId: "thread", initialCards: cards as never }), { initialProps: { cards: [running] } });
+    await settle();
+    await act(async () => { void result.current.run("Derive the standing wave equation", [], { threadId: "thread" }); });
+    await settle();
+    expect(result.current.liveExchange?.runId).toBe("run");
+    rerender({ cards: [{ ...running, status: "cancelled", title: "Stopped", updatedAt: 2 }] });
+    await settle();
+    expect(result.current.liveExchange?.status).toBe("stopped");
+    // A late progress event from the same stream does not bring it back.
+    await act(async () => { push({ type: "progress", runId: "run", title: "Creating Standing Waves" }); });
+    await settle();
+    expect(result.current.liveExchange?.status).toBe("stopped");
+  });
+
   it("clears the provisional exchange when a continuation is rejected before acknowledgement", async () => {
     source(tab(), [final()]);
     const { result } = renderHook(() => useSpectraRun({ surface: "chat", threadId: "thread" }));

@@ -5,6 +5,8 @@ import {
 } from "./actions";
 import { calendarItemFromWire, type CalendarItem } from "./model";
 
+export { refusePastCalendarStart } from "./past-start";
+
 export const CALENDAR_MUTATION_TOOL_IDS = [
   "schedule_calendar_task",
   "create_calendar_personal_event",

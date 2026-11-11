@@ -139,7 +139,7 @@
   border-radius: 8px;
   background: var(--foundry-nav-ink);
   padding: 0 14px;
-  color: var(--text-on-accent, #fff);
+  color: var(--text-inverse);
   font-size: var(--text-ui);
   font-weight: 560;
   transition:

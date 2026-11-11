@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { requestFullView } from "../components/full-view-origin";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@/features/spectra/data/use-kept-query";
@@ -396,8 +397,10 @@ export function ChatShell() {
             targetId: artifactId,
             view: "artifact",
             navigate: () => {
-              if (surface === "full")
+              if (surface === "full") {
+                requestFullView(artifactId);
                 router.push(`/library/${encodeURIComponent(artifactId)}`);
+              }
               else openArtifact(artifactId);
             },
           });
@@ -440,6 +443,9 @@ export function ChatShell() {
   }, [focusedArtifact, setVisibleArtifactIds]);
   const scopedWorkspaceId = chatWorkspaceId ?? detail?.thread.workspaceId;
 
+  const openAfterSendRef = useRef(preferences.ai?.openConversationAfterSend ?? false);
+  openAfterSendRef.current = preferences.ai?.openConversationAfterSend ?? false;
+  const [homeQuiet, setHomeQuiet] = useState(false);
   const runEngine = useSpectraRun({
     surface: "chat",
     workspaceId: scopedWorkspaceId,
@@ -449,6 +455,13 @@ export function ChatShell() {
     currentView: "conversation",
     initialCards: [],
     onThreadReady: async (id) => {
+      // Sent from Home with "Open the thread when I send" off: Home stays where
+      // it is and the answer rises from its tab on the island (ISLAND.md, "Sending").
+      if (!activeThreadRef.current && !openAfterSendRef.current) {
+        setHomeQuiet(true);
+        setComposerThread(null);
+        return;
+      }
       setComposerThread({
         id,
         title:
@@ -592,7 +605,9 @@ export function ChatShell() {
   }, [studioBeside, studioPanelWidth]);
   const column = useThreadColumn(studioBeside);
   // Home is this page before a thread: the day lifts away once one is sent or opened, and comes back with a new one.
-  const started = Boolean(threadId || detail || runEngine.liveExchange || loading);
+  // A run left to answer in the background from Home does not take the page.
+  const quietLive = homeQuiet && (!threadId || (runEngine.liveExchange?.threadId !== undefined && runEngine.liveExchange.threadId !== threadId));
+  const started = Boolean(threadId || detail || (runEngine.liveExchange && !quietLive) || loading);
   const [leadState, setLeadState] = useState<"shown" | "leaving" | "gone">(requestedThreadId ? "gone" : "shown");
   useEffect(() => {
     if (started && leadState === "shown") setLeadState("leaving");
@@ -739,7 +754,7 @@ export function ChatShell() {
               />
             ) : undefined
           }
-          liveExchange={runEngine.liveExchange}
+          liveExchange={quietLive ? null : runEngine.liveExchange}
           workspaces={workspaces}
           onOpenArtifact={openArtifact}
           onOpenWorkspace={(workspaceId) =>

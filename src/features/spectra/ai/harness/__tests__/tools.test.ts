@@ -125,6 +125,22 @@ describe("harness tools", () => {
     expect(lastTool(outcome.state.messages)).toMatch(/1\. Organelle 1\?/);
   });
 
+  it("never lets the reply claim a desktop file is saved before Bridge writes it (F12)", async () => {
+    const backend = new MemoryBackend({ artifacts: [{ id: "doc1", type: "document", title: "Notes", content: authorNew("document", { markdown: "Hello there." }, { timeZone: "UTC" }).content }] });
+    const update = backend.updateArtifact.bind(backend);
+    backend.updateArtifact = async (input) => {
+      await update(input);
+      return { ok: true, content: "", desktopFilePending: true };
+    };
+    const { run } = setup(backend);
+    const model = scripted([
+      { text: "", toolCalls: [call("e1", "edit_artifact", { id: "doc1", operations: [{ op: "replace", find: "Hello", replace: "Hi" }] })] },
+      { text: "Done.", toolCalls: [] },
+    ]);
+    const outcome = await run(model.caller);
+    expect(lastTool(outcome.state.messages)).toMatch(/^Saved \*Notes\* in Spectra\. The file on their computer has not taken the change yet/);
+  });
+
   it("returns authoring errors to the model and saves nothing", async () => {
     const backend = new MemoryBackend({ artifacts: [{ id: "doc1", type: "document", title: "Essay", content: authorNew("document", { markdown: "Hello" }, { timeZone: "UTC" }).content }] });
     const { run } = setup(backend);
@@ -623,5 +639,17 @@ describe("harness tools", () => {
     expect(() => named("managebac").parse!({ action: "set_sync_mode", kind: "grades", mode: "follow" })).toThrow(/classId/);
     expect(() => named("manage_conversation").parse!({})).toThrow(/title, pinned, archived or placeId/);
     expect(() => named("calendar").parse!({ action: "complete_block", itemId: "b1" })).toThrow(/expectedRevision/);
+  });
+
+  it("refuses a calendar start that has already passed, unless it logs what happened", () => {
+    // Tuesday 10 November 2026, 19:21 in Madrid.
+    const session = createSession({ backend: new MemoryBackend(), prompt: "test", now: () => Date.parse("2026-11-10T18:21:00Z") });
+    const calendar = buildHarnessTools(session).find((entry) => entry.name === "calendar")!;
+    expect(() => calendar.parse!({ action: "add_event", title: "Revise", start: "2026-11-10T17:00", end: "2026-11-10T18:00" })).toThrow(
+      "That time has already passed. It is 19:21 on Tuesday.",
+    );
+    expect(() => calendar.parse!({ action: "schedule_task", taskId: "t", start: "2026-11-09T10:00", end: "2026-11-09T11:00" })).toThrow(/already passed/);
+    expect(calendar.parse!({ action: "add_event", title: "Ran 5 km", start: "2026-11-10T07:00", alreadyHappened: true })).toMatchObject({ alreadyHappened: true });
+    expect(() => calendar.parse!({ action: "add_event", title: "Call", start: "2026-11-10T20:00" })).not.toThrow();
   });
 });

@@ -1288,6 +1288,9 @@ export async function executeOperation(
     };
     // The journal keeps that the edit was admitted, not two more copies of the document.
     output = { ...receipt, ...(acceptedFrontier ? { acceptedSequence: acceptedFrontier.sequence } : {}) } as Record<string, unknown>;
+    // F12: the file on the computer is written after this, by Bridge, once Office lets go of it.
+    if (officeKind && (onDevice || localNative) && mutationResult.changedRegionIds?.some(isNativeContentRegion))
+      output.desktopFile = "pending";
     if (performance) await context.onUiEvent?.({ key: "artifact_performance", payload: { performance, committedAt: Date.now() } });
     const changedPaths =
       input.content !== null

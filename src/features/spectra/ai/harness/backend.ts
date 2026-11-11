@@ -104,6 +104,10 @@ export type CommandResult = {
   uiEvents?: ToolOutcome["uiEvents"];
   /** The command discovered an effect that needs approval (desktop files). */
   pause?: ToolOutcome["pause"];
+  /** An artifact edit: the first region it changed. */
+  region?: string;
+  /** An artifact edit saved in Spectra whose desktop file Bridge has yet to write. */
+  desktopFilePending?: boolean;
 };
 
 export type ThreadReadRequest = {

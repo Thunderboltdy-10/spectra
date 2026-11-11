@@ -47,11 +47,11 @@ afterEach(() => {
 });
 
 describe("agent hub tickets", () => {
-  it("accepts its own and refuses forged, expired or other keys", () => {
-    const ticket = signAgentHubTicket({ sub: "acct", exp: soon() }, serverKey);
+  it("accepts its own and refuses forged, expired or other keys", async () => {
+    const ticket = await signAgentHubTicket({ sub: "acct", exp: soon() }, serverKey);
     expect(readAgentHubTicket(ticket, serverKey)?.sub).toBe("acct");
     expect(readAgentHubTicket(ticket, bridgeKey)).toBeNull();
-    expect(readAgentHubTicket(signAgentHubTicket({ sub: "acct", exp: Date.now() - 1 }, serverKey), serverKey)).toBeNull();
+    expect(readAgentHubTicket(await signAgentHubTicket({ sub: "acct", exp: Date.now() - 1 }, serverKey), serverKey)).toBeNull();
     expect(readAgentHubTicket(`${ticket}x`, serverKey)).toBeNull();
     expect(readAgentHubTicket("nonsense", serverKey)).toBeNull();
   });
@@ -60,9 +60,9 @@ describe("agent hub tickets", () => {
 describe("agent hub", () => {
   it("pipes the server to the account's Bridge and keeps frames sent before the pipe opened", async () => {
     const { url } = await hub();
-    const control = connect(`${url}/bridge`, signAgentHubTicket({ sub: "acct", exp: soon() }, bridgeKey));
+    const control = connect(`${url}/bridge`, await signAgentHubTicket({ sub: "acct", exp: soon() }, bridgeKey));
     await once(control, "open");
-    const server = connect(`${url}/server?provider=codex`, signAgentHubTicket({ sub: "acct", exp: soon() }, serverKey));
+    const server = connect(`${url}/server?provider=codex`, await signAgentHubTicket({ sub: "acct", exp: soon() }, serverKey));
     const asked = nextFrame(control);
     await once(server, "open");
     server.send("early");
@@ -82,23 +82,23 @@ describe("agent hub", () => {
 
   it("says so when the account has no Bridge, and never reaches another account's", async () => {
     const { url } = await hub();
-    const control = connect(`${url}/bridge`, signAgentHubTicket({ sub: "someone-else", exp: soon() }, bridgeKey));
+    const control = connect(`${url}/bridge`, await signAgentHubTicket({ sub: "someone-else", exp: soon() }, bridgeKey));
     await once(control, "open");
-    const server = connect(`${url}/server?provider=claude`, signAgentHubTicket({ sub: "acct", exp: soon() }, serverKey));
+    const server = connect(`${url}/server?provider=claude`, await signAgentHubTicket({ sub: "acct", exp: soon() }, serverKey));
     expect(await closed(server)).toBe(NO_BRIDGE_CLOSE);
   });
 
   it("gives up when the Bridge does not answer", async () => {
     const { url } = await hub({ pipeWaitMs: 30 });
-    const control = connect(`${url}/bridge`, signAgentHubTicket({ sub: "acct", exp: soon() }, bridgeKey));
+    const control = connect(`${url}/bridge`, await signAgentHubTicket({ sub: "acct", exp: soon() }, bridgeKey));
     await once(control, "open");
-    const server = connect(`${url}/server?provider=codex`, signAgentHubTicket({ sub: "acct", exp: soon() }, serverKey));
+    const server = connect(`${url}/server?provider=codex`, await signAgentHubTicket({ sub: "acct", exp: soon() }, serverKey));
     expect(await closed(server)).toBe(PIPE_TIMEOUT_CLOSE);
   });
 
   it("refuses browsers, wrong keys, unknown pipes, and unknown providers", async () => {
     const { url } = await hub();
-    const ticket = signAgentHubTicket({ sub: "acct", exp: soon() }, serverKey);
+    const ticket = await signAgentHubTicket({ sub: "acct", exp: soon() }, serverKey);
     expect(await refused(connect(`${url}/server?provider=codex`, ticket, { Origin: "https://example.com" }))).toBe(403);
     expect(await refused(connect(`${url}/bridge`, ticket))).toBe(401);
     expect(await refused(connect(`${url}/pipe?sid=nope`))).toBe(404);

@@ -14,7 +14,7 @@ vi.mock("@clerk/nextjs", () => ({
 }));
 vi.mock("convex/react", () => ({
   useConvexAuth: () => ({ isAuthenticated: session.authenticated }),
-  useQuery: () => session.account,
+  useQuery: () => (session.account ? { account: session.account } : session.account),
 }));
 import {
   AccountStorageBoundary,

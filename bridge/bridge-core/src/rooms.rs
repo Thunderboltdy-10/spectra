@@ -45,8 +45,39 @@ const VERSION_EVERY: Duration = Duration::from_secs(10 * 60);
 /// The other side gives up on a silent connection after 30 seconds.
 const PING_EVERY: Duration = Duration::from_secs(15);
 
+/// A peer that misses two pings in a row is gone.
+const SILENT_AFTER: Duration = Duration::from_secs(2 * 15 + 5);
+/// Messages waiting for one browser. A browser that can't keep up is dropped,
+/// not buffered without end; it reconnects and syncs what it lacks.
+const OUTGOING_KEPT: usize = 4096;
+const REMOVED_MESSAGE: &str = "This artifact was removed from this computer.";
+const DAMAGED_MESSAGE: &str = "Part of this artifact's recent history couldn't be read. The last saved version is shown.";
+
 pub type Authorize = Arc<dyn Fn(&str) -> bool + Send + Sync>;
-type Outgoing = mpsc::UnboundedSender<Vec<u8>>;
+
+#[derive(Clone)]
+pub struct Outgoing {
+    queue: mpsc::Sender<Vec<u8>>,
+    overflow: Arc<tokio::sync::Notify>,
+}
+
+impl Outgoing {
+    fn send(&self, message: Vec<u8>) -> Result<(), ()> {
+        match self.queue.try_send(message) {
+            Ok(()) => Ok(()),
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                self.overflow.notify_one();
+                Err(())
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => Err(()),
+        }
+    }
+}
+
+fn outgoing() -> (Outgoing, mpsc::Receiver<Vec<u8>>) {
+    let (queue, receiver) = mpsc::channel(OUTGOING_KEPT);
+    (Outgoing { queue, overflow: Arc::new(tokio::sync::Notify::new()) }, receiver)
+}
 
 struct Reader<'a> {
     bytes: &'a [u8],
@@ -208,6 +239,53 @@ pub fn artifact_of_document(name: &str) -> Option<&str> {
     (!id.is_empty()).then_some(id)
 }
 
+/// The document as far as it can be read. An update that can't be read is
+/// skipped and its place in the log reported; a saved state that can't be read
+/// gives way to `fallback`, the newest saved point. Says whether anything was lost.
+pub(crate) fn readable_doc(state: Option<&[u8]>, updates: &[Vec<u8>], artifact_id: &str, fallback: impl FnOnce() -> Option<Vec<u8>>) -> (Doc, bool) {
+    let doc = Doc::new();
+    let mut damaged = false;
+    {
+        let mut txn = doc.transact_mut();
+        if let Some(state) = state.filter(|state| !state.is_empty()) {
+            let applied = Update::decode_v1(state).map_err(anyhow::Error::from).and_then(|update| Ok(txn.apply_update(update)?));
+            if let Err(error) = applied {
+                eprintln!("[works] {artifact_id}: the saved state couldn't be read ({error:#}); using the newest saved point");
+                damaged = true;
+                if let Some(saved) = fallback() {
+                    if let Ok(update) = Update::decode_v1(&saved) {
+                        let _ = txn.apply_update(update);
+                    }
+                }
+            }
+        }
+        for (index, update) in updates.iter().enumerate() {
+            let applied = Update::decode_v1(update).map_err(anyhow::Error::from).and_then(|update| Ok(txn.apply_update(update)?));
+            if let Err(error) = applied {
+                eprintln!("[works] {artifact_id}: skipped unreadable update {} ({error:#})", index + 1);
+                damaged = true;
+            }
+        }
+    }
+    (doc, damaged)
+}
+
+/// `existing` with `incoming` folded in, or nothing when `incoming` adds
+/// nothing, deletions included.
+pub(crate) fn merge_if_new(existing: &[u8], incoming: &[u8]) -> anyhow::Result<Option<Vec<u8>>> {
+    if incoming.len() <= 2 {
+        return Ok(None);
+    }
+    let doc = Doc::new();
+    if existing.len() > 2 {
+        doc.transact_mut().apply_update(Update::decode_v1(existing)?)?;
+    }
+    let before = doc.transact().encode_state_as_update_v1(&StateVector::default());
+    doc.transact_mut().apply_update(Update::decode_v1(incoming).context("reading the backup")?)?;
+    let after = doc.transact().encode_state_as_update_v1(&StateVector::default());
+    Ok((after != before).then_some(after))
+}
+
 /// Folds a saved state and the updates after it into one state.
 pub fn merge_state(state: Option<&[u8]>, updates: &[Vec<u8>]) -> anyhow::Result<Vec<u8>> {
     let doc = Doc::new();
@@ -239,6 +317,10 @@ struct Room {
     /// Changed since the last saved point.
     changed: bool,
     last_version: Instant,
+    /// Removed from this computer while open: nothing more is written.
+    removed: bool,
+    /// Part of the log couldn't be read when it was loaded.
+    damaged: bool,
 }
 
 impl Room {
@@ -274,6 +356,7 @@ impl Room {
 
     /// Writes the edit down before saying it's safe.
     fn apply(&mut self, store: &WorkStore, update: &[u8]) -> anyhow::Result<Option<i64>> {
+        anyhow::ensure!(!self.removed, REMOVED_MESSAGE);
         // An empty update is how a side says it has nothing the other lacks.
         if update.len() <= 2 {
             return Ok(None);
@@ -308,6 +391,9 @@ impl Room {
     }
 
     fn finish(&mut self, store: &WorkStore) -> anyhow::Result<()> {
+        if self.removed {
+            return Ok(());
+        }
         if self.logged > 0 {
             store.compact(&self.artifact_id, &self.state())?;
             self.logged = 0;
@@ -378,24 +464,20 @@ impl Rooms {
             Some(room) => room.clone(),
             None => {
                 let (state, updates) = self.store.load(artifact_id)?;
-                let doc = Doc::new();
-                {
-                    let mut txn = doc.transact_mut();
-                    if let Some(state) = state.as_deref().filter(|state| !state.is_empty()) {
-                        txn.apply_update(Update::decode_v1(state)?)?;
-                    }
-                    for update in &updates {
-                        txn.apply_update(Update::decode_v1(update)?)?;
-                    }
-                }
+                let (doc, damaged) = readable_doc(state.as_deref(), &updates, artifact_id, || {
+                    self.store.latest_version_state(artifact_id).ok().flatten()
+                });
                 let room = Arc::new(Mutex::new(Room {
                     artifact_id: artifact_id.to_string(),
                     doc,
                     peers: HashMap::new(),
                     awareness: BTreeMap::new(),
-                    logged: updates.len() as u32,
-                    changed: !updates.is_empty(),
+                    // A damaged log is folded into what could be read the next time it is saved.
+                    logged: if damaged { updates.len().max(1) as u32 } else { updates.len() as u32 },
+                    changed: !updates.is_empty() || damaged,
                     last_version: Instant::now(),
+                    removed: false,
+                    damaged,
                 }));
                 open.insert(artifact_id.to_string(), room.clone());
                 room
@@ -435,18 +517,65 @@ impl Rooms {
         }
     }
 
+    /// How many works someone has open right now.
+    pub fn open_count(&self) -> usize {
+        locked(&self.open).len()
+    }
+
+    /// Saves every open work as if its last person had left, so a restart
+    /// loses nothing. The rooms stay open; browsers reconnect after it.
+    pub fn finish_open(&self) -> anyhow::Result<()> {
+        let rooms: Vec<_> = locked(&self.open).values().cloned().collect();
+        for room in rooms {
+            locked(&room).finish(&self.store)?;
+        }
+        Ok(())
+    }
+
     /// The whole document as it is now, whether or not anyone has it open.
     pub fn state(&self, artifact_id: &str) -> anyhow::Result<Vec<u8>> {
         if let Some(room) = locked(&self.open).get(artifact_id) {
             return Ok(locked(room).state());
         }
-        let (state, updates) = self.store.load(artifact_id)?;
-        if updates.is_empty() {
-            if let Some(state) = state {
-                return Ok(state);
+        Ok(self.store.readable_state(artifact_id)?.0)
+    }
+
+    /// Puts a work arriving from a backup in place. An open work takes it as
+    /// an edit, so the browsers on it receive it and nothing is undone later;
+    /// a closed one is merged in the store while no one can open it.
+    /// With `only_held`, a work this computer doesn't hold is left out: a
+    /// hand-over carries only the works that moved here.
+    fn place_restored(&self, artifact_id: &str, projection: &Projection, incoming: &[u8], only_held: bool) -> anyhow::Result<bool> {
+        let open = locked(&self.open);
+        let Some(room) = open.get(artifact_id).cloned() else {
+            if only_held && self.store.work(artifact_id)?.is_none() {
+                return Ok(false);
             }
+            self.store.merge_in(artifact_id, projection, incoming)?;
+            return Ok(true);
+        };
+        let mut room = locked(&room);
+        if room.removed {
+            return Ok(false);
         }
-        merge_state(state.as_deref(), &updates)
+        // Only what the open work lacks; nothing to do when the backup is older.
+        let Some(merged) = merge_if_new(&room.state(), incoming)? else {
+            return Ok(true);
+        };
+        let missing = {
+            let probe = Doc::new();
+            probe.transact_mut().apply_update(Update::decode_v1(&merged)?)?;
+            let here = StateVector::decode_v1(&room.state_vector())?;
+            probe.transact().encode_diff_v1(&here)
+        };
+        room.checkpoint(&self.store, "restore", Some("Before restore"), None, None)?;
+        if room.apply(&self.store, &missing)?.is_some() {
+            room.send_to_others(0, &sync_body(2, &missing));
+        }
+        drop(room);
+        drop(open);
+        self.store.save_projection(artifact_id, projection)?;
+        Ok(true)
     }
 
     /// One request about stored work, from the app or the AI.
@@ -507,10 +636,22 @@ impl Rooms {
                 json!({ "seeded": true })
             }
             "state" => json!({ "stateBase64": base64_of(&self.state(&text("artifactId")?)?) }),
+            // Anyone still on it is told, and their next edit is refused rather
+            // than bringing the work back without its history.
             "remove" => {
                 let artifact_id = text("artifactId")?;
-                locked(&self.open).remove(&artifact_id);
+                let mut open = locked(&self.open);
+                if let Some(room) = open.remove(&artifact_id) {
+                    let mut room = locked(&room);
+                    room.removed = true;
+                    room.send_to_others(0, &stateless_body(&json!({
+                        "type": "spectra.durable_failed",
+                        "code": "COLLABORATION_WORK_REMOVED",
+                        "message": REMOVED_MESSAGE,
+                    })));
+                }
                 self.store.remove(&artifact_id)?;
+                drop(open);
                 json!({ "ok": true })
             }
             "versions" => Value::Array(
@@ -524,14 +665,27 @@ impl Rooms {
             // Names only, one level, in the ordinary places: nothing is opened or changed.
             "computerNames" => crate::computer_names::list(params["path"].as_str().unwrap_or(""))?,
             "backup" => {
-                let (bundle, works) = self.store.backup_bundle(params["full"].as_bool().unwrap_or(false))?;
-                json!({ "bundleBase64": base64_of(&bundle), "works": works, "bytes": bundle.len() })
+                let (bundle, works, snapshot) = self.store.backup_bundle(params["full"].as_bool().unwrap_or(false))?;
+                json!({ "bundleBase64": base64_of(&bundle), "works": works, "bytes": bundle.len(), "snapshotRev": snapshot })
             }
             "backedUp" => {
-                self.store.mark_backed_up(params["at"].as_i64().ok_or_else(|| anyhow!("at is missing"))?)?;
+                self.store.mark_backed_up(
+                    params["at"].as_i64().ok_or_else(|| anyhow!("at is missing"))?,
+                    params["snapshotRev"].as_i64(),
+                )?;
                 json!({ "ok": true })
             }
-            "restore" => json!({ "restored": self.store.restore_bundle(&from_base64(&text("bundleBase64")?)?)? }),
+            "restore" => {
+                let only_held = params["onlyHeld"].as_bool().unwrap_or(false);
+                let place = |id: &str, projection: &Projection, state: &[u8]| self.place_restored(id, projection, state, only_held);
+                let ids = self.store.restore_bundle(&from_base64(&text("bundleBase64")?)?, &place)?;
+                if let Some(hand_over) = params["handOverId"].as_str() {
+                    self.store.record_hand_over(hand_over)?;
+                }
+                json!({ "restored": ids.len(), "artifactIds": ids })
+            }
+            "changed" => json!({ "artifactIds": self.store.changed_ids()? }),
+            "handOversMerged" => json!({ "backupIds": self.store.hand_overs_merged()? }),
             _ => anyhow::bail!("Unknown request"),
         })
     }
@@ -612,8 +766,12 @@ impl Connection {
             self.joined.insert(raw_key.to_string(), Joined { artifact_id, room, peer });
         }
         self.send(raw_key, &auth_body(2, "read-write"));
-        if let Some(update) = locked(&self.joined[raw_key].room).awareness_update() {
+        let room = locked(&self.joined[raw_key].room);
+        if let Some(update) = room.awareness_update() {
             self.send(raw_key, &awareness_body(&update));
+        }
+        if room.damaged {
+            self.send(raw_key, &stateless_body(&json!({ "type": "spectra.history_notice", "message": DAMAGED_MESSAGE })));
         }
         Ok(())
     }
@@ -643,6 +801,14 @@ impl Connection {
                 self.send(raw_key, &stateless_body(&json!({ "type": "spectra.durable_frontier", "deviceStateVector": vector })));
             }
             Ok(None) => {}
+            Err(_) if room.removed => {
+                self.send(raw_key, &stateless_body(&json!({
+                    "type": "spectra.durable_failed",
+                    "code": "COLLABORATION_WORK_REMOVED",
+                    "message": REMOVED_MESSAGE,
+                })));
+                return Ok(());
+            }
             Err(error) => {
                 eprintln!("[works] {}: {error:#}", joined.artifact_id);
                 self.send(raw_key, &stateless_body(&json!({
@@ -758,12 +924,19 @@ async fn drive(rooms: Arc<Rooms>, authorize: Authorize, mut inbound: mpsc::Recei
     let mut assembler = Assembler::default();
     let mut ping = tokio::time::interval(PING_EVERY);
     ping.tick().await;
+    let overflow = out.overflow.clone();
+    let mut heard = Instant::now();
     loop {
         tokio::select! {
             biased;
             _ = revoked(&mut changes) => break,
+            _ = overflow.notified() => {
+                eprintln!("[works] a browser fell too far behind; it will reconnect");
+                break;
+            }
             message = inbound.recv() => {
                 let Some(message) = message else { break };
+                heard = Instant::now();
                 let whole = match assembler.accept(message) {
                     Ok(Some(whole)) => whole,
                     Ok(None) => continue,
@@ -780,7 +953,7 @@ async fn drive(rooms: Arc<Rooms>, authorize: Authorize, mut inbound: mpsc::Recei
                 }
             }
             _ = ping.tick() => {
-                if out.send(vec![PING]).is_err() {
+                if heard.elapsed() >= SILENT_AFTER || out.send(vec![PING]).is_err() {
                     break;
                 }
             }
@@ -793,7 +966,7 @@ async fn drive(rooms: Arc<Rooms>, authorize: Authorize, mut inbound: mpsc::Recei
 /// A browser's socket to the rooms.
 pub async fn serve_browser(socket: WebSocket, rooms: Arc<Rooms>, authorize: Authorize, changes: tokio::sync::watch::Receiver<u64>) {
     let (mut sink, mut stream) = socket.split();
-    let (out, mut outgoing) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (out, mut outgoing) = outgoing();
     let (to_room, inbound) = mpsc::channel::<Vec<u8>>(256);
     let mut writing_changes = changes.clone();
     let writer = tokio::spawn(async move {
@@ -855,7 +1028,7 @@ where
 
 /// Reads `{id, method, params}` and answers `{id, result}` or `{id, error}`.
 pub async fn answer_store_request(rooms: Arc<Rooms>, text: String) -> String {
-    enum Answer { Ready(Value), Restore { id: Value, bundle: ValidatedBackup } }
+    enum Answer { Ready(Value), Restore { id: Value, bundle: ValidatedBackup, only_held: bool, hand_over: Option<String> } }
     let request_rooms = rooms.clone();
     let answered = tokio::task::spawn_blocking(move || {
         let request: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
@@ -867,7 +1040,12 @@ pub async fn answer_store_request(rooms: Arc<Rooms>, text: String) -> String {
                 ValidatedBackup::from_bytes(bundle)
             })();
             return match parsed {
-                Ok(bundle) => Answer::Restore { id, bundle },
+                Ok(bundle) => Answer::Restore {
+                    id,
+                    bundle,
+                    only_held: request["params"]["onlyHeld"].as_bool().unwrap_or(false),
+                    hand_over: request["params"]["handOverId"].as_str().map(str::to_owned),
+                },
                 Err(error) => Answer::Ready(json!({ "id": id, "error": format!("{error:#}") })),
             };
         }
@@ -878,7 +1056,7 @@ pub async fn answer_store_request(rooms: Arc<Rooms>, text: String) -> String {
     }).await;
     match answered {
         Ok(Answer::Ready(value)) => value,
-        Ok(Answer::Restore { id, bundle }) => {
+        Ok(Answer::Restore { id, bundle, only_held, hand_over }) => {
             let restored = async {
                 let authority = locked(&rooms.authority).clone().context("A verified work account is required")?;
                 let account = rooms.store.account_id().context("A verified work account is required")?;
@@ -886,10 +1064,17 @@ pub async fn answer_store_request(rooms: Arc<Rooms>, text: String) -> String {
                 for chunk in bundle.artifact_ids().chunks(100) {
                     allowed.extend(crate::sync::owned_stored_works(&authority.deployment, &authority.credential, account, chunk).await?);
                 }
-                tokio::task::spawn_blocking(move || rooms.store.restore_verified(bundle, &allowed)).await?
+                tokio::task::spawn_blocking(move || {
+                    let place = |artifact_id: &str, projection: &Projection, state: &[u8]| rooms.place_restored(artifact_id, projection, state, only_held);
+                    let ids = rooms.store.restore_verified(bundle, &allowed, &place)?;
+                    if let Some(hand_over) = hand_over {
+                        rooms.store.record_hand_over(&hand_over)?;
+                    }
+                    anyhow::Ok(ids)
+                }).await?
             }.await;
             match restored {
-                Ok(count) => json!({ "id": id, "result": { "restored": count } }),
+                Ok(ids) => json!({ "id": id, "result": { "restored": ids.len(), "artifactIds": ids } }),
                 Err(error) => json!({ "id": id, "error": format!("{error:#}") }),
             }
         }
@@ -904,7 +1089,7 @@ where
     R: futures_util::Stream<Item = Result<Vec<u8>, E>> + Unpin + Send + 'static,
     E: Send + 'static,
 {
-    let (out, mut outgoing) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (out, mut outgoing) = outgoing();
     let (to_room, inbound) = mpsc::channel::<Vec<u8>>(256);
     let mut writing_changes = changes.clone();
     let writer = tokio::spawn(async move {
@@ -996,12 +1181,12 @@ mod tests {
 
     struct Client {
         connection: Connection,
-        incoming: mpsc::UnboundedReceiver<Vec<u8>>,
+        incoming: mpsc::Receiver<Vec<u8>>,
     }
 
     impl Client {
         fn new(rooms: &Arc<Rooms>) -> Self {
-            let (out, incoming) = mpsc::unbounded_channel();
+            let (out, incoming) = outgoing();
             Self { connection: Connection::new(rooms.clone(), Arc::new(|token| token == "good"), out), incoming }
         }
 
@@ -1153,6 +1338,76 @@ mod tests {
     }
 
     #[test]
+    fn open_work_is_counted_and_saved_before_a_restart() {
+        let rooms = rooms();
+        assert_eq!(rooms.open_count(), 0);
+        let mut client = Client::new(&rooms);
+        client.sign_in("good");
+        client.send_update(&edit("before the update"));
+        assert_eq!(rooms.open_count(), 1);
+        rooms.finish_open().unwrap();
+        // Saved as a whole state with a saved point; nothing waits in the log.
+        assert_eq!(rooms.store.load("work1").unwrap().1.len(), 0);
+        assert_eq!(rooms.store.versions("work1", 5).unwrap().len(), 1);
+        assert_eq!(rooms.open_count(), 1);
+        client.connection.close();
+        assert_eq!(rooms.open_count(), 0);
+    }
+
+    fn says(messages: &[Vec<u8>], text: &str) -> bool {
+        messages.iter().any(|message| message.windows(text.len()).any(|window| window == text.as_bytes()))
+    }
+
+    #[test]
+    fn a_work_removed_while_open_leaves_nothing_behind() {
+        let rooms = rooms();
+        let mut client = Client::new(&rooms);
+        client.sign_in("good");
+        client.send_update(&edit("first"));
+        client.drain();
+        rooms.call("remove", &json!({"artifactId":"work1"})).unwrap();
+        assert!(says(&client.drain(), "COLLABORATION_WORK_REMOVED"));
+        assert!(says(&client.send_update(&edit("after removal")), "COLLABORATION_WORK_REMOVED"));
+        client.connection.close();
+        assert!(rooms.call("get", &json!({"artifactId":"work1"})).unwrap().is_null());
+        let (state, updates) = rooms.store.load("work1").unwrap();
+        assert!(state.is_none() && updates.is_empty());
+        assert_eq!(rooms.store.versions("work1", 5).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn an_unreadable_update_is_skipped_and_the_rest_still_opens() {
+        let rooms = rooms();
+        rooms.store.append_update("work1", &edit("kept")).unwrap();
+        rooms.store.append_update("work1", &[9, 9, 9, 9, 9, 9]).unwrap();
+        assert_eq!(text_of(&rooms.state("work1").unwrap()), "kept");
+        let mut client = Client::new(&rooms);
+        assert!(says(&client.sign_in("good"), "spectra.history_notice"));
+        assert_eq!(text_of(&locked(&client.connection.joined[DOCUMENT].room).state()), "kept");
+    }
+
+    #[test]
+    fn restoring_an_open_work_reaches_the_people_on_it() {
+        let rooms = rooms();
+        let mut client = Client::new(&rooms);
+        client.sign_in("good");
+        client.send_update(&edit("here"));
+        client.drain();
+        let elsewhere = Doc::new();
+        elsewhere.get_or_insert_text("content").insert(&mut elsewhere.transact_mut(), 0, "from backup ");
+        let incoming = elsewhere.transact().encode_state_as_update_v1(&StateVector::default());
+        rooms.place_restored("work1", &Projection::default(), &incoming, false).unwrap();
+        let text = text_of(&locked(&client.connection.joined[DOCUMENT].room).state());
+        assert!(text.contains("here") && text.contains("from backup"), "{text}");
+        assert!(!client.drain().is_empty());
+        assert!(rooms.store.versions("work1", 5).unwrap().iter().any(|version| version["summary"] == "Before restore"));
+        // The same backup again changes nothing.
+        let versions = rooms.store.versions("work1", 5).unwrap().len();
+        rooms.place_restored("work1", &Projection::default(), &incoming, true).unwrap();
+        assert_eq!(rooms.store.versions("work1", 5).unwrap().len(), versions);
+    }
+
+    #[test]
     fn work_interrupted_before_the_room_closed_still_loads() {
         let rooms = rooms();
         rooms.store.append_update("work1", &edit("not lost")).unwrap();
@@ -1269,7 +1524,7 @@ mod tests {
     #[test]
     fn a_session_suffixed_name_is_answered_under_that_name() {
         let rooms = rooms();
-        let (out, mut incoming) = mpsc::unbounded_channel();
+        let (out, mut incoming) = outgoing();
         let mut connection = Connection::new(rooms.clone(), Arc::new(|_| true), out);
         let raw_key = format!("{DOCUMENT}\0session");
         let mut body = Vec::new();

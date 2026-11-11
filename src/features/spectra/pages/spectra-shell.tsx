@@ -1,6 +1,7 @@
 "use client";
 
 import { distinctHubTabs, hubTabsWithoutWorkspace, workSetLabel, type WorkspaceHubTab } from "./hub-tabs";
+import { takeFullViewRequest } from "../components/full-view-origin";
 import { subscribeShellWorkAvailability } from "../components/use-work-availability";
 import { retireShellArtifactLocation } from "./shell-location";
 
@@ -150,6 +151,7 @@ import {
   SIDEBAR_EXPANDED_PX,
   SIDEBAR_RAILED_PX,
   WORKBENCH_CONTENT_RESERVE_PX,
+  stageMinimumFor,
   type WorkbenchPaneSpec,
 } from "../components/split-presentation";
 import {
@@ -973,6 +975,9 @@ export function SpectraShell({
     requestedArtifactId,
   );
   const [studioPanelWidth, setStudioPanelWidth] = useState(720);
+  /* Room the open work's own pane (comments, history, references) needs
+     beside its page; the work's floor and width grow by it while it is open. */
+  const [studioPaneRoom, setStudioPaneRoom] = useState(0);
   const [liveThreadPanelWidth, setLiveThreadPanelWidth] = useState(480);
   const [runPanelWidth, setRunPanelWidth] = useState(680);
   const [chatBrowserOpen, setChatBrowserOpen] = useState(false);
@@ -1009,17 +1014,21 @@ export function SpectraShell({
     useState<SpectraArtifact | null>(null);
   const [artifactShareTarget, setShareDialogTarget] =
     useState<SpectraArtifact | null>(null);
-  const setArtifactShareTarget = (artifact: SpectraArtifact | null) => {
-    if (artifact?.storageHome !== "device") return setShareDialogTarget(artifact);
-    // Others can't reach this computer, so sharing brings the work online first.
-    void import("../bridge/device-works")
-      .then(({ moveWorkToCloud }) => moveWorkToCloud(artifact._id))
-      .then(() => {
-        toast.info("Moved online so the people you share with can open it.");
-        spectraBus.emit("workspace.refreshRequested", {});
-        setShareDialogTarget({ ...artifact, storageHome: undefined, storageStoreId: undefined });
-      })
-      .catch(() => toast.error("Open Spectra Bridge on the computer that holds this work to share it."));
+  const setArtifactShareTarget = setShareDialogTarget;
+  /* Others can't reach this computer, so a work kept on it moves online with
+     the first invitation or link, never just because Share was opened (F18). */
+  const moveShareTargetOnline = async () => {
+    const artifact = artifactShareTarget;
+    if (artifact?.storageHome !== "device") return;
+    try {
+      const { moveWorkToCloud } = await import("../bridge/device-works");
+      await moveWorkToCloud(artifact._id);
+    } catch {
+      throw new Error("Open Spectra Bridge on the computer that holds this work to share it.");
+    }
+    toast.info("Moved online so the people you share with can open it.");
+    spectraBus.emit("workspace.refreshRequested", {});
+    setShareDialogTarget({ ...artifact, storageHome: undefined, storageStoreId: undefined });
   };
   const invitationCollection = searchParams.get("collection") === "invitations";
   const {
@@ -1630,7 +1639,7 @@ export function SpectraShell({
     if (studio.mode === "split" && studio.activeArtifact)
       panes.push({
         id: "studio",
-        floor: studioPaneFloor,
+        floor: studioPaneFloor + studioPaneRoom,
         priority: 0,
         overlay: false,
       });
@@ -1660,17 +1669,20 @@ export function SpectraShell({
     studio.mode,
     studio.activeArtifact,
     studioPaneFloor,
+    studioPaneRoom,
     liveThread,
     activeRunPanelId,
     chatBrowserOpen,
   ]);
 
-  /* In tab mode the open work *is* the content column, so the reserve a side
-     panel must leave is the work's own floor, not the library's. */
+  /* The reserve is the page's stage minimum (SHELL.md), so the rail gives way
+     before the page does and a panel floats before the page goes under it. In
+     tab mode the open work *is* the content column, so the reserve is the
+     work's own floor. */
   const workbenchReserve =
     studio.mode === "tab" && studio.activeArtifact
       ? Math.max(WORKBENCH_CONTENT_RESERVE_PX, studioPaneFloor)
-      : WORKBENCH_CONTENT_RESERVE_PX;
+      : stageMinimumFor(pathname);
 
   useEffect(() => {
     const panes = workbenchPanes.map((pane) => ({
@@ -1735,13 +1747,14 @@ export function SpectraShell({
           overlay: paneOverlay[pane.id] ?? false,
           intent:
             pane.id === "studio"
-              ? studioPanelWidth
+              ? studioPanelWidth + studioPaneRoom
               : pane.id === "thread"
                 ? liveThreadPanelWidth
                 : pane.id === "run"
                   ? runPanelWidth
                   : chatBrowserWidth,
           recency: paneRecencyRef.current[pane.id] ?? 0,
+          cap: pane.id === "studio" ? 960 + studioPaneRoom : undefined,
         })),
       }),
     [
@@ -1750,6 +1763,7 @@ export function SpectraShell({
       workbenchPanes,
       paneOverlay,
       studioPanelWidth,
+      studioPaneRoom,
       liveThreadPanelWidth,
       runPanelWidth,
       chatBrowserWidth,
@@ -2713,6 +2727,7 @@ export function SpectraShell({
       refreshActivatedArtifact,
     );
     const removeRefresh = spectraBus.on("workspace.refreshRequested", refresh);
+    const removeStorageMoved = spectraBus.on("artifact.storageMoved", refreshActivatedArtifact);
     const removeNavigateHome = spectraBus.handle(
       "navigation.home",
       navigateWorkspaceHome,
@@ -2724,6 +2739,7 @@ export function SpectraShell({
       removeAiNavigate();
       removeLensActivated();
       removeRefresh();
+      removeStorageMoved();
       removeNavigateHome();
       removeShare();
     };
@@ -2810,7 +2826,8 @@ export function SpectraShell({
     if (openedDeepLinkRef.current === routeArtifactId) return;
     if (!overview) return;
     openedDeepLinkRef.current = routeArtifactId;
-    void requestArtifactOpen(routeArtifactId, "replace")
+    // "Open full" pressed elsewhere arrives here; it opens full on that one press.
+    void requestArtifactOpen(routeArtifactId, "replace", takeFullViewRequest(routeArtifactId) ? "tab" : "split")
       .catch(() => {
         if (
           artifactIdFromSpectraLocation(
@@ -4066,6 +4083,7 @@ export function SpectraShell({
               onChanged={async () => {
                 await loadOverview(selectedWorkspaceId, true);
               }}
+              beforeShare={artifactShareTarget.storageHome === "device" ? moveShareTargetOnline : undefined}
             />
           ) : null}
           <WorkspaceEditDialog
@@ -4399,8 +4417,9 @@ export function SpectraShell({
                         panelOverlay={paneOverlay.studio ?? false}
                         sourceLabel={workspace?.title ?? surfaceLabel}
                         onPanelWidthChange={(next) =>
-                          notePaneIntent("studio", next)
+                          notePaneIntent("studio", Math.max(0, next - studioPaneRoom))
                         }
+                        onPaneRoomChange={setStudioPaneRoom}
                         onClose={closeActiveStudio}
                         onExpand={openArtifactTab}
                         onActivateTab={activateArtifactTab}

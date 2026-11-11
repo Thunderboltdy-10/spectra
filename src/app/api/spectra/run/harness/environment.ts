@@ -2,6 +2,7 @@ import type { MemoryHead } from "../../../../../../shared/memory-files";
 import { DEFAULT_PERMISSION_PREFS, readPermissionPrefs, type PermissionPrefs } from "@/features/spectra/ai/harness/permissions";
 import type { EnvironmentInput, EnvironmentPlace, EnvironmentPointer, EnvironmentRecentWork } from "@/features/spectra/ai/harness/prompt";
 import { notesMessage } from "@/features/spectra/ai/harness/compaction";
+import { claudeModelAlias } from "@/features/spectra/ai/model-config";
 import type { HarnessContentPart, HarnessMessage } from "@/features/spectra/ai/harness/types";
 import type { PreparedAttachment, RunPointers } from "./contract";
 import { rows } from "./effects";
@@ -91,8 +92,37 @@ export function normalizePointers(value: unknown): RunPointers {
 
 export type RunPreferences = {
   permissions: PermissionPrefs;
-  runtime: { provider: unknown; model?: string; reasoning?: "low" | "medium" | "high" };
+  runtime: {
+    provider: unknown;
+    model?: string;
+    reasoning?: "low" | "medium" | "high";
+    /** What to try, in order, when the chosen runtime can't answer. */
+    then: Array<"codex" | "claude" | "spectra">;
+    /** Each subscription's chosen model, for when the run moves to it. */
+    models: { codex?: string; claude?: string };
+  };
 };
+
+const RUNTIMES = new Set(["codex", "claude", "spectra"]);
+
+const UNREACHABLE_STATES = new Set(["signed-out", "not-installed", "no-bridge", "error"]);
+
+/** What the client said it can't reach. A hint only: it can reorder the person's own runtimes, nothing more. */
+export function normalizeUnreachable(value: unknown): Array<{ runtime: "codex" | "claude"; state: "signed-out" | "not-installed" | "no-bridge" | "error" }> {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 2).flatMap((entry) => {
+    const row = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
+    return (row.runtime === "codex" || row.runtime === "claude") && typeof row.state === "string" && UNREACHABLE_STATES.has(row.state)
+      ? [{ runtime: row.runtime, state: row.state as "signed-out" | "not-installed" | "no-bridge" | "error" }]
+      : [];
+  });
+}
+
+/** The stored order, or Spectra's model when there is none. */
+export function runtimeOrder(value: unknown): RunPreferences["runtime"]["then"] {
+  if (!Array.isArray(value)) return ["spectra"];
+  return [...new Set(value.filter((item): item is "codex" | "claude" | "spectra" => typeof item === "string" && RUNTIMES.has(item)))];
+}
 
 /** The account's settings a run obeys: one read for all of them. */
 export async function readRunPreferences(actorClerkId: string): Promise<RunPreferences> {
@@ -104,13 +134,20 @@ export async function readRunPreferences(actorClerkId: string): Promise<RunPrefe
   const values = account?.values && typeof account.values === "object" ? (account.values as Record<string, unknown>) : {};
   const ai = values.ai && typeof values.ai === "object" ? (values.ai as Record<string, unknown>) : {};
   const provider = ai.runtime === "codex" || ai.runtime === "claude" ? ai.runtime : "spectra";
-  const model = provider === "codex" ? ai.codexModel : provider === "claude" ? ai.claudeModel : undefined;
+  const models = {
+    ...(typeof ai.codexModel === "string" && ai.codexModel ? { codex: ai.codexModel } : {}),
+    ...(typeof ai.claudeModel === "string" && ai.claudeModel ? { claude: claudeModelAlias(ai.claudeModel) } : {}),
+  };
+  const model = provider === "spectra" ? undefined : models[provider];
   return {
     permissions: layers ? readPermissionPrefs(values.ai) : DEFAULT_PERMISSION_PREFS,
     runtime: {
       provider,
-      ...(typeof model === "string" && model ? { model } : {}),
-      ...(ai.thinking === "low" || ai.thinking === "medium" || ai.thinking === "high" ? { reasoning: ai.thinking } : {}),
+      ...(model ? { model } : {}),
+      // D7: Medium unless the person chose otherwise.
+      reasoning: ai.thinking === "low" || ai.thinking === "high" ? ai.thinking : "medium",
+      then: runtimeOrder(ai.runtimeThen),
+      models,
     },
   };
 }

@@ -7,7 +7,7 @@ import { requireActor } from "@/lib/auth-server";
 import { errorStatus } from "@/lib/route-handler";
 import { NextRequest } from "next/server";
 import { asOwner, verifyScheduledCallback } from "@/lib/scheduled-callback";
-import { runHarnessAttempt, type AttemptMode, type AttemptParams } from "./harness/attempt";
+import { runHarnessAttempt, stopLiveAttempt, type AttemptMode, type AttemptParams } from "./harness/attempt";
 import { AGENT_UNAVAILABLE, AGENT_UNAVAILABLE_MESSAGE } from "./harness/agents";
 import { loadRunAttachments, persistRunAttachments } from "./harness/attachments";
 import type {
@@ -20,7 +20,7 @@ import type {
   RunState,
   Surface,
 } from "./harness/contract";
-import { normalizePointers } from "./harness/environment";
+import { normalizePointers, normalizeUnreachable } from "./harness/environment";
 import { mutate, query } from "./harness/io";
 import { latestCard, publicError, streamCard } from "./harness/report";
 import { handleUiObserverRequest, uiObserverSchema } from "./harness/ui-observer-request";
@@ -65,6 +65,7 @@ function payloadFrom(value: unknown): RunPayload {
     timeZone: text(payload.timeZone),
     agentId: text(payload.agentId),
     relayId: text(payload.relayId),
+    unreachable: normalizeUnreachable(payload.unreachable),
   };
 }
 
@@ -523,6 +524,7 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
         ...pointers,
         timeZone: body.timeZone,
         ...(chosenAgentId ? { agentId: chosenAgentId } : {}),
+        unreachable: normalizeUnreachable(body.unreachable),
       },
       attachments,
       prelude,
@@ -559,6 +561,7 @@ async function handleSpectraRunRequestInLog(request: NextRequest) {
     } catch (error) {
       return new Response(publicError(error), { status: 409 });
     }
+    stopLiveAttempt(runId, stopped.executionId ?? expectedExecutionId);
     await settleForRun(actor.clerkId, runId, stopped.executionId, "failed");
     return new Response(null, { status: 204 });
   }

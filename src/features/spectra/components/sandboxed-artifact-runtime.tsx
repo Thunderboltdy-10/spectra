@@ -10,6 +10,7 @@ import {
   type SpectraSandboxFrameMessage,
   type SpectraSandboxAsset,
   type SpectraSandboxTest,
+  isBenignRuntimeError,
 } from "../embed/sandbox-protocol";
 import { readSpectraSandboxTheme } from "../embed/theme-tokens";
 
@@ -177,6 +178,7 @@ export function SandboxedArtifactRuntime({
           // As tall as the work inside, however short.
           setHeight(Math.max(48, Math.min(SPECTRA_EMBED_BUDGETS.maxHeight, payload.height)));
       } else if (payload.type === "spectra:error") {
+        if (isBenignRuntimeError(payload.message)) return;
         setStatus("error");
         setMessage(payload.message);
         onStatusChangeRef.current?.(

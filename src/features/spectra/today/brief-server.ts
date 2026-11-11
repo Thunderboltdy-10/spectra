@@ -147,9 +147,9 @@ async function composeBrief(context: BriefContext, signal: AbortSignal) {
         ...plain.suggestions.filter((move) => !written.suggestions.some((kept) => kept.kind === move.kind)),
       ].slice(0, Math.max(written.suggestions.length, 4));
       return { recap: written.recap, ahead: written.ahead ?? plain.ahead, suggestions };
-    } catch (error) {
+    } catch {
+      // A failed attempt falls through to the next, then to the plain brief.
       if (signal.aborted) break;
-      console.warn("[spectra:brief] attempt", attempt + 1, error instanceof Error ? error.message : error);
     }
   }
   return plain;

@@ -2,14 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { accountStorageMatches, accountStorageRevision } from "@/lib/account-storage-scope";
-import { useConvexAuth, useMutation } from "convex/react";
+import { useConvex, useConvexAuth, useMutation } from "convex/react";
 import { useQuery } from "@/features/spectra/data/use-kept-query";
+import { useSession } from "@/features/spectra/data/use-session";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "@/components/ui/toast";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
-import { backUpNow, backupIsDue } from "./device-backup";
-import { deviceStoreSummary, publishDeviceState } from "./device-works";
+import { backUpNow, backupIsDue, handOverEdits, mergeHandOvers, type BackupServer } from "./device-backup";
+import { deviceStoreSummary, publishDeviceState, retryPendingRemovals, useDeviceState } from "./device-works";
 import { recheckAgentRuntime, useAgentRuntime } from "../ai/use-agent-runtime";
 import { rejoinBridge } from "../devices/pairing";
 import { publishBridgeAvailability } from "./availability";
@@ -89,7 +90,7 @@ export function BridgeConnection() {
   const requestPairing = useMutation(api.bridge.requestPairing);
   const { discovery, status, checked, refresh } = useBridgeHealth();
   const { preferences, hydrated, update } = useSpectraPreferences();
-  const hasDevice = useQuery(api.bridge.hasDevice, isAuthenticated ? {} : "skip");
+  const hasDevice = useSession()?.hasDevice;
   const unjoined = checked && discovery.kind === "running" && !status?.paired;
   const [activation, setActivation] = useState(0);
   useEffect(() => {
@@ -131,7 +132,8 @@ export function BridgeConnection() {
   }, [activation, checked, isAuthenticated, requestPairing, revision, status?.paired, unjoined]);
   // The choice stays with the person; Bridge hears it whenever it's here to listen.
   const joined = Boolean(status?.paired);
-  const workSettings = useQuery(api.deviceWorks.settings, isAuthenticated ? {} : "skip");
+  const { storeId } = useDeviceState();
+  const workSettings = useQuery(api.deviceWorks.settings, isAuthenticated ? (storeId ? { storeId } : {}) : "skip");
   useEffect(() => {
     if (!joined || !hydrated) return;
     // Connected computers stay reachable by the person's own Spectra, so its AI
@@ -166,22 +168,36 @@ export function BridgeConnection() {
   }, [joined]);
   const backupUploadUrl = useMutation(api.deviceWorks.backupUploadUrl);
   const recordBackup = useMutation(api.deviceWorks.recordBackup);
+  const convex = useConvex();
+  // A hand-over addressed to this computer is merged as soon as it is known.
+  const handOvers = workSettings?.handOvers?.join(",") ?? "";
   useEffect(() => {
-    if (!storeKnown || !workSettings) return;
-    const check = () => {
-      if (!backupIsDue(workSettings)) return;
-      void backUpNow(workSettings, {
-        uploadUrl: () => backupUploadUrl({}),
-        record: (input) => recordBackup({ ...input, storageId: input.storageId as Id<"_storage"> }),
-      }).catch(() => undefined);
+    if (!storeKnown || !storeId || !handOvers) return;
+    void mergeHandOvers(handOvers.split(","), () => convex.query(api.deviceWorks.handOverBackups, { storeId })).catch(() => undefined);
+  }, [convex, handOvers, storeId, storeKnown]);
+  useEffect(() => {
+    if (!storeKnown || !workSettings || !storeId || !("handOvers" in workSettings)) return;
+    const server: BackupServer = {
+      uploadUrl: () => backupUploadUrl({}),
+      record: (input) => recordBackup({ ...input, storageId: input.storageId as Id<"_storage"> }),
     };
-    const first = window.setTimeout(check, BACKUP_SETTLE_MS);
-    const later = window.setInterval(check, BACKUP_CHECK_MS);
+    const check = async () => {
+      await retryPendingRemovals().catch(() => undefined);
+      // Edits written here after a work moved to another computer go to it first.
+      await handOverEdits(workSettings, {
+        ...server,
+        targets: (artifactIds) => convex.query(api.deviceWorks.handOverTargets, { storeId, artifactIds }),
+      }).catch(() => undefined);
+      if (!backupIsDue(workSettings)) return;
+      await backUpNow(workSettings, server).catch(() => undefined);
+    };
+    const first = window.setTimeout(() => void check(), BACKUP_SETTLE_MS);
+    const later = window.setInterval(() => void check(), BACKUP_CHECK_MS);
     return () => {
       window.clearTimeout(first);
       window.clearInterval(later);
     };
-  }, [backupUploadUrl, recordBackup, storeKnown, workSettings]);
+  }, [backupUploadUrl, convex, recordBackup, storeId, storeKnown, workSettings]);
   useEffect(() => {
     if (!checked || hasDevice === undefined) return;
     if (joined) publishBridgeAvailability("ready");

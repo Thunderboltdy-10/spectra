@@ -215,6 +215,49 @@ describe("runHarness", () => {
     expect(events.filter((event) => event.type === "thread_title")).toEqual([{ type: "thread_title", title: "Biology unit plan" }]);
   });
 
+  it("names a thread from the work in focus, apart from the other conversations", async () => {
+    const titleWriter = vi.fn(async () => ({ title: "Physics progress summary" }));
+    const result = await runHarness({
+      runId: "r-focus",
+      backend: new MemoryBackend(),
+      signal: new AbortController().signal,
+      prompt: "Summarise this document",
+      environment: { now: 0, open: [{ id: "a1", type: "document", title: "Physics progress" }] },
+      permissions: DEFAULT_PERMISSION_PREFS,
+      wantTitle: true,
+      titleWriter,
+      otherThreadTitles: async () => ["Document summary request", "Summarize a document"],
+      compactor: null,
+      callModel: model([{ text: "Here it is.", toolCalls: [] }]),
+      sink: { emit: () => undefined, checkpoint: async () => undefined },
+    });
+    await result.titling;
+    expect(titleWriter).toHaveBeenCalledWith(
+      expect.objectContaining({ focus: "Physics progress", others: ["Document summary request", "Summarize a document"] }),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("still names the thread when the other titles cannot be read", async () => {
+    const titleWriter = vi.fn(async () => ({ title: "Cells" }));
+    const result = await runHarness({
+      runId: "r-noothers",
+      backend: new MemoryBackend(),
+      signal: new AbortController().signal,
+      prompt: "Cells",
+      environment: { now: 0 },
+      permissions: DEFAULT_PERMISSION_PREFS,
+      wantTitle: true,
+      titleWriter,
+      otherThreadTitles: async () => { throw new Error("offline"); },
+      compactor: null,
+      callModel: model([{ text: "Sure.", toolCalls: [] }]),
+      sink: { emit: () => undefined, checkpoint: async () => undefined },
+    });
+    await result.titling;
+    expect(titleWriter).toHaveBeenCalledWith(expect.not.objectContaining({ others: expect.anything() }), expect.any(AbortSignal));
+  });
+
   it("binds history to this thread and puts the new message last", async () => {
     let seen: HarnessMessage[] = [];
     await runHarness({

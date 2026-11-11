@@ -5,7 +5,6 @@ import {
   type FunctionReference,
   type OptionalRestArgs,
 } from "convex/server";
-import { auth } from "@clerk/nextjs/server";
 import { getConvexUrl } from "@/lib/env";
 import { getWorkerConvexToken } from "@/lib/convex-worker-context";
 import { rethrowWorded } from "../../shared/convex-error.mjs";
@@ -110,7 +109,8 @@ async function getCachedSessionToken(
 
 async function getConvexClient() {
   const workerToken = getWorkerConvexToken();
-  const authState = workerToken ? null : await auth();
+  // Loaded on use: workers and scripts that carry their own token never touch Next's request scope.
+  const authState = workerToken ? null : await (await import("@clerk/nextjs/server")).auth();
   const audience = authState?.sessionClaims?.aud;
   const usesNativeConvexIntegration =
     audience === "convex" ||

@@ -163,7 +163,16 @@ export type LoopDeps = {
    * Checked at tool boundaries only, so the run resumes from a checkpoint.
    */
   shouldYield?: () => boolean;
+  /** How long one tool call may take before it becomes a tool error. */
+  toolLimitMs?: number;
 };
+
+/**
+ * The loop checks its budgets between turns only, so a tool that never
+ * returns would hold the run forever. Five minutes is well past the slowest
+ * healthy call (a long code run or a large sync).
+ */
+export const TOOL_LIMIT_MS = 5 * 60_000;
 
 export type LoopOutcome =
   | { status: "completed"; state: LoopState }
@@ -458,16 +467,34 @@ export async function runHarnessLoop(
     ) {
       outcome = { ok: false, content: deniedResult(prepared.category) };
     } else {
+      const limit = deps.toolLimitMs ?? TOOL_LIMIT_MS;
+      const call = new AbortController();
+      const stopCall = () => call.abort(deps.signal.reason);
+      deps.signal.addEventListener("abort", stopCall, { once: true });
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
+        const limited = (work: Promise<ToolOutcome>) =>
+          Promise.race([
+            work,
+            new Promise<ToolOutcome>((resolve) => {
+              timer = setTimeout(() => {
+                call.abort(new Error("TOOL_LIMIT"));
+                resolve({
+                  ok: false,
+                  content: `${prepared.tool!.name} did not finish within ${Math.round(limit / 60_000) || "a few"} minutes and was stopped. Tell the user it took too long, or try a smaller request.`,
+                });
+              }, limit);
+            }),
+          ]).finally(() => clearTimeout(timer));
         const run = (granted: boolean) =>
-          prepared.tool!.execute(prepared.args!, {
-            signal: deps.signal,
+          limited(prepared.tool!.execute(prepared.args!, {
+            signal: call.signal,
             runId: deps.runId,
             toolCallId: prepared.call.id,
             approved: granted,
             ...(granted && state.pending?.toolCallId === prepared.call.id && state.pending.approvalScope
               ? { approvalScope: state.pending.approvalScope } : {}),
-          });
+          }));
         outcome = await run(approved);
         // A tool can discover mid-call that its effect needs approval (a
         // Bridge move that touches desktop files). The user's stored choices
@@ -490,6 +517,8 @@ export async function runHarnessLoop(
               ok: false,
               content: describeToolFailure(prepared.tool.name, error),
             };
+      } finally {
+        deps.signal.removeEventListener("abort", stopCall);
       }
     }
     if (!outcome.pause) {

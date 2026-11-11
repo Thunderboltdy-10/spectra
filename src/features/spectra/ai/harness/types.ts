@@ -53,6 +53,8 @@ export type ArtifactTouch = {
   action: "created" | "edited" | "referenced";
   /** "Added 3 slides". Never an id. */
   change?: string;
+  /** The first region an edit changed, so opening the work later lands there (LAUNCH-REVIEW F5). */
+  region?: string;
 };
 
 export type InputOption = { key: string; label: string; description?: string };

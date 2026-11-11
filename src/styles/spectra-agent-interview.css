@@ -18,7 +18,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  animation: interview-ask-in 380ms var(--ease-out-soft, cubic-bezier(0.22, 1, 0.36, 1)) both;
+  animation: interview-ask-in 380ms var(--ease-standard) both;
 }
 
 @keyframes interview-ask-in {

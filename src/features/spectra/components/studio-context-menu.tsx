@@ -157,7 +157,7 @@ export function useStudioContextMenu(common: StudioMenuProvider) {
                     <DropdownMenuItem
                       key={item.key}
                       disabled={item.disabled}
-                      className={cn(item.danger && "text-[var(--danger,var(--status-error))]")}
+                      className={cn(item.danger && "text-[var(--danger)]")}
                       onSelect={() => {
                         pending.current = item.onSelect;
                       }}

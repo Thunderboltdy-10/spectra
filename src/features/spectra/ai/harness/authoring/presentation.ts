@@ -1,4 +1,4 @@
-import { estimateTextOverflow } from "../../../presentation/audit";
+import { estimateTextHeight, estimateTextOverflow } from "../../../presentation/audit";
 import {
   DECK_FAMILIES,
   currentDesign,
@@ -389,12 +389,43 @@ function keepDesign(deck: PresentationContent, index: number, look: string | und
   if (idea) deck.slides[index] = idea.slide;
 }
 
+/** Type floors: a heading stays a heading, body stays readable from the back of a room. */
+const SETTLE_FLOOR = { title: 22, body: 14 } as const;
+
+function textSize(object: PresentationObject) {
+  const value = Number(object.style?.fontSize);
+  return Number.isFinite(value) && value > 0 ? value : 21;
+}
+
+/**
+ * The last word on fit. Layouts and looks size type from estimates; where a
+ * box still cannot hold its words the type comes down a point at a time to a
+ * floor, so a finished deck never shows "Text overflows this object" and the
+ * model is not sent round again to shorten a heading it was asked for (F10).
+ */
+export function settleSlideText(slide: PresentationSlide) {
+  const visible = slide.objects.filter((object) => !object.hidden);
+  const title = visible.find((object) => object.type === "text");
+  for (const object of visible) {
+    const words = object.type === "text" || (object.type === "shape" && presentationObjectText(object).trim());
+    if (!words || !object.height || !object.width) continue;
+    const floor = object.id === title?.id ? SETTLE_FLOOR.title : SETTLE_FLOOR.body;
+    let size = textSize(object);
+    // The same inner room the studio's own fit keeps.
+    while (size > floor && estimateTextHeight(object) > object.height - 8) {
+      size -= 1;
+      object.style = { ...object.style, fontSize: size };
+    }
+  }
+}
+
 /** Designer over the whole deck in one family of looks, or one look on one slide. */
 function applyDesign(deck: PresentationContent, op: Extract<PresentationEditOp, { op: "design" }>, label: string) {
   if (op.slide === undefined) {
     const look = op.look ?? "rule";
     if (!DECK_LOOKS.has(look))
       throw new AuthoringError(`${label}: look for the whole deck must be one of ${[...DECK_LOOKS].join(", ")}.`);
+    deck.slides.forEach(settleSlideText);
     // A slide that still has a problem keeps its layout, so the readback can name what it is missing.
     const designed = designDeck(deck, look as DeckFamily);
     deck.slides = deck.slides.map((slide, index) => (slideProblems(slide, index).length ? slide : designed[index]!));
@@ -418,6 +449,9 @@ export function applyPresentationEdits(
 ): PresentationContent {
   const deck = content ? normalizePresentationContent(structuredClone(content)) : emptyDeck();
   if (!Array.isArray(ops) || !ops.length) throw new AuthoringError("No operations were given.");
+  // Only slides this edit touched are settled: a student's own type elsewhere stays as it is.
+  const touched = new Set<string>();
+  let touchedAll = false;
   ops.forEach((op, index) => {
     const label = `Edit ${index + 1} (${String(op?.op)})`;
     switch (op?.op) {
@@ -432,6 +466,8 @@ export function applyPresentationEdits(
         deck.slides.splice(at, 0, slide);
         fillSlide(slide, op, layout, ids, label);
         layoutSlide(deck, at, layout);
+        settleSlideText(deck.slides[at]!);
+        touched.add(slide.id);
         break;
       }
       case "update_slide": {
@@ -446,6 +482,7 @@ export function applyPresentationEdits(
           layoutSlide(deck, at, layout);
           keepDesign(deck, at, look);
         }
+        touched.add(deck.slides[at]!.id);
         break;
       }
       case "delete_slide": {
@@ -463,12 +500,15 @@ export function applyPresentationEdits(
       }
       case "set_theme":
         applyTheme(deck, op, label);
+        touchedAll = true;
         break;
       case "replace":
         replaceAcrossDeck(deck, op, label);
+        touchedAll = true;
         break;
       case "design":
         applyDesign(deck, op, label);
+        touchedAll = true;
         break;
       default:
         throw new AuthoringError(
@@ -477,6 +517,7 @@ export function applyPresentationEdits(
     }
   });
   if (!deck.slides.length) throw new AuthoringError("A presentation needs at least one slide.");
+  for (const slide of deck.slides) if (touchedAll || touched.has(slide.id)) settleSlideText(slide);
   return ensurePresentationReadingOrders(deck);
 }
 

@@ -53,7 +53,8 @@ export function updateMemoryTool(session: HarnessSession): HarnessTool<MemoryCha
       required: ["file"],
       additionalProperties: false,
     },
-    effect: "read",
+    // It writes, and like every write it never asks: notes are the person's to correct in Settings.
+    effect: "write",
     label: () => "Updating my notes",
     parse: (raw) => {
       if (raw.file !== "about" && raw.file !== "preferences" && raw.file !== "topic")

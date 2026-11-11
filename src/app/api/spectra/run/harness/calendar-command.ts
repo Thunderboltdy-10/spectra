@@ -9,6 +9,7 @@ import {
   calendarUndoInverse,
   interpretCalendarMutationResult,
   normalizeCalendarCommand,
+  refusePastCalendarStart,
   type CanonicalCalendarTool,
   type CalendarUndoInverse,
 } from "@/features/spectra/calendar/domain/command";
@@ -45,6 +46,7 @@ export async function executeRegisteredCalendarMutation(input: {
   // Calendar writes carry no authority class: they are undoable gestures.
   const { args: parsed } = parseApplicationCommand(toolId, input.args);
   throwIfAborted(input.signal);
+  refusePastCalendarStart(toolId, parsed);
   const action = calendarSemanticAction(toolId, parsed);
   const scopeId =
     input.operationId?.trim() ||

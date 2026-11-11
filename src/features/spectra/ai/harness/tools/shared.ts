@@ -23,6 +23,8 @@ export type HarnessSession = {
   learner?: boolean;
   /** The agent changed its notes itself, so they need no second look after the run. */
   memoryWritten?: boolean;
+  /** The time now, as the run sees it. */
+  now: () => number;
 };
 
 export function createSession(input: {
@@ -33,6 +35,7 @@ export function createSession(input: {
   agents?: Array<{ id: string; title: string }>;
   places?: Array<{ id: string }>;
   learner?: boolean;
+  now?: () => number;
 }): HarnessSession {
   return {
     backend: input.backend,
@@ -45,6 +48,7 @@ export function createSession(input: {
     ...(input.places ? { places: input.places } : {}),
     ...(input.learner ? { learner: true } : {}),
     created: new Map(),
+    now: input.now ?? Date.now,
   };
 }
 

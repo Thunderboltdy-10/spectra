@@ -32,6 +32,7 @@ export type ArtifactStatusActionKind =
   | "open-in-office"
   | "show-in-folder"
   | "review-draft"
+  | "put-back"
   | "history";
 
 export type ArtifactStatusAction = { kind: ArtifactStatusActionKind; label: string };
@@ -138,7 +139,7 @@ function stateOf(input: ArtifactStatusInput): ArtifactStatusState {
   if (presentation.state === "read_only") return "readOnly";
   if (input.nativeConflict || input.draftReview || presentation.key === "conflict") return "versions";
   if (presentation.key === "error") return "problem";
-  if (presentation.action?.kind === "sign-in") return "problem";
+  if (presentation.action?.kind === "sign-in" || presentation.key === "device") return "problem";
   if (presentation.state === "saving" || presentation.state === "pending") {
     if (replicas.some(replicaHasNativeLock)) return "waitingOffice";
     if (retrying(replicas)) return "problem";
@@ -177,6 +178,7 @@ function wordsOf(state: ArtifactStatusState, input: ArtifactStatusInput) {
       return input.presentation.key === "offline" ? "Offline" : input.presentation.label;
     case "problem":
       if (input.presentation.action?.kind === "sign-in") return "Signed out";
+      if (input.presentation.key === "device") return input.presentation.label;
       return retrying(input.replicas) ? "Couldn't save. Retrying" : "Couldn't save";
   }
 }
@@ -236,6 +238,7 @@ export function artifactStatusOf(input: ArtifactStatusInput): ArtifactStatus {
     if (input.draftReview) offer("review-draft", "Review the draft");
     else offer("compare", "Compare");
   }
+  if (input.presentation.action?.kind === "put-back") offer("put-back", input.presentation.action.label);
   if (input.presentation.action?.kind === "retry") offer("retry", input.presentation.action.label);
   if (input.presentation.action?.kind === "sign-in") offer("sign-in", input.presentation.action.label);
   if (input.presentation.action?.kind === "reconnect") offer("reconnect", input.presentation.action.label);

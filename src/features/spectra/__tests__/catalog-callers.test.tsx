@@ -6,7 +6,7 @@ import { spectraAgentCatalog, spectraWorkspaceCatalog } from "../data/api";
 
 const auth = vi.hoisted(() => ({ userId: "user", sessionId: "session", identity: { accountId: "account", schoolId: "school", membershipId: "membership" } }));
 vi.mock("@clerk/nextjs", () => ({ useAuth: () => auth }));
-vi.mock("convex/react", () => ({ useQuery: (_query: unknown, args: unknown) => args === "skip" ? undefined : auth.identity }));
+vi.mock("convex/react", () => ({ useConvexAuth: () => ({ isAuthenticated: true }), useQuery: (_query: unknown, args: unknown) => args === "skip" ? undefined : { catalog: auth.identity } }));
 vi.mock("../data/use-authed-args", () => ({ useAuthedArgs: (args: unknown) => args }));
 const row = (id: string) => ({ _id: id, title: id, status: "active", lastActivityAt: 1 });
 const page = (items: unknown[], cursor: string | null) => Response.json({ items, isDone: cursor === null, continueCursor: cursor });

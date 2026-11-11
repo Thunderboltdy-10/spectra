@@ -183,6 +183,9 @@ pub struct PairingExchange {
     pub device_credential: String,
     pub browser_origin: String,
     pub account_id: String,
+    /// Shown in the tray, so which account this computer serves is always visible.
+    #[serde(default)]
+    pub account_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -191,6 +194,8 @@ pub struct PairingResume {
     pub device_id: String,
     pub browser_origin: String,
     pub account_id: String,
+    #[serde(default)]
+    pub account_name: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

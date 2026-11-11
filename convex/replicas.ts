@@ -481,7 +481,17 @@ export const forWork = query({
     const pending = await ctx.db.query("syncOperations").withIndex("by_work_account_created", (q) => q.eq("workId", workId).eq("accountId", actor.accountId)).order("desc").take(50);
     const replicaById = new Map(presented.map((replica) => [String(replica._id), replica]));
     const pendingCount = pending.filter((operation) => isActionablePendingOperation(operation, replicaById)).length;
-    return { replicas: presented, conflicts: openConflicts, openConflictCount: openConflicts.length, pendingCount, recentOperations: pending.slice(0, 20) };
+    // An editor open in another tab learns here that the work went to Trash (F17).
+    const placements = await ctx.db.query("orgNodes")
+      .withIndex("by_account_kind_source", (q) => q.eq("accountId", actor.accountId).eq("kind", "work").eq("sourceId", workId))
+      .take(4);
+    const trashedNode = placements.length && placements.every((node) => node.deletedAt !== undefined)
+      ? placements.sort((a, b) => (b.deletedAt ?? 0) - (a.deletedAt ?? 0))[0]!
+      : null;
+    return {
+      replicas: presented, conflicts: openConflicts, openConflictCount: openConflicts.length, pendingCount, recentOperations: pending.slice(0, 20),
+      ...(trashedNode ? { trashedNodeId: trashedNode.trashedRootId ?? trashedNode._id } : {}),
+    };
   },
 });
 

@@ -13,12 +13,14 @@ export type SpectraRunStatus =
 
 export type SpectraOperationStatus = SpectraOperationRecoveryStatus;
 
-const ACTIVE_STATUSES = new Set<SpectraRunStatus>([
+export const ACTIVE_RUN_STATUSES = [
   "queued",
   "running",
   "awaiting_confirmation",
   "awaiting_resolution",
-]);
+] as const satisfies readonly SpectraRunStatus[];
+
+const ACTIVE_STATUSES = new Set<SpectraRunStatus>(ACTIVE_RUN_STATUSES);
 
 const TERMINAL_STATUSES = new Set<SpectraRunStatus>([
   "completed",

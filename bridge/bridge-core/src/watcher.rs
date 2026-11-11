@@ -299,6 +299,9 @@ pub fn scan_selection<P: Platform>(
                 && !name.to_string_lossy().contains(['/', '\\']),
             "A file selection must be one file name."
         );
+        // A folder that isn't there (an unplugged drive) says nothing about
+        // the file in it: the scan fails rather than reporting it deleted.
+        anyhow::ensure!(std::fs::metadata(root).is_ok_and(|metadata| metadata.is_dir()), "The folder isn't available here.");
         // A deleted selection is an empty complete scan, so reconciliation
         // marks it missing. A symlink replacement must not grant a sibling.
         match std::fs::symlink_metadata(&selection) {
@@ -461,13 +464,58 @@ fn is_double_sync_path(path: &Path) -> bool {
             || component == "google drive"
             || component.starts_with("google drive - ")
             || component == "my drive"
+            || component == "icloud drive"
+            || component == "icloud~com~apple~clouddocs"
+            || component == "com~apple~clouddocs"
     })
 }
 
 pub fn is_office_lock_file(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with("~$"))
+        // `._name` is the metadata twin macOS writes beside a file on a drive
+        // it doesn't own; it carries the name's extension but no document.
+        .is_some_and(|name| name.starts_with("~$") || name.starts_with("._"))
+}
+
+/// A file in a cloud-synced folder that its drive made as a conflict copy.
+pub fn is_held_back_conflict_copy(root: &Path, path: &Path) -> bool {
+    is_double_sync_path(path)
+        && is_provider_conflict_copy(&relative_key(root, path), |sibling| root.join(sibling).is_file())
+}
+
+/// A copy a cloud drive made when two edits met: Dropbox's "(… conflicted
+/// copy …)" and "(Case Conflict)", or "name (2).docx" beside "name.docx".
+/// `exists` says whether a sibling path (relative, like the one given) exists.
+pub fn is_provider_conflict_copy(relative_path: &str, exists: impl Fn(&str) -> bool) -> bool {
+    let path = Path::new(relative_path);
+    let (Some(stem), Some(extension)) = (
+        path.file_stem().and_then(|stem| stem.to_str()),
+        path.extension().and_then(|extension| extension.to_str()),
+    ) else {
+        return false;
+    };
+    let lower = stem.to_lowercase();
+    if lower.contains("conflicted copy") || lower.contains("(case conflict") {
+        return true;
+    }
+    // "name (2)" from OneDrive and Dropbox, "name 2" from iCloud.
+    let (at, number) = match stem.strip_suffix(')').and_then(|rest| rest.rfind(" (").map(|at| (at, &rest[at + 2..]))) {
+        Some(found) => found,
+        None => match stem.rfind(' ') {
+            Some(at) => (at, &stem[at + 1..]),
+            None => return false,
+        },
+    };
+    if number.is_empty() || number.len() > 3 || !number.bytes().all(|byte| byte.is_ascii_digit()) {
+        return false;
+    }
+    let original = format!("{}.{extension}", &stem[..at]);
+    let sibling = match relative_path.rfind(['/', '\\']) {
+        Some(slash) => format!("{}{original}", &relative_path[..=slash]),
+        None => original,
+    };
+    exists(&sibling)
 }
 
 pub(crate) fn is_bridge_staging_file(path: &Path) -> bool {
@@ -817,6 +865,46 @@ mod tests {
     use async_trait::async_trait;
     use std::io::Write;
     use tempfile::tempdir;
+
+    #[test]
+    fn copies_a_cloud_drive_made_are_recognised() {
+        let held = |path: &str| ["essay.docx", "Year 10/notes.docx"].contains(&path);
+        assert!(is_provider_conflict_copy("essay (1).docx", held));
+        assert!(is_provider_conflict_copy("Year 10/notes (2).docx", held));
+        assert!(is_provider_conflict_copy("essay (Pablo's conflicted copy 2026-11-10).docx", |_| false));
+        assert!(is_provider_conflict_copy("Essay (Case Conflict).docx", |_| false));
+        assert!(is_provider_conflict_copy("essay 2.docx", held));
+        assert!(!is_provider_conflict_copy("Unit 3.docx", held));
+        // Without the original beside it, "(1)" is just part of a name.
+        assert!(!is_provider_conflict_copy("report (1).docx", held));
+        assert!(!is_provider_conflict_copy("chapter (draft).docx", held));
+        assert!(!is_provider_conflict_copy("essay.docx", held));
+        assert!(is_office_lock_file(Path::new("._essay.docx")));
+        assert!(is_office_lock_file(Path::new("~$essay.docx")));
+        let drive = tempfile::tempdir().unwrap();
+        let root = drive.path().join("OneDrive").join("School");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("essay.docx"), b"x").unwrap();
+        assert!(is_held_back_conflict_copy(&root, &root.join("essay (1).docx")));
+        assert!(!is_held_back_conflict_copy(&root, &root.join("essay.docx")));
+        let plain = drive.path().join("School");
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::write(plain.join("essay.docx"), b"x").unwrap();
+        // Outside a cloud drive, "(1)" is the person's own naming.
+        assert!(!is_held_back_conflict_copy(&plain, &plain.join("essay (1).docx")));
+    }
+
+    #[test]
+    fn a_folder_that_is_not_there_is_never_a_complete_scan() {
+        let root = tempdir().unwrap();
+        let gone = root.path().join("unplugged");
+        let folder = scan_mount(&TestPlatform, &gone);
+        assert!(folder.is_err() || !folder.unwrap().failures.is_empty());
+        assert!(scan_selection(&TestPlatform, &gone, Some(Path::new("essay.docx"))).is_err());
+        // The folder is there and the chosen file is not: that file was deleted.
+        let page = scan_selection(&TestPlatform, root.path(), Some(Path::new("essay.docx"))).unwrap();
+        assert!(page.entries.is_empty() && page.failures.is_empty());
+    }
 
     struct TestPlatform;
     #[async_trait]

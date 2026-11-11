@@ -49,7 +49,7 @@ Settings → Spectra → "The dock at rest" offers:
 | --- | --- |
 | **Rest** | The prism alone, about 30 px. It is still until the pointer comes near; then it leans toward it, and on hover it spins round once. |
 | **Working** | The prism turns in 3D, and the spectrum flows round its edges. Faint spectral particles shed from it and drift into the field. When more than one thread is working, a small count sits beside it. |
-| **Finished** | The prism spins once with momentum and settles. A short ripple runs through the field. A one-line notice unfolds from it ("*Photosynthesis deck* is ready"), and hovering holds the notice. After it folds away, the prism keeps the full spectrum on its edges until the thread has been seen. |
+| **Finished** | The prism spins once with momentum and settles. A short ripple runs through the field. The reply peek rises from the thread's tab (see Sending). After it folds away, the prism keeps the full spectrum on its edges until the thread has been seen. |
 | **Needs you** | The question card (below) comes up over the island at once. A warm orange light leans out of the prism. |
 | **Hover** | The rail stands up on the bar's top edge (below) |
 | **Composing** | The dock opens into the composer, with the rail standing on it |
@@ -189,8 +189,18 @@ The agent switch is at the left end of the field.
 ### Sending
 
 - The words travel into the dock, which takes the run in; its light shows working.
-- A new thread's card opens over its new tab, so what was sent is seen working. A reply to a thread still working
-  joins its run instead of starting another.
+- Nothing opens at send. The thread arrives as a tab and the field says the step it is on ("Reading *Physics
+  progress*…"); focused, it says "Ask something else". A reply to a thread still working joins its run instead of
+  starting another.
+- When the answer is ready and its card is not open, a **reply peek** rises out of its tab (`reply-peek.tsx`):
+  - a plain answer shows its first lines, fading where they are cut;
+  - an edit says in one line what changed, with **Undo** and **Show** (Show opens the work at the changed region);
+  - a new work is named, with **Open**.
+  It never takes focus and has no header or close button. It folds back into its tab after 8 seconds; the pointer on
+  it holds it, resting there grows it into the whole thread, and Esc folds it. It does not rise while a menu or dialog
+  is open, or when the thread is already on screen.
+- The setting "Open the thread when I send" (`ai.openConversationAfterSend`, off by default) opens the card at send
+  instead.
 
 ### Cancelling
 
@@ -274,7 +284,7 @@ The island lives in `src/features/spectra/island/`.
   - the Agents page lends its engine, so an open agent is what Spectra is asked about;
   - elsewhere, the thread open in the route's Side (the `side.thread` bus query) is the focus.
 - **No page has its own composer.** `CommandBar` remains only on the landing page.
-- **Sending never opens anything.** The run arrives as a tab; the user opens it from the thread view.
+- **Sending** follows "Sending" above; the peek's life (8 s, held while the pointer is on it) is in `island.tsx`.
 - **Tabs** come from one shared store (`run-tabs.ts`); `island-model.ts` arranges them and ranks the one status.
   Which threads the user has seen is kept per browser (`seen.ts`).
 - **Questions** (`questions.ts`) merge the live harness question with saved runs waiting on the user, and each

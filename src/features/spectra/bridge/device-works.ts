@@ -9,6 +9,7 @@ import {
 import { bridgeIsAway } from "./availability";
 import { deviceBaseline, wordsOf, type DeviceSeed } from "../collaboration/device-work";
 import { requestSpectra } from "../data/request";
+import { spectraBus } from "../events";
 import { accountStorageRevision, assertAccountStorageRevision } from "@/lib/account-storage-scope";
 
 /*
@@ -140,12 +141,54 @@ export async function seedNewDeviceWork(
     await callWorks("seed", { artifactId: created.artifactId, stateBase64: baseline.stateBase64, projection: baseline.projection });
     assertAccountStorageRevision(revision);
     seeded.add(created.artifactId);
+    void markSeeded(created.artifactId);
   } catch {
     assertAccountStorageRevision(revision);
     await sendWorkToCloud(created.artifactId, { ...input, tags: input.tags ?? [], text: wordsOf(input.content) });
     assertAccountStorageRevision(revision);
     knownOnDevice.delete(created.artifactId);
   }
+}
+
+/** From now on a missing copy of this work is a lost copy, never an empty new one. */
+async function markSeeded(artifactId: string) {
+  await requestSpectra("/api/spectra", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "touchDeviceWork", artifactId, seeded: true }),
+  }).catch(() => undefined);
+}
+
+const REMOVALS_KEY = "spectra:device-removals-pending";
+
+function pendingRemovals(): string[] {
+  try {
+    const value: unknown = JSON.parse(window.localStorage.getItem(`${REMOVALS_KEY}:${accountStorageRevision()}`) ?? "[]");
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string").slice(0, 200) : [];
+  } catch {
+    return [];
+  }
+}
+
+function keepPendingRemovals(ids: string[]) {
+  try {
+    const key = `${REMOVALS_KEY}:${accountStorageRevision()}`;
+    if (ids.length) window.localStorage.setItem(key, JSON.stringify(ids));
+    else window.localStorage.removeItem(key);
+  } catch {
+    // Without storage the stale copy is only tidied on a later move.
+  }
+}
+
+/** A work moved online whose copy here couldn't be removed then is removed now. */
+export async function retryPendingRemovals() {
+  const ids = pendingRemovals();
+  if (!ids.length) return;
+  const left: string[] = [];
+  for (const artifactId of ids) {
+    await callWorks("remove", { artifactId }).catch(() => left.push(artifactId));
+  }
+  keepPendingRemovals(left);
 }
 
 async function sendWorkToCloud(
@@ -193,6 +236,7 @@ export async function moveWorkToDevice(
   }
   knownOnDevice.add(work._id);
   seeded.add(work._id);
+  spectraBus.emit("artifact.storageMoved", { artifactId: work._id });
 }
 
 /** Brings a work up to the cloud, for sharing or another computer. */
@@ -211,10 +255,13 @@ export async function moveWorkToCloud(artifactId: string) {
     text: wordsOf(stored.content),
   });
   assertAccountStorageRevision(revision);
-  await callWorks("remove", { artifactId }).catch(() => undefined);
+  await callWorks("remove", { artifactId }).catch(() => {
+    keepPendingRemovals([...new Set([...pendingRemovals(), artifactId])]);
+  });
   assertAccountStorageRevision(revision);
   knownOnDevice.delete(artifactId);
   seeded.delete(artifactId);
+  spectraBus.emit("artifact.storageMoved", { artifactId });
 }
 
 const seeded = new Set<string>();
@@ -292,7 +339,7 @@ export async function deviceVersion(artifactId: string, versionId: string) {
 }
 
 /** Gets a browser into the room on this computer, or says why it can't. */
-export async function enterDeviceRoom<T extends { token: string; device?: { storeId: string; seed: DeviceSeed } }>(
+export async function enterDeviceRoom<T extends { token: string; device?: { storeId: string; storageSeeded?: boolean; seed: DeviceSeed } }>(
   artifactId: string,
   session: T,
 ): Promise<T> {
@@ -319,9 +366,17 @@ export async function enterDeviceRoom<T extends { token: string; device?: { stor
       "COLLABORATION_DEVICE_ELSEWHERE: This work is kept on another of your computers. Open it there, or move it to the cloud from that computer.",
     );
   if (!seeded.has(artifactId)) {
-    const baseline = deviceBaseline(device.seed);
-    await callWorks("seed", { artifactId, stateBase64: baseline.stateBase64, projection: baseline.projection });
+    // Seeding makes a new work; it never stands in for one this computer has lost.
+    const held = await callWorks<DeviceWorkRow | null>("get", { artifactId });
     assertAccountStorageRevision(revision);
+    if (!held) {
+      if (device.storageSeeded)
+        throw new Error("COLLABORATION_DEVICE_MISSING: This artifact isn't on this computer. Bring it back from your backup.");
+      const baseline = deviceBaseline(device.seed);
+      await callWorks("seed", { artifactId, stateBase64: baseline.stateBase64, projection: baseline.projection });
+      assertAccountStorageRevision(revision);
+      void markSeeded(artifactId);
+    }
     seeded.add(artifactId);
   }
   assertAccountStorageRevision(revision);

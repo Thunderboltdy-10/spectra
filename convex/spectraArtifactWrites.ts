@@ -15,7 +15,7 @@ import { computeEffectivePolicy } from "./syncPolicy";
 import type { PermissionCategory } from "../src/features/spectra/settings/schema/ai-permissions";
 import {
   artifactOperationDigest, artifactOutput, artifactScopeDigest, artifactSourceIdentity,
-  artifactWriteReceipt, currentArtifactApprovalScope, type ArtifactWriteScope,
+  artifactWriteReceipt, currentArtifactApprovalScope, approvalSemanticDigest, type ArtifactWriteScope,
   artifactOperationTarget, artifactCreationIdentity,
 } from "./spectraArtifactWriteScope";
 
@@ -171,6 +171,7 @@ export const preparePlan = action({
         version: 1, artifactId: target.artifact._id, runId: args.runId, executionId: args.executionId, operationId: operation._id,
         operationDigest: await artifactOperationDigest(operation), sourceContentIdentity: target.sourceContentIdentity,
         baseContentDigest: await artifactScopeDigest(before), resultContentDigest: await artifactScopeDigest(after), kind,
+        semanticBaseDigest: await approvalSemanticDigest(before), semanticResultDigest: await approvalSemanticDigest(after),
         ...(target.previousOperationId ? { baseProducerOperationId: target.previousOperationId } : {}),
         ...(kind === "create" ? { creationSourceIdentity: await artifactCreationIdentity(target.artifact) } : {}),
       };

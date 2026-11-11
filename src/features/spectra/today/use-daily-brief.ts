@@ -53,7 +53,7 @@ export function useDailyBrief(now: number | null): BriefState {
   // Until the reader's own preferences are in, the default must not ask for a brief they turned off.
   // A showcase (the landing page) has the brief its story holds, and asks for nothing.
   const showcase = useShowcaseTime() !== null;
-  const on = showcase || (hydrated && preferences.notifications.dailyBrief && (setup?.established === true || (preferences.integrations.tourStatus === "done" && (setup?.phase === "ready" || setup?.phase === "awaiting_connection"))));
+  const on = showcase || (hydrated && preferences.notifications.dailyBrief && (Boolean(now && setup?.establishedAt != null && now > setup.establishedAt) || (preferences.integrations.tourStatus === "done" && (setup?.phase === "ready" || setup?.phase === "awaiting_connection"))));
   const timeZone = useMemo(() => localZone(), []);
   const day = now ? zonedDay(now, timeZone) : null;
   const awake = Boolean(now && day && now >= zonedInstant(day, wakeTime, timeZone));

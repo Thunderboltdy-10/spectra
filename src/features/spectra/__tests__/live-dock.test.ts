@@ -309,7 +309,8 @@ describe("Live Dock V2", () => {
     expect(tabs).toContain("window.setTimeout(");
     expect(tabs).not.toContain("window.setInterval(");
     expect(tabs).toContain("activePollSignature");
-    expect(tabs).toContain('spectraBus.on("run.changed", () => void refreshRunTabs(false, true))');
+    expect(tabs).toContain('spectraBus.on("run.changed", readAfterBurst)');
+    expect(tabs).toContain("BUS_READ_EVERY_MS = 1_000");
     expect(tabs).toContain("let refreshGeneration = 0;");
     expect(tabs).toContain("if (generation < appliedRefreshGeneration) return;");
     expect(tabs).not.toContain("refreshRunTabs(), 180_000");

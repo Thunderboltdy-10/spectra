@@ -525,7 +525,7 @@
   height: 26px;
   overflow: hidden;
   border-radius: 50%;
-  background: var(--bg-sunken, var(--bg-hover));
+  background: var(--bg-hover);
   color: var(--text-tertiary);
 }
 .shared-people-face img {

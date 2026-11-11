@@ -45,8 +45,15 @@ async function rowOf(ctx: QueryCtx, accountId: Id<"accounts">) {
 }
 
 /** Whoever finished setting up gets a brief, with or without a school's systems behind it. */
-function briefAllowed(setup: { tourComplete: boolean; established: boolean; phase: string }) {
-  return setup.established || (setup.tourComplete && (setup.phase === "ready" || setup.phase === "awaiting_connection"));
+function briefAllowed(setup: { tourComplete: boolean; establishedAt: number | null; phase: string }, at: number) {
+  const established = setup.establishedAt !== null && at > setup.establishedAt;
+  return established || (setup.tourComplete && (setup.phase === "ready" || setup.phase === "awaiting_connection"));
+}
+
+/** The end of a "YYYY-MM-DD" day, the latest that day can be anywhere: a query compares with this, not the clock. */
+function endOfDay(day: string) {
+  const start = Date.parse(`${day}T00:00:00Z`);
+  return Number.isFinite(start) ? start + 24 * 60 * 60 * 1_000 : 0;
 }
 
 /** The brief a row keeps from before `day`: its own when it is an earlier day's, else the one it replaced. */
@@ -67,7 +74,7 @@ export const today = query({
     const account = await getAuthenticatedAccount(ctx);
     if (!account) return null;
     const setup = await schoolSetupForAccount(ctx, account._id);
-    if (!briefAllowed(setup)) return null;
+    if (!briefAllowed(setup, endOfDay(day))) return null;
     const row = await rowOf(ctx, account._id);
     if (!row) return null;
     if (row.claimedAt < (setup.completedAt ?? 0)) return null;
@@ -91,7 +98,7 @@ export const claim = mutation({
     const account = await getAuthenticatedAccount(ctx);
     if (!account) throw new Error("AUTH_ACCOUNT_REQUIRED");
     const setup = await schoolSetupForAccount(ctx, account._id);
-    if (!briefAllowed(setup)) return false;
+    if (!briefAllowed(setup, Date.now())) return false;
     const completedAt = setup.completedAt ?? 0;
     const now = Date.now();
     const row = await rowOf(ctx, account._id);
@@ -186,7 +193,7 @@ export const dispatchDue = internalMutation({
       .take(DISPATCH_BATCH);
     for (const schedule of due) {
       const setup = await schoolSetupForAccount(ctx, schedule.accountId);
-      if (!briefAllowed(setup)) {
+      if (!briefAllowed(setup, now)) {
         await ctx.db.patch(schedule._id, { nextAt: now + DAY_MS });
         continue;
       }

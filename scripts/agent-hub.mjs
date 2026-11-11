@@ -24,12 +24,8 @@ const MAX_WAITING_FRAMES = 64;
 export const NO_BRIDGE_CLOSE = 4404;
 export const PIPE_TIMEOUT_CLOSE = 4408;
 
-const base64url = (value) => Buffer.from(value).toString("base64url");
 
-export function signAgentHubTicket(claims, key) {
-  const body = base64url(JSON.stringify({ ...claims, aud: "spectra-agent-hub" }));
-  return `${body}.${createHmac("sha256", key).update(body).digest("base64url")}`;
-}
+export { signAgentHubTicket } from "../shared/agent-hub-ticket.mjs";
 
 export function readAgentHubTicket(ticket, key, now = Date.now()) {
   const [body, signature] = String(ticket ?? "").split(".");

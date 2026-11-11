@@ -6,11 +6,16 @@ export function downloadDocumentText(
   downloadDocumentBlob(name, new Blob([value], { type }));
 }
 
+/** A work titled after its file ("Essay.docx") exported as Word must not become "Essay.docx.docx". */
+export function downloadFileName(name: string) {
+  return name.replace(/(\.[a-z0-9]{1,8})\1$/i, "$1");
+}
+
 export function downloadDocumentBlob(name: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const anchor = window.document.createElement("a");
   anchor.href = url;
-  anchor.download = name;
+  anchor.download = downloadFileName(name);
   window.document.body.appendChild(anchor);
   try {
     anchor.click();

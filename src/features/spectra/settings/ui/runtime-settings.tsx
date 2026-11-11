@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select";
+import { claudeModelAlias } from "../../ai/model-config";
 import { PROVIDER_LABEL, providerProblem, useAgentRuntime } from "../../ai/use-agent-runtime";
 import { bridgeUnavailableReason, useBridgeAvailability } from "../../bridge/availability";
 import { DEVICES_HREF } from "../../bridge/client";
@@ -80,6 +81,52 @@ function ProviderRow({ provider, model, onModel }: {
   );
 }
 
+/**
+ * What a run tries after the person's own runtime, in their order. The other
+ * subscription is offered only when it is ready on this computer.
+ */
+/** Select items cannot carry an empty value, so an empty order is "stop". */
+const STOP = "stop";
+export const runtimeThenValue = (then: readonly string[]) => then.join(",") || STOP;
+
+export function runtimeThenOptions(runtime: "codex" | "claude", otherReady: boolean, current: readonly string[]) {
+  const other = runtime === "codex" ? "claude" : "codex";
+  const name = PROVIDER_LABEL[other];
+  const options = [
+    ...(otherReady ? [{ value: `${other},spectra`, label: `${name}, then Spectra` }] : []),
+    { value: "spectra", label: "Spectra" },
+    ...(otherReady ? [{ value: other, label: name }] : []),
+    { value: STOP, label: "Stop" },
+  ];
+  const value = runtimeThenValue(current);
+  // A saved choice stays visible after that runtime stops being ready.
+  if (!options.some((option) => option.value === value))
+    options.unshift({ value, label: current.map((item) => (item === "spectra" ? "Spectra" : PROVIDER_LABEL[item as "codex" | "claude"])).join(", then ") });
+  return options;
+}
+
+function RuntimeThenRow({ runtime, then, onThen }: {
+  runtime: "codex" | "claude";
+  then: Ai["runtimeThen"];
+  onThen: (then: Ai["runtimeThen"]) => void;
+}) {
+  const { status } = useAgentRuntime();
+  const other = runtime === "codex" ? "claude" : "codex";
+  return (
+    <Row
+      label="If it can't answer"
+      control={
+        <SelectField
+          ariaLabel="If it can't answer"
+          value={runtimeThenValue(then)}
+          onChange={(value) => onThen((value && value !== STOP ? value.split(",") : []) as Ai["runtimeThen"])}
+          options={runtimeThenOptions(runtime, status?.[other]?.state === "ready", then)}
+        />
+      }
+    />
+  );
+}
+
 export function RuntimeSettings() {
   const { preferences, update } = useSpectraPreferences();
   const { recheck } = useAgentRuntime();
@@ -90,7 +137,7 @@ export function RuntimeSettings() {
     <div className="space-y-10">
       <Group
         title="Who runs your work"
-        description="Use your own Codex or Claude Code subscription through Spectra Bridge. Spectra's tools and instructions stay the same. If your subscription can't answer, Spectra's model takes over, and work that runs on a schedule always uses Spectra's."
+        description="Use your own Codex or Claude Code subscription through Spectra Bridge. Spectra's tools and instructions stay the same. If yours can't answer, Spectra follows the order you set here. Work that runs on a schedule always uses Spectra's."
       >
         <Row
           label="Default"
@@ -107,8 +154,11 @@ export function RuntimeSettings() {
             />
           }
         />
+        {ai.runtime === "codex" || ai.runtime === "claude" ? (
+          <RuntimeThenRow runtime={ai.runtime} then={ai.runtimeThen} onThen={(runtimeThen) => patch({ runtimeThen })} />
+        ) : null}
         <ProviderRow provider="codex" model={ai.codexModel} onModel={(codexModel) => patch({ codexModel })} />
-        <ProviderRow provider="claude" model={ai.claudeModel} onModel={(claudeModel) => patch({ claudeModel })} />
+        <ProviderRow provider="claude" model={claudeModelAlias(ai.claudeModel)} onModel={(claudeModel) => patch({ claudeModel })} />
         <Row label="Logged in just now?" description="Spectra checks again whenever you come back to this window." control={<Button size="sm" variant="secondary" onClick={() => void recheck()}>Check again</Button>} />
       </Group>
       <Group title="Thinking" description="How hard the model thinks before it answers. Low is quickest, High takes longer on hard work.">

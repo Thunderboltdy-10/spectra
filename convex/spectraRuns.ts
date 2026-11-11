@@ -17,6 +17,7 @@ import {
   requireArtifactCapability,
 } from "./spectraShared";
 import {
+  ACTIVE_RUN_STATUSES,
   canTransitionRunStatus,
   interruptionRecovery,
   isActiveRunStatus,
@@ -615,6 +616,7 @@ function assertContinuationSelection(
  * a live lease count, so a crashed worker cannot lock the account out. */
 export const MAX_LIVE_RUNS_PER_ACCOUNT = 4;
 export const MAX_RUNS_PER_ACCOUNT_PER_HOUR = 120;
+const HOUR_MS = 60 * 60_000;
 
 async function assertRunAdmission(
   ctx: MutationCtx,
@@ -629,15 +631,13 @@ async function assertRunAdmission(
         q.eq("ownerAccountId", ownerAccountId).eq("status", status),
       )
       .take(64);
-  const [queued, running, recent] = await Promise.all([
+  const [queued, running, admission] = await Promise.all([
     byStatus("queued"),
     byStatus("running"),
     ctx.db
-      .query("spectraAiRuns")
-      .withIndex("by_account_created", (q) =>
-        q.eq("ownerAccountId", ownerAccountId).gte("createdAt", now - 60 * 60_000),
-      )
-      .take(MAX_RUNS_PER_ACCOUNT_PER_HOUR),
+      .query("spectraRunAdmissions")
+      .withIndex("by_account", (q) => q.eq("accountId", ownerAccountId))
+      .unique(),
   ]);
   const live = [...queued, ...running].filter(
     (run) => (run.leaseExpiresAt ?? 0) > now,
@@ -646,11 +646,27 @@ async function assertRunAdmission(
     throw new Error(
       "Several AI requests are already running. Wait for one to finish, or stop one, before starting another.",
     );
-  if (recent.length >= MAX_RUNS_PER_ACCOUNT_PER_HOUR)
+  // A rolling hour from two hourly counts: this hour's, plus the last hour's
+  // weighted by how much of it still falls within the past sixty minutes.
+  // Reading the hour's runs cost their whole rows, up to 120 of them (E3).
+  const hourStart = Math.floor(now / HOUR_MS) * HOUR_MS;
+  const count = admission?.hourStart === hourStart ? admission.count : 0;
+  const previous =
+    admission?.hourStart === hourStart
+      ? admission.previous
+      : admission?.hourStart === hourStart - HOUR_MS
+        ? admission.count
+        : 0;
+  const recent = count + previous * (1 - (now - hourStart) / HOUR_MS);
+  if (recent >= MAX_RUNS_PER_ACCOUNT_PER_HOUR)
     throw new Error(
       "You have started many AI requests in the last hour. Wait a little before starting another.",
     );
+  const next = { hourStart, count: count + 1, previous };
+  if (admission) await ctx.db.patch(admission._id, next);
+  else await ctx.db.insert("spectraRunAdmissions", { accountId: ownerAccountId, ...next });
 }
+
 
 /** An item named by id, type and title only: a label for the model, never content. */
 const vRunPointer = v.object({ id: v.string(), type: v.string(), title: v.string() });
@@ -860,13 +876,22 @@ export const beginRun = mutation({
       continuationRun = askingRun;
     }
     if (thread) {
+      // The account's active runs are few; the thread's history can be long,
+      // and each run is a large row (E3).
       const activeRuns = (
-        await ctx.db
-          .query("spectraAiRuns")
-          .withIndex("by_thread", (q) => q.eq("threadId", thread!._id))
-          .collect()
+        await Promise.all(
+          ACTIVE_RUN_STATUSES.map((status) =>
+            ctx.db
+              .query("spectraAiRuns")
+              .withIndex("by_account_status", (q) =>
+                q.eq("ownerAccountId", actor._id).eq("status", status),
+              )
+              .take(64),
+          ),
+        )
       )
-        .filter((run) => isActiveRunStatus(run.status))
+        .flat()
+        .filter((run) => run.threadId === thread!._id)
         .sort((left, right) => right.updatedAt - left.updatedAt);
       const activeRun = activeRuns[0] ?? null;
       // A clarification can be answered in ordinary chat text. Resolve the
@@ -905,7 +930,12 @@ export const beginRun = mutation({
       !attachmentSourceRun &&
       thread &&
       !hasIncomingAttachments &&
-      thread.lastRunId
+      thread.lastRunId &&
+      // Most runs carry no files: look for one before reading the whole run.
+      (await ctx.db
+        .query("spectraRunAttachments")
+        .withIndex("by_run_execution", (q) => q.eq("runId", thread!.lastRunId!))
+        .first())
     ) {
       const latestRun = await ctx.db.get(thread.lastRunId);
       if (
@@ -2458,6 +2488,45 @@ export const hideTab = mutation({
   },
 });
 
+/**
+ * The composer re-selects the conversation it shows on every change; when that
+ * tab is already the open one, up to date and alone, there is nothing to
+ * write, and the run (a large row) need not be read (LAUNCH-REVIEW E3).
+ */
+async function alreadyOpenTab(
+  ctx: MutationCtx,
+  actor: Awaited<ReturnType<typeof requireActor>>,
+  args: { runId?: Id<"spectraAiRuns">; threadId?: Id<"spectraThreads"> },
+) {
+  let runId = args.runId;
+  if (args.threadId) {
+    const thread = await ctx.db.get(args.threadId);
+    if (!thread || thread.ownerAccountId !== actor._id || thread.schoolId !== actor.schoolId || !thread.lastRunId) return false;
+    runId = thread.lastRunId;
+  }
+  if (!runId) return false;
+  const tab = await ctx.db
+    .query("spectraRunTabs")
+    .withIndex("by_account_run", (q) => q.eq("ownerAccountId", actor._id).eq("runId", runId))
+    .first();
+  if (
+    !tab ||
+    !tab.selected ||
+    tab.hiddenAt ||
+    tab.schoolId !== actor.schoolId ||
+    (args.threadId && tab.threadId !== args.threadId) ||
+    tab.projectionVersion !== RUN_TAB_PROJECTION_VERSION ||
+    tab.runSummary?._id !== runId
+  )
+    return false;
+  const [selected, threadTabs] = await Promise.all([
+    ctx.db.query("spectraRunTabs").withIndex("by_account_selected", (q) => q.eq("ownerAccountId", actor._id).eq("selected", true)).take(2),
+    ctx.db.query("spectraRunTabs").withIndex("by_account_thread", (q) => q.eq("ownerAccountId", actor._id).eq("threadId", tab.threadId)).take(8),
+  ]);
+  if (selected.length !== 1 || selected[0]!._id !== tab._id) return false;
+  return threadTabs.every((other) => other._id === tab._id || other.hiddenAt || other.updatedAt < tab.updatedAt);
+}
+
 export const selectTab = mutation({
   args: {
     runId: v.optional(v.id("spectraAiRuns")),
@@ -2465,6 +2534,7 @@ export const selectTab = mutation({
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
+    if (await alreadyOpenTab(ctx, actor, args)) return { selected: true };
     const selectedTabs = await ctx.db
       .query("spectraRunTabs")
       .withIndex("by_account_selected", (q) => q.eq("ownerAccountId", actor._id).eq("selected", true))

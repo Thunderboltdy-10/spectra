@@ -241,7 +241,7 @@ function JoinSchoolContent() {
               autoFocus
               aria-label="Verification code"
               placeholder="6-digit code"
-              className="h-11 rounded-control border border-[var(--border-default)] bg-[var(--surface-primary)] px-3 text-body tracking-[0.3em] text-[var(--text-primary)]"
+              className="h-11 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-body tracking-[0.3em] text-[var(--text-primary)]"
             />
             <Button variant="primary" size="lg" className="w-full" type="submit" disabled={codeState === "checking" || !code.trim()}>
               {codeState === "checking" ? <LoaderCircle size={15} className="animate-spin" /> : null}

@@ -47,3 +47,24 @@ it("honors a forced Codex route even when the paid provider is configured", asyn
   expect(io.oneShot).toHaveBeenCalledWith("codex", expect.anything());
   expect(fetcher).not.toHaveBeenCalled();
 });
+
+it.each([
+  ["title", "none", true],
+  ["memory", "none", undefined],
+  ["fold", "low", undefined],
+] as const)("runs the %s side call at %s thinking, never at the run's own level", async (kind, level, small) => {
+  const signal = new AbortController().signal;
+  const runtime = { provider: "claude", accountId: "owner", model: "opus", reasoning: "high" as const };
+  if (kind === "title") await modelThreadTitleWriter({ prompt: "physics revision", runtime }, signal);
+  if (kind === "fold") await modelSummariser({ transcript: "Earlier physics revision", runtime, signal });
+  if (kind === "memory") await modelMemoryReflector({ prompt: "I study Physics HL", reply: "Understood", runtime,
+    head: { enabled: true, about: "", preferences: "", topics: [] } }, signal);
+  expect(io.oneShot).toHaveBeenCalledWith("claude", expect.objectContaining({ reasoning: level, small }));
+});
+
+it("picks the smallest Codex model in the account's list for titles", async () => {
+  const { smallestCodexModel } = await import("../subscription-runtime");
+  expect(smallestCodexModel([{ id: "gpt-6-luna" }, { id: "gpt-6-luna-mini" }, { id: "gpt-6-luna-nano" }])).toBe("gpt-6-luna-nano");
+  expect(smallestCodexModel([{ id: "gpt-6-luna" }, { id: "gpt-6-luna-mini" }])).toBe("gpt-6-luna-mini");
+  expect(smallestCodexModel([{ id: "gpt-6-luna" }])).toBeUndefined();
+});

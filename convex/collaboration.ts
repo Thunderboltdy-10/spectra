@@ -77,6 +77,29 @@ async function getRoom(
     .unique();
 }
 
+/**
+ * A work that moved between this computer and the cloud starts a new room:
+ * the old one holds a different history of the same words, and merging two
+ * independent histories doubles every paragraph (F19). Open editors are
+ * disconnected by the policy bump and rejoin the fresh room.
+ */
+export async function retireRoomsForStorageMove(ctx: MutationCtx, artifact: Doc<"spectraArtifacts">) {
+  const rooms = await ctx.db
+    .query("collaborationRooms")
+    .withIndex("by_artifact_partition", (q) => q.eq("artifactId", artifact._id))
+    .take(16);
+  const now = Date.now();
+  let retired = 0;
+  for (const room of rooms) {
+    if (room.status === "closed" || room.partitionKey.startsWith("__retired__:")) continue;
+    await ctx.db.patch(room._id, { partitionKey: `__retired__:${room._id}`, status: "closed", updatedAt: now });
+    await ctx.scheduler.runAfter(0, internal.collaboration.compactRetiredRoom, { roomId: room._id });
+    retired += 1;
+  }
+  if (retired) await bumpPolicyVersion(ctx, "artifact", artifact._id, artifact.schoolId, artifact.ownerAccountId);
+  return retired;
+}
+
 async function rotateRoomForSchema(
   ctx: MutationCtx,
   room: Doc<"collaborationRooms">,

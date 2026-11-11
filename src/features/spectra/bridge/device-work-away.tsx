@@ -30,7 +30,7 @@ export function DeviceWorkAway({ title, reason }: { title: string; reason: strin
     return <div className="flex h-full min-h-[240px] items-center justify-center text-[var(--text-tertiary)]">Opening {title}…</div>;
   return (
     <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-3 px-6 text-center">
-      <p className="text-[length:var(--text-lg)] font-medium text-[var(--text-primary)]">{title} is on your computer</p>
+      <p className="text-[length:var(--text-title)] font-medium text-[var(--text-primary)]">{title} is on your computer</p>
       <p className="max-w-[44ch] text-[var(--text-secondary)]">{reason}</p>
       <Link
         href="/devices"

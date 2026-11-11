@@ -407,7 +407,7 @@ button.work-embed-title:hover {
 
 .work-embed-sheet-grid span {
   display: block;
-  font-size: 10.5px;
+  font-size: var(--text-micro);
   color: var(--text-tertiary);
 }
 

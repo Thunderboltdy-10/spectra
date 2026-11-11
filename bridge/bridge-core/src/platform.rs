@@ -337,3 +337,34 @@ mod tests {
         assert_ne!(first_id, second_id);
     }
 }
+
+#[cfg(test)]
+mod rename_tests {
+    use super::{HostPlatform, Platform};
+    use std::fs::File;
+    use tempfile::tempdir;
+
+    /// A rename that only changes case, a name in another script, or a long
+    /// path keeps the file's identity, so the artifact is never duplicated.
+    #[test]
+    fn renames_of_every_kind_keep_the_file_identity() {
+        let dir = tempdir().unwrap();
+        let identity = |path: &std::path::Path| HostPlatform.file_identity(&File::open(path).unwrap()).unwrap();
+        let original = dir.path().join("essay.docx");
+        std::fs::write(&original, b"words").unwrap();
+        let first = identity(&original);
+        let mut current = original;
+        let deep = (0..6).fold(dir.path().to_path_buf(), |path, level| path.join(format!("{level}-{}", "carpeta".repeat(5))));
+        std::fs::create_dir_all(&deep).unwrap();
+        for next in [
+            dir.path().join("Essay.docx"),
+            dir.path().join("Ensayo — 論文 сочинение.docx"),
+            deep.join(format!("{}.docx", "largo".repeat(20))),
+        ] {
+            std::fs::rename(&current, &next).unwrap();
+            assert_eq!(identity(&next), first, "{}", next.display());
+            current = next;
+        }
+        assert!(current.to_string_lossy().chars().count() > 260);
+    }
+}

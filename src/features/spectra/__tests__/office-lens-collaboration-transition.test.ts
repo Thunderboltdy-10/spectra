@@ -29,6 +29,16 @@ describe("Office lens collaboration transition", () => {
     expect(
       artifactCollaborationPersistenceKey("work-1", "root", "sheets", 3),
     ).not.toBe(
+      artifactCollaborationPersistenceKey("work-1", "root", "sheets", 3, 1),
+    );
+    expect(
+      artifactCollaborationPersistenceKey("work-1", "root", "sheets", 3, 0),
+    ).toBe(
+      artifactCollaborationPersistenceKey("work-1", "root", "sheets", 3),
+    );
+    expect(
+      artifactCollaborationPersistenceKey("work-1", "root", "sheets", 3),
+    ).not.toBe(
       artifactCollaborationPersistenceKey("work-1", "root", "sheets", 4),
     );
   });

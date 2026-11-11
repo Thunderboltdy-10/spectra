@@ -484,7 +484,7 @@
   border: 1px solid var(--border-default);
   border-radius: var(--control-radius);
   background: var(--card-paper);
-  font-size: var(--text-small, 0.8125rem);
+  font-size: var(--text-caption);
 }
 
 .spectra-document-inline-panel :is(input, textarea):focus-visible {
@@ -523,7 +523,7 @@
   flex-direction: column;
   gap: 4px;
   min-width: 0;
-  font-size: var(--text-small, 0.8125rem);
+  font-size: var(--text-caption);
 }
 
 .spectra-document-word-comments textarea,

@@ -137,7 +137,11 @@ impl PollScheduler {
         if self.state != PollState::Idle {
             return self.next_delay();
         }
-        if busy { SIGNALLED_BUSY_DELAY } else { SIGNALLED_IDLE_DELAY }
+        if busy {
+            SIGNALLED_BUSY_DELAY
+        } else {
+            SIGNALLED_IDLE_DELAY
+        }
     }
 
     pub fn next_delay(&self) -> Duration {

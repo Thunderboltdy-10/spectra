@@ -89,8 +89,12 @@ export function artifactCollaborationPersistenceKey(
   partitionKey: string,
   namespace: string,
   schemaVersion = 1,
+  storageEpoch?: number,
 ) {
-  return `work:${artifactId}:${partitionKey}:${namespace}:v${schemaVersion}`;
+  // Each move between a computer and the cloud starts a fresh live history; a cache from
+  // the earlier history merged into the new room doubles every paragraph (F19).
+  const epoch = storageEpoch ? `:s${storageEpoch}` : "";
+  return `work:${artifactId}:${partitionKey}:${namespace}:v${schemaVersion}${epoch}`;
 }
 
 export function useArtifactCollaboration(
@@ -99,6 +103,7 @@ export function useArtifactCollaboration(
   schemaVersion = 1,
   providerKind?: RealtimeProviderKind,
   persistenceNamespace = "artifact",
+  storageEpoch?: number,
 ) {
   const [generation, setGeneration] = useState(0);
   // The transport is created inside the effect rather than in useMemo so that
@@ -127,6 +132,7 @@ export function useArtifactCollaboration(
       partitionKey,
       persistenceNamespace,
       schemaVersion,
+      storageEpoch,
     );
     // The same work closed a moment ago may still be draining: hand over to this session.
     draining.get(persistenceKey)?.();
@@ -192,6 +198,7 @@ export function useArtifactCollaboration(
     persistenceNamespace,
     providerKind,
     schemaVersion,
+    storageEpoch,
   ]);
   const snapshot = useSyncExternalStore(
     transport?.subscribeSync ?? subscribeClosed,

@@ -124,7 +124,8 @@ export const confirmPairing = mutation({
         await retireDevice(ctx, device._id, now);
     }
     await ctx.db.patch(row._id, { confirmedAt: now, consumedAt: now });
-    return { deviceId, deviceCredential: credential, browserOrigin: row.browserOrigin, accountId: row.accountId };
+    const account = await ctx.db.get(row.accountId);
+    return { deviceId, deviceCredential: credential, browserOrigin: row.browserOrigin, accountId: row.accountId, accountName: account?.name };
   },
 });
 
@@ -150,7 +151,8 @@ export const resumePairing = mutation({
       lastSeenAt: now,
     });
     await ctx.db.patch(row._id, { confirmedAt: now, consumedAt: now });
-    return { deviceId: device._id, browserOrigin: row.browserOrigin, accountId: device.accountId };
+    const account = await ctx.db.get(device.accountId);
+    return { deviceId: device._id, browserOrigin: row.browserOrigin, accountId: device.accountId, accountName: account?.name };
   },
 });
 

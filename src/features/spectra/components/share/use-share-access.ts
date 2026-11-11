@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import { readConvexError } from "../../../../../shared/convex-error.mjs";
 import {
@@ -48,11 +48,14 @@ export function useShareAccess({
   resourceType,
   resourceId,
   onChanged,
+  beforeShare,
 }: {
   open: boolean;
   resourceType: ShareableResourceType;
   resourceId: string;
   onChanged?: () => void | Promise<void>;
+  /** Runs once before the first invitation or link: a work kept on a computer moves online then, not when Share opens (F18). */
+  beforeShare?: () => Promise<void>;
 }) {
   const [shares, setShares] = useState<SpectraShareEntry[]>([]);
   const [publicLinks, setPublicLinks] = useState<SpectraPublicLinkEntry[]>([]);
@@ -121,11 +124,14 @@ export function useShareAccess({
     [onChanged, refresh],
   );
 
+  const beforeShareRef = useRef(beforeShare);
+  beforeShareRef.current = beforeShare;
   const invite = useCallback(
     (people: SpectraSchoolMember[], level: ShareLevel, message: string) =>
       change(
         "invite",
         async () => {
+          await beforeShareRef.current?.();
           // One invitation each: a person already invited elsewhere still gets theirs.
           for (const person of people) {
             await postSpectra({
@@ -222,13 +228,15 @@ export function useShareAccess({
     async (expiresInDays: number | null) => {
       const result = await change(
         "link:create",
-        () =>
-          postSpectra<{ url: string }>({
+        async () => {
+          await beforeShareRef.current?.();
+          return postSpectra<{ url: string }>({
             action: "createPublicLink",
             resourceType,
             resourceId,
             expiresAt: expiresInDays === null ? undefined : Date.now() + expiresInDays * 24 * 60 * 60 * 1000,
-          }),
+          });
+        },
         "Link made. Copy it now: it is shown only once.",
         "Could not make the link.",
       );

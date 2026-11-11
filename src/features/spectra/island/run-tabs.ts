@@ -225,15 +225,33 @@ export function runTabSource(tab: SpectraRunTab): LiveDockTabSource {
 let busReaders = 0;
 let leaveBus: (() => void) | null = null;
 
-/** The first reader joins the bus and the last leaves it: a forced read is not deduplicated, so one event must be one read. */
+/*
+ * A burst of changes (a run writing its reply, several tabs moving) is one
+ * read: at most one a second, after the first change, so the read sees them
+ * all (LAUNCH-REVIEW E3).
+ */
+const BUS_READ_EVERY_MS = 1_000;
+let busTimer: ReturnType<typeof setTimeout> | null = null;
+
+function readAfterBurst() {
+  if (busTimer) return;
+  busTimer = setTimeout(() => {
+    busTimer = null;
+    void refreshRunTabs(false, true);
+  }, BUS_READ_EVERY_MS);
+}
+
+/** The first reader joins the bus and the last leaves it. */
 function joinRunTabsBus() {
   busReaders += 1;
   if (!leaveBus) {
-    const removeThreads = spectraBus.on("threads.changed", () => void refreshRunTabs(false, true));
-    const removeRun = spectraBus.on("run.changed", () => void refreshRunTabs(false, true));
+    const removeThreads = spectraBus.on("threads.changed", readAfterBurst);
+    const removeRun = spectraBus.on("run.changed", readAfterBurst);
     leaveBus = () => {
       removeThreads();
       removeRun();
+      if (busTimer) clearTimeout(busTimer);
+      busTimer = null;
     };
   }
   return () => {

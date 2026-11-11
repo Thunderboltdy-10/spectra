@@ -64,3 +64,19 @@ describe("Share dialog public links", () => {
     expect(writeText).not.toHaveBeenCalled();
   });
 });
+
+/* F18: opening Share on a work kept on this computer moved it online at once. */
+describe("sharing a work kept on this computer (F18)", () => {
+  it("says it will move online, and moves it only when a link is made", async () => {
+    api.links = [];
+    api.postSpectra.mockResolvedValue({ url: "/public#new" });
+    const beforeShare = vi.fn(async () => undefined);
+    render(<ShareDialog open resourceType="artifact" resourceId="art-1" title="Draft" onClose={() => {}} beforeShare={beforeShare} />);
+    expect(await screen.findByText(/kept on this computer now/)).toBeTruthy();
+    expect(beforeShare).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Make a link" }));
+    await waitFor(() => expect(api.postSpectra).toHaveBeenCalledWith(expect.objectContaining({ action: "createPublicLink" })));
+    expect(beforeShare).toHaveBeenCalledTimes(1);
+    expect(beforeShare.mock.invocationCallOrder[0]!).toBeLessThan(api.postSpectra.mock.invocationCallOrder[0]!);
+  });
+});

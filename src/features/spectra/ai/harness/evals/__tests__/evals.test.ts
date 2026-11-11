@@ -260,3 +260,29 @@ describe("eval report", () => {
     }
   });
 });
+
+describe("the golden set", () => {
+  it("names twenty scenarios that exist, one behaviour each", async () => {
+    const { EVAL_SCENARIOS, GOLDEN_SET } = await import("../scenarios");
+    expect(GOLDEN_SET).toHaveLength(20);
+    expect(new Set(GOLDEN_SET).size).toBe(20);
+    const names = new Set(EVAL_SCENARIOS.map((scenario) => scenario.name));
+    expect(GOLDEN_SET.filter((name) => !names.has(name))).toEqual([]);
+  });
+
+  it("can undo the previous pass in memory", async () => {
+    const { MemoryBackend } = await import("../../memory-backend");
+    const { authorNew } = await import("../../authoring");
+    const doc = (markdown: string) => authorNew("document", { markdown }, { timeZone: "UTC" }).content;
+    const backend = new MemoryBackend({ undo: true, artifacts: [{ id: "a", type: "document", title: "Notes", content: doc("# Notes") }] });
+    const before = JSON.stringify(backend.artifacts.get("a")!.content);
+    backend.startPass();
+    await backend.updateArtifact({ id: "a", type: "document", content: doc("# Notes\n\nMore.") } as never);
+    const { id } = await backend.createArtifact({ type: "document", title: "Extra", content: doc("# Extra") } as never);
+    backend.startPass();
+    const undone = await backend.undoPreviousRun!({ approved: false }, new AbortController().signal);
+    expect(undone.ok).toBe(true);
+    expect(JSON.stringify(backend.artifacts.get("a")!.content)).toBe(before);
+    expect(backend.artifacts.has(id)).toBe(false);
+  });
+});

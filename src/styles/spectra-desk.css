@@ -490,7 +490,7 @@
 .work-preview-leaf-month {
   padding: 2px 0 1px;
   background: var(--work-hue);
-  font-size: 10px;
+  font-size: var(--text-micro);
   font-weight: 700;
   letter-spacing: 0.04em;
   color: var(--bg-elevated);
@@ -537,7 +537,7 @@
   padding: 0 6px;
   border-radius: var(--radius-chip);
   background: color-mix(in oklab, var(--accent-coral) 14%, var(--bg-elevated));
-  font-size: 10.5px;
+  font-size: var(--text-micro);
   font-weight: 600;
   color: color-mix(in oklab, var(--accent-coral) 75%, var(--text-primary));
 }
@@ -940,7 +940,7 @@ button.work-slip:focus-visible .work-slip-open {
   padding: 4px 4px 4px 14px;
   background: var(--card-paper);
   color: var(--text-primary);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-lg);
 }
 
 .selection-bar-count {

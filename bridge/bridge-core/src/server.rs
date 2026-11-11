@@ -18,9 +18,11 @@ use subtle::ConstantTimeEq;
 use crate::protocol::{HealthResponse, LocalBridgeStatus, LocalControlSnapshot, PairingOffer};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
-/// Development instances use different ports. Discovery and a pairing offer
-/// may reach the local process; file controls still require confirmed pairing
-/// and the exact pinned browser origin in `authenticate`.
+use crate::locks::{Locked, Recover};
+
+/// A page served from this computer, on any port: a development instance of
+/// Spectra. Only debug builds accept one (`ServerState::origin_allowed`); a
+/// release Bridge accepts exactly the origins baked into it.
 fn is_local_development_origin(value: &str) -> bool {
     let Ok(url) = reqwest::Url::parse(value) else { return false; };
     matches!(url.scheme(), "http" | "https")
@@ -53,7 +55,14 @@ pub struct ServerState {
     work_scope: RwLock<Option<WorkScope>>,
     work_cache: Mutex<HashMap<(String, String), Arc<crate::rooms::Rooms>>>,
     work_initializing: tokio::sync::Mutex<()>,
+    /// Debug builds also accept pages served from this computer.
+    local_development: bool,
+    /// When Spectra last asked for an update, so a page cannot loop it.
+    update_requested_at: AtomicU64,
 }
+
+/// One update request per ten minutes.
+const UPDATE_REQUEST_INTERVAL_MS: u64 = 10 * 60 * 1000;
 
 struct WorkScope {
     identity: LocalRelayIdentity,
@@ -112,16 +121,18 @@ pub trait LocalBridgeControl: Send + Sync {
 }
 
 impl ServerState {
+    /// The origins come from `SPECTRA_ORIGINS`, baked into a release build
+    /// (`configure_embedded_release_environment`). Without it a debug build
+    /// serves the local development app and a release build serves nothing.
     pub fn unpaired() -> Self {
-        let mut origins = HashSet::new();
-        for origin in std::env::var("SPECTRA_ORIGINS")
-            .unwrap_or_else(|_| "http://localhost:3000,http://127.0.0.1:3000".into())
-            .split(',')
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            origins.insert(origin.to_owned());
-        }
+        let configured = std::env::var("SPECTRA_ORIGINS").ok().or_else(|| {
+            cfg!(debug_assertions).then(|| "http://localhost:3000,http://127.0.0.1:3000".to_string())
+        });
+        let configured = configured.unwrap_or_default();
+        Self::with_origins(configured.split(',').map(str::trim), cfg!(debug_assertions))
+    }
+    pub fn with_origins<'a>(origins: impl IntoIterator<Item = &'a str>, local_development: bool) -> Self {
+        let origins: HashSet<String> = origins.into_iter().filter(|value| !value.is_empty()).map(str::to_owned).collect();
         Self {
             paired: RwLock::new(false),
             allowed_origins: RwLock::new(origins),
@@ -138,18 +149,25 @@ impl ServerState {
             work_scope: RwLock::new(None),
             work_cache: Mutex::new(HashMap::new()),
             work_initializing: tokio::sync::Mutex::new(()),
+            local_development,
+            update_requested_at: AtomicU64::new(0),
         }
     }
+    /// The one test for a browser origin: pairing offers, CORS and updates.
+    pub fn origin_allowed(&self, origin: &str) -> bool {
+        self.allowed_origins.reading().contains(origin)
+            || (self.local_development && is_local_development_origin(origin))
+    }
     pub fn install_local_control(&self, control: Arc<dyn LocalBridgeControl>) {
-        *self.local_control.write().unwrap() = Some(control);
+        *self.local_control.writing() = Some(control);
     }
     pub fn set_device_id(&self, device_id: String) {
-        let mut current = self.device_id.write().unwrap();
+        let mut current = self.device_id.writing();
         if current.as_ref() == Some(&device_id) { return; }
         if current.as_ref().is_some_and(|previous| previous != &device_id) {
-            *self.paired.write().unwrap() = false;
-            self.sessions.write().unwrap().clear();
-            self.pairing_completion.write().unwrap().clear();
+            *self.paired.writing() = false;
+            self.sessions.writing().clear();
+            self.pairing_completion.writing().clear();
             self.cloud_seen_at.store(0, Ordering::Relaxed);
         }
         *current = Some(device_id);
@@ -158,7 +176,7 @@ impl ServerState {
     }
     /// Also available while a confirmed pairing is preparing its local store.
     pub fn pairing_identity(&self) -> Option<LocalRelayIdentity> {
-        let device = self.device_id.read().unwrap();
+        let device = self.device_id.reading();
         Some(LocalRelayIdentity {
             device_id: device.clone()?,
             generation: self.relay_generation.borrow().to_string(),
@@ -175,20 +193,20 @@ impl ServerState {
         self.relay_generation.subscribe()
     }
     fn clear_work_scope(&self) {
-        *self.work_scope.write().unwrap() = None;
+        *self.work_scope.writing() = None;
         // Keep each room map until process exit: an old connection may still
         // be finishing a save when the same account is paired again.
-        for rooms in self.work_cache.lock().unwrap().values() { rooms.clear_authority(); }
+        for rooms in self.work_cache.locked().values() { rooms.clear_authority(); }
     }
     pub fn is_listening(&self) -> bool { self.listening.load(Ordering::Acquire) }
     pub fn work_rooms(&self) -> Option<Arc<crate::rooms::Rooms>> {
         let identity = self.local_relay_identity()?;
-        let scope = self.work_scope.read().unwrap();
+        let scope = self.work_scope.reading();
         scope.as_ref().filter(|scope| scope.identity == identity).map(|scope| scope.rooms.clone())
     }
     pub fn work_account(&self) -> Option<(String, String)> {
         let identity = self.local_relay_identity()?;
-        let scope = self.work_scope.read().unwrap();
+        let scope = self.work_scope.reading();
         scope.as_ref().filter(|scope| scope.identity == identity).map(|scope| (scope.deployment.clone(), scope.account.clone()))
     }
     /// Called only with an owner from an authenticated pairing/health response
@@ -198,30 +216,30 @@ impl ServerState {
         anyhow::ensure!(self.pairing_identity().as_ref() == Some(identity), "Pairing changed while preparing local work");
         let deployment = deployment.trim_end_matches('/').to_string();
         {
-            let device = self.device_id.read().unwrap();
+            let device = self.device_id.reading();
             anyhow::ensure!(device.as_deref() == Some(identity.device_id.as_str()) && self.relay_generation.borrow().to_string() == identity.generation, "Pairing changed while preparing local work");
-            let mut scope = self.work_scope.write().unwrap();
+            let mut scope = self.work_scope.writing();
             if scope.as_ref().is_some_and(|scope| scope.account != account || scope.deployment != deployment) {
                 *scope = None;
-                for rooms in self.work_cache.lock().unwrap().values() { rooms.clear_authority(); }
+                for rooms in self.work_cache.locked().values() { rooms.clear_authority(); }
                 self.relay_generation.send_modify(|generation| *generation = generation.wrapping_add(1));
                 anyhow::bail!("Work account changed; reconnect this computer");
             }
         }
         let key = (deployment.clone(), account.clone());
-        let cached = self.work_cache.lock().unwrap().get(&key).cloned();
+        let cached = self.work_cache.locked().get(&key).cloned();
         let rooms = match cached {
             Some(rooms) => rooms,
             None => crate::rooms::Rooms::for_account(store_path, legacy_path, deployment.clone(), credential.clone(), account.clone()).await?,
         };
         // Holding the device read lock fences set_device_id/forget_pairing
         // through cache insertion and publication, with no await in this span.
-        let device = self.device_id.read().unwrap();
+        let device = self.device_id.reading();
         anyhow::ensure!(device.as_deref() == Some(identity.device_id.as_str()) && self.relay_generation.borrow().to_string() == identity.generation, "Pairing changed while preparing local work");
-        let mut scope = self.work_scope.write().unwrap();
+        let mut scope = self.work_scope.writing();
         anyhow::ensure!(scope.as_ref().is_none_or(|scope| scope.account == account && scope.deployment == deployment), "Work account changed; reconnect this computer");
         rooms.refresh_authority(deployment.clone(), credential);
-        self.work_cache.lock().unwrap().insert(key, rooms.clone());
+        self.work_cache.locked().insert(key, rooms.clone());
         *scope = Some(WorkScope { identity: identity.clone(), deployment, account, rooms });
         Ok(())
     }
@@ -238,7 +256,7 @@ impl ServerState {
     }
     /// The first configured Spectra origin, for opening the Devices page.
     pub fn primary_origin(&self) -> Option<String> {
-        let origins = self.allowed_origins.read().unwrap();
+        let origins = self.allowed_origins.reading();
         let mut sorted: Vec<&String> = origins.iter().collect();
         // Prefer a deployed origin over a local development one.
         sorted.sort_by_key(|origin| (origin.starts_with("http://"), origin.as_str()));
@@ -247,30 +265,29 @@ impl ServerState {
     pub fn pair(&self, origin: String) -> String {
         let mut token = vec![0_u8; 32];
         rand::rng().fill_bytes(&mut token);
-        self.sessions.write().unwrap().insert(origin.clone(), token.clone());
-        self.allowed_origins.write().unwrap().insert(origin);
-        *self.paired.write().unwrap() = true;
+        self.sessions.writing().insert(origin.clone(), token.clone());
+        self.allowed_origins.writing().insert(origin);
+        *self.paired.writing() = true;
         base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, token)
     }
     /// Unpairing: the browser session and the device identity are dropped.
     pub fn forget_pairing(&self) {
-        let mut device = self.device_id.write().unwrap();
-        *self.paired.write().unwrap() = false;
-        self.sessions.write().unwrap().clear();
+        let mut device = self.device_id.writing();
+        *self.paired.writing() = false;
+        self.sessions.writing().clear();
         *device = None;
         self.clear_work_scope();
         self.relay_generation.send_modify(|generation| *generation = generation.wrapping_add(1));
         drop(device);
         self.cloud_seen_at.store(0, Ordering::Relaxed);
-        self.pending_pairing.write().unwrap().clear();
-        self.pairing_completion.write().unwrap().clear();
-        self.pairing_failure.write().unwrap().clear();
+        self.pending_pairing.writing().clear();
+        self.pairing_completion.writing().clear();
+        self.pairing_failure.writing().clear();
     }
     fn prune_expired_pairing(&self) {
         let now = unix_ms();
         self.pending_pairing
-            .write()
-            .unwrap()
+            .writing()
             .retain(|_, offer| offer.expires_at > now);
     }
     pub fn accept_pairing_offer(&self, offer: PairingOffer) -> anyhow::Result<()> {
@@ -285,17 +302,13 @@ impl ServerState {
         );
         anyhow::ensure!(offer.expires_at > unix_ms(), "pairing offer expired");
         anyhow::ensure!(
-            self.allowed_origins
-                .read()
-                .unwrap()
-                .contains(&offer.browser_origin) || is_local_development_origin(&offer.browser_origin),
+            self.origin_allowed(&offer.browser_origin),
             "origin is not configured for Spectra"
         );
         self.prune_expired_pairing();
-        self.pairing_failure.write().unwrap().remove(&offer.challenge);
+        self.pairing_failure.writing().remove(&offer.challenge);
         self.pending_pairing
-            .write()
-            .unwrap()
+            .writing()
             .insert(offer.challenge.clone(), offer);
         Ok(())
     }
@@ -303,15 +316,14 @@ impl ServerState {
         self.prune_expired_pairing();
         let offer = self
             .pending_pairing
-            .write()
-            .unwrap()
+            .writing()
             .remove(challenge)
             .ok_or_else(|| anyhow::anyhow!("no pairing is waiting"))?;
         anyhow::ensure!(offer.expires_at > unix_ms(), "pairing offer expired");
         Ok(offer)
     }
     pub fn is_paired(&self) -> bool {
-        *self.paired.read().unwrap()
+        *self.paired.reading()
     }
     pub fn complete_pairing(&self, challenge: String, origin: String) -> String {
         let token = self.prepare_pairing_session(&origin);
@@ -335,30 +347,28 @@ impl ServerState {
     ) -> anyhow::Result<()> {
         self.restore_pairing(origin, token)?;
         self.pairing_completion
-            .write()
-            .unwrap()
+            .writing()
             .insert(challenge, token.to_owned());
         Ok(())
     }
     pub fn complete_pairing_with_session_for(&self, identity: &LocalRelayIdentity, challenge: String, origin: String, token: &str) -> anyhow::Result<()> {
-        let device = self.device_id.read().unwrap();
+        let device = self.device_id.reading();
         anyhow::ensure!(device.as_deref() == Some(identity.device_id.as_str()) && self.relay_generation.borrow().to_string() == identity.generation, "Pairing changed before completion");
         self.complete_pairing_with_session(challenge, origin, token)
     }
     /// A pairing attempt ended without pairing; the page reads why once.
     pub fn fail_pairing(&self, challenge: String, reason: String) {
         self.pairing_failure
-            .write()
-            .unwrap()
+            .writing()
             .insert(challenge, reason);
     }
     pub fn restore_pairing(&self, origin: String, token: &str) -> anyhow::Result<()> {
         let decoded =
             base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, token)?;
         anyhow::ensure!(decoded.len() == 32, "invalid stored browser session");
-        self.allowed_origins.write().unwrap().insert(origin.clone());
-        self.sessions.write().unwrap().insert(origin, decoded);
-        *self.paired.write().unwrap() = true;
+        self.allowed_origins.writing().insert(origin.clone());
+        self.sessions.writing().insert(origin, decoded);
+        *self.paired.writing() = true;
         Ok(())
     }
     /// Every session as the journal keeps it, with one about to be committed.
@@ -368,8 +378,7 @@ impl ServerState {
         };
         let mut stored: HashMap<String, String> = self
             .sessions
-            .read()
-            .unwrap()
+            .reading()
             .iter()
             .map(|(origin, token)| (origin.clone(), encode(token)))
             .collect();
@@ -386,10 +395,10 @@ impl ServerState {
         }
     }
     pub fn resume_session(&self, origin: &str) -> Option<String> {
-        if !self.is_paired() || !self.allowed_origins.read().unwrap().contains(origin) {
+        if !self.is_paired() || !self.allowed_origins.reading().contains(origin) {
             return None;
         }
-        let sessions = self.sessions.read().unwrap();
+        let sessions = self.sessions.reading();
         let token = sessions.get(origin)?;
         if token.len() != 32 {
             return None;
@@ -407,8 +416,7 @@ impl ServerState {
             base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, supplied)
                 .unwrap_or_default();
         self.sessions
-            .read()
-            .unwrap()
+            .reading()
             .values()
             .any(|expected| session_matches(expected, &supplied))
     }
@@ -416,8 +424,7 @@ impl ServerState {
         self.is_paired()
             && self
                 .sessions
-                .read()
-                .unwrap()
+                .reading()
                 .get(origin)
                 .is_some_and(|expected| session_matches(expected, supplied))
     }
@@ -433,8 +440,7 @@ impl ServerState {
     pub fn local_status(&self) -> LocalBridgeStatus {
         let snapshot = self
             .local_control
-            .read()
-            .unwrap()
+            .reading()
             .as_ref()
             .map(|control| control.snapshot())
             .unwrap_or_default();
@@ -443,7 +449,7 @@ impl ServerState {
             protocol_version: crate::PROTOCOL_VERSION.into(),
             paired: self.is_paired(),
             cloud_connected: self.cloud_connected(),
-            device_id: self.device_id.read().unwrap().clone(),
+            device_id: self.device_id.reading().clone(),
             device_name: snapshot.device_name,
             paused: snapshot.paused,
             last_sync_at: snapshot.last_sync_at,
@@ -452,13 +458,13 @@ impl ServerState {
         }
     }
     fn take_pairing_completion(&self, challenge: &str) -> Option<String> {
-        self.pairing_completion.write().unwrap().remove(challenge)
+        self.pairing_completion.writing().remove(challenge)
     }
     fn take_pairing_failure(&self, challenge: &str) -> Option<String> {
-        self.pairing_failure.write().unwrap().remove(challenge)
+        self.pairing_failure.writing().remove(challenge)
     }
     fn control(&self) -> Option<Arc<dyn LocalBridgeControl>> {
-        self.local_control.read().unwrap().clone()
+        self.local_control.reading().clone()
     }
 }
 
@@ -499,10 +505,7 @@ pub fn router(state: Arc<ServerState>) -> Router {
         .layer(
             CorsLayer::new()
                 .allow_origin(AllowOrigin::predicate(move |origin, _| {
-                    origin.to_str().is_ok_and(|value| {
-                        cors_state.allowed_origins.read().unwrap().contains(value)
-                            || is_local_development_origin(value)
-                    })
+                    origin.to_str().is_ok_and(|value| cors_state.origin_allowed(value))
                 }))
                 .allow_methods([http::Method::GET, http::Method::POST])
                 .allow_headers([http::header::AUTHORIZATION, http::header::CONTENT_TYPE])
@@ -538,10 +541,10 @@ where
 async fn health(State(state): State<Arc<ServerState>>) -> Json<HealthResponse> {
     Json(HealthResponse {
         version: env!("CARGO_PKG_VERSION").into(),
-        paired: *state.paired.read().unwrap(),
+        paired: *state.paired.reading(),
         protocol_version: crate::PROTOCOL_VERSION.into(),
         port: crate::BRIDGE_PORT,
-        bind_error: state.bind_error.read().unwrap().clone(),
+        bind_error: state.bind_error.reading().clone(),
     })
 }
 
@@ -764,12 +767,19 @@ async fn unpair(State(state): State<Arc<ServerState>>) -> Response {
     response
 }
 
-/// Accepts an offer and pairs in the background: the native confirmation may
-/// wait for the person, so the page polls `/v1/pair/status` for the outcome.
+/// Accepts an offer and pairs in the background; the page polls
+/// `/v1/pair/status` for the outcome. Pairing is silent, so the offer must
+/// come from a page of an allowed origin, and from the origin it names: the
+/// browser sets `Origin` and a page cannot forge it.
 async fn pair_offer(
     State(state): State<Arc<ServerState>>,
+    headers: HeaderMap,
     Json(offer): Json<PairingOffer>,
 ) -> Response {
+    let origin = headers.get("origin").and_then(|value| value.to_str().ok());
+    if origin != Some(offer.browser_origin.as_str()) || !state.origin_allowed(&offer.browser_origin) {
+        return (StatusCode::FORBIDDEN, "PAIRING_ORIGIN_REFUSED").into_response();
+    }
     let Some(control) = state.control() else {
         return controls_not_ready();
     };
@@ -785,7 +795,22 @@ async fn pair_offer(
     StatusCode::ACCEPTED.into_response()
 }
 
-async fn request_update(State(state): State<Arc<ServerState>>) -> Response {
+/// Spectra's Devices page may ask for the update now. A page elsewhere may not,
+/// and no page may ask more than once in ten minutes. The tray and the native
+/// app call `request_update` directly, without `Origin`.
+async fn request_update(State(state): State<Arc<ServerState>>, headers: HeaderMap) -> Response {
+    if let Some(origin) = headers.get("origin") {
+        if !origin.to_str().is_ok_and(|value| state.origin_allowed(value)) {
+            return (StatusCode::FORBIDDEN, "Not for this page").into_response();
+        }
+    }
+    let now = unix_ms();
+    let last = state.update_requested_at.load(Ordering::Acquire);
+    if last > 0 && now.saturating_sub(last) < UPDATE_REQUEST_INTERVAL_MS
+        || state.update_requested_at.compare_exchange(last, now, Ordering::AcqRel, Ordering::Acquire).is_err()
+    {
+        return (StatusCode::TOO_MANY_REQUESTS, "An update was asked for a moment ago").into_response();
+    }
     match state.control() {
         Some(control) => match control.request_update().await {
             Ok(message) => Json(serde_json::json!({ "message": message })).into_response(),
@@ -845,7 +870,7 @@ async fn authenticate(
 ) -> Response {
     let headers = request.headers();
     let origin = headers.get("origin").and_then(|v| v.to_str().ok());
-    let allowed = origin.is_some_and(|value| state.allowed_origins.read().unwrap().contains(value));
+    let allowed = origin.is_some_and(|value| state.allowed_origins.reading().contains(value));
     let supplied = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
@@ -873,7 +898,7 @@ pub async fn serve(state: Arc<ServerState>) -> anyhow::Result<()> {
     let listener = match tokio::net::TcpListener::bind(address).await {
         Ok(listener) => listener,
         Err(error) => {
-            *state.bind_error.write().unwrap() = Some(format!(
+            *state.bind_error.writing() = Some(format!(
                 "Port {} is unavailable: {error}",
                 crate::BRIDGE_PORT
             ));
@@ -1149,7 +1174,7 @@ mod tests {
     #[async_trait]
     impl LocalBridgeControl for FakeControl {
         async fn auto_pair(&self, challenge: &str) -> Result<(), String> {
-            self.calls.lock().unwrap().push(format!("pair:{}", &challenge[..4]));
+            self.calls.locked().push(format!("pair:{}", &challenge[..4]));
             if self.decline_pairing {
                 Err("Pairing was declined on this computer.".into())
             } else {
@@ -1184,11 +1209,11 @@ mod tests {
             }
         }
         async fn select_mount(&self) -> Result<Option<String>, String> {
-            self.calls.lock().unwrap().push("select".into());
+            self.calls.locked().push("select".into());
             Ok(Some("grant_folder".into()))
         }
         async fn select_files(&self) -> Result<FilesSelected, String> {
-            self.calls.lock().unwrap().push("select-files".into());
+            self.calls.locked().push("select-files".into());
             Ok(FilesSelected {
                 selected: 2,
                 added: vec![crate::fs::SyncedFile {
@@ -1202,41 +1227,40 @@ mod tests {
             })
         }
         async fn retry_mount(&self, grant_id: &str) -> Result<(), String> {
-            self.calls.lock().unwrap().push(format!("retry:{grant_id}"));
+            self.calls.locked().push(format!("retry:{grant_id}"));
             Ok(())
         }
         async fn remove_mount(&self, grant_id: &str) -> Result<(), String> {
-            self.calls.lock().unwrap().push(format!("remove:{grant_id}"));
+            self.calls.locked().push(format!("remove:{grant_id}"));
             Ok(())
         }
         async fn set_mount_paused(&self, grant_id: &str, paused: bool) -> Result<(), String> {
             self.calls
-                .lock()
-                .unwrap()
+                .locked()
                 .push(format!("pause-mount:{grant_id}:{paused}"));
             Ok(())
         }
         async fn set_sync_paused(&self, paused: bool) -> Result<(), String> {
-            self.calls.lock().unwrap().push(format!("pause:{paused}"));
+            self.calls.locked().push(format!("pause:{paused}"));
             Ok(())
         }
         async fn open_logs(&self) -> Result<(), String> {
-            self.calls.lock().unwrap().push("logs".into());
+            self.calls.locked().push("logs".into());
             Ok(())
         }
         async fn open_file(&self, grant_id: &str, relative_path: &str) -> Result<(), String> {
-            self.calls.lock().unwrap().push(format!("open:{grant_id}:{relative_path}"));
+            self.calls.locked().push(format!("open:{grant_id}:{relative_path}"));
             if relative_path.ends_with(".exe") {
                 return Err("Spectra opens documents only.".into());
             }
             Ok(())
         }
         async fn reveal_file(&self, grant_id: &str, relative_path: &str) -> Result<(), String> {
-            self.calls.lock().unwrap().push(format!("reveal:{grant_id}:{relative_path}"));
+            self.calls.locked().push(format!("reveal:{grant_id}:{relative_path}"));
             Ok(())
         }
         async fn unpair(&self) -> Result<(), String> {
-            self.calls.lock().unwrap().push("unpair".into());
+            self.calls.locked().push("unpair".into());
             Ok(())
         }
     }
@@ -1267,7 +1291,7 @@ mod tests {
         let a = state.pair(ORIGIN.into());
         let b = state.pair(ORIGIN.into());
         assert_ne!(a, b);
-        assert!(state.allowed_origins.read().unwrap().contains(ORIGIN));
+        assert!(state.allowed_origins.reading().contains(ORIGIN));
     }
     #[test]
     fn pairing_session_restores_after_process_restart() {
@@ -1275,10 +1299,10 @@ mod tests {
         let token = original.pair(ORIGIN.into());
         let restored = ServerState::unpaired();
         restored.restore_pairing(ORIGIN.into(), &token).unwrap();
-        assert!(*restored.paired.read().unwrap());
+        assert!(*restored.paired.reading());
         assert_eq!(
-            *restored.sessions.read().unwrap(),
-            *original.sessions.read().unwrap()
+            *restored.sessions.reading(),
+            *original.sessions.reading()
         );
     }
     #[test]
@@ -1305,7 +1329,7 @@ mod tests {
         }
         let first = state.take_pairing_offer(&"0".repeat(64)).unwrap();
         assert_eq!(first.short_code, "000000");
-        assert_eq!(state.pending_pairing.read().unwrap().len(), 5);
+        assert_eq!(state.pending_pairing.reading().len(), 5);
         assert!(state.take_pairing_offer(&format!("{:0>64}", 5)).is_ok());
     }
     #[test]
@@ -1430,8 +1454,7 @@ mod tests {
         let state = ServerState::unpaired();
         state
             .allowed_origins
-            .write()
-            .unwrap()
+            .writing()
             .insert("https://spectra.school".into());
         assert_eq!(state.primary_origin().as_deref(), Some("https://spectra.school"));
     }
@@ -1461,7 +1484,7 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), 401, "{path} must be protected");
         }
-        assert!(control.calls.lock().unwrap().is_empty());
+        assert!(control.calls.locked().is_empty());
     }
 
     #[tokio::test]
@@ -1534,7 +1557,7 @@ mod tests {
             "an unpaired Bridge no longer accepts the old session"
         );
         assert_eq!(
-            *control.calls.lock().unwrap(),
+            *control.calls.locked(),
             vec![
                 "pause-mount:grant_ab:true",
                 "retry:grant_ab",
@@ -1569,7 +1592,7 @@ mod tests {
         assert_eq!(refused.status(), 400);
         assert_eq!(refused.text().await.unwrap(), "Spectra opens documents only.");
         assert_eq!(
-            *control.calls.lock().unwrap(),
+            *control.calls.locked(),
             vec![
                 "open:grant_ab:Essays/Cells.docx",
                 "reveal:grant_ab:Essays/Cells.docx",
@@ -1590,6 +1613,7 @@ mod tests {
         let offer = offer('d', "654321");
         let accepted = client
             .post(format!("{base}/v1/pair"))
+            .header("origin", ORIGIN)
             .json(&offer)
             .send()
             .await
@@ -1613,5 +1637,57 @@ mod tests {
         }
         assert_eq!(outcome["paired"], false);
         assert_eq!(outcome["failure"], "Pairing was declined on this computer.");
+    }
+
+    const RELEASE_ORIGIN: &str = "https://spectra.ink";
+
+    #[tokio::test]
+    async fn a_release_build_accepts_only_its_baked_origins() {
+        let state = Arc::new(ServerState::with_origins([RELEASE_ORIGIN], false));
+        state.install_local_control(Arc::new(FakeControl::default()));
+        let base = spawn(state.clone()).await;
+        let client = reqwest::Client::new();
+        let local = "http://localhost:5173";
+        let mut offer_from_local = offer('e', "123456");
+        offer_from_local.browser_origin = local.into();
+        let refused = client.post(format!("{base}/v1/pair")).header("origin", local).json(&offer_from_local).send().await.unwrap();
+        assert_eq!(refused.status(), 403);
+        let health = client.get(format!("{base}/v1/health")).header("origin", local).send().await.unwrap();
+        assert!(health.headers().get("access-control-allow-origin").is_none());
+        let mut released = offer('f', "123456");
+        released.browser_origin = RELEASE_ORIGIN.into();
+        let accepted = client.post(format!("{base}/v1/pair")).header("origin", RELEASE_ORIGIN).json(&released).send().await.unwrap();
+        assert_eq!(accepted.status(), 202);
+    }
+
+    #[tokio::test]
+    async fn a_pairing_offer_must_come_from_the_origin_it_names() {
+        let state = Arc::new(ServerState::with_origins([RELEASE_ORIGIN, "https://other.spectra.ink"], false));
+        state.install_local_control(Arc::new(FakeControl::default()));
+        let base = spawn(state.clone()).await;
+        let client = reqwest::Client::new();
+        let mut named = offer('g', "123456");
+        named.browser_origin = RELEASE_ORIGIN.into();
+        let without_origin = client.post(format!("{base}/v1/pair")).json(&named).send().await.unwrap();
+        assert_eq!(without_origin.status(), 403);
+        let elsewhere = client.post(format!("{base}/v1/pair")).header("origin", "https://other.spectra.ink").json(&named).send().await.unwrap();
+        assert_eq!(elsewhere.status(), 403);
+        let evil = client.post(format!("{base}/v1/pair")).header("origin", "https://evil.test").json(&named).send().await.unwrap();
+        assert_eq!(evil.status(), 403);
+        assert!(state.take_pairing_offer(&named.challenge).is_err());
+    }
+
+    #[tokio::test]
+    async fn only_spectra_can_ask_for_an_update_and_not_often() {
+        let state = Arc::new(ServerState::with_origins([RELEASE_ORIGIN], false));
+        state.install_local_control(Arc::new(FakeControl::default()));
+        let base = spawn(state.clone()).await;
+        let client = reqwest::Client::new();
+        let foreign = client.post(format!("{base}/v1/update")).header("origin", "https://evil.test").send().await.unwrap();
+        assert_eq!(foreign.status(), 403);
+        let first = client.post(format!("{base}/v1/update")).header("origin", RELEASE_ORIGIN).send().await.unwrap();
+        assert_eq!(first.status(), 200);
+        let again = client.post(format!("{base}/v1/update")).header("origin", RELEASE_ORIGIN).send().await.unwrap();
+        assert_eq!(again.status(), 429);
     }
 }

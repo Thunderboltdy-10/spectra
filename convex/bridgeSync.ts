@@ -17,6 +17,7 @@ import { assertPayloadWriteAllowed, computeEffectivePolicy } from "./syncPolicy"
 import { decideMissingResourceAction, policyIncludesPath } from "../shared/sync-policy";
 import type { SyncPolicyValues } from "../shared/sync-policy";
 import { formatByteCount } from "../shared/human-format";
+import { agentHubTicket as signTicketFor } from "../shared/agent-hub-ticket.mjs";
 import { classWorkspaceNodes, matchClass, mountPathBase } from "./bridgePlacement";
 import {
   BRIDGE_CLAIM_REDRIVE_MS,
@@ -151,15 +152,7 @@ export const agentHubTicket = mutation({
     const url = process.env.SPECTRA_AGENT_HUB_URL?.trim();
     const secret = process.env.SPECTRA_COLLAB_BRIDGE_KEY;
     if (!url || !secret) return { url: null, ticket: null, accountId: device.accountId };
-    const base64url = (bytes: Uint8Array) =>
-      btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    const encoder = new TextEncoder();
-    const body = base64url(
-      encoder.encode(JSON.stringify({ sub: String(device.accountId), exp: Date.now() + AGENT_HUB_TICKET_MS, aud: "spectra-agent-hub" })),
-    );
-    const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-    const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(body));
-    return { url, ticket: `${body}.${base64url(new Uint8Array(signature))}`, accountId: device.accountId };
+    return { url, ticket: await signTicketFor(String(device.accountId), secret, AGENT_HUB_TICKET_MS), accountId: device.accountId };
   },
 });
 
@@ -449,11 +442,31 @@ async function markReplicaMissing(
       .withIndex("by_work_kind", (q) => q.eq("workId", replica.workId).eq("kind", "cloud"))
       .unique();
     const action = decideMissingResourceAction(policy.structure, Boolean(cloud?.payloadRef && cloud.contentHash));
-    if (action === "restore-to-disk" && cloud?.payloadRef && cloud.contentHash && replica.deviceId && replica.mountId && replica.localResourceId && replica.relativePath) {
+    if (action === "restore-to-disk" && await queueRestoreToDisk(ctx, actor, replica, cloud)) return "restoring" as const;
+    const reason = action === "ask" ? "missing-awaiting-decision" : "missing-on-disk";
+    await ctx.db.patch(replica._id, { state: "unavailable", unavailableReason: reason, updatedAt: Date.now() });
+    return "unavailable" as const;
+}
+
+/** Writes Spectra's copy back to where a local file was. False when there is nothing to write. */
+async function queueRestoreToDisk(
+  ctx: MutationCtx,
+  actor: BridgeActor,
+  replica: Doc<"workReplicas">,
+  cloud: Doc<"workReplicas"> | null,
+) {
+    if (!(cloud?.payloadRef && cloud.contentHash && replica.deviceId && replica.mountId && replica.localResourceId && replica.relativePath)) return false;
+    {
+      // The file is gone, so the write creates it rather than replacing the
+      // bytes it used to have: Bridge creates a file only for a `new:` base, and
+      // refuses one if anything appeared at that path meanwhile (F22). Each
+      // disappearance gets its own base, so putting it back a second time is a
+      // new write rather than the first one's finished receipt.
+      const restoreBase = `new:restore:${replica._id}:${replica.updatedAt}`;
       const idempotencyKey = await deriveSyncIdempotencyKey({
         workId: String(replica.workId),
         target: localMaterializationTarget(String(replica.mountId), replica.relativePath),
-        baseRevision: replica.revision,
+        baseRevision: restoreBase,
         targetRevision: cloud.contentHash,
         direction: "cloud-to-local",
       });
@@ -462,7 +475,7 @@ async function markReplicaMissing(
         idempotencyKey,
         replicaId: replica._id,
         workId: replica.workId,
-        baseRevision: replica.revision,
+        baseRevision: restoreBase,
         targetRevision: cloud.revision,
       });
       if (!existing) {
@@ -476,7 +489,7 @@ async function markReplicaMissing(
           localResourceId: replica.localResourceId,
           relativePath: replica.relativePath,
           payloadRef: cloud.payloadRef,
-          baseRevision: replica.revision,
+          baseRevision: restoreBase,
           targetRevision: cloud.revision,
           contentHash: cloud.contentHash,
           idempotencyKey,
@@ -499,7 +512,7 @@ async function markReplicaMissing(
           replicaId: replica._id,
           idempotencyKey,
           direction: "cloud-to-local",
-          revisionBefore: replica.revision,
+          revisionBefore: restoreBase,
           revisionAfter: cloud.revision,
           state: "pending",
           actorKind: "restore",
@@ -507,13 +520,35 @@ async function markReplicaMissing(
           updatedAt: now,
         });
       }
-      await ctx.db.patch(replica._id, { state: "pending", unavailableReason: "restoring-from-cloud", updatedAt: Date.now() });
-      return "restoring" as const;
+      await ctx.db.patch(replica._id, { state: "pending", unavailableReason: "restoring-from-cloud", revision: restoreBase, updatedAt: Date.now() });
+      return true;
     }
-    const reason = action === "ask" ? "missing-awaiting-decision" : "missing-on-disk";
-    await ctx.db.patch(replica._id, { state: "unavailable", unavailableReason: reason, updatedAt: Date.now() });
-    return "unavailable" as const;
 }
+
+const MISSING_REASONS = new Set(["missing-on-disk", "missing-awaiting-decision"]);
+
+/** The person's one action for a file deleted outside Spectra: write it back. */
+export const putBackFile = mutation({
+  args: { workId: v.id("spectraArtifacts") },
+  handler: async (ctx, { workId }) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
+    if (!(await hasArtifactModify(ctx, actor, workId))) throw new Error("ACCESS_DENIED");
+    const replicas = await ctx.db.query("workReplicas")
+      .withIndex("by_work_kind", (q) => q.eq("workId", workId).eq("kind", "local"))
+      .take(20);
+    const missing = replicas.filter((replica) =>
+      replica.accountId === actor.accountId && replica.state === "unavailable" && MISSING_REASONS.has(replica.unavailableReason ?? ""));
+    if (!missing.length) throw new Error("FILE_NOT_MISSING");
+    const cloud = await ctx.db.query("workReplicas")
+      .withIndex("by_work_kind", (q) => q.eq("workId", workId).eq("kind", "cloud"))
+      .unique();
+    let putBack = 0;
+    for (const replica of missing) if (await queueRestoreToDisk(ctx, actor, replica, cloud)) putBack += 1;
+    if (!putBack) throw new Error("FILE_PUT_BACK_UNAVAILABLE");
+    return { putBack };
+  },
+});
 
 /** The Bridge names what went missing; files still there are not touched. */
 export const reportMissingResources = mutation({
@@ -542,17 +577,6 @@ export const reportMissingResources = mutation({
     }
     return { unavailable, restoring };
   },
-});
-
-/** A Bridge from before reportMissingResources still calls this; it finds nothing to do. */
-export const reconcileMissingResources = mutation({
-  args: {
-    credential: v.string(),
-    mountId: v.id("bridgeMounts"),
-    scanId: v.string(),
-    cursor: v.optional(v.string()),
-  },
-  handler: async () => ({ unavailable: 0, restoring: 0, continueCursor: "", isDone: true }),
 });
 
 const OFFICE_FORMATS = new Set(["docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "xltm", "xlam", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppam", "spectra-pkg"]);

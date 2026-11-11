@@ -2213,7 +2213,8 @@ export const platformOverview = mutation({
       usageByDay[meter.day] ??= {};
       usageByDay[meter.day]![meter.category] =
         (usageByDay[meter.day]![meter.category] ?? 0) + meter.quantity;
-      if (meter.schoolId)
+      // Ranked by one unit: bytes and tokens do not add up to anything.
+      if (meter.schoolId && (meter.category === "model_input_tokens" || meter.category === "model_output_tokens"))
         usageBySchool.set(
           meter.schoolId,
           (usageBySchool.get(meter.schoolId) ?? 0) + meter.quantity,

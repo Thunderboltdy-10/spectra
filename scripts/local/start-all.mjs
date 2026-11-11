@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, openSync } from "node:fs";
+import { existsSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, isAbsolute, resolve } from "node:path";
@@ -134,14 +134,19 @@ function chooseNode() {
   return candidates.find((candidate) => existsSync(candidate)) ?? process.execPath;
 }
 
+/**
+ * A release Bridge serves only the origins baked into it, so the local stack
+ * builds its own copy, with this stack's origins, apart from production builds.
+ */
+const localBridgeTarget = resolve(repositoryRoot, "bridge", "target", "local");
+
 function bridgeExecutable() {
-  return resolve(
-    repositoryRoot,
-    "bridge",
-    "target",
-    "release",
-    process.platform === "win32" ? "spectra-bridge.exe" : "spectra-bridge",
-  );
+  return resolve(localBridgeTarget, "release", process.platform === "win32" ? "spectra-bridge.exe" : "spectra-bridge");
+}
+
+/** What the local Bridge was built for; a different stack needs a new build. */
+function bridgeBakedStamp() {
+  return resolve(localBridgeTarget, "release", "spectra-baked.json");
 }
 
 async function isPortOccupied(port) {
@@ -268,11 +273,12 @@ function requireFileHandle(path, flags) {
   return openSync(path, flags);
 }
 
-async function runBridgeBuild() {
+async function runBridgeBuild(baked) {
   const cargo = process.platform === "win32" ? "cargo.exe" : "cargo";
   await new Promise((resolveResult, reject) => {
     const child = spawn(cargo, ["build", "--release", "--manifest-path", resolve(repositoryRoot, "bridge", "Cargo.toml")], {
       cwd: repositoryRoot,
+      env: { ...process.env, ...baked, CARGO_TARGET_DIR: localBridgeTarget },
       stdio: "inherit",
       windowsHide: true,
     });
@@ -366,12 +372,15 @@ async function main() {
   }
 
   const executable = bridgeExecutable();
-  if (!existsSync(executable)) {
+  const baked = { SPECTRA_CONVEX_URL: convexUrl, SPECTRA_ORIGINS: `${webOrigin},http://127.0.0.1:${ports.web}` };
+  const bakedFor = existsSync(bridgeBakedStamp()) ? readFileSync(bridgeBakedStamp(), "utf8") : "";
+  if (!existsSync(executable) || bakedFor !== JSON.stringify(baked)) {
     if (!options.buildBridge) {
-      throw new Error(`Bridge executable is missing at ${executable}. Run this launcher with --build-bridge once, or build bridge/Cargo.toml with cargo.`);
+      throw new Error(`The local Bridge at ${executable} is missing or was built for another stack. Run this launcher with --build-bridge.`);
     }
-    process.stdout.write("Bridge executable is missing; building the release Bridge...\n");
-    await runBridgeBuild();
+    process.stdout.write("Building the release Bridge for this stack's origins...\n");
+    await runBridgeBuild(baked);
+    writeFileSync(bridgeBakedStamp(), JSON.stringify(baked));
   }
 
   const bridgeDataDir = options.bridgeDataDir

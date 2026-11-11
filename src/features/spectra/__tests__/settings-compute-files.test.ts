@@ -57,7 +57,6 @@ describe("Phase 8 settings, compute, files and autocomplete", () => {
       autoRouteSpecialists: true,
       parallelSafeReads: true,
       researchDepth: "automatic",
-      reasoningProfile: "configured_maximum",
       reversibleLowRiskAutonomy: true,
       notifyRequiredInput: true,
       notifyRunCompletion: true,

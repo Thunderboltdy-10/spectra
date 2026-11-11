@@ -22,6 +22,7 @@ import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { useCalmQuery } from "../data/use-calm-query";
 import { toast } from "@/components/ui/toast";
 import { DeviceWorkAway, useDeviceWorkAway } from "../bridge/device-work-away";
+import { useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { describeFailure } from "@/components/ui/truthful-state";
@@ -1980,6 +1981,40 @@ const TRANSIENT_COLLABORATION_FAILURE =
 /** Saving retries quietly this long before it says anything (users should practically never see it). */
 const QUIET_SAVE_WINDOW_MS = 45_000;
 
+/** Another tab moved this work to Trash while it was open here (F17). */
+function TrashedWorkNotice({ artifactId, trashedNodeId }: { artifactId: string; trashedNodeId: string }) {
+  const restore = useMutation(api.orgTree.restore);
+  const [restoring, setRestoring] = useState(false);
+  return (
+    <div className="relative z-dropdown h-0 shrink-0">
+      <DismissibleArtifactNotice
+        artifactId={artifactId}
+        identity={`trashed:${trashedNodeId}`}
+        role="alert"
+        className="spectra-collaboration-notice absolute right-3 top-2 flex items-center gap-2"
+      >
+        <span className="min-w-0 flex-1">
+          This work is in Trash. What you type is kept and comes back if you restore it.
+        </span>
+        <button
+          type="button"
+          disabled={restoring}
+          className="shrink-0 rounded-chip border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-micro font-medium"
+          onClick={() => {
+            setRestoring(true);
+            void restore({ nodeIds: [trashedNodeId as never] })
+              .then(() => toast.success("Restored from Trash."))
+              .catch(() => toast.error("Couldn't restore it. Try again from Trash in Library."))
+              .finally(() => setRestoring(false));
+          }}
+        >
+          {restoring ? "Restoring…" : "Restore"}
+        </button>
+      </DismissibleArtifactNotice>
+    </div>
+  );
+}
+
 export function ArtifactStudio({
   mode,
   artifact,
@@ -1989,6 +2024,7 @@ export function ArtifactStudio({
   panelOverlay,
   sourceLabel,
   onPanelWidthChange,
+  onPaneRoomChange,
   onClose,
   onCloseTab,
   onExpand,
@@ -2013,6 +2049,8 @@ export function ArtifactStudio({
   panelOverlay?: boolean;
   sourceLabel: string;
   onPanelWidthChange?: (width: number) => void;
+  /** The extra width the work's own pane (comments, history…) needs beside the page; 0 when shut. */
+  onPaneRoomChange?: (room: number) => void;
   onClose: () => void;
   onExpand: (artifact: SpectraArtifact) => void;
   onActivateTab: (artifactId: string) => void;
@@ -2032,6 +2070,11 @@ export function ArtifactStudio({
   const deviceWorkAway = useDeviceWorkAway(artifact);
   const router = useRouter();
   const width = panelWidth ?? 720;
+  // The same subscription the editor holds; Convex shares it. It says when this work went to Trash elsewhere.
+  const replicaTruth = useCalmQuery(
+    api.replicas.forWork,
+    useAuthedArgs(artifact.blueprintKey === "thread_reference" ? "skip" : { workId: artifact._id as never }),
+  );
   const handleClose = useCallback(
     () => (mode === "tab" ? onCloseTab(artifact._id) : onClose()),
     [artifact._id, mode, onClose, onCloseTab],
@@ -2195,13 +2238,16 @@ export function ArtifactStudio({
       <DeviceWorkAway title={artifact.title} reason={deviceWorkAway} />
     ) : (
       <div className="flex h-full min-h-0 flex-col bg-transparent">
+        {replicaTruth?.trashedNodeId ? (
+          <TrashedWorkNotice artifactId={artifact._id} trashedNodeId={replicaTruth.trashedNodeId} />
+        ) : null}
         <ArtifactStudioEditor
           // Editor identity must remain stable while its clean/dirty state
           // changes. A key derived from `dirtyIds` remounted this tree on the
           // first keystroke, restoring the server snapshot and making every
           // artifact editor appear non-interactive. Remote revisions are
           // reconciled by ArtifactStudioEditor's snapshot effects.
-          key={`${artifact._id}:editor:${artifact.storageHome ?? "cloud"}`}
+          key={`${artifact._id}:editor:${artifact.storageHome ?? "cloud"}:${artifact.storageEpoch ?? 0}`}
           mode={mode}
           artifact={artifact}
           artifacts={artifacts}
@@ -2219,6 +2265,7 @@ export function ArtifactStudio({
           onShare={onShare ? () => onShare(artifact) : undefined}
           onDirtyChange={handleDirtyChange}
           onOpenThread={onOpenThread}
+          onPaneRoomChange={onPaneRoomChange}
           compact={compact}
           instanceKey={instanceKey}
           executeApplicationCommand={executeApplicationCommand}
@@ -2279,6 +2326,7 @@ function ArtifactStudioEditor({
   onShare,
   onDirtyChange,
   onOpenThread,
+  onPaneRoomChange,
   compact,
   instanceKey,
   executeApplicationCommand,
@@ -2296,6 +2344,7 @@ function ArtifactStudioEditor({
   onDirtyChange: (dirty: boolean) => void;
   /** Opens a conversation about this work where the surface keeps conversations. */
   onOpenThread?: (thread: { id: string; title: string }) => void;
+  onPaneRoomChange?: (room: number) => void;
   compact: boolean;
   instanceKey?: string;
   executeApplicationCommand?: ApplicationCommandDispatcher;
@@ -2378,6 +2427,7 @@ function ArtifactStudioEditor({
           ) && artifact.nativeFormat
         ? String(artifact.updatedAt)
         : null,
+    artifact.storageEpoch,
   );
   // A document or code body typed into before its room binds is rebuilt under the writer's
   // hands, which reordered and dropped characters. Hold typing for the short
@@ -2406,6 +2456,11 @@ function ArtifactStudioEditor({
     recoveryAdoptionRequest.current?.abort();
     recoveryAdoptionRequest.current = null;
   }, [artifact._id]);
+  // Said once per work, quietly: the work still opens.
+  const liveNotice = live.notice;
+  useEffect(() => {
+    if (liveNotice) toast.info(liveNotice, { id: `history-notice:${artifact._id}` });
+  }, [liveNotice, artifact._id]);
   const liveRecovery = useMemo(
     () =>
       describeFailure(
@@ -4332,7 +4387,18 @@ function ArtifactStudioEditor({
     kind: paneKind,
     onKind: setPaneKind,
     narrow: paneKind === "history",
+    stageMin: workType ? getWorkDefinition(workType).responsive.minInlineSize : 360,
   });
+  /* A work beside a conversation asks for the pane's room, so the page keeps
+     its own floor beside Comments or History instead of turning into a strip.
+     Where the row cannot give it, the work covers the page until the pane shuts. */
+  const paneRoom = mode === "split" && !compact ? pane.requested : 0;
+  const onPaneRoomChangeRef = useRef(onPaneRoomChange);
+  onPaneRoomChangeRef.current = onPaneRoomChange;
+  useEffect(() => {
+    onPaneRoomChangeRef.current?.(paneRoom);
+  }, [paneRoom]);
+  useEffect(() => () => onPaneRoomChangeRef.current?.(0), []);
   /* A version on show sits over the page and leaves the work's own heading,
      and the buttons in it, where they are. */
   const [stageTop, setStageTop] = useState(0);
@@ -5300,6 +5366,7 @@ function ArtifactStudioEditor({
   const statusNow = useNow(30_000);
   useEffect(() => firstTipMoment("work"), []);
   const [statusActionBusy, setStatusActionBusy] = useState(false);
+  const putBackFile = useMutation(api.bridgeSync.putBackFile);
   const [statusCompareOpen, setStatusCompareOpen] = useState(false);
   const statusLocalReplica = replicaTruth?.replicas.find(
     (replica) => replica.kind === "local",
@@ -5344,6 +5411,7 @@ function ArtifactStudioEditor({
           retry: !readOnly,
           "sign-in": true,
           reconnect: true,
+          "put-back": !readOnly,
           "keep-spectra": Boolean(nativeConflict) && !readOnly,
           "keep-office": Boolean(nativeConflict) && !readOnly,
           compare: historyIsMine || Boolean(nativeConflict?.previews?.length),
@@ -5371,6 +5439,14 @@ function ArtifactStudioEditor({
     ],
   );
   const handleStatusAction = (kind: ArtifactStatusActionKind) => {
+    if (kind === "put-back") {
+      setStatusActionBusy(true);
+      void putBackFile({ workId: artifact._id as never })
+        .then(() => toast.success("Putting the file back in its folder."))
+        .catch(() => toast.error("The file couldn't be put back. Check that this computer's Bridge is running."))
+        .finally(() => setStatusActionBusy(false));
+      return;
+    }
     if (kind === "retry") {
       void save();
       return;
@@ -5752,7 +5828,8 @@ function ArtifactStudioEditor({
                 {/* One planner work reads as what it is now: a task, or a plan of several. */}
                 {artifact.blueprintKey === "planner_task" ? "Task" : meta.label}
               </span>
-              {headedByTask ? null : identityBlock}
+              {/* A task heads its own page, but still says where it lives, like every other work. */}
+              {headedByTask ? (instanceKey ? null : <WorkOrigin work={artifact} />) : identityBlock}
             </div>
           </div>
           <ArtifactHeaderActions

@@ -2,6 +2,8 @@ import { patchTouchesAiPermissions } from "../../../settings/schema/ai-permissio
 import { normalizeAiPreferencePatch, preferenceLayerValuesSchema } from "../../../settings/schema/preferences";
 import { applicationCommandCategory } from "../../../../../../shared/ai-application-approval";
 import { AI_SYNC_PURPOSES, SCHOOL_SYNC_KINDS, SCHOOL_SYNC_MODES } from "../../../../../../shared/school-sync";
+import { calendarLocalTimeToEpoch } from "../../../../../../shared/calendar-time";
+import { refusePastCalendarStart } from "../../../calendar/domain/past-start";
 import type { CommandResult } from "../backend";
 import { ToolInputError, type AnyHarnessTool, type HarnessTool, type PermissionCategory, type ToolEffect, type ToolOutcome } from "../types";
 import {
@@ -187,6 +189,34 @@ function localTime(raw: Record<string, unknown>, key: string, required: boolean)
   return value.length === 10 ? `${value}T00:00` : value;
 }
 
+const CALENDAR_TOOL_FOR: Record<string, string> = {
+  add_event: "create_calendar_personal_event",
+  schedule_task: "schedule_calendar_task",
+  move_block: "move_calendar_block",
+};
+
+/**
+ * A start that has already passed is refused here, with the time now, so the
+ * model chooses again in the same turn. The server checks the same rule.
+ */
+function refuseElapsedStart(args: Record<string, unknown>, timeZone: string, now: number) {
+  const toolId = CALENDAR_TOOL_FOR[String(args.action)];
+  if (!toolId || typeof args.start !== "string") return;
+  let startAt: number;
+  let endAt: number | undefined;
+  try {
+    startAt = calendarLocalTimeToEpoch(args.start, timeZone, "earlier");
+    endAt = typeof args.end === "string" ? calendarLocalTimeToEpoch(args.end, timeZone, "earlier") : args.allDay ? startAt + 86_400_000 : undefined;
+  } catch {
+    return; // An impossible time is reported where it is converted.
+  }
+  try {
+    refusePastCalendarStart(toolId, { startAt, endAt, allDay: args.allDay === true, alreadyHappened: args.alreadyHappened === true, alsoAtLocal: args.alsoAtLocal, timezone: timeZone }, now);
+  } catch (error) {
+    throw new ToolInputError(error instanceof Error ? error.message.replace(/^CALENDAR_TIME_PASSED:\s*/, "") : String(error));
+  }
+}
+
 /* Devices: Spectra Bridge on the user's computers (docs/product/DEVICES.md). */
 
 const CALENDAR_ACTIONS = ["add_event", "schedule_task", "move_block", "resize_block", "complete_block", "remove_event"] as const;
@@ -341,7 +371,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     }),
     commandTool(session, {
       name: "calendar",
-      description: `Change the user's calendar. action add_event: a personal event {title, start, end?, allDay?, notes?}. A lesson or anything else that repeats takes repeat {everyWeeks, until (YYYY-MM-DD), except? (dates it does not happen)} on one add_event, instead of one call per date: a timetable lives here, not in a document. In a two-week cycle give each lesson everyWeeks 2 and start it in its own week, and say which week in notes. action schedule_task: a work block for a planner task {taskId (the task's artifact id), start, end}. When the user names a task, find it first and use it; make a new task only if none matches. action move_block {itemId, start, end?, expectedRevision} and resize_block {itemId, end, expectedRevision} for work blocks from read_calendar. complete_block {itemId, expectedRevision} marks a work block done; remove_event {itemId, andFollowing?} takes a personal event or work block off the calendar; andFollowing also takes every later event of its repeating lesson. To change one date of a repeating lesson, remove that event and add its replacement. Times are YYYY-MM-DDTHH:mm in the user's time zone (${timeZone}). Official school deadlines cannot be moved.`,
+      description: `Change the user's calendar. action add_event: a personal event {title, start, end?, allDay?, notes?}. A lesson or anything else that repeats takes repeat {everyWeeks, until (YYYY-MM-DD), except? (dates it does not happen)} on one add_event, instead of one call per date: a timetable lives here, not in a document. In a two-week cycle give each lesson everyWeeks 2 and start it in its own week, and say which week in notes. action schedule_task: a work block for a planner task {taskId (the task's artifact id), start, end}. When the user names a task, find it first and use it; make a new task only if none matches. action move_block {itemId, start, end?, expectedRevision} and resize_block {itemId, end, expectedRevision} for work blocks from read_calendar. complete_block {itemId, expectedRevision} marks a work block done; remove_event {itemId, andFollowing?} takes a personal event or work block off the calendar; andFollowing also takes every later event of its repeating lesson. To change one date of a repeating lesson, remove that event and add its replacement. Times are YYYY-MM-DDTHH:mm in the user's time zone (${timeZone}). A start that has already passed is refused; set alreadyHappened only when the user is logging something that already happened. Official school deadlines cannot be moved.`,
       parameters: {
         type: "object",
         properties: {
@@ -362,6 +392,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
             additionalProperties: false,
           },
           andFollowing: { type: "boolean" },
+          alreadyHappened: { type: "boolean" },
           taskId: { type: "string" },
           itemId: { type: "string" },
           expectedRevision: { type: "number" },
@@ -375,7 +406,9 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       doneLabel: (args: { action: string; title?: string }) =>
         args.action === "add_event" ? `Added *${args.title}* to your calendar` : CALENDAR_WORDS[args.action]?.[1] ?? "Updated your calendar",
       parse: (raw) => {
+        const parsed = (() => {
         const action = oneOf(raw, "action", CALENDAR_ACTIONS);
+        const logged = raw.alreadyHappened === true ? { alreadyHappened: true } : {};
         if (action === "remove_event")
           return { action, itemId: requireString(raw, "itemId", 200), ...(raw.andFollowing === true ? { andFollowing: true } : {}) };
         if (action === "add_event")
@@ -387,18 +420,23 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
             allDay: raw.allDay === true,
             notes: optionalString(raw, "notes"),
             ...repeatOf(raw),
+            ...logged,
           };
         if (action === "schedule_task")
-          return { action, taskId: requireString(raw, "taskId", 200), start: localTime(raw, "start", true), end: localTime(raw, "end", true) };
+          return { action, taskId: requireString(raw, "taskId", 200), start: localTime(raw, "start", true), end: localTime(raw, "end", true), ...logged };
         const expectedRevision = optionalNumber(raw, "expectedRevision");
         if (expectedRevision === undefined) throw new ToolInputError("expectedRevision is required; read it with read_calendar.");
         if (action === "complete_block") return { action, itemId: requireString(raw, "itemId", 200), expectedRevision };
         return action === "move_block"
-          ? { action, itemId: requireString(raw, "itemId", 200), start: localTime(raw, "start", true), end: localTime(raw, "end", false), expectedRevision }
+          ? { action, itemId: requireString(raw, "itemId", 200), start: localTime(raw, "start", true), end: localTime(raw, "end", false), expectedRevision, ...logged }
           : { action, itemId: requireString(raw, "itemId", 200), end: localTime(raw, "end", true), expectedRevision };
+        })();
+        refuseElapsedStart(parsed as Record<string, unknown>, timeZone, session.now());
+        return parsed;
       },
       command: (args: Record<string, unknown>) => {
         const action = args.action;
+        const logged = args.alreadyHappened === true ? { alreadyHappened: true } : {};
         if (action === "add_event")
           return {
             command: "create_calendar_personal_event",
@@ -410,10 +448,11 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
               ...(args.allDay ? { allDay: true } : {}),
               ...(args.notes ? { notes: args.notes } : {}),
               ...(args.alsoAtLocal ? { alsoAtLocal: args.alsoAtLocal } : {}),
+              ...logged,
             },
           };
         if (action === "schedule_task")
-          return { command: "schedule_calendar_task", args: { planArtifactId: args.taskId, startLocal: args.start, endLocal: args.end, timezone: timeZone } };
+          return { command: "schedule_calendar_task", args: { planArtifactId: args.taskId, startLocal: args.start, endLocal: args.end, timezone: timeZone, ...logged } };
         if (action === "complete_block")
           return { command: "complete_calendar_block", args: { itemId: args.itemId, expectedRevision: args.expectedRevision } };
         if (action === "remove_event")
@@ -421,7 +460,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
         if (action === "move_block")
           return {
             command: "move_calendar_block",
-            args: { itemId: args.itemId, startLocal: args.start, ...(args.end ? { endLocal: args.end } : {}), timezone: timeZone, expectedRevision: args.expectedRevision },
+            args: { itemId: args.itemId, startLocal: args.start, ...(args.end ? { endLocal: args.end } : {}), timezone: timeZone, expectedRevision: args.expectedRevision, ...logged },
           };
         return { command: "resize_calendar_block", args: { itemId: args.itemId, endLocal: args.end, timezone: timeZone, expectedRevision: args.expectedRevision } };
       },
@@ -779,7 +818,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "open_in_spectra",
       description:
-        "Show the user a place in Spectra: library, calendar, settings, devices, agents (targetId: an agent to open its page), school, analytics, a workspace or an artifact (targetId; region: the region a search result gives, to open it at that slide, range, block or card). Use it only when they ask to see something; it opens straight away.",
+        "Show the user a place in Spectra: library, calendar, settings, devices, agents (targetId: an agent to open its page), school, analytics, a workspace or an artifact (targetId; region: the region a search result gives, to open it at that slide, range, block or card). Use it only when they ask to see something; it opens straight away. Say it opened at a passage only when you gave that passage's region; otherwise name the section.",
       parameters: {
         type: "object",
         properties: {

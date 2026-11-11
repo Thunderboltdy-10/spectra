@@ -507,7 +507,7 @@
   min-height: 0;
   border-right: 1px solid var(--border-subtle);
   background: color-mix(in oklab, var(--bg-secondary) 55%, var(--bg-primary));
-  animation: library-pane-in var(--motion-medium, 220ms) var(--ease-standard);
+  animation: library-pane-in var(--motion-base) var(--ease-standard);
 }
 
 @keyframes library-pane-in {

@@ -45,7 +45,7 @@ function NoteFile({
         />
       </label>
       <div className="mt-2 flex min-h-8 items-center justify-between gap-3">
-        <span className={`text-micro tabular-nums ${over ? "text-[var(--state-error)]" : "text-[var(--text-tertiary)]"}`}>
+        <span className={`text-micro tabular-nums ${over ? "text-[var(--danger)]" : "text-[var(--text-tertiary)]"}`}>
           {draft.length} of {cap} characters
         </span>
         {changed ? (

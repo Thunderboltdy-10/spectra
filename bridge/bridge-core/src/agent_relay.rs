@@ -53,8 +53,8 @@ const REMOVED_ENV: [&str; 6] = [
     "CLAUDECODE",
     "CLAUDE_CODE_ENTRYPOINT",
 ];
-/// A tool call can wait on the user's approval.
-const MCP_REPLY_TIMEOUT: Duration = Duration::from_secs(60 * 30);
+/// A tool call waiting longer than this ends as a tool error the model can read.
+const MCP_REPLY_TIMEOUT: Duration = Duration::from_secs(60 * 5);
 const LOCAL_ORIGIN: &str = "http://127.0.0.1:47615";
 const HUB_BACKOFF_MAX: Duration = Duration::from_secs(60);
 /// A connection that lasted this long was healthy, whatever ended it.
@@ -82,7 +82,7 @@ fn relay_token() -> Option<&'static str> {
                 }
             }
             let token = random_hex();
-            std::fs::write(&path, &token).ok()?;
+            write_owner_only(&path, &token).ok()?;
             Some(token)
         })
         .as_deref()
@@ -91,6 +91,24 @@ fn relay_token() -> Option<&'static str> {
 // Unit-test servers must never read or replace the installed Bridge's token.
 #[cfg(test)]
 fn relay_token() -> Option<&'static str> { Some("dummy-local-relay-test-token") }
+
+/// The token lets a local process start the user's CLIs; only its owner may read it.
+#[cfg_attr(test, allow(dead_code))]
+fn write_owner_only(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        file.write_all(contents.as_bytes())
+    }
+    #[cfg(not(unix))]
+    {
+        // The file lives in the user's own LOCALAPPDATA, which only they can read.
+        std::fs::write(path, contents)
+    }
+}
 
 fn random_hex() -> String {
     let mut bytes = [0_u8; 32];
@@ -110,16 +128,36 @@ pub struct ConnectQuery {
     identity: crate::server::LocalRelayIdentity,
 }
 
+/// The far side says what it wants; the Bridge decides the command line.
 #[derive(Deserialize)]
 struct StartFrame {
+    /// Sent by servers older than this Bridge's own command lines. Never run.
+    #[serde(default)]
+    #[allow(dead_code)]
     args: Vec<String>,
-    /// Written to a private file; `{{system}}` in the args becomes its path.
+    /// Written to a private file and given to Claude as its system prompt.
     #[serde(default)]
     system: Option<String>,
-    /// Asks for a tool endpoint; `{{mcp}}` in the args becomes its local URL.
+    /// What a Claude session is for. Codex always runs `app-server`.
     #[serde(default)]
-    mcp: bool,
+    claude: Option<ClaudeIntent>,
 }
+
+#[derive(Deserialize)]
+#[serde(tag = "mode", rename_all = "kebab-case")]
+enum ClaudeIntent {
+    Prompt {
+        model: String,
+        #[serde(default)]
+        effort: Option<String>,
+        /// Spectra's tools over the local MCP endpoint.
+        #[serde(default)]
+        tools: bool,
+    },
+    AuthStatus,
+}
+
+const CLAUDE_EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 
 fn executable(provider: &str) -> Option<&'static str> {
     match provider {
@@ -129,24 +167,171 @@ fn executable(provider: &str) -> Option<&'static str> {
     }
 }
 
-/// The only ways Spectra starts these programs.
-fn args_allowed(program: &str, args: &[String]) -> bool {
-    let first = args.first().map(String::as_str);
-    match program {
-        "codex" => matches!(first, Some("app-server")),
-        "claude" => {
-            matches!(first, Some("auth")) || (matches!(first, Some("-p")) && claude_is_confined(args))
-        }
-        _ => false,
-    }
+/// A model name is one short word: an alias or an id, never a flag.
+fn model_name_allowed(model: &str) -> bool {
+    let bytes = model.as_bytes();
+    (1..=64).contains(&bytes.len())
+        && bytes[0].is_ascii_alphanumeric()
+        && bytes.iter().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-' | b'[' | b']'))
 }
 
-/// A prompt session must have its own tools off and its config isolated.
-fn claude_is_confined(args: &[String]) -> bool {
-    let tools_off = args
-        .windows(2)
-        .any(|pair| pair[0] == "--tools" && pair[1].is_empty());
-    tools_off && args.iter().any(|arg| arg == "--strict-mcp-config")
+/// Claude's whole command line, built here. `{{system}}` and `{{mcp}}` become
+/// the prompt file and the local tool endpoint when the session starts. The
+/// CLI's own tools are off, its settings and other MCP servers are ignored, and
+/// nothing is saved as a session on disk.
+fn claude_command(start: &StartFrame) -> Result<(Vec<String>, bool), &'static str> {
+    let Some(intent) = &start.claude else {
+        return Err("This Bridge starts Claude only from Spectra's own request. Update Spectra.");
+    };
+    let (model, effort, tools) = match intent {
+        ClaudeIntent::AuthStatus => return Ok((vec!["auth".into(), "status".into()], false)),
+        ClaudeIntent::Prompt { model, effort, tools } => (model, effort, *tools),
+    };
+    if !model_name_allowed(model) {
+        return Err("Spectra does not start Claude with that model.");
+    }
+    if effort.as_deref().is_some_and(|effort| !CLAUDE_EFFORTS.contains(&effort)) {
+        return Err("Spectra does not start Claude with that thinking level.");
+    }
+    let mut args: Vec<String> = [
+        "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+        "--include-partial-messages", "--model", model, "--tools", "", "--setting-sources", "",
+        "--no-session-persistence", "--strict-mcp-config", "--system-prompt-file", "{{system}}",
+    ]
+    .iter()
+    .map(ToString::to_string)
+    .collect();
+    if let Some(effort) = effort {
+        args.extend(["--effort".into(), effort.clone()]);
+    }
+    if tools {
+        let config = serde_json::json!({ "mcpServers": { "spectra": { "type": "http", "url": "{{mcp}}" } } });
+        args.extend(["--mcp-config".into(), config.to_string(), "--allowedTools".into(), "mcp__spectra".into()]);
+    }
+    Ok((args, tools))
+}
+
+/// Codex features that act on this computer or reach beyond Spectra. Always off.
+const CODEX_FEATURES_OFF: [&str; 18] = [
+    "shell_tool", "apps", "memories", "browser_use", "computer_use", "plugins", "remote_plugin", "multi_agent",
+    "skill_search", "tool_suggest", "image_generation", "goals", "sleep_tool", "unified_exec", "view_image", "hooks",
+    "in_app_browser", "code_mode_host",
+];
+
+/// The requests Spectra sends to `codex app-server`, and the fields each may carry.
+fn codex_allowed_fields(method: &str) -> Option<&'static [&'static str]> {
+    Some(match method {
+        "initialize" => &["clientInfo", "capabilities"],
+        "initialized" => &[],
+        "account/read" => &["refreshToken"],
+        "config/read" => &[],
+        "model/list" => &["cursor", "limit"],
+        "thread/start" => &["model", "ephemeral", "baseInstructions", "serviceName", "config", "dynamicTools"],
+        "turn/start" => &["threadId", "effort", "input", "outputSchema"],
+        "turn/steer" => &["threadId", "expectedTurnId", "input"],
+        "turn/interrupt" => &["threadId", "turnId"],
+        _ => return None,
+    })
+}
+
+/// The isolation every thread runs under, whatever the far side asked for.
+fn codex_config(asked: Option<&serde_json::Value>) -> serde_json::Value {
+    let mut config = serde_json::Map::new();
+    config.insert("web_search".into(), "disabled".into());
+    config.insert("project_doc_max_bytes".into(), 0.into());
+    if let Some(serde_json::Value::Object(asked)) = asked {
+        for (key, value) in asked {
+            let keep = match key.as_str() {
+                "model_reasoning_summary" => value.as_str().is_some_and(|summary| matches!(summary, "auto" | "concise" | "detailed" | "none")),
+                // The person's own MCP servers may only be turned off.
+                key if key.starts_with("mcp_servers.") && key.ends_with(".enabled") => value == &serde_json::Value::Bool(false),
+                key if key.starts_with("features.") => {
+                    config.insert(key.into(), false.into());
+                    false
+                }
+                _ => false,
+            };
+            if keep {
+                config.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    for feature in CODEX_FEATURES_OFF {
+        config.insert(format!("features.{feature}"), false.into());
+    }
+    serde_json::Value::Object(config)
+}
+
+/// One line from the far side to Codex, rewritten to Spectra's terms or refused.
+/// Replies to Codex's own requests (Spectra's tool results) pass unchanged.
+fn codex_inbound(line: &str) -> Result<String, String> {
+    let mut frame: serde_json::Value = serde_json::from_str(line).map_err(|_| "not JSON".to_string())?;
+    let Some(object) = frame.as_object_mut() else { return Err("not a JSON-RPC message".into()) };
+    let Some(method) = object.get("method").and_then(serde_json::Value::as_str).map(str::to_owned) else {
+        let is_reply = object.contains_key("id") && (object.contains_key("result") || object.contains_key("error"));
+        return if is_reply { Ok(line.to_string()) } else { Err("not a JSON-RPC message".into()) };
+    };
+    let Some(fields) = codex_allowed_fields(&method) else {
+        return Err(format!("{method} is not one of Spectra's requests"));
+    };
+    let mut params = serde_json::Map::new();
+    if let Some(serde_json::Value::Object(asked)) = object.get("params") {
+        for field in fields {
+            if let Some(value) = asked.get(*field) {
+                params.insert((*field).into(), value.clone());
+            }
+        }
+    }
+    if method == "thread/start" {
+        let config = codex_config(params.get("config"));
+        params.insert("config".into(), config);
+        params.insert("approvalPolicy".into(), "never".into());
+        params.insert("sandbox".into(), "read-only".into());
+    }
+    if object.contains_key("params") || method == "thread/start" {
+        object.insert("params".into(), serde_json::Value::Object(params));
+    }
+    Ok(frame.to_string())
+}
+
+/// Codex items that act outside Spectra's own tools.
+const CODEX_FOREIGN_ITEMS: [&str; 6] = ["commandExecution", "fileChange", "mcpToolCall", "webSearch", "imageView", "collabAgentToolCall"];
+
+/// True when Codex reports doing something only Spectra's tools may do. The
+/// session ends then: the isolation did not hold.
+fn codex_outbound_refused(line: &str) -> bool {
+    let Ok(frame) = serde_json::from_str::<serde_json::Value>(line) else { return false };
+    let Some(method) = frame.get("method").and_then(serde_json::Value::as_str) else { return false };
+    if method.ends_with("/requestApproval") || matches!(method, "execCommandApproval" | "applyPatchApproval") {
+        return true;
+    }
+    if !matches!(method, "item/started" | "item/completed") {
+        return false;
+    }
+    let kind = frame.pointer("/params/item/type").and_then(serde_json::Value::as_str).unwrap_or_default();
+    CODEX_FOREIGN_ITEMS.contains(&kind)
+}
+
+fn hub_pipe_url(base: &str, sid: &str) -> String {
+    let encoded: String = sid
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (byte as char).to_string(),
+            _ => format!("%{byte:02X}"),
+        })
+        .collect();
+    format!("{}/_spectra/agent-hub/pipe?sid={encoded}", base.trim_end_matches('/'))
+}
+
+/// The CLI's tool request waited too long: it gets an error it can read, not a dropped call.
+fn mcp_timeout_reply(body: &str) -> String {
+    let id = serde_json::from_str::<serde_json::Value>(body).ok().and_then(|request| request.get("id").cloned()).unwrap_or(serde_json::Value::Null);
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": { "isError": true, "content": [{ "type": "text", "text": "Spectra did not answer this tool call in time. Try it again, or continue without it." }] }
+    })
+    .to_string()
 }
 
 pub fn relay_token_matches(candidate: &str) -> bool {
@@ -371,7 +556,7 @@ pub async fn mcp(Path(id): Path<String>, headers: HeaderMap, body: String) -> Re
     if let Ok(mut pending) = route.pending.lock() {
         pending.insert(request, reply);
     }
-    let frame = serde_json::json!({ "relay": "mcp", "id": request, "body": body }).to_string();
+    let frame = serde_json::json!({ "relay": "mcp", "id": request, "body": &body }).to_string();
     if route.to_far.send(frame).await.is_err() {
         return StatusCode::BAD_GATEWAY.into_response();
     }
@@ -381,7 +566,7 @@ pub async fn mcp(Path(id): Path<String>, headers: HeaderMap, body: String) -> Re
         }
         Ok(Ok(None)) => StatusCode::ACCEPTED.into_response(),
         Ok(Err(_)) => StatusCode::BAD_GATEWAY.into_response(),
-        Err(_) => StatusCode::GATEWAY_TIMEOUT.into_response(),
+        Err(_) => ([(header::CONTENT_TYPE, "application/json")], mcp_timeout_reply(&body)).into_response(),
     }
 }
 
@@ -403,12 +588,21 @@ async fn run_cli(
     mut from_far: mpsc::Receiver<String>,
     to_far: mpsc::Sender<String>,
 ) {
-    if !args_allowed(program, &start.args) {
-        let _ = to_far
-            .send(relay_note("error", "Spectra does not start the CLI that way."))
-            .await;
-        return;
-    }
+    let _live = LiveSession::start();
+    let codex = program == "codex";
+    let (template, mcp) = if codex {
+        (vec!["app-server".to_string()], false)
+    } else {
+        match claude_command(&start) {
+            Ok(command) => command,
+            Err(reason) => {
+                eprintln!("[agent-relay] refused a Claude start: {reason}");
+                let _ = to_far.send(relay_note("error", reason)).await;
+                return;
+            }
+        }
+    };
+    let prompt_file = template.iter().any(|arg| arg == "{{system}}");
     let Some(root) = relay_root() else {
         let _ = to_far.send(relay_note("error", "No local data folder")).await;
         return;
@@ -418,8 +612,8 @@ async fn run_cli(
         let _ = to_far.send(relay_note("error", &error.to_string())).await;
         return;
     }
-    let system_file = match start.system.take() {
-        Some(text) => {
+    let system_file = match start.system.take().or_else(|| prompt_file.then(String::new)) {
+        Some(text) if prompt_file => {
             let path = std::env::temp_dir().join(format!("spectra-system-{}.md", random_hex()));
             if let Err(error) = std::fs::write(&path, text) {
                 let _ = to_far.send(relay_note("error", &error.to_string())).await;
@@ -427,10 +621,10 @@ async fn run_cli(
             }
             Some(TemporaryFile(path))
         }
-        None => None,
+        _ => None,
     };
     let pending: Pending = Arc::default();
-    let mcp_guard = start.mcp.then(|| {
+    let mcp_guard = mcp.then(|| {
         let id = random_hex();
         if let Ok(mut routes) = mcp_routes().lock() {
             routes.insert(
@@ -447,7 +641,7 @@ async fn run_cli(
     let mcp_url = mcp_guard
         .as_ref()
         .map(|guard| format!("{LOCAL_ORIGIN}/v1/agent/mcp/{}", guard.id));
-    let args = start.args.iter().map(|arg| {
+    let args = template.iter().map(|arg| {
         let mut arg = arg.clone();
         if let Some(file) = &system_file {
             arg = arg.replace("{{system}}", &file.0.to_string_lossy());
@@ -502,6 +696,23 @@ async fn run_cli(
                         }
                         continue;
                     }
+                    let text = if codex {
+                        match codex_inbound(&text) {
+                            Ok(text) => text,
+                            Err(reason) => {
+                                eprintln!("[agent-relay] refused a Codex request: {reason}");
+                                let id = serde_json::from_str::<serde_json::Value>(&text).ok().and_then(|frame| frame.get("id").cloned());
+                                let reply = match id {
+                                    Some(id) => serde_json::json!({ "id": id, "error": { "code": -32601, "message": "Spectra Bridge does not allow this request." } }).to_string(),
+                                    None => relay_note("refused", &reason),
+                                };
+                                if to_far.send(reply).await.is_err() { break; }
+                                continue;
+                            }
+                        }
+                    } else {
+                        text
+                    };
                     if stdin.write_all(text.as_bytes()).await.is_err()
                         || stdin.write_all(b"\n").await.is_err()
                         || stdin.flush().await.is_err()
@@ -513,6 +724,11 @@ async fn run_cli(
             },
             line = stdout.next_line() => match line {
                 Ok(Some(line)) => {
+                    if codex && codex_outbound_refused(&line) {
+                        eprintln!("[agent-relay] Codex acted outside Spectra's tools; the session was stopped");
+                        let _ = to_far.send(relay_note("error", "Codex tried to act outside Spectra's tools, so Spectra Bridge stopped it.")).await;
+                        break;
+                    }
                     if to_far.send(line).await.is_err() {
                         break;
                     }
@@ -536,6 +752,28 @@ async fn run_cli(
     }
     let _ = child.kill().await;
     drop(mcp_guard);
+}
+
+static LIVE_SESSIONS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How many CLI sessions are running now. An update waits for none.
+pub fn live_sessions() -> usize {
+    LIVE_SESSIONS.load(Ordering::Acquire)
+}
+
+struct LiveSession;
+
+impl LiveSession {
+    fn start() -> Self {
+        LIVE_SESSIONS.fetch_add(1, Ordering::AcqRel);
+        Self
+    }
+}
+
+impl Drop for LiveSession {
+    fn drop(&mut self) {
+        LIVE_SESSIONS.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 struct TemporaryFile(PathBuf);
@@ -715,7 +953,7 @@ async fn hub_control(ticket: &HubTicket, state: Arc<crate::server::ServerState>,
 
 /// A hub connection for stored work rather than a provider's program.
 async fn hub_work_pipe(base: &str, sid: &str, provider: &str, rooms: Arc<crate::rooms::Rooms>, mut stopped: tokio::sync::watch::Receiver<u64>) -> anyhow::Result<()> {
-    let endpoint = format!("{base}/_spectra/agent-hub/pipe?sid={sid}");
+    let endpoint = hub_pipe_url(base, sid);
     let (socket, _) = tokio::select! {
         biased;
         _ = stopped.changed() => return Ok(()),
@@ -754,7 +992,7 @@ async fn hub_pipe(base: &str, sid: &str, provider: &str) -> anyhow::Result<()> {
     let Some(program) = executable(provider) else {
         anyhow::bail!("unknown provider");
     };
-    let endpoint = format!("{base}/_spectra/agent-hub/pipe?sid={sid}");
+    let endpoint = hub_pipe_url(base, sid);
     let (mut socket, _) =
         tokio_tungstenite::connect_async(hub_request(&endpoint, None)?).await?;
     let start = loop {
@@ -889,16 +1127,105 @@ mod tests {
 
     #[test]
     fn only_spectras_own_ways_of_starting_a_cli_are_allowed() {
-        assert!(args_allowed("codex", &strings(&["app-server"])));
-        assert!(!args_allowed("codex", &strings(&["exec", "rm -rf /"])));
-        assert!(args_allowed("claude", &strings(&["auth", "status"])));
-        assert!(args_allowed(
-            "claude",
-            &strings(&["-p", "--tools", "", "--strict-mcp-config"])
-        ));
-        assert!(!args_allowed("claude", &strings(&["-p", "do something"])));
-        assert!(!args_allowed("claude", &strings(&["-p", "--tools", "Bash", "--strict-mcp-config"])));
-        assert!(!args_allowed("claude", &[]));
+        // Argument lists from the far side are never run, however they look.
+        for args in [strings(&["auth", "status"]), strings(&["-p", "--tools", "", "--strict-mcp-config"]), strings(&["-p", "do something"])] {
+            let start: StartFrame = serde_json::from_value(serde_json::json!({ "args": args })).unwrap();
+            assert!(claude_command(&start).is_err());
+        }
+        assert!(model_name_allowed("claude-haiku-4-5") && model_name_allowed("opus[1m]") && model_name_allowed("sonnet"));
+        assert!(!model_name_allowed("") && !model_name_allowed("-p") && !model_name_allowed("Haiku") && !model_name_allowed("a b"));
+    }
+
+    fn claude_start(intent: serde_json::Value) -> StartFrame {
+        serde_json::from_value(serde_json::json!({ "args": ["ignored"], "claude": intent })).unwrap()
+    }
+
+    #[test]
+    fn the_bridge_builds_claudes_command_line_from_intent() {
+        let (args, mcp) = claude_command(&claude_start(serde_json::json!({ "mode": "prompt", "model": "haiku", "effort": "low", "tools": true }))).unwrap();
+        assert!(mcp);
+        assert_eq!(&args[..3], &strings(&["-p", "--input-format", "stream-json"]));
+        assert!(args.windows(2).any(|pair| pair[0] == "--model" && pair[1] == "haiku"));
+        assert!(args.windows(2).any(|pair| pair[0] == "--effort" && pair[1] == "low"));
+        assert!(args.windows(2).any(|pair| pair[0] == "--tools" && pair[1].is_empty()));
+        assert!(args.windows(2).any(|pair| pair[0] == "--allowedTools" && pair[1] == "mcp__spectra"));
+        assert!(args.contains(&"--strict-mcp-config".to_string()));
+        let (plain, mcp) = claude_command(&claude_start(serde_json::json!({ "mode": "prompt", "model": "claude-fable-5-2" }))).unwrap();
+        assert!(!mcp);
+        assert!(!plain.iter().any(|arg| arg == "--mcp-config" || arg == "--effort"));
+        assert_eq!(claude_command(&claude_start(serde_json::json!({ "mode": "auth-status" }))).unwrap().0, strings(&["auth", "status"]));
+        for refused in [
+            serde_json::json!({ "mode": "prompt", "model": "haiku --dangerously-skip-permissions" }),
+            serde_json::json!({ "mode": "prompt", "model": "haiku", "effort": "--tools=Bash" }),
+            serde_json::json!({ "mode": "shell" }),
+        ] {
+            let parsed = serde_json::from_value::<StartFrame>(serde_json::json!({ "claude": refused }));
+            assert!(parsed.is_err() || claude_command(&parsed.unwrap()).is_err());
+        }
+        let old: StartFrame = serde_json::from_value(serde_json::json!({ "args": ["-p", "--tools", "", "--strict-mcp-config", "--extra"] })).unwrap();
+        assert!(claude_command(&old).is_err());
+    }
+
+    #[test]
+    fn the_bridge_owns_codexs_sandbox_and_methods() {
+        let rewritten: serde_json::Value = serde_json::from_str(&codex_inbound(&serde_json::json!({
+            "id": 3, "method": "thread/start",
+            "params": {
+                "model": "gpt-5.5", "ephemeral": true, "sandbox": "danger-full-access", "approvalPolicy": "on-request",
+                "cwd": "/", "baseInstructions": "Be Spectra.", "dynamicTools": [{ "type": "function", "name": "read_work" }],
+                "config": { "features.shell_tool": true, "sandbox_mode": "danger-full-access", "mcp_servers.github.enabled": false, "web_search": "live" }
+            }
+        }).to_string()).unwrap()).unwrap();
+        let params = &rewritten["params"];
+        assert_eq!(params["sandbox"], "read-only");
+        assert_eq!(params["approvalPolicy"], "never");
+        assert!(params.get("cwd").is_none());
+        assert_eq!(params["baseInstructions"], "Be Spectra.");
+        assert_eq!(params["dynamicTools"][0]["name"], "read_work");
+        assert_eq!(params["config"]["features.shell_tool"], false);
+        assert_eq!(params["config"]["web_search"], "disabled");
+        assert_eq!(params["config"]["mcp_servers.github.enabled"], false);
+        assert!(params["config"].get("sandbox_mode").is_none());
+        let turn: serde_json::Value = serde_json::from_str(&codex_inbound(&serde_json::json!({
+            "id": 4, "method": "turn/start", "params": { "threadId": "t", "effort": "medium", "input": [], "sandboxPolicy": { "type": "dangerFullAccess" }, "cwd": "/" }
+        }).to_string()).unwrap()).unwrap();
+        assert!(turn["params"].get("sandboxPolicy").is_none() && turn["params"].get("cwd").is_none());
+        assert_eq!(turn["params"]["effort"], "medium");
+        assert!(codex_inbound(r#"{"id":5,"method":"command/exec","params":{"command":["rm","-rf","/"]}}"#).is_err());
+        assert!(codex_inbound(r#"{"id":6,"method":"config/value/write","params":{}}"#).is_err());
+        assert!(codex_inbound("not json").is_err());
+        assert!(codex_inbound(r#"{"id":7,"result":{"success":true}}"#).is_ok());
+        assert!(codex_inbound(r#"{"method":"initialized"}"#).is_ok());
+    }
+
+    #[test]
+    fn codex_using_anything_but_spectras_tools_ends_the_session() {
+        assert!(codex_outbound_refused(r#"{"method":"item/started","params":{"item":{"type":"commandExecution","command":"ls"}}}"#));
+        assert!(codex_outbound_refused(r#"{"method":"item/started","params":{"item":{"type":"mcpToolCall"}}}"#));
+        assert!(!codex_outbound_refused(r#"{"method":"item/started","params":{"item":{"type":"agentMessage"}}}"#));
+        assert!(!codex_outbound_refused(r#"{"method":"item/agentMessage/delta","params":{"delta":"hi"}}"#));
+    }
+
+    #[test]
+    fn a_running_cli_session_is_counted_until_it_ends() {
+        let before = live_sessions();
+        let session = LiveSession::start();
+        assert!(live_sessions() > before);
+        drop(session);
+        assert!(live_sessions() <= before + 1);
+    }
+
+    #[test]
+    fn hub_session_ids_are_encoded_into_the_url() {
+        assert_eq!(hub_pipe_url("wss://hub.test/", "a b&admin=1"), "wss://hub.test/_spectra/agent-hub/pipe?sid=a%20b%26admin%3D1");
+    }
+
+    #[test]
+    fn a_tool_call_that_waits_too_long_is_a_tool_error() {
+        let reply: serde_json::Value = serde_json::from_str(&mcp_timeout_reply(r#"{"jsonrpc":"2.0","id":12,"method":"tools/call"}"#)).unwrap();
+        assert_eq!(reply["id"], 12);
+        assert_eq!(reply["result"]["isError"], true);
+        assert!(MCP_REPLY_TIMEOUT <= Duration::from_secs(5 * 60));
     }
 
     #[test]

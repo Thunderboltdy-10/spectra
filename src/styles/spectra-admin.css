@@ -1084,7 +1084,7 @@ a.admin-line:focus-visible {
 .analytics-mix span {
   min-width: 3px;
   background: var(--mix-color);
-  transition: flex-grow var(--motion-medium) var(--ease-standard);
+  transition: flex-grow var(--motion-base) var(--ease-standard);
 }
 .analytics-row-label {
   display: inline-flex;

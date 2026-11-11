@@ -156,3 +156,8 @@ export function assertPrimarySpectraRouting(
     );
 }
 
+
+/** A dated Claude id saved before the model list used the CLI's aliases becomes its alias. */
+export function claudeModelAlias(model: string) {
+  return model.replace(/^claude-(fable|opus|sonnet|haiku)-\d[\d-]*$/, "$1");
+}

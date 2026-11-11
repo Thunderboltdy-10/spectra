@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { agentHubTicket } from "../../shared/agent-hub-ticket.mjs";
 import WebSocket from "ws";
 import { localBridgeRelay } from "./local-bridge-relay";
 
@@ -16,10 +16,7 @@ const hubUrl = () => process.env.SPECTRA_AGENT_HUB_URL?.trim().replace(/\/$/, ""
 function hubTicket(accountId: string) {
   const secret = process.env.SPECTRA_COLLAB_TOKEN_SECRET?.trim();
   if (!secret) throw new Error("DEVICE_STORE_UNAVAILABLE: Spectra Bridge can't be reached from this server.");
-  const body = Buffer.from(
-    JSON.stringify({ sub: accountId, exp: Date.now() + TICKET_MS, aud: "spectra-agent-hub" }),
-  ).toString("base64url");
-  return `${body}.${createHmac("sha256", secret).update(body).digest("base64url")}`;
+  return agentHubTicket(accountId, secret, TICKET_MS);
 }
 
 /** How the AI's live connection reaches a room on the person's computer. */
@@ -32,7 +29,7 @@ export async function deviceRoomEndpoint(accountId: string) {
   return {
     url: `${hub}/_spectra/agent-hub/server?provider=rooms`,
     token: "hub",
-    protocols: ["spectra-agent", hubTicket(accountId)],
+    protocols: ["spectra-agent", await hubTicket(accountId)],
   };
 }
 
@@ -45,8 +42,9 @@ export async function deviceStoreCall<T = unknown>(
   const hub = hubUrl();
   const started = Date.now();
   const relay = hub ? null : await localBridgeRelay(accountId, Math.min(timeoutMs, 2_500));
+  const ticket = hub ? await hubTicket(accountId) : null;
   const socket = hub
-    ? new WebSocket(`${hub}/_spectra/agent-hub/server?provider=store`, ["spectra-agent", hubTicket(accountId)])
+    ? new WebSocket(`${hub}/_spectra/agent-hub/server?provider=store`, ["spectra-agent", ticket!])
     : new WebSocket(`${LOCAL_BRIDGE}/v1/store?${relay!.query}`, ["spectra-agent", relay!.token]);
   return new Promise<T>((resolve, reject) => {
     const finish = (settle: () => void) => {

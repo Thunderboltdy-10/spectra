@@ -16,22 +16,37 @@ user sees and does with it happens inside Spectra, on the **Devices** page.
     - red for a problem.
   - Its tooltip says the state in plain words: "Spectra Bridge · Connected · 3 folders".
   - The menu has only:
+    - the connected account, as a line that cannot be clicked: "Connected as Andrew Freeman", or "Not connected to
+      Spectra";
     - **Open Devices in Spectra** (opens the browser at the Devices page);
     - **Pause syncing** or **Resume syncing**;
+    - **Disconnect this computer** (asks first; files stay);
     - **Quit Bridge**.
   - Logs open from the Devices page, not the tray.
 - **Native prompts only where the system requires them.** These are native dialogs, triggered from Spectra:
   - the folder picker, because a browser cannot pick a desktop folder;
-  - the pairing confirmation (below).
+  - the confirmation before a file or folder Spectra AI named is synced.
 
 ## Pairing
 
 1. On the Devices page, the user presses **Connect this computer**. Spectra checks whether Bridge is running locally.
 2. If it isn't, the page offers the download for the user's system, with one sentence on what it does. Then it waits,
    and continues by itself once Bridge starts.
-3. Pairing runs through the existing local control (`auto_pair`). When the system needs a confirmation, Bridge shows
-   one native dialog with the code, and the same code shows on the page. The user confirms on the computer.
-4. The page settles into the device's details. The field condenses the device's row out of particles.
+3. Pairing runs through the local control (`auto_pair`) and is silent: no dialog on the computer. It takes about
+   1.5 s, on first install and when the person switches account.
+4. The page settles into the device's details. The field condenses the device's row out of particles. The tray names
+   the account from then on.
+
+Silence is safe because only Spectra itself can start it:
+
+- A release Bridge accepts exactly the origins baked into it at build time (`SPECTRA_ORIGINS`, `https://spectra.ink`
+  for production; checked by `bridge/scripts/verify-release-env.py`). Pages served from this computer
+  (`localhost`, `127.0.0.1`, `[::1]` on any port) are accepted only by debug builds. One predicate,
+  `ServerState::origin_allowed`, decides for pairing offers, CORS and update requests.
+- `/v1/pair` requires the browser's `Origin` header, requires it to equal the offer's `browser_origin`, and requires
+  that origin to be allowed. A page cannot set `Origin`, so another site cannot offer pairing in Spectra's name.
+- `/v1/update` refuses a request whose `Origin` is not allowed, and takes one request in ten minutes. An update never
+  installs while a run, a sync or an open work is active; it waits for the Bridge to be idle.
 
 ## The Devices page
 

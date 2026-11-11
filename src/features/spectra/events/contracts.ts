@@ -101,6 +101,8 @@ export type SpectraCommands = {
 
 export type SpectraEvents = {
   "artifact.lensActivated": { artifactId: string; projection?: unknown };
+  /** A work moved between this computer and the cloud: an open copy reads it again so it joins the fresh live history. */
+  "artifact.storageMoved": { artifactId: string };
   "workspace.refreshRequested": Record<string, never>;
   "threads.changed": Record<string, never>;
   /** Something may have put work on the calendar or moved it (a finished run); an open calendar reads again. */

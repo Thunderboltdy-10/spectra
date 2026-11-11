@@ -5,7 +5,7 @@ const h = vi.hoisted(() => ({
   authenticated: true, focused: true, revision: "a", paired: false,
   rejoin: vi.fn(async () => true), request: vi.fn(), runtime: vi.fn(), refresh: vi.fn(async () => {}),
 }));
-vi.mock("convex/react", () => ({ useConvexAuth: () => ({ isAuthenticated: h.authenticated }), useMutation: () => h.request }));
+vi.mock("convex/react", () => ({ useConvexAuth: () => ({ isAuthenticated: h.authenticated }), useMutation: () => h.request, useConvex: () => ({ query: vi.fn(async () => []), mutation: vi.fn() }) }));
 vi.mock("@/lib/account-storage-scope", () => ({ accountStorageRevision: () => h.revision, accountStorageMatches: (value: string) => value === h.revision }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({}), usePathname: () => "/devices" }));
 vi.mock("@/features/spectra/data/use-kept-query", () => ({ useQuery: () => undefined }));
@@ -13,7 +13,7 @@ vi.mock("../bridge/use-bridge", () => ({ useBridgeHealth: () => ({ checked: true
 vi.mock("../devices/pairing", () => ({ rejoinBridge: h.rejoin }));
 vi.mock("../settings/preference-store", () => ({ useSpectraPreferences: () => ({ hydrated: false, preferences: { ai: { runtimeChosen: true } } }) }));
 vi.mock("../ai/use-agent-runtime", () => ({ recheckAgentRuntime: h.runtime, useAgentRuntime: () => ({}) }));
-vi.mock("../bridge/device-works", () => ({ deviceStoreSummary: vi.fn(async () => ({ storeId: "fixture" })), publishDeviceState: vi.fn() }));
+vi.mock("../bridge/device-works", () => ({ deviceStoreSummary: vi.fn(async () => ({ storeId: "fixture" })), publishDeviceState: vi.fn(), useDeviceState: () => ({ storeId: null }) }));
 vi.mock("../bridge/availability", () => ({ publishBridgeAvailability: vi.fn() }));
 import { BridgeConnection } from "../bridge/bridge-discovery-mount";
 

@@ -108,6 +108,34 @@ describe("P9.I2 run projections and targeted recovery", () => {
     expect(dense.tabRows).toBe(small.tabRows);
   });
 
+  it("starts a run without reading the previous run when it carried no files (E3)", async () => {
+    const t = convexTest(schema, modules), actor = await seedActor(t), user = t.withIdentity(identity);
+    for (const name of ["orgNodeCountByType", "orgNodeCountByWorkspace", "orgNodeCountByParent"])
+      aggregateTest.register(t, name);
+    const threadId = await t.run(async ctx => {
+      const now = Date.now();
+      const threadId = await ctx.db.insert("spectraThreads", {
+        ownerAccountId: actor.accountId, schoolId: actor.schoolId, title: "Long conversation", origin: "chat",
+        status: "active", messageCount: 0, createdAt: now, updatedAt: now,
+      });
+      const lastRunId = await ctx.db.insert("spectraAiRuns", {
+        ownerAccountId: actor.accountId, schoolId: actor.schoolId, threadId, sourceSurface: "chat", executionId: "earlier",
+        status: "completed", userPrompt: "x".repeat(60_000), createdAt: now - 1_000, updatedAt: now - 1_000,
+      });
+      await ctx.db.patch(threadId, { lastRunId });
+      return threadId;
+    });
+    const handler = Reflect.get(beginRun, "_handler") as (ctx: MutationCtx, args: FunctionArgs<typeof api.spectraRuns.beginRun>) => Promise<FunctionReturnType<typeof api.spectraRuns.beginRun>>;
+    const measured = await user.run(async ctx => {
+      const observer = observeDatabase(ctx.db);
+      const result = await handler({ ...ctx, db: observer.db }, { sourceSurface: "chat", userPrompt: "Next", submissionKey: "next", threadId });
+      return { result, ...observer.snapshot() };
+    });
+    expect(measured.result.created).toBe(true);
+    const runBytes = measured.reads.filter(read => read.table === "spectraAiRuns").reduce((sum, read) => sum + read.serializedDocumentBytes, 0);
+    expect(runBytes).toBeLessThan(20_000);
+  });
+
   it("keeps tab-selection reads independent of unrelated conversation history", async () => {
     const t = convexTest(schema, modules), actor = await seedActor(t), user = t.withIdentity(identity);
     const fixture = await t.run(async ctx => {
@@ -161,6 +189,36 @@ describe("P9.I2 run projections and targeted recovery", () => {
     expect(tabs[2]).toMatchObject({ selected: false });
     await user.mutation(api.spectraRuns.selectTab, {});
     expect((await t.run(ctx => ctx.db.get(fixture.canonical)))?.selected).toBe(false);
+  });
+
+  it.each(["runId", "threadId"] as const)("re-selecting the open tab by %s reads no run and writes nothing (E3)", async field => {
+    const t = convexTest(schema, modules), actor = await seedActor(t), user = t.withIdentity(identity);
+    const fixture = await t.run(async ctx => {
+      const now = Date.now();
+      const threadId = await ctx.db.insert("spectraThreads", {
+        ownerAccountId: actor.accountId, schoolId: actor.schoolId, title: "Open conversation", origin: "chat",
+        status: "active", messageCount: 0, createdAt: now, updatedAt: now,
+      });
+      const runId = await ctx.db.insert("spectraAiRuns", {
+        ownerAccountId: actor.accountId, schoolId: actor.schoolId, threadId, sourceSurface: "chat",
+        status: "completed", userPrompt: "x".repeat(20_000), createdAt: now, updatedAt: now,
+      });
+      await ctx.db.patch(threadId, { lastRunId: runId });
+      await ctx.db.insert("spectraRunTabs", { ownerAccountId: actor.accountId, schoolId: actor.schoolId, runId, threadId,
+        surface: "chat", selected: false, createdAt: now, updatedAt: now });
+      return { runId, threadId };
+    });
+    const args = field === "runId" ? { runId: fixture.runId } : { threadId: fixture.threadId };
+    await user.mutation(api.spectraRuns.selectTab, args);
+    const handler = Reflect.get(selectTab, "_handler") as (ctx: MutationCtx, args: FunctionArgs<typeof api.spectraRuns.selectTab>) => Promise<FunctionReturnType<typeof api.spectraRuns.selectTab>>;
+    const again = await user.run(async ctx => {
+      const observer = observeDatabase(ctx.db);
+      const result = await handler({ ...ctx, db: observer.db }, args);
+      return { result, ...observer.snapshot() };
+    });
+    expect(again.result).toMatchObject({ selected: true });
+    expect(again.writes).toBe(0);
+    expect(again.reads.filter(read => read.table === "spectraAiRuns")).toEqual([]);
   });
 
   it.each(["runId", "threadId"] as const)("refuses another student's same-school %s when selecting a tab", async field => {

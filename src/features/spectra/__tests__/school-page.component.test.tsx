@@ -3,7 +3,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { getFunctionName } from "convex/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { forgetIdentityForTests } from "../administration/identity";
 
 const mocks = vi.hoisted(() => ({
   data: {} as Record<string, unknown>,
@@ -21,6 +20,9 @@ vi.mock("convex/react", () => ({
   useConvex: () => ({ query: async (reference: Parameters<typeof getFunctionName>[0]) => mocks.data[getFunctionName(reference)] }),
 }));
 vi.mock("../data/use-authed-args", () => ({ useAuthedArgs: <T,>(args: T) => args }));
+const scope = vi.hoisted(() => ({ value: "test-0", count: 0 }));
+// Each test is its own account, so the shared identity read is never carried over.
+vi.mock("@/lib/account-storage", async (original) => ({ ...(await original<typeof import("@/lib/account-storage")>()), accountStorageScope: () => scope.value }));
 vi.mock("../administration/api", () => ({ getAdministration: mocks.identity }));
 vi.mock("../hooks/use-spectra-router", () => ({ useSpectraRouter: () => ({ push: vi.fn() }) }));
 vi.mock("../data/api", async (importOriginal) => ({
@@ -45,7 +47,7 @@ function connected(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  forgetIdentityForTests();
+  scope.value = `test-${++scope.count}`;
   globalThis.ResizeObserver ??= class {
     observe() {}
     unobserve() {}

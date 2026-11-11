@@ -2,7 +2,7 @@
 
 import { followRunRelay, isRunRelayInvite, type RunRelayInvite } from "./run-relay-client";
 import { closeLocalRunStream, localRunStream, publishLocalRunEvent, subscribeLocalRunStreams } from "./local-run-streams";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import { uniqueToken } from "@/lib/unique-token";
 import {
@@ -33,6 +33,7 @@ import { spectraBus } from "../events";
 import { getRunTabs, isActiveRunStatus, refreshRunTabs } from "../island/run-tabs";
 import { isRetryableRunStatus } from "./run-lifecycle";
 import { observeUiRun, stopObservingUiRun, uiObserverForRun } from "../collaboration/settings-observation-client";
+import { knownUnreachableRuntimes } from "./use-agent-runtime";
 
 /**
  * Artifact ids the run feed has published coarse activity for, per run, so a
@@ -377,6 +378,15 @@ const STOP_FAILURE_COPY = {
   signedOut: "Sign in again to stop this run.",
 };
 
+/** What the run showed, finished as it stood. */
+function stoppedExchange(exchange: SpectraLiveExchange): SpectraLiveExchange {
+  return {
+    ...exchange,
+    status: "stopped",
+    steps: exchange.steps.map((step) => (step.status === "running" ? { ...step, status: "done" as const } : step)),
+  };
+}
+
 export function useSpectraRun({
   surface,
   workspaceId,
@@ -431,9 +441,10 @@ export function useSpectraRun({
     string | null
   >(null);
   const liveExchangeRef = useRef<SpectraLiveExchange | null>(null);
-  const [liveExchange, setLiveExchange] = useState<SpectraLiveExchange | null>(
-    null,
-  );
+  // A stopped run stays stopped: a late event from its stream, or a quiet
+  // continuation that had not heard of the stop yet, must never show the same
+  // exchange Working again (F09). A new exchange is unaffected.
+  const [liveExchange, setLiveExchange] = useReducer(keepStoppedExchange, null);
   useEffect(() => {
     liveExchangeRef.current = liveExchange;
   }, [liveExchange]);
@@ -510,6 +521,19 @@ export function useSpectraRun({
           }
         : card,
     );
+    // Another view (the rail, another tab) stopped the run this view is
+    // showing: its saved card says so, and the live strip follows (F09).
+    const stoppedRuns = new Set(
+      incoming.filter((card) => card.status === "cancelled").map((card) => card.runId),
+    );
+    if (stoppedRuns.size) {
+      stoppedRuns.forEach((runId) => activeRunIds.current.delete(runId));
+      setLiveExchange((current) =>
+        current?.runId && stoppedRuns.has(current.runId) && current.status !== "stopped"
+          ? stoppedExchange(current)
+          : current,
+      );
+    }
     if (previousScopeKey.current !== scopeKey) {
       previousScopeKey.current = scopeKey;
       if (surface === "chat") {
@@ -1105,6 +1129,12 @@ export function useSpectraRun({
           }
           if (event.type === "stopped" || event.type === "interrupted")
             changed = requestReachedTerminal = true;
+          if (event.type === "stopped")
+            setLiveExchange((current) =>
+              current && (!liveExchangeId || current.id === liveExchangeId)
+                ? stoppedExchange(current)
+                : current,
+            );
           if (event.type === "operation_preview" && event.preview) {
             const operationTitle = operationPreviewMessage(event.preview);
             setCards((current) =>
@@ -1427,6 +1457,7 @@ export function useSpectraRun({
             currentView,
             timeZone: userTimeZone(),
             attachments,
+            ...(knownUnreachableRuntimes().length ? { unreachable: knownUnreachableRuntimes() } : {}),
           },
           optimisticCardId,
           exchangeId,
@@ -1845,11 +1876,7 @@ export function useSpectraRun({
         current &&
         ((!targetRunId && current.id === submissionKey) ||
           current.runId === targetRunId)
-          ? {
-              ...current,
-              status: "stopped",
-              steps: current.steps.map((step) => (step.status === "running" ? { ...step, status: "done" as const } : step)),
-            }
+          ? stoppedExchange(current)
           : current,
       );
       if (targetRunId)
@@ -2067,4 +2094,24 @@ export function useSpectraRun({
       submitting,
     ],
   );
+}
+
+type LiveExchangeUpdate =
+  | SpectraLiveExchange
+  | null
+  | ((current: SpectraLiveExchange | null) => SpectraLiveExchange | null);
+
+function keepStoppedExchange(
+  current: SpectraLiveExchange | null,
+  update: LiveExchangeUpdate,
+): SpectraLiveExchange | null {
+  const next = typeof update === "function" ? update(current) : update;
+  if (
+    current?.status === "stopped" &&
+    next &&
+    next.id === current.id &&
+    (next.status === "streaming" || next.status === "starting")
+  )
+    return current;
+  return next;
 }

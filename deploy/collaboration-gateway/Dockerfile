@@ -37,6 +37,7 @@ COPY shared/collaboration-framing.mjs \
      shared/document-projection.mjs \
      shared/durable-dependencies.mjs \
      shared/convex-error.mjs \
+     shared/agent-hub-ticket.mjs \
      shared/convex-nesting.mjs \
      shared/planner-source.mjs \
      shared/yjs-collections.mjs \

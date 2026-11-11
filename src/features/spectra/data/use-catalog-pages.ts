@@ -1,10 +1,8 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import { useQuery } from "@/features/spectra/data/use-kept-query";
+import { useSession } from "@/features/spectra/data/use-session";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { api } from "../../../../convex/_generated/api";
-import { useAuthedArgs } from "./use-authed-args";
 import { spectraBus } from "../events";
 import { getSpectraWorkspaceMetadata, spectraAgentCatalog, spectraWorkspaceCatalog, type SpectraWorkspace } from "./api";
 import type { CatalogSnapshot, createCatalogPageCache } from "./catalog-page-cache";
@@ -14,7 +12,7 @@ type Cache<T extends { _id: string }> = ReturnType<typeof createCatalogPageCache
 
 export function useCatalogPages<T extends { _id: string }>(cache: Cache<T>, enabled = true, complete = false) {
   const { userId, sessionId } = useAuth();
-  const identity = useQuery(api.catalogGraph.identity, useAuthedArgs(enabled ? {} : "skip", "account"));
+  const identity = useSession(enabled)?.catalog;
   const key = enabled && userId && sessionId && identity
     ? JSON.stringify([userId, sessionId, identity.accountId, identity.schoolId, identity.membershipId]) + "/"
     : null;

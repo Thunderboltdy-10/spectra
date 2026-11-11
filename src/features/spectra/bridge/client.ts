@@ -325,6 +325,9 @@ export function pairingFailureMessage(
   if (/pairing offer expired|pairing expired/i.test(raw)) {
     return "This connection attempt timed out. Try again.";
   }
+  if (/PAIRING_ORIGIN_REFUSED/.test(raw)) {
+    return "This copy of Spectra Bridge connects only to spectra.ink. Open Devices there and connect again.";
+  }
   if (/PAIRING_CHALLENGE_INVALID/.test(raw)) {
     return "Spectra could not confirm this computer. Start connecting again from Bridge.";
   }

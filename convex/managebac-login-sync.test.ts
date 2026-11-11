@@ -186,3 +186,20 @@ it("only exposes saved sync progress to its owning account", async () => {
   await t.run((ctx) => ctx.db.patch(runId, { accountId: undefined }));
   await expect(student.query(api.managebac.studentSyncProgress, { runIds: [runId] })).rejects.toThrow("AUTH_FORBIDDEN");
 });
+
+it("answers setup without reading the clock, so the query stays cacheable (E2)", async () => {
+  const { t, ids, student } = await fixture();
+  const created = await t.run(async (ctx) => (await ctx.db.get(ids.accountId))!._creationTime);
+  const first = await student.query(api.managebac.onboardingStatus, {});
+  expect(first).toMatchObject({ establishedAt: created + 48 * 60 * 60 * 1_000 });
+  expect(first).not.toHaveProperty("established");
+  vi.setSystemTime(new Date("2026-10-27T10:00:00Z"));
+  expect(await student.query(api.managebac.onboardingStatus, {})).toEqual(first);
+});
+
+it("allows the first brief on a day after setup has had time to settle (E2)", async () => {
+  const { t, ids, student } = await fixture();
+  await t.run(async (ctx) => ctx.db.insert("dailyBriefs", { accountId: ids.accountId, day: "2026-10-26", state: "ready", claimedAt: Date.now(), recap: "Done", ahead: "Next", suggestions: [], updatedAt: Date.now() } as never));
+  expect(await student.query(api.dailyBriefs.today, { day: "2026-10-23" })).toBeNull();
+  expect(await student.query(api.dailyBriefs.today, { day: "2026-10-26" })).toMatchObject({ state: "ready" });
+});

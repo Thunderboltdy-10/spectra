@@ -36,6 +36,8 @@ import { refreshRunTabs, useRunTabs } from "./run-tabs";
 import { settleFirstVisit, useSeenRuns } from "./seen";
 import { ThreadSwitcher } from "./thread-switcher";
 import { ThreadView } from "./thread-view";
+import { PEEK_LIFE_MS, PEEK_REST_MS, ReplyPeek, peekLine } from "./reply-peek";
+import { runTabCard } from "./run-tabs";
 import { useFlip, useTabDrag } from "./use-tab-drag";
 import { threadHref } from "../chat/home-routes";
 import { firstTipMoment } from "../onboarding/first-tips";
@@ -71,12 +73,19 @@ const PLACEHOLDER_TITLE = 36;
 /** How long a question stands untouched before it folds onto its thread's tab. */
 const QUESTION_IDLE_MS = 90_000;
 
-function shortTitle(title: string) {
-  const clean = title.replace(/\s+/g, " ").trim();
+/** A title for one line: cut on a word boundary, ending in one ellipsis and nothing after it. */
+export function shortTitle(title: string) {
+  const clean = title.replace(/\s+/g, " ").trim().replace(/(?:…|\.{3})$/, "");
   if (clean.length <= PLACEHOLDER_TITLE) return clean;
-  const cut = clean.slice(0, PLACEHOLDER_TITLE);
+  const cut = clean.slice(0, PLACEHOLDER_TITLE + 1);
   const space = cut.lastIndexOf(" ");
-  return `${(space > PLACEHOLDER_TITLE / 2 ? cut.slice(0, space) : cut).replace(/[\s,.;:–—-]+$/, "")}…`;
+  return `${(space > 0 ? cut.slice(0, space) : cut.slice(0, PLACEHOLDER_TITLE)).replace(/[\s,.;:–—-]+$/, "")}…`;
+}
+
+/** A step caption as the field's line while it works: "Reading Physics progress…". */
+export function workingLine(caption: string) {
+  const clean = caption.replace(/\*/g, "").replace(/\s+/g, " ").trim().replace(/[\s.…:;,]+$/, "");
+  return clean ? `${clean}…` : "Working…";
 }
 
 /** The island's own centre line: the middle of the stage, between the rail and the Side. */
@@ -141,6 +150,9 @@ export function Island() {
   const composerRef = useRef<ComposerHandle>(null);
   const questionRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<HTMLDivElement>(null);
+  const replyPeekRef = useRef<HTMLDivElement>(null);
+  /** Where the thread card grows from when it opens out of the reply peek rather than its tab. */
+  const growFrom = useRef<ReturnType<typeof boxOf>>(null);
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
   const dividerRef = useRef<HTMLSpanElement>(null);
   const dragActive = useRef(false);
@@ -306,6 +318,11 @@ export function Island() {
   const openRun = useCallback((runId: string) => openRunRef.current(runId), []);
 
   const [announcement, setAnnouncement] = useState("");
+  // The reply peek (ISLAND.md, "Sending"): one at a time, rising from the finished thread's tab.
+  const [replyPeek, setReplyPeek] = useState<string | null>(null);
+  const [replyPeekShown, setReplyPeekShown] = useState(false);
+  const replyPeekRun = useRef<string | null>(null);
+  replyPeekRun.current = replyPeek;
   const lastStates = useRef(new Map<string, string>());
   useEffect(() => {
     const previous = lastStates.current;
@@ -317,11 +334,14 @@ export function Island() {
       const wasMoving = ["working", "waiting", "completing", "reconnecting", "needs_input"].includes(before);
       if (!wasMoving) continue;
       if (tab.state === "completed" || tab.state === "completed_limited") {
-        const ready = readyLine(tab);
-        setAnnouncement(`${ready}.`);
-        // A reply landing in the thread on screen is its own news; work it made elsewhere is still called out.
-        const watched = tab.threadId === focusThread && !tab.source.card?.provenance?.artifactTitles?.length;
-        if (!watched && !madeOnScreen(tab)) toast.success(ready, { id: `run:${tab.runId}:done`, action: { label: "Open", onClick: () => openRun(tab.runId) } });
+        const line = peekLine(tab);
+        setAnnouncement(`${tab.title}: ${line?.text ?? "finished"}`);
+        // The answer comes up out of its tab, unless the thread is already on screen or its card is open.
+        const onScreenNow =
+          currentView.current?.runId === tab.runId ||
+          spectraBus.getQuery("side.thread")?.threadId === tab.threadId ||
+          Boolean(slot?.bindsThread && slot.focus?.threadId === tab.threadId);
+        if (line && !onScreenNow && !menuOpen() && !dialogOpen()) setReplyPeek(tab.runId);
         radiateFromIsland(STATUS_COLOURS.done, 14, 24);
       } else if (tab.state === "failed_terminal" || tab.state === "paused") {
         toast.error(`${tab.title} stopped with a problem`, { id: `run:${tab.runId}:problem`, action: { label: "Open", onClick: () => openRun(tab.runId) } });
@@ -330,7 +350,7 @@ export function Island() {
       }
     }
     lastStates.current = next;
-  }, [allTabs, focusThread, openRun, radiateFromIsland]);
+  }, [allTabs, openRun, radiateFromIsland, slot]);
 
   // Notifications reach the user here (SHELL.md): the island lights in their colour and the words form from it.
   useEffect(
@@ -349,7 +369,17 @@ export function Island() {
 
   // Questions put aside wait on their thread's tab, counted, until answered or brought back.
   const [later, setLater] = useState<ReadonlySet<string>>(new Set());
-  const asking = useMemo(() => questions.filter((candidate) => !later.has(candidate.key)), [later, questions]);
+  // A question whose thread is already on the page is answered there: the card would only say it twice (F04).
+  const threadOnPage = slot?.bindsThread ? (slot.focus?.threadId ?? null) : null;
+  const asking = useMemo(
+    () =>
+      questions.filter(
+        (candidate) =>
+          !later.has(candidate.key) &&
+          !(candidate.threadId && (candidate.threadId === threadOnPage || spectraBus.getQuery("side.thread")?.threadId === candidate.threadId)),
+      ),
+    [later, questions, threadOnPage],
+  );
   const waitingByThread = useMemo(() => {
     const counts = new Map<string, number>();
     for (const candidate of questions)
@@ -458,8 +488,9 @@ export function Island() {
     void (async () => {
       await nextFrame();
       if (!live || !viewRef.current) return;
-      // The card grows out of its tab.
-      morphShape(frameRef.current, boxOf(tabRefs.current.get(view?.runId ?? "")), boxOf(viewRef.current));
+      // The card grows out of its tab, or out of the reply peek it was opened from.
+      morphShape(frameRef.current, growFrom.current ?? boxOf(tabRefs.current.get(view?.runId ?? "")), boxOf(viewRef.current));
+      growFrom.current = null;
       setViewShown(true);
     })();
     return () => {
@@ -481,6 +512,8 @@ export function Island() {
     (runId: string, pinned: boolean) => {
       if (isPendingTab(runId)) return;
       window.clearTimeout(viewTimer.current);
+      // Opened over its peek, the card grows from the peek: one surface getting bigger.
+      if (replyPeekRun.current === runId && replyPeekRef.current) growFrom.current = boxOf(replyPeekRef.current);
       setView((current) => (current?.pinned && !pinned && current.runId !== runId ? current : { runId, pinned: pinned || Boolean(current?.pinned && current.runId === runId) }));
       markSeen(runId);
     },
@@ -491,6 +524,87 @@ export function Island() {
     setReplyTo({ runId: live.runId, threadId: live.threadId, title: allTabs.find((tab) => tab.runId === live.runId)?.title ?? replyTo.title });
     openView(live.runId, true);
   }, [allTabs, live, openView, replyTo]);
+  /* ------------------------------------------------------------ reply peek */
+
+  const replyPeekTab = replyPeek ? allTabs.find((tab) => tab.runId === replyPeek) ?? null : null;
+  const replyPeekLine = replyPeekTab ? peekLine(replyPeekTab) : null;
+  const replyPeekLife = useRef({ timer: 0, rest: 0, left: PEEK_LIFE_MS, since: 0 });
+
+  /** It folds back into its tab, which keeps its unread lip. */
+  const foldReplyPeek = useCallback(() => {
+    const runId = replyPeekRun.current;
+    if (!runId) return;
+    window.clearTimeout(replyPeekLife.current.timer);
+    window.clearTimeout(replyPeekLife.current.rest);
+    morphShape(frameRef.current, boxOf(replyPeekRef.current), boxOf(tabRefs.current.get(runId)));
+    setReplyPeekShown(false);
+    setReplyPeek(null);
+  }, []);
+  const runReplyPeekLife = useCallback(() => {
+    const life = replyPeekLife.current;
+    window.clearTimeout(life.timer);
+    life.since = performance.now();
+    life.timer = window.setTimeout(foldReplyPeek, life.left);
+  }, [foldReplyPeek]);
+  /** The count stops while the pointer is over the peek or the rail, and goes on from where it was. */
+  const holdReplyPeekLife = useCallback(() => {
+    const life = replyPeekLife.current;
+    if (!replyPeekRun.current || !life.since) return;
+    window.clearTimeout(life.timer);
+    life.left = Math.max(1_000, life.left - (performance.now() - life.since));
+    life.since = 0;
+  }, []);
+
+  // It rises out of its tab: the same origin and spring as the card. With reduced motion it only fades.
+  const replyPeekOpen = Boolean(replyPeekTab && replyPeekLine);
+  useEffect(() => {
+    if (!replyPeekOpen) {
+      setReplyPeekShown(false);
+      return;
+    }
+    let current = true;
+    const life = replyPeekLife.current;
+    life.left = PEEK_LIFE_MS;
+    void (async () => {
+      await nextFrame();
+      if (!current || !replyPeekRef.current) return;
+      morphShape(frameRef.current, boxOf(tabRefs.current.get(replyPeekRun.current ?? "")), boxOf(replyPeekRef.current));
+      setReplyPeekShown(true);
+      if (pointerInside.current) replyPeekLife.current.since = 0;
+      else runReplyPeekLife();
+    })();
+    return () => {
+      current = false;
+      window.clearTimeout(life.timer);
+      window.clearTimeout(life.rest);
+    };
+    // A newer peek replaces the one showing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replyPeekOpen, replyPeek]);
+  // Never over an open thread card: the card takes its place.
+  useEffect(() => {
+    if (viewOpen && replyPeek) {
+      setReplyPeekShown(false);
+      setReplyPeek(null);
+    }
+  }, [replyPeek, viewOpen]);
+  // Escape puts it away; it never takes the key from what has focus otherwise.
+  useEffect(() => {
+    if (!replyPeek) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") foldReplyPeek();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [foldReplyPeek, replyPeek]);
+
+  const openOnArrival = useRef(false);
+  useEffect(() => {
+    if (!openOnArrival.current || !live?.runId || !allTabs.some((tab) => tab.runId === live.runId)) return;
+    openOnArrival.current = false;
+    openView(live.runId, true);
+  }, [allTabs, live?.runId, openView]);
+
   useEffect(() => {
     openRunRef.current = (runId) => {
       setReaching(true);
@@ -503,14 +617,27 @@ export function Island() {
     const element = tabRefs.current.get(viewTab.runId);
     if (!element || typeof window === "undefined") return 0;
     const r = element.getBoundingClientRect();
-    // The card stays over its tab without leaving the stage.
+    // The card stays over its tab without leaving the stage: its own half width, inside the gutter.
     const stage = stageHalf();
-    const half = Math.min(300, stage - 16);
+    const half = Math.min((viewRef.current?.offsetWidth || 680) / 2, stage - 16);
     const limit = Math.max(0, stage - half - 16);
     return Math.max(-limit, Math.min(limit, r.x + r.width / 2 - stageCentre()));
     // Measured when the card moves to another tab.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewTab?.runId, shown]);
+
+  // Over its tab, never past the stage's gutter.
+  const replyPeekOffset = useMemo(() => {
+    if (!replyPeekTab || typeof window === "undefined") return 0;
+    const element = tabRefs.current.get(replyPeekTab.runId);
+    if (!element) return 0;
+    const r = element.getBoundingClientRect();
+    const stage = stageHalf();
+    const half = Math.min(180, stage - 16);
+    const limit = Math.max(0, stage - half - 16);
+    return Math.max(-limit, Math.min(limit, r.x + r.width / 2 - stageCentre()));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replyPeekTab?.runId, shown]);
 
   const openThread = useCallback(
     (runId: string, threadId: string, title: string) => {
@@ -614,11 +741,13 @@ export function Island() {
 
   const onEnter = () => {
     pointerInside.current = true;
+    holdReplyPeekLife();
     setReaching(true);
     window.clearTimeout(closeTimer.current);
   };
   const onLeave = () => {
     pointerInside.current = false;
+    if (replyPeekRun.current && !replyPeekLife.current.since) runReplyPeekLife();
     window.clearTimeout(viewTimer.current);
     schedulePeekClose();
     scheduleClose();
@@ -668,8 +797,11 @@ export function Island() {
         const trip = life.travel({ strokes }, { absorb: home }, { colour: "spectrum" });
         void within(trip.arrived, 1600).then(receive);
       }
-      // Sending never opens a card over the page: the new thread's tab stands on the rail, working, to open when wanted.
+      // Nothing opens at send (ISLAND.md, "Sending"): the words go into the prism and the thread's tab stands on the
+      // rail, working; its answer rises from the tab as a peek when it is done. "Open the thread when I send" opens
+      // the card over its tab instead, once the run has one.
       quietUntil.current = performance.now() + PRESS_QUIET_MS;
+      openOnArrival.current = preferences.ai.openConversationAfterSend;
       const options = {
         ...(slot?.bindsThread ? {} : { threadId: focus?.threadId ?? null }),
         ...(message.references.length ? { references: message.references } : {}),
@@ -681,7 +813,7 @@ export function Island() {
       if (steering) void engine.steer(steering, message.text, message.attachments);
       else void engine.run(message.text, message.attachments, options);
     },
-    [allTabs, engine, focus, islandHome, receive, slot],
+    [allTabs, engine, focus, islandHome, preferences.ai.openConversationAfterSend, receive, slot],
   );
 
   /* ------------------------------------------------------------ keyboard */
@@ -796,19 +928,25 @@ export function Island() {
     composerRef.current?.focus();
   }, [composerVisible]);
   // One line whatever the thread is called: a long name is shortened, never wrapped or cut mid-word.
-  // A message sent from here goes on working out of sight, so the box it left says so.
+  // A message sent from here goes on working out of sight, so the empty field says what it is doing now,
+  // the same caption its thread shows; given the keyboard, it asks for the next thing.
   const workingElsewhere = allTabs.find((tab) => tab.status === "working" && tab.threadId !== focus?.threadId);
+  const liveCaption = workingElsewhere && live?.runId === workingElsewhere.runId ? live.steps.at(-1)?.title : undefined;
   const placeholder = focus
     ? `Reply to ${shortTitle(focus.title)}`
     : workingElsewhere
-      ? `Working on ${shortTitle(workingElsewhere.title)}. Ask something else?`
+      ? workingLine(liveCaption ?? workingElsewhere.caption)
       : "Ask Spectra anything";
+  const focusedPlaceholder = !focus && workingElsewhere ? "Ask something else" : undefined;
 
   /* ------------------------------------------------------------ rail */
 
   const findShown = useCallback(() => elementOf(shownRef.current), [elementOf]);
   const seat = useRailSeat(shown, findShown);
   const raised = Boolean(seat) && (composerVisible || reaching);
+  // The field open with the hand away: only threads in play that want attention stand (working, asking, a
+  // problem, unread); the rest rise when the island is hovered or has the keyboard.
+  const settled = raised && !reaching;
   const railHas = composerVisible || allTabs.length > 0;
   // The tab rail stands over the band; the clearance follows it as it comes and goes.
   useEffect(() => refreshComposerBands(), [railHas, seat]);
@@ -946,6 +1084,34 @@ export function Island() {
         </div>
       ) : null}
 
+      {replyPeekTab && replyPeekLine && !viewTab ? (
+        <div className="pointer-events-auto -mb-1" style={{ transform: `translateX(${replyPeekOffset}px)` }}>
+          <ReplyPeek
+            ref={replyPeekRef}
+            line={replyPeekLine}
+            title={replyPeekTab.title}
+            visible={replyPeekShown}
+            onOpen={() => openView(replyPeekTab.runId, true)}
+            onRest={() => {
+              window.clearTimeout(replyPeekLife.current.rest);
+              replyPeekLife.current.rest = window.setTimeout(() => openView(replyPeekTab.runId, false), PEEK_REST_MS);
+            }}
+            onLeave={() => window.clearTimeout(replyPeekLife.current.rest)}
+            onUndo={() => {
+              const card = runTabCard(replyPeekTab.source);
+              if (card && engine) void engine.onCardAction(card, "revert");
+              markSeen(replyPeekTab.runId);
+              foldReplyPeek();
+            }}
+            onShow={(workId, regionId) => {
+              void spectraBus.command("work.open", { workId, ...(regionId ? { region: { id: regionId } } : {}) });
+              markSeen(replyPeekTab.runId);
+              foldReplyPeek();
+            }}
+          />
+        </div>
+      ) : null}
+
       {viewTab ? (
         <div className="pointer-events-auto -mb-3 pb-3 transition-transform duration-200 ease-[var(--ease-standard)]" style={{ transform: `translateX(${viewOffset}px)` }} onPointerEnter={keepPeek} onPointerLeave={() => view && !view.pinned && schedulePeekClose()}>
           <ThreadView
@@ -995,6 +1161,7 @@ export function Island() {
             play={shownPlay}
             done={railDone}
             raised={raised}
+            settled={settled}
             current={current}
             focusTitle={composerVisible && focus && !focusTab ? focus.title : null}
             dragging={tabDrag.dragging}
@@ -1029,6 +1196,7 @@ export function Island() {
             ref={composerRef}
             draftKey={focus?.threadId ?? "new"}
             placeholder={placeholder}
+            focusedPlaceholder={focusedPlaceholder}
             visible={composerVisible}
             busy={Boolean(focus && engine?.submitting)}
             working={Boolean(workingElsewhere)}
@@ -1135,16 +1303,7 @@ function MenuGlyph({ name }: { name: IconName }) {
   );
 }
 
-/** Everything the run made is open in front of the user already: there is nothing to go and open. */
-function madeOnScreen(tab: IslandTab) {
-  const ids = tab.source.card?.provenance?.artifactIds ?? [];
-  return ids.length > 0 && ids.every((id) =>
-    document.querySelector(`.spectra-artifact-studio[data-artifact-id="${CSS.escape(id)}"]`));
-}
-
-/** What a finished run made, by name: the work it wrote, or else its thread. A thread keeps its first title while later asks make other things. */
-function readyLine(tab: IslandTab) {
-  const made = tab.source.card?.provenance?.artifactTitles?.filter((title) => title.trim()) ?? [];
-  if (made.length > 1) return `${made.length} works are ready`;
-  return `${made[0] ?? tab.title} is ready`;
+/** A dialog is open over the page: nothing rises over it. */
+function dialogOpen() {
+  return Boolean(document.querySelector('[role="dialog"]:not([data-island-thread]), [role="alertdialog"]'));
 }

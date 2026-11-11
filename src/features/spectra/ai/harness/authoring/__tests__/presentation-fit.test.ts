@@ -53,3 +53,28 @@ describe("how written copy sits on a slide", () => {
     expect(presentationProblems(deck).join(" ")).toMatch(/typed in characters/);
   });
 });
+
+/* F10: a generated slide showed a clipped heading and "Text overflows this
+   object", and the model had been sent round again and again to fix it. */
+describe("a finished deck never shows an overflowing box (F10)", () => {
+  const longHeadings = [
+    "Mitosis: one division that makes two identical body cells for growth and repair",
+    "Meiosis: two divisions that make four genetically different gametes for reproduction",
+    "Comparing mitosis and meiosis: number of divisions, daughter cells and genetic variation",
+  ];
+  for (const design of ["rule", "panel", "none"] as const) {
+    it(`fits every heading and body with the ${design} look`, () => {
+      const deck = presentationFromSpec(
+        {
+          design,
+          slides: longHeadings.map((title) => ({
+            title,
+            body: "- Prophase, metaphase, anaphase and telophase follow in order\n- Chromosomes line up on the equator\n- Sister chromatids separate to opposite poles",
+          })),
+        },
+        sequentialIdFactory(),
+      );
+      expect(presentationProblems(deck).filter((problem) => problem.includes("overflows"))).toEqual([]);
+    });
+  }
+});

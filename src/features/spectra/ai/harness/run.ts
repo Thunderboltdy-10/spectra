@@ -1,10 +1,16 @@
 import { jsonSize, traceEvent, traceSpan } from "./run-trace";
 import {
-  runtimeFallbackLabel,
+  RUNTIME_NAMES,
   subscriptionModelCaller,
   subscriptionProviderFrom,
-  withRuntimeFallback,
+  runtimeOrderFor,
+  withRuntimeChain,
+  type RuntimeChainCaller,
+  type RuntimeLink,
+  type RuntimeName,
   type RuntimeTarget,
+  type SubscriptionProvider,
+  type UnreachableRuntime,
 } from "./subscription-runtime";
 import type { HarnessBackend } from "./backend";
 import { modelThreadTitleWriter, type ThreadTitleWriter } from "./thread-title";
@@ -47,8 +53,8 @@ import type {
 export type HarnessEvent =
   | { type: "text"; delta: string }
   | { type: "text_reset"; text: string }
-  | { type: "step_start"; id: string; label: string; effect: ToolEffect; work?: string }
-  | { type: "step_end"; id: string; ok: boolean; label: string; durationMs: number }
+  | { type: "step_start"; id: string; label: string; effect: ToolEffect; work?: string; detail?: string }
+  | { type: "step_end"; id: string; ok: boolean; label: string; durationMs: number; detail?: string }
   | { type: "reasoning"; id: string; delta: string; done?: boolean }
   | { type: "artifact"; artifact: ArtifactTouch }
   /** Everything the run has read that its reply may cite, so far. */
@@ -101,8 +107,18 @@ export type HarnessRunInput = {
   restore?: LoopState;
   callModel?: ModelCaller;
   /** The user's own choice of who runs the work. Unset is Spectra's model. */
-  runtime?: RuntimeTarget & { provider?: unknown };
+  runtime?: RuntimeTarget & {
+    provider?: unknown;
+    /** What to try, in order, when the chosen runtime can't answer. Unset is Spectra's model. */
+    then?: RuntimeName[];
+    /** Each subscription's chosen model, for when the run moves to it. */
+    models?: Partial<Record<SubscriptionProvider, string>>;
+    /** Runtimes the person's computer said it can't reach as they sent. */
+    unreachable?: UnreachableRuntime[];
+  };
   titleWriter?: ThreadTitleWriter | null;
+  /** The titles of the user's other conversations, read only when a title is written. */
+  otherThreadTitles?: () => Promise<string[]>;
   compactor?: Compactor | null;
   budgets?: LoopBudgets;
   now?: () => number;
@@ -121,6 +137,10 @@ export type HarnessRunResult = LoopOutcome & {
   titling: Promise<void>;
   /** The agent changed its notes itself during this run. */
   memoryWritten: boolean;
+  /** Who answered last: the person's runtime, or the one the run moved to. */
+  finishedWith: RuntimeName;
+  /** The run left the person's runtime for the next in their order. */
+  moved: boolean;
 };
 
 function userMessage(prompt: string, attachments?: HarnessContentPart[]): HarnessMessage {
@@ -136,6 +156,8 @@ export const modelSummariser = async ({ transcript, signal, runtime }: { transcr
       { role: "user", content: transcript },
     ],
     signal,
+    // A summary needs care, not the run's full thinking.
+    reasoning: "low",
     title: "Spectra compaction",
   });
   return turn.text;
@@ -167,6 +189,8 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
     agents: input.environment.agent ? [] : input.environment.agents,
     places: input.environment.places,
     learner: input.environment.user?.role === "student",
+    // The environment's clock, moved on by the run's own: an eval's fixed day stays that day.
+    now: () => (input.environment.now ?? started) + (now() - started),
   });
   const tools = buildHarnessTools(session);
   // Labels name what the user pointed at from the first step, without a read.
@@ -193,7 +217,20 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
   const places = input.environment.here ? undefined : input.environment.places;
   const titling: Promise<void> =
     writeTitle && input.wantTitle
-      ? writeTitle({ prompt: input.prompt, ...(input.runtime ? { runtime: input.runtime } : {}), ...(places?.length ? { places } : {}) }, AbortSignal.timeout(45_000))
+      ? (input.otherThreadTitles?.().catch(() => []) ?? Promise.resolve([] as string[]))
+          .then((others) => {
+            const focus = input.environment.open?.[0]?.title;
+            return writeTitle(
+              {
+                prompt: input.prompt,
+                ...(input.runtime ? { runtime: input.runtime } : {}),
+                ...(places?.length ? { places } : {}),
+                ...(focus ? { focus } : {}),
+                ...(others.length ? { others } : {}),
+              },
+              AbortSignal.timeout(45_000),
+            );
+          })
           .then((named) => {
             if (!named?.title) return;
             const placeId = places?.some((place) => place.id === named.placeId) ? named.placeId : undefined;
@@ -239,19 +276,14 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
   };
 
   const provider = input.callModel ? null : subscriptionProviderFrom(input.runtime?.provider);
-  const subscriptionCaller = provider ? subscriptionModelCaller(provider, input.runtime) : null;
-  const openRouter = createOpenRouterCaller(input.runtime?.reasoning);
-  const baseCaller =
-    input.callModel ??
-    (subscriptionCaller
-      ? withRuntimeFallback(subscriptionCaller, openRouter, (reason) => {
-          // Said once, in the trace, in words that tell the user what happened.
-          const id = "runtime-fallback";
-          const label = runtimeFallbackLabel(reason);
-          emit({ type: "step_start", id, label, effect: "read" });
-          emit({ type: "step_end", id, ok: true, label, durationMs: 0 });
-        })
-      : openRouter);
+  const chain: RuntimeChainCaller | null = provider ? runtimeChain(provider, input, (from, to, reason) => {
+    // One quiet line where the run moved; the reason is on hover.
+    const id = `runtime-move:${from}:${to}`;
+    const label = `Continued with ${RUNTIME_NAMES[to]}`;
+    emit({ type: "step_start", id, label, effect: "read", detail: reason });
+    emit({ type: "step_end", id, ok: true, label, durationMs: 0, detail: reason });
+  }) : null;
+  const baseCaller = input.callModel ?? chain ?? createOpenRouterCaller(input.runtime?.reasoning);
   traceEvent("run.harness_start", {
     runtime: provider ?? "openrouter",
     preference: input.runtime?.provider,
@@ -404,7 +436,7 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
     input.resume?.answer,
   );
 
-  subscriptionCaller?.dispose?.();
+  chain?.dispose?.();
   traceEvent("run.loop_end", { status: outcome.status, turns: outcome.state.turns, modelCalls: modelCallIndex });
   if (flushTimer) {
     clearTimeout(flushTimer);
@@ -422,5 +454,36 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
     quietly(() => input.sink.checkpoint({ state: outcome.state, status })),
   );
   traceEvent("run.harness_end", { status: outcome.status, ms: now() - started });
-  return { ...outcome, durationMs: now() - started, titling, memoryWritten: session.memoryWritten === true };
+  return {
+    ...outcome,
+    durationMs: now() - started,
+    titling,
+    memoryWritten: session.memoryWritten === true,
+    finishedWith: chain?.finishedWith() ?? (provider ?? "spectra"),
+    moved: Boolean(chain && chain.finishedWith() !== provider),
+  };
+}
+
+/**
+ * The person's runtime, then the order they set for when it can't answer.
+ * A forced runtime (SPECTRA_AI_RUNTIME) runs alone.
+ */
+function runtimeChain(
+  provider: SubscriptionProvider,
+  input: HarnessRunInput,
+  onMove: (from: RuntimeName, to: RuntimeName, reason: string) => void,
+): RuntimeChainCaller {
+  const { order, skipped } = runtimeOrderFor(provider, input.runtime?.then ?? ["spectra"], input.runtime?.unreachable ?? []);
+  if (skipped) onMove(skipped.from, skipped.to, skipped.reason);
+  const links: RuntimeLink[] = order.map((runtime) => ({
+    runtime,
+    make: () =>
+      runtime === "spectra"
+        ? createOpenRouterCaller(input.runtime?.reasoning)
+        : subscriptionModelCaller(runtime, {
+            ...input.runtime,
+            model: runtime === provider ? input.runtime?.model : input.runtime?.models?.[runtime],
+          }),
+  }));
+  return withRuntimeChain(links, { onMove });
 }

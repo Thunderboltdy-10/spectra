@@ -40,6 +40,7 @@ export async function POST(request: NextRequest) {
       blueprintKey: string;
       storageHome?: "device";
       storageStoreId?: string;
+      storageSeeded?: boolean;
       title: string;
       summary?: string;
       tags?: string[];
@@ -81,6 +82,7 @@ export async function POST(request: NextRequest) {
         displayName: actor.name,
         device: {
           storeId: artifact.storageStoreId ?? "",
+          storageSeeded: artifact.storageSeeded === true,
           seed: {
             typeKey: artifact.blueprintKey,
             title: artifact.title,

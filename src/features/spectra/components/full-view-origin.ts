@@ -13,3 +13,18 @@ export function rememberFullViewOrigin(workId: string, href: string) {
 export function fullViewOrigin(workId: string) {
   return origins.get(workId) ?? null;
 }
+
+/*
+ * "Open full" from a surface the Library does not host lands on the work's own
+ * Library link. That link alone opens the work beside the Library, so the press
+ * is remembered once here and the Library opens it full (F05).
+ */
+const fullViewRequests = new Set<string>();
+
+export function requestFullView(workId: string) {
+  fullViewRequests.add(workId);
+}
+
+export function takeFullViewRequest(workId: string) {
+  return fullViewRequests.delete(workId);
+}

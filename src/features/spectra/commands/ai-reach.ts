@@ -550,7 +550,7 @@ export const COMMAND_CATALOG: readonly CatalogCommand[] = [
     id: "calendar.add_event",
     area: "calendar",
     title: "Add a calendar event",
-    description: "Add a personal event to the calendar: title, start, end?, allDay?, notes?.",
+    description: "Add a personal event to the calendar: title, start, end?, allDay?, notes?, alreadyHappened? (only to log something that already happened).",
     keywords: ["schedule", "meeting", "appointment", "remind", "book"],
     server: ["calendar:createPersonalItem"],
     reach: tool("calendar", { fixed: { action: "add_event" }, appCommand: "create_calendar_personal_event", example: { title: "Dentist", start: "2026-10-06T09:00" } }),

@@ -29,7 +29,7 @@ export function AnsweredCard({ question, label }: { question: string; label: str
     <div
       role="status"
       data-island-question-answered
-      className="box-border w-[min(440px,calc(100vw-32px))] rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3 shadow-[var(--shadow-lg)]"
+      className="box-border w-[min(440px,calc(100vw-var(--spectra-rail-width,0px)-var(--spectra-lead-width,0px)-var(--spectra-side-width,0px)-32px))] rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3 shadow-[var(--shadow-lg)]"
     >
       <p className="line-clamp-2 text-caption text-[var(--text-secondary)]">{question}</p>
       <p className="mt-1 flex items-center gap-1.5 text-ui font-medium text-[var(--text-primary)]">
@@ -97,7 +97,7 @@ export const QuestionCard = forwardRef<
       onKeyDown={onActivity}
       onFocus={onActivity}
       className={cn(
-        "box-border w-[min(440px,calc(100vw-32px))] rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 pb-3 pt-3.5 shadow-[var(--shadow-lg)]",
+        "box-border w-[min(440px,calc(100vw-var(--spectra-rail-width,0px)-var(--spectra-lead-width,0px)-var(--spectra-side-width,0px)-32px))] rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] max-h-[calc(100dvh-160px)] overflow-y-auto px-4 pb-3 pt-3.5 shadow-[var(--shadow-lg)]",
         "transition-opacity duration-150",
         visible ? "opacity-100" : "pointer-events-none opacity-0",
       )}

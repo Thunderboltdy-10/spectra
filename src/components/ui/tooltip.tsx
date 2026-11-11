@@ -138,7 +138,7 @@ export function Tooltip({
           // Only a move through the page by keyboard asks for the name. Focus
           // put here by a click or by code would keep it up after the pointer
           // has long gone.
-          if (document.documentElement.dataset.keys !== undefined && event.target.matches(":focus-visible")) show();
+          if (event.target.matches(":focus-visible:not([data-quiet-focus])")) show();
         }}
         onBlur={hide}
       >

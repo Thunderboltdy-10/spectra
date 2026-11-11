@@ -1,4 +1,5 @@
 import { WORK_TYPE_KEYS, type ArtifactTypeKey } from "../../../artifacts/types";
+import { lengthNote } from "../authoring/page-estimate";
 import { classifyArtifactContentWipe } from "../../../operations/artifact-content-wipe";
 import { normalizeAiArtifactWriteContent } from "../../../operations/artifact-write-content";
 import { AuthoringError, authorEdit, authorNew, isAuthoredType, readAuthored, type AuthoredContent, type ReadRange } from "../authoring";
@@ -138,7 +139,7 @@ export function createArtifactTool(session: HarnessSession): HarnessTool<CreateA
       session.created.set(createdKey, created.id);
       return {
         ok: true,
-        content: `Created the ${typeName(args.type)} *${created.title}* (id ${created.id}).\n${authored.readback}${problemsNote(authored)}`,
+        content: `Created the ${typeName(args.type)} *${created.title}* (id ${created.id}).\n${authored.readback}${problemsNote(authored)}${args.type === "document" ? lengthNote(authored.content, session.prompt) : ""}`,
         artifacts: [{ id: created.id, type: args.type, title: created.title, action: "created", change: authored.summary }],
         doneLabel: `Created *${created.title}*`,
       };
@@ -238,13 +239,17 @@ export function editArtifactTool(session: HarnessSession): HarnessTool<EditArgs>
       rememberTitle(session, current.id, title, current.type);
       return {
         ok: true,
-        content: `Saved *${title}*.${failuresNote(authored)}\n${authored.readback}${problemsNote(authored)}`,
-        artifacts: [{ id: current.id, type: current.type, title, action: "edited", change: authored.summary }],
+        content: `${updated?.desktopFilePending ? `Saved *${title}* in Spectra. ${DESKTOP_FILE_PENDING}` : `Saved *${title}*.`}${failuresNote(authored)}\n${authored.readback}${problemsNote(authored)}${current.type === "document" ? lengthNote(authored.content, session.prompt) : ""}`,
+        artifacts: [{ id: current.id, type: current.type, title, action: "edited", change: authored.summary, ...(updated?.region ? { region: updated.region } : {}) }],
         doneLabel: `Edited *${title}*`,
       };
     },
   };
 }
+
+/** F12: what the reply may claim about a file on the computer that Bridge has not written yet. */
+export const DESKTOP_FILE_PENDING =
+  "The file on their computer has not taken the change yet: Spectra Bridge writes it next, and waits while the file is open in Office. Say it is saved in Spectra and will reach the file on their computer; do not say the file itself is saved.";
 
 type ReadArgs = { id: string } & ReadRange;
 

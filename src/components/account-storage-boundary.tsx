@@ -21,7 +21,8 @@ export function useAccountStorageReady() {
 export function AccountStorageBoundary({ children }: { children: ReactNode }) {
   const { isLoaded, userId } = useAuth();
   const { isAuthenticated } = useConvexAuth();
-  const account = useQuery(api.identity.account, isAuthenticated ? {} : "skip");
+  const session = useQuery(api.identity.session, isAuthenticated ? {} : "skip");
+  const account = session === undefined ? undefined : (session?.account ?? null);
   const owner = isLoaded
     ? JSON.stringify([process.env.NEXT_PUBLIC_CONVEX_URL, userId ?? null])
     : null;

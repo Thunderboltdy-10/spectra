@@ -1,4 +1,5 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { agentHubTicket } from "../../../../../shared/agent-hub-ticket.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { convexQuery } from "@/lib/convex-server";
 import { localBridgeRelay } from "@/lib/local-bridge-relay";
@@ -65,6 +66,8 @@ export type OneShotRequest = RuntimeTarget & {
   responseFormat?: Record<string, unknown>;
   title?: string;
   purpose?: string;
+  /** Bookkeeping such as a title: the subscription's smallest model, not the person's choice. */
+  small?: boolean;
 };
 
 const RELAY_URL = "ws://127.0.0.1:47615/v1/agent/connect";
@@ -77,7 +80,11 @@ const CONNECTION_IDLE_MS = 5 * 60_000;
 /** Through the hub, a connection idle this long may not have survived; a new one is quick. */
 const HUB_REUSE_MS = 45_000;
 const STATUS_TIMEOUT_MS = 12_000;
-/** Nothing at all from the CLI for this long means it has gone away. */
+/**
+ * Nothing at all from the CLI for this long means it has gone away. Twice the
+ * longest healthy gap in the launch traces (64 s of Codex reasoning between two
+ * items, 2026-11-08), held to the 45–120 s range.
+ */
 const IDLE_TIMEOUT_MS = 120_000;
 /** Starting a thread or a turn is bookkeeping; it should never take long. */
 const CONTROL_TIMEOUT_MS = 25_000;
@@ -96,13 +103,6 @@ export function subscriptionProviderFrom(preference: unknown): SubscriptionProvi
 }
 
 const hubUrl = () => process.env.SPECTRA_AGENT_HUB_URL?.trim().replace(/\/$/, "") || null;
-
-function hubTicket(accountId: string, secret: string) {
-  const body = Buffer.from(
-    JSON.stringify({ sub: accountId, exp: Date.now() + HUB_TICKET_MS, aud: "spectra-agent-hub" }),
-  ).toString("base64url");
-  return `${body}.${createHmac("sha256", secret).update(body).digest("base64url")}`;
-}
 
 async function authenticatedRuntimeAccount() {
   const actor = await convexQuery<Record<string, never>, { accountId: string } | null>("identity:me", {});
@@ -125,7 +125,7 @@ async function relayEndpoint(provider: SubscriptionProvider, accountId: string |
   if (!secret) throw new ProviderUnavailableError("Spectra Bridge can't be reached from this server.");
   return {
     url: `${hub}/_spectra/agent-hub/server?provider=${provider}`,
-    protocols: ["spectra-agent", hubTicket(owner, secret)],
+    protocols: ["spectra-agent", await agentHubTicket(owner, secret, HUB_TICKET_MS)],
   };
 }
 
@@ -187,11 +187,11 @@ class RelaySocket {
   onMcp: (body: string) => Promise<string | undefined> = async () => undefined;
   readonly ready: Promise<void>;
 
-  constructor(provider: SubscriptionProvider, start: { args: string[]; system?: string; mcp?: boolean }, accountId?: string) {
+  constructor(provider: SubscriptionProvider, start: RelayStart, accountId?: string) {
     this.ready = this.connect(provider, start, accountId);
   }
 
-  private async connect(provider: SubscriptionProvider, start: { args: string[]; system?: string; mcp?: boolean }, accountId?: string) {
+  private async connect(provider: SubscriptionProvider, start: RelayStart, accountId?: string) {
     const endpoint = await relayEndpoint(provider, accountId);
     if (this.closed) throw new ProviderUnavailableError("The AI session has closed.");
     const socket = this.socket = new WebSocket(endpoint.url, endpoint.protocols);
@@ -339,6 +339,14 @@ function defaultCodexModel() {
   return id.slice(id.indexOf("/") + 1);
 }
 
+/** Each account's smallest Codex model, learned when its status is read. */
+const smallestCodexModels = new Map<string, string>();
+
+/** The smallest of an account's Codex models: a "nano", else a "mini". */
+export function smallestCodexModel(models: ReadonlyArray<{ id: string }>) {
+  return models.find((model) => /nano/i.test(model.id))?.id ?? models.find((model) => /mini/i.test(model.id))?.id;
+}
+
 function defaultClaudeModel() {
   return process.env.SPECTRA_CLAUDE_MODEL?.trim() || "sonnet";
 }
@@ -415,8 +423,8 @@ class CodexConnection {
     });
   }
 
-  forget(threadId: string) {
-    this.threads.delete(threadId);
+  forget(threadId?: string) {
+    if (threadId) this.threads.delete(threadId);
     if (!this.idle) return;
     this.idleSince = Date.now();
     clearTimeout(this.idleTimer);
@@ -436,7 +444,14 @@ class CodexConnection {
     }, CONTROL_TIMEOUT_MS);
     const settled = () => clearTimeout(timer);
     entry.promise.then(settled, settled);
-    this.relay.send({ id, method, params });
+    // A closed session answers with a failed promise, never a throw: callers
+    // tear down with `void request(...).catch()`.
+    try {
+      this.relay.send({ id, method, params });
+    } catch (error) {
+      this.waiting.delete(id);
+      entry.reject(error instanceof Error ? error : new ProviderUnavailableError("The AI session has closed."));
+    }
     return entry.promise;
   }
 
@@ -452,6 +467,7 @@ class CodexConnection {
   }
 
   respond(id: number | string, result: unknown) {
+    if (this.lost || this.relay.isClosed) throw new ProviderUnavailableError("The Codex session ended before the run finished.");
     this.relay.send({ id, result });
   }
 
@@ -509,6 +525,24 @@ async function codexConnection(accountId: string | undefined) {
     throw error;
   }
   return connection;
+}
+
+/**
+ * Start the person's runtime before they send (LAUNCH-REVIEW A6.4): the
+ * composer asks as it takes focus, so the first turn finds Codex connected
+ * instead of spending a second and a half starting it. An unused warm
+ * connection closes on the usual idle timer. Claude Code starts per run, so
+ * there is nothing to warm; a runtime that cannot be reached stays quiet.
+ */
+export async function warmRuntime(provider: SubscriptionProvider, accountId: string | undefined) {
+  if (provider !== "codex") return;
+  try {
+    const connection = await codexConnection(accountId);
+    if (connection.idle) connection.forget();
+    traceEvent("codex.warmed", {});
+  } catch {
+    // The send finds out and follows the person's order.
+  }
 }
 
 /**
@@ -872,7 +906,8 @@ function codexModelCaller(target: RuntimeTarget): DisposableModelCaller {
 
 async function codexOneShot(request: OneShotRequest): Promise<ModelTurn> {
   const connection = await codexConnection(request.accountId);
-  const model = request.model || process.env.SPECTRA_CODEX_ONESHOT_MODEL?.trim() || defaultCodexModel();
+  const small = request.small ? smallestCodexModels.get(request.accountId ?? "") : undefined;
+  const model = small || request.model || process.env.SPECTRA_CODEX_ONESHOT_MODEL?.trim() || defaultCodexModel();
   const effort = codexEffort(request.reasoning ?? getSpectraReasoningProfile());
   const result = await connection.request("thread/start", {
     model,
@@ -920,6 +955,18 @@ async function codexOneShot(request: OneShotRequest): Promise<ModelTurn> {
 /** Spectra's reasoning levels as the Claude CLI names them. */
 function claudeEffort(profile: SpectraReasoningProfile) {
   return profile === "none" || profile === "minimal" ? "low" : profile;
+}
+
+/**
+ * What a Claude session is for. The Bridge builds the command line from it and
+ * refuses anything else; `args` is kept only for Bridges older than that rule.
+ */
+type ClaudeIntent = { mode: "prompt"; model: string; tools?: boolean; effort?: string } | { mode: "auth-status" };
+type RelayStart = { args: string[]; system?: string; mcp?: boolean; claude?: ClaudeIntent };
+
+function claudeStart(intent: ClaudeIntent, system?: string): RelayStart {
+  if (intent.mode === "auth-status") return { args: ["auth", "status"], claude: intent };
+  return { args: claudeArgs(intent), system, mcp: intent.tools === true, claude: intent };
 }
 
 /** The Bridge fills in {{system}} and {{mcp}}: the prompt's file and its local tool endpoint. */
@@ -1073,11 +1120,10 @@ function claudeModelCaller(target: RuntimeTarget): DisposableModelCaller {
       };
       relay = new RelaySocket(
         "claude",
-        {
-          args: claudeArgs({ model, tools: true, effort: claudeEffort(target.reasoning ?? getSpectraReasoningProfile()) }),
-          system: systemOf(input.messages),
-          mcp: true,
-        },
+        claudeStart(
+          { mode: "prompt", model, tools: true, effort: claudeEffort(target.reasoning ?? getSpectraReasoningProfile()) },
+          systemOf(input.messages),
+        ),
         target.accountId,
       );
       relay.onMcp = (body) => answerMcp(input.tools, callTool, body);
@@ -1125,8 +1171,9 @@ function claudeModelCaller(target: RuntimeTarget): DisposableModelCaller {
 
 async function claudeOneShot(request: OneShotRequest): Promise<ModelTurn> {
   const stream = new TurnStream();
-  const model = request.model || defaultClaudeModel();
-  const relay = new RelaySocket("claude", { args: claudeArgs({ model }), system: systemOf(request.messages) }, request.accountId);
+  const model = request.small ? "haiku" : request.model || defaultClaudeModel();
+  const effort = claudeEffort(request.reasoning ?? getSpectraReasoningProfile());
+  const relay = new RelaySocket("claude", claudeStart({ mode: "prompt", model, effort }, systemOf(request.messages)), request.accountId);
   relay.onFrame = (frame) => routeClaudeFrame(stream, frame, { blocks: new Map(), waiting: new Map() });
   relay.onClose = (reason) => stream.push({ type: "lost", reason });
   try {
@@ -1234,16 +1281,14 @@ async function codexStatus(accountId: string | undefined): Promise<RuntimeProvid
           cursor = list.nextCursor;
           if (!cursor) break;
         }
-        return {
-          state: "ready",
-          account: account.email,
-          plan: account.planType,
-          models: newestInEachFamily(
-            rows
-              .filter((row) => !row.hidden)
-              .map((row) => ({ id: String(row.model ?? row.id), label: row.displayName || String(row.model ?? row.id) })),
-          ),
-        };
+        const models = newestInEachFamily(
+          rows
+            .filter((row) => !row.hidden)
+            .map((row) => ({ id: String(row.model ?? row.id), label: row.displayName || String(row.model ?? row.id) })),
+        );
+        const small = smallestCodexModel(models);
+        if (small) smallestCodexModels.set(accountId ?? "", small);
+        return { state: "ready", account: account.email, plan: account.planType, models };
       })(),
     );
   } catch (error) {
@@ -1253,15 +1298,16 @@ async function codexStatus(accountId: string | undefined): Promise<RuntimeProvid
   }
 }
 
+/** The CLI's own aliases, so the list follows Claude Code's updates instead of going stale. */
 const CLAUDE_MODELS = [
-  { id: "claude-fable-5-1", label: "Fable 5.1" },
-  { id: "opus", label: "Opus 5.5" },
-  { id: "sonnet", label: "Sonnet 5.5" },
-  { id: "haiku", label: "Haiku 5.5" },
+  { id: "fable", label: "Fable" },
+  { id: "opus", label: "Opus" },
+  { id: "sonnet", label: "Sonnet" },
+  { id: "haiku", label: "Haiku" },
 ];
 
 async function claudeStatus(accountId: string | undefined): Promise<RuntimeProviderStatus> {
-  const relay = new RelaySocket("claude", { args: ["auth", "status"] }, accountId);
+  const relay = new RelaySocket("claude", claudeStart({ mode: "auth-status" }), accountId);
   const lines: string[] = [];
   const ended = deferred<void>();
   relay.onLine = (line) => lines.push(line);
@@ -1290,51 +1336,153 @@ export async function runtimeStatus(accountId: string | undefined) {
   return { codex, claude };
 }
 
-/** The line in the trace when a run moves off the user's own runtime. */
-export function runtimeFallbackLabel(reason: string) {
-  if (/log ?in|logged|authenticat|\/login|api key/i.test(reason)) return "Not logged in to your AI subscription, so Spectra's model took over";
-  if (/usage limit|rate limit|quota|too many/i.test(reason)) return "Your AI subscription hit its limit, so Spectra's model took over";
-  if (/isn't installed/.test(reason)) return reason.replace(/ on this computer\.$/, ", so Spectra's model took over");
-  if (/bridge|relay/i.test(reason)) return "Spectra Bridge isn't running, so Spectra's model took over";
-  return "Your AI subscription stopped responding, so Spectra's model took over";
+/** Who can run the work: the person's own CLIs, or Spectra's model. */
+export type RuntimeName = SubscriptionProvider | "spectra";
+
+export const RUNTIME_NAMES: Record<RuntimeName, string> = { codex: "Codex", claude: "Claude Code", spectra: "Spectra" };
+
+/** One runtime in the person's order. `make` gives a fresh session. */
+export type RuntimeLink = { runtime: RuntimeName; make: () => DisposableModelCaller };
+
+export type RuntimeChainCaller = DisposableModelCaller & {
+  /** The runtime that answered last. */
+  finishedWith: () => RuntimeName;
+};
+
+/** The order ran out; the run ends where it is, keeping what it finished. */
+export class RuntimeOrderExhaustedError extends ProviderUnavailableError {
+  constructor(reason: string, cause?: unknown) {
+    super(`${reason}, and you've chosen not to use anything else. What was done so far is saved.`, cause);
+    this.name = "RuntimeOrderExhaustedError";
+  }
 }
 
+const REFUSED = /log ?in|logged|authenticat|\/login|api key|usage limit|rate limit|quota|too many|cannot read this attached/i;
+const UNREACHABLE = /bridge|relay|isn't installed|store unavailable|STORE_UNAVAILABLE|can't be reached|could not reach/i;
+
+/** Why a runtime was left, in words for the hover. */
+export function runtimeChainReason(runtime: RuntimeName, reason: string) {
+  const name = RUNTIME_NAMES[runtime];
+  if (/log ?in|logged|authenticat|\/login|api key/i.test(reason)) return `${name} isn't logged in on this computer`;
+  if (/usage limit|rate limit|quota|too many/i.test(reason)) return `${name} hit its usage limit`;
+  if (/isn't installed/.test(reason)) return `${name} isn't installed on this computer`;
+  if (/cannot read this attached/i.test(reason)) return `${name} can't read the attached file`;
+  if (/different Spectra account/i.test(reason)) return "Spectra Bridge on this computer is connected to another account";
+  if (/isn't running/i.test(reason)) return "Spectra Bridge isn't running";
+  if (/bridge|relay|can't be reached|could not reach/i.test(reason)) return "Spectra Bridge can't be reached";
+  return `${name} stopped responding`;
+}
+
+/** A runtime the person's computer said it can't reach just now, and why. */
+export type UnreachableRuntime = { runtime: SubscriptionProvider; state: "signed-out" | "not-installed" | "no-bridge" | "error" };
+
+const UNREACHABLE_WORDS: Record<UnreachableRuntime["state"], string> = {
+  "signed-out": "Log in",
+  "not-installed": "isn't installed",
+  "no-bridge": "Spectra Bridge isn't running.",
+  error: "stopped responding",
+};
+
 /**
- * The user's runtime while it works, OpenRouter from the moment it does not.
- *
- * The harness hands every call the full transcript, so the switch can happen at
- * any tool boundary and loses nothing that finished. Only the unfinished turn is
- * lost: its text is taken back through onRetry, and OpenRouter answers it again.
+ * The runtimes a run tries, in order. One this computer already knows it can't
+ * reach is left out, so the send starts at the next one without waiting for a
+ * failure; the move is still said once. Nothing is left out when that would
+ * leave nothing, and a forced runtime runs alone.
  */
-export function withRuntimeFallback(
-  primary: DisposableModelCaller,
-  fallback: ModelCaller,
-  onFallback: (reason: string) => void,
-): DisposableModelCaller {
-  let down = false;
-  const caller: DisposableModelCaller = async (input) => {
-    if (down) return fallback(input);
-    let streamed = false;
+export function runtimeOrderFor(
+  provider: SubscriptionProvider,
+  then: readonly RuntimeName[],
+  unreachable: readonly UnreachableRuntime[],
+): { order: RuntimeName[]; skipped?: { from: RuntimeName; to: RuntimeName; reason: string } } {
+  const full = [...new Set<RuntimeName>([provider, ...(subscriptionProvider() ? [] : then)])];
+  const known = new Map(unreachable.map((entry) => [entry.runtime as RuntimeName, entry.state]));
+  const order = full.filter((runtime) => !known.has(runtime));
+  if (!order.length || order.length === full.length) return { order: full };
+  const state = known.get(provider);
+  return {
+    order,
+    ...(state ? { skipped: { from: provider, to: order[0]!, reason: runtimeChainReason(provider, UNREACHABLE_WORDS[state]) } } : {}),
+  };
+}
+
+const pause = (ms: number, signal: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    if (!ms || signal.aborted) return resolve();
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    }
+    signal.addEventListener("abort", done, { once: true });
+  });
+
+/**
+ * The person's runtime order (D1). Each runtime gets one quiet retry: after a
+ * second when it couldn't be reached, at once on a fresh session when it went
+ * silent. A refusal (usage limit, signed out) is not retried. Then the next in
+ * the order; when the order runs out the run stops with a sentence. Spectra's
+ * model runs only when it is in the order. SPECTRA_AI_RUNTIME forces one
+ * runtime with no retry and no order.
+ *
+ * The harness hands every call the whole transcript, so a move at any tool
+ * boundary loses only the unfinished turn, whose text is taken back through
+ * onRetry before it is answered again.
+ */
+export function withRuntimeChain(
+  links: readonly RuntimeLink[],
+  hooks: { onMove: (from: RuntimeName, to: RuntimeName, reason: string) => void; retryDelayMs?: number },
+): RuntimeChainCaller {
+  const forced = subscriptionProvider();
+  let index = 0;
+  let current: DisposableModelCaller | null = null;
+  const session = () => (current ??= links[index]!.make());
+  // A dead session can fail to tear down; that must never stop the order.
+  const drop = () => {
+    const leaving = current;
+    current = null;
     try {
-      return await primary({
-        ...input,
-        onText: (delta) => {
-          streamed = true;
-          input.onText(delta);
-        },
-      });
+      leaving?.dispose?.();
     } catch (error) {
-      if (input.signal.aborted || subscriptionProvider()) throw error;
-      down = true;
-      const reason = error instanceof Error ? error.message : String(error);
-      traceEvent("runtime.fallback", { reason: reason.slice(0, 300) });
-      primary.dispose?.();
-      if (streamed) input.onRetry?.();
-      onFallback(reason);
-      return fallback(input);
+      traceEvent("runtime.dispose_failed", { reason: error instanceof Error ? error.message.slice(0, 200) : "unknown" });
     }
   };
-  caller.dispose = () => primary.dispose?.();
+  const caller = (async (input) => {
+    if (!links.length) throw new RuntimeOrderExhaustedError("Nothing is set to answer");
+    let retried = false;
+    for (;;) {
+      let streamed = false;
+      try {
+        return await session()({
+          ...input,
+          onText: (delta) => {
+            streamed = true;
+            input.onText(delta);
+          },
+        });
+      } catch (error) {
+        if (input.signal.aborted || forced) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        const runtime = links[index]!.runtime;
+        if (streamed) input.onRetry?.();
+        drop();
+        if (!retried && !REFUSED.test(message)) {
+          retried = true;
+          traceEvent("runtime.retry", { runtime, reason: message.slice(0, 300) });
+          await pause(UNREACHABLE.test(message) ? (hooks.retryDelayMs ?? 1_000) : 0, input.signal);
+          continue;
+        }
+        const reason = runtimeChainReason(runtime, message);
+        traceEvent("runtime.move", { from: runtime, to: links[index + 1]?.runtime ?? null, reason: message.slice(0, 300) });
+        if (index + 1 >= links.length) throw new RuntimeOrderExhaustedError(reason, error);
+        index += 1;
+        retried = false;
+        hooks.onMove(runtime, links[index]!.runtime, reason);
+      }
+    }
+  }) as RuntimeChainCaller;
+  caller.dispose = drop;
+  caller.finishedWith = () => links[index]?.runtime ?? "spectra";
   return caller;
 }
 

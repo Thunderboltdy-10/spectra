@@ -273,6 +273,50 @@ describe("artifact preparation and archive approval boundary", () => {
     expect(await f.artifact()).toMatchObject({ status: "active" });
   });
 
+  describe("Allow after the work was re-saved underneath (F08)", () => {
+    const allowNative = async (resave: (f: Awaited<ReturnType<typeof fixture>>) => Promise<unknown>) => {
+      const f = await fixture("artifact.update");
+      const binding = { format: "docx", sourcePayloadHash: "a".repeat(64), semanticDigest: "b".repeat(64), identityStable: false };
+      await f.t.run(async ctx => {
+        await ctx.db.patch(f.ids.artifactId, { nativeFormat: "docx", content: { ...body("Authored explanation"), nativeBinding: binding } });
+        await ctx.db.patch(f.ids.operationId, { input: { artifactId: f.ids.artifactId, blueprintKey: "document", content: body("Updated explanation") } });
+        await ctx.db.insert("workReplicas", { accountId: f.ids.accountId, workId: f.ids.artifactId, kind: "local", nativeFormat: "docx", revision: "native-before", state: "current", updatedAt: Date.now() });
+        await ctx.db.insert("syncPolicies", { accountId: f.ids.accountId, scopeKind: "account", scopeId: String(f.ids.accountId), ...POLICY_PRESETS.both, createdAt: Date.now(), updatedAt: Date.now() });
+      });
+      await f.actor.mutation(api.spectraHarness.recordToolOperations, { ...f.attempt, toolCallId: "native-edit", operationIds: [f.ids.operationId] });
+      await f.pending();
+      await f.t.run(async ctx => {
+        const row = await ctx.db.query("spectraHarnessStates").withIndex("by_run", q => q.eq("runId", f.ids.runId)).unique();
+        await ctx.db.patch(row!._id, { pending: { kind: "approval", toolCallId: "native-edit", question: "Change the file?", category: "bridge_files" } });
+        await ctx.db.patch(f.ids.runId, { approval: { status: "pending", executionId: f.attempt.executionId, reasons: ["Change the file?"], requestedAt: Date.now() } });
+      });
+      await resave(f);
+      await f.actor.mutation(api.spectraHarness.answer, { ...f.attempt, toolCallId: "native-edit", answer: { kind: "approval", allowed: true } });
+      await f.t.run(ctx => ctx.db.patch(f.ids.runId, { status: "running" }));
+      // The run prepares the edit again on the work as it is now.
+      await f.actor.action(prepare, { ...f.attempt, operationId: f.ids.operationId });
+      return f;
+    };
+
+    it("applies the allowed edit when Bridge only re-saved the work", async () => {
+      const f = await allowNative(f => f.t.run(async ctx => {
+        const artifact = (await ctx.db.get(f.ids.artifactId))!;
+        await ctx.db.patch(f.ids.artifactId, { liveStateVectorHash: "resaved", content: { ...artifact.content,
+          nativeBinding: { ...artifact.content.nativeBinding, sourcePayloadHash: "c".repeat(64), identityStable: true } } });
+      }));
+      await expect(f.actor.mutation(api.spectraHarness.ensureApproved, { ...f.attempt, toolCallId: "native-edit" })).resolves.toBeNull();
+      const output = (await f.operation())!.output;
+      expect(output.approvedArtifactScope).toBe(output.pendingArtifactScope);
+      expect(output.allowedArtifactIntent).toBeUndefined();
+    });
+
+    it("does not carry the Allow over to work someone changed", async () => {
+      const f = await allowNative(f => f.t.run(ctx => ctx.db.patch(f.ids.artifactId, { content: body("New human work") })));
+      await expect(f.actor.mutation(api.spectraHarness.ensureApproved, { ...f.attempt, toolCallId: "native-edit" })).rejects.toThrow("AI_APPROVAL_WORK_CHANGED");
+      expect((await f.operation())!.output.approvedArtifactScope).toBeUndefined();
+    });
+  });
+
   it("does not accept content changed after the preview", async () => {
     const f = await fixture();
     await f.pending();

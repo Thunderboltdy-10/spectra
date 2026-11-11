@@ -32,6 +32,8 @@ export const resultCardStreamViewSchema = z
       .object({
         artifactIds: z.array(z.string()).optional(),
         artifactTitles: z.array(z.string()).optional(),
+        createdIds: z.array(z.string()).optional(),
+        regions: z.array(z.object({ artifactId: z.string(), regionId: z.string() })).optional(),
         threadId: z.string().optional(),
         workspaceId: z.string().optional(),
         workspaceTitle: z.string().optional(),
@@ -76,6 +78,8 @@ export const harnessArtifactTouchSchema = z
     title: z.string(),
     action: z.enum(["created", "edited", "referenced"]),
     change: z.string().optional(),
+    /** The first region an edit changed, so opening the work lands on it. */
+    region: z.string().max(200).optional(),
   })
   .strict();
 
@@ -260,6 +264,8 @@ export const spectraStreamEventSchema = z.discriminatedUnion("type", [
       durationMs: z.number().optional(),
       /** The artifact a running step works in. */
       work: z.string().optional(),
+      /** Why, in a few words, shown on hover ("Codex stopped responding"). */
+      detail: z.string().max(200).optional(),
     })
     .strict(),
   z

@@ -9,7 +9,7 @@ import type { HarnessArtifactTouchView, HarnessInputView, SpectraStreamEvent } f
 export type LiveStep = {
   id: string;
   title: string;
-  /** A stretch of reasoning: `summary` holds its words. */
+  /** A stretch of reasoning: `summary` holds its words; on a plain step, why it happened. */
   kind?: "thinking";
   summary?: string;
   status: "running" | "done" | "error";
@@ -119,6 +119,7 @@ export function mergeTouch(list: readonly HarnessArtifactTouchView[], touch: Har
     title: touch.title || previous.title,
     action: rank[touch.action] > rank[previous.action] ? touch.action : previous.action,
     ...(touch.change ?? previous.change ? { change: touch.change ?? previous.change } : {}),
+    ...(previous.region ?? touch.region ? { region: previous.region ?? touch.region } : {}),
   };
   return list.map((entry, position) => (position === index ? merged : entry));
 }
@@ -133,8 +134,8 @@ export function applyHarnessEvent<T extends HarnessExchangeFields>(exchange: T, 
     case "step": {
       const known = exchange.steps.some((step) => step.id === event.id);
       const steps = known
-        ? exchange.steps.map((step) => (step.id === event.id ? { ...step, title: event.label, status: event.status } : step))
-        : [...settleThinking(exchange.steps), { id: event.id, title: event.label, status: event.status, createdAt: now, textAt: writtenSoFar(exchange) }];
+        ? exchange.steps.map((step) => (step.id === event.id ? { ...step, title: event.label, status: event.status, ...(event.detail ? { summary: event.detail } : {}) } : step))
+        : [...settleThinking(exchange.steps), { id: event.id, title: event.label, status: event.status, createdAt: now, textAt: writtenSoFar(exchange), ...(event.detail ? { summary: event.detail } : {}) }];
       return { ...exchange, steps: steps.slice(-MAX_STEPS) };
     }
     case "reasoning_delta": {

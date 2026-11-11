@@ -47,13 +47,15 @@ export type ModelRequest = {
   onToolDraft?: (draft: { id: string; name: string; arguments: string }) => void;
   /** The model's reasoning as it streams, for the trace. */
   onReasoning?: (delta: string) => void;
-  /** Only the thread title ("low") and the daily brief ("medium") pass this. */
+  /** Side calls pass this: titles and notes "none", compaction "low", the daily brief "medium". */
   reasoning?: SpectraReasoningProfile;
   /** "daily" runs on SPECTRA_DAILY_MODEL_ID when it is configured. */
   purpose?: "daily";
   maxTokens?: number;
   responseFormat?: Record<string, unknown>;
   title?: string;
+  /** Bookkeeping such as a title: the subscription's smallest model. */
+  small?: boolean;
   /** Reasoning kept for this tool loop only. See createOpenRouterCaller. */
   reasoningMemory?: ReasoningMemory;
 };
@@ -226,6 +228,7 @@ export async function callSpectraModel(request: ModelRequest): Promise<ModelTurn
             responseFormat: request.responseFormat,
             title: request.title,
             purpose: request.purpose,
+            small: request.small,
           })
         : callOpenRouter(request),
   );

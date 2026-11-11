@@ -32,7 +32,7 @@ const CHOICES: ReadonlyArray<{ value: WorkStorage; label: string; impacts: Impac
     label: "This computer, with a backup",
     impacts: [
       { good: true, text: "Opens and saves instantly, even offline" },
-      { good: true, text: "If this computer is lost, you lose a day at most" },
+      { good: true, text: "A copy is saved online with Spectra once a day, so a lost computer costs a day at most" },
       { good: false, text: "Another computer needs the backup brought across" },
     ],
   },
@@ -269,32 +269,62 @@ function BackupControls({ settings }: { settings: { backupEveryHours: number; la
   );
 }
 
-/** A new or emptied computer can take the backed-up work back. */
+type BackupChain = {
+  storeId: string;
+  computerName: string | null;
+  at: number;
+  backups: Array<{ url: string | null }>;
+};
+
+function copyAge(at: number) {
+  return new Date(at).toLocaleString(undefined, { weekday: "long", hour: "2-digit", minute: "2-digit" });
+}
+
+/** A new or emptied computer can take the backed-up work back, from the computer it names. */
 function BringBackBackup() {
   const { storeId } = useDeviceState();
   const convex = useConvex();
   const adopt = useMutation(api.deviceWorks.adoptRestored);
   const counts = useQuery(api.deviceWorks.counts, storeId ? { storeId } : "skip");
   const [busy, setBusy] = useState(false);
+  const [offer, setOffer] = useState<BackupChain | null>(null);
   if (!storeId || !counts?.elsewhere) return null;
-  const bring = async () => {
+  const choose = async () => {
     const revision = accountStorageRevision();
     if (!accountStorageMatches(revision)) return;
     setBusy(true);
     try {
-      const backups = await convex.query(api.deviceWorks.backupsToRestore, {});
+      const chains = await convex.query(api.deviceWorks.backupsToRestore, { storeId });
       if (!accountStorageMatches(revision)) return;
-      if (!backups.length) {
+      // The computer backed up most recently is the one most likely meant.
+      const newest = [...chains].sort((left, right) => right.at - left.at)[0];
+      if (!newest) {
         toast.info("There's no backup to bring back. Open Spectra on the computer that holds this work.");
         return;
       }
-      await restoreBackups(backups);
+      setOffer(newest);
+    } catch (error) {
+      if (!accountStorageMatches(revision)) return;
+      toast.error(error instanceof Error ? error.message : "The backup couldn't be found.");
+    } finally {
+      if (accountStorageMatches(revision)) setBusy(false);
+    }
+  };
+  const bring = async (chain: BackupChain) => {
+    const revision = accountStorageRevision();
+    if (!accountStorageMatches(revision)) return;
+    setOffer(null);
+    setBusy(true);
+    try {
+      const restored = await restoreBackups(chain.backups);
       if (!accountStorageMatches(revision)) return;
       await deviceStoreSummary();
       if (!accountStorageMatches(revision)) return;
-      const { adopted } = await adopt({ storeId });
+      let adopted = 0;
+      for (let at = 0; at < restored.length; at += 200)
+        adopted += (await adopt({ storeId, artifactIds: restored.slice(at, at + 200) })).adopted;
       if (!accountStorageMatches(revision)) return;
-      toast.success(`${adopted === 1 ? "One work is" : `${adopted} works are`} back on this computer.`);
+      toast.success(`${adopted === 1 ? "One work is" : `${adopted} works are`} on this computer now.`);
     } catch (error) {
       if (!accountStorageMatches(revision)) return;
       toast.error(error instanceof Error ? error.message : "The backup couldn't be brought back.");
@@ -302,21 +332,38 @@ function BringBackBackup() {
       if (accountStorageMatches(revision)) setBusy(false);
     }
   };
+  const source = offer?.computerName || "your other computer";
   return (
     <div className="work-home-footer">
       <span className="min-w-0 text-caption text-[var(--text-secondary)]">
         {counts.elsewhere === 1 ? "One work is" : `${counts.elsewhere} works are`} on another computer.
       </span>
-      <Button size="sm" variant="secondary" disabled={busy} onClick={() => void bring()}>
-        Bring back the backup
+      <Button size="sm" variant="secondary" disabled={busy} onClick={() => void choose()}>
+        Bring it here
       </Button>
+      <ConfirmDialog
+        open={Boolean(offer)}
+        pending={busy}
+        title={offer?.computerName ? `Bring the backup from ${offer.computerName}?` : "Bring the backup here?"}
+        detail={
+          offer
+            ? `This copy is from ${copyAge(offer.at)}. Anything written on ${source} after that is merged in when that computer next opens Spectra.`
+            : ""
+        }
+        confirmLabel="Bring it here"
+        onCancel={() => setOffer(null)}
+        onConfirm={() => {
+          if (offer) void bring(offer);
+        }}
+      />
     </div>
   );
 }
 
 export function WorkHomeChoice({ compact = false }: { compact?: boolean }) {
   const { isAuthenticated } = useConvexAuth();
-  const settings = useQuery(api.deviceWorks.settings, isAuthenticated ? {} : "skip");
+  const { storeId } = useDeviceState();
+  const settings = useQuery(api.deviceWorks.settings, isAuthenticated ? (storeId ? { storeId } : {}) : "skip");
   const overview = useQuery(api.bridge.overview, isAuthenticated ? {} : "skip") as { devices?: unknown[] } | null | undefined;
   const availability = useBridgeAvailability();
   const choose = useMutation(api.deviceWorks.choose);

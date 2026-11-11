@@ -15,7 +15,7 @@ from this directory run:
 ```sh
 cd bridge/bridge-app
 export SPECTRA_CONVEX_URL='https://<the-authoritative-deployment>.convex.cloud'
-export SPECTRA_ORIGINS='https://<the-authoritative-browser-origin>'
+export SPECTRA_ORIGINS='https://spectra.ink'
 cargo install tauri-cli --version 2.11.5 --locked
 cargo tauri icon icons/app-icon.png
 cargo tauri build --bundles app,dmg --config tauri.friend-test.conf.json

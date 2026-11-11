@@ -5,7 +5,12 @@ import { traceEvent, withRunTrace } from "@/features/spectra/ai/harness/run-trac
 import { createRunItem } from "@/features/spectra/actions/protocol";
 import { threadFold, threadFoldTranscript } from "@/features/spectra/ai/harness/compaction";
 import { modelSummariser, runHarness, type HarnessEvent, type RunCheckpoint } from "@/features/spectra/ai/harness/run";
-import { subscriptionProviderFrom } from "@/features/spectra/ai/harness/subscription-runtime";
+import {
+  RUNTIME_NAMES,
+  RuntimeOrderExhaustedError,
+  subscriptionProviderFrom,
+  type UnreachableRuntime,
+} from "@/features/spectra/ai/harness/subscription-runtime";
 import type { LoopState } from "@/features/spectra/ai/harness/loop";
 import { alwaysAllowLabel, withThreadAllows } from "@/features/spectra/ai/harness/permissions";
 import { citedSources, withoutCitations } from "@/features/spectra/ai/harness/sources";
@@ -110,6 +115,8 @@ export type AttemptParams = RunPointers & {
   scheduled?: boolean;
   /** One live request; automatic handoffs stay on the same relay. */
   relayId?: string;
+  /** Runtimes the person's computer said it can't reach as they sent; only the first attempt uses it. */
+  unreachable?: UnreachableRuntime[];
   signal?: AbortSignal;
 };
 
@@ -179,7 +186,8 @@ function dedupeTouches(touches: ArtifactTouch[]) {
   for (const touch of touches) {
     const previous = byId.get(touch.id);
     // A creation stays a creation however often it is edited afterwards.
-    byId.set(touch.id, previous ? { ...touch, action: previous.action === "created" ? "created" : touch.action, change: touch.change ?? previous.change } : touch);
+    // So does where the first edit landed.
+    byId.set(touch.id, previous ? { ...touch, action: previous.action === "created" ? "created" : touch.action, change: touch.change ?? previous.change, region: previous.region ?? touch.region } : touch);
   }
   return [...byId.values()];
 }
@@ -239,6 +247,16 @@ async function foldThreadHistory(params: AttemptParams, history: ThreadHistory, 
   });
 }
 
+/** Attempts working in this process, so Stop reaches one at once instead of at its next heartbeat (F09). */
+const liveAttempts = new Map<string, () => void>();
+
+/** Stop an attempt running here now. False when it runs elsewhere; its heartbeat then ends it. */
+export function stopLiveAttempt(runId: string, executionId: string | undefined) {
+  const stop = executionId ? liveAttempts.get(`${runId}:${executionId}`) : undefined;
+  stop?.();
+  return Boolean(stop);
+}
+
 export function runHarnessAttempt(params: AttemptParams, emit: (event: unknown) => void) {
   return withRunUsageLedger(() =>
     withSpectraRunLog({ runId: params.runId, executionId: params.executionId }, () =>
@@ -261,6 +279,11 @@ type SavedHarnessState = {
   pending: PendingInput | null;
   answer: InputAnswer | null;
 };
+
+/** What the saved reply says about the run itself: how long it worked, and who finished it if the run moved. */
+function runAccount(result: { state: LoopState; finishedWith: keyof typeof RUNTIME_NAMES; moved: boolean }) {
+  return { workedMs: result.state.elapsedMs, ...(result.moved ? { finishedWith: RUNTIME_NAMES[result.finishedWith] } : {}) };
+}
 
 /**
  * Everything the first model turn needs, read in parallel. These are reads
@@ -404,6 +427,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     lease.abort();
     cancelUiObservation(runId, executionId);
   };
+  liveAttempts.set(`${runId}:${executionId}`, lostRun);
   let lastHeartbeat = Date.now();
   const heartbeat = setInterval(() => {
     const awaitedOperationId = awaitedUiOperation(runId, executionId);
@@ -519,10 +543,10 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
           publish({ type: "text_replace", runId, content: event.text });
           return;
         case "step_start":
-          publish({ type: "step", runId, id: event.id, label: event.label, status: "running", ...(event.work ? { work: event.work } : {}) });
+          publish({ type: "step", runId, id: event.id, label: event.label, status: "running", ...(event.work ? { work: event.work } : {}), ...(event.detail ? { detail: event.detail } : {}) });
           return;
         case "step_end":
-          publish({ type: "step", runId, id: event.id, label: event.label, status: event.ok ? "done" : "error", durationMs: event.durationMs });
+          publish({ type: "step", runId, id: event.id, label: event.label, status: event.ok ? "done" : "error", durationMs: event.durationMs, ...(event.detail ? { detail: event.detail } : {}) });
           return;
         case "reasoning":
           publish({ type: "reasoning_delta", runId, id: event.id, content: event.delta, ...(event.done ? { done: true } : {}) });
@@ -565,7 +589,10 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       }
     };
 
-    const runtime = await runtimeFor(actorClerkId, preferences.runtime);
+    const runtime = {
+      ...(await runtimeFor(actorClerkId, preferences.runtime)),
+      ...(params.mode === "start" && params.unreachable?.length ? { unreachable: params.unreachable } : {}),
+    };
     const result = await runHarness({
       runId,
       backend,
@@ -584,6 +611,16 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       workspaceId: params.workspaceId,
       // Any attempt names a thread that still needs it, resumed ones too.
       wantTitle: Boolean(threadSummary?.needsTitle),
+      otherThreadTitles: async () => {
+        const listed = await query<unknown & object, { threads?: Array<{ _id?: string; title?: string }> } | null>(
+          "spectraThreads:list",
+          { limit: 13, brief: true },
+        );
+        return (listed?.threads ?? [])
+          .filter((thread) => thread._id !== params.threadId && typeof thread.title === "string" && thread.title.trim())
+          .map((thread) => String(thread.title).trim())
+          .slice(0, 12);
+      },
       ...(resume ? { resume } : restore ? { restore } : {}),
       textFlushMs: TEXT_FLUSH_MS,
       shouldYield: params.scheduled ? () => Date.now() - started > YIELD_AFTER_MS : undefined,
@@ -676,6 +713,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
         widgets: result.state.widgets,
         sources: citedSources(content, result.state.sources),
         model: getSpectraModelId(),
+        ...runAccount(result),
       }).catch(() => null);
       publish({ type: "stopped", runId, partial: Boolean(reply || touches.length) });
       await flushEvents();
@@ -684,7 +722,10 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
 
     if (result.status === "failed") {
       runLog().error("spectra.harness.provider_unreachable", result.error);
-      const message = "Spectra could not reach the AI model just now. Your work so far is kept; try again in a moment.";
+      // An order the person emptied ends in their own words; anything else is Spectra's model failing.
+      const message = result.error instanceof RuntimeOrderExhaustedError
+        ? result.error.message
+        : "Spectra could not reach the AI model just now. Your work so far is kept; try again in a moment.";
       await flushEvents();
       await settleArtifacts("clear");
       await mutate("spectraRuns:updateStatus", {
@@ -733,9 +774,14 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       provenance: {
         artifactIds,
         artifactTitles: touches.map((touch) => touch.title).slice(0, 24),
+        // What the reply peek and the artifact card need: which works are new, and where each edit landed.
+        createdIds: touches.filter((touch) => touch.action === "created").map((touch) => touch.id).slice(0, 24),
+        regions: touches.flatMap((touch) => (touch.action === "edited" && touch.region ? [{ artifactId: touch.id, regionId: touch.region }] : [])).slice(0, 24),
         ...(params.threadId ? { threadId: params.threadId } : {}),
         ...(params.workspaceId ? { workspaceId: params.workspaceId } : {}),
+        workedMs: Math.round(result.state.elapsedMs),
       },
+      providerUsed: result.finishedWith,
       outcome: backend.executedAny ? "canonical_saved" : "answer_only",
       modelUsed: getSpectraModelId(),
       ...(usage ? { usage } : {}),
@@ -752,6 +798,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       widgets: result.state.widgets,
       sources: citedSources(content, result.state.sources),
       model: getSpectraModelId(),
+      ...runAccount(result),
     }).catch(() => null);
     // The reply is out; the notes catch up behind it.
     if (params.mode === "start" && !params.scheduled && !result.memoryWritten && worthReflecting(params.prompt))
@@ -807,6 +854,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     await flushEvents().catch(() => null);
   } finally {
     clearInterval(heartbeat);
+    liveAttempts.delete(`${runId}:${executionId}`);
     await Promise.all(titleWrites);
     if (flushTimer) clearTimeout(flushTimer);
     relay?.close();

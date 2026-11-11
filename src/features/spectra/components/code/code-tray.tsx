@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { AlertTriangle, Eraser, PanelBottom, TerminalSquare } from "lucide-react";
+import { AlertTriangle, Eraser, PanelBottom, TerminalSquare } from "@/components/icons/glyph-icons";
 
 /*
  * The tray under the code (EDITORS.md, "Code"): what went wrong, and what the

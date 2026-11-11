@@ -353,6 +353,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   private recoveryVectorRequest: string | null = null;
   private nativeConflict: CollaborationTransportSnapshot["recoveryConflict"];
   private durableAnchor: DurableRoomAnchor | undefined;
+  private notice: string | undefined;
   private localChangeVersion = 0;
   private documentChangeVersion = 0;
   private durabilityEpoch = 0;
@@ -677,6 +678,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       unsynchronizedChanges: this.unsynchronizedChanges,
       ...(next.presence ? { presence: this.presence } : {}),
       ...(this.error ? { error: this.error } : {}),
+      ...(this.notice ? { notice: this.notice } : {}),
     });
   }
 
@@ -1272,7 +1274,16 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
               this.updateSynchronizationState();
               return;
             }
+            if (message.type === "spectra.history_notice") {
+              if (typeof message.message === "string") {
+                this.notice = message.message.slice(0, 300);
+                this.update({});
+              }
+              return;
+            }
             if (message.type === "spectra.durable_failed") {
+              // The work left this computer while open: stop offering edits to it.
+              if (message.code === "COLLABORATION_WORK_REMOVED") this.quarantined = true;
               if (message.code === "COLLABORATION_NATIVE_OVERLAP") {
                 this.nativeConflict = {
                   regionIds: Array.isArray(message.regionIds) ? message.regionIds.filter((value): value is string => typeof value === "string").slice(0, 128) : [],

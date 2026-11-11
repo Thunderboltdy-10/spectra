@@ -1,6 +1,6 @@
 "use client";
 
-import { Shuffle } from "lucide-react";
+import { Shuffle } from "@/components/icons/glyph-icons";
 import { AlertCircle, ArrowRight, Check, ChevronDown, ChevronUp, Plus, X } from "@/components/icons/glyph-icons";
 import { targetAttrs } from "../../collaboration/target-attributes";
 import { aiRegionAttr } from "../ai-region-path";

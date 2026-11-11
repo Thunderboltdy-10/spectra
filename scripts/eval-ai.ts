@@ -1,5 +1,5 @@
 /*
- * npm run eval:ai [-- --only "hello,small document edit"] [-- --group create] [-- --runtime codex]
+ * npm run eval:ai [-- --only "hello,small document edit"] [-- --group create] [-- --golden] [-- --runtime codex]
  *
  * Plays the Spectra AI eval scenarios against the real model (OpenRouter,
  * with the model, provider and reasoning from the environment) and an
@@ -24,14 +24,14 @@ async function main() {
     process.exit(1);
   }
   // Loaded after the environment so model settings are read from it.
-  const { EVAL_SCENARIOS } = await import("../src/features/spectra/ai/harness/evals/scenarios");
+  const { EVAL_SCENARIOS, GOLDEN_SET } = await import("../src/features/spectra/ai/harness/evals/scenarios");
   const { runEvals } = await import("../src/features/spectra/ai/harness/evals/runner");
   const { writeEvalReport } = await import("../src/features/spectra/ai/harness/evals/report");
   const { modelThreadTitleWriter } = await import("../src/features/spectra/ai/harness/thread-title");
   const { openRouterModelCaller } = await import("../src/features/spectra/ai/harness/model");
   const { modelSummariser } = await import("../src/features/spectra/ai/harness/run");
   const { subscriptionModelCaller, runtimeStatus } = await import("../src/features/spectra/ai/harness/subscription-runtime");
-  const { withRuntimeFallback } = await import("../src/features/spectra/ai/harness/subscription-runtime");
+  const { withRuntimeChain } = await import("../src/features/spectra/ai/harness/subscription-runtime");
   const { ProviderUnavailableError } = await import("../src/features/spectra/ai/harness/types");
   const mode = option("runtime")?.[0];
   const model = option("model")?.[0];
@@ -53,15 +53,22 @@ async function main() {
       if (calls >= 2) throw new ProviderUnavailableError("simulated: Codex went away");
       return codex(input);
     };
-    return withRuntimeFallback(flaky as never, openRouterModelCaller, (reason) => console.log(`[eval:ai] fell back: ${reason}`));
+    return withRuntimeChain(
+      [{ runtime: "codex", make: () => flaky }, { runtime: "spectra", make: () => openRouterModelCaller }],
+      { onMove: (from: string, to: string, reason: string) => console.log(`[eval:ai] moved from ${from} to ${to}: ${reason}`) },
+    );
   };
   const callModel: Caller =
     mode === "switch" ? switching() : mode === "fallback" ? failingOver() : runtime ? subscriptionModelCaller(runtime, model ? { model } : {}) : openRouterModelCaller;
 
   const only = option("only");
   const groups = option("group");
+  const golden = process.argv.includes("--golden");
   const scenarios = EVAL_SCENARIOS.filter(
-    (scenario) => (!only || only.includes(scenario.name.toLowerCase())) && (!groups || groups.includes(scenario.group)),
+    (scenario) =>
+      (!golden || GOLDEN_SET.includes(scenario.name)) &&
+      (!only || only.includes(scenario.name.toLowerCase())) &&
+      (!groups || groups.includes(scenario.group)),
   );
   if (!scenarios.length) {
     console.error("[eval:ai] no scenario matches --only or --group.");

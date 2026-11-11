@@ -2,7 +2,7 @@
 
 import { Toaster } from "sonner";
 import { CookieConsentManager } from "@/components/cookie-consent-manager";
-import { KeyboardModality } from "@/components/keyboard-modality";
+import { QuietReturnFocus } from "@/components/quiet-return-focus";
 import { ThemeProvider } from "@/components/theme-provider";
 import { DynamicFavicon } from "@/components/spectra-logo";
 import { GlobalErrorBoundary } from "@/components/global-error-boundary";
@@ -53,7 +53,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <DynamicFavicon />
         <LocalComputeCacheController />
         <CookieConsentManager />
-        <KeyboardModality />
+        <QuietReturnFocus />
         <Toaster
           theme="system"
           position="bottom-right"

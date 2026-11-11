@@ -1804,1081 +1804,6 @@ body {
   }
 }
 
-/* Spectra timetable — dense academic time with calm hierarchy and honest authority. */
-.timetable-studio {
-  position: relative;
-  display: flex;
-  min-height: 0;
-  flex: 1 1 auto;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-}
-
-.timetable-personal-sync {
-  position: absolute;
-  z-index: 32;
-  top: 66px;
-  right: 14px;
-  display: inline-flex;
-  max-width: min(390px, calc(100% - 28px));
-  min-height: 30px;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 10px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-chip);
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 8px 22px rgba(37, 50, 42, 0.09);
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 650;
-  backdrop-filter: blur(12px);
-}
-
-.timetable-personal-sync[data-error="true"] {
-  border-color: #e7c2bb;
-  color: #a34e42;
-}
-
-.timetable-body {
-  display: grid;
-  min-height: 0;
-  flex: 1 1 auto;
-  grid-template-columns: minmax(0, 1fr) 225px;
-  overflow: hidden;
-}
-
-.timetable-body > main {
-  min-width: 0;
-  overflow: auto;
-  background: var(--bg-elevated);
-}
-
-.timetable-overview {
-  overflow-y: auto;
-  padding: 12px;
-  border-left: 1px solid var(--border-default);
-  background: var(--bg-secondary);
-}
-
-.timetable-overview > section {
-  margin-bottom: 10px;
-  padding: 12px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--card-radius);
-  background: var(--bg-elevated);
-}
-
-.timetable-overview section > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 9px;
-  color: var(--text-secondary);
-}
-
-.timetable-overview section > header strong {
-  color: var(--text-primary);
-  font-size: var(--text-micro);
-  font-weight: 760;
-}
-
-.timetable-overview > section > button {
-  display: grid;
-  width: 100%;
-  grid-template-columns: 7px minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-  padding: 7px 5px;
-  border-radius: var(--control-radius);
-  text-align: left;
-}
-
-.timetable-overview > section > button:hover {
-  background: var(--bg-tertiary);
-}
-
-.timetable-overview > section > button > i {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-pill);
-}
-
-.timetable-overview > section > button span {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.timetable-overview > section > button strong {
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: var(--text-micro);
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.timetable-overview > section > button small,
-.timetable-focus-progress small {
-  margin-top: 2px;
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-
-.timetable-focus-progress header span {
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-}
-
-.timetable-focus-progress > div {
-  height: 5px;
-  overflow: hidden;
-  margin: 8px 0 5px;
-  border-radius: var(--radius-pill);
-  background: var(--bg-tertiary);
-}
-
-.timetable-focus-progress > div i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: #28a778;
-}
-
-.timetable-week {
-  min-width: 720px;
-}
-
-.timetable-week-header,
-.timetable-all-day {
-  display: grid;
-  grid-template-columns: 60px repeat(var(--day-count), minmax(90px, 1fr));
-}
-
-.timetable-week-header {
-  position: sticky;
-  z-index: 12;
-  top: 0;
-  min-height: 51px;
-  border-bottom: 1px solid var(--border-default);
-  background: rgba(255, 255, 255, 0.97);
-}
-
-.timetable-week-header > button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border-left: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-}
-
-.timetable-week-header > button span {
-  font-size: var(--text-micro);
-  font-weight: 650;
-}
-
-.timetable-week-header > button strong {
-  display: inline-flex;
-  width: 25px;
-  height: 25px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-pill);
-  color: var(--text-primary);
-  font-size: 12px;
-}
-
-.timetable-week-header > button[data-today="true"] strong {
-  background: var(--brand-primary);
-  color: #fff;
-  box-shadow: 0 4px 10px rgba(85, 67, 187, 0.22);
-}
-
-.timetable-all-day {
-  min-height: 54px;
-  border-bottom: 1px solid var(--border-default);
-}
-
-.timetable-all-day > span {
-  padding: 12px 8px;
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  text-align: right;
-}
-
-.timetable-all-day > div {
-  min-width: 0;
-  padding: 6px 5px;
-  border-left: 1px solid var(--border-subtle);
-}
-
-.timetable-time-grid {
-  display: grid;
-  grid-template-columns: 60px repeat(var(--day-count), minmax(90px, 1fr));
-}
-
-.timetable-hours {
-  position: relative;
-  background: var(--bg-elevated);
-}
-
-.timetable-hours time {
-  position: absolute;
-  right: 9px;
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  transform: translateY(-50%);
-}
-
-.timetable-day-column {
-  position: relative;
-  border-left: 1px solid var(--border-default);
-  background: var(--bg-elevated);
-}
-
-.timetable-day-column > i {
-  position: absolute;
-  right: 0;
-  left: 0;
-  height: 1px;
-  background: var(--bg-tertiary);
-}
-
-.timetable-day-column:hover {
-  background: linear-gradient(
-    rgba(111, 90, 225, 0.018),
-    rgba(111, 90, 225, 0.018)
-  );
-}
-
-.timetable-event-position {
-  position: absolute;
-  right: 5px;
-  left: 5px;
-  min-height: 23px;
-}
-
-.timetable-event {
-  position: relative;
-  display: flex;
-  width: 100%;
-  height: 100%;
-  min-height: 23px;
-  overflow: hidden;
-  flex-direction: column;
-  gap: 2px;
-  padding: 7px 7px 5px 9px;
-  border: 0;
-  border-left: 2px solid var(--event-color);
-  border-radius: var(--chip-radius);
-  background: color-mix(in oklab, var(--event-color) 10%, white);
-  color: color-mix(in oklab, var(--event-color) 76%, var(--text-primary));
-  text-align: left;
-  box-shadow: inset 0 0 0 1px
-    color-mix(in oklab, var(--event-color) 12%, transparent);
-  transition:
-    box-shadow var(--motion-fast) var(--ease-standard),
-    transform var(--motion-fast) var(--ease-standard);
-}
-
-.timetable-event:hover {
-  z-index: 3;
-  box-shadow:
-    inset 0 0 0 1px color-mix(in oklab, var(--event-color) 22%, transparent),
-    0 7px 18px rgba(44, 54, 48, 0.11);
-  transform: translateY(-1px);
-}
-
-.timetable-event strong {
-  overflow: hidden;
-  font-size: var(--text-micro);
-  font-weight: 720;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.timetable-event time,
-.timetable-event small {
-  overflow: hidden;
-  font-size: var(--text-micro);
-  line-height: 1.3;
-  opacity: 0.84;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.timetable-event[data-compact="true"] {
-  justify-content: center;
-  gap: 0;
-  padding: 3px 5px 3px 7px;
-}
-
-.timetable-event[data-status="removed"] {
-  filter: grayscale(0.6);
-  opacity: 0.58;
-}
-
-.timetable-event-recurrence,
-.timetable-event-source {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 9px;
-  height: 9px;
-  opacity: 0.7;
-}
-
-.timetable-event-source {
-  top: auto;
-  bottom: 4px;
-}
-
-.timetable-event[data-conflict="true"] {
-  box-shadow:
-    inset 0 0 0 1px color-mix(in oklab, #d9822b 40%, transparent),
-    0 2px 8px rgba(176, 96, 28, 0.08);
-}
-
-.timetable-event-conflict {
-  position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 10px;
-  height: 10px;
-  color: #b96b22;
-}
-
-.timetable-event-source + .timetable-event-conflict {
-  right: 17px;
-}
-
-.timetable-now {
-  position: absolute;
-  z-index: 7;
-  right: 0;
-  left: 0;
-  height: 1px;
-  background: #f06565;
-  pointer-events: none;
-}
-
-.timetable-now::before {
-  position: absolute;
-  top: -3px;
-  left: -3px;
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius-pill);
-  background: #f06565;
-  content: "";
-}
-
-.timetable-now span {
-  position: absolute;
-  top: -8px;
-  left: -50px;
-  color: #e64f4f;
-  font-size: var(--text-micro);
-  font-weight: 700;
-}
-
-.timetable-month {
-  display: grid;
-  min-width: 720px;
-  min-height: 690px;
-  grid-template-columns: repeat(7, minmax(96px, 1fr));
-  grid-template-rows: 34px repeat(6, minmax(105px, 1fr));
-  background: var(--bg-tertiary);
-  gap: 1px;
-}
-
-.timetable-month > strong {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-elevated);
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-
-.timetable-month > section {
-  min-width: 0;
-  overflow: hidden;
-  padding: 5px;
-  background: var(--bg-elevated);
-}
-
-.timetable-month > section[data-outside="true"] {
-  background: var(--bg-secondary);
-  opacity: 0.58;
-}
-
-.timetable-month > section > button:first-child {
-  display: inline-flex;
-  width: 24px;
-  height: 24px;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 3px;
-  border-radius: var(--radius-pill);
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 680;
-}
-
-.timetable-month > section[data-today="true"] > button:first-child {
-  background: var(--brand-primary);
-  color: #fff;
-}
-
-.timetable-month .timetable-event {
-  height: 21px;
-  min-height: 21px;
-  margin-bottom: 3px;
-}
-
-.timetable-month > section > small {
-  display: block;
-  padding-left: 5px;
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 650;
-}
-
-.timetable-agenda {
-  min-height: 660px;
-  padding: 18px clamp(16px, 4vw, 52px) 40px;
-  background: var(--bg-primary);
-}
-
-.timetable-agenda > section {
-  margin-bottom: 21px;
-}
-
-.timetable-agenda > section > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 7px;
-  padding: 0 4px 8px;
-  border-bottom: 1px solid var(--border-default);
-}
-
-.timetable-agenda > section > header strong {
-  font-family: var(--font-display);
-  font-size: 15px;
-}
-
-.timetable-agenda > section > header span {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-
-.timetable-agenda > section > button {
-  display: grid;
-  width: 100%;
-  grid-template-columns: 4px 72px minmax(0, 1fr) auto;
-  gap: 11px;
-  align-items: center;
-  padding: 10px 8px;
-  border-bottom: 1px solid var(--border-subtle);
-  text-align: left;
-}
-
-.timetable-agenda > section > button:hover {
-  background: var(--bg-tertiary);
-}
-
-.timetable-agenda > section > button > i {
-  width: 4px;
-  height: 34px;
-  border-radius: var(--radius-pill);
-}
-
-.timetable-agenda time {
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 650;
-}
-
-.timetable-agenda button span {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.timetable-agenda button strong {
-  color: var(--text-primary);
-  font-size: 12px;
-}
-
-.timetable-agenda button small {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-
-.timetable-empty {
-  display: flex;
-  min-height: 360px;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 7px;
-  color: var(--text-tertiary);
-  text-align: center;
-}
-
-.timetable-empty strong {
-  color: var(--text-primary);
-  font-size: 13px;
-}
-
-.timetable-empty span {
-  max-width: 280px;
-  font-size: var(--text-micro);
-}
-
-.timetable-linked-work {
-  padding: 14px;
-  border-top: 1px solid var(--border-default);
-  background: var(--bg-secondary);
-}
-
-.timetable-linked-work > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 9px;
-}
-
-.timetable-linked-work > header strong {
-  font-size: var(--text-micro);
-  font-weight: 750;
-}
-
-.timetable-linked-work > header span {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-
-.timetable-linked-work > div {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 7px;
-}
-
-.timetable-linked-work button {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  min-width: 0;
-  padding: 9px 10px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--control-radius);
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  text-align: left;
-}
-
-.timetable-linked-work button span {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.timetable-linked-work button strong {
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: var(--text-micro);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.timetable-linked-work button small {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  text-transform: capitalize;
-}
-
-.timetable-layers-popover,
-.timetable-add-popover,
-.timetable-import-report {
-  position: absolute;
-  z-index: var(--z-chrome);
-  top: 53px;
-  right: 160px;
-  width: 250px;
-  padding: 10px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--card-radius);
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 18px 42px rgba(35, 47, 40, 0.14);
-  backdrop-filter: blur(16px);
-}
-
-.timetable-layers-popover header,
-.timetable-import-report > div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 2px 3px 9px;
-}
-
-.timetable-layers-popover header strong,
-.timetable-import-report strong {
-  font-size: 12px;
-  font-weight: 750;
-}
-
-.timetable-layers-popover header button,
-.timetable-import-report button {
-  display: inline-flex;
-  width: 27px;
-  height: 27px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--control-radius);
-}
-
-.timetable-layers-popover > label {
-  display: grid;
-  grid-template-columns: 16px 8px minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  padding: 7px 5px;
-  border-radius: var(--control-radius);
-}
-
-.timetable-layers-popover > label:hover {
-  background: var(--bg-tertiary);
-}
-
-.timetable-layers-popover > label > i {
-  width: 7px;
-  height: 7px;
-  border-radius: 2px;
-}
-
-.timetable-layers-popover > label span {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.timetable-layers-popover > label strong {
-  color: var(--text-primary);
-  font-size: var(--text-micro);
-}
-
-.timetable-layers-popover > label small {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  text-transform: capitalize;
-}
-
-.timetable-layers-popover > button {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 7px;
-  margin-top: 6px;
-  padding: 8px 6px;
-  border-top: 1px solid var(--border-subtle);
-  color: var(--brand-ink);
-  font-size: var(--text-micro);
-  font-weight: 650;
-}
-
-.timetable-add-popover {
-  right: 14px;
-  width: 260px;
-}
-
-.timetable-add-popover > button {
-  display: grid;
-  width: 100%;
-  grid-template-columns: 24px minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-  padding: 9px 7px;
-  border-radius: var(--control-radius);
-  color: var(--brand-ink);
-  text-align: left;
-}
-
-.timetable-add-popover > button:hover {
-  background: var(--brand-wash);
-}
-
-.timetable-add-popover span {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.timetable-add-popover strong {
-  color: var(--text-primary);
-  font-size: var(--text-micro);
-}
-
-.timetable-add-popover small {
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-}
-
-.timetable-import-report {
-  top: 65px;
-  right: 14px;
-  width: 310px;
-}
-
-.timetable-import-report > div {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 8px;
-  padding: 0;
-  color: #23835f;
-}
-
-.timetable-import-report[data-error="true"] > div {
-  color: #a74d40;
-}
-
-.timetable-import-report span {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.timetable-import-report small {
-  margin-top: 2px;
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  line-height: 1.4;
-}
-
-.timetable-import-report ul {
-  margin: 8px 0 0 24px;
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  line-height: 1.5;
-}
-
-.timetable-event-editor {
-  position: absolute;
-  z-index: calc(var(--z-chrome) + 10);
-  top: 8px;
-  right: 8px;
-  bottom: 8px;
-  display: grid;
-  width: 320px;
-  align-content: start;
-  gap: 11px;
-  overflow-y: auto;
-  padding: 14px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--surface-radius);
-  background: rgba(255, 255, 255, 0.985);
-  box-shadow: -12px 0 42px rgba(35, 47, 40, 0.15);
-  backdrop-filter: blur(18px);
-}
-
-.timetable-event-editor > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 9px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.timetable-event-editor > header span {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.timetable-event-editor > header i {
-  width: 7px;
-  height: 20px;
-  border-radius: var(--radius-pill);
-}
-
-.timetable-event-editor > header strong {
-  font-size: 12px;
-  font-weight: 750;
-}
-
-.timetable-event-editor > header button {
-  display: inline-flex;
-  width: 28px;
-  height: 28px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--control-radius);
-  color: var(--text-secondary);
-}
-
-.timetable-event-editor > label {
-  display: grid;
-  gap: 5px;
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 720;
-}
-
-.timetable-event-editor > label:has(svg) {
-  grid-template-columns: auto 1fr;
-  align-items: center;
-}
-
-.timetable-event-editor input:not([type="checkbox"]),
-.timetable-event-editor select,
-.timetable-event-editor textarea {
-  width: 100%;
-  min-width: 0;
-  border: 1px solid var(--border-default);
-  border-radius: var(--control-radius);
-  outline: 0;
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  font-size: var(--text-micro);
-  font-weight: 450;
-  letter-spacing: normal;
-  text-transform: none;
-}
-
-.timetable-event-editor input,
-.timetable-event-editor select {
-  height: 34px;
-  padding: 0 8px;
-}
-
-.timetable-event-editor textarea {
-  min-height: 72px;
-  resize: vertical;
-  padding: 8px;
-  line-height: 1.45;
-}
-
-.timetable-event-date-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
-}
-
-.timetable-event-date-fields label {
-  display: grid;
-  gap: 5px;
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 720;
-}
-
-.timetable-color-field > span {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.timetable-color-field input[type="color"] {
-  width: 42px;
-  min-width: 42px;
-  padding: 3px;
-  cursor: pointer;
-}
-
-.timetable-color-field button {
-  display: inline-flex;
-  height: 31px;
-  align-items: center;
-  padding: 0 9px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--control-radius);
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-  font-weight: 650;
-}
-
-.timetable-color-field button:hover:not(:disabled) {
-  border-color: #cbc4f3;
-  background: #f4f2ff;
-  color: var(--brand-ink);
-}
-
-.timetable-color-field button:disabled {
-  opacity: 0.42;
-}
-
-.timetable-source-overlay-time {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  padding: 10px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--card-radius);
-  background: #f7fbf8;
-}
-
-.timetable-source-overlay-time .timetable-check-field {
-  padding: 0;
-}
-
-.timetable-source-overlay-time p {
-  margin: 0;
-  color: var(--text-tertiary);
-  font-size: var(--text-micro);
-  line-height: 1.45;
-}
-
-.timetable-event-editor .timetable-check-field {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  text-transform: none;
-}
-
-.timetable-source-warning {
-  padding: 8px 9px;
-  border: 1px solid #efc98a;
-  border-radius: var(--control-radius);
-  background: #fff8e9;
-  color: #825d1f;
-  font-size: var(--text-micro);
-  line-height: 1.45;
-}
-
-.timetable-event-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.timetable-event-links span {
-  display: inline-flex;
-  max-width: 100%;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 7px;
-  border-radius: var(--control-radius);
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  font-size: var(--text-micro);
-}
-
-.timetable-event-links span button {
-  display: inline-flex;
-  width: 18px;
-  height: 18px;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--chip-radius);
-}
-
-.timetable-delete-event {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-height: 34px;
-  margin-top: 4px;
-  border: 1px solid #efcbc5;
-  border-radius: var(--control-radius);
-  color: #a94f42;
-  font-size: var(--text-micro);
-  font-weight: 680;
-}
-
-.timetable-delete-event:hover {
-  background: #fff5f3;
-}
-
-/* A newly placed event settles into the grid once. Drags and edits are
-   described by the interaction layer, not by replaying placement. */
-.spectra-artifact-studio[data-ai-state="creating"]
-  .timetable-event[data-ai-region="true"],
-.spectra-artifact-studio[data-ai-state="creating"]
-  .timetable-agenda
-  [data-ai-region="true"] {
-  animation: spectra-timetable-place 480ms var(--ease-standard) both;
-}
-
-@keyframes spectra-timetable-place {
-  from {
-    opacity: 0;
-    transform: translateY(5px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@container spectra-studio (max-width: 1100px) {
-  .timetable-body {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .timetable-overview {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-    border-top: 1px solid var(--border-default);
-    border-left: 0;
-  }
-
-  .timetable-overview > section {
-    margin: 0;
-  }
-}
-
-@container spectra-studio (max-width: 760px) {
-  .timetable-overview {
-    grid-template-columns: 1fr;
-  }
-
-  .timetable-event-editor {
-    top: 6px;
-    right: 6px;
-    bottom: 6px;
-    left: 6px;
-    width: auto;
-  }
-
-  .timetable-layers-popover,
-  .timetable-add-popover {
-    top: 97px;
-    right: 8px;
-    left: 8px;
-    width: auto;
-  }
-}
-
-@media print {
-  .timetable-overview,
-  .timetable-event-editor,
-  .timetable-layers-popover,
-  .timetable-add-popover,
-  .timetable-import-report,
-  .timetable-linked-work {
-    display: none !important;
-  }
-
-  .timetable-studio,
-  .timetable-body,
-  .timetable-body > main {
-    display: block;
-    overflow: visible;
-    background: var(--bg-elevated);
-  }
-}
-
 @utility grid-cols-24 {
   grid-template-columns: repeat(24, minmax(0, 1fr));
 }
@@ -3462,17 +2387,23 @@ body {
   outline-offset: 2px;
 }
 
-/* Rings only while moving by keyboard (keyboard-modality.tsx). The browser's
-   own guess also lights them after Alt+Tab, on whatever had focus. */
-html:not([data-keys]) {
-  --focus-ring-color: transparent !important;
-  --focus-ring: 0 solid transparent !important;
-}
-
-html:not([data-keys]) :focus-visible {
+/* The element that kept focus while the window was away, reached last by the
+   pointer (quiet-return-focus.tsx): no ring until a key is pressed. */
+[data-quiet-focus]:focus-visible {
   outline: none !important;
   --tw-ring-shadow: 0 0 #0000 !important;
   --tw-ring-offset-shadow: 0 0 #0000 !important;
+}
+
+/* Text fields match :focus-visible on a click too; the caret already says
+   where typing goes, so their border carries focus quietly instead of a ring. */
+:where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="button"], [type="submit"], [type="reset"], [type="color"], [type="file"]), textarea):focus-visible {
+  outline: none;
+  border-color: var(--focus-ring-color);
+}
+
+[contenteditable="true"]:focus-visible {
+  outline: none;
 }
 
 /* The toaster's close: a plain mark inside the word, not a bubble on its corner. */
@@ -4271,10 +3202,10 @@ button:not(:disabled),
   transform: translate3d(-2px, -1px, 0);
 }
 
-html[data-keys] .spectra-card:focus-within:not(
+.spectra-card:has(:focus-visible:not([data-quiet-focus])):not(
     :has(input:focus, textarea:focus, [contenteditable="true"]:focus)
   ),
-html[data-keys] [data-spectra-card]:focus-within:not(
+[data-spectra-card]:has(:focus-visible:not([data-quiet-focus])):not(
     :has(input:focus, textarea:focus, [contenteditable="true"]:focus)
   ) {
   outline: 2px solid color-mix(in oklab, var(--card-focus) 38%, transparent);
@@ -4629,7 +3560,7 @@ html[data-keys] [data-spectra-card]:focus-within:not(
   padding: 3px 3px 3px 12px;
   background: var(--card-paper);
   color: var(--text-primary);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-lg);
   translate: -50% 0;
   transition: left 300ms var(--ease-standard);
   animation: spectra-follow-status-in 320ms var(--ease-standard) both;
@@ -4980,29 +3911,22 @@ button[data-spectra-context-trigger="true"]::after {
 .spectra-artifact-studio[data-blueprint="presentation"] .spectra-artifact-main,
 .spectra-artifact-studio[data-blueprint="sheets"] .spectra-artifact-main,
 .spectra-artifact-studio[data-blueprint="code"] .spectra-artifact-main,
-.spectra-artifact-studio[data-blueprint="whiteboard"] .spectra-artifact-main,
-.spectra-artifact-studio[data-blueprint="timetable"] .spectra-artifact-main {
+.spectra-artifact-studio[data-blueprint="whiteboard"] .spectra-artifact-main {
   background: transparent;
 }
 
 .spectra-artifact-studio[data-blueprint="presentation"] .presentation-studio,
 .spectra-artifact-studio[data-blueprint="sheets"] .spectra-sheets-studio,
 .spectra-artifact-studio[data-blueprint="code"] .code-studio,
-.spectra-artifact-studio[data-blueprint="whiteboard"] .whiteboard-studio,
-.spectra-artifact-studio[data-blueprint="timetable"] .timetable-studio {
+.spectra-artifact-studio[data-blueprint="whiteboard"] .whiteboard-studio {
   margin-top: 2px;
 }
 
-.spectra-artifact-studio[data-blueprint="whiteboard"] .whiteboard-studio,
-.spectra-artifact-studio[data-blueprint="timetable"] .timetable-studio {
+.spectra-artifact-studio[data-blueprint="whiteboard"] .whiteboard-studio {
   border: none;
   border-radius: 0;
   box-shadow: none;
   background: transparent;
-}
-
-.spectra-artifact-studio[data-studio-mode="split"] .timetable-overview {
-  display: none !important;
 }
 
 .code-icon-action:focus-visible,
@@ -11093,8 +10017,7 @@ body:has(.version-stage) [data-island-root] * {
 }
 
 /* Numeric UI uses the same calm sans face as surrounding metadata. */
-.tabular-nums,
-.timetable-studio time {
+.tabular-nums {
   font-family:
     var(--font-sans) !important;
   font-weight: 500 !important;
@@ -11104,9 +10027,6 @@ body:has(.version-stage) [data-island-root] * {
 
 /* Editors should feel like familiar productivity software, not oversized
    generated form cards. */
-.timetable-event-editor input:not([type="checkbox"]):not([type="color"]),
-.timetable-event-editor select,
-.timetable-event-editor textarea,
 .spectra-quiz-studio input:not([type="checkbox"]):not([type="radio"]):not(.editor-sheet *),
 .spectra-quiz-studio select:not(.editor-sheet *),
 .spectra-quiz-studio textarea:not(.editor-sheet *) {
@@ -11119,7 +10039,6 @@ body:has(.version-stage) [data-island-root] * {
   font-weight: 400 !important;
 }
 
-.timetable-event-editor label,
 .spectra-quiz-studio label {
   font-family: var(--font-sans);
   font-weight: 500;
@@ -11131,13 +10050,6 @@ body:has(.version-stage) [data-island-root] * {
 
 .spectra-studio-tab-scroller::-webkit-scrollbar {
   display: none;
-}
-
-.timetable-week-header strong {
-  font-family:
-    var(--font-sans) !important;
-  font-weight: 500 !important;
-  font-variant-numeric: tabular-nums;
 }
 
 /* Flashcard rows must not stretch their compact metrics/header tracks simply
@@ -12060,8 +10972,7 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
 .spectra-artifact-main > .presentation-studio,
 .spectra-artifact-main > .spectra-sheets-studio,
 .spectra-artifact-main > .code-studio,
-.spectra-artifact-main > .whiteboard-studio,
-.spectra-artifact-main > .timetable-studio {
+.spectra-artifact-main > .whiteboard-studio {
   min-width: 0;
 }
 
@@ -12691,6 +11602,13 @@ html[data-spectra-motion="none"] .spectra-anchor-landing {
     opacity: 0;
     transform: translateX(-8px) scaleX(0.8);
   }
+}
+
+/* A long unbroken folder or file name wraps inside the sentence instead of
+   running past the popover's edge (F21). The Where row keeps its ellipsis. */
+.spectra-status-popover-head,
+.spectra-status-details {
+  overflow-wrap: anywhere;
 }
 
 .spectra-status-popover-head {
@@ -14377,18 +13295,14 @@ html[data-spectra-carrying] .spectra-presence-actor[data-actor-kind="ai"] {
 /* ---- The one pane about a work (see studio-pane) ------------------------
    Beside the page on a work's own screen, over it in a side panel. Whatever it
    holds, it opens the same way and changes in place. */
-.spectra-artifact-studio {
-  transition: padding-right 220ms var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1));
-}
 .spectra-artifact-studio[data-pane-resizing] {
-  transition: none;
   user-select: none;
 }
 .studio-pane {
   position: absolute;
   inset-block: 0;
   right: 0;
-  z-index: var(--z-chrome, 30);
+  z-index: var(--z-chrome);
   display: flex;
   max-width: 100%;
   min-height: 0;
@@ -14612,7 +13526,7 @@ button.work-origin:hover {
   position: absolute;
   inset-inline: 0;
   bottom: 0;
-  z-index: calc(var(--z-chrome, 30) - 1);
+  z-index: calc(var(--z-chrome) - 1);
   display: flex;
   min-height: 0;
   flex-direction: column;
@@ -14620,7 +13534,7 @@ button.work-origin:hover {
 }
 .version-stage[data-fills] {
   inset: 0;
-  z-index: calc(var(--z-chrome, 30) + 1);
+  z-index: calc(var(--z-chrome) + 1);
 }
 .version-stage-head {
   display: flex;

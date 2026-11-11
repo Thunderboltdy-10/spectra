@@ -233,6 +233,8 @@ export function identityFailureMessage(raw: string): string | null {
   if (/AUTH_EMAIL_UNVERIFIED/i.test(raw))
     return "Verify your school email before using Spectra.";
   if (/AUTH_NOT_SIGNED_IN/i.test(raw)) return "Sign in to continue.";
+  if (/IDENTITY_NOT_INVITED/i.test(raw))
+    return "Spectra is by invitation, and no invitation was sent to this email.";
   if (/AUTH_NO_SCHOOL/i.test(raw))
     return "This account does not have an active school membership.";
   if (/AUTH_NO_ACCESS/i.test(raw))

@@ -842,14 +842,14 @@ function insertBindings(handlers: DocumentCommandHandlers): CommandBinding[] {
     ...callouts,
     {
       id: "insert.reference",
-      label: "Reference a work",
+      label: "Reference an artifact",
       icon: Link2,
       tab: "Insert",
       group: "Media",
       priority: "advanced",
       requires: "edit",
       disabled,
-      hint: "Shows another Spectra work here without copying it",
+      hint: "Shows another Spectra artifact here without copying it",
       manifestOps: ["add_embed"],
       strictNative: {
         available: false,

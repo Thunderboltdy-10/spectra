@@ -1,5 +1,6 @@
 "use client";
 
+import { FolderCards } from "./folder-cards";
 import { useMemo, useState } from "react";
 import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { api } from "../../../../convex/_generated/api";
@@ -164,28 +165,14 @@ export function ClassShelf({
         ) : null}
         <section aria-labelledby="class-work">
             <h3 id="class-work" className="library-shelf-heading">
-              Your work {work.length ? <span className="school-heading-count">{work.length}</span> : null}
+              Your artifacts {work.length ? <span className="school-heading-count">{work.length}</span> : null}
             </h3>
             {work.length || folders.length ? (
               <>
                 {folders.length ? (
-                  <ul className="library-loose mb-4">
-                    {folders.map((node) => (
-                      <li key={node.nodeId}>
-                        <button
-                          type="button"
-                          data-node-row={node.nodeId}
-                          data-life-launch
-                          onClick={() => onOpen(node)}
-                          onContextMenu={(event) => onMenu(event, node)}
-                          className="library-loose-item"
-                        >
-                          <span className="min-w-0 flex-1 truncate">{node.name}</span>
-                          <span className="shrink-0 text-caption text-[var(--text-tertiary)]">Folder</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
+                  <div className="mb-6">
+                    <FolderCards folders={folders} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} />
+                  </div>
                 ) : null}
                 {/* Inside the class every card is the class's, so each keeps its kind's colour. */}
                 <ShelfNotes items={shownWork} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} whereOf={sharedMark} />

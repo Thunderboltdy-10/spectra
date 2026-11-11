@@ -162,6 +162,7 @@ export function calendarItemProjection(item: Doc<"calendarItems">) {
     location: item.location,
     teacher: item.teacher,
     classId: item.classId,
+    ...(item.seriesId ? { seriesId: item.seriesId } : {}),
     planArtifactId: item.planArtifactId,
     planTaskId: item.planTaskId,
     taskItemId: item.taskItemId,

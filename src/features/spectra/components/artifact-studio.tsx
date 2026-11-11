@@ -1994,7 +1994,7 @@ function TrashedWorkNotice({ artifactId, trashedNodeId }: { artifactId: string; 
         className="spectra-collaboration-notice absolute right-3 top-2 flex items-center gap-2"
       >
         <span className="min-w-0 flex-1">
-          This work is in Trash. What you type is kept and comes back if you restore it.
+          This artifact is in Trash. What you type is kept and comes back if you restore it.
         </span>
         <button
           type="button"
@@ -2296,7 +2296,7 @@ export function ArtifactStudio({
     <StudioSplitShell
       width={width}
       onWidthChange={onPanelWidthChange}
-      ariaLabel="Work studio"
+      ariaLabel="Artifact studio"
       cssWidthVariable="--spectra-studio-width"
       overlay={panelOverlay}
       // The registry states how narrow this type can get before it stops
@@ -2396,7 +2396,8 @@ function ArtifactStudioEditor({
       : "edit";
   // An archived work's room is closed, so editing it could only queue edits
   // that never sync. It opens read-only until it is restored.
-  const permissionReadOnly = replicaTruth === null || artifact.status === "archived" || (workType
+  // A course syllabus is the official outline: read it, copy it to annotate.
+  const permissionReadOnly = replicaTruth === null || artifact.status === "archived" || Boolean(artifact.syllabus) || (workType
     ? !workCan(workType, sharingRole, "edit")
     : artifact.accessLevel === "read");
   // The live room is the editing substrate, not a feature unlocked by sharing.
@@ -2467,7 +2468,7 @@ function ArtifactStudioEditor({
         live.initializationError ?? live.modelSnapshot.error ?? "unknown",
         {
           fallback:
-            "Part of this work was saved in a shape Spectra no longer recognises, so live editing is paused. Your saved content is intact — reload, and tell your teacher or an administrator if it keeps happening.",
+            "Part of this artifact was saved in a shape Spectra no longer recognises, so live editing is paused. Your saved content is intact — reload, and tell your teacher or an administrator if it keeps happening.",
         },
       ),
     [live.initializationError, live.modelSnapshot.error],
@@ -2527,6 +2528,7 @@ function ArtifactStudioEditor({
     liveLevel: live.level,
     protectedOriginal,
     protectedOriginalCopy: PROTECTED_ORIGINAL_TOGGLE.consequence,
+    syllabus: Boolean(artifact.syllabus),
   });
   const [title, setTitle] = useState(artifact.title);
   const [summary, setSummary] = useState(() =>
@@ -2620,7 +2622,7 @@ function ArtifactStudioEditor({
     const removeReference = spectraBus.handle("reference.add", (input) => {
       if (input.hostWorkId !== artifact._id) return;
       setReferencePicker({ at: input.at ?? { x: window.innerWidth / 2 - 190, y: window.innerHeight / 3 }, stackOnto: input.stackOnto });
-      return { status: "completed", message: "Pick the work to show here." } satisfies SpectraCommandOutcome;
+      return { status: "completed", message: "Pick the artifact to show here." } satisfies SpectraCommandOutcome;
     });
     return () => {
       removeOpen();
@@ -3011,7 +3013,7 @@ function ArtifactStudioEditor({
         );
       setNativeAttribution(
         result?.state === "existing"
-          ? "This work already has a copy on this computer"
+          ? "This artifact already has a copy on this computer"
           : `Queued a local copy${result?.relativePath ? ` at ${result.relativePath}` : ""}`,
       );
     } catch (error) {
@@ -3046,11 +3048,11 @@ function ArtifactStudioEditor({
             replica.contentHash === existing.contentHash,
         )
       ) {
-        setNativeAttribution("This work already has a current copy on this computer");
+        setNativeAttribution("This artifact already has a current copy on this computer");
         return;
       }
       if (existing?.state === "pending" || existing?.state === "ahead") {
-        setNativeAttribution("This work is already syncing to this computer");
+        setNativeAttribution("This artifact is already syncing to this computer");
         return;
       }
       let fileName = stem;
@@ -4353,7 +4355,7 @@ function ArtifactStudioEditor({
     groups.push([
       {
         key: "ask",
-        label: selection ? "Ask Spectra about this" : "Ask Spectra about this work",
+        label: selection ? "Ask Spectra about this" : "Ask Spectra about this artifact",
         icon: MessageSquare,
         onSelect: () =>
           spectraBus.emit("island.compose", {
@@ -4376,7 +4378,7 @@ function ArtifactStudioEditor({
         : []),
     ]);
     groups.push([
-      { key: "about", label: "About this work", icon: Info, onSelect: () => setPaneKind("about") },
+      { key: "about", label: "About this artifact", icon: Info, onSelect: () => setPaneKind("about") },
       { key: "history", label: "Version history", icon: History, onSelect: () => setPaneKind("history") },
     ]);
     return groups;
@@ -5292,10 +5294,10 @@ function ArtifactStudioEditor({
     });
     return [
       { regionId: "work:root", label: "General comment", kind: "root" },
-      { regionId: "metadata:title", label: "Work title", kind: "metadata" },
+      { regionId: "metadata:title", label: "Artifact title", kind: "metadata" },
       {
         regionId: "metadata:summary",
-        label: "Work summary",
+        label: "Artifact summary",
         kind: "metadata",
       },
       ...semantic,
@@ -5540,8 +5542,8 @@ function ArtifactStudioEditor({
         { id: "comments", label: "Comments", icon: MessageSquare, pressed: paneKind === "comments", onSelect: () => togglePane("comments") },
         ...(detailsEligible
           ? [
-              { id: "threads", label: "Threads about this work", icon: MessagesSquare, pressed: paneKind === "threads", onSelect: () => togglePane("threads") },
-              { id: "about", label: "About this work", icon: Info, pressed: paneKind === "about", onSelect: () => togglePane("about") },
+              { id: "threads", label: "Threads about this artifact", icon: MessagesSquare, pressed: paneKind === "threads", onSelect: () => togglePane("threads") },
+              { id: "about", label: "About this artifact", icon: Info, pressed: paneKind === "about", onSelect: () => togglePane("about") },
             ]
           : []),
       ]
@@ -5662,7 +5664,7 @@ function ArtifactStudioEditor({
                   )),
             )}
             className="spectra-artifact-title min-h-6 w-full resize-none overflow-hidden bg-transparent font-display font-semibold leading-tight text-[var(--text-primary)] outline-none [field-sizing:content]"
-            placeholder="Untitled work"
+            placeholder="Untitled artifact"
           />
         </div>
         {summaryExpanded || summaryWorthShowing(presencePreview?.summary ?? summary, artifact.blueprintKey) ? (
@@ -5908,7 +5910,7 @@ function ArtifactStudioEditor({
               />
             }
             commands={headerCommands}
-            moreLabel="More work actions"
+            moreLabel="More artifact actions"
             more={
               <>
                 {nativePortableArtifact ? (
@@ -5939,7 +5941,7 @@ function ArtifactStudioEditor({
                       onShare();
                     }}
                   >
-                    <Share2 className="h-4 w-4" /> Share work
+                    <Share2 className="h-4 w-4" /> Share artifact
                   </WorkbarMenuAction>
                 ) : null}
                 {paneInRow ? null : (
@@ -5950,10 +5952,10 @@ function ArtifactStudioEditor({
                     {detailsEligible ? (
                       <>
                         <WorkbarMenuAction onSelect={() => togglePane("threads")}>
-                          <MessagesSquare className="h-4 w-4" /> Threads about this work
+                          <MessagesSquare className="h-4 w-4" /> Threads about this artifact
                         </WorkbarMenuAction>
                         <WorkbarMenuAction onSelect={() => togglePane("about")}>
-                          <Info className="h-4 w-4" /> About this work
+                          <Info className="h-4 w-4" /> About this artifact
                         </WorkbarMenuAction>
                       </>
                     ) : null}
@@ -6002,7 +6004,7 @@ function ArtifactStudioEditor({
           role="status"
           className="shrink-0 border-y border-[color-mix(in_oklab,var(--accent-gold)_24%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-gold)_6%,var(--bg-primary))] px-5 py-2 text-micro text-[var(--text-secondary)]"
         >
-          Spectra is refreshing this work’s access. You can keep editing your
+          Spectra is refreshing this artifact’s access. You can keep editing your
           local draft; it will synchronize after edit access is confirmed.
         </div>
       ) : null}
@@ -6221,7 +6223,7 @@ function ArtifactStudioEditor({
         </DismissibleArtifactNotice>
       ) : null}
       <section
-        aria-label="Work surface"
+        aria-label="Artifact surface"
         ref={presenceSurfaceRef}
         className={`spectra-artifact-main ${mainClass}`}
         data-spectra-studio={artifact._id}

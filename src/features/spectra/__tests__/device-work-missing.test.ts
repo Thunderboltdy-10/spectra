@@ -36,7 +36,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it("never seeds an empty room for a seeded work the store has lost", async () => {
+it("never seeds an empty room for a seeded artifact the store has lost", async () => {
   const methods = bridge(false);
   await expect(enterDeviceRoom("w-lost", { token: "", device: { storeId: "store-A", storageSeeded: true, seed } }))
     .rejects.toThrow(/^COLLABORATION_DEVICE_MISSING: This artifact isn't on this computer\. Bring it back from your backup\.$/);
@@ -44,7 +44,7 @@ it("never seeds an empty room for a seeded work the store has lost", async () =>
   expect(methods).not.toContain("seed");
 });
 
-it("seeds a new work that never reached the store", async () => {
+it("seeds a new artifact that never reached the store", async () => {
   const methods = bridge(false);
   await enterDeviceRoom("w-new", { token: "", device: { storeId: "store-A", storageSeeded: false, seed } });
   expect(methods).toContain("seed");
@@ -56,7 +56,7 @@ it("opens a held work without seeding it again", async () => {
   expect(methods).not.toContain("seed");
 });
 
-it("says why a work kept on a computer can't open, with the way back", () => {
+it("says why an artifact kept on a computer can't open, with the way back", () => {
   const missing = deviceProblem("COLLABORATION_DEVICE_MISSING: This artifact isn't on this computer. Bring it back from your backup.");
   expect(missing).toMatchObject({ key: "device", label: "Not on this computer", action: { label: "Bring it back" } });
   expect(missing?.detail).toBe("This artifact isn't on this computer. Bring it back from your backup.");

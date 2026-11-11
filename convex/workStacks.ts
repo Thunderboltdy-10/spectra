@@ -40,14 +40,14 @@ function requireWork(node: OrgNode) {
 export const gather = mutation({
   args: { nodeId: v.id("orgNodes"), ontoNodeId: v.id("orgNodes") },
   handler: async (ctx, args) => {
-    if (args.nodeId === args.ontoNodeId) throw new Error("A work cannot be stacked on itself.");
+    if (args.nodeId === args.ontoNodeId) throw new Error("An artifact cannot be stacked on itself.");
     const actor = await requireSpectraActor(ctx);
     const node = requireWork(await requireOwnNode(ctx, args.nodeId, actor.accountId));
     const onto = requireWork(await requireOwnNode(ctx, args.ontoNodeId, actor.accountId));
     const stackId = onto.stackId ?? onto._id;
     if (node.stackId === stackId) return { stackId };
     if ((await stackMembers(ctx, actor.accountId, stackId)).length >= STACK_LIMIT)
-      throw new Error(`A stack holds ${STACK_LIMIT} works at most. Put the rest in a folder.`);
+      throw new Error(`A stack holds ${STACK_LIMIT} artifacts at most. Put the rest in a folder.`);
     const previous = node.stackId;
     if (!onto.stackId) await ctx.db.patch(onto._id, { stackId });
     await ctx.db.patch(node._id, { stackId });

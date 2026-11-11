@@ -71,7 +71,7 @@ describe("personal analytics semantics", () => {
     expect(result.metrics.collaborationBytes).toMatchObject({ value: bytes, state: { kind: bytes === null ? "partial" : "available" } });
   });
 
-  it("excludes legacy timetables and deleted work consistently, preserving account and date scope", async () => {
+  it("excludes legacy timetables and deleted artifact consistently, preserving account and date scope", async () => {
     const { t, now, schoolId, accountId, foreignAccountId } = await setup();
     await t.run(async ctx => {
       for (const [title, blueprintKey, status, ownerAccountId, createdAt] of [
@@ -98,7 +98,7 @@ describe("personal analytics semantics", () => {
     expect(JSON.stringify(result)).not.toMatch(/PRIVATE_BODY|PRIVATE_TEXT_INDEX|Foreign|Legacy calendar/);
   });
 
-  it("keeps recent work and run lists current when aggregation is explicitly partial", async () => {
+  it("keeps recent artifact and run lists current when aggregation is explicitly partial", async () => {
     const { t, now, schoolId, accountId } = await setup();
     await t.run(async ctx => {
       for (let index = 0; index < 2_010; index++) {

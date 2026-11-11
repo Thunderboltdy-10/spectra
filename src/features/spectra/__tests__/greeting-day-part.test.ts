@@ -14,7 +14,7 @@ describe("Home's greeting and its brief agree on the part of day (F7)", () => {
 
 describe("a new account's first questions (F9)", () => {
   const now = new Date(2026, 10, 11, 9).getTime();
-  it("draw on a due date, the last work and a class, three at most", () => {
+  it("draw on a due date, the last artifact and a class, three at most", () => {
     const due = { id: "d", kind: "official_deadline", title: "Physics IA draft", startAt: now + 86_400_000 } as never;
     const questions = firstQuestions({ agenda: { today: [], upcoming: [due], open: [] }, recentWork: { title: "Waves notes" }, className: "Maths AA HL", now });
     expect(questions.map((question) => question.title)).toEqual(["Get started on Physics IA draft", "Ask about Waves notes", "Quiz me on Maths AA HL"]);

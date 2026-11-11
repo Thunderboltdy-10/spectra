@@ -48,7 +48,7 @@ function memoryStorage() {
 }
 
 describe("Workbench V2", () => {
-  it("creates valid automatic layouts for one through four work items", () => {
+  it("creates valid automatic layouts for one through four artifacts", () => {
     for (let count = 1; count <= 4; count += 1) {
       const tree = createAutomaticWorkbenchLayout(tabs.slice(0, count));
       expect(tree).not.toBeNull();
@@ -117,7 +117,7 @@ describe("Workbench V2", () => {
     expect(workspacePath("x/y")).toBe("/workspace/x%2Fy");
   });
 
-  it("declares usable panel, tile, compact and toolbar contracts for every work type", () => {
+  it("declares usable panel, tile, compact and toolbar contracts for every artifact type", () => {
     for (const definition of listWorkDefinitions()) {
       expect(definition.responsive.minInlineSize).toBeGreaterThanOrEqual(280);
       expect(definition.responsive.preferredInlineSize).toBeGreaterThanOrEqual(definition.responsive.minInlineSize);

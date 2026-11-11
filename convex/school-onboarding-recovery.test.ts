@@ -10,8 +10,12 @@ const admin = { subject: "recovery-admin", email: "replacement@example.test", em
 
 async function fixture() {
   const t = convexTest(schema, modules);
-  for (const identity of [operator, admin])
-    await t.withIdentity(identity).mutation(api.identity.registerSelf, { name: identity.subject });
+  await t.withIdentity(operator).mutation(api.identity.registerSelf, { name: operator.subject });
+  // The replacement administrator already has an account (invited earlier).
+  await t.run(async (ctx) => {
+    const now = Date.now();
+    await ctx.db.insert("accounts", { clerkId: admin.subject, email: admin.email, emailVerified: true, name: admin.subject, status: "active", createdAt: now, updatedAt: now });
+  });
   const asOperator = t.withIdentity(operator);
   const school = await asOperator.mutation(api.schools.create, {
     name: "Recovery School", slug: "recovery-school", timezone: "Europe/Madrid",

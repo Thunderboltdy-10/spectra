@@ -71,7 +71,7 @@ describe("Library row interactions", () => {
     ).toBe(false);
   });
 
-  it("publishes every selected work id, not only the last click", () => {
+  it("publishes every selected artifact id, not only the last click", () => {
     const rows = [workRow("n1", "a"), workRow("n2", "b"), workRow("n3", "c")];
     const first = selectRow(
       { ids: new Set(), anchorId: null, cursorId: null },

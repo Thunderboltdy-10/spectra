@@ -116,21 +116,21 @@ function sharedFamily<T extends OfficeWorkType>(
     ["history.redo", "Step forward through undone edits."],
     [
       "navigate.find",
-      "Find text in this work.",
+      "Find text in this artifact.",
       { requires: false, exposed: false },
     ],
     ...(extras.replace
       ? ([
           [
             "navigate.replace",
-            "Find and replace text in this work.",
+            "Find and replace text in this artifact.",
             { exposed: false },
           ],
         ] satisfies Spec<T>[])
       : []),
     [
       "review.comments",
-      "Show or hide Spectra comments on this work.",
+      "Show or hide Spectra comments on this artifact.",
       { requires: false, exposed: false },
     ],
     ...(extras.zoom
@@ -164,7 +164,7 @@ function sharedFamily<T extends OfficeWorkType>(
     ],
     [
       "export.print",
-      "Print or save a PDF of this work.",
+      "Print or save a PDF of this artifact.",
       { requires: false, exposed: false },
     ],
     ...extras.exportFormats.map(
@@ -389,7 +389,7 @@ const DOCUMENT_SPECS: Spec<"document">[] = [
   ],
   [
     "insert.reference",
-    "Show another Spectra work here without copying it.",
+    "Show another Spectra artifact here without copying it.",
     { reason: DOCUMENT_NATIVE_REASONS.embed, manifest: "add_embed" },
   ],
   [

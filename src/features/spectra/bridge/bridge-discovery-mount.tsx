@@ -20,6 +20,7 @@ import {
   BRIDGE_DISCOVERY_STORAGE_KEY,
   BRIDGE_SESSION_STORAGE_KEY,
   bridgeDiscoveryEnabled,
+  bridgePlatform,
   enableBridgeDiscovery,
   setBridgeAgentHub,
 } from "./client";
@@ -71,6 +72,13 @@ function askedWhereWorkLives() {
     return true;
   }
 }
+
+/*
+ * Bridge keeps files and live work on this computer, so it should always be
+ * there. Each time Spectra opens on a computer where it is missing or stopped,
+ * it says so once, with the way to fix it. Phones and tablets never hear it.
+ */
+let entryPromptShown = false;
 
 // One attempt per account/foreground activation, never competing in background.
 let rejoinAttempted = false;
@@ -211,11 +219,26 @@ export function BridgeConnection() {
       action: { label: "Connect", onClick: () => router.push("/devices?connect=1") },
     });
   }, [pathname, rejoinable, router, unjoined]);
+  useEffect(() => {
+    if (entryPromptShown || !checked || hasDevice === undefined || joined || discovery.kind === "running") return;
+    if (pathname.startsWith("/devices") || bridgePlatform() === "other") return;
+    entryPromptShown = true;
+    toast.warning(
+      hasDevice
+        ? "Spectra Bridge isn't running here. Open it, or get it for this computer, to keep your files and artifacts on it in step."
+        : "Get Spectra Bridge to keep your files and artifacts on this computer in step with Spectra.",
+      {
+        id: "bridge-entry",
+        duration: 20_000,
+        action: { label: hasDevice ? "Open Devices" : "Get Bridge", onClick: () => router.push("/devices") },
+      },
+    );
+  }, [checked, discovery.kind, hasDevice, joined, pathname, router]);
   // Someone who was here before there was a choice hears about it once.
   useEffect(() => {
     if (!joined || !workSettings || workSettings.storage || pathname.startsWith("/devices")) return;
     if (askedWhereWorkLives()) return;
-    toast.info("Your work can now live on this computer.", {
+    toast.info("Your artifacts can now live on this computer.", {
       id: "work-home-offer",
       action: { label: "Choose", onClick: () => router.push("/devices") },
     });

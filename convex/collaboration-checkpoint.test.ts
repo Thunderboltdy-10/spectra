@@ -145,7 +145,7 @@ describe("P5.I2 checkpoint projection and compaction", () => {
       expect(retries.some(job => /changeGroups(?:\.js)?:commitIdle$/.test(job.name) &&
         job.scheduledTime === Date.now() + 60_000)).toBe(true);
 
-      const projection = projectionWithTitle("Latest typed work");
+      const projection = projectionWithTitle("Latest typed artifact");
       await t.mutation(internal.collaborationGatewayStore.checkpoint, {
         accountId: seed.accountId, artifactId: seed.artifactId, partitionKey: "root",
         clientId: "burst-client", policyVersion: 0, roomId: seed.roomId,
@@ -157,7 +157,7 @@ describe("P5.I2 checkpoint projection and compaction", () => {
         versions: await ctx.db.query("spectraArtifactVersions").collect(),
       }));
       expect(after.group?.status).toBe("committed");
-      expect(after.artifact?.title).toBe("Latest typed work");
+      expect(after.artifact?.title).toBe("Latest typed artifact");
       expect(after.versions).toHaveLength(1);
     } finally {
       vi.useRealTimers();

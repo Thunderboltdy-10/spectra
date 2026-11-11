@@ -218,9 +218,13 @@ export const create = mutation({
     color: v.optional(v.string()),
     defaultView: v.optional(vDefaultView),
     parentNodeId: v.optional(v.id("orgNodes")),
+    /** A course syllabus (shared/syllabus) the workspace follows. */
+    syllabusId: v.optional(v.string()),
+    syllabusLevel: v.optional(v.union(v.literal("SL"), v.literal("HL"))),
   },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
+    const syllabusId = args.syllabusId?.trim().slice(0, 80) || undefined;
     const now = Date.now();
     const workspaceId = await ctx.db.insert("spectraWorkspaces", {
       ownerAccountId: actor._id,
@@ -231,6 +235,8 @@ export const create = mutation({
       color: args.color?.trim() || "var(--ink-violet)",
       status: "active",
       defaultView: args.defaultView ?? "library",
+      // Following a course makes it a class.
+      ...(syllabusId ? { isClass: true } : {}),
       createdAt: now,
       updatedAt: now,
       lastActivityAt: now,
@@ -243,6 +249,13 @@ export const create = mutation({
       if (args.parentNodeId !== undefined)
         await moveNode(ctx, node, { parentId: args.parentNodeId });
     }
+    // Its syllabus arrives as its first artifact a moment later.
+    if (syllabusId)
+      await ctx.scheduler.runAfter(0, internal.workspaceSyllabus.ensure, {
+        workspaceId,
+        syllabusId,
+        level: args.syllabusLevel,
+      });
     await incrementOperationalCounter(ctx, {
       schoolId: actor.schoolId,
       category: "workspace_created",
@@ -619,7 +632,7 @@ export const archive = mutation({
        archiving another workspace never orphans what is inside it. */
     if (isGeneralWorkspace(workspace))
       throw new Error(
-        "General cannot be archived — it is where work with no other home lives.",
+        "General cannot be archived — it is where artifacts with no other home live.",
       );
     await ctx.db.patch(args.workspaceId, {
       status: "archived",
@@ -651,7 +664,7 @@ export const permanentlyDelete = mutation({
     );
     if (isGeneralWorkspace(workspace))
       throw new Error(
-        "General cannot be deleted — it is where work with no other home lives.",
+        "General cannot be deleted — it is where artifacts with no other home live.",
       );
     const expected = `Remove ${workspace.title} permanently`;
     if (args.confirmation !== expected)

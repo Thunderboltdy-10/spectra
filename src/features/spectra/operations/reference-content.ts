@@ -80,7 +80,7 @@ export function insertOperationReference(type: string, content: unknown, referen
   if (type === "presentation") {
     const deck = normalizePresentationContent(content);
     const slide = deck.slides.at(-1);
-    if (!slide) throw new Error("A presentation needs a slide before adding linked work.");
+    if (!slide) throw new Error("A presentation needs a slide before adding linked artifact.");
     const canvasHeight = deck.settings?.aspectRatio === "4:3" ? 750 : 562.5;
     const width = 440;
     const height = 210;
@@ -101,10 +101,10 @@ export function insertOperationReference(type: string, content: unknown, referen
     if (!position) {
       targetSlide = {
         id: `reference-slide:${reference.containerRegionId}`,
-        title: "Linked work",
+        title: "Linked artifact",
         objects: [],
         sourceRefs: [],
-        accessibility: { label: "Linked work" },
+        accessibility: { label: "Linked artifact" },
       };
       position = { x: 280, y: Math.max(48, Math.round((canvasHeight - height) / 2)) };
       host = { ...deck, slides: [...deck.slides, targetSlide] };
@@ -113,7 +113,7 @@ export function insertOperationReference(type: string, content: unknown, referen
       (maximum, object) => Math.max(maximum, object.readingOrder ?? 0),
       -1,
     ) + 1;
-    const label = typeof reference.label === "string" ? reference.label : "Linked work";
+    const label = typeof reference.label === "string" ? reference.label : "Linked artifact";
     const object = {
       id: reference.containerRegionId,
       type: "embed" as const,

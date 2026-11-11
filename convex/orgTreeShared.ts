@@ -172,6 +172,7 @@ export function artifactSummaryProjection(
     blueprintKey: artifact.blueprintKey,
     ...(artifact.storageHome ? { storageHome: artifact.storageHome, storageStoreId: artifact.storageStoreId } : {}),
     ...(artifact.storageEpoch ? { storageEpoch: artifact.storageEpoch } : {}),
+    ...(artifact.syllabus ? { syllabus: { id: artifact.syllabus.id, level: artifact.syllabus.level } } : {}),
     title: artifact.title.slice(0, ARTIFACT_SUMMARY_TITLE_CHARS),
     ...(artifact.renamedFromTitle ? { renamedFromTitle: artifact.renamedFromTitle.slice(0, ARTIFACT_SUMMARY_TITLE_CHARS) } : {}),
     summary: boundedSummaryText(

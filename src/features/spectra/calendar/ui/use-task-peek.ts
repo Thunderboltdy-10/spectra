@@ -14,7 +14,8 @@ import { planWorkId } from "./calendar-plans";
 const REST_MS = 420;
 const LEAVE_MS = 260;
 
-export type TaskPeekState = { item: CalendarItem; anchor: DOMRect };
+/** `pinned`: opened by a press, so it stays until pressing elsewhere or Escape. */
+export type TaskPeekState = { item: CalendarItem; anchor: DOMRect; pinned?: boolean };
 
 /** The ManageBac record behind a school deadline, which opens as its task work. */
 export function schoolRecordOf(item: CalendarItem) {
@@ -26,6 +27,23 @@ export function isPeekable(item: CalendarItem) {
   return Boolean(planWorkId(item) || schoolRecordOf(item) || item.officialDeadlineItemId);
 }
 
+/**
+ * Something added before everything on the calendar was a task: it becomes
+ * one when pressed (calendar:adoptAsTask). Lessons and school entries do not.
+ */
+export function isAdoptable(item: CalendarItem) {
+  return (
+    ["personal_event", "task", "milestone", "reminder"].includes(item.kind) &&
+    !item.sourceLocked &&
+    !item.source &&
+    !item.seriesId &&
+    !planWorkId(item) &&
+    // Mirrors calendar:adoptAsTask: it needs a day, and a several-day stretch stays an entry.
+    item.startAt !== undefined &&
+    !(item.allDay && item.endAt !== undefined && item.endAt - item.startAt > 86_400_000)
+  );
+}
+
 export function useTaskPeek() {
   const [peek, setPeek] = useState<TaskPeekState | null>(null);
   const timer = useRef<number | undefined>(undefined);
@@ -35,24 +53,29 @@ export function useTaskPeek() {
   const rest = useCallback((item: CalendarItem, element: HTMLElement | null) => {
     window.clearTimeout(timer.current);
     if (!element) {
-      timer.current = window.setTimeout(() => setPeek(null), LEAVE_MS);
+      timer.current = window.setTimeout(() => setPeek((current) => (current?.pinned ? current : null)), LEAVE_MS);
       return;
     }
     if (!isPeekable(item)) return;
     timer.current = window.setTimeout(() => {
-      setPeek((current) => (current?.item.id === item.id ? current : { item, anchor: element.getBoundingClientRect() }));
+      setPeek((current) => (current?.pinned || current?.item.id === item.id ? current : { item, anchor: element.getBoundingClientRect() }));
     }, REST_MS);
   }, []);
 
   const hold = useCallback(() => window.clearTimeout(timer.current), []);
   const release = useCallback(() => {
     window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setPeek(null), LEAVE_MS);
+    timer.current = window.setTimeout(() => setPeek((current) => (current?.pinned ? current : null)), LEAVE_MS);
+  }, []);
+  /** A press: the task opens beside its block at once and stays. */
+  const open = useCallback((item: CalendarItem, element: HTMLElement) => {
+    window.clearTimeout(timer.current);
+    setPeek({ item, anchor: element.getBoundingClientRect(), pinned: true });
   }, []);
   const close = useCallback(() => {
     window.clearTimeout(timer.current);
     setPeek(null);
   }, []);
 
-  return { peek, rest, hold, release, close };
+  return { peek, rest, hold, release, open, close };
 }

@@ -69,7 +69,7 @@ function CommentFrame({ id, arrival, children }: { id: string; arrival?: Arrival
 const WHOLE_WORK = new Set(["work:root", "artifact:structure"]);
 
 function regionLabel(regions: readonly ArtifactCommentRegion[], regionId: string) {
-  return regions.find((region) => region.regionId === regionId)?.label ?? (WHOLE_WORK.has(regionId) ? "Whole work" : regionId);
+  return regions.find((region) => region.regionId === regionId)?.label ?? (WHOLE_WORK.has(regionId) ? "Whole artifact" : regionId);
 }
 
 function regionGone(regions: readonly ArtifactCommentRegion[], comment: SpectraArtifactComment) {
@@ -457,7 +457,7 @@ export function ArtifactCommentsPanel({
               <LocalAutocompleteTextarea surface="comment" value={body} onValueChange={(next) => { setBody(next); setMentionSearch(next.match(MENTION_BEING_TYPED)?.[1] ?? ""); }} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") void createComment(); }} placeholder={replyTo ? "Write a reply" : "Add a comment. Type @ to mention someone."} className="min-h-[52px] w-full" textareaClassName="min-h-[52px] w-full resize-none bg-transparent px-3 pt-2.5 text-caption leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" />
               {mentions.length ? <div className="flex flex-wrap gap-1 px-3 pb-1">{mentions.map((member) => <button type="button" key={member.accountId} onClick={() => setMentions((current) => current.filter((entry) => entry.accountId !== member.accountId))} className="inline-flex cursor-pointer items-center gap-1 rounded-full bg-[var(--bg-secondary)] px-2 py-0.5 text-micro text-[var(--text-secondary)]">@{member.name}<X className="size-2.5" /></button>)}</div> : null}
               <div className="flex items-center gap-1.5 px-1.5 pb-1.5">
-                {replyTo ? <span className="min-w-0 flex-1" /> : <SelectField ariaLabel="What this comment is about" value={regionId} onChange={setRegionId} options={regions.length ? regions.map((region) => ({ value: region.regionId, label: region.label })) : [{ value: "artifact:structure", label: "Whole work" }]} size="sm" className="min-w-0 flex-1" triggerClassName="w-fit max-w-full border-0 bg-transparent font-normal text-[var(--text-secondary)]" />}
+                {replyTo ? <span className="min-w-0 flex-1" /> : <SelectField ariaLabel="What this comment is about" value={regionId} onChange={setRegionId} options={regions.length ? regions.map((region) => ({ value: region.regionId, label: region.label })) : [{ value: "artifact:structure", label: "Whole artifact" }]} size="sm" className="min-w-0 flex-1" triggerClassName="w-fit max-w-full border-0 bg-transparent font-normal text-[var(--text-secondary)]" />}
                 <button type="button" disabled={!body.trim() || busy === "create"} onClick={() => void createComment()} className={buttonVariants({ variant: "primary", size: "icon" })} aria-label="Post comment">{busy === "create" ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}</button>
               </div>
             </div>

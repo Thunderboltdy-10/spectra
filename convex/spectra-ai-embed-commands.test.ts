@@ -38,7 +38,7 @@ async function seed() {
 }
 
 describe("Spectra AI embed commands", () => {
-  it("resizes, pins, follows the live work and removes through the embeds panel's mutations", async () => {
+  it("resizes, pins, follows the live artifact and removes through the embeds panel's mutations", async () => {
     const { ids, run, embed } = await seed();
     await run({ action: "resize", mode: "expanded" });
     expect((await embed())?.mode).toBe("expanded");
@@ -53,7 +53,7 @@ describe("Spectra AI embed commands", () => {
     expect((await embed())?.removedAt).toEqual(expect.any(Number));
   });
 
-  it("refuses a pin to a version of some other work", async () => {
+  it("refuses a pin to a version of some other artifact", async () => {
     const { ids, run, embed, t } = await seed();
     const hostVersion = await t.run(async (ctx) => {
       const host = (await ctx.db.get(ids.hostId))!;

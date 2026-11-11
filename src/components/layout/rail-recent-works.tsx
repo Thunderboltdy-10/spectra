@@ -123,13 +123,13 @@ export function RailRecentWorks() {
   if (works !== null && !shown.length && !searching) return null;
   const listed = matches ?? shown;
   return (
-    <section aria-label="Recent works" className="mb-3">
+    <section aria-label="Recent artifacts" className="mb-3">
       <div className="flex h-7 items-center gap-1 pl-2.5 pr-1">
         <h2 className="min-w-0 flex-1 truncate text-micro font-medium text-[var(--text-tertiary)]">Recent</h2>
-        <Tooltip label={searching ? "Stop searching" : "Search your work"} side="right">
+        <Tooltip label={searching ? "Stop searching" : "Search your artifacts"} side="right">
           <button
             type="button"
-            aria-label={searching ? "Stop searching" : "Search your work"}
+            aria-label={searching ? "Stop searching" : "Search your artifacts"}
             aria-expanded={searching}
             onClick={() => {
               if (searching) return closeSearch();
@@ -158,8 +158,8 @@ export function RailRecentWorks() {
             onBlur={() => {
               if (!term.trim()) setSearching(false);
             }}
-            placeholder="Find work by name"
-            aria-label="Find work by name"
+            placeholder="Find artifact by name"
+            aria-label="Find artifact by name"
             className="h-8 w-full rounded-control border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2.5 text-caption text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[var(--border-strong)]"
           />
         </div>

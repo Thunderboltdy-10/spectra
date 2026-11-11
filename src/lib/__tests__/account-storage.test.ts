@@ -20,7 +20,7 @@ function saveOldWorkbench() {
     .openObject({
       type: "artifact",
       id: "old-deployment-work",
-      label: "Old work",
+      label: "Old artifact",
       presentation: "tab",
     });
   localStorage.setItem(

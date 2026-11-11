@@ -137,6 +137,16 @@ export const registerSelf = mutation({
         await ctx.scheduler.runAfter(0, internal.managebac.resumeRestedSyncs, { accountId: existing._id });
       return existing._id;
     }
+    // Spectra is invitation-only: a new account needs a live invitation sent to
+    // this exact email, unless it is a platform operator's.
+    if (!isPlatformOperatorEmail(email)) {
+      const pending = await ctx.db
+        .query("membershipInvitations")
+        .withIndex("by_email_status", (q) => q.eq("email", email).eq("status", "pending"))
+        .take(20);
+      if (!pending.some((invitation) => invitation.expiresAt > now))
+        throw new Error("IDENTITY_NOT_INVITED: No Spectra invitation was sent to this email.");
+    }
     const accountId = await ctx.db.insert("accounts", {
       clerkId,
       email,

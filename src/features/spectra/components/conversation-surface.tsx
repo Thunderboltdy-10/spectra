@@ -85,9 +85,9 @@ function operationLabel(
   if (operation.type === "artifact.create")
     return `${proposed ? "Create" : "Created"} ${title ?? "work"}`;
   if (operation.type === "artifact.update")
-    return `${proposed ? "Update" : "Updated"} ${target ?? "focused work"}`;
+    return `${proposed ? "Update" : "Updated"} ${target ?? "focused artifact"}`;
   if (operation.type === "artifact.link")
-    return proposed ? "Link the new work" : "Linked the new work";
+    return proposed ? "Link the new artifact" : "Linked the new artifact";
   if (operation.type === "workspaceItem.add")
     return proposed ? "Add to workspace" : "Added to workspace";
   if (operation.type === "workspaceItem.hide")
@@ -491,7 +491,7 @@ export function ArtifactConflictResolution({
           </div>
         ) : (
           <p className="px-3 py-3 text-micro text-[var(--text-secondary)]">
-            No preview is available for this part. Open the work to look at it before you choose.
+            No preview is available for this part. Open the artifact to look at it before you choose.
           </p>
         )
       ) : error ? null : (
@@ -966,8 +966,8 @@ function RunOutcomeNote({
         </p>
         <p className="mt-0.5 text-micro leading-4 text-[var(--text-tertiary)]">
           {retryAvailable
-            ? "Completed work stays saved. Retry continues only the unfinished part."
-            : "Completed work stays saved. Continue in this thread to finish the remaining part."}
+            ? "Completed artifact stays saved. Retry continues only the unfinished part."
+            : "Completed artifact stays saved. Continue in this thread to finish the remaining part."}
         </p>
       </div>
       {onRetry ? (
@@ -1581,7 +1581,7 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
               onChange={(event) => setShareComment(event.target.checked)}
             />
             Share this comment with the agent creator. The rating and category
-            are aggregated; your prompt, thread, memory, and work are never shared.
+            are aggregated; your prompt, thread, memory, and artifact are never shared.
           </label>
           <div className="flex justify-end gap-1.5">
             <button
@@ -1662,8 +1662,8 @@ function ArtifactResult({
             onOpen?.(artifact._id);
           }}
           className="flex h-8 w-8 items-center justify-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
-          aria-label="Open work"
-          title="Open work"
+          aria-label="Open artifact"
+          title="Open artifact"
         >
           <ExternalLink className="h-3.5 w-3.5" />
         </button>
@@ -1705,7 +1705,7 @@ function ArtifactResult({
                     toast.error(
                       error instanceof Error
                         ? error.message
-                        : "Could not add work.",
+                        : "Could not add artifact.",
                     ),
                   )
                   .finally(() => setBusy(false));

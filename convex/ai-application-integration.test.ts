@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
+import aggregateTest from "@convex-dev/aggregate/test";
 import { makeFunctionReference } from "convex/server";
 import { createHash } from "node:crypto";
 import schema from "./schema";
@@ -11,6 +12,7 @@ const execute = makeFunctionReference<"mutation">("spectraApplicationWrites:exec
 
 async function fixture() {
   const t = convexTest(schema, modules);
+  for (const name of ["orgNodeCountByType", "orgNodeCountByWorkspace", "orgNodeCountByParent"]) aggregateTest.register(t, name);
   const ids = await t.run(async ctx => {
     const now = Date.now();
     const schoolId = await ctx.db.insert("schools", { name: "AI integration", slug: "ai-integration", verifiedDomains: [], status: "active", timezone: "Europe/Madrid", policyVersion: 1, createdAt: now, updatedAt: now });

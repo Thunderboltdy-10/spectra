@@ -31,7 +31,7 @@ The files:
 Keep something only if it would still matter in a month, and a good assistant would be embarrassed to forget it.
 - Keep: who they are, stable facts about their life at school or work, goals and dates, standing likes and dislikes.
 - Keep corrections of how Spectra behaved, at the narrowest scope the user meant. A complaint about one document or class is scoped to that document or class. It becomes "Everywhere" only if they said always, or the same complaint is already noted for another context.
-- Do not keep: the task itself, things that are already in their work, what you inferred from a single request, anything said in passing, one-off wording choices.
+- Do not keep: the task itself, things that are already in their artifact, what you inferred from a single request, anything said in passing, one-off wording choices.
 - Never keep passwords, health, money, or anything about other people's private lives unless the user plainly asked you to remember it.
 - If what they said replaces a line, change that line. Do not add a second one that disagrees with it.
 

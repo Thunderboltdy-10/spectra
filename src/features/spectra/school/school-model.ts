@@ -155,7 +155,7 @@ export type TaskGroup = { key: string; className: string; terms: { term: string;
 export function groupPastTasks(tasks: readonly SchoolTask[]): TaskGroup[] {
   const classes = new Map<string, TaskGroup>();
   for (const task of tasks) {
-    const className = task.className ?? "Other work";
+    const className = task.className ?? "Other";
     const key = task.providerClassId ?? className;
     const group = classes.get(key) ?? { key, className, terms: [] };
     classes.set(key, group);

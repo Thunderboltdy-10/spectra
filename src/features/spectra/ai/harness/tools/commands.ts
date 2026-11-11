@@ -77,7 +77,7 @@ export function runOnlyTools(session: HarnessSession): AnyHarnessTool[] {
     }),
     commandTool(session, {
       name: "insert_reference",
-      description: "Insert a live reference to one work (targetWorkId) inside another (hostWorkId), with an optional label. In a document it goes at the end unless after names a heading: then it goes at the end of that section, beside the words it belongs to.",
+      description: "Insert a live reference to one artifact (targetWorkId) inside another (hostWorkId), with an optional label. In a document it goes at the end unless after names a heading: then it goes at the end of that section, beside the words it belongs to.",
       parameters: {
         type: "object",
         properties: { hostWorkId: { type: "string" }, targetWorkId: { type: "string" }, label: { type: "string" }, after: { type: "string", description: "A document heading; the reference goes at the end of its section." } },

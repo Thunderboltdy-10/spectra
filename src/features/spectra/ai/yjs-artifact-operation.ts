@@ -455,9 +455,9 @@ async function createCollaborationSession(
       throw new Error("AI_ARTIFACT_PERMISSION_REVOKED: Access was removed before the live document could be loaded.");
     const summary = await deviceStoreCall<{ storeId?: string }>(actor.accountId, "summary", {}, 4_000).catch(() => null);
     if (!summary)
-      throw new Error("DEVICE_WORK_UNAVAILABLE: This work is kept on the person's computer, and Spectra Bridge isn't reachable right now.");
+      throw new Error("DEVICE_WORK_UNAVAILABLE: This artifact is kept on the person's computer, and Spectra Bridge isn't reachable right now.");
     if (summary.storeId !== artifact.storageStoreId)
-      throw new Error("DEVICE_WORK_ELSEWHERE: This work is kept on another of the person's computers, which isn't reachable from here.");
+      throw new Error("DEVICE_WORK_ELSEWHERE: This artifact is kept on another of the person's computers, which isn't reachable from here.");
     const baseline = deviceBaseline({
       typeKey,
       title: artifact.title,
@@ -1558,13 +1558,13 @@ async function applyAiArtifactMutationAttempt(params: {
       const desiredContent = validateAiArtifactWriteContent(typeKey, desired.content);
       const nextSummary = refreshGeneratedArtifactSummary({
         blueprintKey: typeKey,
-        title: desired.title.trim() || "Untitled work",
+        title: desired.title.trim() || "Untitled artifact",
         content: desiredContent,
         currentSummary: base.summary,
         nextSummary: desired.summary,
       });
       return {
-        title: desired.title.trim() || "Untitled work",
+        title: desired.title.trim() || "Untitled artifact",
         ...(nextSummary ? { summary: nextSummary } : {}),
         tags: [
           ...new Set(desired.tags.map((tag) => tag.trim()).filter(Boolean)),

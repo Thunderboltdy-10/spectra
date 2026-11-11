@@ -166,7 +166,7 @@ const STUDIO_SPECS: readonly StudioSpec[] = [
   { type: "whiteboard", localId: "tool-frame", description: "Add a frame.", requires: "edit" },
   { type: "whiteboard", localId: "tool-card", description: "Add a card.", requires: "edit" },
   { type: "whiteboard", localId: "tool-table", description: "Add a table.", requires: "edit" },
-  { type: "whiteboard", localId: "tool-embed", description: "Embed other work.", requires: "edit" },
+  { type: "whiteboard", localId: "tool-embed", description: "Embed other artifacts.", requires: "edit" },
   { type: "whiteboard", localId: "add-image", description: "Add an image.", requires: "edit" },
   { type: "whiteboard", localId: "import", description: "Import a board.", requires: "edit" },
   { type: "whiteboard", localId: "dots", description: "Show or hide the grid as dots on the board.", requires: "edit" },

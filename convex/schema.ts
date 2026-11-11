@@ -1666,6 +1666,8 @@ export default defineSchema({
     planTaskId: v.optional(v.string()),
     taskItemId: v.optional(v.id("calendarItems")),
     officialDeadlineItemId: v.optional(v.id("calendarItems")),
+    /** Brought in from an imported calendar: an entry to see, never made into a task. */
+    plain: v.optional(v.boolean()),
     linkedArtifactIds: v.array(v.id("spectraArtifacts")),
     recurrence: v.optional(v.string()),
     /** Shared by the events of one repeating lesson. Each is a real event, so one can move or go alone. */
@@ -1759,6 +1761,7 @@ export default defineSchema({
     location: v.optional(v.string()),
     teacher: v.optional(v.string()),
     classId: v.optional(v.string()),
+    seriesId: v.optional(v.string()),
     planArtifactId: v.optional(v.id("spectraArtifacts")),
     planTaskId: v.optional(v.string()),
     taskItemId: v.optional(v.id("calendarItems")),
@@ -1956,6 +1959,15 @@ export default defineSchema({
     icon: v.optional(v.string()),
     color: v.optional(v.string()),
     starterKey: v.optional(v.string()),
+    /** The course syllabus this workspace follows (shared/syllabus) and the read-only artifact that shows it. */
+    syllabus: v.optional(v.object({
+      id: v.string(),
+      level: v.optional(v.union(v.literal("SL"), v.literal("HL"))),
+      artifactId: v.optional(v.id("spectraArtifacts")),
+      version: v.optional(v.string()),
+    })),
+    /** SYLLABUS_BUNDLE_VERSION last checked here, so a class sync skips the check when nothing changed. */
+    syllabusBundle: v.optional(v.string()),
     // A class: the student's chosen kind for the workspace. Absent, a
     // workspace made for a ManageBac class is one and any other is not.
     isClass: v.optional(v.boolean()),
@@ -2102,6 +2114,8 @@ export default defineSchema({
     storageEpoch: v.optional(v.number()),
     // Set by a rename until the live document says something else.
     renamedFromTitle: v.optional(v.string()),
+    /** An official course syllabus (shared/syllabus). Read-only; refreshed when the bundle changes. */
+    syllabus: v.optional(v.object({ id: v.string(), level: v.optional(v.union(v.literal("SL"), v.literal("HL"))), version: v.string() })),
     ownerAccountId: v.id("accounts"),
     schoolId: v.optional(v.id("schools")),
     resourceClass: v.optional(

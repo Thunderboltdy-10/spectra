@@ -179,7 +179,7 @@ describe("planJoinLateArrival", () => {
     __resetRunLedger();
   });
 
-  it("walks unseen work in route order rather than arrival order", () => {
+  it("walks unseen artifact in route order rather than arrival order", () => {
     recordRunEvent({ type: "run_created", runId: "run-1" });
     expect(planJoinLateArrival("run-1", changedPaths)).toEqual([
       "/questions/0/prompt",
@@ -204,7 +204,7 @@ describe("planJoinLateArrival", () => {
     expect(planJoinLateArrival("run-1", changedPaths)).not.toEqual([]);
   });
 
-  it("skips work this client already watched", () => {
+  it("skips artifact this client already watched", () => {
     recordRunEvent({ type: "run_created", runId: "run-1" });
     markOperationSeen("run-1", "join:/questions/0/prompt");
     expect(planJoinLateArrival("run-1", changedPaths)).toEqual([

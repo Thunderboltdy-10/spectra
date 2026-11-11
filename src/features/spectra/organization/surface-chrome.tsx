@@ -405,7 +405,7 @@ export function SurfaceNewMenu({
           <DropdownMenuSeparator />
         ) : null}
         {onNewFolder || onNewWorkspace || onImport || onSyncFolder || onSyncFiles ? (
-          <DropdownMenuLabel>New work here</DropdownMenuLabel>
+          <DropdownMenuLabel>New artifact here</DropdownMenuLabel>
         ) : null}
         {blueprintChoices.map((choice) => (
           <DropdownMenuItem
@@ -432,7 +432,7 @@ export function SurfaceSelectToggle({ selecting, onToggle }: { selecting: boolea
       type="button"
       data-library-select
       aria-pressed={selecting}
-      title={selecting ? "Stop picking" : "Pick several works to ask about or lay side by side"}
+      title={selecting ? "Stop picking" : "Pick several artifacts to ask about or lay side by side"}
       aria-label={selecting ? "Done picking" : "Select"}
       onClick={onToggle}
       className={cn(controlClass, selecting && controlActiveClass)}

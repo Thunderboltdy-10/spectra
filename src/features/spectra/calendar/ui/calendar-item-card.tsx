@@ -145,7 +145,7 @@ function CalendarItemDetails({
             key={workId}
             icon="openSide"
             size="compact"
-            label={workId === item.planArtifactId ? "Open plan" : "Open linked work"}
+            label={workId === item.planArtifactId ? "Open plan" : "Open linked artifact"}
             data-life-launch
             onClick={() => void spectraBus.command("work.open", { workId })}
           />

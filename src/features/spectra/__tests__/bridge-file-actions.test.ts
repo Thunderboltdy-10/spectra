@@ -14,7 +14,7 @@ import {
 
 const FILE = { grantId: "grant_ab", relativePath: "Essays/Cells.docx" };
 
-describe("a work's file on this computer", () => {
+describe("an artifact's file on this computer", () => {
   afterEach(() => {
     clearBridgeSession();
     vi.unstubAllGlobals();
@@ -52,7 +52,7 @@ describe("a work's file on this computer", () => {
     await expect(revealBridgeFile(FILE)).rejects.toThrow("Connect this computer before showing its files.");
   });
 
-  it("offers both actions in the work's status when its folder is on this computer", () => {
+  it("offers both actions in the artifact's status when its folder is on this computer", () => {
     const studio = fs.readFileSync(path.join(process.cwd(), "src/features/spectra/components/artifact-studio.tsx"), "utf8");
     expect(studio).toContain('"open-in-office": Boolean(statusLocalFile) && nativeOfficeDocument');
     expect(studio).toContain('"show-in-folder": Boolean(statusLocalFile)');

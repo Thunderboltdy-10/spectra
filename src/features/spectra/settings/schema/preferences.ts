@@ -28,7 +28,7 @@ const aiSchema = z.object({
   /** The island at rest: the prism (default), or nothing until the pointer reaches the bottom edge. */
   islandWake: z.enum(["prism", "edge"]).default("prism"),
   /** The middle the island keeps to: of the page between the columns, or of the whole screen. */
-  islandCentre: z.enum(["page", "screen"]).default("page"),
+  islandCentre: z.enum(["page", "screen"]).default("screen"),
   autoRouteSpecialists: z.boolean().default(true),
   parallelSafeReads: z.boolean().default(true),
   researchDepth: z.enum(["automatic", "quick", "verified", "deep"]).default("automatic"),

@@ -451,7 +451,7 @@ export class StoryWorld {
       case "artifact": {
         const id = params.get("artifactId") ?? "";
         const work = this.works.get(id) ?? this.outside.get(id);
-        return work ? { artifact: work } : json(404, { error: "This work is not in the story." });
+        return work ? { artifact: work } : json(404, { error: "This artifact is not in the story." });
       }
       case "search": {
         const query = (params.get("search") ?? "").toLowerCase();

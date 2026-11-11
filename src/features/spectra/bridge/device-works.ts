@@ -203,7 +203,7 @@ async function sendWorkToCloud(
     body: JSON.stringify({ action: "workMovedToCloud", artifactId, ...work }),
   });
   assertAccountStorageRevision(revision);
-  if (!response.ok) throw new Error("This work could not be moved to the cloud.");
+  if (!response.ok) throw new Error("This artifact could not be moved to the cloud.");
 }
 
 /** Takes a cloud work onto this computer, and only then lets go of the cloud's copy. */
@@ -232,7 +232,7 @@ export async function moveWorkToDevice(
   if (!response.ok) {
     await callWorks("remove", { artifactId: work._id }).catch(() => undefined);
     assertAccountStorageRevision(revision);
-    throw new Error("This work could not be moved to this computer.");
+    throw new Error("This artifact could not be moved to this computer.");
   }
   knownOnDevice.add(work._id);
   seeded.add(work._id);
@@ -245,7 +245,7 @@ export async function moveWorkToCloud(artifactId: string) {
   assertAccountStorageRevision(revision); deviceState();
   const stored = await callWorks<DeviceWorkRow | null>("get", { artifactId });
   assertAccountStorageRevision(revision);
-  if (!stored?.blueprintKey) throw new Error("This work isn't on this computer.");
+  if (!stored?.blueprintKey) throw new Error("This artifact isn't on this computer.");
   await sendWorkToCloud(artifactId, {
     blueprintKey: stored.blueprintKey,
     title: stored.title ?? "Untitled",
@@ -303,9 +303,9 @@ function versionSummary(artifactId: string, version: StoredVersion) {
   const label =
     version.summary ??
     (version.source === "before_ai"
-      ? "Your work before the AI's edit"
+      ? "Your artifact before the AI's edit"
       : version.source === "before_restore"
-        ? "Your work before restore"
+        ? "Your artifact before restore"
         : version.source === "ai"
           ? "AI edit"
           : version.source === "restore"
@@ -350,20 +350,20 @@ export async function enterDeviceRoom<T extends { token: string; device?: { stor
   knownOnDevice.add(artifactId);
   if (!loadBridgeSession())
     throw new Error(
-      "COLLABORATION_DEVICE_UNAVAILABLE: This work is kept on a computer through Spectra Bridge, which isn't connected to this browser.",
+      "COLLABORATION_DEVICE_UNAVAILABLE: This artifact is kept on a computer through Spectra Bridge, which isn't connected to this browser.",
     );
   let summary: DeviceStoreSummary;
   try {
     summary = await deviceStoreSummary();
   } catch {
     throw new Error(
-      "COLLABORATION_DEVICE_UNAVAILABLE: This work is kept on this computer and Spectra Bridge isn't answering. Open it and your work comes straight back.",
+      "COLLABORATION_DEVICE_UNAVAILABLE: This artifact is kept on this computer and Spectra Bridge isn't answering. Open it and your artifact comes straight back.",
     );
   }
   assertAccountStorageRevision(revision);
   if (summary.storeId !== device.storeId)
     throw new Error(
-      "COLLABORATION_DEVICE_ELSEWHERE: This work is kept on another of your computers. Open it there, or move it to the cloud from that computer.",
+      "COLLABORATION_DEVICE_ELSEWHERE: This artifact is kept on another of your computers. Open it there, or move it to the cloud from that computer.",
     );
   if (!seeded.has(artifactId)) {
     // Seeding makes a new work; it never stands in for one this computer has lost.

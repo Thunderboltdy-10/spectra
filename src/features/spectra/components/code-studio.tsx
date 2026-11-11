@@ -1814,7 +1814,7 @@ export function CodeStudio({
               : result.report.warnings.length
                 ? "adapted"
                 : "exact",
-            message: `${result.report.imported} source file${result.report.imported === 1 ? "" : "s"} entered the live work.`,
+            message: `${result.report.imported} source file${result.report.imported === 1 ? "" : "s"} entered the live artifact.`,
           },
           ...(result.assets.length
             ? [
@@ -3722,7 +3722,7 @@ function CodeSettings({
       <nav className="code-settings-nav" aria-label="Code settings sections">
         <div className="code-settings-nav-heading">
           <span>Configuration</span>
-          <strong>Code work</strong>
+          <strong>Code artifact</strong>
           <button
             type="button"
             className="code-settings-close"
@@ -3865,7 +3865,7 @@ function CodeSettings({
               <button
                 type="button"
                 disabled={readOnly}
-                title="Let the preview grow to what the work draws"
+                title="Let the preview grow to what the artifact draws"
                 onClick={() =>
                   onChange((draft) => {
                     draft.preview = { ...draft.preview, height: undefined };
@@ -3875,7 +3875,7 @@ function CodeSettings({
                 {content.preview.height}px, fit instead
               </button>
             ) : (
-              <span>Fits the work</span>
+              <span>Fits the artifact</span>
             )}
           </label>
         </section>
@@ -4648,8 +4648,8 @@ function CodeSettings({
             <div>
               <h3>Permissioned resources</h3>
               <p>
-                Connect work or Sheets ranges you have access to. Preview
-                code reads them through the Spectra SDK; secrets and details of unrelated work are never included.
+                Connect artifact or Sheets ranges you have access to. Preview
+                code reads them through the Spectra SDK; secrets and details of unrelated artifact are never included.
               </p>
             </div>
             <span className="rounded-chip border border-[var(--border-default)] px-2 py-1 text-micro font-semibold text-[var(--text-tertiary)]">
@@ -4719,15 +4719,15 @@ function CodeSettings({
             })}
             {(content.resourceBindings ?? []).length === 0 ? (
               <div className="rounded-control border border-dashed border-[var(--border-default)] px-4 py-5 text-center text-micro leading-4 text-[var(--text-tertiary)]">
-                No resources are exposed to this runtime. Importing work in the editor never gives code access to it automatically.
+                No resources are exposed to this runtime. Importing artifact in the editor never gives code access to it automatically.
               </div>
             ) : null}
           </div>
           <div className="mt-3 grid gap-2 rounded-card bg-[var(--bg-secondary)] p-3 sm:grid-cols-[minmax(0,1fr)_minmax(120px,.35fr)_auto]">
             <SelectField
-              ariaLabel="Work to connect"
+              ariaLabel="Artifact to connect"
               size="sm"
-              placeholder="Choose accessible work"
+              placeholder="Choose accessible artifact"
               value={bindingArtifactId}
               disabled={readOnly}
               options={availableArtifacts.map((artifact) => ({
@@ -4985,7 +4985,7 @@ function CodeSettings({
         <ConfirmDialog
           open
           title="Revoke this asset everywhere?"
-          detail={`${pendingAssetRevocation.label} will stop loading in the current work, retained history, and every published or embedded build. This security action cannot be undone.`}
+          detail={`${pendingAssetRevocation.label} will stop loading in the current artifact, retained history, and every published or embedded build. This security action cannot be undone.`}
           confirmLabel={
             revokingAssetId === pendingAssetRevocation.assetId
               ? "Revoking..."

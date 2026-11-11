@@ -864,13 +864,13 @@ export function presentationCommandBindings(
     },
     {
       id: "insert.embed",
-      label: "Linked work",
+      label: "Linked artifact",
       icon: Link2,
       tab: "Insert",
       group: "Links",
       priority: "secondary",
       requires: "edit",
-      hint: "Show another Spectra work live on this slide",
+      hint: "Show another Spectra artifact live on this slide",
       strictNative: { available: false, reason: PRESENTATION_STRICT_REASONS.embed },
       onSelect: () => handlers.insert.embed(),
     },
@@ -2073,8 +2073,8 @@ export function presentationCommandBindings(
       requires: "edit",
       disabled: !selection.bindable,
       hint: selection.bindable
-        ? "Bind this object to another Spectra work, so the slide follows the numbers"
-        : "Charts and linked works carry a source",
+        ? "Bind this object to another Spectra artifact, so the slide follows the numbers"
+        : "Charts and linked artifacts carry a source",
       touches: ["charts"],
       onSelect: (value) => handlers.object.bindSource(stringParam(value) ?? null),
     },
@@ -2103,7 +2103,7 @@ export function presentationCommandBindings(
       disabled: !selection.bindable,
       hint: selection.bindable
         ? "Reads the source again and redraws the chart"
-        : "Charts and linked works carry a source",
+        : "Charts and linked artifacts carry a source",
       touches: ["charts"],
       manifestOps: ["generate_chart"],
       onSelect: () => handlers.object.refreshChart(),

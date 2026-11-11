@@ -59,7 +59,7 @@ async function showAiPublicLink(runId: string, operationId: string) {
   }
   toast.success("Spectra made a public link", {
     id: `ai-public-link:${operationId}`,
-    description: "Anyone with the link can view this work. Turn it off any time in Share.",
+    description: "Anyone with the link can view this artifact. Turn it off any time in Share.",
     duration: Infinity,
     closeButton: true,
     action: {
@@ -378,7 +378,7 @@ function rememberEvent(event: SpectraAiUiEvent): void {
       ...(event.runId ? { actorId: event.runId } : {}),
       artifactId: targetId,
       ...(region ? { region } : {}),
-      note: "Opening the requested work",
+      note: "Opening the requested artifact",
     });
     return;
   }

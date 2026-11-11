@@ -55,6 +55,13 @@ function reminderRows(content: Record<string, unknown>) {
     : [];
 }
 
+/** What a task's reminders count back from: its start when it fills hours, otherwise when it is due. */
+function reminderAnchor(content: Record<string, unknown>) {
+  const due = Number(content.dueAt);
+  const start = Number(content.startAt);
+  return Number.isFinite(start) && Number.isFinite(due) && start < due ? start : due;
+}
+
 function sourceFingerprint(artifact: Doc<"spectraArtifacts"> | null) {
   if (!artifact || artifact.blueprintKey !== "planner_task") return null;
   const content = object(artifact.content);
@@ -67,6 +74,7 @@ function sourceFingerprint(artifact: Doc<"spectraArtifacts"> | null) {
     taskTitle: content.taskTitle,
     taskStatus: content.status,
     dueAt: content.dueAt,
+    startAt: content.startAt,
     targetDueAt: overlay.targetDueAt,
     assignees: accountIds(content.assignees).sort(),
     reminders: reminderRows(content),
@@ -156,7 +164,7 @@ export const reconcileArtifact = internalMutation({
       return { stale: false, scheduled: 0, cancelled: existing.length };
     }
     const content = object(artifact.content);
-    const dueAtBase = Number(content.dueAt);
+    const dueAtBase = reminderAnchor(content);
     const reminders = reminderRows(content);
     if (
       content.status === "done" ||
@@ -336,7 +344,7 @@ async function rowIsCurrent(
     row.recipientAccountId === artifact.ownerAccountId &&
     Number.isFinite(Number(overlay.targetDueAt))
       ? Number(overlay.targetDueAt)
-      : Number(content.dueAt);
+      : reminderAnchor(content);
   if (!Number.isFinite(dueAt)) return false;
   return (
     dueAt === row.dueAt &&

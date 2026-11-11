@@ -63,7 +63,7 @@ export function decideAiAuthority(input: AiAuthorityInput): AiAuthorityResult {
       return {
         decision: "proceed",
         reason:
-          "Reversible content work may proceed under the existing artifact claims and history.",
+          "Reversible content changes may proceed under the existing artifact claims and history.",
       };
     case "settings":
       return {
@@ -80,7 +80,7 @@ export function decideAiAuthority(input: AiAuthorityInput): AiAuthorityResult {
           }
         : {
             decision: "confirm",
-            reason: "Deleting organizational work requires explicit approval.",
+            reason: "Deleting organizational artifact requires explicit approval.",
           };
     case "tree":
       return {

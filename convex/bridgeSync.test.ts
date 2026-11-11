@@ -55,13 +55,13 @@ describe("individual file mounts", () => {
     }
     await expect(t.mutation(api.bridgeSync.registerMount, selection({ fileCount: 2 }))).rejects.toThrow("BRIDGE_FILE_SELECTION_INVALID");
   });
-  it("carries a file chosen alone into a folder that later covers it, as one work", async () => {
+  it("carries a file chosen alone into a folder that later covers it, as one artifact", async () => {
     const t = setupTest();
     const fixture = await seedBridge(t);
     const fileMount = await t.mutation(api.bridgeSync.registerMount, selection());
     const resource = { localResourceId: "lr_" + "f".repeat(16), relativePath: "Chosen.docx", size: 12, contentHash: "a".repeat(64), nativeFormat: "docx" };
     const original = (await t.mutation(api.bridgeSync.discoverResourcesPage, { credential, mountId: fileMount, resources: [resource] })).registrations[0];
-    if (!("workId" in original) || !original.workId) throw new Error("Expected selected file work");
+    if (!("workId" in original) || !original.workId) throw new Error("Expected selected file artifact");
     const folderMount = await t.mutation(api.bridgeSync.registerMount, {
       credential, rootLabel: "Unit 1", grantId: "grant_b1", rootKey: "1".repeat(64),
       scanId: crypto.randomUUID(), fileCount: 1, doubleSyncRisk: false, ownerLockPaths: [],
@@ -102,13 +102,13 @@ describe("individual file mounts", () => {
     const second = await asUser.mutation(api.orgTree.createReference, { targetNodeId: found!.nodeId as Id<"orgNodes">, parentId: root!.nodeId });
     expect(second.nodeId).toBe(first.nodeId);
   });
-  it("leaves work filed elsewhere where its owner put it when a folder takes it over", async () => {
+  it("leaves artifact filed elsewhere where its owner put it when a folder takes it over", async () => {
     const t = setupTest();
     const fixture = await seedBridge(t);
     const fileMount = await t.mutation(api.bridgeSync.registerMount, selection());
     const resource = { localResourceId: "lr_" + "e".repeat(16), relativePath: "Chosen.docx", size: 12, contentHash: "b".repeat(64), nativeFormat: "docx" };
     const original = (await t.mutation(api.bridgeSync.discoverResourcesPage, { credential, mountId: fileMount, resources: [resource] })).registrations[0];
-    if (!("workId" in original) || !original.workId) throw new Error("Expected selected file work");
+    if (!("workId" in original) || !original.workId) throw new Error("Expected selected file artifact");
     const filed = await t.run(async (ctx) => {
       const node = await findPrimaryNode(ctx, fixture.accountId, "work", String(original.workId));
       await ctx.db.patch(node!._id, { parentId: null });
@@ -121,14 +121,14 @@ describe("individual file mounts", () => {
     await t.mutation(api.bridgeSync.discoverResourcesPage, { credential, mountId: folderMount, resources: [{ ...resource, relativePath: "Chosen.docx" }] });
     expect((await t.run((ctx) => ctx.db.get(filed)))?.parentId).toBeNull();
   });
-  it("keeps Library renames independent and preserves the work after re-pairing a retired device", async () => {
+  it("keeps Library renames independent and preserves the artifact after re-pairing a retired device", async () => {
     const t = setupTest();
     const fixture = await seedBridge(t);
     const args = selection();
     const mountId = await t.mutation(api.bridgeSync.registerMount, args);
     const resource = { localResourceId: "lr_" + "f".repeat(16), relativePath: "Chosen.docx", size: 12, contentHash: "a".repeat(64), nativeFormat: "docx" };
     const original = (await t.mutation(api.bridgeSync.discoverResourcesPage, { credential, mountId, resources: [resource] })).registrations[0];
-    if (!("workId" in original) || !original.workId) throw new Error("Expected selected file work");
+    if (!("workId" in original) || !original.workId) throw new Error("Expected selected file artifact");
     const workId = original.workId;
     const requestId = await t.run(ctx => enqueueStructureRequest(ctx, fixture.accountId, workId, "rename", "Chosen.docx", "Renamed.docx"));
     expect(await t.run(ctx => ctx.db.get(requestId!))).toMatchObject({ state: "ignored", explanation: "This file was selected on its own. Its name and location on disk stay the same." });
@@ -371,12 +371,12 @@ describe("Bridge structure receipts", () => {
     });
   });
 
-  it.each(["deleted work", "revoked permission", "detached mount", "changed base", "reassigned resource"])("rejects refresh and completion after %s", async (change) => {
+  it.each(["deleted artifact", "revoked permission", "detached mount", "changed base", "reassigned resource"])("rejects refresh and completion after %s", async (change) => {
     const t = setupTest();
     const fixture = await seedStructure(t);
     const claim = await claimStructure(t);
     await t.run(async ctx => {
-      if (change === "deleted work") await ctx.db.patch(fixture.workId, { status: "deleted" });
+      if (change === "deleted artifact") await ctx.db.patch(fixture.workId, { status: "deleted" });
       if (change === "revoked permission") {
         const ownerAccountId = await ctx.db.insert("accounts", {
           clerkId: "new-structure-owner", email: "other@example.test", emailVerified: true,
@@ -392,7 +392,7 @@ describe("Bridge structure receipts", () => {
     expect(await t.mutation(api.bridgeStructure.refreshClaim, claim)).toEqual({ valid: false });
     expect(await t.run(ctx => ctx.db.get(fixture.requestId))).toEqual(before);
     expect(await t.mutation(api.bridgeStructure.complete, { ...claim, outcome: "verified", actualRelativePath: "renamed.docx" }))
-      .toEqual({ state: ["deleted work", "revoked permission"].includes(change) ? "failed" : "conflicted" });
+      .toEqual({ state: ["deleted artifact", "revoked permission"].includes(change) ? "failed" : "conflicted" });
     expect((await t.run(ctx => ctx.db.get(fixture.replicaId)))?.relativePath).toBe("candidate-0.docx");
   });
 
@@ -461,7 +461,7 @@ describe("Bridge structure receipts", () => {
       .toEqual({ state: "verified" });
   });
 
-  it("captures the queued base and rejects a replica belonging to another work", async () => {
+  it("captures the queued base and rejects a replica belonging to another artifact", async () => {
     const t = setupTest();
     const fixture = await seedStructure(t);
     const account = await t.run(ctx => ctx.db.get(fixture.accountId));
@@ -940,7 +940,7 @@ async function seedOfficeLockedWrite(
 }
 
 describe("Bridge incremental cloud seam", () => {
-  it("fails pending native writes after the work is deleted and releases replica payload refs", async () => {
+  it("fails pending native writes after the artifact is deleted and releases replica payload refs", async () => {
     const t = setupTest();
     const seeded = await seedDeletedWrite(t, "pending");
 
@@ -964,7 +964,7 @@ describe("Bridge incremental cloud seam", () => {
     expect(replica?.projectionBasePayloadRef).toBeUndefined();
   });
 
-  it("fails an in-flight native write completion after the work is deleted", async () => {
+  it("fails an in-flight native write completion after the artifact is deleted", async () => {
     const t = setupTest();
     const seeded = await seedDeletedWrite(t, "claimed");
 
@@ -986,7 +986,7 @@ describe("Bridge incremental cloud seam", () => {
     expect(replica?.payloadRef).toBeUndefined();
   });
 
-  it("does not claim a pending native structure operation after the work is deleted", async () => {
+  it("does not claim a pending native structure operation after the artifact is deleted", async () => {
     const t = setupTest();
     const fixture = await seedBridge(t);
     const discovery = await t.mutation(api.bridgeSync.discoverResourcesPage, {
@@ -1019,7 +1019,7 @@ describe("Bridge incremental cloud seam", () => {
         sourceRelativePath: "Deleted/Essay.docx",
         idempotencyKey: `structure-deleted-${crypto.randomUUID()}`,
         state: "pending",
-        explanation: "Delete the file after deleting the work.",
+        explanation: "Delete the file after deleting the artifact.",
         createdAt: now,
         updatedAt: now,
       });
@@ -1072,7 +1072,7 @@ describe("Bridge incremental cloud seam", () => {
     expect(truth.replicas).toHaveLength(1);
   });
 
-  it("preserves one work identity through rename and reports disappearance as unavailable", async () => {
+  it("preserves one artifact identity through rename and reports disappearance as unavailable", async () => {
     const t = setupTest();
     const fixture = await seedBridge(t);
     const discovery = await t.mutation(api.bridgeSync.discoverResourcesPage, {

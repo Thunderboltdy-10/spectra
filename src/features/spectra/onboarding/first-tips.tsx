@@ -14,8 +14,8 @@ import { useTourStore } from "./tour-store";
  */
 
 export const FIRST_TIPS = {
-  message: "Type @ to point me at one of your works, or drop files on the island to attach them.",
-  work: "The mark at the top right of a work says where it is saved. Press it for the desktop file and the version history.",
+  message: "Type @ to point me at one of your artifacts, or drop files on the island to attach them.",
+  work: "The mark at the top right of an artifact says where it is saved. Press it for the desktop file and the version history.",
   search: `Press ${shortcutLabel()} anywhere to search everything and run commands.`,
   task: "Drag a task onto another day to move it. Moving a ManageBac task makes your own copy, so your teacher's stays as they set it.",
   agent: "Your agent is ready. When a request is squarely what it is for, I hand it over.",

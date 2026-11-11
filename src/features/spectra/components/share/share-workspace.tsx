@@ -63,12 +63,12 @@ export function ShareWorkspaceWorks({
     <section className="share-section">
       <h3 className="share-section-title">What they see</h3>
       <p className="share-quiet">
-        Only the works you share with this workspace. Pick them in the Library and choose Share; the rest stay yours.
+        Only the artifacts you share with this workspace. Pick them in the Library and choose Share; the rest stay yours.
       </p>
       <label className="share-switch-row">
         <span>
-          New work here starts shared
-          <span className="share-quiet">Off: each new work is private until you share it.</span>
+          New artifacts here start shared
+          <span className="share-quiet">Off: each new artifact is private until you share it.</span>
         </span>
         <Switch checked={links.shareNewWork} onCheckedChange={(next) => void toggle(next)} />
       </label>

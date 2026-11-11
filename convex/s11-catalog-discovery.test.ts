@@ -63,10 +63,10 @@ async function fixture(privateCount: number) {
     // result must be traversed. All newer timestamps tie deliberately.
     const tailCount = Math.floor(privateCount / 8);
     for (let index = 0; index < privateCount + tailCount; index++) {
-      const id = await artifact("Private work", index < privateCount ? 200 : 10);
+      const id = await artifact("Private artifact", index < privateCount ? 200 : 10);
       await placement(id, privateWorkspaceId);
     }
-    const ownedId = await artifact("Owned unplaced work", 100, readerId);
+    const ownedId = await artifact("Owned unplaced artifact", 100, readerId);
     const inheritedId = await artifact("Inherited late placement", 90);
     let inheritedGrantId: Id<"accessGrants"> | undefined;
     for (let index = 0; index < 18; index++) {

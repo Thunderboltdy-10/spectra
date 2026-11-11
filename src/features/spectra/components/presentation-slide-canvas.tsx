@@ -626,7 +626,7 @@ function PresentationObjectView({
           className="presentation-linked-artifact"
           data-unavailable={!linkedArtifact || undefined}
         >
-          <span>Linked work</span>
+          <span>Linked artifact</span>
           <strong>{linkedArtifact?.title ?? "Access unavailable"}</strong>
           <small>
             {linkedArtifact
@@ -647,7 +647,7 @@ function PresentationObjectView({
                 });
               }}
             >
-              Open linked work
+              Open linked artifact
             </button>
           ) : null}
         </div>

@@ -223,7 +223,7 @@ export class NativeArtifactYjsModel {
         error:
           error instanceof Error
             ? error.message
-            : "Native work state is invalid.",
+            : "Native artifact state is invalid.",
       };
     }
     this.emit();

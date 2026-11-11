@@ -317,7 +317,7 @@ describe("the field in an editor", () => {
   });
 });
 
-describe("what counts as an object in a work", () => {
+describe("what counts as an object in an artifact", () => {
   it("includes a sheet's charts and an agent's skills and examples", () => {
     for (const className of ["sheets-chart-object", "foundry-skill", "foundry-pair"]) {
       const element = document.createElement("div");

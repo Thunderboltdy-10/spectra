@@ -35,9 +35,9 @@ import { useSpectraMotion } from "../motion/motion-level";
 export type StudioPaneKind = "about" | "comments" | "threads" | "references" | "history";
 
 const PANES: Record<StudioPaneKind, { label: string; title: string; icon: IconName }> = {
-  about: { label: "About", title: "About this work", icon: "info" },
+  about: { label: "About", title: "About this artifact", icon: "info" },
   comments: { label: "Comments", title: "Comments", icon: "reply" },
-  threads: { label: "Threads", title: "Threads about this work", icon: "conversations" },
+  threads: { label: "Threads", title: "Threads about this artifact", icon: "conversations" },
   references: { label: "References", title: "References", icon: "link" },
   history: { label: "History", title: "Version history", icon: "activity" },
 };
@@ -306,7 +306,7 @@ export function StudioPane({
           >
             {kind && kinds.length > 1 ? (
               <PanelTabs
-                label="About this work"
+                label="About this artifact"
                 tabs={kinds.map((id) => ({ id, label: PANES[id].label, icon: PANES[id].icon }))}
                 value={kind}
                 onChange={(id) => onKind(id as StudioPaneKind)}

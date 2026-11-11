@@ -652,7 +652,7 @@ export class BoundedYjsLocalPersistence {
       this.patch({
         state: "quota_exceeded",
         bytes: update.byteLength,
-        error: "This unsynchronized edit exceeds the local recovery budget. Keep this work open until synchronization completes.",
+        error: "This unsynchronized edit exceeds the local recovery budget. Keep this artifact open until synchronization completes.",
       });
       return;
     }
@@ -750,7 +750,7 @@ export class BoundedYjsLocalPersistence {
         this.patch({
           state: "quota_exceeded",
           bytes: update.byteLength,
-          error: "This unsynchronized edit exceeds the local recovery budget. Keep this work open until synchronization completes.",
+          error: "This unsynchronized edit exceeds the local recovery budget. Keep this artifact open until synchronization completes.",
         });
       return;
     }

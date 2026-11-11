@@ -23,10 +23,10 @@ export function LocalComputeCacheController() {
               .map((key) => caches.delete(key)),
           );
         }
-        toast.success("Local compute cache cleared. Your work and original files were not changed.");
+        toast.success("Local compute cache cleared. Your artifacts and original files were not changed.");
         return {
           status: "completed",
-          message: "Local compute cache cleared. Your work and original files were not changed.",
+          message: "Local compute cache cleared. Your artifacts and original files were not changed.",
         } satisfies SpectraCommandOutcome;
       }),
     [],

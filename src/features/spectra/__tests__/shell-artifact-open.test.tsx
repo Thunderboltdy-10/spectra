@@ -22,7 +22,7 @@ function deferred() {
 }
 
 describe("selected shell artifact opening", () => {
-  it("cancels only the selected work that an authoritative read revokes", async () => {
+  it("cancels only the selected artifact that an authoritative read revokes", async () => {
     const access = createShellArtifactAccess(read);
     const { result } = renderHook(() => {
       const opening = useShellArtifactOpen(access.read);
@@ -93,7 +93,7 @@ describe("selected shell artifact opening", () => {
     expect(result.current.pending?.artifact).toBe(fresh);
   });
 
-  it("cancels a pending network open when refocusing mounted work", async () => {
+  it("cancels a pending network open when refocusing mounted artifact", async () => {
     const waiting = deferred();
     read.mockReturnValueOnce(waiting.promise);
     const { result } = renderHook(() => useShellArtifactOpen());

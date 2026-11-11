@@ -90,7 +90,7 @@ describe("composer artifact membership and pending requests", () => {
     host.rerender(dock());
     await act(async () => request.resolve());
     // Kept work sits in the thread itself, so its row leaves the dock.
-    expect(screen.queryByLabelText("Work from this conversation")).toBeNull();
+    expect(screen.queryByLabelText("Artifact from this conversation")).toBeNull();
     mocks.memberships.set("a", []);
     host.rerender(dock());
     expect(keep()).toBeEnabled();
@@ -135,7 +135,7 @@ describe("composer artifact membership and pending requests", () => {
     mocks.memberships.set("b", [source._id]);
     host.rerender(dock("b"));
     await act(async () => next.resolve());
-    expect(screen.queryByLabelText("Work from this conversation")).toBeNull();
+    expect(screen.queryByLabelText("Artifact from this conversation")).toBeNull();
   });
 
   it("lets independent sources finish without clearing each other's pending state", async () => {
@@ -209,19 +209,19 @@ describe("composer artifact identity (LV-050)", () => {
     ["a failed creation", "I couldn’t save this as a Spectra flashcard deck—the creation request wasn’t accepted. Here are the 8 cards: Photosynthesis absorbs light."],
     ["an ordinary answer", "Photosynthesis converts light energy into chemical energy."],
     ["a proposed creation", "I will make a Photosynthesis deck with eight cards."],
-  ])("does not attach old catalogue work from %s", (_reason, assistantContent) => {
+  ])("does not attach old catalogue artifact from %s", (_reason, assistantContent) => {
     // Prose accompanies the dock, but it supplies no object identity.
     const props = { artifacts: [oldDeck], assistantContent, onOpen: vi.fn(),
       cards: [{ ...result, status: "failed" as const, variant: "error" as const,
         summary: assistantContent, provenance: { artifactTitles: [oldDeck.title] } }],
     };
     render(<><p>{assistantContent}</p><ComposerArtifactDock {...props} /></>);
-    expect(screen.queryByLabelText("Work from this conversation")).toBeNull();
+    expect(screen.queryByLabelText("Artifact from this conversation")).toBeNull();
     expect(screen.queryByRole("button", { name: "Open Photosynthesis" })).toBeNull();
   });
 
   it.each(["provenance", "action", "selection"])(
-    "opens the exact %s identity when old and new works have the same title", kind => {
+    "opens the exact %s identity when old and new artifacts have the same title", kind => {
       const onOpen = vi.fn();
       const card = { ...result,
         ...(kind === "provenance" ? { provenance: { artifactIds: [newDeck._id], artifactTitles: [newDeck.title] } } : {}),

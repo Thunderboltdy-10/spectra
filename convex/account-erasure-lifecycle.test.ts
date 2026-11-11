@@ -154,7 +154,7 @@ async function seed(t: T) {
   });
 }
 
-it("erases an account across two schools, keeps its shared works under a tombstone and leaves others untouched", async () => {
+it("erases an account across two schools, keeps its shared artifacts under a tombstone and leaves others untouched", async () => {
   vi.useFakeTimers();
   const t = setup();
   const ids = await seed(t);
@@ -295,7 +295,13 @@ it("a deletion that arrives before registration leaves an erased tombstone", asy
     t.withIdentity({ subject: "never-registered", email: "late@example.test", emailVerified: true })
       .mutation(api.identity.registerSelf, {}),
   ).rejects.toThrow(/IDENTITY_ACCOUNT_ERASED/);
-  // The same person may still sign up again under a new identity.
+  // The same person may still sign up again under a new identity, once invited.
+  await t.run(async (ctx) => {
+    const now = Date.now();
+    const schoolId = await ctx.db.insert("schools", { name: "Late School", slug: "late-school", verifiedDomains: [], status: "active", timezone: "Europe/Madrid", policyVersion: 1, createdAt: now, updatedAt: now });
+    const inviter = await ctx.db.insert("accounts", { clerkId: "late-inviter", email: "late-inviter@example.test", emailVerified: true, name: "Inviter", status: "active", createdAt: now, updatedAt: now });
+    await ctx.db.insert("membershipInvitations", { schoolId, email: "late@example.test", role: "student", tokenHash: "late-token", status: "pending", invitedByAccountId: inviter, expiresAt: now + 86_400_000, createdAt: now, updatedAt: now });
+  });
   const fresh = await t.withIdentity({ subject: "new-identity", email: "late@example.test", emailVerified: true })
     .mutation(api.identity.registerSelf, {});
   expect(fresh).not.toBe(account?._id);
@@ -404,7 +410,7 @@ it("the bridge action erases only for a request signed with the server key", asy
   }
 });
 
-it("gives back the school storage it metered for erased works and keeps what shared works still hold", async () => {
+it("gives back the school storage it metered for erased artifacts and keeps what shared artifacts still hold", async () => {
   vi.useFakeTimers();
   const t = setup();
   const ids = await seed(t);

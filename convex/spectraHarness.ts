@@ -534,7 +534,7 @@ export const ensureApproved = mutation({
       if (!approvedByUser && accepted && artifactScope && typeof intent.base === "string") {
         // Prepared again on the re-saved work: the Allow carries over only to the same edit.
         if (intent.base !== artifactScope.scope.semanticBaseDigest || intent.result !== artifactScope.scope.semanticResultDigest)
-          throw new Error("AI_APPROVAL_WORK_CHANGED: The work changed while the person was deciding, so this edit was not made.");
+          throw new Error("AI_APPROVAL_WORK_CHANGED: The artifact changed while the person was deciding, so this edit was not made.");
         await ctx.db.patch(operation._id, { output: { ...output, allowedArtifactIntent: undefined, pendingArtifactScope: scope, approvedArtifactScope: scope } });
         approvedByUser = true;
       }

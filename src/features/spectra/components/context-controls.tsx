@@ -99,7 +99,7 @@ export function SelectionActionBar({
       {count > 0 ? (
         <motion.div
           role="toolbar"
-          aria-label="Picked work"
+          aria-label="Picked artifact"
           initial={{ opacity: 0, y: 14, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 10, scale: 0.97 }}
@@ -226,7 +226,7 @@ export function GlobalSearch({
             : "flex h-9 items-center gap-2 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-caption font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         }
         title="Search Spectra"
-        aria-label="Search work and workspaces"
+        aria-label="Search artifacts and workspaces"
         aria-expanded={open}
         aria-controls="spectra-global-search-dialog"
       >
@@ -254,7 +254,7 @@ export function GlobalSearch({
               ref={fieldRef}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search your work by meaning or words, and workspaces by name…"
+              placeholder="Search your artifacts by meaning or words, and workspaces by name…"
               className="h-14 min-w-0 flex-1 bg-transparent text-subhead text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
             />
             <span className="rounded-chip bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro text-[var(--text-tertiary)]">
@@ -311,7 +311,7 @@ export function GlobalSearch({
             {artifacts.length ? (
               <section className="mt-2">
                 <div className="px-2 py-1.5 text-micro font-semibold text-[var(--text-tertiary)]">
-                  Work
+                  Artifact
                 </div>
                 {artifacts.map((result) => {
                   const meta = result.subtype && isArtifactTypeKey(result.subtype) ? workTypeMeta[result.subtype] : null;
@@ -355,7 +355,7 @@ export function GlobalSearch({
             ) : null}
             {ready && !pending && !failed && !workspaces.length && !artifacts.length ? (
               <p className="px-3 py-12 text-center text-caption text-[var(--text-secondary)]">
-                No matching workspaces or work.
+                No matching workspaces or artifact.
               </p>
             ) : null}
           </div>

@@ -35,7 +35,7 @@ function Work({ start = "comments" as StudioPaneKind | null, withTool = false })
   );
 }
 
-describe("the work's one pane", () => {
+describe("the artifact's one pane", () => {
   it("names what it shows, switches in place, and closes", () => {
     render(<Work />);
     expect(screen.getByRole("complementary", { name: "Comments" })).toBeTruthy();
@@ -57,7 +57,7 @@ describe("the work's one pane", () => {
     expect(grip.getAttribute("aria-valuenow")).toBe("300");
   });
 
-  it("gives its place to a studio tool, and a work button puts the tool away", () => {
+  it("gives its place to a studio tool, and an artifact button puts the tool away", () => {
     render(<Work start={null} />);
     fireEvent.click(screen.getByRole("button", { name: "Format" }));
     expect(screen.getByRole("complementary", { name: "Format" }).textContent).toContain("Number format");

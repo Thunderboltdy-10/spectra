@@ -635,6 +635,13 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
     clearInterval(heartbeat);
     const usage = runUsageSnapshot();
     const reply = result.state.text.trim();
+    // What the run closed with: the words after its last tool call. A tab's summary and the reply peek open on
+    // these, not on what it said before it started working.
+    const lastMessage = result.state.messages.at(-1);
+    const closing =
+      lastMessage?.role === "assistant" && !("tool_calls" in lastMessage && lastMessage.tool_calls?.length) && typeof lastMessage.content === "string"
+        ? lastMessage.content.trim()
+        : "";
     const touches = dedupeTouches(result.state.artifacts);
 
     if (result.status === "yielded") {
@@ -725,7 +732,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       // An order the person emptied ends in their own words; anything else is Spectra's model failing.
       const message = result.error instanceof RuntimeOrderExhaustedError
         ? result.error.message
-        : "Spectra could not reach the AI model just now. Your work so far is kept; try again in a moment.";
+        : "Spectra could not reach the AI model just now. Your artifact so far is kept; try again in a moment.";
       await flushEvents();
       await settleArtifacts("clear");
       await mutate("spectraRuns:updateStatus", {
@@ -766,14 +773,15 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       executionId,
       status: "completed",
       decision: backend.executedAny ? "operate" : "answer",
-      finalSummary: withoutCitations(content),
+      finalSummary: withoutCitations(closing || content),
       resultTitle: "Done",
-      resultSummary: withoutCitations(content).slice(0, 2_000),
+      resultSummary: withoutCitations(closing || content).slice(0, 2_000),
       resultVariant: artifactIds.length ? "artifact" : "status",
       resultActions: actions,
       provenance: {
         artifactIds,
         artifactTitles: touches.map((touch) => touch.title).slice(0, 24),
+        artifactTypes: touches.map((touch) => touch.type).slice(0, 24),
         // What the reply peek and the artifact card need: which works are new, and where each edit landed.
         createdIds: touches.filter((touch) => touch.action === "created").map((touch) => touch.id).slice(0, 24),
         regions: touches.flatMap((touch) => (touch.action === "edited" && touch.region ? [{ artifactId: touch.id, regionId: touch.region }] : [])).slice(0, 24),

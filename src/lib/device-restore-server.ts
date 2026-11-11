@@ -31,7 +31,7 @@ export async function deviceUndoPlan(touched: string[], runId: string) {
       if (!last) continue;
       if (versions.length === 200 && versions.at(-1)?.runId === runId) {
         plan.keep.push(artifactId);
-        plan.notes.push("This run reaches beyond the available version history, so work kept on this computer stays as it is.");
+        plan.notes.push("This run reaches beyond the available version history, so artifacts kept on this computer stay as they are.");
         continue;
       }
       const [work, lastVersion] = await Promise.all([
@@ -44,14 +44,14 @@ export async function deviceUndoPlan(touched: string[], runId: string) {
         JSON.stringify(work?.content ?? null) !== JSON.stringify(lastVersion?.content ?? null);
       if (changedSince) {
         plan.keep.push(artifactId);
-        plan.notes.push(`"${work?.title ?? last.title ?? "This work"}" changed after Spectra finished, so it stays. Version history still has the earlier copy.`);
+        plan.notes.push(`"${work?.title ?? last.title ?? "This artifact"}" changed after Spectra finished, so it stays. Version history still has the earlier copy.`);
         continue;
       }
       const before = ofRun.filter((version) => version.source === "before_ai").at(-1);
       if (before) plan.restore.push({ artifactId, versionId: before.id });
     } catch {
       plan.keep.push(artifactId);
-      plan.notes.push("Spectra Bridge isn't answering on this computer, so work kept there stays as it is. Open Bridge and try again.");
+      plan.notes.push("Spectra Bridge isn't answering on this computer, so artifacts kept there stay as they are. Open Bridge and try again.");
     }
   }
   return plan;
@@ -64,7 +64,7 @@ export async function deviceUndoPlan(touched: string[], runId: string) {
  */
 export async function restoreDeviceVersion(input: { artifactId: string; versionId: string; requestId: string }) {
   const me = await convexQuery<Record<string, never>, { accountId: string } | null>("identity:me", {});
-  if (!me) throw new Error("AUTH_NOT_SIGNED_IN: Sign in to restore this work.");
+  if (!me) throw new Error("AUTH_NOT_SIGNED_IN: Sign in to restore this artifact.");
   const id = Number(input.versionId.replace(/^device:/, ""));
   if (!Number.isSafeInteger(id)) throw new Error("That version isn't available.");
   const version = await deviceStoreCall<StoredVersion | null>(me.accountId, "version", { artifactId: input.artifactId, id });

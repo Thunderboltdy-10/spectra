@@ -87,7 +87,7 @@ async function placeWork(
 }
 
 describe("I1 — one primary placement per source", () => {
-  it("re-placing the same work reuses its single node", async () => {
+  it("re-placing the same artifact reuses its single node", async () => {
     const workspace = await seedWorkspace(db, accountId, "Biology");
     const artifactId = await seedArtifact(db, accountId, "Essay");
 
@@ -129,7 +129,7 @@ describe("I1 — one primary placement per source", () => {
     expect(moved.parentId).not.toBeNull();
   });
 
-  it("re-asserting the same workspace does not flatten a work out of its folder", async () => {
+  it("re-asserting the same workspace does not flatten an artifact out of its folder", async () => {
     const biology = await seedWorkspace(db, accountId, "Biology");
     const workspaceNode = await ensureWorkspaceNode(ctx, biology as never);
     const folder = await createFolderNode(ctx, {
@@ -200,7 +200,7 @@ describe("I5 — no cycles, and only containers hold children", () => {
     expect((await db.get(outer._id))?.parentId).toBeNull();
   });
 
-  it("refuses to put anything inside a work or a reference", async () => {
+  it("refuses to put anything inside an artifact or a reference", async () => {
     const artifactId = await seedArtifact(db, accountId, "Essay");
     const work = await placeWork(artifactId);
     const link = await createLinkNode(ctx, {
@@ -596,7 +596,7 @@ describe("revoked access removes only the recipient's filing", () => {
   });
 });
 
-describe("permanent trash is atomic for mixed folder, thread and work", () => {
+describe("permanent trash is atomic for mixed folder, thread and artifact", () => {
   it("refuses before any write when the selection is not in Trash", async () => {
     const folder = await createFolderNode(ctx, {
       accountId: id(accountId),
@@ -639,7 +639,7 @@ describe("permanent trash is atomic for mixed folder, thread and work", () => {
     expect(await db.get(timetableId)).not.toBeNull();
   });
 
-  it("purges a mixed folder of work and thread and keeps child counts honest", async () => {
+  it("purges a mixed folder of artifact and thread and keeps child counts honest", async () => {
     const biology = await seedWorkspace(db, accountId, "Biology");
     const workspaceNode = await ensureWorkspaceNode(ctx, biology as never);
     const folder = await createFolderNode(ctx, {
@@ -704,7 +704,7 @@ describe("permanent trash is atomic for mixed folder, thread and work", () => {
     ).toHaveLength(0);
   });
 
-  it("places an invitee's own node so Shared can list accepted work", async () => {
+  it("places an invitee's own node so Shared can list accepted artifact", async () => {
     const inviteeId = await seedAccount(db);
     const artifactId = await seedArtifact(db, accountId, "Lab notes");
     await placeWork(artifactId);

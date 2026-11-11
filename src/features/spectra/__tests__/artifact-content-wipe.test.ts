@@ -70,7 +70,7 @@ describe("artifact content deletion classification", () => {
   it("allows blank-to-blank editing and substantive rewrites of any length", () => {
     expect(classifyArtifactContentWipe("document", document(""), document(" ")).fullContentDeletion).toBe(false);
     expect(classifyArtifactContentWipe("document", document("A very long section"), document("x")).fullContentDeletion).toBe(false);
-    expect(classifyArtifactContentWipe("document", document(""), document("New work")).fullContentDeletion).toBe(false);
+    expect(classifyArtifactContentWipe("document", document(""), document("New artifact")).fullContentDeletion).toBe(false);
   });
 
   it("treats an actual embedded image as authored document content", () => {

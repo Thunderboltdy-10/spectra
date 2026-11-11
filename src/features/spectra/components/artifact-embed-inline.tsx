@@ -30,7 +30,7 @@ export const EDITABLE_IN_PLACE: ReadonlySet<SpectraBlueprintKey> = new Set<Spect
 
 function InlineGhost() {
   return (
-    <div data-life-ghost className="spectra-embed-editor-ghost" aria-label="Opening the work here" role="status">
+    <div data-life-ghost className="spectra-embed-editor-ghost" aria-label="Opening the artifact here" role="status">
       <Skeleton bar className="h-8 w-full" />
       <Skeleton bar className="h-5 w-2/3" />
       <Skeleton bar className="h-4 w-full" />
@@ -81,7 +81,7 @@ export function InlineEmbedEditor({
       .catch((error) => {
         if (request.signal.aborted) return;
         setLoaded({
-          error: describeFailure(error, { fallback: "This work could not be opened here." }).message,
+          error: describeFailure(error, { fallback: "This artifact could not be opened here." }).message,
         });
       });
     return () => request.abort();

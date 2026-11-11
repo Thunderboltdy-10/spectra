@@ -12,9 +12,11 @@ optional due time, notes, and done. Keep it that small unless the user asks for 
 
 - The title starts with a verb and names the outcome: "Finish the chemistry lab report", not
   "Chemistry".
-- Due: `YYYY-MM-DD` for a day, `YYYY-MM-DDTHH:mm` for a time, in the user's time zone. Work out
-  relative dates ("next Friday") from the current date in the environment. No due date if the
-  user gave none.
+- When: `due` as `YYYY-MM-DD` for a day (it sits at the top of that day on the calendar), or
+  `YYYY-MM-DDTHH:mm` for a deadline at a time, in the user's time zone. Something that fills
+  hours ("revise 4–6 on Tuesday") takes `start` and `end` instead. Work out relative dates
+  ("next Friday") from the current date in the environment. No date if the user gave none.
+- A task with a day is on the calendar by itself; there is nothing else to add there.
 - Notes (`description`) hold what the user told you that is not in the title, in their words.
 - Priority and estimate only when the user gives them, or a deadline makes the priority
   obvious. Never fill them in for the sake of it.
@@ -23,14 +25,15 @@ optional due time, notes, and done. Keep it that small unless the user asks for 
 
 - **Never turn one task into a checklist.** "Return my library book by Thursday" is one task
   with no subtasks.
-- Add subtasks only when the user asks for steps, or names separate pieces of work that each
+- Add subtasks only when the user asks for steps, or names separate artifacts that each
   need ticking off ("it still needs the graph and the conclusion").
 - A request for N steps gets exactly N. Each step is concrete and short: "Write the outline".
 
 ## Task or something else?
 
 - Several separate things to do are several tasks, not one task with subtasks.
-- A time block without an outcome ("study maths 4–5") belongs on the calendar.
+- A lesson or anything that repeats every week is a calendar event (the calendar tool's
+  `repeat`), not a task.
 - Long notes belong in a document; link it from the notes.
 - A school deadline from ManageBac is the school's. Never change its official date; plan the
   user's own work around it.

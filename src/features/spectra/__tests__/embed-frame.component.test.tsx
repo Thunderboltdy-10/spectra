@@ -52,7 +52,7 @@ afterEach(() => {
 });
 
 describe("the embed frame", () => {
-  it("opens the work from its name and from its options menu", async () => {
+  it("opens the artifact from its name and from its options menu", async () => {
     const open = vi.fn();
     render(<ArtifactEmbed embed={deckEmbed()} onOpenSource={open} />);
     fireEvent.click(screen.getByRole("button", { name: "Cell biology" }));

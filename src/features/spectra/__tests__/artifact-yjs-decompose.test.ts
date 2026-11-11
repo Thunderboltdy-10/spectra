@@ -85,7 +85,7 @@ describe("decomposeArtifactContent", () => {
       ),
     ).not.toThrow();
     const whole = snapshotArtifactRegions("quiz", { title: "Photosynthesis quiz", tags: [], content }, ["artifact:structure"]);
-    expect(whole.regions[0]?.label).toBe("Whole work");
+    expect(whole.regions[0]?.label).toBe("Whole artifact");
   });
 
   it("does not treat object-key order as a structural document change", () => {

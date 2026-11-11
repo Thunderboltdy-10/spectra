@@ -183,10 +183,10 @@ describe("the status control's life moments", () => {
 describe("a file deleted outside Spectra", () => {
   const GONE: ArtifactStatusReplica & ReplicaTruth = { kind: "local", state: "unavailable", unavailableReason: "missing-on-disk", relativePath: "Biology/Essay.docx" };
 
-  it("says the file is gone, keeps the work, and offers one way to put it back", () => {
+  it("says the file is gone, keeps the artifact, and offers one way to put it back", () => {
     const presentation = presentSync({ replicas: [{ kind: "cloud", state: "current", lastVerifiedAt: NOW }, GONE], openConflictCount: 0, replicaPendingCount: 0, online: true });
     expect(presentation).toMatchObject({ key: "file-gone", label: "File deleted", action: { label: "Put it back", kind: "put-back" } });
-    expect(presentation.detail).toBe("The file was deleted or moved out of its folder on this computer. This work is still here in Spectra.");
+    expect(presentation.detail).toBe("The file was deleted or moved out of its folder on this computer. This artifact is still here in Spectra.");
     const gone = status({ replicas: [{ kind: "cloud", state: "current", lastVerifiedAt: NOW }, GONE] }, { can: { ...ALL_ACTIONS, "put-back": true } });
     expect(gone.words).toBe("File deleted");
     expect(gone.actions[0]).toEqual({ kind: "put-back", label: "Put it back" });

@@ -73,7 +73,7 @@ describe("heldControlsFrom", () => {
     expect(heldControlsFrom([state({ act: { kind: "idle" } })]).size).toBe(0);
   });
 
-  it("releases the control once the work settles", () => {
+  it("releases the control once the artifact settles", () => {
     expect(heldControlsFrom([state({ lifecycle: "settled" })]).size).toBe(0);
     expect(heldControlsFrom([state({ lifecycle: "completed" })]).size).toBe(0);
   });

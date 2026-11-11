@@ -4,6 +4,7 @@ import { useLayoutEffect, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { useAccountStorageReady } from "../account-storage-boundary";
 import { AccountConnectionState } from "../account-connection-state";
+import { AccountGate } from "../account-gate";
 import { captureSpectraNavigation, useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import { SignedInContinue } from "@/components/signed-in-continue";
 import { UniversalKBar } from "@/features/spectra/components/universal-kbar";
@@ -35,7 +36,13 @@ const TABBED_PAGES = ["/library", "/workspace"];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const ready = useAccountStorageReady();
-  return ready ? <AppShellContent>{children}</AppShellContent> : <AccountConnectionState />;
+  return ready ? (
+    <AccountGate bare={<main id="main-content" className="min-h-dvh overflow-y-auto bg-[var(--bg-primary)]">{children}</main>}>
+      <AppShellContent>{children}</AppShellContent>
+    </AccountGate>
+  ) : (
+    <AccountConnectionState />
+  );
 }
 
 function AppShellContent({ children }: { children: ReactNode }) {

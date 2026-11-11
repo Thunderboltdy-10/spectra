@@ -335,14 +335,16 @@ export class ConvexHarnessBackend implements HarnessBackend {
     const type = text(artifact.blueprintKey);
     if (!isArtifactTypeKey(type)) return null;
     const capabilities = Array.isArray(artifact.capabilities) ? artifact.capabilities : [];
-    const canEdit = capabilities.includes("modify");
+    // A course syllabus stays as published; the person can copy it to annotate.
+    const syllabus = Boolean(artifact.syllabus);
+    const canEdit = capabilities.includes("modify") && !syllabus;
     // Viewer projections (a quiz without its answers) must not be replaced by
     // the full live document.
     const live = canEdit
       ? await readLiveArtifactValue({ artifactId: id, timeoutMs: 3_000, signal }).catch(() => null)
       : null;
     if (artifact.storageHome === "device" && !live)
-      throw new Error("This work is kept on the person's computer, and Spectra Bridge isn't reachable right now. Tell them to open it.");
+      throw new Error("This artifact is kept on the person's computer, and Spectra Bridge isn't reachable right now. Tell them to open it.");
     const current = overlayLiveArtifactRecord(artifact, live);
     const placement = rows(artifact.placements)[0];
     return {
@@ -352,6 +354,7 @@ export class ConvexHarnessBackend implements HarnessBackend {
       content: current.content,
       ...(text(current.summary) ? { summary: text(current.summary) } : {}),
       canEdit,
+      ...(syllabus ? { readOnlyReason: "is a read-only course reference from IB sources. Offer a copy to annotate, or write alongside it; check its source links for the full requirements" } : {}),
       ...(placement && text(placement.workspaceTitle) ? { location: text(placement.workspaceTitle) } : {}),
       ...(typeof artifact.updatedAt === "number" ? { updatedAt: artifact.updatedAt } : {}),
     };
@@ -391,7 +394,7 @@ export class ConvexHarnessBackend implements HarnessBackend {
       this.executedAny = true;
       this.affected.push(...affected);
       const id = affected.find((entry) => entry.type === "artifact")?.id;
-      if (!id) throw new Error("Your new work wasn't saved.");
+      if (!id) throw new Error("Your new artifact wasn't saved.");
       return { id, title: input.title };
     } catch (error) {
       await this.markFailed(operationId!, error);
@@ -453,7 +456,7 @@ export class ConvexHarnessBackend implements HarnessBackend {
     } catch (error) {
       if (String(error).includes("AI_APPROVAL_WORK_CHANGED")) {
         await this.markFailed(staged.operationId, error);
-        return { ok: false, content: "The work changed while they were deciding, so this edit was not made. Read the work again and make the edit again; they will be asked again." };
+        return { ok: false, content: "The artifact changed while they were deciding, so this edit was not made. Read the artifact again and make the edit again; they will be asked again." };
       }
       if (permissionRequired(error) && String(error).includes("Never"))
         return { ok: false, content: deniedResult(staged.approvalCategories[0]) };

@@ -47,7 +47,7 @@ const mediaTypes: Record<string, string> = {
 
 function artifactId(value: string) { return value as Id<"spectraArtifacts">; }
 function safeBaseName(value: string) {
-  return value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/[. ]+$/g, "").trim() || "Spectra work";
+  return value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/[. ]+$/g, "").trim() || "Spectra artifact";
 }
 
 async function verifiedPayload(workId: Id<"spectraArtifacts">) {

@@ -134,7 +134,7 @@ function ArtifactCard({
             {artifact.title}
           </span>
           <span className="mt-1 line-clamp-2 block text-micro leading-5 text-[var(--text-secondary)]">
-            {artifact.summary || type?.label || "Shared work"}
+            {artifact.summary || type?.label || "Shared artifact"}
           </span>
         </span>
       </span>
@@ -160,7 +160,7 @@ function ArtifactContent({ artifact }: { artifact: PublicArtifact }) {
       <header className="border-b border-[var(--border-subtle)] px-6 py-6 sm:px-10 sm:py-8">
         <div className="flex items-center gap-2 text-caption text-[var(--text-secondary)]">
           <Icon name={type?.glyph ?? "document"} size={14} accent={type?.color} />
-          {type?.label ?? "Shared work"}
+          {type?.label ?? "Shared artifact"}
         </div>
         <h1 className="mt-3 font-display text-display font-semibold leading-[1.08] text-[var(--text-primary)]">
           {artifact.title}
@@ -434,7 +434,7 @@ function ArtifactContent({ artifact }: { artifact: PublicArtifact }) {
           "agent",
         ].includes(artifact.blueprintKey) ? (
           <p className="text-ui text-[var(--text-secondary)]">
-            This work can be viewed in Spectra.
+            This artifact can be viewed in Spectra.
           </p>
         ) : null}
       </div>
@@ -493,7 +493,7 @@ function SharedWorkspace({
             className="col-span-full"
             icon="layers"
             title="Nothing shared here yet"
-            detail="The owner hasn't added any work to this view. Check back later or ask them for a new link."
+            detail="The owner hasn't added any artifact to this view. Check back later or ask them for a new link."
           />
         ) : null}
       </div>
@@ -640,12 +640,12 @@ export function PublicShareShell() {
       </nav>
       <div className="mx-auto max-w-[1120px] px-4 py-8 sm:px-7 sm:py-12">
         {state === "loading" ? (
-          <LoadingRows label="Opening the shared work" count={6} className="mx-auto max-w-[920px]" />
+          <LoadingRows label="Opening the shared artifact" count={6} className="mx-auto max-w-[920px]" />
         ) : null}
         {state === "error" ? (
           <ProblemState
             className="mt-[10vh]"
-            title="This shared work isn't available"
+            title="This shared artifact isn't available"
             detail={message}
             action={
               retryable ? (

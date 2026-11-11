@@ -314,7 +314,7 @@ function PlatformOverviewSurface({
           source={metricDefinition("platform.total_users").source}
         />
         <MetricCard
-          label="Work made"
+          label="Artifacts made"
           value={formatCompact(data.metrics.artifactsCreated)}
           detail="Documents, decks, quizzes and the rest"
           state={data.metricStates.artifactsCreated}
@@ -442,7 +442,7 @@ function PlatformOverviewSurface({
       </section>
 
       <PrivacyNotice>
-        The platform pages count; they never read. Nobody’s work, threads, prompts or memory can be opened from here.
+        The platform pages count; they never read. Nobody’s artifact, threads, prompts or memory can be opened from here.
       </PrivacyNotice>
     </div>
   );
@@ -1342,7 +1342,7 @@ function SchoolsSurface({
         open={Boolean(sessionSchool)}
         onClose={() => setSessionSchool(null)}
         title={`Step into ${sessionSchool?.name ?? "the school"}`}
-        detail="You see the school’s admin pages, not anyone’s work, and you do not become a member. A banner stays on screen while you are in, and the school’s activity log records the visit."
+        detail="You see the school’s admin pages, not anyone’s artifact, and you do not become a member. A banner stays on screen while you are in, and the school’s activity log records the visit."
         footer={
           <>
             <AdminButton onClick={() => setSessionSchool(null)}>
@@ -1802,8 +1802,8 @@ function PlatformGovernanceSurface() {
         </p>
       </section>
       <PrivacyNotice>
-        Nobody on the platform team can open anyone’s prompts, threads, memory or work from these pages. School admins
-        work under the same promises.
+        Nobody on the platform team can open anyone’s prompts, threads, memory or artifacts from these pages. School admins
+        artifact under the same promises.
       </PrivacyNotice>
     </div>
   );
@@ -2022,7 +2022,7 @@ function SecuritySurface({
                     </strong>
                     <span>
                       {job.impact.activeMembers} {job.impact.activeMembers === 1 ? "member" : "members"}, {job.impact.artifacts}
-                      {job.impact.artifactsAtLeast ? "+" : ""} pieces of work, {job.impact.workspaces}{" "}
+                      {job.impact.artifactsAtLeast ? "+" : ""} artifacts, {job.impact.workspaces}{" "}
                       {job.impact.workspaces === 1 ? "class" : "classes"}
                       {job.purge
                         ? `. ${formatCompact(job.purge.deletedRows)} records deleted so far`
@@ -2102,7 +2102,7 @@ function SecuritySurface({
           </section>
         </div>
         <PrivacyNotice>
-          The log keeps who did what and when, never what anyone wrote: no keys, prompts, threads, memory or pieces of work.
+          The log keeps who did what and when, never what anyone wrote: no keys, prompts, threads, memory or artifacts.
         </PrivacyNotice>
       </div>
       <AdminDialog

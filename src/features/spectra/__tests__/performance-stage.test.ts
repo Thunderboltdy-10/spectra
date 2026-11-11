@@ -171,7 +171,7 @@ describe("the document stage a viewer draws while the AI writes", () => {
     return { perf, beats: performanceBeats(perf, end) };
   };
 
-  it("hides what is not reached, opens the carried work's place, and never touches a person's block", () => {
+  it("hides what is not reached, opens the carried artifact's place, and never touches a person's block", () => {
     const { perf, beats } = played();
     const lift = beats.findIndex((beat) => beat.carry?.phase === "lift");
     const drop = beats.findIndex((beat) => beat.carry?.phase === "drop");

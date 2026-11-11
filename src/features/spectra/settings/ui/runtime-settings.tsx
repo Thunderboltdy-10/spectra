@@ -136,8 +136,8 @@ export function RuntimeSettings() {
   return (
     <div className="space-y-10">
       <Group
-        title="Who runs your work"
-        description="Use your own Codex or Claude Code subscription through Spectra Bridge. Spectra's tools and instructions stay the same. If yours can't answer, Spectra follows the order you set here. Work that runs on a schedule always uses Spectra's."
+        title="Who runs your artifacts"
+        description="Use your own Codex or Claude Code subscription through Spectra Bridge. Spectra's tools and instructions stay the same. If yours can't answer, Spectra follows the order you set here. Artifact that runs on a schedule always uses Spectra's."
       >
         <Row
           label="Default"

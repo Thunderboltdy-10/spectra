@@ -1324,7 +1324,7 @@ const RESOLUTION: Record<
 > = {
   rebase: {
     label: "Use ManageBac's",
-    detail: "Takes ManageBac's version of what changed. Your notes and work in Spectra stay.",
+    detail: "Takes ManageBac's version of what changed. Your notes and artifacts in Spectra stay.",
   },
   keep_overlay: {
     label: "Keep mine",
@@ -1425,7 +1425,7 @@ function ConflictComparison({ conflict }: { conflict: SpectraManageBacConflict }
           {!comparison && !failure ? <p role="status">Reading the saved Spectra copy…</p> : null}
           {comparison?.state === "private" ? <p>The local copy belongs to another person and is private. Only the source versions are shown.</p> : null}
           {comparison?.state === "missing" ? <p>No saved Spectra copy is available to compare.</p> : null}
-          {comparison?.state === "unmaterialized" ? <p>This source has not been imported as editable work in Spectra.</p> : null}
+          {comparison?.state === "unmaterialized" ? <p>This source has not been imported as editable artifact in Spectra.</p> : null}
           {comparison?.savedAt ? <p className="text-[var(--text-tertiary)]">Spectra copy saved {formatDate(comparison.savedAt)}. Unsaved editor changes are not included.</p> : null}
           {keys.map(key => (
             <section key={key} aria-label={`${FIELD_LABELS[key]} comparison`}>
@@ -2133,7 +2133,7 @@ export function DisconnectDialog({
     <ConfirmDialog
       open
       title="Disconnect ManageBac?"
-      detail="Spectra will give up its ManageBac access, stop scheduled syncs and unlink accounts. Imported work and everyone's own notes on it stay in Spectra, marked as no longer syncing."
+      detail="Spectra will give up its ManageBac access, stop scheduled syncs and unlink accounts. Imported artifacts and everyone's own notes on it stay in Spectra, marked as no longer syncing."
       confirmLabel="Disconnect"
       cancelLabel="Keep connected"
       destructive

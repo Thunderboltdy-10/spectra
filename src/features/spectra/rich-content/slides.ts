@@ -229,7 +229,7 @@ function runsOf(content: readonly RichInline[], href?: string): PresentationText
         push({ text: `[${inline.label ?? "source"}]`, ...link });
         break;
       case "reference":
-        push({ text: inline.label ?? "Referenced work", ...link });
+        push({ text: inline.label ?? "Referenced artifact", ...link });
         break;
       case "footnote_ref":
         push({ text: `[${inline.id}]`, ...link });
@@ -280,7 +280,7 @@ function blockText(block: RichBlock): RichInline[] {
     case "media":
       return [{ type: "text", text: block.alt || block.url }];
     case "embed":
-      return [{ type: "text", text: block.label ?? "Embedded work" }];
+      return [{ type: "text", text: block.label ?? "Embedded artifact" }];
     case "source_note":
       return [{ type: "text", text: "Source: " }, ...block.content];
     case "footnote":

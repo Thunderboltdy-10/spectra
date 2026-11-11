@@ -120,7 +120,7 @@ describe("storage strategy transitions", () => {
   it("keeps the logical item and unlinks without deleting the physical file", () => {
     expect(planStorageStrategyTransition("spectra", verifiedLocal)).toMatchObject({ localAction: "unlink", cloudAction: "retain", completion: "verified" });
   });
-  it("requires a verified local replica for linked work", () => {
+  it("requires a verified local replica for linked artifact", () => {
     expect(() => planStorageStrategyTransition("linked", { ...verifiedLocal, localIsVerified: false })).toThrow("STORAGE_STRATEGY_LOCAL_NOT_VERIFIED");
   });
   it("marks cloud-only to local transitions pending until Bridge verification", () => {
@@ -205,7 +205,7 @@ describe("storage strategy transitions", () => {
       replicasAgree: false,
     })).toThrow("STORAGE_STRATEGY_RECONCILIATION_REQUIRED");
   });
-  it("keeps linked work metadata-only in Spectra", () => {
+  it("keeps linked artifact metadata-only in Spectra", () => {
     expect(planStorageStrategyTransition("linked", verifiedLocal).cloudAction)
       .toBe("metadata-only");
   });

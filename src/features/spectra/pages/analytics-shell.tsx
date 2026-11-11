@@ -74,7 +74,7 @@ const RUN_WORDS: Record<string, string> = {
   cancelled: "Stopped",
 };
 const CHART_KINDS = [
-  { key: "work", label: "Work made", one: "piece of work", many: "pieces of work" },
+  { key: "work", label: "Artifacts made", one: "artifact", many: "artifacts" },
   { key: "runs", label: "Asked Spectra", one: "request", many: "requests" },
 ] as const;
 
@@ -119,8 +119,8 @@ function leadLine(payload: AnalyticsPayload, days: Window) {
   if (work === null && runs === null) return `Your counts for ${when} are still being prepared.`;
   if (!work && !runs) return `Nothing new ${when} yet.`;
   if (work && runs)
-    return `You made ${counted(work, "piece of work", "pieces of work")} and asked Spectra ${counted(runs, "time", "times")} ${when}.`;
-  if (work) return `You made ${counted(work, "piece of work", "pieces of work")} ${when}.`;
+    return `You made ${counted(work, "artifact", "artifacts")} and asked Spectra ${counted(runs, "time", "times")} ${when}.`;
+  if (work) return `You made ${counted(work, "artifact", "artifacts")} ${when}.`;
   return `You asked Spectra ${counted(runs ?? 0, "time", "times")} ${when}.`;
 }
 
@@ -208,7 +208,7 @@ function AnalyticsBody({ payload, days }: { payload: AnalyticsPayload; days: Win
 
       <TallySheet>
         <MetricCard
-          label="Work made"
+          label="Artifacts made"
           value={formatCompact(metrics.workCreated.value)}
           detail="New in this range"
           state={metrics.workCreated.state}
@@ -283,7 +283,7 @@ function AnalyticsBody({ payload, days }: { payload: AnalyticsPayload; days: Win
             </>
           ) : (
             <p className="admin-ledger-empty">
-              {metrics.workCreated.value === null ? "Your work history is still being prepared." : "No new work in this range."}
+              {metrics.workCreated.value === null ? "Your artifact history is still being prepared." : "No new artifacts in this range."}
             </p>
           )}
         </section>
@@ -319,7 +319,7 @@ function AnalyticsBody({ payload, days }: { payload: AnalyticsPayload; days: Win
 
       <div className="admin-columns">
         <section>
-          <AdminSectionHeader title="Latest work" />
+          <AdminSectionHeader title="Latest artifact" />
           {payload.recentWork.length ? (
             <ul className="admin-ledger">
               {payload.recentWork.map((item) => (

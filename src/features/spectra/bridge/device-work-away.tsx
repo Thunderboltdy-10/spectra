@@ -15,7 +15,7 @@ export function useDeviceWorkAway(artifact: Placed) {
   if (availability !== "ready") return bridgeUnavailableReason(availability);
   if (!storeId) return "checking" as const;
   if (artifact.storageStoreId !== storeId)
-    return "This work is kept on another of your computers. Open it there, or move it to the cloud from that computer.";
+    return "This artifact is kept on another of your computers. Open it there, or move it to the cloud from that computer.";
   return null;
 }
 

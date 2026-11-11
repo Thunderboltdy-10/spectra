@@ -124,7 +124,7 @@ describe("ManageBac provider projection through canonical history", () => {
     // The canonical room and the stored projection converge on one value.
     expect(replayed.projection.content).toEqual(after.plan.content);
     expect(after.versions.map(version => version.source)).toEqual(["checkpoint", "import"]);
-    expect(after.versions[0]!.summary).toBe("Your work before the school source changed");
+    expect(after.versions[0]!.summary).toBe("Your artifact before the school source changed");
     expect(after.projection).toMatchObject({ sourceHash: "v2", state: "active",
       providerReceipt: { state: "committed", roomId, sequence: 2, versionId: after.versions[1]!._id } });
     expect(after.projection.pendingProvider).toBeUndefined();

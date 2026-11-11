@@ -363,7 +363,7 @@ export function ChatShell() {
             setRunsOpen(false);
             studio.openSplit(resolved);
           })
-          .catch(() => toast.error("That work is no longer available."));
+          .catch(() => toast.error("That artifact is no longer available."));
         return;
       }
       setRunsOpen(false);
@@ -627,7 +627,7 @@ export function ChatShell() {
 
   function toggleRuns() {
     if (studio.activeArtifact && studio.dirtyIds.has(studio.activeArtifact._id)) {
-      toast.message("Save or discard your open work before opening Runs.");
+      toast.message("Save or discard your open artifact before opening Runs.");
       return;
     }
     studio.closeStudio();
@@ -738,12 +738,12 @@ export function ChatShell() {
                     ? requestedThreadId
                       ? "This thread could not refresh"
                       : "Threads could not refresh"
-                    : "Your work could not load"
+                    : "Your artifact could not load"
                 }
                 detail={
                   loadError
                     ? "The messages shown below are the last loaded copy. Try again to refresh this thread."
-                    : "Your messages are here. Works and workspaces could not load beside them. Try again."
+                    : "Your messages are here. Artifacts and workspaces could not load beside them. Try again."
                 }
                 className="mb-5 min-h-0 items-start rounded-card border border-[color-mix(in_oklab,var(--danger)_22%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_4%,var(--bg-primary))] px-4 py-3 text-left"
                 action={

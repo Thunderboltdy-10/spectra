@@ -60,14 +60,14 @@ export const TOUR_STEPS: readonly TourStep[] = [
     path: "/library",
     targets: ["section[aria-labelledby='shelf-classes']", PAGE],
     say: () =>
-      "The Library holds everything we make, on a shelf for each of your classes. Open any piece of work and I can edit it beside you, or you can follow along as I go.",
+      "The Library holds everything we make, on a shelf for each of your classes. Open any artifact and I can edit it beside you, or you can follow along as I go.",
   },
   {
     id: "select",
     path: "/library",
     targets: ["[data-library-select]"],
     say: () =>
-      "Select lets you pick several works at once. Ask me about all of them together, or lay them side by side to work across them.",
+      "Select lets you pick several artifacts at once. Ask me about all of them together, or lay them side by side to work across them.",
   },
   {
     id: "calendar",
@@ -82,7 +82,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     targets: [],
     ask: "reminders",
     say: () =>
-      "Each morning I write you a short brief on Home: what's due, and what to start on. I also remind you of work dated for the day. Pick when they arrive; Settings can change it later.",
+      "Each morning I write you a short brief on Home: what's due, and what to start on. I also remind you of artifact dated for the day. Pick when they arrive; Settings can change it later.",
   },
   {
     id: "school",
@@ -112,7 +112,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     targets: ["[data-work-home]"],
     ask: "storage",
     say: () =>
-      "One more choice, and it's worth a moment. If you mostly use one computer, keep your work on it: everything opens instantly, works offline, and a backup goes up once a day. It looks and works the same either way.",
+      "One more choice, and it's worth a moment. If you mostly use one computer, keep your artifacts on it: everything opens instantly, works offline, and a backup goes up once a day. It looks and works the same either way.",
   },
   {
     id: "account",

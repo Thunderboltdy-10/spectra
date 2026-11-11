@@ -37,7 +37,7 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Spectra — The AI School Platform",
   description:
-    "Spectra is a collaborative AI workspace for connected work, people, and evidence.",
+    "Spectra is a collaborative AI workspace for connected artifacts, people, and evidence.",
   icons: {
     icon: [
       { url: "/icon.svg", type: "image/svg+xml" },
@@ -48,7 +48,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Spectra — The AI School Platform",
     description:
-      "Spectra is a collaborative AI workspace for connected work, people, and evidence.",
+      "Spectra is a collaborative AI workspace for connected artifacts, people, and evidence.",
     siteName: "Spectra",
   },
 };

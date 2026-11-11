@@ -16,9 +16,9 @@ export type PlatformScope = "ai" | "background";
 const scope = v.union(v.literal("ai"), v.literal("background"));
 
 const STOPPED_MESSAGES: Record<PlatformScope, string> = {
-  ai: "PLATFORM_STOPPED: Spectra's AI is paused by the Spectra team for a moment. Your work is safe; try again shortly.",
+  ai: "PLATFORM_STOPPED: Spectra's AI is paused by the Spectra team for a moment. Your artifact is safe; try again shortly.",
   background:
-    "PLATFORM_STOPPED: Spectra's background work is paused by the Spectra team. Your work is safe.",
+    "PLATFORM_STOPPED: Spectra's background work is paused by the Spectra team. Your artifacts are safe.",
 };
 
 async function control(ctx: QueryCtx | MutationCtx, which: PlatformScope) {

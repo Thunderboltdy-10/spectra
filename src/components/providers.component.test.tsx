@@ -29,10 +29,10 @@ it("exposes both independent recovery actions without hovering or dismissing the
   const retryWork = vi.fn();
   const retryConversation = vi.fn((id: string | number) => { toast.dismiss(id); });
   showRetryToast("This conversation could not be opened.", retryConversation, { label: "Try again" });
-  showRetryToast("This work could not be opened.", retryWork, { label: "Try again" });
-  await screen.findByText("This work could not be opened.");
+  showRetryToast("This artifact could not be opened.", retryWork, { label: "Try again" });
+  await screen.findByText("This artifact could not be opened.");
   const conversation = screen.getByText("This conversation could not be opened.").closest("[data-sonner-toast]") as HTMLElement;
-  const work = screen.getByText("This work could not be opened.").closest("[data-sonner-toast]") as HTMLElement;
+  const work = screen.getByText("This artifact could not be opened.").closest("[data-sonner-toast]") as HTMLElement;
   // This attribute selects Sonner's separated layout instead of its overlapping stack.
   await waitFor(() => {
     expect(conversation.getAttribute("data-expanded")).toBe("true");

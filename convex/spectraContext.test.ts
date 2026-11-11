@@ -77,7 +77,7 @@ describe("exact-reference context orientation", () => {
     expect(await f.reader.query(artifactQuery, { artifactId: f.artifactId })).toMatchObject({ _id: f.artifactId });
   });
 
-  it("authorizes exact unplaced references and denies expired grants and deleted works", async () => {
+  it("authorizes exact unplaced references and denies expired grants and deleted artifacts", async () => {
     const f = await fixture();
     await f.t.run(async (ctx) => {
       const nodes = await ctx.db.query("orgNodes").collect();

@@ -47,7 +47,7 @@ export function findBindings(adapter: FindAdapter): CommandBinding[] {
       shortcut: "Mod+F",
       active: adapter.open,
       hint: adapter.matchCount === undefined
-        ? "Search this work"
+        ? "Search this artifact"
         : `${adapter.matchCount} ${adapter.matchCount === 1 ? noun : `${noun}es`}`,
       onSelect: () => adapter.toggle(),
     },

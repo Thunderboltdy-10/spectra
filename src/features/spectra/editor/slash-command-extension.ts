@@ -72,7 +72,7 @@ export const DOCUMENT_SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   { id: "section-break", commandId: "document.insert.sectionBreak", label: "Section break", description: "Start a section with its own page setup", icon: "columns", section: "Blocks", aliases: ["section"] },
   { id: "table", commandId: "document.insert.table", label: "Table", description: "Insert a 3 × 3 table", icon: "table", section: "Media", aliases: ["grid"] },
   { id: "image", commandId: "document.insert.image", label: "Image", description: "Insert an image from your device", icon: "image", section: "Media", aliases: ["picture", "photo"] },
-  { id: "reference", commandId: "document.insert.reference", label: "Reference", description: "Show another work here, live, without copying it", icon: "link", section: "Media", aliases: ["embed", "work"], opensPicker: true },
+  { id: "reference", commandId: "document.insert.reference", label: "Reference", description: "Show another artifact here, live, without copying it", icon: "link", section: "Media", aliases: ["embed", "work"], opensPicker: true },
   { id: "link", commandId: "document.insert.link", label: "Link", description: "Link the selection to a web address", icon: "link", section: "Media", aliases: ["url", "href"] },
   { id: "citation", commandId: "document.insert.citation", label: "Citation", description: "Insert a Spectra research citation (not a Word citation field)", icon: "book", section: "References", aliases: ["cite", "source"] },
   { id: "footnote", commandId: "document.insert.footnote", label: "Footnote", description: "A numbered note at the foot of the page", icon: "book", section: "References", aliases: ["note"] },
@@ -154,7 +154,7 @@ export const SLASH_COMMANDS: SlashCommandItem[] = [
     };
     input.click();
   } },
-  { id: "reference", label: "Reference", description: "Show another work here, live, without copying it", icon: "link", section: "Media", aliases: ["embed", "work"], opensPicker: true, action: (editor) => {
+  { id: "reference", label: "Reference", description: "Show another artifact here, live, without copying it", icon: "link", section: "Media", aliases: ["embed", "work"], opensPicker: true, action: (editor) => {
     const hostWorkId = editor.view.dom.dataset.workId;
     if (hostWorkId) spectraBus.command("reference.add", { hostWorkId, at: caretPoint(editor.view) });
   } },

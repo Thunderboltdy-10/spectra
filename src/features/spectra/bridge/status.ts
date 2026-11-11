@@ -334,7 +334,7 @@ function fileGone(replicas: readonly ReplicaTruth[]): SyncPresentation | null {
     key: "file-gone",
     state: "offline",
     label: "File deleted",
-    detail: "The file was deleted or moved out of its folder on this computer. This work is still here in Spectra.",
+    detail: "The file was deleted or moved out of its folder on this computer. This artifact is still here in Spectra.",
     tone: "warning",
     action: { label: "Put it back", kind: "put-back" },
     ready: true,

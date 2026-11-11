@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 import { describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
+import aggregateTest from "@convex-dev/aggregate/test";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import {
@@ -18,7 +19,9 @@ const identity = {
 };
 
 function setupTest() {
-  return convexTest(schema, modules);
+  const t = convexTest(schema, modules);
+  for (const name of ["orgNodeCountByType", "orgNodeCountByWorkspace", "orgNodeCountByParent"]) aggregateTest.register(t, name);
+  return t;
 }
 
 async function seedCalendar(t: ReturnType<typeof setupTest>) {

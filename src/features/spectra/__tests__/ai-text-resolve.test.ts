@@ -6,7 +6,7 @@ import { AiRegionDecoration, aiRegionDecorationKey } from "../editor/ai-region-d
 import { NATIVE_PROJECTION_TRANSACTION_META } from "../editor/collaboration-change";
 import { AiTextResolve, MAX_RESOLVE_CHARS, RESOLVE_MS } from "../editor/ai-text-resolve";
 
-describe("Spectra's words in a work", () => {
+describe("Spectra's words in an artifact", () => {
   let editor: Editor;
 
   beforeEach(() => {

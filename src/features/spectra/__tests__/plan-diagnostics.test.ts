@@ -629,7 +629,7 @@ describe("plan diagnostics and schema slip recovery", () => {
     expect(
       isRepairablePlanFailure(
         new Error(
-          "This update-only request names every exact target as required work. Add the missing artifact.update operation(s) before submitting the plan.",
+          "This update-only request names every exact target as required artifact. Add the missing artifact.update operation(s) before submitting the plan.",
         ),
       ),
     ).toBe(true);

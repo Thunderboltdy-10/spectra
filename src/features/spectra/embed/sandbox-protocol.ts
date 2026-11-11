@@ -743,7 +743,7 @@ export function buildSpectraSandboxDocument({
     const link = event.target && event.target.closest ? event.target.closest('a') : null;
     if (link && link.href) { event.preventDefault(); post({ type: 'spectra:interaction', name: 'link.open', detail: { href: String(link.getAttribute('href') || '').slice(0, 500) } }); }
   });
-  // The body's own height, not the document's: the document is at least as tall as the frame, so a frame measured by it could never shrink to its work.
+  // The body's own height, not the document's: the document is at least as tall as the frame, so a frame measured by it could never shrink to its artifact.
   const reportLayout = () => post({ type: 'spectra:resize', height: Math.max(48, Math.min(budgets.maxHeight, Math.ceil(document.body.scrollHeight) || 48)) });
   const accessibleName = (element) => {
     const direct = element.getAttribute('aria-label') || element.getAttribute('title') || '';

@@ -296,7 +296,7 @@ const FACET_KINDS: Record<FoundryFacet, FoundrySectionKind> = {
 const FACET_RATIONALE: Record<FoundryFacet, string> = {
   objective: "The agent has no usable objective yet.",
   interaction: "How the agent should feel to work with is unestablished.",
-  inputs: "What the agent will be given is undefined, so it cannot validate work.",
+  inputs: "What the agent will be given is undefined, so it cannot validate its work.",
   outputs: "The shape of a correct answer is undefined.",
   criteria: "There are no criteria that separate a good result from a poor one.",
   evidence:

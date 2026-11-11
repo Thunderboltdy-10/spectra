@@ -81,13 +81,13 @@ describe("canonical Spectra client state", () => {
 
   it("does not discard an open artifact when a bounded overview omits it", () => {
     const state = contextStore.getState();
-    state.openObject({ type: "artifact", id: "outside-page", label: "Open work", presentation: "tab" });
+    state.openObject({ type: "artifact", id: "outside-page", label: "Open artifact", presentation: "tab" });
     state.reconcile(
-      [{ type: "artifact", id: "page-one", label: "First page work" }],
+      [{ type: "artifact", id: "page-one", label: "First page artifact" }],
       { completeTypes: ["workspace"] },
     );
     expect(contextStore.getState().openObjects).toEqual([
-      { type: "artifact", id: "outside-page", label: "Open work", presentation: "tab" },
+      { type: "artifact", id: "outside-page", label: "Open artifact", presentation: "tab" },
     ]);
     contextStore.getState().setObjectAvailability("artifact", "outside-page");
     expect(contextStore.getState().openObjects).toEqual([]);

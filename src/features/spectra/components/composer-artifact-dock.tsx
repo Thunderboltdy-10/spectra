@@ -123,7 +123,7 @@ export function ComposerArtifactDock({
       ) {
         toast.error(
           readConvexError(error).message ||
-            "This work could not be kept in the conversation.",
+            "This artifact could not be kept in the conversation.",
         );
       }
     } finally {
@@ -140,7 +140,7 @@ export function ComposerArtifactDock({
   return (
     <div
       className="mb-2 flex max-h-[148px] flex-col gap-1.5 overflow-y-auto [scrollbar-width:thin]"
-      aria-label="Work from this conversation"
+      aria-label="Artifact from this conversation"
     >
       {rows.map((artifact) => {
         const meta = workTypeMeta[artifact.blueprintKey];

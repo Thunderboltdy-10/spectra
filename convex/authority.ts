@@ -194,7 +194,7 @@ export async function sendShareInvitation(
     );
   if (invitee._id === actor.accountId)
     throw new Error(
-      "SHARING_SELF_INVARIANT: You already have access to this work.",
+      "SHARING_SELF_INVARIANT: You already have access to this artifact.",
     );
   const now = Date.now();
   if (args.expiresAt && args.expiresAt <= now)

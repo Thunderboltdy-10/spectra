@@ -160,8 +160,8 @@ describe("account-private conflict writes", () => {
   });
 });
 
-describe("reactive work metadata availability", () => {
-  it.each(["work metadata", "Library summary", "cloud payload", "local payload"] as const)("keeps %s available independently of other accounts' replica density", async (kind) => {
+describe("reactive artifact metadata availability", () => {
+  it.each(["artifact metadata", "Library summary", "cloud payload", "local payload"] as const)("keeps %s available independently of other accounts' replica density", async (kind) => {
     const t = setupTest();
     const fixture = await seedWork(t);
     const user = t.withIdentity(identity);
@@ -188,7 +188,7 @@ describe("reactive work metadata availability", () => {
       }
       return ids;
     });
-    const endpoint = kind === "work metadata" ? forWork : kind === "Library summary" ? presentationsForAccount : payloadForWork;
+    const endpoint = kind === "artifact metadata" ? forWork : kind === "Library summary" ? presentationsForAccount : payloadForWork;
     const args = kind === "Library summary" ? {} : { workId: fixture.workId,
       ...(kind.endsWith("payload") ? { prefer: kind === "local payload" ? "local-latest" : "cloud" } : {}) };
     const handler = Reflect.get(endpoint, "_handler") as (ctx: QueryCtx, input: typeof args) => Promise<unknown>;
@@ -199,7 +199,7 @@ describe("reactive work metadata availability", () => {
     const dense = await measure();
     await t.run(async ctx => { for (const id of foreignIds.slice(1)) await ctx.db.delete(id); });
     const sparse = await measure();
-    if (kind === "work metadata") expect(sparse.result).toMatchObject({ replicas: [
+    if (kind === "artifact metadata") expect(sparse.result).toMatchObject({ replicas: [
       expect.objectContaining({ kind: "cloud", state: "current" }), expect.objectContaining({ kind: "local", state: "pending" }),
     ] });
     else if (kind === "Library summary") expect(sparse.result).toMatchObject([{ pendingCount: 1, replicas: [
@@ -410,7 +410,7 @@ describe("reactive work metadata availability", () => {
     expect(await user.mutation(api.replicas.createLocalReplica, args)).toMatchObject({ state: "existing", replicaId: fixture.localId });
     expect(await t.run(ctx => ctx.db.query("bridgeWriteRequests").collect())).toEqual([]);
   });
-  it("reports unavailable metadata after an open work is permanently deleted", async () => {
+  it("reports unavailable metadata after an open artifact is permanently deleted", async () => {
     const t = setupTest();
     const fixture = await seedWork(t);
     const user = t.withIdentity(identity);
@@ -420,7 +420,7 @@ describe("reactive work metadata availability", () => {
     expect(await user.query(api.replicas.strategyTransitionForWork, { workId: fixture.workId })).toBeNull();
   });
 
-  it("returns no reactive metadata when the work record is gone", async () => {
+  it("returns no reactive metadata when the artifact record is gone", async () => {
     const t = setupTest();
     const fixture = await seedWork(t);
     const user = t.withIdentity(identity);
@@ -949,7 +949,7 @@ describe("replica truth machine", () => {
     const truth = await t
       .withIdentity(identity)
       .query(api.replicas.forWork, { workId: fixture.workId });
-    assert(truth, "Authorized work must have replica metadata");
+    assert(truth, "Authorized artifact must have replica metadata");
     expect(
       truth.replicas.find((replica) => replica._id === staleLocalId),
     ).toMatchObject({
@@ -1185,7 +1185,7 @@ describe("replica truth machine", () => {
     const truth = await t.withIdentity(identity).query(api.replicas.forWork, {
       workId: fixture.workId,
     });
-    assert(truth, "Authorized work must have replica metadata");
+    assert(truth, "Authorized artifact must have replica metadata");
     expect(truth.pendingCount).toBe(0);
   });
 
@@ -1259,12 +1259,12 @@ describe("replica truth machine", () => {
     const ownerTruth = await t.withIdentity(identity).query(api.replicas.forWork, {
       workId: fixture.workId,
     });
-    assert(ownerTruth, "Authorized work must have replica metadata");
+    assert(ownerTruth, "Authorized artifact must have replica metadata");
     expect(ownerTruth.replicas.length).toBeGreaterThan(0);
     const collaboratorTruth = await t
       .withIdentity(collaboratorIdentity)
       .query(api.replicas.forWork, { workId: fixture.workId });
-    assert(collaboratorTruth, "Authorized work must have replica metadata");
+    assert(collaboratorTruth, "Authorized artifact must have replica metadata");
     expect(collaboratorTruth.replicas.map((replica) => replica._id)).toEqual(
       ownerTruth.replicas
         .filter((replica) => replica.kind === "cloud")
@@ -1741,7 +1741,7 @@ describe("replica truth machine", () => {
     const truth = await t.withIdentity(identity).query(api.replicas.forWork, {
       workId: fixture.workId,
     });
-    assert(truth, "Authorized work must have replica metadata");
+    assert(truth, "Authorized artifact must have replica metadata");
     expect(truth.pendingCount).toBe(0);
   });
 
@@ -1766,7 +1766,7 @@ describe("replica truth machine", () => {
     const truth = await t.withIdentity(identity).query(api.replicas.forWork, {
       workId: fixture.workId,
     });
-    assert(truth, "Authorized work must have replica metadata");
+    assert(truth, "Authorized artifact must have replica metadata");
     expect(truth.openConflictCount).toBe(0);
     expect(truth.conflicts).toEqual([]);
   });
@@ -2329,7 +2329,7 @@ describe("replica truth machine", () => {
     });
   });
 
-  it("migrates a local-only full-cloud work to ahead, never false current", async () => {
+  it("migrates a local-only full-cloud artifact to ahead, never false current", async () => {
     const t = setupTest();
     const fixture = await seedWork(t);
     await t.run(async (ctx) => ctx.db.delete(fixture.cloudId));
@@ -2614,7 +2614,7 @@ describe("replica truth machine", () => {
     const truth = await t.withIdentity(identity).query(api.replicas.forWork, {
       workId: fixture.workId,
     });
-    assert(truth, "Authorized work must have replica metadata");
+    assert(truth, "Authorized artifact must have replica metadata");
     expect(truth.conflicts[0]?.previews).toEqual(previews);
   });
 
@@ -2862,7 +2862,7 @@ describe("replica truth machine", () => {
       const accountId = kind === "foreign" ? await ctx.db.insert("accounts", { clerkId: "wrong-write-peer", email: "wrong-write@example.test",
         emailVerified: true, name: "Wrong write peer", status: "active", createdAt: now, updatedAt: now }) : f.accountId;
       const workId = kind === "other-work" ? await ctx.db.insert("spectraArtifacts", { ownerAccountId: f.accountId, schoolId: f.schoolId,
-        title: "Other work", blueprintKey: "document", content: { blocks: [] }, tags: [], status: "active", createdAt: now, updatedAt: now }) : f.workId;
+        title: "Other artifact", blueprintKey: "document", content: { blocks: [] }, tags: [], status: "active", createdAt: now, updatedAt: now }) : f.workId;
       const id = await ctx.db.insert("bridgeWriteRequests", { accountId, workId, replicaId: f.localId, deviceId: f.deviceId, mountId: f.mountId,
         localResourceId: "wrong-target", relativePath: "Wrong.docx", payloadRef: String(f.nextPayloadId), baseRevision: baseHash,
         targetRevision: nextHash, contentHash: nextHash, idempotencyKey: "wrong-target", regionIds: ["body"], partNames: [],
@@ -3122,7 +3122,7 @@ describe("replica truth machine", () => {
     expect(truth.externalOperation).toMatchObject({ state: "verified" });
   });
 
-  it("leaves work content unchanged while a verified-first materialization is pending", async () => {
+  it("leaves artifact content unchanged while a verified-first materialization is pending", async () => {
     const t = setupTest();
     const fixture = await seedWork(t);
     const asUser = t.withIdentity(identity);
@@ -3272,7 +3272,7 @@ describe("replica truth machine", () => {
     expect(truth.local?.state).toBe("pending");
   });
 
-  it("advances replica byte and projection bases on verified-first without rewriting work content", async () => {
+  it("advances replica byte and projection bases on verified-first without rewriting artifact content", async () => {
     const t = setupTest();
     const fixture = await seedWork(t);
     const externalOperationId = await t.run(async (ctx) => {
@@ -3600,8 +3600,8 @@ describe("replica truth machine", () => {
   });
 });
 
-describe("an open work in another tab (F17)", () => {
-  it("tells the editor when the work went to Trash, and stops once it is back", async () => {
+describe("an open artifact in another tab (F17)", () => {
+  it("tells the editor when the artifact went to Trash, and stops once it is back", async () => {
     const t = setupTest();
     const fixture = await seedWork(t);
     const user = t.withIdentity(identity);

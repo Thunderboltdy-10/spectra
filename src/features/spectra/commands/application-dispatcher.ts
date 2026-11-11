@@ -186,7 +186,7 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
         if (destination === "artifact") {
           if (!targetId) throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.navigate requires targetId for artifacts");
           const readiness = readinessFrom(await host.openArtifact(targetId, "panel"));
-          return completed(commandId, "open", "Work opened.", readiness, { targetId });
+          return completed(commandId, "open", "Artifact opened.", readiness, { targetId });
         }
         if (destination !== "library" && destination !== "calendar" && destination !== "settings" && destination !== "workspace")
           throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.navigate requires a registered destination");
@@ -198,7 +198,7 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
         if (!workId) throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.work.open requires workId");
         expectLanding(workId, params.region);
         const readiness = readinessFrom(await host.openArtifact(workId, params.surface === "tile" || params.surface === "full" || params.surface === "panel" ? params.surface : "panel"));
-        return completed(commandId, "open", "Work opened.", readiness, { workId });
+        return completed(commandId, "open", "Artifact opened.", readiness, { workId });
       }
       case "app.calendar.open": {
         const readiness = readinessFrom(await host.navigate("calendar"));
@@ -294,7 +294,7 @@ export function createApplicationCommandDispatcher(host: ApplicationCommandHost)
         return dispatchSemantic(commandId, "open", "work.revealAnchor", {
           anchor: anchor as never,
           focus: params.focus !== false,
-        }, "Work anchor revealed.");
+        }, "Artifact anchor revealed.");
       }
       case "app.run.open-conversation": {
         if (typeof params.runId !== "string" || !params.runId.trim()) throw new Error("APPLICATION_COMMAND_INVALID_PARAMS: app.run.open-conversation requires runId");

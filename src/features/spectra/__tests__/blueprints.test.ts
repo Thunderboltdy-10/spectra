@@ -14,7 +14,7 @@ describe("Spectra blueprint registry", () => {
     ]);
   });
 
-  it("offers every creatable type from Library New and empty-board New work here", () => {
+  it("offers every creatable type from Library New and empty-board New artifact here", () => {
     expect(blueprintChoices.map((choice) => choice.key)).toEqual([
       ...WORK_TYPE_KEYS,
     ]);

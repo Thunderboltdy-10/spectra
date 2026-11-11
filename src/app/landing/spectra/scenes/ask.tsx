@@ -198,7 +198,7 @@ export function Ask() {
   return (
     <section ref={sceneRef} className="sp-scene sp-ask" aria-labelledby="sp-ask-title">
       <div className="sp-scene-copy" data-centred>
-        <Written id="sp-ask-title" className="sp-heading" text={"Ask once.\nGet the work back."} />
+        <Written id="sp-ask-title" className="sp-heading" text={"Ask once.\nGet the artifact back."} />
         <p className="sp-lede">
           Spectra doesn&rsquo;t stop at an answer. It writes the quiz, builds the slides and files them in the right class.
         </p>

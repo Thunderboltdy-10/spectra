@@ -66,7 +66,7 @@ export function useShellArtifactOpen(readArtifact = getSpectraArtifactForDeepLin
     setLoadingId(null);
     if (!artifact || artifact.accessLevel === null || artifact.status === "deleted") {
       requestedId.current = null;
-      throw new Error("That work is not available.");
+      throw new Error("That artifact is not available.");
     }
     // Undefined is a summary row; null and an empty body are valid detail.
     if (artifact.content === undefined) {

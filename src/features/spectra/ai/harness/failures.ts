@@ -25,7 +25,7 @@ const KNOWN: Array<{ match: RegExp; say: (detail: string) => string }> = [
   },
   {
     match: /(?:AI_NATIVE_CANONICAL_STALE|AI_NATIVE_SOURCE_STALE)/,
-    say: () => `This work changed while you were editing it. ${NOTHING_SAVED} Read it again and repeat only your edit.`,
+    say: () => `This artifact changed while you were editing it. ${NOTHING_SAVED} Read it again and repeat only your edit.`,
   },
   {
     match: /(?:AI_NATIVE_[A-Z_]+|NATIVE_RECEIPT_[A-Z_]+|DOCX_[A-Z_]+|OFFICE_[A-Z_]+)/,

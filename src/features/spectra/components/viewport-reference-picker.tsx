@@ -83,7 +83,7 @@ export function ViewportReferencePicker() {
             typeof value.message === "string",
         );
       if (dispatched.listeners === 0) {
-        setSelectionError("Reference insertion is not available on this work.");
+        setSelectionError("Reference insertion is not available on this artifact.");
         return;
       }
       if (outcome?.status !== "completed") {
@@ -111,13 +111,13 @@ export function ViewportReferencePicker() {
         layer="composer-dock"
         hideCloseButton
         overlayClassName="backdrop-blur-none"
-        aria-label="Pick referenced work from page"
+        aria-label="Pick referenced artifact from page"
         className="bottom-5 top-auto max-w-[min(520px,calc(100vw-24px))] -translate-y-0 gap-0 rounded-card p-3"
       >
         <div className="flex items-center gap-2">
           <Crosshair className="h-4 w-4 text-[var(--accent-cyan)]" />
           <DialogTitle className="text-caption">
-            Reference visible work
+            Reference visible artifact
           </DialogTitle>
           <span className="ml-auto text-micro text-[var(--text-tertiary)]">
             Esc to cancel
@@ -132,7 +132,7 @@ export function ViewportReferencePicker() {
           </button>
         </div>
         <DialogDescription className="sr-only">
-          Choose a visible work region to reference.
+          Choose a visible artifact region to reference.
         </DialogDescription>
         {selectionError ? (
           <p role="alert" className="mt-2 text-micro text-[var(--danger)]">

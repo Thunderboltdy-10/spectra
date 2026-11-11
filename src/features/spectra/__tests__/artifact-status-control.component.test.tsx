@@ -168,7 +168,7 @@ describe("the status control in the field", () => {
 describe("the header around it", () => {
   const commands = [
     { id: "comments", label: "Comments", icon: MessageSquare, onSelect: () => {} },
-    { id: "chats", label: "Browse chats about this work", icon: MessagesSquare, onSelect: () => {} },
+    { id: "chats", label: "Browse chats about this artifact", icon: MessagesSquare, onSelect: () => {} },
     { id: "open-full", label: "Open full", icon: Maximize2, onSelect: () => {} },
   ];
 
@@ -191,7 +191,7 @@ describe("the header around it", () => {
         presence={<span>People</span>}
         status={<ArtifactStatusControl status={SAVED} onAction={() => {}} />}
         commands={commands}
-        moreLabel="More work actions"
+        moreLabel="More artifact actions"
         more={null}
         close={<button type="button">Close</button>}
       />,
@@ -199,10 +199,10 @@ describe("the header around it", () => {
     const buttons = screen.getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent);
     expect(buttons).toEqual([
       "Comments",
-      "Browse chats about this work",
+      "Browse chats about this artifact",
       "Open full",
       "Status: Saved",
-      "More work actions",
+      "More artifact actions",
       "Close",
     ]);
   });

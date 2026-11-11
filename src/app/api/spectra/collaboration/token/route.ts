@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
         typeof artifact
       >("spectraArtifacts:get", { artifactId });
     } catch (error) {
-      logger.warn("Collaboration work lookup failed", {
+      logger.warn("Collaboration artifact lookup failed", {
         artifactId,
         message:
           error instanceof Error ? error.message : "Unknown lookup failure",

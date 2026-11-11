@@ -318,7 +318,7 @@ export function UniversalKBar() {
       if (targetField) {
         const rankedTarget = params[targetField];
         if (!currentTarget || rankedTarget !== currentTarget) {
-          setResultMessage("The active target changed. Close this command and open it again for the current work.");
+          setResultMessage("The active target changed. Close this command and open it again for the current artifact.");
           return;
         }
         params = { ...params, [targetField]: currentTarget };
@@ -447,7 +447,7 @@ export function UniversalKBar() {
               setQuery(event.target.value);
               setResultMessage(null);
             }}
-            placeholder={parametersFor ? "Enter a value…" : confirming ? "Review this action" : "Search commands, work, workspaces, conversations…"}
+            placeholder={parametersFor ? "Enter a value…" : confirming ? "Review this action" : "Search commands, artifact, workspaces, conversations…"}
             readOnly={Boolean(parametersFor || confirming)}
             className="h-14 min-w-0 flex-1 border-0 bg-transparent text-body outline-none ring-0 placeholder:text-[var(--text-tertiary)] focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none"
           />

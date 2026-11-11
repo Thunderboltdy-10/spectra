@@ -195,7 +195,7 @@ export const commit = internalMutation({
     }
     await ctx.db.patch(artifact._id, { ...snapshot(before), contentHash: args.beforeProjectionHash, liveStateVectorHash: append.baseStateVectorHash });
     await ctx.db.patch(state.room._id, { lastProjectionSequence: state.room.nextSequence - 1 });
-    await commitHumanCheckpoint(ctx, artifact._id, "Your work before restore", { kind: "pre_restore_checkpoint" });
+    await commitHumanCheckpoint(ctx, artifact._id, "Your artifact before restore", { kind: "pre_restore_checkpoint" });
     const appended = await appendRoomUpdate(ctx, append);
     if (appended.duplicate || !("projected" in appended) || !appended.projected) throw new Error("ARTIFACT_RESTORE_RECEIPT_MISSING");
     let groupId = appended.changeGroupId;

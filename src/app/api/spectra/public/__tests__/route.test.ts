@@ -42,7 +42,7 @@ describe("anonymous public projection route", () => {
     const convexQuery = vi.fn().mockResolvedValue({
       resourceType: "artifact",
       level: "read",
-      artifact: { artifactId: "artifact-1", title: "Shared work" },
+      artifact: { artifactId: "artifact-1", title: "Shared artifact" },
     });
     const convexPublicQuery = vi.fn();
     const auth = vi.fn().mockResolvedValue({ userId: "viewer-1" });

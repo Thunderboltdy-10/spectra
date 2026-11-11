@@ -14,7 +14,7 @@ import { useShareAccess, type ShareableResourceType } from "./share/use-share-ac
  * people choose whether to accept, so nothing lands in their Library unasked.
  */
 
-const NOUN: Record<ShareableResourceType, string> = { workspace: "workspace", artifact: "work", agent: "agent" };
+const NOUN: Record<ShareableResourceType, string> = { workspace: "workspace", artifact: "artifact", agent: "agent" };
 
 export function ShareDialog({
   open,

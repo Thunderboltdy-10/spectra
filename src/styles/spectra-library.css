@@ -816,6 +816,188 @@
   }
 }
 
+/* Back to the folder, beside the cards' tabs: a small folder with the count. */
+.work-stack-fold {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  gap: 5px;
+  margin-right: 2px;
+  padding: 0 8px;
+  border-radius: 7px;
+  background: var(--folder-back);
+  color: var(--folder-ink);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  box-shadow: inset 0 0 0 1px var(--folder-edge);
+  transition: background-color 140ms ease;
+}
+
+.work-stack-fold:hover {
+  background: color-mix(in oklab, var(--folder-kraft) 40%, var(--card-paper));
+}
+
+.work-stack-fold:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 1px;
+}
+
+/* A stack holding many works lists them in columns rather than one long scroll. */
+.work-stack-names:has(> li:nth-child(6)) {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 170px), 1fr));
+  align-content: start;
+  column-gap: 6px;
+}
+
+/* Folders sit in a row of their own, a little wider than a work's card. */
+.library-notes.library-folders {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr));
+}
+@container library-body (min-width: 900px) {
+  .library-notes.library-folders {
+    grid-template-columns: repeat(auto-fill, minmax(290px, 340px));
+  }
+}
+
+/* --- Folders on a shelf --------------------------------------------------
+ * A real folder: the kraft of a stack, a tab with its kind, a sheet or two
+ * over its edge when it holds something, its name on the front. */
+.library-folders {
+  grid-auto-flow: dense;
+}
+
+.folder-card {
+  --folder-kraft: #c08a52;
+  --folder-back: color-mix(in oklab, var(--folder-kraft) 30%, var(--card-paper));
+  --folder-front: color-mix(in oklab, var(--folder-kraft) 16%, var(--card-paper));
+  --folder-ink: color-mix(in oklab, #7a4c22 78%, var(--text-primary));
+  --folder-edge: color-mix(in oklab, var(--folder-kraft) 34%, var(--card-border));
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 132px;
+  isolation: isolate;
+  text-align: left;
+  outline: none;
+}
+
+/* The back of the folder, under its tab. */
+.folder-card::before {
+  content: "";
+  position: absolute;
+  inset: 22px 0 0;
+  z-index: -2;
+  border-radius: 0 14px 14px;
+  background: var(--folder-back);
+  box-shadow: 0 0 0 1px var(--folder-edge);
+}
+
+.folder-card-tab {
+  position: absolute;
+  top: 0;
+  left: 12px;
+  display: flex;
+  height: 23px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border-radius: 9px 9px 0 0;
+  background: var(--folder-back);
+  color: var(--folder-ink);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 -1px 0 var(--folder-edge), 1px 0 0 var(--folder-edge), -1px 0 0 var(--folder-edge);
+}
+
+/* What it holds, peeking over the front's edge. */
+.folder-card-sheets > span {
+  position: absolute;
+  top: 30px;
+  z-index: -1;
+  height: 40px;
+  border-radius: 6px 6px 0 0;
+  background: var(--card-paper);
+  box-shadow: 0 0 0 1px var(--card-border);
+  transition: translate 220ms var(--ease-standard);
+}
+
+.folder-card-sheets > span:first-child {
+  right: 18px;
+  left: 30%;
+}
+
+.folder-card-sheets > span:nth-child(2) {
+  top: 36px;
+  right: 34%;
+  left: 18px;
+  rotate: -1.2deg;
+}
+
+.folder-card-front {
+  position: absolute;
+  inset: 44px 0 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 12px 16px 14px;
+  border-radius: 4px 4px 14px 14px;
+  background: var(--folder-front);
+  box-shadow:
+    0 0 0 1px var(--folder-edge),
+    0 -8px 16px -12px rgb(68 44 20 / 0.4);
+  transition: translate 200ms var(--ease-standard);
+}
+
+.folder-card-name {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-card-meta {
+  color: var(--folder-ink);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.folder-card:hover .folder-card-front,
+.folder-card[data-drop-over] .folder-card-front {
+  translate: 0 4px;
+}
+
+.folder-card:hover .folder-card-sheets > span {
+  translate: 0 -5px;
+}
+
+.folder-card:focus-visible .folder-card-front {
+  box-shadow:
+    0 0 0 1px var(--folder-edge),
+    0 0 0 3px var(--focus-ring-color);
+}
+
+.folder-card[data-picked] .folder-card-front {
+  box-shadow: 0 0 0 2px var(--brand-primary);
+}
+
+.dark :is(.folder-card, .work-stack) {
+  --folder-ink: color-mix(in oklab, #e3b27c 80%, var(--text-primary));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .folder-card-front,
+  .folder-card-sheets > span {
+    transition: none;
+  }
+}
+
 /* Laying one card on another. */
 html[data-shelf-gathering] {
   cursor: grabbing;

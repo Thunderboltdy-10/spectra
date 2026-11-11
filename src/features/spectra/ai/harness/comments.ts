@@ -29,7 +29,7 @@ function when(at: number) {
 }
 
 function where(row: CommentRow) {
-  if (row.regionId === "work:root") return "on the whole work";
+  if (row.regionId === "work:root") return "on the whole artifact";
   return row.excerpt ? `on "${row.excerpt.replace(/\s+/g, " ").slice(0, 120)}" (region ${row.regionId})` : `on region ${row.regionId}`;
 }
 

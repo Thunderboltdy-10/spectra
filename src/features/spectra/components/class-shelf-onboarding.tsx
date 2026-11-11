@@ -199,7 +199,7 @@ export function ClassShelfOnboarding({
       >
         <DialogTitle>Choose this year&apos;s classes</DialogTitle>
         <DialogDescription className="mt-1.5 max-w-xl text-caption">
-          Each class you pick becomes a workspace, and its tasks and work come
+          Each class you pick becomes a workspace, and its tasks and artifacts come
           in from ManageBac. Close this to decide later in School, Sync.
         </DialogDescription>
         <div className="mt-5">

@@ -589,6 +589,19 @@ export function applyPlannerTaskEdits(content: unknown, ops: PlannerTaskOp[], id
   task.subtasks = subtasks;
   if (typeof task.startAt === "number" && typeof task.endAt === "number" && task.endAt <= task.startAt)
     throw new AuthoringError("end must be after start.");
+  // One shape for every task (CALENDAR.md, "Tasks"): dueAt is the end, and a
+  // start before it makes the task fill those hours. An end is the due time.
+  if (typeof task.endAt === "number") {
+    task.dueAt = task.endAt;
+    task.allDay = false;
+  }
+  delete task.endAt;
+  if (typeof task.startAt === "number" && typeof task.dueAt !== "number") {
+    task.dueAt = task.startAt;
+    task.allDay = false;
+  }
+  if (typeof task.startAt === "number" && typeof task.dueAt === "number" && task.startAt >= task.dueAt) delete task.startAt;
+  if (task.startAt === null) delete task.startAt;
   return task;
 }
 
@@ -628,7 +641,9 @@ export function plannerTaskOutline(content: unknown) {
   const subtasks = list(task.subtasks).map(record);
   return [
     `Task: ${text(task.taskTitle) || "(untitled)"} [${text(task.status)}, ${text(task.priority) || "medium"} priority]`,
-    `Due: ${formatInstant(task.dueAt, timeZone, task.allDay === true)} (${timeZone})`,
+    typeof task.startAt === "number" && typeof task.dueAt === "number" && task.startAt < task.dueAt
+      ? `When: ${formatInstant(task.startAt, timeZone, false)} to ${formatInstant(task.dueAt, timeZone, false)} (${timeZone})`
+      : `Due: ${formatInstant(task.dueAt, timeZone, task.allDay === true)} (${timeZone})`,
     ...(task.description ? [`Description: ${truncate(text(task.description), 600)}`] : []),
     ...(subtasks.length ? [`Subtasks:`, ...subtasks.map((entry, index) => `${index + 1}. [${entry.done ? "x" : " "}] ${text(entry.title)}`)] : []),
   ].join("\n");

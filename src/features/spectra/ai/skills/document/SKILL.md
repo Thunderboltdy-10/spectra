@@ -33,7 +33,7 @@ document the reader needs, not the longest one you can produce.
 - For study material, teach: a worked example for a procedure, a contrast for a subtle
   distinction, a short self-check at the end only when the learner wants practice. Load the
   `teaching` skill for anything longer than a page.
-- When the work rests on sources, load the `research` skill. Cite only real sources you read;
+- When the artifact rests on sources, load the `research` skill. Cite only real sources you read;
   never invent a reference.
 
 ## Editing

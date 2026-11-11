@@ -252,7 +252,7 @@ const emptyStates = {
   },
   planner_task: {
     headline: "Nothing planned yet",
-    body: "Add a task or a milestone, then schedule the work in Calendar.",
+    body: "Add a task or a milestone, then schedule it in Calendar.",
     action: "Add a task",
   },
   agent: {
@@ -277,12 +277,12 @@ const emptyStates = {
   },
   code: {
     headline: "No files yet",
-    body: "Create a file, or import a project archive to work on something existing.",
+    body: "Create a file, or import a project archive to carry on with an existing one.",
     action: "New file",
   },
   whiteboard: {
     headline: "Empty board",
-    body: "Drop a shape, write a note, or paste a reference to work you already have.",
+    body: "Drop a shape, write a note, or paste a reference to an artifact you already have.",
     action: "Add a note",
   },
 } satisfies Record<ArtifactTypeKey, WorkEmptyState>;

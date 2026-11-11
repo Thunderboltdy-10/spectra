@@ -24,7 +24,7 @@ const artifacts = [
 const ids = (list: SpectraArtifact[]) => list.map((entry) => entry._id);
 
 describe("embed picker candidates", () => {
-  it("puts related work first, then the most recently changed, and never the container", () => {
+  it("puts related artifact first, then the most recently changed, and never the container", () => {
     expect(ids(rankEmbedCandidates({ artifacts, containerId: "self", query: "" }))).toEqual(["new", "mid", "old"]);
     expect(
       ids(rankEmbedCandidates({ artifacts, containerId: "self", query: "", relatedIds: ["old"] })),

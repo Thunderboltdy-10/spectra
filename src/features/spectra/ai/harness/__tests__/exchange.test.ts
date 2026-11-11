@@ -31,7 +31,7 @@ describe("live exchange from harness events", () => {
     expect(state.answers).toEqual([{ toolCallId: "t1", kind: "approval", question: "Share Revision plan with Ana?", label: "Allowed" }]);
   });
 
-  it("keeps one card per piece of work, and a creation stays a creation", () => {
+  it("keeps one card per artifact, and a creation stays a creation", () => {
     let list = mergeTouch([], { id: "w", type: "document", title: "Essay", action: "created" });
     list = mergeTouch(list, { id: "w", type: "document", title: "Essay v2", action: "edited", change: "Shortened the intro" });
     list = mergeTouch(list, { id: "x", type: "sheets", title: "Data", action: "referenced" });

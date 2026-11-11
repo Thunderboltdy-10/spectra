@@ -84,7 +84,7 @@ export function nodeIdentity(node: TreeNode, open = false): NodeIdentity {
     | ArtifactCardView["blueprintKey"]
     | undefined;
   const meta = key && workTypeMeta[key] ? presentWork(key, node.name) : undefined;
-  return meta ?? { ...FOLDER, icon: Folder, label: "Work" };
+  return meta ?? { ...FOLDER, icon: Folder, label: "Artifact" };
 }
 
 /** The set of blueprint keys a type filter can offer, in the order they read. */

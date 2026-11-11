@@ -392,7 +392,7 @@ function carryBeats(
     value,
     previewGesture: "selecting",
     cursorMode: "pointer",
-    interaction: { kind: "dragging", targetId: phase === "drop" ? itemPath : seamPath, targetKind: "path", label: "Place work" },
+    interaction: { kind: "dragging", targetId: phase === "drop" ? itemPath : seamPath, targetKind: "path", label: "Place artifact" },
     focusPath: phase === "drop" ? itemPath : seamPath,
     gesturePhase,
     carry: { ...placed, ...(seamBlockId ? { seamBlockId } : {}), phase },

@@ -246,7 +246,7 @@ export function activateSkills(
             );
             if (hits.length > 0) {
               score += 30;
-              reasons.push(`work type ${hits.join(", ")}`);
+              reasons.push(`artifact type ${hits.join(", ")}`);
             }
             break;
           }

@@ -69,7 +69,7 @@ async function structureRequests(t: ReturnType<typeof setupTest>) {
 }
 
 describe("Library names mirrored to Bridge files", () => {
-  it("keeps the file's extension and folder when a linked work is renamed", async () => {
+  it("keeps the file's extension and folder when a linked artifact is renamed", async () => {
     const t = setupTest();
     const { nodeId } = await seedLinkedWork(t);
     await t.withIdentity(identity).mutation(api.orgTree.rename, { nodeId, name: "  Essay   draft " });
@@ -117,8 +117,8 @@ async function mirrorStructureToDisk(t: ReturnType<typeof setupTest>, accountId:
   });
 }
 
-describe("Trash and restore of a Bridge-linked work", () => {
-  it("asks Bridge to delete the file once, even when the work is trashed again", async () => {
+describe("Trash and restore of a Bridge-linked artifact", () => {
+  it("asks Bridge to delete the file once, even when the artifact is trashed again", async () => {
     const t = setupTest();
     const { nodeId, accountId } = await seedLinkedWork(t);
     await mirrorStructureToDisk(t, accountId);
@@ -134,7 +134,7 @@ describe("Trash and restore of a Bridge-linked work", () => {
     expect(requests.filter((request) => request.kind === "delete")).toHaveLength(1);
   });
 
-  it("withdraws the waiting file deletion when the work is restored", async () => {
+  it("withdraws the waiting file deletion when the artifact is restored", async () => {
     const t = setupTest();
     const { nodeId, accountId } = await seedLinkedWork(t);
     await mirrorStructureToDisk(t, accountId);

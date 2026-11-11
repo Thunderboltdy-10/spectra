@@ -628,7 +628,7 @@ function PresentationObjectInspector({
       {object.type === "chart" || (object.type === "embed" && !(object.content as { diagram?: unknown } | null)?.diagram) ? (
         <div className="presentation-source-binding">
           <SelectField
-            label="Source work"
+            label="Source artifact"
             size="sm"
             value={object.sourceBinding?.artifactId ?? NO_SELECTION}
             disabled={readOnly}
@@ -3960,7 +3960,7 @@ export function PresentationStudio({
                             disabled={readOnly}
                             onClick={() => addObject("embed")}
                           >
-                            <Link2 className="h-3.5 w-3.5" /> Link work
+                            <Link2 className="h-3.5 w-3.5" /> Link artifact
                           </button>
                         </div>
                         <p className="presentation-empty-copy">
@@ -4259,7 +4259,7 @@ export function PresentationStudio({
                             <p>
                               Originals stay private and recoverable. Native
                               conversion reports substitutions before imported
-                              work enters history.
+                              artifact enters history.
                             </p>
                           </div>
                         </div>

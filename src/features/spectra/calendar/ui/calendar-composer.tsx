@@ -11,13 +11,15 @@ import { addDays, todayKey, type DayKey } from "@/components/ui/when";
 import { beginCreation } from "../../life/use-life";
 
 /*
- * Adding something of one's own to the Calendar. An event takes a day and the
- * hours it fills (an end before its start runs past midnight); a task takes
- * the day it is due and, if it has one, a time. A task without a time sits in
- * the day's row above the hours.
+ * Adding something to the Calendar (CALENDAR.md, "Tasks"). Whatever it is,
+ * it becomes a task: a title and a day, and then how it sits in that day.
+ * The whole day (at the top of the day, above the hours), due at a time (a
+ * deadline), or from one time to another (it fills those hours; an end
+ * before its start runs past midnight). It opens as a task sheet after.
  */
 
 type Kind = "personal_event" | "task";
+type When = "day" | "due" | "span";
 
 export type CalendarDraft = {
   kind: Kind;
@@ -60,27 +62,27 @@ export function CalendarComposer({
   /** Writes it; a rejection is shown here and the composer stays open. */
   onCreate: (draft: CalendarDraft) => Promise<void>;
 }) {
-  const [kind, setKind] = useState<Kind>("personal_event");
+  const [when, setWhen] = useState<When>("day");
   const [title, setTitle] = useState("");
   const [day, setDay] = useState<DayKey>(() => todayKey());
   const [start, setStart] = useState("09:00");
   const [end, setEnd] = useState("10:00");
-  const [dueAt, setDueAt] = useState("");
+  const [dueAt, setDueAt] = useState("17:00");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     const now = Date.now();
     const hour = nextHour(now);
-    setKind("personal_event");
+    setWhen("day");
     setTitle("");
     setDay(hour ? todayKey(now) : addDays(todayKey(now), 1));
     setStart(hour ?? "09:00");
     setEnd(laterBy(hour ?? "09:00", 60));
-    setDueAt("");
+    setDueAt("17:00");
   }, [open]);
 
-  const event = kind === "personal_event";
+  const event = when === "span";
   const overnight = event && minutesOf(end) <= minutesOf(start);
   const changeStart = (next: string) => {
     if (!next) return;
@@ -93,14 +95,14 @@ export function CalendarComposer({
   const submit = () => {
     const draft: CalendarDraft = event
       ? {
-          kind,
+          kind: "personal_event",
           title,
           startAt: localInstant(day, start),
           endAt: localInstant(overnight ? addDays(day, 1) : day, end),
         }
-      : dueAt
-        ? { kind, title, startAt: localInstant(day, dueAt), endAt: localInstant(day, dueAt) }
-        : { kind, title, startAt: localInstant(day, "00:00"), allDay: true };
+      : when === "due"
+        ? { kind: "task", title, startAt: localInstant(day, dueAt), endAt: localInstant(day, dueAt) }
+        : { kind: "task", title, startAt: localInstant(day, "23:59"), allDay: true };
     setBusy(true);
     // Dots gather at the press; what was added grows out of them where it lands.
     const creation = beginCreation({ into: "item" });
@@ -128,47 +130,48 @@ export function CalendarComposer({
           }}
         >
           <div className="calendar-composer-head">
-            <DialogTitle>{event ? "Add an event" : "Add a task"}</DialogTitle>
-            <Segmented
-              size="compact"
-              label="What to add"
-              value={kind}
-              onChange={setKind}
-              options={[
-                { value: "personal_event", label: "Event" },
-                { value: "task", label: "Task" },
-              ]}
-            />
+            <DialogTitle>Add to your calendar</DialogTitle>
           </div>
           <input
             autoFocus
             required
             aria-label="Title"
-            placeholder={event ? "Football practice, dentist, study group" : "Revise chapter 4, email Ms Ortiz"}
+            placeholder="Football practice, revise chapter 4, hand in the essay"
             value={title}
             onChange={(change) => setTitle(change.target.value)}
             className="calendar-composer-title"
           />
           <div className="calendar-composer-when">
-            <DayField label={event ? "Day" : "Due day"} value={day} onChange={setDay} />
+            <DayField label="Day" value={day} onChange={setDay} />
+            <Segmented
+              size="compact"
+              label="How it sits in the day"
+              value={when}
+              onChange={setWhen}
+              options={[
+                { value: "day", label: "All day" },
+                { value: "due", label: "Due at" },
+                { value: "span", label: "From – to" },
+              ]}
+            />
             {event ? (
               <div className="calendar-composer-hours">
                 <TimeField label="Starts" value={start} onChange={changeStart} />
                 <span aria-hidden>–</span>
                 <TimeField label="Ends" value={end} onChange={(next) => next && setEnd(next)} from={start} />
               </div>
-            ) : (
-              <TimeField label="Due time" placeholder="Any time that day" value={dueAt} onChange={setDueAt} opensAt="17:00" />
-            )}
+            ) : when === "due" ? (
+              <TimeField label="Due time" value={dueAt} onChange={(next) => next && setDueAt(next)} opensAt="17:00" />
+            ) : null}
           </div>
           <p className="calendar-composer-hint">
             {event
               ? overnight
                 ? "It ends the next morning."
-                : "Drag it on the calendar later to move or stretch it."
-              : dueAt
-                ? "Due at that time."
-                : "Without a time it sits at the top of the day."}
+                : "It fills those hours. Drag it later to move or stretch it."
+              : when === "due"
+                ? "A deadline: it is due at that time."
+                : "It sits at the top of the day, above the hours."}
           </p>
           <DialogFooter className="mt-5">
             <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onClose}>
@@ -176,7 +179,7 @@ export function CalendarComposer({
             </Button>
             <Button type="submit" variant="primary" size="sm" disabled={busy || !title.trim()}>
               {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-              {event ? "Add event" : "Add task"}
+              Add
             </Button>
           </DialogFooter>
         </form>

@@ -27,7 +27,7 @@ describe("run Undo lookup and receipt fences", () => {
     const request = { runId: f.currentId, executionId: "current-exec", previousRunId: f.previousId, previousExecutionId: "prior-exec" };
     await expect(f.actor.mutation(api.spectraRuns.updateStatus, { runId: f.currentId, executionId: "current-exec", status: "completed", outcome: "canonical_saved" })).rejects.toThrow("without a committed operation");
     await expect(f.actor.mutation(api.spectraRunUndo.recordReversal, request)).rejects.toThrow("no committed reversal");
-    await f.t.run(async (ctx) => ctx.db.insert("spectraResultCards", { runId: f.previousId, surface: "chat", status: "completed", variant: "status", title: "Done", summary: "Undone: restored 1 work.", actions: [{ key: "undone", label: "Undone" }], provenance: { undoneByRunId: f.currentId }, createdAt: Date.now(), updatedAt: Date.now() }));
+    await f.t.run(async (ctx) => ctx.db.insert("spectraResultCards", { runId: f.previousId, surface: "chat", status: "completed", variant: "status", title: "Done", summary: "Undone: restored 1 artifact.", actions: [{ key: "undone", label: "Undone" }], provenance: { undoneByRunId: f.currentId }, createdAt: Date.now(), updatedAt: Date.now() }));
     const receipt = await f.actor.mutation(api.spectraRunUndo.recordReversal, request);
     expect(await f.actor.mutation(api.spectraRunUndo.recordReversal, request)).toEqual(receipt);
     await expect(f.actor.mutation(api.spectraRunUndo.recordReversal, { ...request, previousExecutionId: "stale" })).rejects.toThrow("no longer active");

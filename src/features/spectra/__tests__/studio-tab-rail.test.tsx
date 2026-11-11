@@ -22,7 +22,7 @@ describe("studio tab rail", () => {
     render(
       <StudioTabRail
         hubTabs={[
-          { id: "hub-1", label: "All work" },
+          { id: "hub-1", label: "All artifacts" },
           { id: "hub-2", label: "Physics" },
         ]}
         activeHubTabId="hub-1"
@@ -50,7 +50,7 @@ describe("studio tab rail", () => {
     expect(onCloseHub).toHaveBeenCalledWith("hub-2");
     expect(onActivateHub).toHaveBeenCalledTimes(1);
     expect(
-      screen.getByRole("button", { name: "All work" }).getAttribute("aria-current"),
+      screen.getByRole("button", { name: "All artifacts" }).getAttribute("aria-current"),
     ).toBe("page");
   });
 });

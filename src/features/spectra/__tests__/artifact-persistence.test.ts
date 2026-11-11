@@ -20,12 +20,12 @@ describe("artifact persistence (P1.I3)", () => {
     expect(persistableTitle("Essay")).toBe("Essay");
   });
 
-  it("asks before closing dirty work and closes clean work", () => {
+  it("asks before closing dirty artifact and closes clean artifact", () => {
     expect(decideClose(true)).toBe("confirm");
     expect(decideClose(false)).toBe("close");
   });
 
-  it("asks before closing work that still has unsynchronized live changes", () => {
+  it("asks before closing artifact that still has unsynchronized live changes", () => {
     expect(decideClose(false, 1)).toBe("confirm");
     expect(decideClose(false, 0)).toBe("close");
   });

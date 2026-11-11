@@ -37,7 +37,7 @@ function SignInCard({
         <p className="auth-lede">
           {invitation
             ? `You were invited as a ${invitationRoleLabel(invitation.role)}. Sign in with ${invitation.email} to join, or create your account if you're new.`
-            : "Pick up where you left off: your work, your chats and your school, in one place."}
+            : "Pick up where you left off: your artifacts, your chats and your school, in one place."}
         </p>
       </div>
       {invitationFlow && !invitation ? (

@@ -466,7 +466,7 @@ async function projection(
       title: retainedAccess?.allowed
         ? typeof snapshotRecord.title === "string"
           ? snapshotRecord.title
-          : "Pinned work"
+          : "Pinned artifact"
         : source.title,
       summary: retainedAccess?.allowed
         ? typeof snapshotRecord.summary === "string"

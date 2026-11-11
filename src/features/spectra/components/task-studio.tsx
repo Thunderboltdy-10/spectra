@@ -3,7 +3,7 @@
 import { downloadDocumentText } from "./artifact-studio-file-utils";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
-import { CalendarCheck2, Lock } from "@/components/icons/glyph-icons";
+import { Lock } from "@/components/icons/glyph-icons";
 import { currentTimeMs } from "@/lib/unique-token";
 import { applySingleTask, singleTaskView } from "../plan/model";
 import { taskToIcs } from "../plan/projections";
@@ -13,30 +13,33 @@ import { useStudioContract } from "./artifact-studio-shell";
 import { SpectraStoredText } from "./spectra-rich-content";
 import { ArtifactRichTextEditor } from "./artifact-studio";
 import type { TaskOptionsValue, TaskRecurrence, TaskReminder } from "./task/task-options";
-import { TaskProperties } from "./task/task-properties";
+import { TaskEssentials, TaskMore } from "./task/task-properties";
 import { TaskSteps, type TaskStep } from "./task/task-steps";
-import { taskInputs, taskInstant, taskZone } from "./task/task-time";
-import { TaskWhen } from "./task/task-when";
-import { TaskElapsed } from "./task/task-elapsed";
+import { dueSentence, taskInputs, taskInstant, taskZone } from "./task/task-time";
+import { TaskTarget, TaskWhen } from "./task/task-when";
 import { useReminderTime } from "./task/task-reminders";
 import { SchoolTaskNotice } from "../school/school-task-details";
 
 export { dueDistance, taskInputs, taskInstant } from "./task/task-time";
 
 /*
- * A task (EDITORS.md, "Planner task"): one thing to do, laid out the way to-do
- * apps do it. A round check beside the title marks it done; under them, its
- * details one per line (due, priority, reminders, and repeating, time and the
- * work it is for once wanted); then what the school asked, the checklist and
- * the notes. A new task is a title and one press for its day. A task set in
- * ManageBac is the same task, with a notice of where it came from and what
- * the school holds for it (grade, hand-in).
+ * A task (EDITORS.md, "Planner task"): one thing to do, and nothing in the
+ * way of reading it. A round check beside the title marks it done. Under the
+ * title, one line: when it is due and when to be reminded. Then the
+ * description, written straight on the sheet with the rich field, where a
+ * task is broken into parts with a list if the student wants parts. What a
+ * few tasks need (priority, repeating, time needed, linked work, a day of
+ * one's own, the calendar file) is folded under "More options". A task set
+ * in ManageBac is the same task, with what the school asked above the
+ * student's own notes and what the school holds for it (grade, hand-in).
  */
 
 type TaskContent = Record<string, unknown> & {
   taskTitle?: string;
   description?: string;
   dueAt?: number | null;
+  /** A start before dueAt: the task fills those hours on the calendar. */
+  startAt?: number;
   allDay?: boolean;
   status?: "todo" | "doing" | "done";
   priority?: "low" | "medium" | "high";
@@ -99,6 +102,7 @@ export function TaskStudio({
   const done = task.status === "done";
   const steps = Array.isArray(task.subtasks) ? task.subtasks : [];
   const due = typeof task.dueAt === "number" ? task.dueAt : null;
+  const start = due !== null && typeof task.startAt === "number" && task.startAt < due ? task.startAt : null;
   const target = typeof task.personalOverlay?.targetDueAt === "number" ? task.personalOverlay.targetDueAt : null;
   const options: TaskOptionsValue = {
     priority: task.priority,
@@ -118,9 +122,15 @@ export function TaskStudio({
     onChange(applySingleTask(latest.current.raw, { ...latest.current.task, ...next }));
   };
 
-  const setDue = (date: string, time: string | null) => {
-    if (!date) patch({ dueAt: null, allDay: undefined, reminders: [] });
-    else patch({ dueAt: taskInstant(date, time, timeZone), allDay: !time });
+  // One task, three shapes: a day (top of the day), a due time, or a start and an end.
+  const setDue = (date: string, time: string | null, from?: string | null) => {
+    if (!date) patch({ dueAt: null, startAt: undefined, allDay: undefined, reminders: [] });
+    else
+      patch({
+        dueAt: taskInstant(date, time, timeZone),
+        startAt: from && time ? taskInstant(date, from, timeZone) : undefined,
+        allDay: !time,
+      });
   };
 
   const exportIcs = () => {
@@ -177,82 +187,80 @@ export function TaskStudio({
             </div>
           </header>
 
-          <TaskProperties
+          <TaskEssentials
             when={
-              <>
-                <TaskWhen
-                  due={due}
-                  allDay={task.allDay !== false}
-                  done={done}
-                  now={now}
-                  timeZone={timeZone}
-                  reminderTime={reminderTime}
-                  editable={canEdit && !locked.has("dueAt")}
-                  canEdit={canEdit}
-                  fromSchool={fromSchool}
-                  target={target}
-                  onDue={setDue}
-                  onTarget={(date) =>
-                    patch({ personalOverlay: { ...task.personalOverlay, targetDueAt: date ? taskInstant(date, null, timeZone) : undefined } })
-                  }
-                />
-                <TaskElapsed createdAt={createdAt} due={due} done={done} now={now} />
-              </>
+              <TaskWhen
+                due={due}
+                start={start}
+                allDay={task.allDay !== false}
+                done={done}
+                now={now}
+                timeZone={timeZone}
+                reminderTime={reminderTime}
+                editable={canEdit && !locked.has("dueAt")}
+                onDue={setDue}
+              />
             }
             options={options}
-            links={Array.isArray(task.linkedArtifactIds) ? task.linkedArtifactIds : []}
-            selfId={artifactId}
             hasDue={due !== null}
-            dueWeekday={weekday}
             timing={timing}
             canEdit={canEdit}
             onChange={(next) => patch(next)}
-            onLinks={(ids) => patch({ linkedArtifactIds: ids })}
           />
 
           {fromSchool && task.description ? (
-            <section className="sheet-section task-brief" aria-label="What the school asked" data-anchor-region="task:description">
-              <header className="sheet-section-head">
-                <h3>What the school asked</h3>
-              </header>
+            <section className="task-brief" aria-label="What the school asked" data-anchor-region="task:description">
+              <h3 className="task-brief-head">From your school</h3>
               <SpectraStoredText value={task.description} className="task-brief-text" />
             </section>
           ) : null}
 
-          {fromSchool && artifactId ? <SchoolTaskNotice artifactId={artifactId} /> : null}
-
-          <TaskSteps steps={steps} canEdit={canEdit} onChange={(next) => patch({ subtasks: next })} />
-
-          <section className="sheet-section" aria-label={fromSchool ? "Your notes" : "Notes"} data-anchor-region={fromSchool ? undefined : "task:description"}>
-            <header className="sheet-section-head">
-              <h3>{fromSchool ? "Your notes" : "Notes"}</h3>
-            </header>
-            <div className="task-notes">
-              <ArtifactRichTextEditor
-                key={fromSchool ? "note" : "description"}
-                value={fromSchool ? (task.personalOverlay?.note ?? "") : (task.description ?? "")}
-                format="markdown"
-                variant="bare"
-                disabled={!canEdit}
-                placeholder={fromSchool ? "What you plan to do, what to remember" : "Anything to remember"}
-                label={fromSchool ? "Your notes" : "Notes"}
-                onChange={(value) =>
-                  fromSchool
-                    ? patch({ personalOverlay: { ...task.personalOverlay, note: value.slice(0, 20_000) } })
-                    : patch({ description: value })
-                }
-              />
-            </div>
+          <section className="task-notes" aria-label={fromSchool ? "Your notes" : "Description"} data-anchor-region={fromSchool ? undefined : "task:description"}>
+            <ArtifactRichTextEditor
+              key={fromSchool ? "note" : "description"}
+              value={fromSchool ? (task.personalOverlay?.note ?? "") : (task.description ?? "")}
+              format="markdown"
+              variant="bare"
+              disabled={!canEdit}
+              placeholder={fromSchool ? "Your notes: what you plan to do, what to remember" : "Add a description. A list breaks it into parts."}
+              label={fromSchool ? "Your notes" : "Description"}
+              onChange={(value) =>
+                fromSchool
+                  ? patch({ personalOverlay: { ...task.personalOverlay, note: value.slice(0, 20_000) } })
+                  : patch({ description: value })
+              }
+            />
           </section>
 
-          {due !== null ? (
-            <footer className="task-foot">
-              <button type="button" className="task-export" onClick={exportIcs}>
-                <CalendarCheck2 className="size-3.5" />
-                Add to my calendar app
-              </button>
-            </footer>
-          ) : null}
+          {/* A checklist made before the description took lists, or by Spectra: still here to tick off. */}
+          {steps.length ? <TaskSteps steps={steps} canEdit={canEdit} onChange={(next) => patch({ subtasks: next })} /> : null}
+
+          {fromSchool && artifactId ? <SchoolTaskNotice artifactId={artifactId} /> : null}
+
+          <TaskMore
+            options={options}
+            links={Array.isArray(task.linkedArtifactIds) ? task.linkedArtifactIds : []}
+            selfId={artifactId}
+            dueWeekday={weekday}
+            canEdit={canEdit}
+            ownDate={
+              fromSchool && due !== null ? (
+                <TaskTarget
+                  target={target}
+                  now={now}
+                  timeZone={timeZone}
+                  canEdit={canEdit}
+                  onTarget={(date) =>
+                    patch({ personalOverlay: { ...task.personalOverlay, targetDueAt: date ? taskInstant(date, null, timeZone) : undefined } })
+                  }
+                />
+              ) : undefined
+            }
+            ownDateLabel={fromSchool && target !== null ? dueSentence(target, true, timeZone) : null}
+            onExport={due !== null ? exportIcs : undefined}
+            onChange={(next) => patch(next)}
+            onLinks={(ids) => patch({ linkedArtifactIds: ids })}
+          />
         </article>
       </div>
     </div>

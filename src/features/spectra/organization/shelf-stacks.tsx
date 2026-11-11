@@ -155,7 +155,7 @@ export function ShelfNotes({
   );
 }
 
-type StackAction = "fold" | "out" | "all";
+type StackAction = "out" | "all";
 
 function LibraryStack({
   nodes,
@@ -187,7 +187,6 @@ function LibraryStack({
   const preview = useWorkPreview(previewSource(active), card);
   const picked = picking && pickable(active) ? picking.has(active) : undefined;
   const options: OverflowItem<StackAction>[] = [
-    { key: "fold", label: "Put back in the folder", icon: "folder" },
     { key: "out", label: `Take “${active.name}” out`, icon: "arrowUp" },
     { key: "all", label: "Unstack all", icon: "layers" },
   ];
@@ -227,11 +226,22 @@ function LibraryStack({
           })}
         </div>
         <span data-stack-menu className="work-stack-options" inert={!open}>
+          {/* Back to the folder in one press, as the folder's tab opens it in one. */}
+          <button
+            type="button"
+            className="work-stack-fold"
+            aria-label={`Show the ${nodes.length} works as a folder`}
+            title="Show as a folder"
+            onClick={() => setLook("folder")}
+          >
+            <Icon name="folder" size={12} />
+            {nodes.length}
+          </button>
           <OverflowMenu<StackAction>
             label="Stack options"
             size={24}
             items={options}
-            onSelect={(key) => (key === "fold" ? setLook("folder") : onRelease(active, key === "all"))}
+            onSelect={(key) => onRelease(active, key === "all")}
             triggerClassName="work-stack-more-trigger"
           />
         </span>
@@ -266,8 +276,8 @@ function LibraryStack({
 /**
  * The folder a stack rests in: how many it holds and every work's name, each
  * opening its work straight from the folder. Its tab, or a press anywhere
- * else on it, opens the folder into cards; the menu on the cards puts them
- * back. Which of the two a stack shows is remembered on this device.
+ * else on it, opens the folder into cards; the folder button beside the
+ * cards' tabs puts them back. Which of the two a stack shows is remembered on this device.
  */
 function StackFolder({
   nodes,
@@ -293,11 +303,11 @@ function StackFolder({
         }}
       >
         <Icon name="folder" size={12} />
-        {nodes.length} works
+        {nodes.length} artifacts
         <Icon name="expand" size={11} />
       </button>
       <div className="work-stack-folder-front">
-        <ul className="work-stack-names" aria-label="Works in this stack">
+        <ul className="work-stack-names" aria-label="Artifacts in this stack">
           {nodes.map((node) => (
             <li key={node.nodeId} style={workCardStyle(workType(node))}>
               <button

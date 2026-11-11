@@ -53,7 +53,7 @@ export function useAddReference({
   return async function addReference(source: SpectraArtifact, options: AddReferenceOptions = {}) {
     if (compatibilityProfile === "strict-native")
       throw new Error("This file keeps strict native compatibility. Change it to Enhanced before adding a live reference.");
-    if (!isArtifactTypeKey(source.blueprintKey)) throw new Error("This kind of work cannot be shown here.");
+    if (!isArtifactTypeKey(source.blueprintKey)) throw new Error("This kind of artifact cannot be shown here.");
     const contract = getWorkReferenceContract(source.blueprintKey);
     const view = options.view ?? contract.targets[0]?.views[0];
     const mode = options.mode ?? "compact";

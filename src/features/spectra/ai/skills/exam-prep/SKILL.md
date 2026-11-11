@@ -9,8 +9,8 @@ When a student is lost before an upcoming test, help them get ready as well as u
 first idea.
 
 - Look up the assessment and their materials first: the date, what it covers, their class notes
-  and earlier work.
-- Make a revision plan: explanations, practice and their existing works placed beside the
+  and earlier artifact.
+- Make a revision plan: explanations, practice and their existing artifacts placed beside the
   steps that use them, from now until the test.
 - Keep the first explanation short and start building. The plan is the answer; a long lecture
   before it is not.

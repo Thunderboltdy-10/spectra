@@ -44,9 +44,9 @@ export function artifactRestoreFailure(error: unknown): { message: string; statu
   if (/ARTIFACT_RESTORE_STALE|ARTIFACT_RESTORE_NATIVE_BASE_STALE|MATERIALIZATION_BASE_STALE|COLLABORATION_BASE_STATE_STALE|COLLABORATION_REPLAY_GENERATION_CHANGED/.test(text))
     return { message: "New changes arrived before restoration. Review the current version and try again.", status: 409 };
   if (/ARTIFACT_RESTORE_NATIVE_BASE_LIMIT/.test(text))
-    return { message: "This work is linked to too many computers for Spectra to restore it safely. Your work hasn't changed. Ask your teacher or school admin for help.", status: 409 };
+    return { message: "This artifact is linked to too many computers for Spectra to restore it safely. Your artifact hasn't changed. Ask your teacher or school admin for help.", status: 409 };
   if (/ARTIFACT_RESTORE_NATIVE_SOURCE_(UNAVAILABLE|INVALID|AMBIGUOUS)/.test(text))
-    return { message: "The saved file for this version is no longer available, so Spectra can't restore it. Your work hasn't changed.", status: 409 };
+    return { message: "The saved file for this version is no longer available, so Spectra can't restore it. Your artifact hasn't changed.", status: 409 };
   return null;
 }
 

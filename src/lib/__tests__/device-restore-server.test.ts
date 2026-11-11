@@ -42,7 +42,7 @@ it.each([60, 200])("finds the earliest before snapshot among %i native version r
   expect(io.store.mock.calls[0][2].limit).toBeLessThanOrEqual(200);
 });
 
-it("keeps the native work when retention may have pruned the run's original snapshot", async () => {
+it("keeps the native artifact when retention may have pruned the run's original snapshot", async () => {
   io.query.mockResolvedValue({ accountId: "owner", onDevice: ["work"] });
   const versions = Array.from({ length: 200 }, (_, index) => ({
     id: 201 - index, source: index % 2 ? "before_ai" : "ai", runId: "run",

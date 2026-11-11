@@ -210,7 +210,7 @@ describe("LibraryOrganizer", () => {
     expect(await screen.findByText("Old notes")).toBeTruthy();
   });
 
-  it("labels broad search results and names the work Enter will open", async () => {
+  it("labels broad search results and names the artifact Enter will open", async () => {
     tree.search = [node("s1", "Water Cycle Field Guide"), node("s2", "Draft notes")];
     const onOpenWork = vi.fn();
     render(<LibraryOrganizer onOpenWork={onOpenWork} onOpenThread={vi.fn()} />);
@@ -255,7 +255,7 @@ describe("LibraryOrganizer", () => {
     expect(onOpenWork).toHaveBeenCalledWith("work-s2");
   });
 
-  it("keeps Enter in the unfiltered search input opening the first visible work", () => {
+  it("keeps Enter in the unfiltered search input opening the first visible artifact", () => {
     const onOpenWork = vi.fn();
     render(<LibraryOrganizer onOpenWork={onOpenWork} onOpenThread={vi.fn()} />);
     fireEvent.keyDown(screen.getByRole("searchbox", { name: "Search Library" }), { key: "Enter" });

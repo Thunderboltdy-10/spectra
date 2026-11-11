@@ -106,7 +106,7 @@ describe("CursorTravel", () => {
   });
 });
 
-describe("an AI's hand when the work outruns it", () => {
+describe("an AI's hand when the artifact outruns it", () => {
   it("does not dart across the page several times a second", () => {
     const travel = new CursorTravel(() => false, "actor");
     travel.moveTo(0, 0, 0);

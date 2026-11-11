@@ -11,16 +11,16 @@ const files = [
 ];
 
 const forbidden = [
-  /["'`]Artifacts["'`]/g,
-  /["'`]Artifact details["'`]/gi,
-  /["'`]New artifact["'`]/gi,
-  /["'`]Search artifacts["'`]/gi,
-  /["'`]Artifact type["'`]/gi,
+  /["'`]Works["'`]/g,
+  /["'`]New work["'`]/gi,
+  /["'`]Search works["'`]/gi,
+  /["'`]Work type["'`]/gi,
   /["'`]Timetable(?: Items)?["'`]/g,
-  />\s*Artifacts\s*</g,
+  />\s*Works\s*</g,
   />\s*Timetable\s*</g,
-  /\bNo artifacts\b/gi,
-  /\bSelect multiple artifacts\b/gi,
+  /\bNo works\b/gi,
+  /\bOpen saved work\b/gi,
+  /\bSelect multiple works\b/gi,
 ];
 
 const issues = [];
@@ -36,11 +36,12 @@ for (const relative of files) {
   }
 }
 
-/* CANON D15: "artifact" is an internal word. Every surface a student or
-   teacher reads says "work" or the type name. These rules cover the places
-   copy lives in UI code: JSX text, labelling attributes, toasts, failure
-   fallbacks and command hints. Operator diagnostics (superadmin), API routes,
-   model prompts and tests are out of scope. */
+/* Every surface a student or teacher reads calls a made thing an "artifact"
+   (or names its type), never a "work". These rules cover the places copy
+   lives in UI code: JSX text, labelling attributes, toasts, failure fallbacks
+   and command hints. "work" as a verb or as effort ("time for work") is fine;
+   a counted work ("a work", "your works") is not. Operator diagnostics
+   (superadmin), API routes, model prompts and tests are out of scope. */
 const uiRoots = [
   "src/app",
   "src/components",
@@ -50,14 +51,15 @@ const uiRoots = [
   "src/features/spectra/runs",
 ];
 const uiExcluded = [/[\\/]__tests__[\\/]/, /\.test\.tsx?$/, /[\\/]superadmin/, /^src[\\/]app[\\/]api[\\/]/];
-const word = /\bartifacts?\b/i;
-// Strip template holes so `${artifact.title}` never counts as copy.
+const word =
+  /\b(?:a|each|every|this|that|one|another|which|new|open|saved|shared|linked|live|whole)\s+work\b(?!\s*-?\s*(?:block|reference|session|time))|\b(?:the|your|my|their|these|those|all|no|any|some|other|recent|shared|saved|open|new|linked|live|his|her|our)\s+works\b|^\s*Works?\s*$/i;
+// Strip template holes so `${work.title}` never counts as copy.
 const text = (value) => value.replace(/\$\{[^}]*\}/g, "");
 const uiRules = [
   {
     name: "JSX text",
     pattern: />([^<>{}]*)</g,
-    test: (value) => /[A-Za-z]{2,} /.test(value.trim()) || /^\s*Artifacts?\s*$/i.test(value),
+    test: (value) => /[A-Za-z]{2,} /.test(value.trim()) || /^\s*Works?\s*$/i.test(value),
   },
   {
     name: "label attribute",

@@ -26,7 +26,7 @@ describe("nativeOfficeDraftPending", () => {
     ).toBe(false);
   });
 
-  it("does not treat matching snapshots as dirty for non-Office collaborative work", () => {
+  it("does not treat matching snapshots as dirty for non-Office collaborative artifact", () => {
     expect(
       nativeOfficeDraftPending({
         nativeOfficeDocument: false,
@@ -36,7 +36,7 @@ describe("nativeOfficeDraftPending", () => {
     ).toBe(false);
   });
 
-  it("still marks an unsaved React snapshot dirty for non-Office work", () => {
+  it("still marks an unsaved React snapshot dirty for non-Office artifact", () => {
     expect(
       nativeOfficeDraftPending({
         nativeOfficeDocument: false,

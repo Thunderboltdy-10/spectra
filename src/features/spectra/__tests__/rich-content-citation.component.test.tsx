@@ -30,7 +30,7 @@ describe("verified citations", () => {
   const citation = (label: string) =>
     [...container.querySelectorAll("button, span")].find((element) => element.textContent === `[${label}]`)!;
 
-  it("opens a work source in the Side", () => {
+  it("opens an artifact source in the Side", () => {
     const opened: unknown[] = [];
     const stop = spectraBus.handle("work.open", (detail) => { opened.push(detail); });
     render({ sources: [{ id: "book", workId: "wx1", title: "Biology textbook" }] });

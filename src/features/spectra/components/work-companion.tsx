@@ -131,7 +131,7 @@ export function WorkDetails({
       {children ? <div className="mt-4">{children}</div> : null}
       {onArchive ? (
         <button type="button" className="reference-text-action -ml-1.5 mt-4" onClick={onArchive}>
-          <Archive className="size-3.5" /> Archive this work
+          <Archive className="size-3.5" /> Archive this artifact
         </button>
       ) : null}
     </div>
@@ -143,7 +143,7 @@ const MADE_FROM: Record<string, string> = {
   chat: "By Spectra in a thread",
   ai: "By Spectra",
   workspace: "In a workspace",
-  artifact: "From another work",
+  artifact: "From another artifact",
   manual: "By you",
 };
 
@@ -234,7 +234,7 @@ export function WorkConversations({
         compact
         icon="conversations"
         title="No conversations yet"
-        detail="Ask Spectra about this work and the conversation is kept here."
+        detail="Ask Spectra about this artifact and the conversation is kept here."
       />
     );
   return (

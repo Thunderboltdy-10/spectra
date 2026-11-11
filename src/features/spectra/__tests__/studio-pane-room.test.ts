@@ -6,7 +6,7 @@ import { allocateWorkbenchPanes, resolveWorkbenchPanes } from "../components/spl
    conversation into an unreadable strip. The work now asks the row for the
    pane's room; where the row has it the pane sits beside a readable page,
    and where it has not the work covers the page until the pane shuts. */
-describe("the work's own pane beside a conversation (F01)", () => {
+describe("the artifact's own pane beside a conversation (F01)", () => {
   const documentFloor = 360;
 
   function row(hostWidth: number, room: number) {
@@ -41,14 +41,14 @@ describe("the work's own pane beside a conversation (F01)", () => {
     expect(row(784, 0).overlay).toBe(false);
   });
 
-  it("keeps the conversation beside the work at full HD", () => {
+  it("keeps the conversation beside the artifact at full HD", () => {
     const { overlay, width } = row(1680, 380);
     expect(overlay).toBe(false);
     expect(1680 - width).toBeGreaterThanOrEqual(420);
     expect(width).toBeGreaterThan(960);
   });
 
-  it("still docks beside a full work only when the page keeps 560", () => {
+  it("still docks beside a full artifact only when the page keeps 560", () => {
     expect(studioPaneLayout({ surface: "full", surfaceWidth: 900, stored: 380 }).docked).toBe(false);
     expect(studioPaneLayout({ surface: "full", surfaceWidth: 1000, stored: 380 }).docked).toBe(true);
     expect(studioPaneLayout({ surface: "full", surfaceWidth: 0, stored: 380 }).docked).toBe(true);

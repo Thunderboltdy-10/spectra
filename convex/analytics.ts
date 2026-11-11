@@ -154,7 +154,7 @@ export const personalOverview = query({
       range: { from: args.from, to: args.to, fromDay, toDay },
       computedAt,
       privacy:
-        "This response contains only the signed-in account's metadata and aggregate usage meters. Prompt text, thread transcripts, memory claims, and work content are excluded from the response.",
+        "This response contains only the signed-in account's metadata and aggregate usage meters. Prompt text, thread transcripts, memory claims, and artifact content are excluded from the response.",
       metrics: {
         workCreated: {
           value: workReady ? work.length : null,
@@ -198,7 +198,7 @@ export const personalOverview = query({
         .slice(0, 8)
         .map((item) => ({
           id: item.artifactId,
-          title: typeof item.projection?.title === "string" ? item.projection.title.slice(0, 240) : "Untitled work",
+          title: typeof item.projection?.title === "string" ? item.projection.title.slice(0, 240) : "Untitled artifact",
           blueprintKey: item.blueprintKey,
           status: item.status,
           createdAt: item.createdAt!,

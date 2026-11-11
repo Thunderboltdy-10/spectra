@@ -108,7 +108,7 @@ export function RouteSidePanelHost() {
         if (failureToastId !== undefined) toast.dismiss(failureToastId);
       } catch (error) {
         const failure = describeFailure(error, {
-          fallback: "This work could not be opened. Check your connection, then try again.",
+          fallback: "This artifact could not be opened. Check your connection, then try again.",
         });
         showRetryToast(failure.message, (id) => loadWork(workId, id), {
           id: failureToastId,

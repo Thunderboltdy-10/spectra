@@ -20,7 +20,7 @@ without guessing.
   should hand back, so routing stays honest.
 - **Tone and length:** pick `tone` and `responseLength` to fit the audience. A Socratic tutor
   asks before telling; a planner is direct.
-- **Boundaries:** what it must never do, such as writing graded work for a student or giving
+- **Boundaries:** what it must never do, such as writing graded coursework for a student or giving
   medical advice.
 - **Routing:** `routingDescription` says when Spectra should pick this agent;
   `routingExamples` are real-sounding requests that should route to it.
@@ -31,7 +31,7 @@ without guessing.
 - Say what to do, not only what to avoid.
 - Keep every rule actionable: "Ask which criterion the student is working on before giving
   feedback" rather than "Be helpful about criteria".
-- Do not paste private documents into the instructions; reference the work the agent should
+- Do not paste private documents into the instructions; reference the artifact the agent should
   use instead.
 - Keep it short enough to read in two minutes.
 

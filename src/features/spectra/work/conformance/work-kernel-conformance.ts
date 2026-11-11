@@ -328,7 +328,7 @@ function checkAnchors(definition: WorkDefinition): WorkKernelCheck {
       if (JARGON.test(described))
         problems.push(`anchor description uses jargon: "${described}"`);
       if (adapter.migrate(root, content).workType !== definition.key)
-        problems.push("anchor migration loses the work type");
+        problems.push("anchor migration loses the artifact type");
       if (typeof adapter.reveal !== "function")
         problems.push("anchor cannot be revealed");
     }
@@ -412,7 +412,7 @@ function checkCommentsAndHistory(definition: WorkDefinition): WorkKernelCheck {
     problems.push("no general comment target");
   if (!definition.history.snapshot) problems.push("no history strategy");
   if (!definition.history.partialRestore)
-    problems.push("history cannot restore part of the work");
+    problems.push("history cannot restore part of the artifact");
   return check(
     "comments_and_history",
     problems.length === 0,

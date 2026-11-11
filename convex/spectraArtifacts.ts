@@ -2158,7 +2158,7 @@ export const create = mutation({
     const actor = await requireSpectraActor(ctx);
     if (args.blueprintKey === "timetable") {
       throw new Error(
-        "Calendar is an application surface, not creatable work. Open Calendar to schedule tasks, work blocks, or personal events.",
+        "Calendar is an application surface, not creatable artifact. Open Calendar to schedule tasks, work blocks, or personal events.",
       );
     }
     if (args.runId) {

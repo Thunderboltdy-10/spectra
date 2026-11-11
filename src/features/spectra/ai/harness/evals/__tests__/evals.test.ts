@@ -99,7 +99,7 @@ describe("eval runner", () => {
     expect(row.problems).toEqual([]);
   });
 
-  it("checks an edit in place and lists the work it touched", async () => {
+  it("checks an edit in place and lists the artifact it touched", async () => {
     const { caller } = scripted([
       { text: "", toolCalls: [call("e1", "edit_artifact", { id: "wxnotes", operations: [{ op: "replace", find: "Mitosys", replace: "Mitosis" }] })] },
       { text: "Fixed the title.", toolCalls: [] },

@@ -8,7 +8,7 @@ import {
 } from "../../../../convex/bridgeIdentity";
 
 describe("Bridge Office-save identity continuity", () => {
-  it("keeps the established cloud-backed work", () => {
+  it("keeps the established cloud-backed artifact", () => {
     expect(chooseReplicaContinuity([
       { value: "duplicate", creationTime: 20, hasCloudReplica: false },
       { value: "established", creationTime: 10, hasCloudReplica: true },

@@ -600,8 +600,8 @@ button.work-embed-title:hover {
 }
 
 .work-embed-choice[data-active] {
-  background: var(--card-paper);
-  box-shadow: inset 0 0 0 1.5px var(--text-primary);
+  background: color-mix(in oklab, var(--brand-primary) 6%, var(--card-paper));
+  box-shadow: inset 0 0 0 1.5px var(--brand-primary);
 }
 
 .work-embed-choice-mark {
@@ -621,10 +621,11 @@ button.work-embed-title:hover {
   border-radius: 6px;
 }
 
+/* Chosen: the brand's colour, not solid ink, so a ticked box reads the same in light and dark. */
 .work-embed-choice[data-active] .work-embed-choice-mark {
-  background: var(--text-primary);
+  background: var(--brand-primary);
   box-shadow: none;
-  color: var(--card-paper);
+  color: #fff;
 }
 
 .work-embed-answer {

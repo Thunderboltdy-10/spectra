@@ -42,7 +42,7 @@ import { registerSettingsToggleControl } from "../../collaboration/settings-togg
 const SECTIONS = [
   { id: "ai", label: "Spectra AI", icon: "agent" },
   { id: "subscriptions", label: "AI subscriptions", icon: "agents" },
-  { id: "storage", label: "Where work is kept", icon: "devices" },
+  { id: "storage", label: "Where artifacts are kept", icon: "devices" },
   { id: "writing", label: "Writing", icon: "edit" },
   { id: "day", label: "Your day", icon: "clock" },
   { id: "appearance", label: "Appearance", icon: "theme" },
@@ -182,7 +182,7 @@ function WritingSettings({ p, update, refreshConfirmedPreferences }: SectionProp
 
 function DaySettings({ p, update }: SectionProps<"notifications">) {
   return (
-    <SettingGroup title="Reminders and brief" description="When Spectra nudges you about the work you have dated, and the brief it writes each morning.">
+    <SettingGroup title="Reminders and brief" description="When Spectra nudges you about the artifact you have dated, and the brief it writes each morning.">
       <SettingRow
         label="Reminder time"
         description="A task with a day but no time reminds you at this time, on the day or the days before, as you choose on the task."
@@ -198,7 +198,7 @@ function DaySettings({ p, update }: SectionProps<"notifications">) {
       />
       <ToggleRow
         label="Morning brief"
-        description="When you wake, Home has yesterday in a few lines and what to do today, each one press away: work to make or pick up, tasks to open or add."
+        description="When you wake, Home has yesterday in a few lines and what to do today, each one press away: artifact to make or pick up, tasks to open or add."
         checked={p.dailyBrief}
         onCheckedChange={(dailyBrief) => update({ dailyBrief })}
       />
@@ -229,7 +229,7 @@ function AppearanceSettings({ p, update }: SectionProps<"appearance">) {
     setTheme(theme === "system" ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : theme);
   };
   return (
-    <SettingGroup title="Reading comfort" description="Text and motion preferences apply across every work type through the shared Spectra shell.">
+    <SettingGroup title="Reading comfort" description="Text and motion preferences apply across every artifact type through the shared Spectra shell.">
       <SelectRow label="Theme" value={p.theme} options={[{ value: "system", label: "System" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }]} onChange={applyTheme} />
       <SelectRow label="Editor text" value={p.editorTextScale} options={[{ value: "small", label: "Small" }, { value: "default", label: "Default" }, { value: "large", label: "Large" }, { value: "extra_large", label: "Extra large" }]} onChange={(editorTextScale) => update({ editorTextScale: editorTextScale as typeof p.editorTextScale })} />
       <SelectRow label="Interface text" value={p.interfaceTextScale} options={[{ value: "default", label: "Default" }, { value: "large", label: "Large" }]} onChange={(interfaceTextScale) => update({ interfaceTextScale: interfaceTextScale as typeof p.interfaceTextScale })} />
@@ -270,7 +270,7 @@ function WorkbarSettings({ p, update }: SectionProps<"workbar">) {
   return (
     <SettingGroup title="Workbar layout" description="Layouts follow your account and update open editors without reloading them.">
       <SelectRow
-        label="Work type"
+        label="Artifact type"
         value={type}
         options={WORKBAR_TYPES.map((value) => ({ value, label: value.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase()) }))}
         onChange={(value) => setType(value as typeof type)}
@@ -302,7 +302,7 @@ function WorkbarSettings({ p, update }: SectionProps<"workbar">) {
           </div>
         );
       })}
-      <SettingRow label="Restore the shipped layout" description="Clears renamed labels, moved commands, the order of tabs, groups and commands, and hidden controls for this work type." control={<Button size="sm" variant="secondary" onClick={() => save({})}>Reset workbar</Button>} />
+      <SettingRow label="Restore the shipped layout" description="Clears renamed labels, moved commands, the order of tabs, groups and commands, and hidden controls for this artifact type." control={<Button size="sm" variant="secondary" onClick={() => save({})}>Reset workbar</Button>} />
     </SettingGroup>
   );
 }
@@ -344,7 +344,7 @@ function PrivacySettings() {
     <SettingGroup title="Personal context" description="Inspectable controls for the private context Spectra can use across conversations.">
       <SettingRow label="Class shelves" description="Choose which ManageBac classes get their own workspace. Unchosen class work stays in General." control={<Button size="sm" variant="secondary" asChild><Link href="/school">Open School</Link></Button>} />
       <SettingRow label="Export personal context" description="Download a JSON copy for review." control={<Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void exportContext()}>{busy === "export" ? "Preparing…" : "Export"}</Button>} />
-      <SettingRow label="Clear personal context" description={confirmClear ? "This removes the private retrieval context Spectra has learned. Your work stays intact." : "Remove retrieval evidence without deleting your work."} control={confirmClear ? <div className="flex items-center gap-1"><Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setConfirmClear(false)}>Cancel</Button><Button size="sm" variant="destructive" disabled={busy !== null} onClick={() => void clearContext()}>{busy === "clear" ? "Clearing…" : "Clear now"}</Button></div> : <Button size="sm" variant="destructive" disabled={busy !== null} onClick={() => setConfirmClear(true)}>Clear context</Button>} />
+      <SettingRow label="Clear personal context" description={confirmClear ? "This removes the private retrieval context Spectra has learned. Your artifacts stay intact." : "Remove retrieval evidence without deleting your artifact."} control={confirmClear ? <div className="flex items-center gap-1"><Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setConfirmClear(false)}>Cancel</Button><Button size="sm" variant="destructive" disabled={busy !== null} onClick={() => void clearContext()}>{busy === "clear" ? "Clearing…" : "Clear now"}</Button></div> : <Button size="sm" variant="destructive" disabled={busy !== null} onClick={() => setConfirmClear(true)}>Clear context</Button>} />
     </SettingGroup>
     </>
   );
@@ -359,7 +359,7 @@ function AccountSettings() {
       <SettingRow label="Account details" description="Name, email, password and sign-in methods." control={<Button size="sm" variant="secondary" onClick={() => openUserProfile()}>Manage account</Button>} />
       <SettingRow
         label="Sign out of this device"
-        description="Your work stays in your account. Sign out on a shared or school computer."
+        description="Your artifact stays in your account. Sign out on a shared or school computer."
         control={
           <Button
             size="sm"

@@ -20,7 +20,7 @@ beforeEach(() => {
     const refused = await authorize(state, ["work"], false);
     if (refused) return refused;
     io.changed();
-    return Response.json({ changed: true, summary: "Undone: restored 1 work.", notes: ["Later human edits stayed."] });
+    return Response.json({ changed: true, summary: "Undone: restored 1 artifact.", notes: ["Later human edits stayed."] });
   });
 });
 const settings = () => state.operations.push({ _id: "op", type: "app.command", status: "executed", requiresConfirmation: true, input: { command: "change_spectra_settings", args: {} } });
@@ -29,7 +29,7 @@ describe("conversational previous-run Undo", () => {
   it("uses the saved-state orchestrator without advertising an unsupported redo", async () => {
     const b = backend();
     const result = await b.undoPreviousRun({ approved: false }, signal());
-    expect(result).toEqual({ ok: true, content: "Undone: restored 1 work.\nLater human edits stayed." });
+    expect(result).toEqual({ ok: true, content: "Undone: restored 1 artifact.\nLater human edits stayed." });
     expect(io.revert).toHaveBeenCalledWith("actor", "previous", "previous-exec", expect.any(Function), "current");
     expect(b.executedAny).toBe(true);
     expect(io.mutate).toHaveBeenCalledWith("spectraRunUndo:recordReversal", { runId: "current", executionId: "current-exec", previousRunId: "previous", previousExecutionId: "previous-exec" });

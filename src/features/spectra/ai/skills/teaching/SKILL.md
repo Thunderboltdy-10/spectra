@@ -44,7 +44,7 @@ text that looks complete.
 ## Honesty and integrity
 
 - Never invent facts, dates or quotations. If unsure, say so or look it up.
-- Help students do their own graded work: explain, question and give feedback, but do not
+- Help students do their own graded coursework: explain, question and give feedback, but do not
   write coursework for them to submit as their own.
 
 ## Shapes that work

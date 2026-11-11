@@ -895,7 +895,7 @@ async function withdrawFileDeletion(ctx: MutationCtx, node: Doc<"orgNodes">) {
     if (request.state !== "approval-required" && request.state !== "pending") continue;
     await ctx.db.patch(request._id, {
       state: "ignored",
-      explanation: "The work was restored from Trash, so its file stays on disk.",
+      explanation: "The artifact was restored from Trash, so its file stays on disk.",
       updatedAt: now,
     });
   }

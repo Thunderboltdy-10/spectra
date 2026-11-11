@@ -69,7 +69,7 @@ async function backup(t: ReturnType<typeof convexTest>, accountId: Id<"accounts"
   });
 }
 
-describe("work kept on computers", () => {
+describe("artifact kept on computers", () => {
   it("keeps each computer's backups in its own chain", async () => {
     const t = convexTest(schema, modules);
     const { accountId } = await seed(t);
@@ -106,7 +106,7 @@ describe("work kept on computers", () => {
     expect(chainA).toHaveLength(7);
   });
 
-  it("re-homes only the works a restore brought", async () => {
+  it("re-homes only the artifacts a restore brought", async () => {
     const t = convexTest(schema, modules);
     const { brought, notBrought, third } = await seed(t);
     const me = t.withIdentity(owner);
@@ -116,7 +116,7 @@ describe("work kept on computers", () => {
     expect(rows.map((row) => row?.storageStoreId)).toEqual(["store-new", "store-A", "store-C"]);
   });
 
-  it("addresses a hand-over to the computer the works moved to", async () => {
+  it("addresses a hand-over to the computer the artifacts moved to", async () => {
     const t = convexTest(schema, modules);
     const { accountId, brought, notBrought } = await seed(t);
     const me = t.withIdentity(owner);
@@ -129,7 +129,7 @@ describe("work kept on computers", () => {
     expect(waiting.map((row) => row.id)).toEqual([String(handOver)]);
   });
 
-  it("starts a fresh live room each time a work moves between a computer and the cloud (F19)", async () => {
+  it("starts a fresh live room each time an artifact moves between a computer and the cloud (F19)", async () => {
     vi.useFakeTimers();
     const t = convexTest(schema, modules);
     const { brought } = await seed(t);

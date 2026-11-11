@@ -71,8 +71,8 @@ it("cannot put an old resumed session back into the next account's storage", asy
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
 
-it("forgets the previous account's in-memory work store and known work ids", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ result: { title: "A private work" } })));
+it("forgets the previous account's in-memory artifact store and known artifact ids", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ result: { title: "A private artifact" } })));
   publishDeviceState({ storeId: "store-A", storage: "device_only" });
   await readDeviceWork("a-work");
   expect(newWorkStoreId("document")).toBe("store-A");
@@ -82,7 +82,7 @@ it("forgets the previous account's in-memory work store and known work ids", asy
   expect.soft(isDeviceWork("a-work")).toBe(false);
 });
 
-it("discards an old work response when its body finishes after the account changes", async () => {
+it("discards an old artifact response when its body finishes after the account changes", async () => {
   const body = deferred<{ result: { title: string } }>();
   const json = vi.fn(() => body.promise);
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json }));
@@ -90,7 +90,7 @@ it("discards an old work response when its body finishes after the account chang
   const refused = expect(work).rejects.toThrow(/account|connected|changed/i);
   await vi.waitFor(() => expect(json).toHaveBeenCalledOnce());
   bindAccountStorageScope("deployment/account-B");
-  body.resolve({ result: { title: "A private work" } });
+  body.resolve({ result: { title: "A private artifact" } });
   await refused;
 });
 

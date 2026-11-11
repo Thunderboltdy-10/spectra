@@ -40,7 +40,7 @@ function ProvenanceLine({ card }: { card: ResultCardView }) {
   const artifactCount = provenance.artifactIds?.length ?? 0;
   const threadCount = provenance.threadId ? 1 : 0;
   const attachmentCount = provenance.attachmentNames?.length ?? 0;
-  const parts = [artifactCount ? `${artifactCount} work item${artifactCount === 1 ? "" : "s"}` : "", threadCount ? "1 thread" : "", attachmentCount ? `${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"}` : ""].filter(Boolean);
+  const parts = [artifactCount ? `${artifactCount} artifact${artifactCount === 1 ? "" : "s"}` : "", threadCount ? "1 thread" : "", attachmentCount ? `${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"}` : ""].filter(Boolean);
   const hasSources = parts.length > 0 || Boolean(provenance.workspaceTitle);
   const hasAgent = Boolean(provenance.agentId && provenance.agentTitle);
   if (!hasSources && !hasAgent) return null;

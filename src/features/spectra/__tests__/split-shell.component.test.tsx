@@ -49,7 +49,7 @@ it("allows a route panel drag to grow within the actual canvas budget", () => {
   expect(changed).toHaveBeenLastCalledWith(440);
 });
 it("retains the workbench row's existing responsive first-fit budget", () => {
-  const changed = vi.fn(); render(<div className="spectra-wave-y" data-split-host><StudioSplitShell width={700} onWidthChange={changed} ariaLabel="Work"><p>Work</p></StudioSplitShell></div>);
+  const changed = vi.fn(); render(<div className="spectra-wave-y" data-split-host><StudioSplitShell width={700} onWidthChange={changed} ariaLabel="Work"><p>Artifact</p></StudioSplitShell></div>);
   expect(changed).toHaveBeenLastCalledWith(500);
 });
 
@@ -66,6 +66,6 @@ it("uses the content edge when dragging beside a padded route canvas", () => {
 
 it("promotes a padded workbench when the content box cannot hold both minimums", () => {
   vi.spyOn(HTMLElement.prototype,"clientWidth","get").mockReturnValue(782);
-  render(<div className="spectra-wave-y" data-split-host style={{paddingLeft:32,paddingRight:32}}><StudioSplitShell width={360} onWidthChange={vi.fn()} ariaLabel="Work"><p>Work</p></StudioSplitShell></div>);
+  render(<div className="spectra-wave-y" data-split-host style={{paddingLeft:32,paddingRight:32}}><StudioSplitShell width={360} onWidthChange={vi.fn()} ariaLabel="Work"><p>Artifact</p></StudioSplitShell></div>);
   expect(screen.getByRole("complementary",{name:"Work"}).hasAttribute("data-split-overlay")).toBe(true);
 });

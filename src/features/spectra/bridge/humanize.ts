@@ -61,7 +61,7 @@ const CODE_MESSAGES: Array<{ test: RegExp; message: (app: string) => string }> =
   {
     test: /AI_ARTIFACT_CONNECTION_CLOSED|AI_ARTIFACT_CONNECT_TIMEOUT/i,
     message: () =>
-      "Spectra lost the live connection to this work before the change finished. Your draft is still here. Retry when you are ready.",
+      "Spectra lost the live connection to this artifact before the change finished. Your draft is still here. Retry when you are ready.",
   },
   {
     test: /AI_ARTIFACT_REGION_QUEUED/i,

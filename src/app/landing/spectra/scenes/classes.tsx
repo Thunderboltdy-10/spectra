@@ -56,7 +56,7 @@ const BOOKS: Record<Key, Book> = {
     level: "HL",
     teacher: "Ms Gonzalez",
     meets: "Tuesdays and Thursdays, room 14",
-    counts: "14 works, 3 tasks to do",
+    counts: "14 artifacts, 3 tasks to do",
     synced: "Synced from ManageBac 4 min ago",
     ink: "#4f9fe6",
     cover: "#dbe9f8",
@@ -79,7 +79,7 @@ const BOOKS: Record<Key, Book> = {
     level: "SL",
     teacher: "Mr Okafor",
     meets: "Mondays and Thursdays, lab 3",
-    counts: "11 works, 2 tasks to do",
+    counts: "11 artifacts, 2 tasks to do",
     synced: "Synced from ManageBac 4 min ago",
     ink: "#ff647f",
     cover: "#ffdfe4",
@@ -102,7 +102,7 @@ const BOOKS: Record<Key, Book> = {
     level: "HL",
     teacher: "Ms Lindqvist",
     meets: "Wednesdays and Fridays, room 9",
-    counts: "9 works, 1 task to do",
+    counts: "9 artifacts, 1 task to do",
     synced: "Synced from ManageBac 4 min ago",
     ink: "#e6bf2e",
     cover: "#fbf0bf",
@@ -122,7 +122,7 @@ const BOOKS: Record<Key, Book> = {
     level: "SL",
     teacher: "Mr Haddad",
     meets: "Every day but Wednesday, room 6",
-    counts: "12 works, 2 tasks to do",
+    counts: "12 artifacts, 2 tasks to do",
     synced: "Synced from ManageBac 4 min ago",
     ink: "#48c997",
     cover: "#d3f0e2",
@@ -145,7 +145,7 @@ const BOOKS: Record<Key, Book> = {
     level: "SL",
     teacher: "Sra. Ruiz",
     meets: "Tuesdays and Fridays, room 2",
-    counts: "8 works, 1 task to do",
+    counts: "8 artifacts, 1 task to do",
     synced: "Synced from ManageBac 4 min ago",
     ink: "#9176e8",
     cover: "#e6defb",
@@ -263,7 +263,7 @@ export function Classes() {
       <div className="sp-scene-copy">
         <Written id="sp-classes-title" className="sp-heading" text={"Every class,\nalready set up."} />
         <p className="sp-lede">
-          Connect ManageBac once. Classes, tasks, your work and what teachers share arrive by themselves, and stay up to date.
+          Connect ManageBac once. Classes, tasks, your artifacts and what teachers share arrive by themselves, and stay up to date.
         </p>
       </div>
 
@@ -331,7 +331,7 @@ export function Classes() {
                     ))}
                   </section>
                   <section>
-                    <h4>Your work</h4>
+                    <h4>Your artifacts</h4>
                     {book.work.map((row) => (
                       <p key={row.title} className="sp-cl-row sp-cl-work" style={{ "--tint": row.tint } as CSSProperties}>
                         <span className="sp-cl-kind">

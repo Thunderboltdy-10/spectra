@@ -12,8 +12,8 @@ import {
   workCan,
 } from "@/features/spectra/work/registry";
 
-describe("Work Kernel conformance (§11.0)", () => {
-  it("every work type meets every shared obligation", () => {
+describe("Artifact Kernel conformance (§11.0)", () => {
+  it("every artifact type meets every shared obligation", () => {
     const suite = runWorkKernelConformanceSuite();
     expect(formatWorkKernelFailures(suite)).toEqual([]);
     expect(suite.passed).toBe(true);
@@ -119,7 +119,7 @@ describe("static inventory of work-type contracts", () => {
     }
   });
 
-  it("keeps Calendar out of creatable work types", () => {
+  it("keeps Calendar out of creatable artifact types", () => {
     expect(WORK_TYPE_KEYS).not.toContain("timetable");
   });
 });

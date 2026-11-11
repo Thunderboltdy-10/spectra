@@ -1,3 +1,4 @@
+import { syncTaskWorkProjection } from "./calendarTaskWork";
 import {
   customCtx,
   customMutation,
@@ -227,8 +228,13 @@ triggers.register("spectraArtifacts", async (ctx, change) => {
       },
     );
   }
-  if (change.newDoc?.blueprintKey === "planner_task")
+  if (change.newDoc?.blueprintKey === "planner_task") {
+    // The task's own calendar item first, so the plan list knows it has a day.
+    await syncTaskWorkProjection({ db: ctx.innerDb }, change.newDoc);
     await syncPlannerTaskReadModels({ db: ctx.innerDb }, change.newDoc);
+  }
+  if (!change.newDoc && change.oldDoc?.blueprintKey === "planner_task")
+    await syncTaskWorkProjection({ db: ctx.innerDb }, { ...change.oldDoc, status: "deleted" });
   if (change.newDoc?.blueprintKey === "timetable")
     await syncCalendarMigrationReadModel({ db: ctx.innerDb }, change.newDoc);
   if (!change.newDoc && change.oldDoc)

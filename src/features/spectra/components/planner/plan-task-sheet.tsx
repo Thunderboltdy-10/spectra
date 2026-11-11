@@ -112,11 +112,7 @@ export function PlanTaskSheet({
             timeZone={timeZone}
             reminderTime={reminderTime}
             editable={canEdit && !official}
-            canEdit={canEdit}
-            fromSchool={false}
-            target={null}
             onDue={onDue}
-            onTarget={() => {}}
           />
         </div>
         <div className="plan-task-side">

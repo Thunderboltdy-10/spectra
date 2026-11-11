@@ -215,7 +215,7 @@ describe("runHarness", () => {
     expect(events.filter((event) => event.type === "thread_title")).toEqual([{ type: "thread_title", title: "Biology unit plan" }]);
   });
 
-  it("names a thread from the work in focus, apart from the other conversations", async () => {
+  it("names a thread from the artifact in focus, apart from the other conversations", async () => {
     const titleWriter = vi.fn(async () => ({ title: "Physics progress summary" }));
     const result = await runHarness({
       runId: "r-focus",

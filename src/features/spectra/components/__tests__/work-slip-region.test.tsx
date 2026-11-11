@@ -7,7 +7,7 @@ import { messageTouches, WorkTouchCards } from "../harness-run-parts";
 
 afterEach(cleanup);
 
-describe("a work slip opens where the run changed it (F5)", () => {
+describe("an artifact slip opens where the run changed it (F5)", () => {
   it("keeps the region through the stream, the merge and the saved reply", () => {
     const event = parseSpectraStreamEvent({
       type: "artifact_touched",

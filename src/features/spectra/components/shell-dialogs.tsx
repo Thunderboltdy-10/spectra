@@ -64,7 +64,7 @@ export function WorkspaceDeleteDialog({
       <DialogContent className="max-w-[min(480px,calc(100vw-32px))] gap-0 p-5">
         <DialogTitle>Permanently remove {workspaceTitle}?</DialogTitle>
         <DialogDescription className="mt-2">
-          This removes the workspace and its placements. Your work, threads, and AI run history remain available and are never deleted with their
+          This removes the workspace and its placements. Your artifact, threads, and AI run history remain available and are never deleted with their
           workspace.
         </DialogDescription>
         <div className="mt-4">
@@ -226,7 +226,7 @@ export function WorkspaceEditDialog({
           <span className="min-w-0 flex-1">
             <span className="block text-caption font-semibold text-[var(--text-primary)]">A class</span>
             <span className="mt-0.5 block text-micro text-[var(--text-secondary)]">
-              Its work is for one subject. Spectra reads it that way, and a class from School shows its tasks here.
+              Its artifacts are for one subject. Spectra reads it that way, and a class from School shows its tasks here.
             </span>
           </span>
           <Switch checked={isClass} onCheckedChange={onIsClassChange} className="mt-0.5" />
@@ -300,7 +300,7 @@ export function ArtifactDeleteDialog({
     <ConfirmDialog
       open={open}
       title={`Delete ${artifactTitle}?`}
-      detail="This work item, its placements, version history, and directly linked run history will be permanently removed."
+      detail="This artifact, its placements, version history, and directly linked run history will be permanently removed."
       confirmLabel="Delete permanently"
       destructive
       pending={busy}

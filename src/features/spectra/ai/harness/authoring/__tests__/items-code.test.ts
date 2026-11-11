@@ -107,6 +107,16 @@ describe("planner task authoring", () => {
     expect(() => applyPlannerTaskEdits(task, [{ op: "set", due: "next friday" }])).toThrow(AuthoringError);
     expect(plannerTime("2026-01-15T09:00", "Europe/Madrid", "x", "due")).toBe(Date.parse("2026-01-15T09:00:00+01:00"));
   });
+
+  it("holds every task in one shape: a day, a due time, or a start and an end", () => {
+    const span = plannerTaskFromSpec({ title: "Revise maths", start: "2026-10-10T16:00", end: "2026-10-10T18:00" }, "Europe/Madrid");
+    expect(span).toMatchObject({ startAt: Date.parse("2026-10-10T16:00:00+02:00"), dueAt: Date.parse("2026-10-10T18:00:00+02:00"), allDay: false });
+    expect(span.endAt).toBeUndefined();
+    expect(plannerTaskOutline(span)).toMatch(/^When: /m);
+    const deadline = plannerTaskFromSpec({ title: "Hand in", start: "2026-10-10T15:00" }, "Europe/Madrid");
+    expect(deadline).toMatchObject({ dueAt: Date.parse("2026-10-10T15:00:00+02:00"), allDay: false });
+    expect(deadline.startAt).toBeUndefined();
+  });
 });
 
 describe("code authoring", () => {

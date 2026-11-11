@@ -24,10 +24,10 @@ export const TOOL_CHOICES: ReadonlyArray<{
   label: string;
   detail: string;
 }> = [
-  { id: "artifact_search", label: "Find work", detail: "Search what the person asking can already see" },
-  { id: "artifact_read", label: "Read work", detail: "Open and quote items they can already open" },
-  { id: "artifact_create", label: "Create work", detail: "Start new typed Spectra work" },
-  { id: "artifact_edit", label: "Edit work", detail: "Propose region-safe changes" },
+  { id: "artifact_search", label: "Find artifact", detail: "Search what the person asking can already see" },
+  { id: "artifact_read", label: "Read artifact", detail: "Open and quote items they can already open" },
+  { id: "artifact_create", label: "Create artifact", detail: "Start new typed Spectra artifact" },
+  { id: "artifact_edit", label: "Edit artifact", detail: "Propose region-safe changes" },
   { id: "memory_retrieve", label: "Recall context", detail: "Read what they asked Spectra to remember" },
   { id: "school_data", label: "Read school data", detail: "Timetable and results they may already see" },
   { id: "web_search", label: "Search the web", detail: "Look things up outside Spectra" },

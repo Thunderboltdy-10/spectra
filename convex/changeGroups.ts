@@ -87,7 +87,7 @@ async function retainLiveStateAfterRecoveredImport(
     integrityHash: afterObject.integrityHash,
     before: inline ? before : undefined,
     after: inline ? after : undefined,
-    summary: "Continued work after recovered import history",
+    summary: "Continued artifact after recovered import history",
     provenance: {
       source: "human",
       kind: "import_history_recovery",
@@ -894,7 +894,7 @@ export const checkpointBeforeAi = mutation({
     return commitHumanCheckpoint(
       ctx,
       args.artifactId,
-      "Live work before Spectra edited",
+      "Live artifact before Spectra edited it",
     );
   },
 });

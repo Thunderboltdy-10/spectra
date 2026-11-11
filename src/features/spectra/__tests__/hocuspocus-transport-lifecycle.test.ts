@@ -77,7 +77,7 @@ import { performancePatches } from "../collaboration/performance";
 import { initializeNativeArtifactDocument } from "../../../../scripts/collaboration-native-projection.mjs";
 
 describe("P5.I2 Hocuspocus transport lifecycle", () => {
-  it("never seeds old-account native work after its transport is destroyed during a late cloud session", async () => {
+  it("never seeds old-account native artifact after its transport is destroyed during a late cloud session", async () => {
     bindAccountStorageScope("deployment/account-A");
     persistBridgeSession("session-A");
     let finish!: (response: Response) => void;
@@ -93,7 +93,7 @@ describe("P5.I2 Hocuspocus transport lifecycle", () => {
     transport.destroy();
     bindAccountStorageScope("deployment/account-B");
     persistBridgeSession("session-B");
-    finish(Response.json({ token: "cloud-session-A", documentName: "artifact:root", provider: "self_hosted_yjs", url: "ws://fixture", expiresInMs: 60_000, level: "modify", accountId: "account-A", device: { storeId: "old-shared-store", seed: { typeKey: "document", title: "A private work", tags: [], schemaVersion: 1, content: { blocks: [] } } } }));
+    finish(Response.json({ token: "cloud-session-A", documentName: "artifact:root", provider: "self_hosted_yjs", url: "ws://fixture", expiresInMs: 60_000, level: "modify", accountId: "account-A", device: { storeId: "old-shared-store", seed: { typeKey: "document", title: "A private artifact", tags: [], schemaVersion: 1, content: { blocks: [] } } } }));
     await connecting;
     expect(fetcher.mock.calls.filter(([url]) => url.includes("/v1/works/call"))).toHaveLength(0);
   });

@@ -43,7 +43,7 @@ describe("Library Import resource citizens (D29)", () => {
     });
   });
 
-  it("keeps .doc in the Import accept list without claiming Word work", () => {
+  it("keeps .doc in the Import accept list without claiming Word artifact", () => {
     expect(LIBRARY_IMPORT_ACCEPT.split(",")).toContain(".doc");
     expect(LIBRARY_IMPORT_ACCEPT.split(",")).toContain(".docx");
     const src = readFileSync(
@@ -116,7 +116,7 @@ describe("Library Import resource citizens (D29)", () => {
     );
   });
 
-  it("keeps Office and text as editable work imports", () => {
+  it("keeps Office and text as editable artifact imports", () => {
     expect(
       classifyLibraryImport(
         new File([""], "deck.pptx", {

@@ -23,6 +23,8 @@ export type ArtifactSnapshot = {
   content: unknown;
   summary?: string;
   canEdit: boolean;
+  /** Why it cannot be edited when that is not sharing, finishing "*Title* ...". */
+  readOnlyReason?: string;
   /** "Biology / Unit 2", for listings. */
   location?: string;
   updatedAt?: number;

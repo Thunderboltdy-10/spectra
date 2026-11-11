@@ -67,7 +67,7 @@ describe("compiling an agent in the Foundry", () => {
     });
   });
 
-  it("drafts skills, routing and notes on a completed job, with the model and reasoning from the environment, and meters the work", async () => {
+  it("drafts skills, routing and notes on a completed job, with the model and reasoning from the environment, and meters the artifact", async () => {
     const result = await compileAgentDraft({ userId: "user_1", agentId: "agent" });
     expect(mocks.convexMutation).toHaveBeenCalledWith("agents:beginCompilerJob", { agentId: "agent", skipStages: ["extract_evidence", "detect_overlap"] });
     const request = mocks.callSpectraModel.mock.calls[0]![0] as Record<string, unknown>;

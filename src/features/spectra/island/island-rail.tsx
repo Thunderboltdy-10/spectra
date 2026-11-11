@@ -93,6 +93,7 @@ export function IslandRail({
       tab={item}
       order={order++}
       current={current === item.runId}
+      settled={settled}
       lifted={dragging === item.runId}
       tabRefs={tabRefs}
       handlers={handlers}
@@ -109,7 +110,8 @@ export function IslandRail({
       data-settled={settled || undefined}
       inert={!raised}
       onKeyDown={onKeyDown}
-      style={{ bottom, maxWidth } as CSSProperties}
+      // Never more than three threads across: each takes at least a third of the room between the two ends.
+      style={{ bottom, maxWidth, "--rail-tab-min": `${Math.max(76, Math.floor((maxWidth - 96) / 3))}px` } as CSSProperties}
       className="island-rail"
     >
       {/* New thread and every thread hold the two ends; the threads in hand run between them. */}
@@ -195,6 +197,7 @@ function RailTab({
   tab,
   order,
   current,
+  settled,
   lifted,
   tabRefs,
   handlers,
@@ -203,6 +206,8 @@ function RailTab({
   tab: IslandTab;
   order: number;
   current: boolean;
+  /** The hand is away: a tab still standing has the room for its whole title. */
+  settled: boolean;
   lifted: boolean;
   tabRefs: RefObject<Map<string, HTMLButtonElement>>;
   handlers: RailHandlers;
@@ -247,7 +252,7 @@ function RailTab({
     >
       <TabCue tab={tab} />
       <span data-tab-title className="min-w-0 truncate">
-        {tabTitle(tab.title)}
+        {settled && (current || state !== "seen") ? tab.title : tabTitle(tab.title)}
       </span>
       {waiting ? (
         <span data-tab-waiting aria-hidden className="island-tab-waiting">

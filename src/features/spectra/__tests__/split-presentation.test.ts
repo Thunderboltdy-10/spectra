@@ -414,7 +414,7 @@ describe("the shell gives way in SHELL.md's order (F2)", () => {
     expect(stageMinimumFor("/home")).toBe(WORKBENCH_CONTENT_RESERVE_PX);
   });
 
-  it("rails the chrome before the Library falls under 560 beside a work", () => {
+  it("rails the chrome before the Library falls under 560 beside an artifact", () => {
     const result = sides(stageMinimumFor("/library"), [560]);
     expect(result.railed).toBe(true);
     expect(result.overlay.p0).toBe(false);

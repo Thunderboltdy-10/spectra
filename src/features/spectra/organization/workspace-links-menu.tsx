@@ -53,10 +53,10 @@ export function WorkspaceLinksMenu({ workspaceId, size = 32 }: { workspaceId: st
         toast.success("It shows on its own again.");
       } else if (action === "link") {
         await link({ workspaceId: workspaceId as Id<"spectraWorkspaces">, linkedWorkspaceId: id as Id<"spectraWorkspaces"> });
-        toast.success("Its shared works show here now.");
+        toast.success("Its shared artifacts show here now.");
       } else if (action === "into") {
         await link({ workspaceId: id as Id<"spectraWorkspaces">, linkedWorkspaceId: workspaceId as Id<"spectraWorkspaces"> });
-        toast.success("Its shared works show inside your workspace now.");
+        toast.success("Its shared artifacts show inside your workspace now.");
       }
     } catch (error) {
       toast.error(describeFailure(error, { fallback: "The link did not change." }).message);

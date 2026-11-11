@@ -26,7 +26,7 @@ import {
 const root = resolve(__dirname, "../../../..");
 
 describe("Calendar, School, and administration V2", () => {
-  it("removes Calendar from creatable work while retaining semantic tools", () => {
+  it("removes Calendar from creatable artifact while retaining semantic tools", () => {
     expect(WORK_TYPE_KEYS).not.toContain("timetable");
     expect(() =>
       parseModelOperation({

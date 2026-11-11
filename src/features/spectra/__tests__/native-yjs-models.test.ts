@@ -169,7 +169,7 @@ describe("native fine-grained Yjs models", () => {
     document.destroy();
   });
 
-  it("registers a complete create/bind/project/regions/validate/migrate/undo adapter for every work type", () => {
+  it("registers a complete create/bind/project/regions/validate/migrate/undo adapter for every artifact type", () => {
     const adapters = listWorkYjsAdapters();
     expect(adapters.map((adapter) => adapter.workType)).toEqual(
       ARTIFACT_TYPE_KEYS,
@@ -203,7 +203,7 @@ describe("native fine-grained Yjs models", () => {
     }
   });
 
-  it("passes native merge, stable-region, actor-undo, projection, and serialization contracts for every work type", () => {
+  it("passes native merge, stable-region, actor-undo, projection, and serialization contracts for every artifact type", () => {
     for (const type of ARTIFACT_TYPE_KEYS) {
       const adapter = workYjsAdapter(type);
       const left = adapter.createDocument(mergeFixtureContent(type));

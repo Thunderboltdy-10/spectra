@@ -214,8 +214,8 @@ export function artifactStatusOf(input: ArtifactStatusInput): ArtifactStatus {
       if (input.draftReview && !input.nativeConflict)
         return `A draft kept on this device overlaps a newer change${input.officeApplication ? ` from ${input.officeApplication}` : ""}. Nothing was overwritten: review it to choose.`;
       return input.nativeConflict
-        ? `This work changed here and in ${app}. Nothing was overwritten: choose the version to keep.`
-        : "This work changed in two places. Nothing was overwritten: choose the version to keep.";
+        ? `This artifact changed here and in ${app}. Nothing was overwritten: choose the version to keep.`
+        : "This artifact changed in two places. Nothing was overwritten: choose the version to keep.";
     }
     return input.presentation.detail;
   })();

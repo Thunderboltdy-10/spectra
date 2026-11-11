@@ -407,7 +407,7 @@ function OverviewSurface({
         )}
       </section>
 
-      <PrivacyNotice>School admin shows who is in the school and how much it uses Spectra. Nobody’s work, threads or memory can be opened from here.</PrivacyNotice>
+      <PrivacyNotice>School admin shows who is in the school and how much it uses Spectra. Nobody’s artifact, threads or memory can be opened from here.</PrivacyNotice>
     </div>
   );
 }
@@ -851,7 +851,7 @@ function UsageSurface({ overview }: { overview: SchoolAdministrationOverview }) 
   return (
     <div className="admin-page">
       <section>
-        <AdminSectionHeader title="This month" detail={`The school’s totals over the last 30 days, counted up to ${completeThrough}. Nobody’s work is read to count them.`} />
+        <AdminSectionHeader title="This month" detail={`The school’s totals over the last 30 days, counted up to ${completeThrough}. Nobody’s artifact is read to count them.`} />
         <TallySheet>
           {USAGE_METERS.map((item) => (
             <MetricCard key={item.key} label={item.label} value={formatMeter(totals[item.key], item.unit)} detail={item.detail} />
@@ -1001,7 +1001,7 @@ function ManageBacSurface({ overview, operator }: { overview: SchoolAdministrati
           {[
             ["Reads, never writes", "Nothing in Spectra changes the school’s ManageBac."],
             ["Keeps people’s own changes", "When the school updates a task, the notes and plans students added to it stay."],
-            ["Archives instead of deleting", "A class that ends in ManageBac is archived here with its work, not removed."],
+            ["Archives instead of deleting", "A class that ends in ManageBac is archived here with its artifact, not removed."],
             ["Keeps the key on the server", "The ManageBac key is never sent to anyone’s browser."],
           ].map(([title, detail]) => (
             <li key={title} className="admin-line">
@@ -1030,8 +1030,8 @@ function RightsSurface() {
             ["Use the full AI", "Every student and teacher has the same models and tools."],
             ["Keep a memory", "Spectra remembers what helps each person. Only they can see or clear it."],
             ["Make and share agents", "Anyone can build an agent, use it and share it."],
-            ["Make every kind of work", "Documents, decks, quizzes, code and the rest, with import and export."],
-            ["Decide who sees their work", "Work is private until its owner shares it."],
+            ["Make every kind of artifact", "Documents, decks, quizzes, code and the rest, with import and export."],
+            ["Decide who sees their artifacts", "Artifact is private until its owner shares it."],
           ].map(([title, detail]) => (
             <li key={title} className="admin-line">
               <span className="admin-line-main">
@@ -1047,7 +1047,7 @@ function RightsSurface() {
         <ul className="admin-ledger">
           {[
             ["Can see", "Who is in the school, groups, announcements, totals of use, feedback sent to the school, and this school’s activity log."],
-            ["Cannot see", "Anyone’s work, threads, prompts or memory, unless its owner shares it with them."],
+            ["Cannot see", "Anyone’s artifact, threads, prompts or memory, unless its owner shares it with them."],
           ].map(([title, detail]) => (
             <li key={title} className="admin-line">
               <span className="admin-line-main">

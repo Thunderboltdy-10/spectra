@@ -93,7 +93,7 @@ export class MemoryBackend implements HarnessBackend {
         }
         this.undone.push(previous.size);
         this.passes.at(-1)?.clear();
-        return { ok: true, content: `Undid the previous run: ${previous.size} work${previous.size === 1 ? "" : "s"} restored. Nothing was left changed.` };
+        return { ok: true, content: `Undid the previous run: ${previous.size} artifact${previous.size === 1 ? "" : "s"} restored. Nothing was left changed.` };
       };
     for (const seed of options.artifacts ?? []) {
       const id = seed.id ?? this.nextId();

@@ -72,7 +72,7 @@ export function createArtifactTool(session: HarnessSession): HarnessTool<CreateA
   return {
     name: "create_artifact",
     description: [
-      "Create a new piece of work in the user's library. Something short goes in whole. Substantial work is built in steps: create it with its structure and the first part written for real (a deck's theme and opening slides, a document's opening sections, a workbook's main sheet), then add the rest with edit_artifact a section or a few slides at a time, so it takes shape in front of the user. A deck built that way ends with one design edit over the whole deck. Every part you write is complete and finished, never a placeholder, and never leave empty headings or blank slides waiting.",
+      "Create a new artifact in the user's library. Something short goes in whole. A substantial artifact is built in steps: create it with its structure and the first part written for real (a deck's theme and opening slides, a document's opening sections, a workbook's main sheet), then add the rest with edit_artifact a section or a few slides at a time, so it takes shape in front of the user. A deck built that way ends with one design edit over the whole deck. Every part you write is complete and finished, never a placeholder, and never leave empty headings or blank slides waiting.",
       "`content` uses the type's authoring format:",
       formatCheatSheet("create"),
       "The result reads back what was saved and lists any problems; edit_artifact is for changes after that.",
@@ -83,7 +83,7 @@ export function createArtifactTool(session: HarnessSession): HarnessTool<CreateA
         type: { type: "string", enum: [...WORK_TYPE_KEYS] },
         title: { type: "string", description: "A short, specific title." },
         content: { type: "object", description: "The content in the type's authoring format.", additionalProperties: true },
-        summary: { type: "string", description: "One sentence describing the work, for the library." },
+        summary: { type: "string", description: "One sentence describing the artifact, for the library." },
         placeId: { type: "string", description: "A workspace placeId from the environment, to file the work with that class or project. Omit to file it with this conversation." },
       },
       required: ["type", "title", "content"],
@@ -153,7 +153,7 @@ export function editArtifactTool(session: HarnessSession): HarnessTool<EditArgs>
   return {
     name: "edit_artifact",
     description: [
-      "Change existing work with a list of operations, applied in order. Those that work are saved; the result names any that did not and why, so send only those again.",
+      "Change an existing artifact with a list of operations, applied in order. Those that work are saved; the result names any that did not and why, so send only those again.",
       "Operations by type:",
       formatCheatSheet("edit"),
       "Read the artifact first unless you have just created or read it, or know its exact text. Edits merge with what collaborators are typing. A result that says saved means it is saved: nothing needs reading again to check it.",
@@ -175,7 +175,7 @@ export function editArtifactTool(session: HarnessSession): HarnessTool<EditArgs>
     effect: "write",
     targets: (args) => [args.id],
     shows: (args) => args.id,
-    label: (args) => `Editing ${titled(session, args.id, "your work")}`,
+    label: (args) => `Editing ${titled(session, args.id, "your artifact")}`,
     parse: (raw) => {
       const operations = raw.operations;
       if (!Array.isArray(operations) || !operations.length)
@@ -187,7 +187,7 @@ export function editArtifactTool(session: HarnessSession): HarnessTool<EditArgs>
       if (!current)
         return { ok: false, content: `No artifact has id "${args.id}", or the user cannot open it. Find it with list_library or search.` };
       rememberTitle(session, current.id, current.title, current.type);
-      if (!current.canEdit) return { ok: false, content: `*${current.title}* is shared with the user as read-only, so it cannot be edited.` };
+      if (!current.canEdit) return { ok: false, content: `*${current.title}* ${current.readOnlyReason ?? "is shared with the user as read-only"}, so it cannot be edited.` };
       if (!isAuthoredType(current.type)) return { ok: false, content: `${current.type} cannot be edited here.` };
       let authored: AuthoredContent;
       try {
@@ -257,7 +257,7 @@ export function readArtifactTool(session: HarnessSession): HarnessTool<ReadArgs>
   return {
     name: "read_artifact",
     description:
-      "Read a piece of work in its authoring format: a document as Markdown, slides as an outline, a workbook as a grid with formulas, a board as nodes and edges, cards and questions as numbered lists, code with line numbers. Large items: read a part (section, from/to, sheet and range, file).",
+      "Read an artifact in its authoring format: a document as Markdown, slides as an outline, a workbook as a grid with formulas, a board as nodes and edges, cards and questions as numbered lists, code with line numbers. Large items: read a part (section, from/to, sheet and range, file).",
     parameters: {
       type: "object",
       properties: {
@@ -274,7 +274,7 @@ export function readArtifactTool(session: HarnessSession): HarnessTool<ReadArgs>
     },
     effect: "read",
     shows: (args) => args.id,
-    label: (args) => `Reading ${titled(session, args.id, "your work")}`,
+    label: (args) => `Reading ${titled(session, args.id, "your artifact")}`,
     parse: (raw) => ({
       id: requireString(raw, "id", 200),
       section: optionalString(raw, "section", 300),

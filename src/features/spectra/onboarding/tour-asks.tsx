@@ -38,7 +38,7 @@ function ReminderTimes() {
       {dailyBrief ? (
         <TimeChoice label="Morning brief ready by" value={dailyBriefTime} onChange={(value) => update("notifications", { dailyBriefTime: value })} />
       ) : null}
-      <TimeChoice label="Remind me of the day's work at" value={reminderTime} onChange={(value) => update("notifications", { reminderTime: value })} />
+      <TimeChoice label="Remind me of the day's plan at" value={reminderTime} onChange={(value) => update("notifications", { reminderTime: value })} />
     </div>
   );
 }

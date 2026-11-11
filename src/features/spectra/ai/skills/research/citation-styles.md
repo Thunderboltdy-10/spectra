@@ -15,7 +15,7 @@ leave out a missing element rather than inventing it.
 ## MLA (9th edition)
 
 - In text: (Author page), e.g. (Smith 42).
-- Works Cited entry: Author Last, First. "Title of Page." *Site Name*, Day Month Year, URL.
+- Artifacts Cited entry: Author Last, First. "Title of Page." *Site Name*, Day Month Year, URL.
 - Book: Author Last, First. *Title of Book*. Publisher, Year.
 
 ## Chicago (notes and bibliography)

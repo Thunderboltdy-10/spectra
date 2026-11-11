@@ -65,26 +65,26 @@ describe("ThreadWidget", () => {
     expect(iframe.style.height).toBe("240px");
   });
 
-  it("saves as a code work in the thread, recording why, then offers to open it", async () => {
+  it("saves as a code artifact in the thread, recording why, then offers to open it", async () => {
     mocks.create.mockResolvedValue({ artifactId: "art-9", nodeId: "n" });
     const open = vi.fn();
     render(<ThreadWidget widget={widget} threadId="thread-1" onOpenArtifact={open} />);
-    fireEvent.click(screen.getByRole("button", { name: /Save as work/ }));
-    await waitFor(() => expect(screen.getByRole("button", { name: /Open saved work/ })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Save as artifact/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Open saved artifact/ })).toBeInTheDocument());
     expect(mocks.create).toHaveBeenCalledTimes(1);
     const args = mocks.create.mock.calls[0]![0];
     expect(args).toMatchObject({ blueprintKey: "code", title: "Projectile range", threadId: "thread-1", source: "chat" });
     expect(args.contextSummary).toMatch(/as code \(browser runtime\)/);
-    fireEvent.click(screen.getByRole("button", { name: /Open saved work/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Open saved artifact/ }));
     expect(open).toHaveBeenCalledWith("art-9");
   });
 
   it("says plainly when saving fails and lets the user try again", async () => {
     mocks.create.mockRejectedValueOnce(new Error("You are offline."));
     render(<ThreadWidget widget={widget} />);
-    fireEvent.click(screen.getByRole("button", { name: /Save as work/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Save as artifact/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("You are offline.");
-    expect(screen.getByRole("button", { name: /Save as work/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Save as artifact/ })).toBeEnabled();
   });
 });
 

@@ -256,7 +256,7 @@ export function useArtifactNativeSync({
               previews: result.conflict?.previews,
               message:
                 result.conflict?.message ??
-                `${nativeOfficeApplication} and Spectra changed the same work region.`,
+                `${nativeOfficeApplication} and Spectra changed the same artifact region.`,
             });
             return;
           }
@@ -417,7 +417,7 @@ export function useArtifactNativeSync({
             previews: result.conflict?.previews,
             message:
               result.conflict?.message ??
-              `${nativeOfficeApplication} and Spectra changed the same work region.`,
+              `${nativeOfficeApplication} and Spectra changed the same artifact region.`,
           });
           return;
         }
@@ -665,7 +665,7 @@ export function useArtifactNativeSync({
           previews: result.conflict?.previews,
           message:
             result.conflict?.message ??
-            `${nativeOfficeApplication} and Spectra changed the same work region.`,
+            `${nativeOfficeApplication} and Spectra changed the same artifact region.`,
         });
       else if (resolution === "spectra") {
         setNativeConflict(null);
@@ -875,10 +875,10 @@ export function useArtifactNativeSync({
             regionIds: persistedNativeConflict.regionIds,
             previews: persistedNativeConflict.previews,
             message: regionCount
-              ? `${nativeOfficeApplication} and Spectra changed ${regionCount === 1 ? "the same work region" : `${regionCount} overlapping work regions`}. Choose which version to keep.`
+              ? `${nativeOfficeApplication} and Spectra changed ${regionCount === 1 ? "the same artifact region" : `${regionCount} overlapping artifact regions`}. Choose which version to keep.`
               : preservedPartCount
                 ? `${nativeOfficeApplication} and Spectra changed the same preserved native content. Choose which version to keep.`
-                : `${nativeOfficeApplication} and Spectra changed this work independently. Choose which version to keep.`,
+                : `${nativeOfficeApplication} and Spectra changed this artifact independently. Choose which version to keep.`,
           },
     );
   }, [

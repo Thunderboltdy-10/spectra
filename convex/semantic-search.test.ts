@@ -22,7 +22,7 @@ afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals()
 const ids = (response: SemanticSearchResponse) => response.results.map((result) => result.itemId);
 
 describe("semantic search over the fixture corpus", () => {
-  it("indexes every kind through the backfill and finds work by meaning, words and title", async () => {
+  it("indexes every kind through the backfill and finds artifact by meaning, words and title", async () => {
     const world = await createSemanticWorld();
     await indexEverything(world);
     const status = await world.t.query(internal.semanticIndex.backfillStatus, {});
@@ -78,7 +78,7 @@ describe("semantic search over the fixture corpus", () => {
     expect(ids(events)).toEqual([world.ids["e-chem-test"]]);
   });
 
-  it("lists explicit links first, then similar work, excluding self and copies", async () => {
+  it("lists explicit links first, then similar artifacts, excluding self and copies", async () => {
     const world = await createSemanticWorld();
     const copyId = await world.t.run((ctx) => insertArtifact(ctx, { ownerAccountId: world.anaId, schoolId: world.schoolA,
       blueprintKey: "document", title: "Cell Biology Notes (copy)", sourceArtifactIds: [world.ids["a-cell-notes"] as Id<"spectraArtifacts">],
@@ -174,7 +174,7 @@ describe("semantic permissions", () => {
   let world: PermissionWorld;
   beforeEach(async () => { world = await permissionWorld(); });
 
-  it("shows Ana her own work, her shared workspace and direct shares, and nothing else", async () => {
+  it("shows Ana her own artifact, her shared workspace and direct shares, and nothing else", async () => {
     const seen = await visibleTo(world, "ana");
     // The shared quiz's only mention is in its answers, which only Ben may search.
     expect(seen).toEqual(new Set([world.own, world.trashed, world.benGroup, world.benShared]));

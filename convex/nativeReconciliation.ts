@@ -248,7 +248,7 @@ export const commit = internalMutation({
     // native operation, all in this transaction (no observable partial phase).
     await ctx.db.patch(artifact._id, { ...before, contentHash: args.beforeProjectionHash, liveStateVectorHash: append.baseStateVectorHash });
     await ctx.db.patch(room._id, { lastProjectionSequence: room.nextSequence - 1 });
-    await commitHumanCheckpoint(ctx, artifact._id, "Your work before the native file changed", { kind: "pre_native_checkpoint" });
+    await commitHumanCheckpoint(ctx, artifact._id, "Your artifact before the native file changed", { kind: "pre_native_checkpoint" });
     const appended = await appendRoomUpdate(ctx, append);
     if (appended.duplicate) throw new Error("EXTERNAL_RECEIPT_MISSING");
     const appendedRow = await ctx.db.query("collaborationUpdates")

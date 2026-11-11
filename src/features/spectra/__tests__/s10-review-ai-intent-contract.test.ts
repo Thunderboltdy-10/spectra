@@ -9,7 +9,7 @@ const createDocument = (title: string) => parseModelOperation({
 });
 const references = { artifactIds: new Set<string>(), workspaceIds: new Set(["destination-b"]), placementNodes: new Map() };
 const plan = (operations: ReturnType<typeof parseModelOperation>[], intent: Record<string, unknown>) => parseSpectraPlan({
-  decision: "operate", finalResponse: "Created the requested work.", operations,
+  decision: "operate", finalResponse: "Created the requested artifact.", operations,
   intent: { mode: "create", requestedArtifactTypes: ["document"], requestedVisibleArtifactCount: 1,
     targetArtifactId: null, targetWorkspaceId: null, ...intent },
 });

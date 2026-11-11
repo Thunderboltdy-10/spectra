@@ -5,9 +5,9 @@ export const SPECTRA_COPY = {
     calendar: "Calendar",
   },
   genericWork: {
-    singular: "work",
-    item: "work item",
-    plural: "work items",
+    singular: "artifact",
+    item: "artifact",
+    plural: "artifacts",
   },
   inspector: {
     overview: "Overview",
@@ -17,4 +17,4 @@ export const SPECTRA_COPY = {
 } as const;
 
 /** Terms that may remain in APIs, schemas, migration adapters, and admin diagnostics only. */
-export const INTERNAL_LEGACY_TERMS = ["artifact", "timetable"] as const;
+export const INTERNAL_LEGACY_TERMS = ["work", "timetable"] as const;

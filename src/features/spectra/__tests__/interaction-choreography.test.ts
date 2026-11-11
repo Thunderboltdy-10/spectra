@@ -324,7 +324,7 @@ describe("buildArtifactLivePreviewBeats", () => {
   });
 });
 
-describe("placing a work into a page", () => {
+describe("placing an artifact into a page", () => {
   const reference = { embedId: "embed-1", sourceArtifactId: "work-diagram", blockId: "e1", label: "Cell membrane diagram" };
   const before = {
     title: "Notes",
@@ -347,7 +347,7 @@ describe("placing a work into a page", () => {
     },
   };
 
-  it("carries the work to its seam and sets it down whole, never typing its identity", () => {
+  it("carries the artifact to its seam and sets it down whole, never typing its identity", () => {
     const beats = buildArtifactLivePreviewBeats(before, after);
     const carry = beats.filter((beat) => beat.carry);
     expect(carry.map((beat) => beat.carry?.phase)).toEqual(["lift", "fly", "drop"]);
@@ -393,7 +393,7 @@ describe("writing a new document", () => {
   const blocksOf = (beat: (typeof beats)[number]) =>
     (beat.value.content as { blocks: Array<{ id: string; text?: string; latex?: string }> }).blocks;
 
-  it("clears the placeholder first, so it never sits under the new work", () => {
+  it("clears the placeholder first, so it never sits under the new artifact", () => {
     const firstNew = beats.findIndex((beat) => blocksOf(beat).some((block) => block.id === "h1"));
     expect(firstNew).toBeGreaterThan(0);
     expect(blocksOf(beats[firstNew]!).some((block) => block.id === "intro")).toBe(false);

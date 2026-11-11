@@ -31,7 +31,7 @@ describe("architectural kernel foundation", () => {
     expect(await bus.commandAsync("insert", undefined)).toBe(1);
   });
 
-  it("registers every current work type with required contracts", () => {
+  it("registers every current artifact type with required contracts", () => {
     const definitions = listWorkDefinitions();
     expect(definitions.map((definition) => definition.key)).toEqual(
       WORK_TYPE_KEYS,
@@ -91,7 +91,7 @@ describe("architectural kernel foundation", () => {
     expect(DEFAULT_SPECTRA_PREFERENCES.ai.openConversationAfterSend).toBe(false);
   });
 
-  it("projects legacy studio state through the Work session controller", () => {
+  it("projects legacy studio state through the Artifact session controller", () => {
     const works = new Map([
       ["a", { _id: "a", title: "A" }],
       ["b", { _id: "b", title: "B" }],

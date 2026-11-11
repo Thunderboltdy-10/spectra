@@ -11,7 +11,7 @@ import { spectraBus } from "../events";
 import { clearLandings, pendingLanding } from "../anchors/open-anchor";
 
 describe("application command dispatcher", () => {
-  it("records where a work should land before asking the host to open it", async () => {
+  it("records where an artifact should land before asking the host to open it", async () => {
     clearLandings();
     let seen: unknown;
     const openArtifact = vi.fn((workId: string) => {
@@ -30,7 +30,7 @@ describe("application command dispatcher", () => {
     expect(pendingLanding("work-1")).toBeUndefined();
   });
 
-  it("routes navigation and work opening through the shell host", async () => {
+  it("routes navigation and artifact opening through the shell host", async () => {
     const openArtifact = vi.fn();
     const navigate = vi.fn();
     const dispatch = createApplicationCommandDispatcher({

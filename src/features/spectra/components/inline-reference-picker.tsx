@@ -137,8 +137,8 @@ export function InlineReferencePicker({
           autoFocus
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Find work to show here"
-          aria-label="Find work to show here"
+          placeholder="Find artifacts to show here"
+          aria-label="Find artifacts to show here"
           role="combobox"
           aria-expanded="true"
           aria-controls="inline-reference-results"

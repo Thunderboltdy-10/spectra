@@ -131,7 +131,7 @@ type WidgetArgs = { title: string; html: string };
 export function showWidgetTool(): HarnessTool<WidgetArgs> {
   return {
     name: "show_widget",
-    description: `Show an interactive HTML or SVG visual inline in the conversation: a slider demo, a small simulation, a calculator, a chart, a labelled diagram. Write a fragment (no <html> or <head>) with inline <style> and <script>. It runs sandboxed with no network: no external scripts, styles, fonts, images or fetch. Colour it with the theme variables (var(--paper-0), var(--ink-1), var(--blue), var(--blue-tint), var(--font-ui) and the rest in the frontend-design skill); they follow light and dark mode. It sits directly on the conversation's page with the app's typefaces, so don't paint a page background or wrap it in a card: draw on the page, with var(--paper-1) only for a panel that needs one. Limits: ${WIDGET_LIMITS.maxHtmlChars.toLocaleString("en")} characters, ${WIDGET_LIMITS.maxScripts} script blocks, height up to ${WIDGET_LIMITS.maxHeight}px. The user can save it as work; for something they asked to keep, create a code artifact instead.`,
+    description: `Show an interactive HTML or SVG visual inline in the conversation: a slider demo, a small simulation, a calculator, a chart, a labelled diagram. Write a fragment (no <html> or <head>) with inline <style> and <script>. It runs sandboxed with no network: no external scripts, styles, fonts, images or fetch. Colour it with the theme variables (var(--paper-0), var(--ink-1), var(--blue), var(--blue-tint), var(--font-ui) and the rest in the frontend-design skill); they follow light and dark mode. It sits directly on the conversation's page with the app's typefaces, so don't paint a page background or wrap it in a card: draw on the page, with var(--paper-1) only for a panel that needs one. Limits: ${WIDGET_LIMITS.maxHtmlChars.toLocaleString("en")} characters, ${WIDGET_LIMITS.maxScripts} script blocks, height up to ${WIDGET_LIMITS.maxHeight}px. The user can save it as an artifact; for something they asked to keep, create a code artifact instead.`,
     parameters: {
       type: "object",
       properties: {
@@ -156,7 +156,7 @@ export function showWidgetTool(): HarnessTool<WidgetArgs> {
     },
     execute: async (args) => ({
       ok: true,
-      content: `Showed the widget "${args.title}" to the user. They can save it as work.`,
+      content: `Showed the widget "${args.title}" to the user. They can save it as an artifact.`,
       widget: { title: args.title, html: args.html },
       doneLabel: `Showed *${args.title}*`,
     }),

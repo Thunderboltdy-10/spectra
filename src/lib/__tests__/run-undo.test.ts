@@ -4,7 +4,7 @@ import { commandCanBeReversed, commandHasNothingToUndo, runUndoSummary } from ".
 describe("undoing a whole AI run", () => {
   it("names every kind of lasting change it reversed", () => {
     expect(runUndoSummary({ works: 2, restored: 1, events: 3, settings: 1 })).toBe(
-      "Undone: moved 2 new works to the Trash, restored 1 work, put 3 calendar changes back and put 1 setting back.",
+      "Undone: moved 2 new artifacts to the Trash, restored 1 artifact, put 3 calendar changes back and put 1 setting back.",
     );
   });
 
@@ -12,7 +12,7 @@ describe("undoing a whole AI run", () => {
     expect(runUndoSummary({})).toBe("There was nothing left to undo.");
   });
 
-  it("arms on lasting changes, not on opening a work", () => {
+  it("arms on lasting changes, not on opening an artifact", () => {
     expect(commandCanBeReversed("create_calendar_personal_event")).toBe(true);
     expect(commandCanBeReversed("change_spectra_settings")).toBe(true);
     expect(commandCanBeReversed("show_work")).toBe(false);

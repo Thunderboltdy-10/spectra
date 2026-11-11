@@ -21,7 +21,7 @@ describe("AI presentation content policy", () => {
     "Keep citations in notes, with no bibliography page.",
     "Resume la lectura en una diapositiva.",
     "Révise uniquement les notes de présentation.",
-  ])("does not add slides to cited work: %s", (prompt) => {
+  ])("does not add slides to cited artifact: %s", (prompt) => {
     const deck = citedDeck();
     const before = structuredClone(deck);
     expect(enforceAiPresentationContentPolicy(deck, prompt)).toEqual(before);

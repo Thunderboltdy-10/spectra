@@ -121,7 +121,7 @@ describe("Settings application accessibility contract", () => {
     expect(screen.queryByDisplayValue("Dead control")).toBeNull();
     expect(screen.queryByText("document.format.ghostFromNova")).toBeNull();
   });
-  it("folds the section list into a popover while the Side holds work", async () => {
+  it("folds the section list into a popover while the Side holds artifact", async () => {
     spectraBus.setQuery("side.open", { kind: "work" });
     render(
       <ThemeProvider>

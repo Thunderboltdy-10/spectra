@@ -16,6 +16,7 @@ const { JSDOM } = createRequire(import.meta.url)("jsdom") as {
 
 const route = vi.hoisted(() => ({ pathname: "/settings", ready: true }));
 vi.mock("next/font/google", () => ({ Figtree: () => ({ variable: "font-main" }), Newsreader: () => ({ variable: "font-display" }), IBM_Plex_Mono: () => ({ variable: "font-mono" }) }));
+vi.mock("../account-gate", () => ({ AccountGate: ({ children }: { children: import("react").ReactNode }) => children }));
 vi.mock("next/navigation", () => ({ usePathname: () => route.pathname, useRouter: () => ({ push: vi.fn() }), useSearchParams: () => new URLSearchParams("section=appearance") }));
 vi.mock("next/link", () => ({ default: ({ children, ...props }: { children: ReactNode } & { prefetch?: boolean }) => { delete props.prefetch; return <a {...props}>{children}</a>; } }));
 vi.mock("@clerk/nextjs", () => ({ ClerkProvider: ({ children }: { children: ReactNode }) => children, useClerk: () => ({ openUserProfile: vi.fn() }) }));

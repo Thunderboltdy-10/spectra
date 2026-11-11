@@ -76,7 +76,7 @@ function Body({ node }: { node: WhiteboardNode }) {
     );
   }
   if (node.type === "image" || node.type === "embed")
-    return <span className="board-view-placeholder">{node.semanticLabel || (node.type === "image" ? "Picture" : "Embedded work")}</span>;
+    return <span className="board-view-placeholder">{node.semanticLabel || (node.type === "image" ? "Picture" : "Embedded artifact")}</span>;
   if (node.type === "frame")
     return <span className="board-view-frame-title">{typeof content.title === "string" ? content.title : ""}</span>;
   if (node.type === "card" && typeof content.title === "string")

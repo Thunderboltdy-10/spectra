@@ -459,7 +459,7 @@ export async function executeApplicationCommand(
     const result = await applyMutation(accept ? "authority:acceptShareInvitation" : "authority:declineShareInvitation", parsed);
     onUiEvent?.({
       key: "share_invitation_answered",
-      payload: { targetId: String(parsed.invitationId), note: accept ? "Added shared work to your Library" : "Declined an invitation" },
+      payload: { targetId: String(parsed.invitationId), note: accept ? "Added shared artifact to your Library" : "Declined an invitation" },
     });
     return result;
   }
@@ -814,14 +814,14 @@ async function restoreVersion(input: {
   const restored = receipt.outcome === "restored";
   input.onUiEvent?.({
     key: "version_restored",
-    payload: { targetId: input.artifactId, note: restored ? "Restored an earlier version" : "That version matches the current work" },
+    payload: { targetId: input.artifactId, note: restored ? "Restored an earlier version" : "That version matches the current artifact" },
   });
   return {
     state: restored ? "restored" : "unchanged",
     ...(receipt.outcome === "restored" ? { versionId: String(receipt.versionId) } : {}),
     message: restored
-      ? "Restored. The work before the restore is saved in its history as \"Your work before restore\"."
-      : "Nothing changed: the work already matches that version.",
+      ? "Restored. The artifact before the restore is saved in its history as \"Your artifact before restore\"."
+      : "Nothing changed: the artifact already matches that version.",
   };
 }
 
@@ -1044,7 +1044,7 @@ const AGENT_RELEASE_NOTES: Record<string, string> = {
 
 const EMBED_NOTES: Record<string, string> = {
   resize: "Resized an embed",
-  follow_live: "An embed now follows the live work",
+  follow_live: "An embed now follows the live artifact",
   pin: "Pinned an embed to a version",
   recheck: "Checked an embed again",
   remove: "Removed an embed",

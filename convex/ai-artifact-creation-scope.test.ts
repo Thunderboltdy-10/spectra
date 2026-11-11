@@ -12,7 +12,7 @@ const modules = import.meta.glob("./**/*.ts");
 const prepare = makeFunctionReference<"action">("spectraArtifactWrites:preparePlan");
 const archive = makeFunctionReference<"mutation">("spectraArtifactWrites:archive");
 const body = (text: string) => ({ blocks: [{ id: "p", type: "paragraph", text }] });
-const createInput = { blueprintKey: "document", title: "Created work", content: body("Created explanation") };
+const createInput = { blueprintKey: "document", title: "Created artifact", content: body("Created explanation") };
 
 async function fixture(follow: "wipe" | "archive" | "create" = "wipe") {
   const t = convexTest(schema, modules);
@@ -22,7 +22,7 @@ async function fixture(follow: "wipe" | "archive" | "create" = "wipe") {
     const schoolId = await ctx.db.insert("schools", { name: "Creation", slug: "creation", verifiedDomains: [], status: "active", timezone: "UTC", policyVersion: 1, createdAt: now, updatedAt: now });
     const accountId = await ctx.db.insert("accounts", { clerkId: "creation-owner", email: "creation@example.test", emailVerified: true, name: "Creator", status: "active", createdAt: now, updatedAt: now });
     await ctx.db.insert("schoolMemberships", { accountId, schoolId, role: "student", status: "active", joinedAt: now, createdAt: now, updatedAt: now });
-    const runId = await ctx.db.insert("spectraAiRuns", { ownerAccountId: accountId, schoolId, sourceSurface: "workspace", userPrompt: "Create the work and perform the next operation", executionId: "create-attempt", status: "running", createdAt: now, updatedAt: now });
+    const runId = await ctx.db.insert("spectraAiRuns", { ownerAccountId: accountId, schoolId, sourceSurface: "workspace", userPrompt: "Create the artifact and perform the next operation", executionId: "create-attempt", status: "running", createdAt: now, updatedAt: now });
     return { schoolId, accountId, runId };
   });
   const actor = t.withIdentity({ subject: "creation-owner", email: "creation@example.test", emailVerified: true });
@@ -81,7 +81,7 @@ describe("created artifact effect identity", () => {
     await expect(f.bind()).rejects.toThrow("no longer pending");
   });
 
-  it("rejects preexisting or edited work even when AI presentation flags match", async () => {
+  it("rejects preexisting or edited artifact even when AI presentation flags match", async () => {
     const f = await fixture();
     await f.t.run(ctx => ctx.db.patch(f.pending.artifactId, { content: body("Human writing before bind") }));
     await expect(f.bind()).rejects.toThrow("Pending artifact not found");

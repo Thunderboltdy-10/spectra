@@ -341,7 +341,7 @@ describe("AiPerformer", () => {
     expect(performer.getSnapshot().operations).toHaveLength(0);
   });
 
-  it("materialises completed work for an artifact opened after the run", () => {
+  it("materialises completed artifact for an artifact opened after the run", () => {
     performer.materialize([
       envelope({
         operationId: "op-a",

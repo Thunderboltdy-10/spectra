@@ -249,7 +249,7 @@ function WhatChanged({ version, blueprintKey }: { version: SpectraArtifactVersio
     return versionPartChanges(version.before ? readableParts(blueprintKey, version.before) : [], after);
   }, [blueprintKey, version.after, version.before]);
   if (!version.before)
-    return <p className="version-note">This is where the work began, so there is nothing earlier to compare it with.</p>;
+    return <p className="version-note">This is where the artifact began, so there is nothing earlier to compare it with.</p>;
   if (!changes.some((change) => change.kind !== "same")) return <p className="version-note">Nothing you can read changed in this version.</p>;
   return (
     <ol className="version-page">

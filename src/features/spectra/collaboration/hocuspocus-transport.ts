@@ -496,7 +496,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     if (conflict) {
       this.nativeConflict = conflict;
       this.update({ state: "unsynchronized", recoveryConflict: conflict,
-        error: "A native edit changed the same part of this work. The local draft is preserved for review." });
+        error: "A native edit changed the same part of this artifact. The local draft is preserved for review." });
       return;
     }
     this.updateSynchronizationState();

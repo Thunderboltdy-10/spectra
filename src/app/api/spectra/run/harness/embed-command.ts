@@ -36,9 +36,9 @@ export async function executeEmbedCommand(input: {
   const embed = (list.embeds ?? []).find((entry) => entry.embedId === input.embedId);
   // A removal that already happened replays its receipt below.
   if (!embed && input.action !== "remove")
-    throw new Error("EMBED_NOT_IN_WORK: That embed is not in this work. read_embeds lists the work's embeds.");
+    throw new Error("EMBED_NOT_IN_WORK: That embed is not in this artifact. read_embeds lists the artifact's embeds.");
   if (embed && list.canConfigure !== true)
-    throw new Error("EMBED_NOT_CONFIGURABLE: The user can only view this work, so its embeds cannot be changed.");
+    throw new Error("EMBED_NOT_CONFIGURABLE: The user can only view this artifact, so its embeds cannot be changed.");
   if (input.action === "resize")
     return input.applyMutation("artifactEmbeds:update", { embedId: input.embedId, mode: input.mode });
   if (input.action === "follow_live")

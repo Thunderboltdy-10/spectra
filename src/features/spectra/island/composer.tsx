@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -156,13 +157,18 @@ export const IslandComposer = forwardRef<
     };
   }, [visible]);
 
-  // The field grows upward, line by line, then scrolls.
-  useEffect(() => {
+  // The field grows upward, line by line, and scrolls only past its eight lines. Empty, it is as tall as the
+  // line it shows, so a long one takes a second line instead of being cut.
+  useLayoutEffect(() => {
     const field = fieldRef.current;
     if (!field) return;
+    const max = LINE * MAX_LINES + 8;
     field.style.height = "auto";
-    field.style.height = `${Math.min(field.scrollHeight, LINE * MAX_LINES + 8)}px`;
-  }, [text, visible]);
+    const hint = text ? 0 : rootRef.current?.querySelector<HTMLElement>("[data-placeholder-current]")?.offsetHeight ?? 0;
+    const wanted = Math.max(field.scrollHeight, hint);
+    field.style.height = `${Math.min(wanted, max)}px`;
+    field.style.overflowY = wanted > max ? "auto" : "hidden";
+  }, [text, visible, placeholder]);
 
   // @ opens the picker of the user's things.
   useEffect(() => {
@@ -333,26 +339,26 @@ export const IslandComposer = forwardRef<
       ) : null}
       <div className="flex items-end gap-1.5 p-2">
         <AgentSwitch label={agentLabel} agent={agent} agentIndex={agentIndex} agents={agents} sends={sends} working={working} onChoose={setAgentIndex} />
-        <div className="relative flex min-w-0 flex-1">
-        {!text ? <PlaceholderLine text={placeholder} /> : null}
-        <textarea
-          ref={fieldRef}
-          data-composer-text
-          rows={1}
-          value={text}
-          aria-label="Message Spectra"
-          // Read out as the field's hint; the line drawn over it crossfades as it changes.
-          placeholder={placeholder}
-          onChange={(event) => onChange(event.target.value)}
-          onBlur={() => setFieldFocused(false)}
-          onFocus={() => {
-            setFieldFocused(true);
-            if (ownRuntime) void recheckAgentRuntimeIfStale().then(() => warmAgentRuntime(chosenRuntime));
-          }}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          className="min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1.5 py-[7px] text-ui leading-[22px] text-[var(--text-primary)] outline-none placeholder:text-transparent"
-        />
+        <div className="relative grid min-w-0 flex-1">
+          {!text ? <PlaceholderLine text={placeholder} /> : null}
+          <textarea
+            ref={fieldRef}
+            data-composer-text
+            rows={1}
+            value={text}
+            aria-label="Message Spectra"
+            // Read out as the field's hint; the line drawn under it crossfades as it changes.
+            aria-placeholder={placeholder}
+            onChange={(event) => onChange(event.target.value)}
+            onBlur={() => setFieldFocused(false)}
+            onFocus={() => {
+              setFieldFocused(true);
+              if (ownRuntime) void recheckAgentRuntimeIfStale().then(() => warmAgentRuntime(chosenRuntime));
+            }}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            className="composer-field col-start-1 row-start-1 min-h-9 w-full min-w-0 resize-none overflow-y-hidden bg-transparent px-1.5 py-[7px] text-ui leading-[22px] text-[var(--text-primary)] outline-none"
+          />
         </div>
         <input ref={fileRef} type="file" multiple hidden onChange={(event) => void addFiles(event.target.files).then(() => (event.target.value = ""))} />
         <IconButton
@@ -640,7 +646,8 @@ function PlaceholderLine({ text }: { text: string }) {
     const timer = window.setTimeout(() => setLines((state) => ({ ...state, leaving: null })), 200);
     return () => window.clearTimeout(timer);
   }, [lines.leaving]);
-  const line = "pointer-events-none absolute inset-x-0 top-0 truncate px-1.5 py-[7px] text-ui leading-[22px] text-[var(--text-tertiary)]";
+  // The line wraps rather than cutting its words: three lines at most, with no ellipsis.
+  const line = "pointer-events-none col-start-1 row-start-1 max-h-[80px] overflow-hidden break-words px-1.5 py-[7px] text-ui leading-[22px] text-[var(--text-tertiary)]";
   return (
     <span aria-hidden data-composer-placeholder className="contents">
       {lines.leaving ? (
@@ -648,7 +655,7 @@ function PlaceholderLine({ text }: { text: string }) {
           {lines.leaving}
         </span>
       ) : null}
-      <span key={`in:${lines.current}`} className={cn(line, lines.leaving && "island-content-in")}>
+      <span key={`in:${lines.current}`} data-placeholder-current className={cn(line, lines.leaving && "island-content-in")}>
         {lines.current}
       </span>
     </span>

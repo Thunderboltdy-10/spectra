@@ -1,10 +1,12 @@
 /// <reference types="vite/client" />
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
+import aggregateTest from "@convex-dev/aggregate/test";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import { interpretCalendarMutationResult } from "../src/features/spectra/calendar/domain/command";
+import { syncTaskWorkProjection } from "./calendarTaskWork";
 
 const modules = import.meta.glob("./**/*.ts");
 const identity = {
@@ -14,7 +16,9 @@ const identity = {
 };
 
 function setupTest() {
-  return convexTest(schema, modules);
+  const t = convexTest(schema, modules);
+  for (const name of ["orgNodeCountByType", "orgNodeCountByWorkspace", "orgNodeCountByParent"]) aggregateTest.register(t, name);
+  return t;
 }
 
 async function seedCalendarTask(t: ReturnType<typeof setupTest>) {
@@ -290,7 +294,7 @@ describe("Calendar personal events", () => {
     expect(moved).toMatchObject({ startAt: 1_790_337_600_000, endAt: 1_790_341_200_000 });
     expect(interpretCalendarMutationResult({
       type: "calendar.move_work_block", itemId, startAt: moved.startAt!, endAt: moved.endAt!, expectedRevision: created.revision,
-    }, moved).postcondition).toMatchObject({ kind: "personal_event", linkedTask: false });
+    }, moved).postcondition).toMatchObject({ kind: "personal_event", linkedTask: true });
     const resized = await user.mutation(api.calendar.resizeWorkBlock, {
       itemId, endAt: 1_790_343_000_000, expectedRevision: moved.revision,
     });
@@ -298,6 +302,38 @@ describe("Calendar personal events", () => {
     expect(interpretCalendarMutationResult({
       type: "calendar.resize_work_block", itemId, endAt: resized.endAt!, expectedRevision: moved.revision,
     }, resized).postcondition).toMatchObject({ kind: "personal_event", startAt: moved.startAt, endAt: resized.endAt });
+  });
+
+  it("is one task: what is added opens as a task artifact, and the calendar and the artifact move together", async () => {
+    const t = setupTest();
+    await seedCalendarTask(t);
+    const user = t.withIdentity(identity);
+    const day = 1_790_380_740_000;
+    const created = await user.mutation(api.calendar.createPersonalItem, {
+      kind: "task", title: "Hand in the essay", startAt: day, allDay: true, timezone: "Europe/Madrid", actorKind: "ai",
+    });
+    expect(created).toMatchObject({ kind: "task", allDay: true, startAt: day, endAt: day });
+    const workId = created.planArtifactId as Id<"spectraArtifacts">;
+    const work = () => t.run((ctx) => ctx.db.get(workId));
+    expect(await work()).toMatchObject({ blueprintKey: "planner_task", content: { taskTitle: "Hand in the essay", dueAt: day, allDay: true } });
+    const moved = await user.mutation(api.calendar.moveWorkBlock, {
+      itemId: created.id as Id<"calendarItems">, startAt: day + 86_400_000, expectedRevision: created.revision,
+    });
+    expect(moved.startAt).toBe(day + 86_400_000);
+    expect((await work())!.content).toMatchObject({ dueAt: day + 86_400_000 });
+    // The task sheet keeps its one task in `tasks`; a start makes it fill hours.
+    const span = await t.run(async (ctx) => {
+      const current = (await ctx.db.get(workId))!;
+      const content = { ...(current.content as Record<string, unknown>), startAt: day + 86_400_000 - 7_200_000, allDay: false, tasks: [{ id: "task-1", title: "Hand in the essay" }] };
+      await ctx.db.patch(workId, { content });
+      await syncTaskWorkProjection(ctx, (await ctx.db.get(workId))!);
+      return ctx.db.get(created.id as Id<"calendarItems">);
+    });
+    expect(span).toMatchObject({ status: "active", startAt: day + 86_400_000 - 7_200_000, endAt: day + 86_400_000, allDay: false });
+    await user.mutation(api.calendar.removePersonalItem, { itemId: created.id as Id<"calendarItems"> });
+    expect((await work())!.content).toMatchObject({ dueAt: null });
+    const item = await t.run((ctx) => ctx.db.get(created.id as Id<"calendarItems">));
+    expect(item!.status).toBe("removed");
   });
 
   it("keeps a block's length when it is moved with no end given", async () => {
@@ -325,5 +361,32 @@ describe("Calendar personal events", () => {
     await expect(t.withIdentity(identity).mutation(api.calendar.moveWorkBlock, {
       itemId, startAt: 1_790_337_600_000, endAt: 1_790_341_200_000, expectedRevision: 1,
     })).rejects.toThrow();
+  });
+});
+
+describe("Calendar entries that stay entries", () => {
+  it("keeps imported events and several-day stretches as plain entries, never made into tasks", async () => {
+    const t = setupTest();
+    const seeded = await seedCalendarTask(t);
+    const user = t.withIdentity(identity);
+    const day = 86_400_000;
+    const imported = await user.mutation(api.calendar.createPersonalItem, {
+      kind: "personal_event", title: "Imported concert", startAt: 1_790_330_400_000, endAt: 1_790_334_000_000,
+      timezone: "Europe/Madrid", plain: true,
+    });
+    const trip = await user.mutation(api.calendar.createPersonalItem, {
+      kind: "personal_event", title: "Field trip", startAt: 1_790_294_400_000, endAt: 1_790_294_400_000 + 3 * day,
+      allDay: true, timezone: "Europe/Madrid",
+    });
+    for (const created of [imported, trip]) {
+      const item = await t.run((ctx) => ctx.db.get(created.id as Id<"calendarItems">));
+      expect(item?.planArtifactId).toBeUndefined();
+      expect(await user.mutation(api.calendar.adoptAsTask, { itemId: created.id as Id<"calendarItems"> })).toBeNull();
+      expect((await t.run((ctx) => ctx.db.get(created.id as Id<"calendarItems">)))?.status).toBe("active");
+    }
+    const trips = await t.run((ctx) => ctx.db.get(trip.id as Id<"calendarItems">));
+    expect(trips?.endAt).toBe(1_790_294_400_000 + 3 * day);
+    const tasks = await t.run((ctx) => ctx.db.query("spectraArtifacts").collect());
+    expect(tasks.filter((artifact) => artifact.ownerAccountId === seeded.accountId && artifact.blueprintKey === "planner_task")).toHaveLength(0);
   });
 });

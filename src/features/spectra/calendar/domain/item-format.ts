@@ -21,7 +21,8 @@ export function layerFor(item: CalendarItem): CalendarLayerKey {
   if (item.kind === "official_event") return "classes";
   if (item.kind === "official_deadline") return "deadlines";
   if (item.kind === "scheduled_work_block") return "work";
-  if (item.kind === "personal_event") return "personal";
+  // A task that fills hours is still a task; only lessons and other plain events are personal.
+  if (item.kind === "personal_event") return item.planArtifactId ? "tasks" : "personal";
   return "tasks";
 }
 

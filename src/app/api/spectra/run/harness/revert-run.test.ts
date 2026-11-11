@@ -34,20 +34,20 @@ describe("the shared run reversal", () => {
     expect(io.apply).not.toHaveBeenCalled();
   });
 
-  it("does not restore content into a newly created work that reversal trashed", async () => {
+  it("does not restore content into a newly created artifact that reversal trashed", async () => {
     io.mutate.mockImplementation(async (name: string) => name === "changeGroups:revertPlanForRun" ? { restored: [{ artifactId: "quiz", snapshot: before }], blocked: [] } : { counts: { works: 1 }, left: [], kept: [], trashedWorks: ["quiz"] });
     expect((await revertRun("actor", "run-1", "exec-1")).status).toBe(200);
     expect(io.apply).not.toHaveBeenCalled();
   });
 
-  it("uses the existing device version fence and keeps unavailable device work", async () => {
+  it("uses the existing device version fence and keeps unavailable device artifact", async () => {
     io.device.mockResolvedValue({ restore: [{ artifactId: "device-work", versionId: 42 }], keep: ["offline-work"], notes: [] });
     await revertRun("actor", "run-1", "exec-1");
     expect(io.mutate).toHaveBeenCalledWith("spectraRunUndo:reverseWrites", { runId: "run-1", executionId: "exec-1", keepWorks: ["offline-work"] });
     expect(io.restore).toHaveBeenCalledWith({ artifactId: "device-work", versionId: "device:42", requestId: "undo:run-1:device-work" });
   });
 
-  it("discovers affected native works beyond the result card's display limit", async () => {
+  it("discovers affected native artifacts beyond the result card's display limit", async () => {
     const affected = Array.from({ length: 30 }, (_,i) => ({ type: "artifact", id: `work-${i}` }));
     io.query.mockResolvedValue({ run: { status: "completed", executionId: "exec-1" }, cards: [], operations: [{ type: "artifact.update", status: "executed", affected }] });
     await revertRun("actor", "run-1", "exec-1");
@@ -68,10 +68,10 @@ describe("the shared run reversal", () => {
   });
 
   it("recovers the same requesting run's receipt without repeating reversal writes", async () => {
-    io.query.mockResolvedValue({ run: { status: "completed", executionId: "exec-1" }, cards: [{ summary: "Undone: restored 1 work.", actions: [{ key: "undone" }], provenance: { undoneByRunId: "requester" } }] });
+    io.query.mockResolvedValue({ run: { status: "completed", executionId: "exec-1" }, cards: [{ summary: "Undone: restored 1 artifact.", actions: [{ key: "undone" }], provenance: { undoneByRunId: "requester" } }] });
     const response = await revertRun("actor", "run-1", "exec-1", undefined, "requester");
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ changed: true, summary: "Undone: restored 1 work." });
+    expect(await response.json()).toMatchObject({ changed: true, summary: "Undone: restored 1 artifact." });
     expect((await revertRun("actor", "run-1", "exec-1", undefined, "another-requester")).status).toBe(409);
     expect(io.mutate).not.toHaveBeenCalled();
     expect(io.apply).not.toHaveBeenCalled();

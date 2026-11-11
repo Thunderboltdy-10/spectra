@@ -65,12 +65,12 @@ export function UnsavedCloseDialog({
         hideCloseButton
       >
         <DialogTitle>
-          {unnamed ? "Save this work before closing?" : "Save your edits?"}
+          {unnamed ? "Save this artifact before closing?" : "Save your edits?"}
         </DialogTitle>
         <DialogDescription className="mt-1.5">
           {unnamed
-            ? "Save this work as Untitled, or keep your edits as a local draft on this device."
-            : "Save your edits, or keep them as a local draft on this device. You can reopen local drafts from More work actions."}
+            ? "Save this artifact as Untitled, or keep your edits as a local draft on this device."
+            : "Save your edits, or keep them as a local draft on this device. You can reopen local drafts from More artifact actions."}
         </DialogDescription>
         <DialogFooter className="mt-5">
           <Button variant="ghost" size="sm" disabled={busy} onClick={onDiscard}>

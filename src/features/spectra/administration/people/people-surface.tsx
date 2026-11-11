@@ -149,7 +149,7 @@ export function PeopleSurface({
           patch: next,
           done,
           title: `Make ${person.name} a school admin?`,
-          detail: "They will be able to invite and remove people, message the school, change groups and settings, and read the school’s activity log. They still can’t open anyone’s work.",
+          detail: "They will be able to invite and remove people, message the school, change groups and settings, and read the school’s activity log. They still can’t open anyone’s artifact.",
           confirm: "Make admin",
         });
       if (person.role === "school_admin")
@@ -169,7 +169,7 @@ export function PeopleSurface({
         patch: next,
         done: `${person.name} is suspended.`,
         title: `Suspend ${person.name}?`,
-        detail: "They can’t use the school until you restore them. Their work stays as it is; what was shared with them directly is taken back.",
+        detail: "They can’t use the school until you restore them. Their artifacts stay as they are; what was shared with them directly is taken back.",
         confirm: "Suspend",
         destructive: true,
       });
@@ -179,7 +179,7 @@ export function PeopleSurface({
         patch: next,
         done: `${person.name} is no longer in the school.`,
         title: `Remove ${person.name} from the school?`,
-        detail: "They lose the school and everything shared through it. Their own work is kept. You can bring them back later.",
+        detail: "They lose the school and everything shared through it. Their own artifact is kept. You can bring them back later.",
         confirm: "Remove from school",
         destructive: true,
       });

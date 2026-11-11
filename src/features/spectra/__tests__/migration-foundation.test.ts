@@ -68,7 +68,7 @@ describe("definitive migration foundation", () => {
     expect(
       adaptLegacyToolDefinition({
         type: "artifact.archive",
-        purpose: "Archive selected work",
+        purpose: "Archive selected artifact",
         execution: "confirmation",
         batchable: false,
       }),

@@ -105,6 +105,14 @@ function JoinSchoolContent() {
           setPreviewState("error");
           return;
         }
+        if (/IDENTITY_NOT_INVITED/.test(raw)) {
+          // Signed up with an email this invitation was not sent to.
+          setPreview(null);
+          setPreviewState("error");
+          setStatus("error");
+          setError("This invitation was sent to a different email. Use a different account and sign up with the email it went to.");
+          return;
+        }
         const retryable = invitationPreviewCanRetry(raw, previewAttempt);
         if (
           /INVITATION_INVALID|INVITATION_EXPIRED|INVITATION_SCHOOL_UNAVAILABLE/.test(

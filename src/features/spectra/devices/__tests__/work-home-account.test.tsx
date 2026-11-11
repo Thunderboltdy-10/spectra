@@ -47,5 +47,5 @@ it("brings back the newest computer's chain, says its age, and adopts only what 
   await act(async () => { fireEvent.click(confirm); });
   expect(h.restore).toHaveBeenCalledWith([{ url: "https://fixture-only-b1" }, { url: "https://fixture-only-b2" }]);
   expect(h.adopt).toHaveBeenCalledWith({ storeId: "store-A", artifactIds: ["w1"] });
-  expect(h.success).toHaveBeenCalledWith("One work is on this computer now.");
+  expect(h.success).toHaveBeenCalledWith("One artifact is on this computer now.");
 });

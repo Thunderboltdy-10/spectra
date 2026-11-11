@@ -149,7 +149,7 @@ export function ThreadWidget({
               className="inline-flex items-center gap-1 rounded-control px-2 py-1 text-micro font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]"
             >
               <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-              Open saved work
+              Open saved artifact
             </button>
           ) : (
             <span className="inline-flex items-center gap-1 px-2 py-1 text-micro font-semibold text-[var(--text-secondary)]">
@@ -169,7 +169,7 @@ export function ThreadWidget({
             ) : (
               <Bookmark className="h-3.5 w-3.5" aria-hidden />
             )}
-            Save as work
+            Save as artifact
           </button>
         )}
       </figcaption>

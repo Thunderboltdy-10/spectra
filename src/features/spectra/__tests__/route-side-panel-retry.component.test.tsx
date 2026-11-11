@@ -199,13 +199,13 @@ it("keeps the original recovery action across a long offline hold with the produ
   expect(fetchRequest).toHaveBeenCalledTimes(4);
 });
 
-it.each(["conversation", "work"] as const)("recovers the Dock's associated conversation and work independently, %s first", async (first) => {
+it.each(["conversation", "artifact"] as const)("recovers the Dock's associated conversation and artifact independently, %s first", async (first) => {
   render(<><main>School context</main><OpenFromIsland /><RouteSidePanelHost /><Toaster expand /></>);
   fireEvent.click(screen.getByRole("button", { name: "Open chat for Temporary conversation" }));
   await screen.findByText("This conversation could not be opened. Check your connection, then try again.");
-  await screen.findByText("This work could not be opened. Check your connection, then try again.");
+  await screen.findByText("This artifact could not be opened. Check your connection, then try again.");
   expect(fetchRequest).toHaveBeenCalledTimes(2);
-  const retry = (kind: "conversation" | "work") => {
+  const retry = (kind: "conversation" | "artifact") => {
     const notice = screen.getByText(`This ${kind} could not be opened. Check your connection, then try again.`).closest("[data-sonner-toast]") as HTMLElement;
     fireEvent.click(within(notice).getByRole("button", { name: "Try again" }));
   };
@@ -217,7 +217,7 @@ it.each(["conversation", "work"] as const)("recovers the Dock's associated conve
   await waitFor(() => expect(screen.getAllByRole("button", { name: "Try again" })).toHaveLength(1));
   if (first === "conversation") expect(screen.getByText("Opened conversation-a")).toBeTruthy();
   else expect(screen.queryByRole("button", { name: "Close live chat" })).toBeNull();
-  retry(first === "conversation" ? "work" : "conversation");
+  retry(first === "conversation" ? "artifact" : "conversation");
   expect(await screen.findByText("Opened conversation-a")).toBeTruthy();
   await waitFor(() => expect(screen.queryByRole("button", { name: "Try again" })).toBeNull());
   expect(screen.getByText("School context")).toBeTruthy();

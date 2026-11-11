@@ -115,6 +115,12 @@
   transition:
     translate 340ms var(--rail-ease),
     height 220ms var(--rail-ease),
+    flex-grow 300ms var(--ease-standard),
+    max-width 300ms var(--ease-standard),
+    min-width 300ms var(--ease-standard),
+    padding 300ms var(--ease-standard),
+    margin 300ms var(--ease-standard),
+    opacity 200ms var(--ease-standard),
     background-color 150ms var(--ease-standard),
     color 150ms var(--ease-standard);
 }
@@ -152,6 +158,27 @@
 
 .island-rail[data-raised][data-settled] :is(.island-rail-tab[data-state="seen"][data-side="done"]:not([data-current]), .island-rail-threads) {
   translate: 0 100%;
+}
+
+/* What went down gives up its room, and the threads still standing share it: a title reads whole. */
+.island-rail[data-raised][data-settled] .island-rail-scroller > .island-rail-tab[data-state="seen"]:not([data-current]) {
+  min-width: 0;
+  max-width: 0;
+  margin-inline: -1.5px;
+  border-inline-width: 0;
+  padding-inline: 0;
+  opacity: 0;
+}
+
+.island-rail[data-raised][data-settled] .island-rail-scroller > .island-rail-tab:is([data-current], :not([data-state="seen"])) {
+  max-width: 640px;
+  flex: 1 1 auto;
+}
+
+.island-rail[data-raised][data-settled] .island-rail-divider {
+  width: 0;
+  margin: 0;
+  opacity: 0;
 }
 
 /* Raised one after the other, from the left, like fingers along a drawer. */
@@ -209,7 +236,7 @@
   padding: 0;
 }
 
-/* About four tabs across the field; the rest run on to the right, the edge fading into them. */
+/* Three tabs across the field at most; the rest run on to the right, the edge fading into them. */
 .island-rail-scroller {
   display: flex;
   min-width: 0;
@@ -229,9 +256,11 @@
   display: none;
 }
 
+/* Three threads across at most, each a third of the room; the rest run on to the right. */
 .island-rail-scroller > .island-rail-tab {
   flex: none;
-  max-width: 152px;
+  min-width: var(--rail-tab-min, 76px);
+  max-width: var(--rail-tab-min, 152px);
   scroll-snap-align: start;
 }
 
@@ -413,4 +442,67 @@
   .island-rail-tab[data-finished] {
     animation: none;
   }
+}
+
+/* The works on a reply peek: small tabs in each work's colour, along its top. */
+.peek-work {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 180px;
+  height: 28px;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid color-mix(in oklab, var(--work-hue) 26%, var(--card-border));
+  border-radius: var(--radius-control, 8px);
+  background: var(--work-tint, var(--bg-secondary));
+  padding: 0 9px 0 7px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  outline: none;
+  transition: border-color 150ms var(--ease-standard), background-color 150ms var(--ease-standard);
+}
+
+.peek-work > svg {
+  flex: none;
+  color: var(--work-hue);
+}
+
+.peek-work:hover,
+.peek-work:focus-visible {
+  border-color: color-mix(in oklab, var(--work-hue) 60%, var(--card-border));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .peek-work {
+    transition: none;
+  }
+}
+
+/* The field's own scrolling, past eight lines: a thin thumb with no track behind it. */
+.composer-field {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--text-tertiary) 55%, transparent) transparent;
+}
+
+.composer-field::-webkit-scrollbar {
+  width: 6px;
+  background: transparent;
+}
+
+.composer-field::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.composer-field::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--text-tertiary) 55%, transparent);
+}
+
+/* A working tab says so with its mark and its lip. The band does not sweep the whole tab: on something this
+   small, in the corner of the eye, it reads as flashing. */
+.island-rail-tab[data-life-working]::after {
+  content: none;
 }

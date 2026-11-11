@@ -14,7 +14,7 @@ const work: SpectraArtifact = {
   tags: [], status: "active", accessLevel: "modify", createdAt: 1, updatedAt: 1,
 };
 
-describe("reactive work availability", () => {
+describe("reactive artifact availability", () => {
   it("evicts an open cached body through the existing ordered authority coordinator", async () => {
     const read = vi.fn().mockResolvedValue({ artifact: null });
     const access = createShellArtifactAccess(read);
@@ -61,7 +61,7 @@ describe("reactive work availability", () => {
     ["/workspace/class", "?artifactId=work", "/workspace/class"],
     ["/library/work", "?collection=trash", "/library?collection=trash"],
     ["/library", "?artifactId=another", null],
-  ])("retires only the unavailable work URL at %s%s", (pathname, search, expected) => {
+  ])("retires only the unavailable artifact URL at %s%s", (pathname, search, expected) => {
     expect(retireShellArtifactLocation(pathname!, search!, "work")).toBe(expected);
   });
 });

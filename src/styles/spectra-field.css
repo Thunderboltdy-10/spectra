@@ -721,14 +721,15 @@ html[data-life="on"] [data-life-ghost] [data-life-ghost-bar] {
    Spectra is working on has it cross over it (`[data-life-working]`, set by
    useLifeGlow); and a thing Spectra just made is crossed by it once as it
    lands (`[data-life-working="arrival"]`). The gradient is fixed to the
-   viewport, so lines mounted together share one band, crossing every 1.6 s
+   viewport, so lines mounted together share one band, crossing slowly
    as the field's ghosts do. */
 :root {
   --life-band-bar: color-mix(in oklab, var(--text-primary) 7%, transparent);
   --life-band-light: color-mix(in oklab, var(--bg-elevated) 92%, transparent);
   /* The band is the skeleton's light, never a colour sweeping over the work. */
-  --life-band-tint: color-mix(in oklab, var(--bg-elevated) 70%, transparent);
-  --life-band-period: 1.6s;
+  --life-band-tint: color-mix(in oklab, var(--bg-elevated) 38%, transparent);
+  /* Slow and faint: work in progress should be noticed once, not flash at the edge of the eye. */
+  --life-band-period: 2.8s;
 }
 
 @keyframes life-band {

@@ -122,7 +122,7 @@ export function VersionChanges({
         </header>
         {version.before === undefined ? (
           <p className="text-micro leading-5 text-[var(--text-secondary)]">
-            This is where the work began, so there is nothing earlier to compare it with.
+            This is where the artifact began, so there is nothing earlier to compare it with.
           </p>
         ) : changes.length === 0 ? (
           <p className="text-micro leading-5 text-[var(--text-secondary)]">

@@ -234,12 +234,12 @@ export function ArtifactCard({
                 title={
                   artifact.accessLevel === "read"
                     ? "Shared with read-only access"
-                    : "Shared work"
+                    : "Shared artifact"
                 }
                 aria-label={
                   artifact.accessLevel === "read"
                     ? "Shared with read-only access"
-                    : "Shared work"
+                    : "Shared artifact"
                 }
               >
                 <Share2 className="h-3 w-3" aria-hidden="true" />

@@ -53,13 +53,13 @@ function statusOf(embed: SpectraArtifactEmbed): Status | null {
         ? { icon: Send, title: "Access requested", detail: "Its owner decides. It appears here as soon as they say yes." }
         : { icon: LockKeyhole, title: "You can't open this yet", detail: "It belongs to someone who hasn't shared it with you, so nothing of it shows here." };
     case "deleted":
-      return { icon: AlertCircle, title: "This work was deleted", detail: "The page around it is unchanged." };
+      return { icon: AlertCircle, title: "This artifact was deleted", detail: "The page around it is unchanged." };
     case "version_unavailable":
       return embed.placementRefreshKey
         ? { icon: AlertCircle, title: "The saved version needs checking", detail: "It shows again once it matches the page around it." }
-        : { icon: AlertCircle, title: "The saved version is missing", detail: "Follow the live work instead, or remove it." };
+        : { icon: AlertCircle, title: "The saved version is missing", detail: "Follow the live artifact instead, or remove it." };
     case "removed":
-      return { icon: X, title: "No longer linked", detail: "This spot is no longer connected to its work. You can delete it from the page." };
+      return { icon: X, title: "No longer linked", detail: "This spot is no longer connected to its artifact. You can delete it from the page." };
     default:
       return null;
   }
@@ -107,7 +107,7 @@ function EmbedStatus({
         ) : null}
         {embed.state === "version_unavailable" && !embed.sourceUnavailable && embed.canConfigure && onUseLiveVersion ? (
           <button type="button" disabled={busy} onClick={onUseLiveVersion} data-primary="">
-            Follow the live work
+            Follow the live artifact
           </button>
         ) : null}
         {onRetry && !embed.placementRefreshKey ? (
@@ -295,12 +295,12 @@ export function ArtifactEmbed({
           : { key: "expand" as const, label: "Show more", icon: Maximize2 }]
       : []),
     ...(embed.canConfigure && pinned && onUseLiveVersion
-      ? [{ key: "live" as const, label: "Follow the live work", icon: Radio }]
+      ? [{ key: "live" as const, label: "Follow the live artifact", icon: Radio }]
       : []),
     ...(embed.canConfigure && !pinned && onPinVersion
       ? [{ key: "pin" as const, label: "Keep this version", icon: Pin }]
       : []),
-    ...(onStackAnother ? [{ key: "another" as const, label: "Add another work here", icon: Plus }] : []),
+    ...(onStackAnother ? [{ key: "another" as const, label: "Add another artifact here", icon: Plus }] : []),
     ...(onUnstack ? [{ key: "unstack" as const, label: "Give it a card of its own", icon: ArrowUpRight }] : []),
     ...(onRemove ? [{ key: "remove" as const, label: "Remove from page", icon: X }] : []),
   ].map((item) => ({ ...item, disabled: busy && item.key !== "open" }));
@@ -360,7 +360,7 @@ export function ArtifactEmbed({
         )}
         <span className="sr-only">, {referenceState}</span>
         {pinned ? (
-          <span className="work-embed-tab-note" title="This shows a saved version. It stays as it is when the work changes.">
+          <span className="work-embed-tab-note" title="This shows a saved version. It stays as it is when the artifact changes.">
             <Pin className="size-3" aria-hidden />
             Saved version
           </span>

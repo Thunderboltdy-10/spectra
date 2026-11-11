@@ -136,7 +136,7 @@ export function transferSideSessionToLibrary(
   const openPanes = side.workId && !alreadyOpen
     ? addWorkbenchTab(session.openPanes, {
         id: side.workId,
-        title: "Transferred work",
+        title: "Transferred artifact",
         minInlineSize: 320,
         preferredInlineSize: 720,
       })

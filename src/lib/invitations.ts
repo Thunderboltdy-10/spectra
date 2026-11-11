@@ -28,7 +28,7 @@ function inviteeOf(role: string): Invitee {
 /** What each person will find when they join, in the words they would use. */
 const WAITING: Record<Invitee, { lead: (school: string) => string; lines: string[] }> = {
   student: {
-    lead: (school) => `${school} has set up Spectra for you: one place for your classes, your deadlines and the work you make for them.`,
+    lead: (school) => `${school} has set up Spectra for you: one place for your classes, your deadlines and the artifact you make for them.`,
     lines: [
       "Your ManageBac tasks and classes, already on one calendar",
       "A Library for your notes and files, filed by class",
@@ -36,7 +36,7 @@ const WAITING: Record<Invitee, { lead: (school: string) => string; lines: string
     ],
   },
   teacher: {
-    lead: (school) => `${school} has set up Spectra, where its students plan their work and make what they study with.`,
+    lead: (school) => `${school} has set up Spectra, where its students plan their artifact and make what they study with.`,
     lines: [
       "Your classes and their deadlines, from ManageBac",
       "A Library for the resources you make and share",

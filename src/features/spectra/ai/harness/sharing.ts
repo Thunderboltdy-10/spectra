@@ -89,7 +89,7 @@ function link(entry: SharingLink) {
   return `- Public link ${entry.linkId}: anyone with it can view; ${parts.join(", ")}.`;
 }
 
-const KIND = { workspace: "workspace", artifact: "work", agent: "agent" } as const;
+const KIND = { workspace: "workspace", artifact: "artifact", agent: "agent" } as const;
 
 export function formatIncomingInvitations(invitations: IncomingInvitation[]) {
   if (!invitations.length) return "Nobody has invited the user to anything; no invitation is waiting.";
@@ -119,7 +119,7 @@ export function formatSharing(state: SharingState, title: string) {
     lines.push(state.links.length ? "Public links (their addresses are shown to the user only):" : "No public link is on.");
     lines.push(...state.links.map(link));
   } else {
-    lines.push("The user cannot make public links for this work.");
+    lines.push("The user cannot make public links for this artifact.");
   }
   return lines.join("\n");
 }

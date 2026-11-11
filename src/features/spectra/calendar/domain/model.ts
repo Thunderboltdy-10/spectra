@@ -39,6 +39,8 @@ export type CalendarItem = {
   location?: string;
   teacher?: string;
   classId?: string;
+  /** One of a repeating lesson's events. */
+  seriesId?: string;
   planArtifactId?: string;
   planTaskId?: string;
   taskItemId?: string;
@@ -126,6 +128,7 @@ export function calendarItemFromWire(value: unknown): CalendarItem {
     : "personal_event";
   return {
     id: String(row.id ?? row._id ?? ""),
+    ...(typeof row.seriesId === "string" && row.seriesId ? { seriesId: row.seriesId } : {}),
     kind,
     title: String(row.title ?? "Untitled item"),
     notes: typeof row.notes === "string" ? row.notes : undefined,

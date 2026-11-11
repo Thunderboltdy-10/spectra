@@ -4,7 +4,9 @@ import { buttonVariants } from "@/components/ui/button";
 import { useState, type CSSProperties } from "react";
 import { Icon as Glyph } from "@/components/icons";
 import { Loader2, ShieldCheck } from "@/components/icons/glyph-icons";
+import Link from "next/link";
 import { workTypeMeta } from "../artifacts/presentation";
+import { calendarTouchHref, isCalendarTouch } from "../calendar/domain/touch";
 import type { HarnessAnswerValue } from "../ai/harness-exchange";
 import { mergeTouch } from "../ai/harness-exchange";
 import { InlineEmphasis } from "./inline-emphasis";
@@ -228,9 +230,12 @@ export function WorkTouchCards({
   });
   if (unique.length === 0) return null;
   return (
-    <ul className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-2" aria-label="Work from this response">
+    <ul className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-2" aria-label="Artifact from this response">
       {unique.map((touch) => {
-        const meta = (workTypeMeta as Record<string, (typeof workTypeMeta)[keyof typeof workTypeMeta] | undefined>)[touch.type] ?? workTypeMeta.document;
+        const calendar = isCalendarTouch(touch.id);
+        const meta = calendar
+          ? { ...workTypeMeta.planner_task, glyph: "calendar" as const, label: "Calendar event" }
+          : ((workTypeMeta as Record<string, (typeof workTypeMeta)[keyof typeof workTypeMeta] | undefined>)[touch.type] ?? workTypeMeta.document);
         const reversed = undone && touch.action !== "referenced";
         const action = reversed ? "Undone" : ACTION_COPY[touch.action];
         // A change that only repeats the action ("Edited", "Edited") says it once.
@@ -256,7 +261,12 @@ export function WorkTouchCards({
         );
         return (
           <li key={touch.id} data-work-slip style={{ "--work-hue": meta.color, "--work-tint": meta.soft } as CSSProperties}>
-            {opens ? (
+            {calendar && !reversed ? (
+              // An event is not a work: it opens the calendar on its day.
+              <Link href={calendarTouchHref(touch.region)} aria-label={`Show ${touch.title} in your calendar`} className="work-slip">
+                {body}
+              </Link>
+            ) : opens && !calendar ? (
               <button type="button" onClick={() => opens(touch.id, touch.region)} aria-label={`Open ${touch.title}`} className="work-slip">
                 {body}
               </button>

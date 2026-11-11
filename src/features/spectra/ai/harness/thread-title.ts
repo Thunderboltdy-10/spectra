@@ -24,7 +24,7 @@ export type ThreadTitleWriter = (request: ThreadTitleRequest, signal: AbortSigna
 const SYSTEM = `You name a conversation in Spectra, a study and teaching workspace.
 
 Reply with JSON only: {"thread_title": "...", "thread_place": "..."}.
-- thread_title: a 2-6 word name for the conversation, sentence case, no full stop, no quotes, in the user's language. Lead with the subject, not the kind of request. When a work is in focus, start from its name. Differ from the listed titles of their other conversations. For a greeting or small talk with no subject yet, omit it, and a later message names the conversation.
+- thread_title: a 2-6 word name for the conversation, sentence case, no full stop, no quotes, in the user's language. Lead with the subject, not the kind of request. When an artifact is in focus, start from its name. Differ from the listed titles of their other conversations. For a greeting or small talk with no subject yet, omit it, and a later message names the conversation.
 - thread_place: only when the user's workspaces are listed. The id of the one workspace (a class or project) the conversation is clearly about. When it is general or could be several, omit it.`;
 
 function describe(request: ThreadTitleRequest) {

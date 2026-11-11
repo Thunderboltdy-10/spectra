@@ -605,7 +605,7 @@ export const commit = internalMutation({
       // An empty successor room starts from the empty document.
       await ctx.db.patch(artifact._id, { liveStateVectorHash: change.baseStateVectorHash });
     }
-    await commitHumanCheckpoint(ctx, artifact._id, "Your work before the school source changed");
+    await commitHumanCheckpoint(ctx, artifact._id, "Your artifact before the school source changed");
     const appended = await appendRoomUpdate(ctx, {
       artifactId: artifact._id, accountId: importer.accountId, actorKind: "human", partitionKey: "root",
       clientId: "managebac-provider", policyVersion, idempotencyKey: intent.operationId,

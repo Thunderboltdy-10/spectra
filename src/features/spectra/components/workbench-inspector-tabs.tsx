@@ -151,7 +151,7 @@ export function WorkbenchInspectorTabs({
   const history = useMemo(
     () => filterInspectorHistory([
       ...versions.filter(version => version.artifactId === work._id).map(versionToHistory),
-      { id: `created:${work._id}`, category: "change", summary: "Work created", createdAt: work.createdAt },
+      { id: `created:${work._id}`, category: "change", summary: "Artifacts created", createdAt: work.createdAt },
       ...(work.isShared ? [{ id: `access:${work._id}`, category: "access" as const, summary: `Shared with ${work.sharedWithCount ?? 0} collaborator${work.sharedWithCount === 1 ? "" : "s"}`, createdAt: work.updatedAt }] : []),
       ...(work.createdFrom?.sourceAttachmentNames ?? []).map((name, index) => ({ id: `source:${work._id}:${index}`, category: "source" as const, summary: `Source attached: ${name}`, createdAt: work.createdAt })),
     ], historyFilter),
@@ -277,7 +277,7 @@ export function WorkbenchInspectorTabs({
                   <SpectraRichContent content={comment.body} className="mt-1.5 text-caption leading-5 text-[var(--text-secondary)]" />
                   <button type="button" onClick={() => void revealOrReanchor(comment)} className={`mt-2 flex w-full items-center gap-1.5 rounded-chip px-2 py-1.5 text-left text-micro ${orphaned ? "bg-[color-mix(in_oklab,var(--accent-gold)_8%,var(--bg-secondary))] text-[var(--warning)]" : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]"}`}>
                     {orphaned ? <RefreshCw className="h-3 w-3" /> : <MapPin className="h-3 w-3" />}
-                    <span className="min-w-0 flex-1 truncate">{orphaned ? "Target changed — attach to whole work" : (comment.anchor.fallbackExcerpt ?? comment.anchor.regionId)}</span>
+                    <span className="min-w-0 flex-1 truncate">{orphaned ? "Target changed — attach to whole artifact" : (comment.anchor.fallbackExcerpt ?? comment.anchor.regionId)}</span>
                   </button>
                   <div className="mt-2 flex items-center gap-2">
                     <button type="button" disabled={busy === comment._id} onClick={() => void setResolved(comment)} className="inline-flex items-center gap-1 text-micro font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
@@ -336,7 +336,7 @@ function versionToHistory(version: SpectraArtifactVersionSummary): InspectorHist
   return {
     id: version._id,
     category,
-    summary: version.summary ?? version.name ?? (category === "ai" ? "AI updated this work" : "Content changed"),
+    summary: version.summary ?? version.name ?? (category === "ai" ? "AI updated this artifact" : "Content changed"),
     createdAt: version.createdAt,
   };
 }

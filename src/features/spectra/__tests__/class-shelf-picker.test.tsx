@@ -124,7 +124,7 @@ describe("class shelf picker", () => {
     expect(screen.queryByLabelText("Search classes")).toBeNull();
   });
 
-  it("asks how deselected work should be retained instead of silently archiving it", () => {
+  it("asks how deselected artifact should be retained instead of silently archiving it", () => {
     function Harness() {
       const [selectedIds, setSelectedIds] = useState(["class-chem"]);
       const [retention, setRetention] = useState<

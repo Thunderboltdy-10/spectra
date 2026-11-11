@@ -98,7 +98,7 @@ const demoDoc: JSONContent = {
           type: "spectraCitation",
           attrs: { id: "cite-1", sourceId: "src-1", label: "Doe" },
         },
-        text(" The prism guides the work."),
+        text(" The prism guides the artifact."),
       ],
     },
     {
@@ -121,7 +121,7 @@ const demoDoc: JSONContent = {
 const demoSources: SourceRecord[] = [
   {
     id: "src-1",
-    title: "Connected Work",
+    title: "Connected Artifact",
     authors: ["Ada Doe"],
     publishedAt: "2024-02-01",
     accessedAt: "2026-01-01",
@@ -640,7 +640,7 @@ function citedDeck(): PresentationContent {
         citations: [
           {
             id: "c1",
-            label: "Doe et al., Connected Work",
+            label: "Doe et al., Connected Artifact",
             url: "https://x.test/doe",
           },
           { id: "c2", label: "Unverified claim" },
@@ -653,7 +653,7 @@ function citedDeck(): PresentationContent {
         citations: [
           {
             id: "c3",
-            label: "Doe et al., Connected Work",
+            label: "Doe et al., Connected Artifact",
             url: "https://x.test/doe",
           },
         ],
@@ -667,7 +667,7 @@ describe("§11E bibliography slide generation", () => {
     const citations = collectDeckCitations(citedDeck());
     expect(citations).toHaveLength(2);
     expect(citations[0]).toMatchObject({
-      label: "Doe et al., Connected Work",
+      label: "Doe et al., Connected Artifact",
       url: "https://x.test/doe",
       slideNumbers: [1, 2],
       verified: true,

@@ -43,13 +43,13 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("what the pane says about a work", () => {
+describe("what the pane says about an artifact", () => {
   it("records who may read it", () => {
     render(<WorkDetails work={work} />);
     expect(screen.getByText("Only you")).toBeTruthy();
   });
 
-  it("lists only this work's conversations, and opens one", async () => {
+  it("lists only this artifact's conversations, and opens one", async () => {
     const onOpenThread = vi.fn();
     render(<WorkConversations work={work} onOpenThread={onOpenThread} />);
     fireEvent.click(await screen.findByText("Explain the light reactions"));

@@ -123,7 +123,7 @@ function mentions(context: EvalContext, pattern: RegExp) {
 }
 
 function nothingCreated(context: EvalContext) {
-  return [...context.backend.artifacts.values()].some((artifact) => artifact.createdBy === "ai") ? ["created work nobody asked for"] : [];
+  return [...context.backend.artifacts.values()].some((artifact) => artifact.createdBy === "ai") ? ["created artifact nobody asked for"] : [];
 }
 
 function sent(context: EvalContext, command: string) {
@@ -534,7 +534,7 @@ export const EVAL_SCENARIOS: EvalScenario[] = [
     ],
   },
   {
-    name: "open a piece of work",
+    name: "open an artifact",
     group: "navigation",
     prompt: "Open my WW1 essay.",
     backend: LIBRARY_FIXTURE,
@@ -638,7 +638,7 @@ export const EVAL_SCENARIOS: EvalScenario[] = [
     check: (context) => [...completed(context), ...mentions(context, /catalase/i), ...nothingCreated(context)],
   },
   {
-    name: "search my work",
+    name: "search my artifact",
     group: "threads",
     prompt: "Which of my notes mention telophase?",
     backend: LIBRARY_FIXTURE,
@@ -967,7 +967,7 @@ export const GOLDEN_SET: readonly string[] = [
   "schedule an event",
   "settings approval",
   "refuses to grant itself permissions",
-  "search my work",
+  "search my artifact",
   "move to the Trash",
 ];
 

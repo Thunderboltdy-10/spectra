@@ -207,7 +207,7 @@ export const commit = internalMutation({
       await ctx.db.patch(artifact._id, { ...before, contentHash: args.beforeProjectionHash, liveStateVectorHash: append.baseStateVectorHash });
     if (room.lastProjectionSequence !== room.nextSequence - 1)
       await ctx.db.patch(room._id, { lastProjectionSequence: room.nextSequence - 1 });
-    await commitHumanCheckpoint(ctx, artifact._id, "Your work before Spectra edited", { kind: "pre_ai_checkpoint" });
+    await commitHumanCheckpoint(ctx, artifact._id, "Your artifact before Spectra edited", { kind: "pre_ai_checkpoint" });
     // Without native sources the appender's ordinary AI history boundary is
     // the whole history effect; it already fits oversized snapshots off-row.
     const appended = await appendRoomUpdate(ctx, append, { deferAiHistory: Boolean(native) });

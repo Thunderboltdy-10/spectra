@@ -361,6 +361,8 @@ export type SpectraArtifact = {
   _id: string;
   /** Kept on a computer through Spectra Bridge. */
   storageHome?: "device";
+  /** An official course syllabus: shown read-only. */
+  syllabus?: { id: string; level?: "SL" | "HL" };
   storageStoreId?: string;
   /** Counts moves between a computer and the cloud; each starts a fresh live history. */
   storageEpoch?: number;
@@ -685,6 +687,8 @@ export type SpectraResultCard = {
   provenance?: {
     artifactIds?: string[];
     artifactTitles?: string[];
+    /** Each work's type, beside `artifactIds`. */
+    artifactTypes?: string[];
     /** Of `artifactIds`, the ones this run made. */
     createdIds?: string[];
     /** Where each edited work changed first, so opening it lands there (LAUNCH-REVIEW F5). */

@@ -200,7 +200,8 @@ describe("Calendar application", () => {
     installFetch(() => undefined);
     render(<CalendarApplication />);
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
-    const dialog = screen.getByRole("dialog", { name: "Add an event" });
+    const dialog = screen.getByRole("dialog", { name: "Add to your calendar" });
+    fireEvent.click(within(dialog).getByRole("radio", { name: "From – to" }));
     expect((within(dialog).getByLabelText("Starts") as HTMLInputElement).value).toBe(start);
     expect((within(dialog).getByLabelText("Ends") as HTMLInputElement).value).toBe(end);
   });
@@ -213,6 +214,7 @@ describe("Calendar application", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     vi.setSystemTime(new Date(2026, 8, 30, 19, 17));
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("radio", { name: "From – to" }));
     expect((screen.getByLabelText("Starts") as HTMLInputElement).value).toBe("20:00");
     expect((screen.getByLabelText("Ends") as HTMLInputElement).value).toBe("21:00");
   });
@@ -223,9 +225,10 @@ describe("Calendar application", () => {
     render(<CalendarApplication />);
     await waitFor(() => expect(gets).toBeGreaterThan(0));
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
-    const dialog = screen.getByRole("dialog", { name: "Add an event" });
+    const dialog = screen.getByRole("dialog", { name: "Add to your calendar" });
     fireEvent.change(within(dialog).getByLabelText("Title"), { target: { value: "Revision" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Add event" }));
+    fireEvent.click(within(dialog).getByRole("radio", { name: "From – to" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
     await waitFor(() => expect(posts.find((post) => post.action === "createPersonalItem")).toMatchObject({
       title: "Revision",
       startAt: Date.parse("2026-09-30T19:00"),
@@ -340,7 +343,8 @@ describe("Calendar application", () => {
       ],
     );
     render(<CalendarApplication />);
-    fireEvent.click(await screen.findByTitle(blockTitled("Dentist")));
+    // Pressing opens it as a task; its quick actions are a right-click away.
+    fireEvent.contextMenu(await screen.findByTitle(blockTitled("Dentist")));
     fireEvent.click(screen.getByRole("button", { name: "Remove from Calendar" }));
     fireEvent.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
@@ -384,7 +388,7 @@ describe("Calendar application", () => {
     expect(dentist.getAttribute("draggable")).toBe("true");
     expect(screen.getByTitle(blockTitled("Assembly")).getAttribute("draggable")).not.toBe("true");
 
-    fireEvent.click(dentist);
+    fireEvent.contextMenu(dentist);
     fireEvent.click(screen.getByRole("button", { name: "30 minutes longer" }));
     await waitFor(() =>
       expect(
@@ -485,18 +489,15 @@ describe("Calendar application", () => {
     expect(within(screen.getByLabelText("Empty notes details")).queryByText("Notes")).toBeNull();
   });
 
-  it("opens a plan's work in the Side instead of a page of its own", async () => {
+  it("opens a task as the task itself beside the block, not a card or a page of its own", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
-    const { spectraBus } = await import("../events");
-    const opened = vi.fn();
-    const stop = spectraBus.handle("work.open", opened);
     installFetch(() => undefined, [
-      { ...workBlock(), taskItemId: undefined, planArtifactId: "plan-1", planTaskId: "task-1", linkedWorkIds: ["plan-1"] },
+      { ...workBlock(), kind: "task", taskItemId: undefined, planArtifactId: "plan-1", planTaskId: "task-1", linkedWorkIds: [] },
     ]);
     render(<CalendarApplication />);
     fireEvent.click(await screen.findByTitle(blockTitled("Essay draft")));
-    expect(opened).toHaveBeenCalledWith({ workId: "plan-1", surface: "panel" });
-    stop();
+    expect(await screen.findByRole("status", { name: "Opening the task" })).toBeTruthy();
+    expect(screen.queryByLabelText("Essay draft details")).toBeNull();
   });
 });
 

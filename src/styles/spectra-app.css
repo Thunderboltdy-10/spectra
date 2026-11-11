@@ -9478,7 +9478,12 @@ body {
   accent-color: var(--brand-primary);
 }
 
-.spectra-wave-y :where(input, select, textarea):not([class*="bg-transparent"]) {
+/* A bare field gets paper. A field that names its own background, or sits inside a toolbar control
+   (a font size, a zoom) as part of that control's pill, keeps its surface; so do checkboxes. */
+.spectra-wave-y
+  :where(input, select, textarea):not([class*="bg-"]):where(
+    :not(.spectra-workbar-control *, [type="checkbox"], [type="radio"], [type="range"], [type="color"])
+  ) {
   background-color: var(--bg-elevated);
 }
 

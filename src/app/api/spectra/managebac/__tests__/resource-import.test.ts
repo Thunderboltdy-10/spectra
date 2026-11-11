@@ -171,7 +171,7 @@ describe("importing a ManageBac resource for Spectra AI", () => {
     );
   });
 
-  it("opens an Office file as an editable work", async () => {
+  it("opens an Office file as an editable artifact", async () => {
     mutations({ "managebac:beginResourceImport": { ...started, title: "Notes.docx" } });
     harness.docx.mockResolvedValue({ projection: { type: "doc", content: [] } });
     respond(() => new Response(Buffer.from("PK\u0003\u0004word"), {
@@ -194,7 +194,7 @@ describe("importing a ManageBac resource for Spectra AI", () => {
     expect(fetches).toEqual([]);
   });
 
-  it("records a failed download and removes the half-made work", async () => {
+  it("records a failed download and removes the half-made artifact", async () => {
     respond(() => new Response("", { status: 403 }));
     await expect(importManageBacResourceAs({ clerkId: "user_1", sourceRecordId: "record_1" })).rejects.toThrow("INTEGRATION_PERMISSION_DENIED");
     expect(harness.mutation).toHaveBeenCalledWith(

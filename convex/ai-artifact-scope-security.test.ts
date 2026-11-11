@@ -44,7 +44,7 @@ async function fixture(type: "artifact.archive" | "artifact.update" = "artifact.
       content, textIndex: "Authored explanation", tags: [], status: "active", createdAt: now, updatedAt: now,
     });
     const runId = await ctx.db.insert("spectraAiRuns", {
-      ownerAccountId: accounts[0], schoolId, sourceSurface: "workspace", userPrompt: "Clear the selected work",
+      ownerAccountId: accounts[0], schoolId, sourceSurface: "workspace", userPrompt: "Clear the selected artifact",
       executionId: "artifact-attempt-1", status: "running", phase: "planning", createdAt: now, updatedAt: now,
     });
     const operationId = await ctx.db.insert("spectraOperations", {
@@ -62,7 +62,7 @@ async function fixture(type: "artifact.archive" | "artifact.update" = "artifact.
   const artifact = () => t.run(ctx => ctx.db.get(ids.artifactId));
   const pending = async () => {
     await actor.action(prepare, attempt);
-    await actor.mutation(api.spectraRuns.updateStatus, { ...attempt, status: "awaiting_confirmation", approvalReasons: ["Clear selected work"] });
+    await actor.mutation(api.spectraRuns.updateStatus, { ...attempt, status: "awaiting_confirmation", approvalReasons: ["Clear selected artifact"] });
   };
   const executing = async () => t.run(async ctx => {
     await ctx.db.patch(ids.runId, { status: "running", phase: "applying" });
@@ -273,7 +273,7 @@ describe("artifact preparation and archive approval boundary", () => {
     expect(await f.artifact()).toMatchObject({ status: "active" });
   });
 
-  describe("Allow after the work was re-saved underneath (F08)", () => {
+  describe("Allow after the artifact was re-saved underneath (F08)", () => {
     const allowNative = async (resave: (f: Awaited<ReturnType<typeof fixture>>) => Promise<unknown>) => {
       const f = await fixture("artifact.update");
       const binding = { format: "docx", sourcePayloadHash: "a".repeat(64), semanticDigest: "b".repeat(64), identityStable: false };
@@ -298,7 +298,7 @@ describe("artifact preparation and archive approval boundary", () => {
       return f;
     };
 
-    it("applies the allowed edit when Bridge only re-saved the work", async () => {
+    it("applies the allowed edit when Bridge only re-saved the artifact", async () => {
       const f = await allowNative(f => f.t.run(async ctx => {
         const artifact = (await ctx.db.get(f.ids.artifactId))!;
         await ctx.db.patch(f.ids.artifactId, { liveStateVectorHash: "resaved", content: { ...artifact.content,
@@ -329,7 +329,7 @@ describe("artifact preparation and archive approval boundary", () => {
     const f = await fixture();
     await f.pending();
     await f.t.run(ctx => ctx.db.patch(f.ids.artifactId, { content: body("Unseen revision") }));
-    await f.actor.mutation(api.spectraRuns.updateStatus, { ...f.attempt, status: "awaiting_confirmation", approvalReasons: ["Clear selected work"] });
+    await f.actor.mutation(api.spectraRuns.updateStatus, { ...f.attempt, status: "awaiting_confirmation", approvalReasons: ["Clear selected artifact"] });
     await expect(f.actor.mutation(api.spectraRuns.claimConfirmation, f.attempt)).rejects.toThrow("APPROVAL_SCOPE_CHANGED");
   });
 
@@ -450,7 +450,7 @@ describe("artifact preparation and archive approval boundary", () => {
 
   it("hydrates integrity-checked offloaded content before classifying and rejects a changed base at commit", async () => {
     const f = await fixture("artifact.update");
-    const json = JSON.stringify({ content: body("Storage-backed authored work") });
+    const json = JSON.stringify({ content: body("Storage-backed authored artifact") });
     await f.t.run(async ctx => {
       const storageId = await ctx.storage.store(new Blob([json]));
       const digest = createHash("sha256").update(json).digest("hex");
@@ -504,7 +504,7 @@ describe("artifact preparation and archive approval boundary", () => {
       actorAccountId: f.ids.accountId, artifactId: f.ids.artifactId,
       aiOperation: { ...f.attempt, operationId: f.ids.operationId },
       beforeContent: body("Authored explanation"),
-      afterContent: canonicalArtifactWriteContent("document", normalizeAiArtifactWriteContent("document", body(""), "Clear the selected work")),
+      afterContent: canonicalArtifactWriteContent("document", normalizeAiArtifactWriteContent("document", body(""), "Clear the selected artifact")),
     }));
     expect(result.scope.kind).toBe("full_content_delete");
     expect(result.resultContentDigest).toBe(result.scope.resultContentDigest);

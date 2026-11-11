@@ -82,7 +82,7 @@ describe("landing in a studio", () => {
     expect(document.querySelector("[data-spectra-anchor-landing]")).toBeNull();
   });
 
-  it("leaves an unknown region alone: the work stays where it opened and the landing expires", async () => {
+  it("leaves an unknown region alone: the artifact stays where it opened and the landing expires", async () => {
     render(<Studio workId="w1" resolve={known} />);
     act(() => expectLanding("w1", { id: "gone" }));
     await act(async () => {
@@ -106,7 +106,7 @@ describe("landing in a studio", () => {
     expect(scrolled).toEqual([]);
   });
 
-  it("waits for the studio to be ready, and for its own work only", async () => {
+  it("waits for the studio to be ready, and for its own artifact only", async () => {
     const { rerender } = render(<Studio workId="w1" resolve={known} ready={false} />);
     act(() => {
       expectLanding("w2", { id: "b" });
@@ -124,7 +124,7 @@ describe("landing in a studio", () => {
     expect(pendingLanding("w2")?.region.id).toBe("b");
   });
 
-  it("does not land in a copy of the work shown inside another", async () => {
+  it("does not land in a copy of the artifact shown inside another", async () => {
     function Copy() {
       const root = useRef<HTMLDivElement>(null);
       return (

@@ -245,10 +245,96 @@
   background: var(--success);
 }
 
-/* Its details, one per line: what it is on the left, the value on the right. */
+/* Under the title, one line: when it is due, then its reminders. */
+.task-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+  margin: -10px 0 0 42px;
+}
+.task-line .task-reminders {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+.task-line .task-reminder-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.task-line .task-reminder {
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: var(--text-body);
+}
+.task-line button[role="combobox"] {
+  margin-left: -10px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+  box-shadow: none;
+}
+.task-line button[role="combobox"]:hover,
+.task-line button[role="combobox"][data-state="open"] {
+  background: color-mix(in oklab, var(--task-ink) 9%, transparent);
+  color: var(--text-primary);
+}
+
+/* What a few tasks need, folded away. Closed, it says what is set inside. */
+.task-more {
+  margin-left: 42px;
+  border-top: 1px solid var(--card-border-soft);
+}
+.task-more-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  cursor: pointer;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  border-radius: 8px;
+}
+.task-more-toggle::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  margin: 0 3px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--motion-fast) var(--ease-standard);
+}
+.task-more[data-open] .task-more-toggle::before {
+  transform: rotate(45deg);
+}
+.task-more-toggle:hover {
+  color: var(--text-primary);
+}
+.task-more-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--text-primary));
+  outline-offset: 2px;
+}
+.task-more-label {
+  font-weight: 500;
+}
+.task-more-set {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Inside the fold, one per line: what it is on the left, the value on the right. */
 .task-props {
   display: grid;
-  margin: -4px 0 0 42px;
+  margin: 0 0 4px;
 }
 .task-prop {
   display: grid;
@@ -283,9 +369,6 @@
 /* Selects sit flush with the words above them; their padding hangs left. */
 .task-prop > dd button[role="combobox"] {
   margin-left: -10px;
-}
-.task-prop .task-elapsed {
-  width: min(320px, 100%);
 }
 .task-prop-minutes {
   display: inline-flex;
@@ -339,35 +422,6 @@
   cursor: default;
 }
 
-/* What else a task can hold, one word each, added on demand. */
-.task-prop-more > dd {
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 4px 2px;
-}
-.task-prop-more button {
-  height: 28px;
-  padding: 0 9px;
-  margin-left: -9px;
-  margin-right: 9px;
-  border-radius: 7px;
-  color: var(--text-secondary);
-  font-size: var(--text-caption);
-  transition:
-    background-color var(--motion-fast) var(--ease-standard),
-    color var(--motion-fast) var(--ease-standard);
-}
-.task-prop-more button:hover {
-  background: color-mix(in oklab, var(--task-ink) 9%, transparent);
-  color: var(--text-primary);
-}
-
-.task-foot {
-  display: flex;
-  justify-content: flex-start;
-  padding-top: 4px;
-  border-top: 1px solid var(--card-border-soft);
-}
 .task-export {
   display: inline-flex;
   align-items: center;
@@ -385,10 +439,17 @@
 
 /* What the school asked: a slip pinned into the sheet, read only. */
 .task-brief {
-  padding: 14px 18px 16px;
+  margin-left: 42px;
+  padding: 12px 18px 14px;
   border-left: 3px solid color-mix(in oklab, var(--task-ink) 60%, transparent);
   border-radius: 0 10px 10px 0;
   background: color-mix(in oklab, var(--task-ink) 6%, var(--card-paper));
+}
+.task-brief-head {
+  margin: 0 0 6px;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+  font-weight: 500;
 }
 .task-brief-text {
   --prose-leading: 1.6;
@@ -418,8 +479,12 @@
 }
 
 .task-notes {
-  min-height: 72px;
+  min-height: 96px;
+  margin-left: 42px;
   padding: 2px 0;
+}
+.task-sheet > :is(.sheet-section, .task-school-notice) {
+  margin-left: 42px;
 }
 /* Notes are written straight on the sheet, with their formatting docked at
    the top of the field (never floating over the words): quiet until the
@@ -684,6 +749,26 @@
   padding: 10px 6px 4px;
   border-top: 1px solid var(--card-border);
 }
+/* From and to: the day takes its own row, the two times share the next. */
+.due-picker-own[data-span] {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+.due-picker-own[data-span] > :first-child {
+  grid-column: 1 / -1;
+}
+.due-picker-span {
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding: 2px 0;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  text-decoration: underline;
+  text-decoration-color: var(--card-border);
+  text-underline-offset: 3px;
+}
+.due-picker-span:hover {
+  color: var(--text-primary);
+}
 .due-picker-own .when-field {
   height: 32px;
   padding: 0 8px;
@@ -745,9 +830,15 @@
   margin-left: 0;
 }
 /* Narrow: the details stop indenting under the check and their labels shrink. */
-[data-mode="split"] .task-props,
-.task-peek .task-props {
+[data-mode="split"] :is(.task-line, .task-more, .task-notes, .task-brief),
+.task-peek :is(.task-line, .task-more, .task-notes, .task-brief),
+[data-mode="split"] .task-sheet > :is(.sheet-section, .task-school-notice),
+.task-peek .task-sheet > :is(.sheet-section, .task-school-notice) {
   margin-left: 0;
+}
+[data-mode="split"] .task-line,
+.task-peek .task-line {
+  margin-top: -6px;
 }
 [data-mode="split"] .task-prop,
 .task-peek .task-prop {
@@ -761,34 +852,6 @@
   .task-prop > dt {
     padding-top: 0;
   }
-}
-
-/* How much of its time is gone: a hairline from the day it was added to the
-   day it is due, filled to today, in the task's ink. */
-.task-elapsed {
-  display: flex;
-  max-width: 420px;
-  flex-direction: column;
-  gap: 5px;
-  margin-top: 2px;
-}
-.task-elapsed-rule {
-  position: relative;
-  height: 3px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--task-ink) 14%, var(--bg-tertiary));
-}
-.task-elapsed-rule > span {
-  position: absolute;
-  inset: 0 auto 0 0;
-  border-radius: inherit;
-  background: color-mix(in oklab, var(--task-ink) 78%, var(--text-secondary));
-  transition: width var(--motion-slow) var(--ease-standard);
-}
-.task-elapsed-words {
-  color: var(--text-tertiary);
-  font-size: var(--text-caption);
 }
 
 /* --------------------------------------------------------------------------

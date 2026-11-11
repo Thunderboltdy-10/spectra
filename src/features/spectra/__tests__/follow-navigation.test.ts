@@ -93,7 +93,7 @@ describe("follow navigation", () => {
     expect(push.mock.calls.map(([href]) => href)).toEqual(["/school"]);
   });
 
-  it("opens a work item where a work surface is open, and its page otherwise", async () => {
+  it("opens an artifact where an artifact surface is open, and its page otherwise", async () => {
     spectraBus.command("navigation.show", { route: "artifact", target: "wx1", intent: "explicit" });
     await settle();
     expect(push).toHaveBeenCalledWith("/library/wx1");

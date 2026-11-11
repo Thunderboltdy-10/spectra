@@ -23,7 +23,7 @@ async function renderPanel() {
     <ArtifactCommentsPanel
       open
       artifactId="artifact-1"
-      regions={[{ regionId: "artifact:structure", label: "Whole work" }]}
+      regions={[{ regionId: "artifact:structure", label: "Whole artifact" }]}
     />,
   );
   await act(async () => {});

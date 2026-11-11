@@ -74,9 +74,13 @@ export async function POST(request: NextRequest) {
                 (item): item is string => typeof item === "string",
               )
             : undefined,
+          ...(body.plain === true ? { plain: true } : {}),
+          ...(text(body.workspaceId, 180) ? { workspaceId: text(body.workspaceId, 180) } : {}),
         }),
       });
     }
+    if (action === "adoptAsTask")
+      return ok({ data: await convexMutation("calendar:adoptAsTask", { itemId: text(body.itemId, 180) }) });
     if (action === "scheduleTask") {
       const startAt = finite(body.startAt);
       const endAt = finite(body.endAt);

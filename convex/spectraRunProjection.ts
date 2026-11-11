@@ -228,6 +228,9 @@ function compactProvenance(value: unknown) {
     artifactTitles: Array.isArray(source.artifactTitles)
       ? source.artifactTitles.filter((title): title is string => typeof title === "string").slice(0, 24).map((title) => title.slice(0, 240))
       : undefined,
+    artifactTypes: Array.isArray(source.artifactTypes)
+      ? source.artifactTypes.filter((type): type is string => typeof type === "string").slice(0, 24).map((type) => type.slice(0, 40))
+      : undefined,
     createdIds: Array.isArray(source.createdIds)
       ? source.createdIds.filter((id): id is string => typeof id === "string").slice(0, 24).map((id) => id.slice(0, 160))
       : undefined,

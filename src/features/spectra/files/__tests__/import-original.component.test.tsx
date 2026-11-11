@@ -30,7 +30,7 @@ afterEach(() => {
   mocks.load.mockReset();
 });
 
-describe("An imported work's original", () => {
+describe("An imported artifact's original", () => {
   it("opens read-only in the shared viewer, next to the download", async () => {
     mocks.load.mockResolvedValue({
       kind: "slides",

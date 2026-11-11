@@ -219,7 +219,7 @@ export function FileStorageControls({
           <p>
             {transitionPreview?.pendingWork?.relativePath
               ? `Writing the retained work to ${transitionPreview.pendingWork.relativePath}.`
-              : "Moving this work between Spectra and this computer."}{" "}
+              : "Moving this artifact between Spectra and this computer."}{" "}
             The item stays open while Spectra Bridge verifies the file.
           </p>
           {transitionPreview?.pendingWork?.localResourceId ? (

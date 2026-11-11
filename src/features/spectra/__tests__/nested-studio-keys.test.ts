@@ -31,8 +31,8 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-describe("shortcuts with a work edited inside another", () => {
-  it("keeps the host's shortcuts out of the nested work, and the nested work's out of the host", () => {
+describe("shortcuts with an artifact edited inside another", () => {
+  it("keeps the host's shortcuts out of the nested artifact, and the nested work's out of the host", () => {
     const host = studio("doc-1");
     const frame = document.createElement("div");
     frame.setAttribute("data-embed-editor", "");
@@ -48,7 +48,7 @@ describe("shortcuts with a work edited inside another", () => {
     expect(eventBelongsToFocusedStudio(inHost, "deck-1", nested.bar)).toBe(false);
   });
 
-  it("answers in only one copy when the same work is open in the Side and edited in place", () => {
+  it("answers in only one copy when the same artifact is open in the Side and edited in place", () => {
     const side = studio("deck-1");
     const host = studio("doc-1");
     const inline = studio("deck-1", host.section);
@@ -72,7 +72,7 @@ describe("shortcuts with a work edited inside another", () => {
 });
 
 describe("close requests", () => {
-  it("reach the named copy only, and an unnamed request only the work's own studio", () => {
+  it("reach the named copy only, and an unnamed request only the artifact's own studio", () => {
     const inline = { workId: "deck-1", instanceKey: "embed-1" };
     const side = { workId: "deck-1" };
     expect(closeRequestReaches({ workId: "deck-1", instance: "embed-1" }, inline)).toBe(true);

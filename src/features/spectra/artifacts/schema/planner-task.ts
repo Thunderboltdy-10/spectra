@@ -144,7 +144,7 @@ export const plannerTaskContentSchema = z
 export const plannerTaskBlueprint: ArtifactBlueprint = {
   key: "planner_task",
   name: "Planner Task",
-  description: "A due-date aware task with links to study work.",
+  description: "A due-date aware task with links to study artifacts.",
   version: 3,
   schema: plannerTaskContentSchema,
   defaultContent: {

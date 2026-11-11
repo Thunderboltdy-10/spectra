@@ -66,7 +66,7 @@ describe("Share dialog public links", () => {
 });
 
 /* F18: opening Share on a work kept on this computer moved it online at once. */
-describe("sharing a work kept on this computer (F18)", () => {
+describe("sharing an artifact kept on this computer (F18)", () => {
   it("says it will move online, and moves it only when a link is made", async () => {
     api.links = [];
     api.postSpectra.mockResolvedValue({ url: "/public#new" });

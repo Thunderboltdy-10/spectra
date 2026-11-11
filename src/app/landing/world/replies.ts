@@ -137,7 +137,7 @@ const ABOUT: Reply[] = [
     matches: has(/\bbridge\b/i, /\bmy (own )?files\b/i, /\bcomputer\b/i, /\bword\b/i, /\boffline\b/i, /\bdesktop\b/i),
     title: "Your files and Bridge",
     steps: [{ label: "Checked Bridge" }],
-    text: `With Spectra Bridge your own folders stay on your computer and show up in Spectra. The file on your desktop and the work in Spectra are the same file: edit it in Word or here, and it is never copied or uploaded twice.`,
+    text: `With Spectra Bridge your own folders stay on your computer and show up in Spectra. The file on your desktop and the artifact in Spectra are the same file: edit it in Word or here, and it is never copied or uploaded twice.`,
   },
   {
     key: "price",
@@ -159,8 +159,8 @@ const PREVIEW: Reply = {
   key: "preview",
   matches: () => true,
   title: "A preview",
-  steps: [{ label: "Read Henry's work" }],
-  text: `This is a preview of Spectra on Henry's example work, so here I can only answer a few things: what is due, revising for Thursday, planning, and questions about Spectra itself (ManageBac, your files, teachers, getting it for your school). In your own Spectra I answer from your own notes, files and classes.`,
+  steps: [{ label: "Read Henry's artifacts" }],
+  text: `This is a preview of Spectra on Henry's example artifact, so here I can only answer a few things: what is due, revising for Thursday, planning, and questions about Spectra itself (ManageBac, your files, teachers, getting it for your school). In your own Spectra I answer from your own notes, files and classes.`,
 };
 
 const STORY_REPLIES = [TIDY_REPLY, LAB_REPLY, MAKE_REPLY, PLAN_REPLY, WEEK_REPLY];

@@ -633,7 +633,7 @@ describe("S10 bounded resumable catalog pages", () => {
           ownerAccountId: ids.peerId,
           schoolId: ids.schoolId,
           blueprintKey: "document",
-          title: "Private newer work",
+          title: "Private newer artifact",
           tags: [],
           status: "active",
           content: {},

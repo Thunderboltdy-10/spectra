@@ -178,7 +178,7 @@ export function ArtifactEmbedById({
           ) : undefined
         }
         onDoneEditing={stopEditing}
-        onUseLiveVersion={() => void change({ versionPolicy: "live" }, "The reference could not follow the live work.")}
+        onUseLiveVersion={() => void change({ versionPolicy: "live" }, "The reference could not follow the live artifact.")}
         onPinVersion={
           workId
             ? () => {
@@ -187,7 +187,7 @@ export function ArtifactEmbedById({
                   .then((page) => {
                     const latest = page.versions[0];
                     if (!latest) {
-                      toast.error("This work has no saved version to pin yet.");
+                      toast.error("This artifact has no saved version to pin yet.");
                       return;
                     }
                     setEditing(false);
@@ -263,7 +263,7 @@ export function ArtifactEmbedList({
       className={className}
       aria-label={
         containerType === "thread"
-          ? "Work in this conversation"
+          ? "Artifact in this conversation"
           : "Live references"
       }
     >

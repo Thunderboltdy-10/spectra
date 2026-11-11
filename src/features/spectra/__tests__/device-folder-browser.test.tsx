@@ -31,7 +31,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("files in a folder on a computer", () => {
-  it("lists folders first, opens a work, and opens a folder into the path", () => {
+  it("lists folders first, opens an artifact, and opens a folder into the path", () => {
     render(<DeviceFolderBrowser rootNodeId="root" name="School" onClose={vi.fn()} />);
     const names = screen.getAllByRole("checkbox", { name: /^Select / }).map((box) => box.getAttribute("aria-label")).filter(Boolean);
     expect(names).toEqual(["Select Labs", "Select Essay.docx", "Select Notes.txt", "Select Data.xlsx"]);

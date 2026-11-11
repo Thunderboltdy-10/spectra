@@ -47,7 +47,7 @@ afterEach(() => {
 });
 
 describe("public shared workspace", () => {
-  it("names the work by its type and says plainly when a shared space is empty", async () => {
+  it("names the artifact by its type and says plainly when a shared space is empty", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(answer({ ...workspaceProjection, artifacts: [] })));
     render(<PublicShareShell />);
     expect(await screen.findByRole("heading", { level: 1, name: "Biology HL" })).toBeTruthy();
@@ -55,7 +55,7 @@ describe("public shared workspace", () => {
     expect(document.body.textContent).not.toMatch(/blueprint|public workspace view/i);
   });
 
-  it("opens a piece of work from the shared workspace and returns to the list", async () => {
+  it("opens an artifact from the shared workspace and returns to the list", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => answer(workspaceProjection)));
     render(<PublicShareShell />);
     fireEvent.click(await screen.findByRole("button", { name: /Cell membranes/ }));
@@ -65,7 +65,7 @@ describe("public shared workspace", () => {
     expect(screen.queryByText("Diffusion moves particles down a gradient.")).toBeNull();
   });
 
-  it("keeps showing the work when a background refresh cannot reach the server", async () => {
+  it("keeps showing the artifact when a background refresh cannot reach the server", async () => {
     const fetchMock = vi.fn()
       .mockImplementationOnce(async () => answer(workspaceProjection))
       .mockRejectedValue(new Error("offline"));

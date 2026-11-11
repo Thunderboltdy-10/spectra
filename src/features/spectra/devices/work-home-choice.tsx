@@ -42,7 +42,7 @@ const CHOICES: ReadonlyArray<{ value: WorkStorage; label: string; impacts: Impac
     impacts: [
       { good: true, text: "Your writing never leaves this computer on its own" },
       { good: true, text: "Opens and saves instantly, even offline" },
-      { good: false, text: "If this computer is lost, so is the work" },
+      { good: false, text: "If this computer is lost, so is the artifact" },
     ],
   },
   {
@@ -198,8 +198,8 @@ function MoveWorks({ storage }: { storage: WorkStorage }) {
           setMoving({ done: done + failed, total: Math.max(total, done + failed) });
         }
       }
-      if (failed) toast.warning(`${failed === 1 ? "One work" : `${failed} works`} stayed where they were, usually because they're shared.`);
-      else toast.success(toCloud ? "Your work is online now." : "Your work is on this computer now.");
+      if (failed) toast.warning(`${failed === 1 ? "One artifact" : `${failed} works`} stayed where they were, usually because they're shared.`);
+      else toast.success(toCloud ? "Your artifact is online now." : "Your artifact is on this computer now.");
     } finally {
       if (accountStorageMatches(revision)) setMoving(null);
     }
@@ -210,8 +210,8 @@ function MoveWorks({ storage }: { storage: WorkStorage }) {
         {moving
           ? `Moving ${moving.done} of ${moving.total}…`
           : toCloud
-            ? `${total === 1 ? "One work is" : `${total} works are`} on this computer.`
-            : `${total === 1 ? "One work is" : `${total} works are`} still online.`}
+            ? `${total === 1 ? "One artifact is" : `${total} artifacts are`} on this computer.`
+            : `${total === 1 ? "One artifact is" : `${total} artifacts are`} still online.`}
       </span>
       <Button size="sm" variant="secondary" disabled={Boolean(moving)} onClick={() => void move()}>
         {toCloud ? "Move them online" : "Move them here"}
@@ -299,7 +299,7 @@ function BringBackBackup() {
       // The computer backed up most recently is the one most likely meant.
       const newest = [...chains].sort((left, right) => right.at - left.at)[0];
       if (!newest) {
-        toast.info("There's no backup to bring back. Open Spectra on the computer that holds this work.");
+        toast.info("There's no backup to bring back. Open Spectra on the computer that holds this artifact.");
         return;
       }
       setOffer(newest);
@@ -324,7 +324,7 @@ function BringBackBackup() {
       for (let at = 0; at < restored.length; at += 200)
         adopted += (await adopt({ storeId, artifactIds: restored.slice(at, at + 200) })).adopted;
       if (!accountStorageMatches(revision)) return;
-      toast.success(`${adopted === 1 ? "One work is" : `${adopted} works are`} on this computer now.`);
+      toast.success(`${adopted === 1 ? "One artifact is" : `${adopted} artifacts are`} on this computer now.`);
     } catch (error) {
       if (!accountStorageMatches(revision)) return;
       toast.error(error instanceof Error ? error.message : "The backup couldn't be brought back.");
@@ -336,7 +336,7 @@ function BringBackBackup() {
   return (
     <div className="work-home-footer">
       <span className="min-w-0 text-caption text-[var(--text-secondary)]">
-        {counts.elsewhere === 1 ? "One work is" : `${counts.elsewhere} works are`} on another computer.
+        {counts.elsewhere === 1 ? "One artifact is" : `${counts.elsewhere} artifacts are`} on another computer.
       </span>
       <Button size="sm" variant="secondary" disabled={busy} onClick={() => void choose()}>
         Bring it here
@@ -383,12 +383,12 @@ export function WorkHomeChoice({ compact = false }: { compact?: boolean }) {
       {compact ? null : (
         <>
           <h2 id="work-home" className="device-slip-heading">
-            Where your work is kept
+            Where your artifacts are kept
           </h2>
           <p className="device-slip-about">It looks and works the same either way. You can change this whenever you like.</p>
         </>
       )}
-      <div role="radiogroup" aria-label="Where your work is kept" className={compact ? "space-y-2" : "mt-4 space-y-2"}>
+      <div role="radiogroup" aria-label="Where your artifacts are kept" className={compact ? "space-y-2" : "mt-4 space-y-2"}>
         {CHOICES.map((choice) => (
           <ChoiceCard
             key={choice.value}
@@ -421,7 +421,7 @@ export function WorkHomeChoice({ compact = false }: { compact?: boolean }) {
       ) : null}
       {value === "device_only" && !compact ? (
         <p className="mt-3 text-caption leading-5 text-[var(--text-secondary)]">
-          A work&apos;s name stays in your account so your Library can list it, and anything you ask the AI about still goes to the AI.
+          An artifact&apos;s name stays in your account so your Library can list it, and anything you ask the AI about still goes to the AI.
         </p>
       ) : null}
       {compact ? null : (
@@ -436,7 +436,7 @@ export function WorkHomeChoice({ compact = false }: { compact?: boolean }) {
         pending={false}
         destructive
         title="Delete your online backups?"
-        detail="Keeping work only on this computer removes the backups already saved online. If this computer is lost after that, the work is gone."
+        detail="Keeping artifacts only on this computer removes the backups already saved online. If this computer is lost after that, those artifacts are gone."
         confirmLabel="Delete backups"
         onCancel={() => setConfirmOnly(false)}
         onConfirm={() => {

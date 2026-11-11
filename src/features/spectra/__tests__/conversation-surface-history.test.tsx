@@ -529,7 +529,7 @@ describe("saved answer cards after loading details", () => {
     mocks.getTrace.mockResolvedValue({
       run: { ...run, finalSummary: answer }, operations: [], events: [], artifacts: [],
       cards: [card,
-        { ...card, _id: "result", variant: "artifact", title: "Saved work", actions: [{ key: "open", label: "Open", targetType: "artifact", targetId: "work-1" }] },
+        { ...card, _id: "result", variant: "artifact", title: "Saved artifact", actions: [{ key: "open", label: "Open", targetType: "artifact", targetId: "work-1" }] },
         { ...card, _id: "recovery", variant: "error", status: "failed", title: "Retry available", actions: [{ key: "retry", label: "Retry", targetType: "run", targetId: run._id }] },
         { ...card, _id: "approval", variant: "operation", status: "awaiting_confirmation", title: "Approval required", actions: [{ key: "confirm", label: "Apply changes" }, { key: "cancel", label: "Reject" }] },
         { ...card, _id: "other", title: "Validation", summary: "Checked editable content" },
@@ -537,7 +537,7 @@ describe("saved answer cards after loading details", () => {
     });
     render(<ConversationSurface detail={live(detail("thread-a", answer))} threadId="thread-a" compact={compact} />);
     fireEvent.click(screen.getByRole("button", { name: "Show details" }));
-    await screen.findByText("Saved work");
+    await screen.findByText("Saved artifact");
     expect(screen.getAllByText(answer)).toHaveLength(1);
     expect(screen.queryByText("Answer")).toBeNull();
     expect(screen.getByText("Retry available")).toBeTruthy();

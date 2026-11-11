@@ -640,7 +640,7 @@ export const localEffectCount = query({
 export const undoNeedsLocalApproval = query({
   args: { workIds: v.array(v.id("spectraArtifacts")) },
   handler: async (ctx, { workIds }) => {
-    if (workIds.length > 100) throw new Error("Too many works in one Undo preflight.");
+    if (workIds.length > 100) throw new Error("Too many artifacts in one Undo preflight.");
     const actor = await getAuthenticatedActor(ctx);
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
     let local = false;

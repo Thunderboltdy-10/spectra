@@ -201,7 +201,7 @@ const DESCRIPTORS: Record<ArtifactTypeKey, readonly ControlRule[]> = {
     { pattern: "/recurrence/frequency", primitive: "dropdown", label: "Repeat" },
     { pattern: "/recurrence/**", primitive: "text", label: "Recurrence" },
     { pattern: "/assignees/**", primitive: "text", label: "Assignees" },
-    { pattern: "/linkedArtifactIds/**", primitive: "listItem", label: "Linked work" },
+    { pattern: "/linkedArtifactIds/**", primitive: "listItem", label: "Linked artifact" },
     { pattern: "/sourceRefs/**", primitive: "text", label: "Source references" },
   ],
 

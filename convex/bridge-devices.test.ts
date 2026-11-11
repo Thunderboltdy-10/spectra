@@ -135,7 +135,7 @@ describe("Bridge retained-work ownership", () => {
     const { accountId } = await seedDevice(t);
     const workId = await t.run(async ctx => {
       const now = Date.now();
-      const id = await ctx.db.insert("spectraArtifacts", { ownerAccountId: accountId, blueprintKey: "document", title: "Large local work", content: {}, tags: [], status: "active", createdAt: now, updatedAt: now });
+      const id = await ctx.db.insert("spectraArtifacts", { ownerAccountId: accountId, blueprintKey: "document", title: "Large local artifact", content: {}, tags: [], status: "active", createdAt: now, updatedAt: now });
       await ctx.db.insert("spectraArtifactSummaries", { readModelVersion: 2, artifactId: id, ownerAccountId: accountId, blueprintKey: "document", status: "active", updatedAt: now, searchText: "", projection: {} });
       return id;
     });
@@ -190,7 +190,7 @@ describe("Bridge retained-work ownership", () => {
     await expect(t.query(api.bridgeSync.ownedStoredWorks, args)).rejects.toThrow("BRIDGE_CREDENTIAL_INVALID");
   });
 
-  it("bounds explicit migration batches before reading work rows", async () => {
+  it("bounds explicit migration batches before reading artifact rows", async () => {
     const t = setupTest();
     await seedDevice(t);
     await expect(t.query(api.bridgeSync.ownedStoredWorks, { credential, artifactIds: Array(101).fill("not-an-artifact") })).rejects.toThrow();

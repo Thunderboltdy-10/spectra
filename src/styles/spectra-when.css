@@ -229,3 +229,176 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Making a work: the same quiet sheet as adding to the Calendar, with the
+ * kinds laid out as a grid of tiles, each in its type's ink. */
+.work-composer-kinds {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 16px;
+}
+.work-composer-kind {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control, 8px);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  transition: border-color var(--motion-fast) var(--ease-standard), background-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+}
+.work-composer-kind:hover {
+  border-color: var(--border-default);
+  color: var(--text-primary);
+}
+.work-composer-kind:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus-ring-color, var(--brand-primary));
+}
+.work-composer-kind[data-active] {
+  border-color: color-mix(in oklab, var(--kind-ink) 55%, transparent);
+  background: var(--kind-soft);
+  color: var(--text-primary);
+}
+.work-composer-kind-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--kind-soft);
+  color: var(--kind-ink);
+}
+.work-composer-kind[data-active] .work-composer-kind-mark {
+  background: var(--kind-ink);
+  color: #fff;
+}
+.work-composer-kind-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.work-composer-place {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+}
+@media (max-width: 480px) {
+  .work-composer-kinds {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .work-composer-kind {
+    transition: none;
+  }
+}
+
+/* New workspace: the same composer, with what a workspace needs. */
+.workspace-composer-notes {
+  width: 100%;
+  margin-top: 10px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--text-body);
+  line-height: 1.45;
+  resize: none;
+  outline: none;
+}
+.workspace-composer-notes::placeholder {
+  color: var(--text-tertiary);
+}
+.workspace-composer-row {
+  margin-top: 14px;
+}
+.workspace-composer-label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+  font-weight: 600;
+}
+.workspace-composer-syllabus {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.workspace-composer-select {
+  flex: 1 1 220px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control, 8px);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--text-body);
+}
+.workspace-composer-select:focus-visible,
+.workspace-composer-level:focus-visible,
+.workspace-composer-icon:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus-ring-color, var(--brand-primary));
+}
+.workspace-composer-levels {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control, 8px);
+  background: var(--bg-primary);
+}
+.workspace-composer-level {
+  min-width: 44px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  cursor: pointer;
+}
+.workspace-composer-level[data-active] {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+.workspace-composer-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.workspace-composer-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control, 8px);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.workspace-composer-icon[data-active] {
+  border-color: var(--accent-cyan);
+  background: color-mix(in oklab, var(--accent-cyan) 9%, var(--bg-primary));
+  color: var(--accent-cyan);
+}

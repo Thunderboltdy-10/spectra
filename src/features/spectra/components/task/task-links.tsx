@@ -52,7 +52,7 @@ export function TaskLinks({
               />
             ) : (
               <button type="button" className="sheet-quiet" onClick={() => setPicking(true)}>
-                <Plus className="size-3.5" /> Link work
+                <Plus className="size-3.5" /> Link artifact
               </button>
             )}
           </li>
@@ -61,9 +61,9 @@ export function TaskLinks({
   );
   if (bare) return list;
   return (
-    <section className="sheet-section" aria-label="Linked work">
+    <section className="sheet-section" aria-label="Linked artifact">
       <header className="sheet-section-head">
-        <h3>Linked work</h3>
+        <h3>Linked artifact</h3>
       </header>
       {list}
     </section>
@@ -83,7 +83,7 @@ function LinkedWork({ workId, canEdit, onRemove }: { workId: string; canEdit: bo
     <li className="task-link" style={{ ["--type-ink" as string]: type.color }}>
       <button type="button" className="task-link-open" disabled={placement === null} onClick={() => void spectraBus.command("work.open", { workId })}>
         <Icon name={type.glyph} size={16} />
-        <span className="min-w-0 flex-1 truncate">{placement === undefined ? " " : (node?.name ?? "A work you can no longer open")}</span>
+        <span className="min-w-0 flex-1 truncate">{placement === undefined ? " " : (node?.name ?? "An artifact you can no longer open")}</span>
         {where ? <span className="task-link-where">{where}</span> : null}
       </button>
       {canEdit ? (
@@ -115,8 +115,8 @@ function WorkPicker({ exclude, onPick, onClose }: { exclude: Set<string>; onPick
       <input
         autoFocus
         className="sheet-input w-full"
-        placeholder="Find a work by name"
-        aria-label="Find a work to link"
+        placeholder="Find an artifact by name"
+        aria-label="Find an artifact to link"
         value={term}
         onChange={(event) => setTerm(event.target.value)}
         onKeyDown={(event) => {

@@ -43,6 +43,7 @@ import type * as bridgeWriteOperations from "../bridgeWriteOperations.js";
 import type * as calendar from "../calendar.js";
 import type * as calendarReadModels from "../calendarReadModels.js";
 import type * as calendarShared from "../calendarShared.js";
+import type * as calendarTaskWork from "../calendarTaskWork.js";
 import type * as catalogCursor from "../catalogCursor.js";
 import type * as catalogGraph from "../catalogGraph.js";
 import type * as catalogPages from "../catalogPages.js";
@@ -154,6 +155,7 @@ import type * as timetableReminders from "../timetableReminders.js";
 import type * as workStacks from "../workStacks.js";
 import type * as workspaceLinksShared from "../workspaceLinksShared.js";
 import type * as workspaceSharing from "../workspaceSharing.js";
+import type * as workspaceSyllabus from "../workspaceSyllabus.js";
 
 import type {
   ApiFromModules,
@@ -197,6 +199,7 @@ declare const fullApi: ApiFromModules<{
   calendar: typeof calendar;
   calendarReadModels: typeof calendarReadModels;
   calendarShared: typeof calendarShared;
+  calendarTaskWork: typeof calendarTaskWork;
   catalogCursor: typeof catalogCursor;
   catalogGraph: typeof catalogGraph;
   catalogPages: typeof catalogPages;
@@ -308,6 +311,7 @@ declare const fullApi: ApiFromModules<{
   workStacks: typeof workStacks;
   workspaceLinksShared: typeof workspaceLinksShared;
   workspaceSharing: typeof workspaceSharing;
+  workspaceSyllabus: typeof workspaceSyllabus;
 }>;
 
 /**

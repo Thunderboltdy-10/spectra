@@ -5,9 +5,9 @@
  */
 
 export const ACCESS_INSPECT =
-  "You can inspect, comment, and place this work, but only a collaborator with modify access can change it.";
+  "You can inspect, comment, and place this artifact, but only a collaborator with modify access can change it.";
 
-export const ACCESS_MODIFY = "You can modify this work.";
+export const ACCESS_MODIFY = "You can modify this artifact.";
 
 export function sharedAccessExplanation(input: {
   ownership?: "owned" | "shared" | null;
@@ -40,7 +40,11 @@ export function artifactAccessBanner(input: {
   liveLevel?: "read" | "modify" | null;
   protectedOriginal?: boolean;
   protectedOriginalCopy?: string;
+  syllabus?: boolean;
 }): { tone: "inspect" | "modify"; text: string } | null {
+  if (input.syllabus) {
+    return { tone: "inspect", text: "A course reference from official IB sources. Read only; make a copy to add your own notes. Check its source links for the full requirements." };
+  }
   if (input.protectedOriginal && input.protectedOriginalCopy) {
     return { tone: "inspect", text: input.protectedOriginalCopy };
   }

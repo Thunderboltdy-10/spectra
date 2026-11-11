@@ -160,7 +160,7 @@ const EVIDENCE_KINDS = [
   { id: "rubric", label: "Rubric or mark scheme" },
   { id: "policy", label: "Policy or standard" },
   { id: "manual", label: "Manual or handbook" },
-  { id: "annotated_work", label: "Marked work" },
+  { id: "annotated_work", label: "Marked artifact" },
   { id: "accepted_example", label: "Good example" },
   { id: "rejected_example", label: "Poor example" },
   { id: "source_document", label: "Reference document" },

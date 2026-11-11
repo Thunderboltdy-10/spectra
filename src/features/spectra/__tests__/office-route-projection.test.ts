@@ -13,7 +13,7 @@ import { XlsxLensError } from "../lenses/xlsx-lens";
 const NATIVE_EXCEL_FILL = "#1F4E78";
 
 describe("Office lens route projection boundary", () => {
-  it("does not activate a removed device's unavailable old bytes over current cloud work", () => {
+  it("does not activate a removed device's unavailable old bytes over current cloud artifact", () => {
     expect(shouldActivateExternalNativeRevision({ localState: "unavailable", localHash: "old-disk", cloudHash: "new-cloud" })).toBe(false);
   });
 

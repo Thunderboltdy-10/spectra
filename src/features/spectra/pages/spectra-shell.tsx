@@ -5,7 +5,7 @@ import { takeFullViewRequest } from "../components/full-view-origin";
 import { subscribeShellWorkAvailability } from "../components/use-work-availability";
 import { retireShellArtifactLocation } from "./shell-location";
 
-import { Loader2, CheckCircle2, ExternalLink, Plus, School, Trash2, X, type GlyphIcon } from "@/components/icons/glyph-icons";
+import { CheckCircle2, ExternalLink, School, Trash2, X, type GlyphIcon } from "@/components/icons/glyph-icons";
 import {
   useCallback,
   useEffect,
@@ -69,18 +69,15 @@ import {
 } from "../collaboration/follow";
 import { ShareDialog } from "../components/share-dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import {
   ArtifactDeleteDialog,
   WorkspaceDeleteDialog,
-  WorkspaceColorPicker,
   WorkspaceEditDialog,
-  workspaceIconChoices,
 } from "../components/shell-dialogs";
 import { LibraryOrganizer } from "../organization/library-organizer";
 import { WORKSPACE_INKS, workspaceInk } from "../organization/node-identity";
+import { WorkspaceComposer, type WorkspaceDraft } from "../organization/workspace-composer";
 import { LibraryShelfSkeleton } from "../organization/library-shelf";
 import { LoadingRows } from "@/components/ui/page-state";
 import {
@@ -431,22 +428,6 @@ function workspaceHubTab(
   };
 }
 
-function useOutsideClick<T extends HTMLElement>(
-  open: boolean,
-  onClose: () => void,
-) {
-  const ref = useRef<T | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    function onPointerDown(event: globalThis.PointerEvent) {
-      if (!ref.current?.contains(event.target as Node)) onClose();
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [onClose, open]);
-  return ref;
-}
-
 /**
  * The Library on its way, laid out as it will stand: its command bar, then the
  * shelf at its top or rows inside a folder, so the ghosts hand over in place.
@@ -568,7 +549,7 @@ function Inspector({
     const links = linkedArtifacts(selectedArtifact, artifacts);
     const selectedPlacements = artifactPlacements(selectedArtifact);
     return (
-      <InspectorSurface inline={inline} title="Selected work" onClose={onClose}>
+      <InspectorSurface inline={inline} title="Selected artifact" onClose={onClose}>
         <WorkbenchInspectorTabs
           work={selectedArtifact}
           overview={
@@ -627,7 +608,7 @@ function Inspector({
                   ))}
                   {selectedPlacements.length === 0 ? (
                     <div className="rounded-control border border-dashed border-[var(--border-default)] p-3 text-micro leading-5 text-[var(--text-secondary)]">
-                      This work is in General. Move it into a workspace when it
+                      This artifact is in General. Move it into a workspace when it
                       belongs with a project or subject.
                     </div>
                   ) : null}
@@ -655,7 +636,7 @@ function Inspector({
               <InspectorSection title="Actions">
                 <ActionRow
                   icon={ExternalLink}
-                  label="Open work"
+                  label="Open artifact"
                   onClick={() => onOpenArtifact(selectedArtifact)}
                 />
                 <Button variant="destructive" size="sm" onClick={onHide}>
@@ -939,10 +920,6 @@ export function SpectraShell({
   const [workspaceCreateOpen, setWorkspaceCreateOpen] = useState(false);
   const [workspaceCreateParentNodeId, setWorkspaceCreateParentNodeId] =
     useState<string | null>(null);
-  const [newWorkspaceTitle, setNewWorkspaceTitle] = useState("");
-  const [newWorkspaceDescription, setNewWorkspaceDescription] = useState("");
-  const [newWorkspaceIcon, setNewWorkspaceIcon] = useState("Sparkles");
-  const [newWorkspaceColor, setNewWorkspaceColor] = useState<string>(WORKSPACE_INKS[0][0]);
   const [workspaceEditOpen, setWorkspaceEditOpen] = useState(false);
   const [workspaceEditTitle, setWorkspaceEditTitle] = useState("");
   const [workspaceEditDescription, setWorkspaceEditDescription] = useState("");
@@ -1024,7 +1001,7 @@ export function SpectraShell({
       const { moveWorkToCloud } = await import("../bridge/device-works");
       await moveWorkToCloud(artifact._id);
     } catch {
-      throw new Error("Open Spectra Bridge on the computer that holds this work to share it.");
+      throw new Error("Open Spectra Bridge on the computer that holds this artifact to share it.");
     }
     toast.info("Moved online so the people you share with can open it.");
     spectraBus.emit("workspace.refreshRequested", {});
@@ -1088,13 +1065,7 @@ export function SpectraShell({
 
   const [workspaceDeleteConfirmation, setWorkspaceDeleteConfirmation] =
     useState("");
-  const workspaceCreateRef = useOutsideClick<HTMLDivElement>(
-    workspaceCreateOpen,
-    () => {
-      setWorkspaceCreateOpen(false);
-      setWorkspaceCreateParentNodeId(null);
-    },
-  );
+
   const workspaceRequestSequence = useRef(0);
   const overviewRequestSequence = useRef(0);
   const workspaceImportInputRef = useRef<HTMLInputElement | null>(null);
@@ -1109,7 +1080,7 @@ export function SpectraShell({
     setObjectAvailability("artifact", artifactId);
     const href = retireShellArtifactLocation(window.location.pathname, window.location.search, artifactId);
     if (href) window.history.replaceState(window.history.state, "", href);
-    if (wasOpen || wasOpening) toast.error("That work is no longer available.");
+    if (wasOpen || wasOpening) toast.error("That artifact is no longer available.");
   }), [artifactAccess, cancelArtifactOpen, revokeArtifact, setObjectAvailability]);
   const liveIdentitySources = useMemo(() => {
     const seen = new Set<string>();
@@ -2768,7 +2739,7 @@ export function SpectraShell({
       if (next.has(artifactId)) next.delete(artifactId);
       else if (next.size < 24) next.add(artifactId);
       else
-        toast.message("You can select up to 24 work items at once.");
+        toast.message("You can select up to 24 artifacts at once.");
       return next;
     }, new Map([[artifactId, work.title]]));
   }
@@ -2792,7 +2763,7 @@ export function SpectraShell({
 
   function openArtifactById(artifactId: string) {
     void requestArtifactOpen(artifactId)
-      .catch(() => toast.error("That work could not be opened."));
+      .catch(() => toast.error("That artifact could not be opened."));
   }
 
   /**
@@ -2836,7 +2807,7 @@ export function SpectraShell({
           ) !== routeArtifactId
         )
           return;
-        toast.error("That work could not be loaded. Try again.");
+        toast.error("That artifact could not be loaded. Try again.");
       });
     // openArtifactPanel is a render-local function; the guard ref, not the dep
     // list, is what keeps this to one open per id.
@@ -2859,14 +2830,14 @@ export function SpectraShell({
   function shareSelection(shared: boolean) {
     void setWorksShared({ artifactIds: [...selectedContextIds], shared }).then(
       (result) => {
-        const done = result.changed === 1 ? "1 work" : `${result.changed} works`;
+        const done = result.changed === 1 ? "1 artifact" : `${result.changed} works`;
         if (result.changed)
           toast.success(shared ? `Shared ${done} with their workspace.` : `Made ${done} private.`);
         else if (!result.skipped) toast.success(shared ? "Already shared." : "Already private.");
         if (result.skipped)
-          toast.error(`${result.skipped} stayed as they were: only your own works inside a workspace can be shared with it.`);
+          toast.error(`${result.skipped} stayed as they were: only your own artifacts inside a workspace can be shared with it.`);
       },
-      (error) => toast.error(describeFailure(error, { fallback: "The picked works did not change." }).message),
+      (error) => toast.error(describeFailure(error, { fallback: "The picked artifacts did not change." }).message),
     );
   }
 
@@ -2969,7 +2940,7 @@ export function SpectraShell({
     historyMode: "push" | "replace" | "none" = "push",
   ) {
     void requestArtifactOpen(artifact._id, historyMode)
-      .catch(() => toast.error("That work could not be opened."));
+      .catch(() => toast.error("That artifact could not be opened."));
   }
 
   function openResolvedArtifactPanel(
@@ -3034,7 +3005,7 @@ export function SpectraShell({
 
   function openArtifactTab(artifact: SpectraArtifact) {
     void requestArtifactOpen(artifact._id, "push", "tab")
-      .catch(() => toast.error("That work could not be opened."));
+      .catch(() => toast.error("That artifact could not be opened."));
   }
 
   function openResolvedArtifactTab(artifact: SpectraArtifact, historyMode: "push" | "replace" | "none") {
@@ -3170,7 +3141,7 @@ export function SpectraShell({
         }
         replaceWorkspaceLocation(entry.workspaceId, entry.artifactId);
         void requestArtifactOpen(entry.artifactId, "none", entry.kind === "artifact-tab" ? "tab" : "split")
-          .catch(() => toast.error("That work could not be opened."));
+          .catch(() => toast.error("That artifact could not be opened."));
         return;
       }
       studio.closeStudio();
@@ -3429,7 +3400,7 @@ export function SpectraShell({
       spectraBus.emit("notifications.changed", {});
       toast.success(
         response === "accept"
-          ? "Shared work added to your Library."
+          ? "Shared artifact added to your Library."
           : "Invitation declined.",
       );
       await Promise.all([
@@ -3571,7 +3542,7 @@ export function SpectraShell({
                 level: "exact",
                 message: portable
                   ? "Spectra restored the package content and preserved the uploaded package bytes exactly."
-                  : "Original file preserved for the work editor import pipeline.",
+                  : "Original file preserved for the artifact editor import pipeline.",
               },
             ],
         unsupportedFeatures: officeProjection?.unsupportedFeatures ?? [],
@@ -3649,12 +3620,12 @@ export function SpectraShell({
         action: "archiveArtifact",
         artifactId: artifact._id,
       });
-      toast.success("Work archived.");
+      toast.success("Artifact archived.");
       returnToHub();
       await loadOverview(selectedWorkspaceId, true);
     } catch (error) {
       toast.error(
-        describeFailure(error, { fallback: "Could not archive this work. Try again." })
+        describeFailure(error, { fallback: "Could not archive this artifact. Try again." })
           .message,
       );
     } finally {
@@ -3673,13 +3644,13 @@ export function SpectraShell({
     setBusyKey(`delete:${artifact._id}`);
     try {
       await postSpectra({ action: "deleteArtifact", artifactId: artifact._id });
-      toast.success("Work permanently deleted.");
+      toast.success("Artifact permanently deleted.");
       setArtifactDeletePending(null);
       if (studio.activeArtifact?._id === artifact._id) returnToHub();
       await loadOverview(selectedWorkspaceId, true);
     } catch (error) {
       toast.error(
-        describeFailure(error, { fallback: "Could not delete this work. Try again." })
+        describeFailure(error, { fallback: "Could not delete this artifact. Try again." })
           .message,
       );
     } finally {
@@ -3728,26 +3699,21 @@ export function SpectraShell({
     }
   }
 
-  async function createWorkspace() {
-    const title = newWorkspaceTitle.trim();
+  async function createWorkspace(draft: WorkspaceDraft) {
+    const title = draft.title.trim();
     if (!title) return;
     setBusyKey("workspace:create");
     const creation = beginCreation();
     try {
       const result = await postSpectra<{ workspaceId: string }>({
         action: "createWorkspace",
+        ...draft,
         title,
-        description: newWorkspaceDescription.trim() || undefined,
-        icon: newWorkspaceIcon,
-        color: newWorkspaceColor,
         parentNodeId: workspaceCreateParentNodeId ?? undefined,
       });
       toast.success("Workspace created.");
       setWorkspaceCreateOpen(false);
       setWorkspaceCreateParentNodeId(null);
-      setNewWorkspaceTitle("");
-      setNewWorkspaceDescription("");
-      setNewWorkspaceIcon("Sparkles");
       setSelection(null);
         creation.land();
       setActiveHubDestination(title, result.workspaceId);
@@ -3758,6 +3724,7 @@ export function SpectraShell({
         describeFailure(error, { fallback: "Could not create workspace." })
           .message,
       );
+      throw error;
     } finally {
       setBusyKey(null);
     }
@@ -3800,10 +3767,10 @@ export function SpectraShell({
       }
       const detail = result.report.skipped
         ? `${result.report.placed} placed; ${result.report.skipped} you cannot open were skipped.`
-        : `${result.report.placed} work${result.report.placed === 1 ? "" : "s"} placed.`;
+        : `${result.report.placed} artifact${result.report.placed === 1 ? "" : "s"} placed.`;
       toast.success(`Workspace imported. ${detail}`, {
         description: [
-          "Each piece links to the same work in Spectra, not a copy: edits show in both places.",
+          "Each piece links to the same artifact in Spectra, not a copy: edits show in both places.",
           ...result.report.warnings,
         ].join(" "),
       });
@@ -3862,7 +3829,7 @@ export function SpectraShell({
       ];
       toast.success("Workspace layout exported.", {
         description: [
-          "The file lists each work and its folder, and links back to it in Spectra. It holds no copies of the work.",
+          "The file lists each artifact and its folder, and links back to it in Spectra. It holds no copies of the artifact.",
           ...notes,
         ].join(" "),
       });
@@ -4112,90 +4079,14 @@ export function SpectraShell({
               void permanentlyDeleteArtifact(artifactDeletePending, true);
             }}
           />
-          {workspaceCreateOpen ? (
-            <div
-              ref={workspaceCreateRef}
-              className="absolute left-3 top-5 z-dropdown w-[min(330px,calc(100vw-24px))] rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-lg)]"
-            >
-              <div className="mb-3">
-                <div className="text-heading font-semibold text-[var(--text-primary)]">
-                  New workspace
-                </div>
-                <div className="mt-1 text-caption text-[var(--text-secondary)]">
-                  Create a subject space that stays connected to related work.
-                </div>
-              </div>
-              <Input
-                aria-label="Workspace name"
-                value={newWorkspaceTitle}
-                onChange={(event) => setNewWorkspaceTitle(event.target.value)}
-                placeholder="Subject or project name"
-              />
-              <Textarea
-                aria-label="Workspace description"
-                value={newWorkspaceDescription}
-                onChange={(event) =>
-                  setNewWorkspaceDescription(event.target.value)
-                }
-                placeholder="Short description"
-                className="mt-2 min-h-[70px] resize-none placeholder:text-[var(--text-tertiary)]"
-              />
-              <div className="mt-3">
-                <div className="mb-2 text-micro font-semibold text-[var(--text-tertiary)]">
-                  Icon
-                </div>
-                <div
-                  className="flex flex-wrap gap-2"
-                  role="radiogroup"
-                  aria-label="Workspace icon"
-                >
-                  {workspaceIconChoices.map(([key, Icon]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      role="radio"
-                      aria-checked={newWorkspaceIcon === key}
-                      onClick={() => setNewWorkspaceIcon(key)}
-                      className={`flex h-9 w-9 items-center justify-center rounded-control border outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] ${newWorkspaceIcon === key ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))] text-[var(--accent-cyan)]" : "border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)]"}`}
-                      aria-label={key}
-                    >
-                      <Icon className="h-4 w-4" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="mt-3">
-                <WorkspaceColorPicker value={newWorkspaceColor} onChange={setNewWorkspaceColor} />
-              </div>
-              <div className="mt-3 flex justify-end gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    setWorkspaceCreateOpen(false);
-                    setWorkspaceCreateParentNodeId(null);
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  disabled={
-                    !newWorkspaceTitle.trim() || busyKey === "workspace:create"
-                  }
-                  onClick={() => void createWorkspace()}
-                >
-                  {busyKey === "workspace:create" ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Plus className="h-4 w-4" />
-                  )}
-                  Create
-                </Button>
-              </div>
-            </div>
-          ) : null}
+          <WorkspaceComposer
+            open={workspaceCreateOpen}
+            onClose={() => {
+              setWorkspaceCreateOpen(false);
+              setWorkspaceCreateParentNodeId(null);
+            }}
+            onCreate={createWorkspace}
+          />
           <div
             ref={workbenchRowRef}
             data-split-host
@@ -4516,7 +4407,7 @@ export function SpectraShell({
                 width={paneWidths["chat-browser"] ?? chatBrowserWidth}
                 onWidthChange={(next) => notePaneIntent("chat-browser", next)}
                 overlay={paneOverlay["chat-browser"] ?? false}
-                title={chatBrowserScope === "artifact" ? "Threads about this work" : chatBrowserScope === "workspace" ? "Workspace threads" : "All threads"}
+                title={chatBrowserScope === "artifact" ? "Threads about this artifact" : chatBrowserScope === "workspace" ? "Workspace threads" : "All threads"}
                 onClose={() => setChatBrowserOpen(false)}
                 onOpenChat={(thread) => {
                   setChatBrowserOpen(false);

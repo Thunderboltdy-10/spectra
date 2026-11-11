@@ -4,6 +4,7 @@ import { internalMutation, mutation } from "./orgNodeMutation";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { getAuthenticatedActor } from "./identityShared";
+import { createTaskWork, isTaskProjection, patchTaskWork, taskTimePatch, trashTaskWork } from "./calendarTaskWork";
 import { CALENDAR_DONE_CURSOR } from "../shared/calendar-pagination";
 import {
   CALENDAR_RANGE_BUCKET_MS,
@@ -796,6 +797,10 @@ export const createPersonalItem = mutation({
     idempotencyKey: v.optional(v.string()),
     /** Later occurrences of a repeating lesson, each its own event. */
     alsoAt: v.optional(v.array(v.object({ startAt: v.number(), endAt: v.optional(v.number()) }))),
+    /** A plain calendar entry, not a task: an imported calendar's events. Lessons (alsoAt) are always plain. */
+    plain: v.optional(v.boolean()),
+    /** The workspace a new task belongs to. */
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
   },
   handler: async (ctx, args) => {
     const actor = await actorOrThrow(ctx);
@@ -812,6 +817,34 @@ export const createPersonalItem = mutation({
       throw new Error("CALENDAR_IDEMPOTENCY_KEY_INVALID: This Calendar request is invalid. Try again.");
     const previous = idempotencyKey ? await ctx.db.query("calendarItems")
       .withIndex("by_schedule_idempotency", (q) => q.eq("ownerAccountId", actor.accountId).eq("idempotencyKey", idempotencyKey)).unique() : null;
+    // A replay of a task already made returns the same task; the key cannot make another.
+    if (previous && isTaskProjection(previous)) {
+      const span = args.startAt !== undefined && args.endAt !== undefined && args.endAt > args.startAt && args.allDay !== true;
+      const same = previous.title === (text(args.title, 240) || "Untitled task") &&
+        (span ? previous.startAt === args.startAt && previous.endAt === args.endAt : previous.endAt === args.startAt);
+      if (!same) throw new Error("CALENDAR_IDEMPOTENCY_CONFLICT: This key was already used for another event.");
+      if (previous.status === "removed") throw new Error("CALENDAR_IDEMPOTENCY_REPLAY_REMOVED: This event is no longer active.");
+      return itemWire(previous);
+    }
+    // Everything one adds is a task (CALENDAR.md, "Tasks"); lessons and imports stay plain entries.
+    // An all-day stretch of several days (a trip, a holiday) stays a plain entry: a task is one day or some hours.
+    const severalDays = args.allDay === true && args.startAt !== undefined && args.endAt !== undefined && args.endAt - args.startAt > 86_400_000;
+    if (!previous && !args.plain && !severalDays && !args.alsoAt?.length && args.startAt !== undefined && (args.kind === "personal_event" || args.kind === "task")) {
+      const { item } = await createTaskWork(ctx, actor, {
+        title: args.title,
+        notes: args.notes,
+        startAt: args.startAt,
+        endAt: args.endAt,
+        allDay: args.allDay,
+        timezone: args.timezone,
+        linkedArtifactIds: args.linkedArtifactIds,
+        workspaceId: args.workspaceId,
+        createdBy: args.actorKind === "ai" ? "ai" : "human",
+      });
+      if (!item) throw new Error("CALENDAR_TASK_UNAVAILABLE: The task was made but has no day on the calendar.");
+      if (idempotencyKey) await ctx.db.patch(item._id, { idempotencyKey });
+      return itemWire((await ctx.db.get(item._id))!);
+    }
     if (previous) {
       const same = previous.kind === args.kind && previous.title === (text(args.title) || "Untitled item") &&
         previous.notes === (text(args.notes, 20_000) || undefined) && previous.startAt === args.startAt &&
@@ -841,6 +874,7 @@ export const createPersonalItem = mutation({
       idempotencyKey,
       createdAt: now,
       updatedAt: now,
+      ...(args.plain ? { plain: true } : {}),
       ...(args.alsoAt?.length ? { seriesId: crypto.randomUUID() } : {}),
     });
     const first = (await ctx.db.get(itemId))!;
@@ -1039,6 +1073,7 @@ export const moveWorkBlock = mutation({
     // A task is due at a moment, so it may start and end together.
     if (endAt < args.startAt || (endAt === args.startAt && item.kind !== "task"))
       throw new Error("CALENDAR_TIME_INVALID: End must be after start.");
+    if (isTaskProjection(item)) return itemWire(await patchTaskWork(ctx, item, taskTimePatch(item, args.startAt, endAt)));
     await ctx.db.patch(item._id, {
       startAt: args.startAt,
       endAt,
@@ -1070,6 +1105,7 @@ export const resizeWorkBlock = mutation({
       );
     if (item.startAt === undefined || args.endAt <= item.startAt)
       throw new Error("CALENDAR_TIME_INVALID: End must be after start.");
+    if (isTaskProjection(item)) return itemWire(await patchTaskWork(ctx, item, { startAt: item.startAt, dueAt: args.endAt, allDay: false }));
     await ctx.db.patch(item._id, {
       endAt: args.endAt,
       revision: item.revision + 1,
@@ -1092,7 +1128,7 @@ export const completeWorkBlock = mutation({
     if (
       !item ||
       item.ownerAccountId !== actor.accountId ||
-      (item.kind !== "scheduled_work_block" && item.kind !== "task")
+      (item.kind !== "scheduled_work_block" && item.kind !== "task" && !isTaskProjection(item))
     )
       throw new Error("CALENDAR_WORK_BLOCK_NOT_FOUND: This work block is not on your Calendar any more. Refresh Calendar.");
     if (item.revision !== args.expectedRevision)
@@ -1101,6 +1137,7 @@ export const completeWorkBlock = mutation({
       );
     if (item.status === "removed" || item.status === "cancelled")
       throw new Error("CALENDAR_WORK_BLOCK_UNAVAILABLE: This work block was removed or cancelled, so it cannot be completed.");
+    if (isTaskProjection(item)) return itemWire(await patchTaskWork(ctx, item, { status: args.done === false ? "todo" : "done" }));
     await ctx.db.patch(item._id, {
       status: args.done === false ? "active" : "completed",
       revision: item.revision + 1,
@@ -1121,6 +1158,10 @@ export const removePersonalItem = mutation({
       throw new Error(
         "CALENDAR_SOURCE_LOCKED: Official source records cannot be removed here.",
       );
+    if (isTaskProjection(item)) {
+      await trashTaskWork(ctx, item);
+      return { itemId: item._id };
+    }
     await ctx.db.patch(item._id, {
       status: "removed",
       revision: item.revision + 1,
@@ -1359,5 +1400,44 @@ export const backfillArtifactReadModels = internalMutation({
       cursor: page.isDone ? null : page.continueCursor,
       done: page.isDone,
     };
+  },
+});
+
+/**
+ * Something added to the calendar before everything there was a task: made
+ * into its task now, when it is first opened, so it opens like the rest.
+ * Lessons (a repeating series) and school entries stay as they are.
+ */
+export const adoptAsTask = mutation({
+  args: { itemId: v.id("calendarItems") },
+  handler: async (ctx, args) => {
+    const actor = await actorOrThrow(ctx);
+    const item = await ctx.db.get(args.itemId);
+    if (!item || item.ownerAccountId !== actor.accountId || item.status === "removed")
+      throw new Error("CALENDAR_ITEM_NOT_FOUND: This item is not on your Calendar any more. Refresh Calendar.");
+    if (isTaskProjection(item)) return { artifactId: item.planArtifactId! };
+    const adoptable =
+      (item.kind === "personal_event" || item.kind === "task" || item.kind === "milestone" || item.kind === "reminder") &&
+      !item.sourceLocked && !item.sourceProvider && !item.seriesId && !item.planArtifactId && !item.plain &&
+      item.startAt !== undefined &&
+      !(item.allDay && item.endAt !== undefined && item.endAt - item.startAt > 86_400_000);
+    if (!adoptable) return null;
+    const { artifactId } = await createTaskWork(ctx, actor, {
+      title: item.title,
+      notes: item.notes,
+      startAt: item.startAt,
+      endAt: item.endAt,
+      allDay: item.allDay,
+      timezone: item.timezone,
+      linkedArtifactIds: item.linkedArtifactIds,
+      createdBy: item.createdBy === "ai" ? "ai" : "human",
+    });
+    if (item.status === "completed") {
+      const artifact = (await ctx.db.get(artifactId))!;
+      await ctx.db.patch(artifactId, { content: { ...object(artifact.content), status: "done" }, updatedAt: Date.now() });
+    }
+    // The task's own item takes its place.
+    await ctx.db.patch(item._id, { status: "removed", revision: item.revision + 1, updatedAt: Date.now() });
+    return { artifactId };
   },
 });

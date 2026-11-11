@@ -50,8 +50,8 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 /** One sentence the student can check against what they see. */
 export function runUndoSummary(counts: Partial<RunUndoCounts>) {
   const parts = [
-    counts.works ? `moved ${plural(counts.works, "new work", "new works")} to the Trash` : "",
-    counts.restored ? `restored ${plural(counts.restored, "work", "works")}` : "",
+    counts.works ? `moved ${plural(counts.works, "new artifact", "new artifacts")} to the Trash` : "",
+    counts.restored ? `restored ${plural(counts.restored, "artifact", "artifacts")}` : "",
     counts.events ? `put ${plural(counts.events, "calendar change", "calendar changes")} back` : "",
     counts.comments ? `reversed ${plural(counts.comments, "comment change", "comment changes")}` : "",
     counts.library ? `reversed ${plural(counts.library, "Library change", "Library changes")}` : "",

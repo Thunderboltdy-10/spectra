@@ -13,7 +13,7 @@ export default function NotFound() {
         </span>
         <h1 className="mt-2 font-display text-title font-semibold">This page isn&rsquo;t here</h1>
         <p className="mt-1 max-w-sm text-caption leading-5 text-[var(--text-secondary)]">
-          The link may be old, or the page may have moved. Your work is still where you left it.
+          The link may be old, or the page may have moved. Your artifacts are still where you left them.
         </p>
         <div className="mt-5 flex flex-wrap justify-center gap-2">
           <Button asChild variant="primary">

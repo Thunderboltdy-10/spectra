@@ -49,7 +49,7 @@ describe("A Library file's read-only view", () => {
     expect(within(dialog).getByTitle("Syllabus.pdf").getAttribute("src")).toBe("/api/spectra/native?artifactId=work-pdf");
   });
 
-  it("still reads an Office file when it can't open as editable work", async () => {
+  it("still reads an Office file when it can't open as editable artifact", async () => {
     mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ message: "This Excel file could not be opened safely." }), { status: 422 }));
     mocks.load.mockResolvedValue({
       kind: "sheet",

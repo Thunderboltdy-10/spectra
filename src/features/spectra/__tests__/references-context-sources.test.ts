@@ -79,7 +79,7 @@ function reference(type: ArtifactTypeKey = "document"): ReferenceNode {
 }
 
 describe("Phase 7 semantic identity contracts", () => {
-  it("provides round-trippable root and region anchors for every registered work type", () => {
+  it("provides round-trippable root and region anchors for every registered artifact type", () => {
     for (const type of ARTIFACT_TYPE_KEYS) {
       const adapter = getWorkAnchorAdapter(type);
       const value = content(type);
@@ -123,7 +123,7 @@ describe("Phase 7 semantic identity contracts", () => {
     expect(pinned.pinnedVersionId).toBe("version-1");
   });
 
-  it("declares useful targets, views, and native insertion for every work type and origin", () => {
+  it("declares useful targets, views, and native insertion for every artifact type and origin", () => {
     expect(Object.keys(WORK_REFERENCE_CONTRACTS).sort()).toEqual([...ARTIFACT_TYPE_KEYS].sort());
     for (const hostType of ARTIFACT_TYPE_KEYS) {
       const contract = getWorkReferenceContract(hostType);
@@ -170,7 +170,7 @@ describe("Phase 7 context and semantic index", () => {
 
 describe("Phase 7 rich content, citations, exports, and comments", () => {
   it("parses the full canonical AST and preserves stable completed blocks while streaming", () => {
-    const source = "# Heading\n\nParagraph `code` $x+1$ [[cite:source:1:evidence:1|A]] [[ref:work-2|Linked work]] [^n]\n\n- one\n- two\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n```ts\nconst x = 1;\n```\n\n$$\nx^2\n$$\n\n> [!NOTE] Careful\n\n![Diagram](/diagram.png)\n\nSource: primary record\n\n[^n]: footnote";
+    const source = "# Heading\n\nParagraph `code` $x+1$ [[cite:source:1:evidence:1|A]] [[ref:work-2|Linked artifact]] [^n]\n\n- one\n- two\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n```ts\nconst x = 1;\n```\n\n$$\nx^2\n$$\n\n> [!NOTE] Careful\n\n![Diagram](/diagram.png)\n\nSource: primary record\n\n[^n]: footnote";
     const ast = parseSpectraRichContent(source);
     expect([...new Set(ast.blocks.map((block) => block.type))]).toEqual(expect.arrayContaining(["heading", "paragraph", "list", "table", "code_block", "math_block", "callout", "media", "source_note", "footnote"]));
     const parser = new IncrementalRichContentParser();
@@ -186,7 +186,7 @@ describe("Phase 7 rich content, citations, exports, and comments", () => {
     expect(shape(markdown.read(markdown.write(ast)).blocks)).toEqual(shape(ast.blocks));
   });
 
-  it("requires verified source/evidence integrity and preserves it across every work conversion", () => {
+  it("requires verified source/evidence integrity and preserves it across every artifact conversion", () => {
     const source = createVerifiedSource({ title: "Primary source", accessedAt: "2026-08-03T00:00:00.000Z", sourceType: "paper", authority: "primary", provider: "fixture", url: "https://example.com/paper?utm_source=test", content: "Supported claim" });
     const evidence = createEvidenceSpan(source, "Supported claim", { page: 2 });
     const citation = verifyCitation({ sourceId: source.id, evidenceIds: [evidence.id], label: "A" }, [source], [evidence]);

@@ -63,7 +63,7 @@ export function LibraryHeader({
           surface === "library"
             ? "Everything you have made, filed where you put it."
             : workspaceCount === 0
-              ? "Your work lives here."
+              ? "Your artifact lives here."
               : workspaceCount === 1
                 ? "One workspace, and everything filed across it."
                 : `${workspaceCount} workspaces, and everything filed across them.`
@@ -150,7 +150,7 @@ export function WorkspaceHeader({
   ];
 
   return (
-    <Frame role="group" ariaLabel={`${artifactCount} work items, ${threadCount} threads, ${cardCount} pinned, ${activeRuns} active runs`}>
+    <Frame role="group" ariaLabel={`${artifactCount} artifacts, ${threadCount} threads, ${cardCount} pinned, ${activeRuns} active runs`}>
       <PageHeader
         title={
           <span className="inline-flex min-w-0 max-w-full items-center gap-2">

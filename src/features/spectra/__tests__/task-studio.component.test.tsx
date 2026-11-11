@@ -7,7 +7,12 @@ import { StudioContractProvider, type StudioContract } from "../components/artif
 import { TaskStudio, dueDistance, taskInputs, taskInstant } from "../components/task-studio";
 import { isSingleTask } from "../plan/model";
 
-vi.mock("convex/react", () => ({ useMutation: () => vi.fn(async () => ({})), useQuery: () => undefined }));
+vi.mock("convex/react", () => ({
+  useMutation: () => vi.fn(async () => ({})),
+  useQuery: () => undefined,
+  useConvexAuth: () => ({ isAuthenticated: false, isLoading: false }),
+  usePaginatedQuery: () => ({ results: [], status: "Exhausted", loadMore: () => {} }),
+}));
 // The shared field is covered by its own tests; here a textarea stands in for it.
 vi.mock("../components/artifact-studio", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../components/artifact-studio")>()),
@@ -83,12 +88,20 @@ afterEach(() => {
 });
 
 describe("a planner task", () => {
-  it("is one thing: a title, notes and done, with no steps until someone adds them", () => {
+  it("is one thing: a title, a day, a description and done, with the rest folded away", () => {
     render(<Harness initial={base} />);
     expect(screen.getByLabelText("Title")).toHaveProperty("value", "Return the library book");
-    expect(screen.getByRole("textbox", { name: "Notes" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Description" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add a due date" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Checklist" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Add a checklist" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add a checklist" })).toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: "Priority" })).toBeNull();
+    expect(screen.getByRole("button", { name: /More options/ }).getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("says what is set inside the fold while it is closed", () => {
+    render(<Harness initial={{ ...base, priority: "high", estimateMinutes: 45 }} />);
+    expect(screen.getByText("High priority, 45 minutes")).toBeTruthy();
   });
 
   it("is ticked off in place", () => {
@@ -101,18 +114,13 @@ describe("a planner task", () => {
 
   it("writes the same fields Spectra writes, never a plan of many tasks", () => {
     render(<Harness initial={base} />);
-    fireEvent.change(screen.getByRole("textbox", { name: "Notes" }), { target: { value: "It is the blue one." } });
-    fireEvent.click(screen.getByRole("button", { name: "Add a checklist" }));
-    const item = screen.getByLabelText("New item");
-    fireEvent.change(item, { target: { value: "Find it" } });
-    fireEvent.keyDown(item, { key: "Enter" });
-    expect(latest.description).toBe("It is the blue one.");
-    expect(latest.subtasks).toEqual([expect.objectContaining({ title: "Find it", done: false })]);
+    fireEvent.change(screen.getByRole("textbox", { name: "Description" }), { target: { value: "- Find it\n- Take it back" } });
+    expect(latest.description).toBe("- Find it\n- Take it back");
     expect(latest.tasks).toBeUndefined();
     expect(isSingleTask(latest)).toBe(true);
   });
 
-  it("lets an empty item go when you leave it", () => {
+  it("keeps a checklist it already has, and lets an empty item go when you leave it", () => {
     render(<Harness initial={{ ...base, subtasks: [{ id: "s1", title: "Find it", done: false }] }} />);
     const item = screen.getByLabelText("Item");
     fireEvent.change(item, { target: { value: " " } });
@@ -133,6 +141,7 @@ describe("a planner task", () => {
     // The school's day reads as a sentence, not a control the student can change.
     expect(screen.queryByRole("button", { name: /^Due / })).toBeNull();
     expect(screen.getByText(/^Due /)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /More options/ }));
     fireEvent.click(screen.getByRole("button", { name: "Set your own date" }));
     fireEvent.click(screen.getByRole("button", { name: /^Day: / }));
     fireEvent.click(screen.getByRole("gridcell", { name: /October 12, 2026|12 October 2026/ }));

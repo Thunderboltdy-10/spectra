@@ -37,7 +37,7 @@ function SignUpCard({
         <p className="auth-lede">
           {invitation
             ? `You were invited as a ${invitationRoleLabel(invitation.role)}. Create your account with ${invitation.email} and you'll join straight after.`
-            : "Join your school on Spectra to plan, study and make work together, with Spectra AI beside you."}
+            : "Spectra is by invitation. Sign up with the email your school invited, and you'll join your school straight after."}
         </p>
       </div>
       <div className="auth-note">

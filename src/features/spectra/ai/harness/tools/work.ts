@@ -21,7 +21,7 @@ function readVersionsTool(session: HarnessSession): HarnessTool<VersionsArgs> {
   return {
     name: "read_versions",
     description:
-      "Read a work's saved versions, newest first: each version's id, when it was made, who made it, whether Spectra did, and its name or summary. Use it before restore_version.",
+      "Read an artifact's saved versions, newest first: each version's id, when it was made, who made it, whether Spectra did, and its name or summary. Use it before restore_version.",
     parameters: {
       type: "object",
       properties: { artifactId: { type: "string" }, limit: { type: "number" } },
@@ -29,7 +29,7 @@ function readVersionsTool(session: HarnessSession): HarnessTool<VersionsArgs> {
       additionalProperties: false,
     },
     effect: "read",
-    label: (args) => `Reading the history of ${titled(session, args.artifactId, "your work")}`,
+    label: (args) => `Reading the history of ${titled(session, args.artifactId, "your artifact")}`,
     parse: (raw) => ({
       artifactId: requireString(raw, "artifactId", 200),
       limit: Math.max(1, Math.min(50, Math.round(optionalNumber(raw, "limit") ?? 20))),
@@ -40,8 +40,8 @@ function readVersionsTool(session: HarnessSession): HarnessTool<VersionsArgs> {
         return { ok: false, content: `No artifact has id "${args.artifactId}", or the user cannot open it. Find it with list_library or search.` };
       return {
         ok: true,
-        content: formatVersions(page.versions, session.titles.get(args.artifactId)?.title ?? "This work", page.more),
-        doneLabel: `Read the history of ${titled(session, args.artifactId, "your work")}`,
+        content: formatVersions(page.versions, session.titles.get(args.artifactId)?.title ?? "This artifact", page.more),
+        doneLabel: `Read the history of ${titled(session, args.artifactId, "your artifact")}`,
       };
     },
   };
@@ -53,10 +53,10 @@ function readEmbedsTool(session: HarnessSession): HarnessTool<EmbedsArgs> {
   return {
     name: "read_embeds",
     description:
-      "Read the live embeds (references to other work) inside a work: each embed's id, the work it shows, where it sits, its size, whether it follows the live work or a pinned version, and whether its source is still available. Use it before manage_embed.",
+      "Read the live embeds (references to other artifacts) inside an artifact: each embed's id, the artifact it shows, where it sits, its size, whether it follows the live artifact or a pinned version, and whether its source is still available. Use it before manage_embed.",
     parameters: { type: "object", properties: { artifactId: { type: "string" } }, required: ["artifactId"], additionalProperties: false },
     effect: "read",
-    label: (args) => `Reading what ${titled(session, args.artifactId, "your work")} embeds`,
+    label: (args) => `Reading what ${titled(session, args.artifactId, "your artifact")} embeds`,
     parse: (raw) => ({ artifactId: requireString(raw, "artifactId", 200) }),
     execute: async (args, ctx) => {
       const found = await session.backend.readEmbeds(args, ctx.signal);
@@ -64,8 +64,8 @@ function readEmbedsTool(session: HarnessSession): HarnessTool<EmbedsArgs> {
         return { ok: false, content: `No artifact has id "${args.artifactId}", or the user cannot open it. Find it with list_library or search.` };
       return {
         ok: true,
-        content: formatEmbeds(found.embeds, session.titles.get(args.artifactId)?.title ?? "This work", found.canConfigure),
-        doneLabel: `Read what ${titled(session, args.artifactId, "your work")} embeds`,
+        content: formatEmbeds(found.embeds, session.titles.get(args.artifactId)?.title ?? "This artifact", found.canConfigure),
+        doneLabel: `Read what ${titled(session, args.artifactId, "your artifact")} embeds`,
       };
     },
   };
@@ -77,7 +77,7 @@ function readSharingTool(session: HarnessSession): HarnessTool<SharingArgs> {
   return {
     name: "read_sharing",
     description:
-      "Read who can open a work, workspace or agent: people invited (pending or accepted, with the invitation and grant ids share takes), members of shared workspaces it sits in and any exception, and its public links by id. Use it before share. A public link's address is never shown to you.",
+      "Read who can open an artifact, workspace or agent: people invited (pending or accepted, with the invitation and grant ids share takes), members of shared workspaces it sits in and any exception, and its public links by id. Use it before share. A public link's address is never shown to you.",
     parameters: {
       type: "object",
       properties: { resourceType: { type: "string", enum: ["workspace", "artifact", "agent"] }, resourceId: { type: "string" } },
@@ -85,7 +85,7 @@ function readSharingTool(session: HarnessSession): HarnessTool<SharingArgs> {
       additionalProperties: false,
     },
     effect: "read",
-    label: (args) => `Checking who can open ${titled(session, args.resourceId, "your work")}`,
+    label: (args) => `Checking who can open ${titled(session, args.resourceId, "your artifact")}`,
     parse: (raw) => ({
       resourceType: oneOf(raw, "resourceType", ["workspace", "artifact", "agent"] as const),
       resourceId: requireString(raw, "resourceId", 200),
@@ -97,7 +97,7 @@ function readSharingTool(session: HarnessSession): HarnessTool<SharingArgs> {
       return {
         ok: true,
         content: formatSharing(found, session.titles.get(args.resourceId)?.title ?? "this"),
-        doneLabel: `Checked who can open ${titled(session, args.resourceId, "your work")}`,
+        doneLabel: `Checked who can open ${titled(session, args.resourceId, "your artifact")}`,
       };
     },
   };
@@ -107,7 +107,7 @@ function readShareInvitationsTool(session: HarnessSession): HarnessTool<Record<s
   return {
     name: "read_share_invitations",
     description:
-      "Read the invitations other people sent the user (to a work, workspace or agent) that wait for an answer, with the invitation ids respond_to_share takes.",
+      "Read the invitations other people sent the user (to an artifact, workspace or agent) that wait for an answer, with the invitation ids respond_to_share takes.",
     parameters: { type: "object", properties: {}, additionalProperties: false },
     effect: "read",
     label: () => "Checking your invitations",
@@ -282,7 +282,7 @@ const EMBED_ACTIONS = ["resize", "follow_live", "pin", "recheck", "remove"] as c
 type EmbedArgs = { artifactId: string; embedId: string; action: (typeof EMBED_ACTIONS)[number]; mode?: "compact" | "expanded"; versionId?: string };
 const EMBED_LABELS: Record<EmbedArgs["action"], [string, string]> = {
   resize: ["Resizing an embed", "Resized an embed"],
-  follow_live: ["Making an embed follow the live work", "Made an embed follow the live work"],
+  follow_live: ["Making an embed follow the live artifact", "Made an embed follow the live artifact"],
   pin: ["Pinning an embed to a version", "Pinned an embed to a version"],
   recheck: ["Checking an embed again", "Checked an embed again"],
   remove: ["Removing an embed", "Removed an embed"],
@@ -295,7 +295,7 @@ export function workTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "restore_version",
       description:
-        "Restore a work to one of its saved versions (versionId from read_versions). The current work is saved as a version first, so the restore can itself be undone by restoring that one.",
+        "Restore an artifact to one of its saved versions (versionId from read_versions). The current artifact is saved as a version first, so the restore can itself be undone by restoring that one.",
       parameters: {
         type: "object",
         properties: { artifactId: { type: "string" }, versionId: { type: "string" } },
@@ -304,15 +304,15 @@ export function workTools(session: HarnessSession): AnyHarnessTool[] {
       },
       effect: "write",
       targets: (args: { artifactId: string }) => [args.artifactId],
-      label: (args: { artifactId: string }) => `Restoring an earlier version of ${titled(session, args.artifactId, "your work")}`,
-      doneLabel: (args: { artifactId: string }) => `Restored an earlier version of ${titled(session, args.artifactId, "your work")}`,
+      label: (args: { artifactId: string }) => `Restoring an earlier version of ${titled(session, args.artifactId, "your artifact")}`,
+      doneLabel: (args: { artifactId: string }) => `Restored an earlier version of ${titled(session, args.artifactId, "your artifact")}`,
       parse: (raw) => ({ artifactId: requireString(raw, "artifactId", 200), versionId: requireString(raw, "versionId", 200) }),
       command: (args) => ({ command: "restore_version", args }),
     }),
     commandTool(session, {
       name: "publish_code",
       description:
-        "Publish a Code work's live build, so everyone who can open the work runs the current code (publish), or take the build down (unpublish). Before publishing a visualisation, set its accessible title and text alternative using edit_artifact set_accessibility {title, description}; HTML labels do not set the work's metadata. Publishing builds the work's saved source; when the build fails you get the compiler's report to fix the code with edit_artifact. The user approves it unless they allowed publishing.",
+        "Publish a Code artifact's live build, so everyone who can open the artifact runs the current code (publish), or take the build down (unpublish). Before publishing a visualisation, set its accessible title and text alternative using edit_artifact set_accessibility {title, description}; HTML labels do not set the artifact's metadata. Publishing builds the artifact's saved source; when the build fails you get the compiler's report to fix the code with edit_artifact. The user approves it unless they allowed publishing.",
       parameters: {
         type: "object",
         properties: { artifactId: { type: "string" }, action: { type: "string", enum: ["publish", "unpublish"] } },
@@ -336,7 +336,7 @@ export function workTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "respond_to_share",
       description:
-        "Answer an invitation someone sent the user (invitationId from read_share_invitations): accept adds the shared work, workspace or agent to the user's Library at the invited level; decline turns it down. Only when the user asks; the user approves it unless they allowed sharing changes.",
+        "Answer an invitation someone sent the user (invitationId from read_share_invitations): accept adds the shared artifact, workspace or agent to the user's Library at the invited level; decline turns it down. Only when the user asks; the user approves it unless they allowed sharing changes.",
       parameters: {
         type: "object",
         properties: { invitationId: { type: "string" }, response: { type: "string", enum: ["accept", "decline"] } },
@@ -532,11 +532,11 @@ export function workTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "manage_embed",
       description:
-        "Change a live embed inside a work (embedId from read_embeds): resize {mode: compact|expanded}; follow_live makes it show the source as it is now; pin {versionId} keeps it on one saved version of the source (ids from read_versions on the source work); recheck tries again to show a pinned embed whose source was deleted; remove takes it out of the work (the source work is untouched). To move an embed, move its block with edit_artifact. To add one, use insert_reference.",
+        "Change a live embed inside an artifact (embedId from read_embeds): resize {mode: compact|expanded}; follow_live makes it show the source as it is now; pin {versionId} keeps it on one saved version of the source (ids from read_versions on the source artifact); recheck tries again to show a pinned embed whose source was deleted; remove takes it out of the artifact (the source artifact is untouched). To move an embed, move its block with edit_artifact. To add one, use insert_reference.",
       parameters: {
         type: "object",
         properties: {
-          artifactId: { type: "string", description: "The work that contains the embed." },
+          artifactId: { type: "string", description: "The artifact that contains the embed." },
           embedId: { type: "string" },
           action: { type: "string", enum: [...EMBED_ACTIONS] },
           mode: { type: "string", enum: ["compact", "expanded"] },
@@ -547,8 +547,8 @@ export function workTools(session: HarnessSession): AnyHarnessTool[] {
       },
       effect: "write",
       targets: (args: EmbedArgs) => [args.artifactId],
-      label: (args: EmbedArgs) => `${EMBED_LABELS[args.action][0]} in ${titled(session, args.artifactId, "your work")}`,
-      doneLabel: (args: EmbedArgs) => `${EMBED_LABELS[args.action][1]} in ${titled(session, args.artifactId, "your work")}`,
+      label: (args: EmbedArgs) => `${EMBED_LABELS[args.action][0]} in ${titled(session, args.artifactId, "your artifact")}`,
+      doneLabel: (args: EmbedArgs) => `${EMBED_LABELS[args.action][1]} in ${titled(session, args.artifactId, "your artifact")}`,
       parse: (raw): EmbedArgs => {
         const action = oneOf(raw, "action", EMBED_ACTIONS);
         const parsed: EmbedArgs = { artifactId: requireString(raw, "artifactId", 200), embedId: requireString(raw, "embedId", 200), action };
@@ -558,7 +558,7 @@ export function workTools(session: HarnessSession): AnyHarnessTool[] {
         }
         if (action === "pin") {
           const versionId = optionalString(raw, "versionId", 200);
-          if (!versionId) throw new ToolInputError("pin needs versionId, a saved version of the embedded work (read_versions on that work lists them).");
+          if (!versionId) throw new ToolInputError("pin needs versionId, a saved version of the embedded artifact (read_versions on that artifact lists them).");
           parsed.versionId = versionId;
         }
         return parsed;

@@ -52,7 +52,7 @@ function renderSearch(onOpenWorkspace = vi.fn(), onOpenArtifact = vi.fn(), openI
 }
 
 async function openAndSearch(term: string) {
-  const trigger = screen.getByRole("button", { name: "Search work and workspaces" });
+  const trigger = screen.getByRole("button", { name: "Search artifacts and workspaces" });
   trigger.focus();
   fireEvent.click(trigger);
   const dialog = await screen.findByRole("dialog", { name: "Search Spectra" });
@@ -98,7 +98,7 @@ describe("GlobalSearch", () => {
     expect(onOpenArtifact).toHaveBeenCalledWith("work-1");
   });
 
-  it("opens a work at the passage that matched", async () => {
+  it("opens an artifact at the passage that matched", async () => {
     clearLandings();
     searchSpectra.mockResolvedValue({ artifacts: [], workspaces: [] });
     semantic.search.mockResolvedValue({
@@ -142,7 +142,7 @@ describe("GlobalSearch", () => {
     await openAndSearch("bio");
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    fireEvent.click(screen.getByRole("button", { name: "Search work and workspaces" }));
+    fireEvent.click(screen.getByRole("button", { name: "Search artifacts and workspaces" }));
     const dialog = await screen.findByRole("dialog", { name: "Search Spectra" });
     expect(dialog.querySelector("input")!.value).toBe("");
     expect(screen.queryByRole("button", { name: /Biology HL/ })).toBeNull();

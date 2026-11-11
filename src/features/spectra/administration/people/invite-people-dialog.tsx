@@ -171,7 +171,7 @@ export function InvitePeopleDialog({
               <Segmented label="They join as" value={role} onChange={setRole} options={ROLE_OPTIONS} />
             </div>
             {role === "school_admin" ? (
-              <p className="invite-people-quiet">School admins can see this page, manage people and change school settings. They still cannot open anyone’s work.</p>
+              <p className="invite-people-quiet">School admins can see this page, manage people and change school settings. They still cannot open anyone’s artifact.</p>
             ) : null}
           </div>
         )}

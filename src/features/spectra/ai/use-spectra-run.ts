@@ -1105,7 +1105,7 @@ export function useSpectraRun({
             const ledgerEntry = event.runId ? getRunLedger(event.runId) : null;
             if (ledgerEntry?.phase === "partial") {
               toast.message(
-                "Some of that could not be finished. Completed work stays saved.",
+                "Some of that could not be finished. Completed artifact stays saved.",
               );
             }
             setLiveExchange((current) =>
@@ -1426,7 +1426,7 @@ export function useSpectraRun({
             current?.id === exchangeId ? null : current,
           );
           toast.error(
-            "Spectra is still preparing this run. Try again; your work and conversation are safe.",
+            "Spectra is still preparing this run. Try again; your artifact and conversation are safe.",
           );
           settleBegin(false);
         }, RUN_BEGIN_TIMEOUT_MS);
@@ -1888,7 +1888,7 @@ export function useSpectraRun({
                   status: "cancelled",
                   title: "Stopped",
                   summary:
-                    "Stopped by you. Any completed work remains available.",
+                    "Stopped by you. Any completed artifact remains available.",
                    actions: [],
                   updatedAt: Date.now(),
                 }

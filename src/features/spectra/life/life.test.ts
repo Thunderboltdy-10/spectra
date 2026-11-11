@@ -61,7 +61,7 @@ describe("PrismBody", () => {
     expect(restLikeness(body.pose().orientation)).toBeGreaterThan(0.9999);
   });
 
-  it("turns while working and settles once the work ends", () => {
+  it("turns while working and settles once the artifact ends", () => {
     const body = new PrismBody();
     body.setMode("working");
     run(body, 2);

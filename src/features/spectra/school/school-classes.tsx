@@ -208,7 +208,7 @@ export function ClassDetails({
         revision: result.selectionRevision,
         classes: candidates.classes.map((entry) => ({ ...entry, selected: result.selectedRecordIds.includes(entry.recordId) })),
       });
-      onNotice(next ? `${identity.name} syncs again.` : `${identity.name} no longer syncs. Its work stays in Spectra.`);
+      onNotice(next ? `${identity.name} syncs again.` : `${identity.name} no longer syncs. Its artifacts stay in Spectra.`);
     } catch (error) {
       onNotice(/SELECTION_CONFLICT/.test(String(error)) ? "Your classes changed elsewhere. Open this class again, then try." : sentenceOf(error, "That didn't save. Try again."));
     } finally {

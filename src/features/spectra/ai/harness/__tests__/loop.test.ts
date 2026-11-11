@@ -304,7 +304,7 @@ describe("runHarnessLoop", () => {
     expect(model.count()).toBe(4);
   });
 
-  it("stops cleanly mid-tool and keeps the work already done", async () => {
+  it("stops cleanly mid-tool and keeps the artifact already done", async () => {
     const controller = new AbortController();
     const done = tool({
       name: "done",
@@ -709,7 +709,7 @@ describe("runHarnessLoop", () => {
 });
 
 describe("a tool that never returns", () => {
-  it("becomes a tool error after the limit, and its work is told to stop", async () => {
+  it("becomes a tool error after the limit, and its artifact is told to stop", async () => {
     let toldToStop = false;
     const hung = tool({
       name: "hang",

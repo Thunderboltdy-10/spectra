@@ -288,7 +288,7 @@ describe("state normalization", () => {
     expect(state.menu).toBeNull();
   });
 
-  it("clears speculation once the work failed or was cancelled", () => {
+  it("clears speculation once the artifact failed or was cancelled", () => {
     for (const lifecycle of ["failed", "cancelled", "settled"] as const) {
       const state = normalizeInteractionState(
         base({
@@ -300,7 +300,7 @@ describe("state normalization", () => {
     }
   });
 
-  it("keeps speculation while the work is completing", () => {
+  it("keeps speculation while the artifact is completing", () => {
     const state = normalizeInteractionState(
       base({
         lifecycle: "completed",

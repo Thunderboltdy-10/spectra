@@ -1,6 +1,7 @@
 "use client";
 
-import { PlaceRow, type WorkPicking } from "./library-note";
+import type { WorkPicking } from "./library-note";
+import { FolderCards } from "./folder-cards";
 import { LibraryShelfSkeleton } from "./library-shelf";
 import { groupByWhen } from "./shelf-model";
 import { ShelfNotes, useShelfStacks } from "./shelf-stacks";
@@ -10,8 +11,8 @@ import { useLoadOnApproach } from "./use-load-on-approach";
 
 /*
  * A folder, or a workspace that is not a class, as a shelf (LIBRARY.md, "The
- * shelf"): its work as cards, newest first, by when it was touched, and the
- * places inside it down the side. The shelf keeps going as the reader
+ * shelf"): the folders inside it first, as folders a press goes into, then
+ * its work as cards, newest first, by when it was touched. The shelf keeps going as the reader
  * scrolls; nothing is folded behind a "show all".
  */
 export function FolderShelf({
@@ -47,6 +48,14 @@ export function FolderShelf({
   return (
     <div className="library-shelf">
       <div className="min-w-0">
+        {places.length ? (
+          <section aria-labelledby="shelf-folders">
+            <h2 id="shelf-folders" className="library-shelf-heading">
+              Folders <span className="school-heading-count">{places.length}</span>
+            </h2>
+            <FolderCards folders={places} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} />
+          </section>
+        ) : null}
         {groups.map((group) => (
           <section key={group.key} aria-label={group.label}>
             <h2 className="library-shelf-heading">{group.label}</h2>
@@ -56,7 +65,7 @@ export function FolderShelf({
         <SharedWorkGroups groups={shared} place={name} workspaceId={workspaceId} now={now} onOpen={onOpen} picking={picking} />
         {work.length === 0 && children.status === "Exhausted" && !sharedCount ? (
           <div className="class-shelf-empty">
-            <p>{places.length ? `No work in ${name} itself yet; it is in the folders beside.` : `Nothing in ${name} yet.`}</p>
+            <p>{places.length ? `No artifacts in ${name} itself yet; it is in the folders above.` : `Nothing in ${name} yet.`}</p>
             {onCreate ? (
               <button type="button" data-life-launch className="library-shelf-new" onClick={onCreate}>
                 Start a document
@@ -66,23 +75,6 @@ export function FolderShelf({
         ) : null}
         <div ref={mark} aria-hidden />
       </div>
-
-      {places.length ? (
-        <aside aria-label="Folders" className="library-shelf-side">
-          <section>
-            <h2 className="library-shelf-heading">
-              Folders <span className="school-heading-count">{places.length}</span>
-            </h2>
-            <ul className="library-loose">
-              {places.map((node) => (
-                <li key={node.nodeId}>
-                  <PlaceRow node={node} onOpen={onOpen} onMenu={onMenu} picking={picking} />
-                </li>
-              ))}
-            </ul>
-          </section>
-        </aside>
-      ) : null}
     </div>
   );
 }

@@ -70,7 +70,7 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
     }
     // The reply's own region places the work under the message that showed it.
     case "show_work":
-      if (!threadId) throw new Error("AI_SHOW_WORK_NEEDS_CONVERSATION: Only a reply in a conversation can show a work.");
+      if (!threadId) throw new Error("AI_SHOW_WORK_NEEDS_CONVERSATION: Only a reply in a conversation can show an artifact.");
       return { name: "artifactEmbeds:create", args: {
         containerType: "thread",
         containerId: threadId,

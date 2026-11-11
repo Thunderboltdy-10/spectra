@@ -25,6 +25,7 @@ import { useNow } from "@/hooks/use-now";
 import { presentSync, replicaHasNativeLock } from "../bridge/status";
 import { useProductOnline } from "../bridge/use-product-online";
 import { LibrarySyncStrip } from "../bridge/library-sync-strip";
+import { ArtifactComposer } from "./artifact-composer";
 import { useFolderSync } from "../bridge/use-folder-sync";
 import type { StatusTone } from "@/components/ui/badge";
 import {
@@ -265,7 +266,7 @@ function LibraryFailure({ onRetry, attempt }: { onRetry: () => void; attempt: nu
   if (attempt === 0) return <p role="status" className="p-4 text-body text-[var(--text-secondary)]">Opening the Library again.</p>;
   return (
     <div role="alert" className="p-4 text-body text-[var(--text-secondary)]">
-      <p>The Library didn&apos;t load. Your work is safe.</p>
+      <p>The Library didn&apos;t load. Your artifacts are safe.</p>
       <Button className="mt-3" onClick={onRetry}>
         Try again
       </Button>
@@ -834,9 +835,10 @@ function LibraryOrganizerContent({
    * (CANON D43), so it never asks for something their click already answered.
    */
   const createWorkAt = useCallback(
-    (blueprintKey: BlueprintChoiceKey, parentId: string | null) =>
-      run("The work was not created.", async () => {
+    (blueprintKey: BlueprintChoiceKey, parentId: string | null, title?: string) =>
+      run("The artifact was not created.", async () => {
         const payload = createDefaultArtifactPayload(blueprintKey);
+        if (title) payload.title = title;
         // Dots gather at the press; the work's studio grows out of them.
         const creation = beginCreation();
         const created = await actions
@@ -857,11 +859,19 @@ function LibraryOrganizerContent({
     [actions, onOpenWork, run],
   );
 
+  /* New opens the composer on the kind picked; the place stays where the
+     reader stands, captured at the press so a later navigation cannot move it. */
+  const [composing, setComposing] = useState<{ kind: BlueprintChoiceKey; parentId: string | null; place: string } | null>(null);
   const createWorkHere = useCallback(
     (blueprintKey: BlueprintChoiceKey) => {
-      void createWorkAt(blueprintKey, inFolder ? currentParentId : floorId);
+      const parentId = inFolder ? currentParentId : floorId;
+      const place =
+        inFolder && currentParentId !== null && path?.node.nodeId === currentParentId
+          ? path.node.name
+          : scope?.label ?? "your Library";
+      setComposing({ kind: blueprintKey, parentId, place });
     },
-    [createWorkAt, currentParentId, floorId, inFolder],
+    [currentParentId, floorId, inFolder, path, scope],
   );
 
   /* A new folder is appended, which in a long folder means off-screen. */
@@ -1147,6 +1157,17 @@ function LibraryOrganizerContent({
         <ReplicaPresentationLoader onRows={setReplicaRows} />
       </IsolatedErrorBoundary>
       <LibrarySyncStrip />
+      <ArtifactComposer
+        open={composing !== null}
+        kind={composing?.kind ?? "document"}
+        place={composing?.place ?? ""}
+        onClose={() => setComposing(null)}
+        onCreate={async (kind, title) => {
+          const parentId = composing?.parentId ?? null;
+          setComposing(null);
+          await createWorkAt(kind, parentId, title || undefined);
+        }}
+      />
       <input
         ref={importRef}
         type="file"
@@ -1196,7 +1217,6 @@ function LibraryOrganizerContent({
           {/* Shelf or List sits beside where you are, one press away. */}
           {shelfable ? (
             <SurfaceViewSwitch
-              compact
               view={shelf ? "shelf" : "list"}
               onChange={(next) => {
                 setView(next);
@@ -1583,11 +1603,11 @@ function LibraryOrganizerContent({
           onPurge={(nodes) => requestPurge(nodes)}
           onShare={onShareWork}
           onSetShared={(nodes, shared) =>
-            void run(shared ? "Those works stayed private." : "Those works stayed shared.", async () => {
+            void run(shared ? "Those artifacts stayed private." : "Those artifacts stayed shared.", async () => {
               const result = await setWorksShared({ nodeIds: nodes.map((node) => node.nodeId as Id<"orgNodes">), shared });
-              const done = result.changed === 1 ? "1 work" : `${result.changed} works`;
+              const done = result.changed === 1 ? "1 artifact" : `${result.changed} works`;
               if (result.changed) toast.success(shared ? `Shared ${done} with the workspace.` : `${done[0]!.toUpperCase()}${done.slice(1)} private again.`);
-              if (result.skipped) toast.error(`${result.skipped} could not change: only your own works in a workspace can be shared with it.`);
+              if (result.skipped) toast.error(`${result.skipped} could not change: only your own artifacts in a workspace can be shared with it.`);
             })
           }
           onCopy={(nodes) =>
@@ -1779,7 +1799,7 @@ function NodeMenu({
               New folder
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel>New work here</DropdownMenuLabel>
+            <DropdownMenuLabel>New artifact here</DropdownMenuLabel>
             {blueprintChoices.map((choice) => (
               <DropdownMenuItem
                 key={choice.key}
@@ -1967,14 +1987,14 @@ function EmptyState({
         ? { title: "The Trash is empty", body: "Nothing has been thrown away." }
         : firstRun
           ? {
-              title: "Start with one piece of work",
-              body: "Use New above to create a document, quiz, study deck, or another kind of work. Add folders when you want more structure.",
+              title: "Start with one artifact",
+              body: "Use New above to create a document, quiz, study deck, or another kind of artifact. Add folders when you want more structure.",
             }
           : location.kind === "quick"
             ? {
                 recent: {
                   title: "Nothing opened yet",
-                  body: "Work you touch will show up here, newest first.",
+                  body: "Artifact you touch will show up here, newest first.",
                 },
                 favorites: {
                   title: "No favorites yet",
@@ -1982,7 +2002,7 @@ function EmptyState({
                 },
                 shared: {
                   title: "Nothing shared",
-                  body: "Work you share, and work shared with you, collects here.",
+                  body: "Artifacts you share, and artifacts shared with you, collect here.",
                 },
               }[location.view]
             : {

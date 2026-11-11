@@ -88,7 +88,7 @@ function requireString(value: unknown, name: string) {
       name === "workspaceId"
         ? "Choose a workspace first."
         : name === "artifactId"
-          ? "Choose a document or other work first."
+          ? "Choose a document or other artifact first."
           : name === "threadId"
             ? "Choose a thread first."
             : name === "action"
@@ -215,7 +215,7 @@ export async function GET(request: NextRequest) {
     if (action === "artifactPage" || action === "workspacePage") {
       const scope = params.get("scope") ?? "school";
       if (action === "artifactPage" && scope !== "school" && scope !== "owned")
-        return badRequest("Choose Your work or the school catalog.");
+        return badRequest("Choose Your artifact or the school catalog.");
       const limit = params.has("limit") ? Number(params.get("limit")) : undefined;
       if (limit !== undefined && (!Number.isInteger(limit) || limit < 1))
         return badRequest("Choose a positive whole-number page size.");
@@ -988,6 +988,8 @@ export async function POST(request: NextRequest) {
         icon: optionalString(body.icon),
         color: optionalString(body.color),
         parentNodeId: optionalString(body.parentNodeId),
+        syllabusId: optionalString(body.syllabusId),
+        syllabusLevel: body.syllabusLevel === "SL" || body.syllabusLevel === "HL" ? body.syllabusLevel : undefined,
       });
       return ok({ workspaceId });
     }
@@ -1455,15 +1457,15 @@ export async function POST(request: NextRequest) {
         storageHome?: "device";
         storageStoreId?: string;
       } | null;
-      if (!source) return badRequest("That work is no longer available to copy.");
+      if (!source) return badRequest("That artifact is no longer available to copy.");
       if (source.blueprintKey === "agent" || source.blueprintKey === "timetable")
-        return badRequest("This kind of work cannot be copied.");
+        return badRequest("This kind of artifact cannot be copied.");
       const onDevice = source.storageHome === "device";
       const me = onDevice ? await spectraQuery("identity:me", {}) as { accountId: string } : null;
       const stored = me
         ? await (await import("@/lib/device-store")).deviceStoreCall<{ content?: unknown } | null>(me.accountId, "get", { artifactId })
         : null;
-      if (onDevice && !stored?.content) return badRequest("Open Spectra Bridge on the computer that holds this work to copy it.");
+      if (onDevice && !stored?.content) return badRequest("Open Spectra Bridge on the computer that holds this artifact to copy it.");
       const content = onDevice
         ? stored!.content
         : source.blueprintKey === "sheets"

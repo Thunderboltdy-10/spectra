@@ -23,7 +23,7 @@ describe("P6.I1 UX debt closure", () => {
     );
   });
 
-  it("builds reload-stable shell URLs for work and workspace navigation", () => {
+  it("builds reload-stable shell URLs for artifact and workspace navigation", () => {
     expect(spectraShellHref({ surface: "library" })).toBe("/library");
     expect(
       spectraShellHref({
@@ -50,7 +50,7 @@ describe("P6.I1 UX debt closure", () => {
     expect(artifactIdFromSpectraPath("/library/%E0%A4%A")).toBeUndefined();
   });
 
-  it("uses browser history for user navigation and strips closed or invalid work", () => {
+  it("uses browser history for user navigation and strips closed or invalid artifact", () => {
     const shell = read("src/features/spectra/pages/spectra-shell.tsx");
     expect(shell).toContain('historyMode: "push" | "replace" | "none"');
     expect(shell).toContain("window.history[`${mode}State`]");

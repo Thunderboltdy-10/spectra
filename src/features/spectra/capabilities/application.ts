@@ -23,14 +23,14 @@ const APP_SPECS: readonly AppSpec[] = [
   {
     id: "app.navigate",
     description:
-      "Navigate to a registered Spectra route or work target through the shared product path.",
+      "Navigate to a registered Spectra route or artifact target through the shared product path.",
     risk: "safe",
     availability: "readable",
     choreography: { target: "application-route" },
   },
   {
     id: "app.work.open",
-    description: "Open a work item through the shared product navigation path.",
+    description: "Open an artifact through the shared product navigation path.",
     risk: "safe",
     availability: "readable",
     choreography: { target: "library-work" },
@@ -66,7 +66,7 @@ const APP_SPECS: readonly AppSpec[] = [
   },
   {
     id: "app.page.library",
-    description: "Open Library and its authorized work tree.",
+    description: "Open Library and its authorized artifact tree.",
     risk: "safe",
     availability: "readable",
     choreography: { target: "library-route" },
@@ -115,7 +115,7 @@ const APP_SPECS: readonly AppSpec[] = [
   },
   {
     id: "app.chat.new",
-    description: "Start a new thread without changing existing work.",
+    description: "Start a new thread without changing existing artifacts.",
     risk: "safe",
     availability: "readable",
     choreography: { target: "conversation-route" },
@@ -143,14 +143,14 @@ const APP_SPECS: readonly AppSpec[] = [
   },
   {
     id: "app.comments.open",
-    description: "Open comments for the work currently mounted in the editor.",
+    description: "Open comments for the artifact currently mounted in the editor.",
     risk: "safe",
     availability: "readable",
     choreography: { target: "artifact-comments" },
   },
   {
     id: "app.comments.add",
-    description: "Add an anchored comment to the mounted work after you enter its text.",
+    description: "Add an anchored comment to the mounted artifact after you enter its text.",
     risk: "safe",
     availability: "readable",
     choreography: { target: "artifact-comments" },
@@ -243,7 +243,7 @@ const APP_SPECS: readonly AppSpec[] = [
   {
     id: "app.sharing.change",
     description:
-      "Change access to a work item or workspace through the shared permissions path.",
+      "Change access to an artifact or workspace through the shared permissions path.",
     risk: "always-confirm",
     availability: "editable",
     choreography: { target: "sharing-control" },
@@ -311,14 +311,14 @@ const APP_SPECS: readonly AppSpec[] = [
   {
     id: "app.settings.clear-compute-cache",
     description:
-      "Clear disposable local compute caches without changing Spectra work or native files.",
+      "Clear disposable local compute caches without changing Spectra artifact or native files.",
     risk: "confirm",
     availability: "editable",
     choreography: { target: "settings-control", region: "compute-cache" },
   },
   {
     id: "app.calendar.open",
-    description: "Open Calendar without changing the user's work.",
+    description: "Open Calendar without changing the user's artifact.",
     risk: "safe",
     availability: "readable",
     choreography: { target: "calendar-route" },

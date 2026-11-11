@@ -317,7 +317,7 @@ export function SchoolDetailDialog({
       open={Boolean(school)}
       onClose={onClose}
       title={school?.name ?? "School"}
-      detail="Who runs this school, who is in it and what its admins changed lately. Nobody’s work is opened to show it."
+      detail="Who runs this school, who is in it and what its admins changed lately. Nobody’s artifact is opened to show it."
       footer={
         <>
           <AdminButton onClick={onStepIn}>Step in</AdminButton>

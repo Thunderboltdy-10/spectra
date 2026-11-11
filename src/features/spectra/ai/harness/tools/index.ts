@@ -4,7 +4,7 @@ import type { AnyHarnessTool } from "../types";
 import { appTools } from "./app";
 import { commandTools, runOnlyTools } from "./commands";
 import { createArtifactTool, editArtifactTool, readArtifactTool } from "./artifacts";
-import { listLibraryTool, readCalendarTool, readCommentsTool, readThreadTool, schoolDataTool, searchTool, webSearchTool } from "./context";
+import { listLibraryTool, readCalendarTool, readCommentsTool, readSyllabusTool, readThreadTool, schoolDataTool, searchTool, webSearchTool } from "./context";
 import { askUserTool, showWidgetTool, updateTodosTool, agentHandoffTool } from "./interaction";
 import type { HarnessSession } from "./shared";
 
@@ -27,6 +27,7 @@ export function buildHarnessTools(session: HarnessSession): AnyHarnessTool[] {
     webSearchTool(session),
     readCalendarTool(session),
     schoolDataTool(session),
+    readSyllabusTool(),
     loadSkillTool(),
     readMemoryTool(session),
     updateMemoryTool(session),

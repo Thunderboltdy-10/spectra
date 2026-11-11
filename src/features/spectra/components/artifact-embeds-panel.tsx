@@ -63,7 +63,7 @@ function sitsWith(work: SpectraArtifact, other: SpectraArtifact) {
 }
 
 function versionWords(embed: SpectraArtifactEmbed) {
-  if (embed.versionPolicy !== "pinned") return "Follows the live work";
+  if (embed.versionPolicy !== "pinned") return "Follows the live artifact";
   const name = embed.version?.name || embed.version?.summary;
   if (name) return `Kept on ${name}`;
   return embed.version
@@ -76,7 +76,7 @@ function stateWords(embed: SpectraArtifactEmbed) {
     case "no_access":
       return embed.accessRequest ? "Access requested" : "You can't open this yet";
     case "deleted":
-      return "This work was deleted";
+      return "This artifact was deleted";
     case "version_unavailable":
       return "The saved version is missing";
     case "removed":
@@ -155,10 +155,10 @@ function PlacedReference({
     );
     if (embed.versionPolicy !== "pinned") items.push({ key: "pin", label: "Keep on a saved version", icon: "activity" });
   }
-  if (embed.canConfigure && embed.versionPolicy === "pinned") items.push({ key: "live", label: "Follow the live work", icon: "activity" });
+  if (embed.canConfigure && embed.versionPolicy === "pinned") items.push({ key: "live", label: "Follow the live artifact", icon: "activity" });
   if (embed.state === "no_access" && embed.canRequestAccess && !embed.accessRequest) items.push({ key: "request", label: "Ask for access", icon: "reply" });
   if (embed.accessRequest) items.push({ key: "cancel", label: "Cancel the request", icon: "close" });
-  if (embed.canConfigure) items.push({ key: "remove", label: "Remove from this work", icon: "close" });
+  if (embed.canConfigure) items.push({ key: "remove", label: "Remove from this artifact", icon: "close" });
 
   function choose(action: EmbedAction) {
     if (action === "compact" || action === "expanded") void onUpdate({ mode: action });
@@ -173,7 +173,7 @@ function PlacedReference({
     <>
       <LifeKey id={`embed:${embed.embedId}`} />
       <ReferenceRow
-        title={embed.source?.title ?? "Work you can't see"}
+        title={embed.source?.title ?? "Artifact you can't see"}
         detail={[stateWords(embed), regionLabel].filter(Boolean).join(", ")}
         type={embed.source?.blueprintKey}
         onOpen={embed.source && onOpenSource ? () => onOpenSource(embed.sourceArtifactId) : undefined}
@@ -195,7 +195,7 @@ function PlacedReference({
           />
           {pinned.isDone && pinned.versions.length === 0 ? (
             <p role="status" className="mt-1.5 text-micro text-[var(--text-secondary)]">
-              {embed.source?.title ?? "This work"} has no saved versions yet.
+              {embed.source?.title ?? "This artifact"} has no saved versions yet.
             </p>
           ) : pinned.error ? (
             <p role="alert" className="mt-1.5 text-micro text-[var(--text-secondary)]">
@@ -321,7 +321,7 @@ export function ArtifactEmbedsPanel({
       setQuery("");
       setSearching(false);
     } catch (error) {
-      failed(error, "Could not add this reference. Try again, or place it from inside the work.");
+      failed(error, "Could not add this reference. Try again, or place it from inside the artifact.");
     } finally {
       setAdding(null);
     }
@@ -341,7 +341,7 @@ export function ArtifactEmbedsPanel({
       setQuery("");
       setSearching(false);
     } catch (error) {
-      failed(error, "Could not link this work. Check that you can still open it, then try again.");
+      failed(error, "Could not link this artifact. Check that you can still open it, then try again.");
     } finally {
       setAdding(null);
     }
@@ -371,12 +371,12 @@ export function ArtifactEmbedsPanel({
             "message" in value &&
             typeof value.message === "string",
         );
-        if (dispatched.listeners === 0) throw new Error("The editor is still opening. Try again once the work has loaded.");
-        if (outcome?.status !== "completed") throw new Error(outcome?.message ?? "The reference is still in the work. Delete it there, or try again.");
+        if (dispatched.listeners === 0) throw new Error("The editor is still opening. Try again once the artifact has loaded.");
+        if (outcome?.status !== "completed") throw new Error(outcome?.message ?? "The reference is still in the artifact. Delete it there, or try again.");
       }
       await removeReference({ embedId: embed.embedId as Id<"artifactEmbeds"> });
     } catch (error) {
-      failed(error, "Could not remove this reference. Try again, or delete it inside the work.");
+      failed(error, "Could not remove this reference. Try again, or delete it inside the artifact.");
     }
   }
 
@@ -426,8 +426,8 @@ export function ArtifactEmbedsPanel({
             <Search className="size-3.5 shrink-0 text-[var(--text-tertiary)]" />
             <input
               value={query}
-              aria-label="Find work to add"
-              placeholder="Find work to add"
+              aria-label="Find artifacts to add"
+              placeholder="Find artifacts to add"
               onFocus={() => setSearching(true)}
               onChange={(event) => {
                 setQuery(event.target.value);
@@ -468,14 +468,14 @@ export function ArtifactEmbedsPanel({
 
       {nativeOnly && canConfigure ? (
         <p className="shrink-0 px-4 pb-2 text-micro leading-5 text-[var(--text-secondary)]">
-          This file stays exactly as its app writes it, so work is linked beside it rather than placed inside it.
+          This file stays exactly as its app writes it, so an artifact is linked beside it rather than placed inside it.
         </p>
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
         {searching ? (
           candidates.length ? (
-            <ul aria-label="Work you can add">
+            <ul aria-label="Artifact you can add">
               {candidates.map((candidate) => {
                 const busy = adding === candidate._id;
                 return (
@@ -499,7 +499,7 @@ export function ArtifactEmbedsPanel({
             </ul>
           ) : (
             <p className="px-2 py-6 text-center text-micro text-[var(--text-tertiary)]">
-              {semantic.status === "loading" ? "Searching your work" : query.trim() ? "Nothing you can open matches that." : "Type to find work."}
+              {semantic.status === "loading" ? "Searching your artifacts" : query.trim() ? "Nothing you can open matches that." : "Type to find artifact."}
             </p>
           )
         ) : loading ? (
@@ -509,13 +509,13 @@ export function ArtifactEmbedsPanel({
             compact
             icon="link"
             title="Nothing linked yet"
-            detail={canSearch ? "Search above, or right click in the work to place something right where you are." : "This work doesn't draw on anything else."}
+            detail={canSearch ? "Search above, or right click in the artifact to place something right where you are." : "This artifact doesn't draw on anything else."}
           />
         ) : (
           <>
             {embeds.length ? (
               <section className="reference-section">
-                <h3>In this work</h3>
+                <h3>In this artifact</h3>
                 <ul>
                   {embeds.map((embed) => (
                     <PlacedReference
@@ -534,17 +534,17 @@ export function ArtifactEmbedsPanel({
             ) : null}
             {linkedRows.length ? (
               <section className="reference-section">
-                <h3>Linked work</h3>
+                <h3>Linked artifact</h3>
                 <ul>
                   {linkedRows.map((entry) => (
                     <ReferenceRow
                       key={entry._id}
-                      title={entry.artifact?.title ?? "Linked work"}
+                      title={entry.artifact?.title ?? "Linked artifact"}
                       detail={entry.createdBy === "system" ? "About the same thing" : entry.relationType === "related" ? "Linked" : entry.relationType.replaceAll("_", " ")}
                       type={entry.artifact?.blueprintKey}
                       onOpen={entry.artifact && onOpenSource ? () => onOpenSource(entry.artifact!.id) : undefined}
                     >
-                      {canLink ? <IconButton icon={<X className="size-4" />} size="compact" label={`Remove the link to ${entry.artifact?.title ?? "this work"}`} onClick={() => void removeLink(entry)} /> : null}
+                      {canLink ? <IconButton icon={<X className="size-4" />} size="compact" label={`Remove the link to ${entry.artifact?.title ?? "this artifact"}`} onClick={() => void removeLink(entry)} /> : null}
                     </ReferenceRow>
                   ))}
                 </ul>

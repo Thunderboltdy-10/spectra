@@ -17,6 +17,7 @@ import { figureOf } from "../life/figure-dom";
 import { markArrival } from "../life/use-life";
 import { refreshComposerBands, registerComposerBand } from "../components/composer-safe-area";
 import { useSpectraRouter } from "../hooks/use-spectra-router";
+import { calendarTouchHref, isCalendarTouch } from "../calendar/domain/touch";
 import { useSpectraMotion } from "../motion";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { useFollowAi } from "../collaboration/follow-ai";
@@ -335,7 +336,7 @@ export function Island() {
       if (!wasMoving) continue;
       if (tab.state === "completed" || tab.state === "completed_limited") {
         const line = peekLine(tab);
-        setAnnouncement(`${tab.title}: ${line?.text ?? "finished"}`);
+        setAnnouncement(`${tab.title}: ${line?.text || "finished"}`);
         // The answer comes up out of its tab, unless the thread is already on screen or its card is open.
         const onScreenNow =
           currentView.current?.runId === tab.runId ||
@@ -633,7 +634,7 @@ export function Island() {
     if (!element) return 0;
     const r = element.getBoundingClientRect();
     const stage = stageHalf();
-    const half = Math.min(180, stage - 16);
+    const half = Math.min(210, stage - 16);
     const limit = Math.max(0, stage - half - 16);
     return Math.max(-limit, Math.min(limit, r.x + r.width / 2 - stageCentre()));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1104,7 +1105,8 @@ export function Island() {
               foldReplyPeek();
             }}
             onShow={(workId, regionId) => {
-              void spectraBus.command("work.open", { workId, ...(regionId ? { region: { id: regionId } } : {}) });
+              if (isCalendarTouch(workId)) router.push(calendarTouchHref(regionId));
+              else void spectraBus.command("work.open", { workId, ...(regionId ? { region: { id: regionId } } : {}) });
               markSeen(replyPeekTab.runId);
               foldReplyPeek();
             }}

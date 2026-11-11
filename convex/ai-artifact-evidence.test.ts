@@ -3,7 +3,7 @@ import { buildAiArtifactContentEvidence } from "./spectraArtifactWriteScope";
 import { canonicalArtifactWriteContent, normalizeAiArtifactWriteContent } from "../src/features/spectra/operations/artifact-write-content";
 import { normalizePlanContent } from "../src/features/spectra/plan/model";
 
-const identity = { operationDigest: "server-operation-digest", sourceContentIdentity: "server-physical-source", prompt: "Update this work" };
+const identity = { operationDigest: "server-operation-digest", sourceContentIdentity: "server-physical-source", prompt: "Update this artifact" };
 const body = (text: string) => ({ blocks: [{ id: "p", type: "paragraph", text }] });
 
 describe("shared signed AI content evidence", () => {

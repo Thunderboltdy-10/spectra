@@ -125,7 +125,7 @@ describe("command parity", () => {
       expect(artifactCapabilityReach(id).kind, id).toBe("user");
   });
 
-  it("can create and edit every work type", () => {
+  it("can create and edit every artifact type", () => {
     expect([...AUTHORED_TYPES].sort()).toEqual(Object.keys(COMMAND_TABS).sort());
     expect(COMMAND_CATALOG.find((entry) => entry.id === "work.create")?.reach).toMatchObject({ tool: "create_artifact" });
     expect(COMMAND_CATALOG.find((entry) => entry.id === "work.edit")?.reach).toMatchObject({ tool: "edit_artifact" });

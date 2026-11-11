@@ -54,7 +54,7 @@ describe("contextual K-bar registry", () => {
     expect(rankKBarCommand(APP_COMMANDS.find((command) => command.id === "app.run.stop")!, context({ activeRunIds: [] }))).toBe(Number.NEGATIVE_INFINITY);
   });
 
-  it("converges authorized work, workspace, and thread results onto registered commands", () => {
+  it("converges authorized artifact, workspace, and thread results onto registered commands", () => {
     const entries = buildKBarEntries(APP_COMMANDS, context(), "biology", [
       { id: "work-1", kind: "artifact", title: "Biology notes", params: { workId: "work-1", surface: "panel" } },
       { id: "workspace-1", kind: "workspace", title: "Biology", params: { destination: "workspace", targetId: "workspace-1" } },
@@ -81,7 +81,7 @@ describe("contextual K-bar registry", () => {
     expect(entries[0]?.command.id).toBe("app.work.open");
   });
 
-  it("opens a work at the place a result matched", () => {
+  it("opens an artifact at the place a result matched", () => {
     const [result] = semanticKBarResults([
       { kind: "artifact", itemId: "work-3", title: "Budget", typeLabel: "Sheets", subtype: "sheets", snippet: "…Lunch · 8", location: "Budget A1:B6", anchor: { kind: "artifact", artifactId: "work-3", regionId: "sheet-2", label: "Budget A1:B6" }, score: 0.9, matchedBy: ["meaning"], ownership: "mine" },
     ]);

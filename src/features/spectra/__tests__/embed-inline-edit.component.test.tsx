@@ -99,7 +99,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("editing an embedded work where it is embedded", () => {
+describe("editing an embedded artifact where it is embedded", () => {
   it("edits on a double-click, with its own studio in the frame, and Escape folds it back", async () => {
     const open = vi.fn();
     render(<ArtifactEmbedById embedId="embed-1" editInPlace onOpenSource={open} />);
@@ -119,7 +119,7 @@ describe("editing an embedded work where it is embedded", () => {
     expect(preview().getAttribute("data-life-key")).toBe("embed:embed-1");
   });
 
-  it("opens the work in the Side on a single click", async () => {
+  it("opens the artifact in the Side on a single click", async () => {
     const open = vi.fn();
     render(<ArtifactEmbedById embedId="embed-1" editInPlace onOpenSource={open} />);
     fireEvent.click(preview());
@@ -158,19 +158,19 @@ describe("editing an embedded work where it is embedded", () => {
     }
   });
 
-  it("shows a ghost while the work loads and says when it cannot open", async () => {
+  it("shows a ghost while the artifact loads and says when it cannot open", async () => {
     let fail!: (error: Error) => void;
     harness.getArtifact.mockReturnValueOnce(new Promise((_, reject) => (fail = reject)));
     render(<ArtifactEmbedById embedId="embed-1" editInPlace />);
     fireEvent.doubleClick(preview());
-    expect(screen.getByRole("status", { name: "Opening the work here" }).hasAttribute("data-life-ghost")).toBe(true);
+    expect(screen.getByRole("status", { name: "Opening the artifact here" }).hasAttribute("data-life-ghost")).toBe(true);
     await act(async () => fail(new Error("offline")));
     expect(await screen.findByRole("alert")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByLabelText("Embedded studio")).toBeTruthy();
   });
 
-  it("keeps a pinned version read-only, with a clear way to follow the live work", async () => {
+  it("keeps a pinned version read-only, with a clear way to follow the live artifact", async () => {
     harness.embed = embed({ versionPolicy: "pinned", pinnedVersionId: "version-1" });
     render(<ArtifactEmbedById embedId="embed-1" editInPlace />);
     expect(screen.getByText("Saved version")).toBeTruthy();
@@ -178,7 +178,7 @@ describe("editing an embedded work where it is embedded", () => {
     expect(document.querySelector("[data-embed-editor]")).toBeNull();
     await openOptions();
     expect(screen.queryByRole("menuitem", { name: /Edit here/ })).toBeNull();
-    fireEvent.click(await screen.findByRole("menuitem", { name: /Follow the live work/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Follow the live artifact/ }));
     await waitFor(() =>
       expect(harness.update).toHaveBeenCalledWith({ embedId: "embed-1", versionPolicy: "live" }),
     );
@@ -197,7 +197,7 @@ describe("editing an embedded work where it is embedded", () => {
     expect(harness.getVersions).toHaveBeenCalledWith("deck-1", 1);
   });
 
-  it("is edited here only in an editor, by someone who may change the work, for a type that fits", async () => {
+  it("is edited here only in an editor, by someone who may change the artifact, for a type that fits", async () => {
     expect(editableInPlace(embed())).toBe(true);
     expect(editableInPlace(embed({ canEditSource: false }))).toBe(false);
     expect(editableInPlace(embed({ versionPolicy: "pinned" }))).toBe(false);

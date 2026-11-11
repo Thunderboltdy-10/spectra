@@ -106,7 +106,7 @@ export function commentsBinding(adapter: CommentsAdapter): CommandBinding {
       ? adapter.preservedNote
       : adapter.openCount
         ? `${adapter.openCount} open`
-        : "Comment threads on this work",
+        : "Comment threads on this artifact",
     touches: ["comments"],
     onSelect: () => adapter.toggle(),
   };

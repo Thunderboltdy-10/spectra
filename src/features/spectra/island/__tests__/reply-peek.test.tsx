@@ -26,44 +26,54 @@ function islandTab(reply: string, card?: Partial<NonNullable<SpectraRunTab["card
 describe("the reply peek (F3)", () => {
   it("shows a plain answer as the reply", () => {
     expect(peekLine(islandTab("The **nodes** sit at whole multiples of half a wavelength."))).toEqual({
-      kind: "reply",
       text: "The nodes sit at whole multiples of half a wavelength.",
+      works: [],
+      canUndo: false,
     });
   });
 
-  it("says in one line what an edit changed, with Undo and Show landing on the change", () => {
+  it("stands the changed work on top as a tab that lands on the change, with Undo", () => {
     const line = peekLine(
       islandTab("Added a closing sentence to Physics progress. It ties the method back to the aim.", {
         actions: [{ key: "open", label: "Open", targetType: "artifact", targetId: "doc-1" }, { key: "revert", label: "Undo this run" }],
-        provenance: { artifactIds: ["doc-1"], artifactTitles: ["Physics progress"], regions: [{ artifactId: "doc-1", regionId: "block:7" }] },
+        provenance: { artifactIds: ["doc-1"], artifactTitles: ["Physics progress"], artifactTypes: ["document"], regions: [{ artifactId: "doc-1", regionId: "block:7" }] },
       }),
     );
-    expect(line).toEqual({ kind: "changed", text: "Added a closing sentence to Physics progress.", artifactId: "doc-1", regionId: "block:7", canUndo: true });
+    expect(line).toEqual({
+      text: "Added a closing sentence to Physics progress. It ties the method back to the aim.",
+      works: [{ id: "doc-1", title: "Physics progress", type: "document", created: false, regionId: "block:7" }],
+      canUndo: true,
+    });
     const onUndo = vi.fn();
     const onShow = vi.fn();
     render(<ReplyPeek line={line!} title="Physics" visible onOpen={vi.fn()} onRest={vi.fn()} onLeave={vi.fn()} onUndo={onUndo} onShow={onShow} />);
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
-    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show Physics progress" }));
     expect(onUndo).toHaveBeenCalledOnce();
     expect(onShow).toHaveBeenCalledWith("doc-1", "block:7");
   });
 
-  it("names a new work with Open", () => {
+  it("puts new artifact first among the tabs", () => {
     const line = peekLine(
-      islandTab("I made a revision sheet.", {
+      islandTab("I made a revision sheet from your notes.", {
         actions: [{ key: "revert", label: "Undo this run" }],
-        provenance: { artifactIds: ["doc-2"], artifactTitles: ["Photosynthesis sheet"], createdIds: ["doc-2"] },
+        provenance: { artifactIds: ["doc-1", "doc-2"], artifactTitles: ["Notes", "Photosynthesis sheet"], artifactTypes: ["document", "flashcards"], createdIds: ["doc-2"] },
       }),
     );
-    expect(line).toEqual({ kind: "made", text: "Photosynthesis sheet", artifactId: "doc-2" });
+    expect(line?.works.map((work) => [work.title, work.created])).toEqual([["Photosynthesis sheet", true], ["Notes", false]]);
+    expect(line?.text).toBe("I made a revision sheet from your notes.");
+    const onShow = vi.fn();
+    render(<ReplyPeek line={line!} title="x" visible onOpen={vi.fn()} onRest={vi.fn()} onLeave={vi.fn()} onUndo={vi.fn()} onShow={onShow} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open Photosynthesis sheet" }));
+    expect(onShow).toHaveBeenCalledWith("doc-2", undefined);
   });
 
   it("never takes focus from where the person is typing", () => {
     const field = document.createElement("textarea");
     document.body.append(field);
     field.focus();
-    render(<ReplyPeek line={{ kind: "changed", text: "Added a sentence.", artifactId: "doc-1", canUndo: true }} title="x" visible onOpen={vi.fn()} onRest={vi.fn()} onLeave={vi.fn()} onUndo={vi.fn()} onShow={vi.fn()} />);
-    const pressed = fireEvent.mouseDown(screen.getByRole("button", { name: "Show" }));
+    render(<ReplyPeek line={{ text: "Added a sentence.", works: [{ id: "doc-1", title: "Essay", type: "document", created: false }], canUndo: true }} title="x" visible onOpen={vi.fn()} onRest={vi.fn()} onLeave={vi.fn()} onUndo={vi.fn()} onShow={vi.fn()} />);
+    const pressed = fireEvent.mouseDown(screen.getByRole("button", { name: "Show Essay" }));
     expect(pressed).toBe(false);
     expect(document.activeElement).toBe(field);
     field.remove();

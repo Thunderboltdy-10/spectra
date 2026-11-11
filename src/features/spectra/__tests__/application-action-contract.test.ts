@@ -132,7 +132,7 @@ describe("application action contract matrix (stubbed persistence)", () => {
     if (status) expect(result.status).toBe(status);
   });
 
-  it("asks the user's view to open a work at the region Spectra named, and only a work", async () => {
+  it("asks the user's view to open an artifact at the region Spectra named, and only an artifact", async () => {
     const events: Array<{ key: string; payload?: Record<string, unknown> }> = [];
     await executeApplicationCommand("actor", "run", "attempt", "navigate_spectra", { destination: "artifact", targetId: "work", region: "slide-3" },
       undefined, (event) => events.push(event), undefined, "operation");
@@ -298,7 +298,7 @@ describe("application action contract matrix (stubbed persistence)", () => {
     expect(seams.mutate).not.toHaveBeenCalled();
   });
 
-  it("removes an embed's node from the host before removing the embed, and refuses embeds outside the work", async () => {
+  it("removes an embed's node from the host before removing the embed, and refuses embeds outside the artifact", async () => {
     const result = await executeApplicationCommand("actor", "run", "attempt", "manage_embed", { artifactId: "work", embedId: "embed", action: "remove" },
       undefined, undefined, undefined, "operation") as Record<string, unknown>;
     expect(seams.applyAi).toHaveBeenCalledWith(expect.objectContaining({ artifactId: "work", operationId: "operation", receipt: "placement" }));

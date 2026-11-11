@@ -32,6 +32,7 @@ export const resultCardStreamViewSchema = z
       .object({
         artifactIds: z.array(z.string()).optional(),
         artifactTitles: z.array(z.string()).optional(),
+        artifactTypes: z.array(z.string()).optional(),
         createdIds: z.array(z.string()).optional(),
         regions: z.array(z.object({ artifactId: z.string(), regionId: z.string() })).optional(),
         threadId: z.string().optional(),

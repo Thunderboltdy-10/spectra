@@ -151,19 +151,19 @@ describe("PERF independent actor-scoped pagination", () => {
     expect(new Set(all.map(row => row.nodeId)).size).toBe(4);
   });
 
-  it("keeps recent work visible and its read cost independent of newer threads", async () => {
+  it("keeps recent artifact visible and its read cost independent of newer threads", async () => {
     const { t, ids, measure } = await fixture();
     const expected = await t.run(async (ctx) => {
       const works = [];
       for (let i = 0; i < 4; i++) {
         const artifactId = await ctx.db.insert("spectraArtifacts", { ownerAccountId: ids.accountId, schoolId: ids.schoolId,
-          blueprintKey: i === 2 ? "planner_task" : "document", schemaVersion: 1, title: `Recent work ${i}`, content: {},
+          blueprintKey: i === 2 ? "planner_task" : "document", schemaVersion: 1, title: `Recent artifact ${i}`, content: {},
           tags: [], status: i === 3 ? "deleted" : "active", createdAt: ids.now, updatedAt: ids.now - i });
         await upsertArtifactSummary(ctx, (await ctx.db.get(artifactId))!);
         await ctx.db.insert("orgNodes", { accountId: ids.accountId, schoolId: ids.schoolId, parentId: null,
-          kind: "work", sourceId: artifactId, name: `Recent work ${i}`, typeKey: i === 2 ? "planner_task" : "document",
+          kind: "work", sourceId: artifactId, name: `Recent artifact ${i}`, typeKey: i === 2 ? "planner_task" : "document",
           orderKey: String(i), activityAt: ids.now - i, createdAt: ids.now, updatedAt: ids.now - i });
-        if (i < 2) works.push({ workId: artifactId, title: `Recent work ${i}`, typeKey: "document", activityAt: ids.now - i });
+        if (i < 2) works.push({ workId: artifactId, title: `Recent artifact ${i}`, typeKey: "document", activityAt: ids.now - i });
       }
       await ctx.db.insert("orgNodes", { accountId: ids.accountId, schoolId: ids.schoolId, parentId: ids.folderId,
         kind: "work", sourceId: works[0]!.workId, name: "Duplicate placement", typeKey: "document", orderKey: "z",
@@ -189,7 +189,7 @@ describe("PERF independent actor-scoped pagination", () => {
     expect.soft(dense.documentsReturned).toBe(before.documentsReturned);
     expect(dense.writes).toBe(0);
     const withoutClock = await measure(async (ctx) => {
-      const clock = vi.spyOn(Date, "now").mockImplementation(() => { throw new Error("Recent owner work must not read the clock"); });
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => { throw new Error("Recent owner artifact must not read the clock"); });
       try { return await recentWorksHandler(ctx, { limit: 12 }); }
       finally { clock.mockRestore(); }
     });

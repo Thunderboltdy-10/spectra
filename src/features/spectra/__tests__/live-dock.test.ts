@@ -181,7 +181,7 @@ describe("Live Dock V2", () => {
         run: { status: "completed", phase: "completed" },
         card: {
           title: "Compare the evidence",
-          summary: "Restored the earlier copy of this work.",
+          summary: "Restored the earlier copy of this artifact.",
           actions: [{ key: "undone" }],
         },
       }),

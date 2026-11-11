@@ -266,7 +266,7 @@ async function failBridgeWriteForRevokedAccess(
 }
 
 const DELETED_WORK_ERROR = "work-no-longer-exists";
-const DELETED_WORK_MESSAGE = "The work no longer exists. Try again with another item.";
+const DELETED_WORK_MESSAGE = "The artifact no longer exists. Try again with another item.";
 
 /** Terminalize a native write when deletion wins the race with the Bridge. */
 async function failWriteForMissingWork(

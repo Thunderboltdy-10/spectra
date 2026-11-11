@@ -163,7 +163,7 @@ const NODE_NOUNS: Record<WhiteboardNodeType, string> = {
   note: "Sticky note",
   shape: "Shape",
   image: "Image",
-  embed: "Linked work",
+  embed: "Linked artifact",
   frame: "Frame",
   group: "Group",
   table: "Table",
@@ -195,7 +195,7 @@ const BOARD_OBJECTS = [
   ["table", Table2, "Table"],
   // D15: "artifact" is not a user-facing word. This inserts a live reference to
   // other work, which is what the label now says.
-  ["embed", Link2, "Embed work"],
+  ["embed", Link2, "Embed artifact"],
 ] as const satisfies readonly (readonly [Tool, LucideIcon, string])[];
 
 /** The side panels, in the order the menu lists them. `true` means it edits. */
@@ -1160,7 +1160,7 @@ export function WhiteboardStudio({
             );
           if (!suppliedReference && !target)
             throw new Error(
-              "Choose source work before adding a live reference.",
+              "Choose source artifact before adding a live reference.",
             );
           const layer = layers.find(
             (candidate) => !candidate.locked && candidate.visible,
@@ -1327,7 +1327,7 @@ export function WhiteboardStudio({
       }
       const source = artifactMap.get(sourceArtifactId);
       if (!source || !isArtifactTypeKey(source.blueprintKey))
-        throw new Error("The selected work is unavailable.");
+        throw new Error("The selected artifact is unavailable.");
       const interaction = suggestedEmbedInteraction(source.blueprintKey);
       const result = await createReference({
         containerType: "artifact",
@@ -2126,7 +2126,7 @@ export function WhiteboardStudio({
         });
       } catch (error) {
         setIoNotice(
-          describeFailure(error, { fallback: "The linked work could not be removed." }).message,
+          describeFailure(error, { fallback: "The linked artifact could not be removed." }).message,
         );
         return;
       }
@@ -4180,9 +4180,9 @@ export function WhiteboardStudio({
               </div>
               {selectedNode.type === "embed" ? (
                 <label>
-                  Linked work
+                  Linked artifact
                   <SelectField
-                    ariaLabel="Linked work"
+                    ariaLabel="Linked artifact"
                     size="sm"
                     disabled={readOnly || linkingEmbed}
                     value={

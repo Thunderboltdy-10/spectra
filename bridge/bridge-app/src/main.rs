@@ -4349,12 +4349,24 @@ fn start_update_checks(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         loop {
-            if let Ok(updater) = app.updater() {
-                if let Ok(Some(update)) = updater.check().await {
-                    install_when_idle(app.clone(), update).await;
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(12 * 60 * 60)).await;
+            // A check that could not reach the release (offline, at login before
+            // the network) tries again soon instead of waiting half a day.
+            let reached = match app.updater() {
+                Ok(updater) => match updater.check().await {
+                    Ok(Some(update)) => {
+                        install_when_idle(app.clone(), update).await;
+                        true
+                    }
+                    Ok(None) => true,
+                    Err(error) => {
+                        eprintln!("[update] check failed: {error}");
+                        false
+                    }
+                },
+                Err(_) => false,
+            };
+            let wait = if reached { 6 * 60 * 60 } else { 20 * 60 };
+            tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
         }
     });
 }
@@ -5499,8 +5511,14 @@ fn main() {
             // queued writes attached to an offline Bridge.
             let isolated_runtime = std::env::var_os("SPECTRA_BRIDGE_DATA_DIR");
             if isolated_runtime.is_none() {
-                app.autolaunch().enable()?;
-                repair_windows_autostart_command()?;
+                // Starting at login must never stop Bridge starting now. If the
+                // logon task cannot be made, the plain login entry stays.
+                if let Err(error) = app.autolaunch().enable() {
+                    eprintln!("[autostart] login entry could not be set: {error}");
+                }
+                if let Err(error) = repair_windows_autostart_command() {
+                    eprintln!("[autostart] logon task could not be made: {error:#}");
+                }
             }
             let data_dir = resolve_bridge_data_dir(isolated_runtime, app.path().app_data_dir()?)?;
             std::fs::create_dir_all(&data_dir)?;

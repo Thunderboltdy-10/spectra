@@ -683,7 +683,7 @@ export function snapshotArtifactRegions(
     let label = regionId;
     let regionValue: unknown;
     if (regionId === "artifact:structure") {
-      label = "Whole work";
+      label = "Whole artifact";
       regionValue = value.content;
     } else if (regionId === "metadata:title") {
       label = "Title";

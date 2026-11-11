@@ -121,7 +121,7 @@ function regionPreview(projected: ProjectedDocument, typeKey: ArtifactTypeKey, r
   if (regionId === "metadata:title") return { label: "Title", text: value.title };
   if (regionId === "metadata:summary") return { label: "Summary", text: value.summary ?? "" };
   if (regionId === "metadata:tags") return { label: "Tags", text: value.tags.join(", ") };
-  if (regionId === STRUCTURE_REGION) return { label: "Whole work", text: excerpt([value.title, value.content]) };
+  if (regionId === STRUCTURE_REGION) return { label: "Whole artifact", text: excerpt([value.title, value.content]) };
   const region = workYjsAdapter(typeKey).deriveSemanticRegions(projected.document, value.content as never)
     .find(candidate => candidate.regionId === regionId);
   if (!region) return { label: undefined, text: undefined };

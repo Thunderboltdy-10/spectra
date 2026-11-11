@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 describe("what is open, for the run", () => {
-  it("names open work by id, its type and title, and leaves out the conversation the message continues", async () => {
+  it("names open artifact by id, its type and title, and leaves out the conversation the message continues", async () => {
     const artifacts = [{ _id: "doc-1", title: "Cell notes", blueprintKey: "document" }] as unknown as SpectraArtifact[];
     const workspaces: never[] = [];
     const { result } = renderHook(() => useSpectraContext(artifacts, workspaces));

@@ -107,7 +107,7 @@ async function seed(t: ReturnType<typeof setupTest>) {
   });
 }
 
-describe("an embed of a work kept on one computer", () => {
+describe("an embed of an artifact kept on one computer", () => {
   it("names the computer instead of showing contents Spectra does not hold", async () => {
     const t = setupTest();
     const { page, kept, shared } = await seed(t);

@@ -239,7 +239,7 @@ export function ClassShelfPicker({
           ? {
               title: "No current classes",
               detail:
-                "Nothing to file into class shelves. General is ready for your work.",
+                "Nothing to file into class shelves. General is ready for your artifact.",
             }
           : state.kind === "error"
             ? {

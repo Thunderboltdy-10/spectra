@@ -33,12 +33,12 @@ export const PERMISSION_CATEGORY_LABELS: Record<PermissionCategory, string> = {
 
 /** What each category covers, for the Settings rows. */
 export const PERMISSION_CATEGORY_DESCRIPTIONS: Record<PermissionCategory, string> = {
-  permanent_delete: "Deleting work or files for good, and emptying the trash.",
+  permanent_delete: "Deleting artifact or files for good, and emptying the trash.",
   external_send: "Sending or publishing anything outside Spectra.",
   managebac: "Writing to ManageBac, such as submissions and class changes.",
   bridge_files: "Moving, overwriting or deleting files on your computer through Bridge.",
   settings: "Changing your Spectra settings. Spectra can never change these permissions.",
-  sharing: "Sharing work or workspaces, and changing who has access.",
+  sharing: "Sharing artifact or workspaces, and changing who has access.",
   connections: "Connecting, disconnecting or changing accounts and services.",
 };
 

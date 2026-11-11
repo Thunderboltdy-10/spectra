@@ -57,7 +57,7 @@ async function renderPanel() {
       open
       artifactId="artifact-1"
       currentAccountId="me"
-      regions={[{ regionId: "artifact:structure", label: "Whole work" }]}
+      regions={[{ regionId: "artifact:structure", label: "Whole artifact" }]}
     />,
   );
   await act(async () => {});

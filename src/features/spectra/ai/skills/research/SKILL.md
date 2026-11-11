@@ -1,16 +1,16 @@
 ---
 name: research
-description: Finding, weighing and citing sources honestly, from the web or the user's own work.
+description: Finding, weighing and citing sources honestly, from the web or the user's own artifacts.
 ---
 
 # Research
 
-Use this whenever an answer or a piece of work rests on sources: a researched document, a
+Use this whenever an answer or an artifact rests on sources: a researched document, a
 fact-check, an essay with references, a "what does the evidence say" question.
 
 ## Finding sources
 
-- Start with what the user already has: `search` their work and chats for notes and sources
+- Start with what the user already has: `search` their artifacts and chats for notes and sources
   before going to the web.
 - Use `web_search` for current or specialist information. Run a second, narrower search when
   the first one is thin; set `deep` for broad questions.

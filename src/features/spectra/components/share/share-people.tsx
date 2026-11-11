@@ -40,7 +40,7 @@ export function ShareRequests({ access }: { access: ShareAccess }) {
 function AccessRequest({ request, access }: { request: SpectraArtifactAccessRequest; access: ShareAccess }) {
   const [level, setLevel] = useState<ShareLevel>(request.requestedLevel);
   const working = access.busyKey === `request:${request.requestId}`;
-  const from = request.context ? `, from an embed in a ${request.context.containerType === "thread" ? "thread" : "work"}` : "";
+  const from = request.context ? `, from an embed in a ${request.context.containerType === "thread" ? "thread" : "artifact"}` : "";
   return (
     <li className="share-person share-person--request">
       <LifeKey id={`access-request:${request.requestId}`} />

@@ -101,7 +101,7 @@ describe("the rail", () => {
     expect(document.documentElement.dataset.spectraSidebarCollapsed).toBe("false");
   });
 
-  it("opens a pinned work where the page can hold it, else in the Library", async () => {
+  it("opens a pinned artifact where the page can hold it, else in the Library", async () => {
     pinned.nodes = [{ nodeId: "n1", sourceId: "work-1", name: "Essay", typeKey: "document", activityAt: Date.now(), kind: "work" }];
     await act(async () => {
       render(<Rail />);

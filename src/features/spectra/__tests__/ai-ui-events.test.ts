@@ -62,7 +62,7 @@ describe("AI UI events", () => {
       payload: { destination: "artifact", targetId: "artifact-7" },
     });
     expect(opened).toEqual([]);
-    expect(getAiLocation()?.note).toBe("Opening the requested work");
+    expect(getAiLocation()?.note).toBe("Opening the requested artifact");
 
     setFollowingAi(true);
     expect(opened).toEqual(["artifact-7"]);
@@ -340,7 +340,7 @@ describe("AI UI events", () => {
     expect(getAiLocation()).toMatchObject({ artifactId: "agent-3", note: "Drafted 2 skills in the Foundry" });
   });
 
-  it("points Follow at a school resource Spectra copied into the Library, and ignores an event with no work", () => {
+  it("points Follow at a school resource Spectra copied into the Library, and ignores an event with no artifact", () => {
     handleSpectraAiUiEvent({ key: "managebac_resource_imported", runId: "run-1", payload: { note: "Copied a school resource into your Library" } });
     expect(getAiLocation()).toBeNull();
     handleSpectraAiUiEvent({ key: "managebac_resource_imported", runId: "run-1", payload: { targetId: "work-9", note: "Copied a school resource into your Library" } });

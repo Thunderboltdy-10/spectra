@@ -116,6 +116,7 @@ export type ArtifactAuthorityResource = {
   schoolId?: Id<"schools">;
   blueprintKey: string;
   status: Doc<"spectraArtifacts">["status"];
+  syllabus?: { id: string; level?: "SL" | "HL" };
 };
 
 export type LoadedArtifactAuthority = {
@@ -161,6 +162,8 @@ async function loadArtifactAuthorityFromSummary(
       schoolId: summary.schoolId,
       blueprintKey: summary.blueprintKey,
       status: summary.status,
+      // This is the server-maintained compact row, never a client projection.
+      ...(summary.projection?.syllabus ? { syllabus: summary.projection.syllabus } : {}),
     } satisfies ArtifactAuthorityResource;
     return {
       resource,
@@ -178,6 +181,7 @@ async function loadArtifactAuthorityFromSummary(
       schoolId: artifact.schoolId,
       blueprintKey: artifact.blueprintKey,
       status: artifact.status,
+      ...(artifact.syllabus ? { syllabus: artifact.syllabus } : {}),
     },
     ownerAccountId: artifact.ownerAccountId,
     schoolId: artifact.schoolId,
@@ -292,6 +296,20 @@ async function inheritedArtifactAccess(
 }
 
 async function evaluateLoadedResourceAccess(
+  ctx: AuthorityCtx,
+  actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
+  resourceType: ResourceType,
+  resourceId: string,
+  loaded: LoadedResource | null,
+  retainedPinRead = false,
+) {
+  const decision = await evaluateLoadedResourceAccessUnrestricted(ctx, actor, resourceType, resourceId, loaded, retainedPinRead);
+  return decision.allowed && resourceType !== "workspace" && loaded && "syllabus" in loaded.resource && loaded.resource.syllabus
+    ? { ...decision, level: "read" as const, capabilities: decision.capabilities.filter((capability): boolean => capability !== "modify") }
+    : decision;
+}
+
+async function evaluateLoadedResourceAccessUnrestricted(
   ctx: AuthorityCtx,
   actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
   resourceType: ResourceType,
@@ -489,6 +507,19 @@ export async function evaluateAccessForActorWithLoadedResource(
 }
 
 async function evaluateLoadedArtifactAuthority(
+  ctx: AuthorityCtx,
+  actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
+  resourceType: "artifact" | "agent",
+  resourceId: string,
+  loaded: LoadedArtifactAuthority | null,
+) {
+  const decision = await evaluateLoadedArtifactAuthorityUnrestricted(ctx, actor, resourceType, resourceId, loaded);
+  return decision.allowed && loaded?.resource.syllabus
+    ? { ...decision, level: "read" as const, capabilities: decision.capabilities.filter((capability): boolean => capability !== "modify") }
+    : decision;
+}
+
+async function evaluateLoadedArtifactAuthorityUnrestricted(
   ctx: AuthorityCtx,
   actor: NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>,
   resourceType: "artifact" | "agent",

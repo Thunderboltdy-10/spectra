@@ -168,7 +168,7 @@ const COMMANDS: Record<string, ApplicationCommand> = {
         if (value.action === "revoke" && !value.grantId) ctx.addIssue({ code: "custom", path: ["grantId"], message: "A grant id is required." });
         if (value.action === "withdraw_invitation" && !value.invitationId) ctx.addIssue({ code: "custom", path: ["invitationId"], message: "A pending invitation id is required." });
         if ((value.action === "set_exception" || value.action === "clear_exception") && !value.accountId) ctx.addIssue({ code: "custom", path: ["accountId"], message: "The member's account id is required." });
-        if ((value.action === "set_exception" || value.action === "clear_exception") && value.resourceType === "workspace") ctx.addIssue({ code: "custom", path: ["resourceType"], message: "Exceptions are set on a single work, not a workspace." });
+        if ((value.action === "set_exception" || value.action === "clear_exception") && value.resourceType === "workspace") ctx.addIssue({ code: "custom", path: ["resourceType"], message: "Exceptions are set on a single artifact, not a workspace." });
         if (value.action === "set_exception" && !value.effect) ctx.addIssue({ code: "custom", path: ["effect"], message: "An exception is deny or restrict." });
         if (value.action === "revoke_public_link" && !value.linkId) ctx.addIssue({ code: "custom", path: ["linkId"], message: "A public link id is required." });
       }),

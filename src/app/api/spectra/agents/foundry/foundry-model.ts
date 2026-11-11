@@ -135,8 +135,8 @@ Return JSON with exactly this shape:
   "objective": "one paragraph stating the concrete outcome this agent produces",
   "domains": ["subject or problem area", ...],
   "intendedUsers": ["who invokes this agent", ...],
-  "expectedInputs": [{"kind": "text|file|work|data|free_form", "description": "...", "required": true}],
-  "expectedOutputs": [{"kind": "document|code|analysis|response|work", "description": "...", "format": "optional"}],
+  "expectedInputs": [{"kind": "text|file|artifact|data|free_form", "description": "...", "required": true}],
+  "expectedOutputs": [{"kind": "document|code|analysis|response|artifact", "description": "...", "format": "optional"}],
   "decisionsAllowed": [{"scope": "...", "autonomy": "always_ask|ask_when_uncertain|decide_and_inform", "boundaries": ["..."]}],
   "approvalBoundaries": [{"action": "...", "requiresApproval": true, "reason": "..."}],
   "evidenceRequirements": [{"domain": "...", "minimumExamples": 1, "purpose": "why this evidence would improve competence"}],
@@ -171,10 +171,10 @@ Return JSON with exactly this shape:
 
 Include "options" only when the section kind is a choice or permission selection. For text, long_text, file_attachment, work_reference and example_pair kinds, omit options entirely.
 
-The question must be answerable by someone who knows their own work but not AI systems. Never ask about prompts, models, tokens, temperature or retrieval.
+The question must be answerable by someone who knows their own artifact but not AI systems. Never ask about prompts, models, tokens, temperature or retrieval.
 
 Ask the way a thoughtful colleague would over coffee, not the way a form does:
-- One short question (under 25 words), about something concrete in this agent's world: a real piece of work, a real person, a real moment.
+- One short question (under 25 words), about something concrete in this agent's world: a real artifact, a real person, a real moment.
 - Prefer an indirect question when it gets a truer answer. Instead of "What tone should it use?", ask "A student hands in a weak draft the night before it is due. What should they hear first?" Instead of "What are the edge cases?", ask "Which request would you be uneasy letting it answer alone?"
 - Use the creator's words for things (students, reports, the mark scheme), never system words ("users", "workspace members", "outputs", "the agent's objective").
 - Never repeat or restate something already established; build on it.
@@ -301,7 +301,7 @@ export function facetQuestion(facet: FoundryFacet): string {
     case "tools":
       return "Should it be able to change anything itself, or only suggest?";
     case "calibration":
-      return "Show it one real piece of work and what you would say about it.";
+      return "Show it one real artifact and what you would say about it.";
     case "evaluation":
       return "How would you notice it had started getting things wrong?";
   }

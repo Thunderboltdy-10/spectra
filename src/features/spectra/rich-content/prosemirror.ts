@@ -363,7 +363,7 @@ function inlinesTo(content: readonly RichInline[], href?: string): Json[] {
         output.push({ type: "text", text: `[${inline.label ?? "source"}]` });
         break;
       case "reference":
-        output.push({ type: "text", text: inline.label ?? "Referenced work" });
+        output.push({ type: "text", text: inline.label ?? "Referenced artifact" });
         break;
       case "footnote_ref":
         output.push({ type: "text", text: `[${inline.id}]` });
@@ -448,7 +448,7 @@ function richBlockInlines(block: RichBlock): RichInline[] {
     case "media":
       return [{ type: "text", text: block.alt || block.url }];
     case "embed":
-      return [{ type: "text", text: block.label ?? "Embedded work" }];
+      return [{ type: "text", text: block.label ?? "Embedded artifact" }];
     case "source_note":
       return [{ type: "text", text: "Source: " }, ...block.content];
     case "footnote":

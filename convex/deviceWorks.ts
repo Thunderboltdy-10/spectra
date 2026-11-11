@@ -164,7 +164,7 @@ export const adoptRestored = mutation({
   args: { storeId: v.string(), artifactIds: v.array(v.string()) },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
-    if (args.artifactIds.length > 200) throw new Error("Adopt at most 200 works at a time.");
+    if (args.artifactIds.length > 200) throw new Error("Adopt at most 200 artifacts at a time.");
     let adopted = 0;
     for (const value of new Set(args.artifactIds)) {
       const id = ctx.db.normalizeId("spectraArtifacts", value);
@@ -253,7 +253,7 @@ export const finishCreate = mutation({
   },
   handler: async (ctx, args) => {
     const { artifact } = await requireArtifactCapability(ctx, args.artifactId, "modify");
-    if (artifact.storageHome !== "device") throw new Error("This work isn't kept on a computer.");
+    if (artifact.storageHome !== "device") throw new Error("This artifact isn't kept on a computer.");
     const title = args.title?.trim().slice(0, 300) || artifact.title;
     const now = Date.now();
     await ctx.db.patch(args.artifactId, {
@@ -282,12 +282,12 @@ export const movedToDevice = mutation({
     const { actor, artifact } = await requireArtifactCapability(ctx, args.artifactId, "modify");
     if (artifact.ownerAccountId !== actor.accountId) throw new Error("Only the owner can keep this on their computer.");
     if (!DEVICE_WORK_TYPES.has(artifact.blueprintKey) || artifact.nativeFormat)
-      throw new Error("This kind of work stays in the cloud.");
+      throw new Error("This kind of artifact stays in the cloud.");
     const shared = await ctx.db
       .query("accessGrants")
       .withIndex("by_resource", (q) => q.eq("resourceType", "artifact").eq("resourceId", args.artifactId))
       .first();
-    if (shared) throw new Error("A shared work stays online so everyone can open it.");
+    if (shared) throw new Error("A shared artifact stays online so everyone can open it.");
     const blueprintKey = artifact.blueprintKey as BlueprintKey;
     await retireRoomsForStorageMove(ctx, artifact);
     await ctx.db.patch(args.artifactId, {

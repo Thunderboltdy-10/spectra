@@ -183,11 +183,11 @@ export function RetainedPinRecovery({
     checking: "Checking this saved placement…",
     proven: "Placement verified. Loading the pinned version…",
     stale:
-      "The surrounding work changed during verification. Retry after editing settles.",
+      "The surrounding artifact changed during verification. Retry after editing settles.",
     unavailable:
       "This placement could not be verified. The retained version is still kept.",
     needs_checkpoint:
-      "This work needs a saved checkpoint before its placement can be verified. The retained version is still kept.",
+      "This artifact needs a saved checkpoint before its placement can be verified. The retained version is still kept.",
     failed:
       "The placement check could not finish. The retained version is still kept; you can retry.",
   }[currentState];

@@ -139,7 +139,7 @@ function Inlines({ content, verified }: { content: readonly RichInline[]; verifi
       case "citation":
         return <Citation key={index} node={node} verified={verified} />;
       case "reference":
-        return <button key={index} type="button" data-spectra-work-ref="" data-life-launch="" onClick={() => void spectraBus.command("work.open", { workId: node.workId, surface: "panel" })}>{node.label ?? "Referenced work"}</button>;
+        return <button key={index} type="button" data-spectra-work-ref="" data-life-launch="" onClick={() => void spectraBus.command("work.open", { workId: node.workId, surface: "panel" })}>{node.label ?? "Referenced artifact"}</button>;
       case "footnote_ref":
         return <sup key={index} data-footnote-ref="">[{node.id}]</sup>;
       case "image":
@@ -252,7 +252,7 @@ function Block({ block, verified }: { block: RichBlock; verified: Verified }): R
         : null;
     case "embed":
       return <div data-spectra-reference="" data-reference-id={block.embedId}>
-        {block.embedId ? <ArtifactEmbedById embedId={block.embedId} /> : block.workId ? <button type="button" data-spectra-work-ref="" data-life-launch="" onClick={() => void spectraBus.command("work.open", { workId: block.workId!, surface: "panel" })}>{block.label ?? "Referenced work"}</button> : null}
+        {block.embedId ? <ArtifactEmbedById embedId={block.embedId} /> : block.workId ? <button type="button" data-spectra-work-ref="" data-life-launch="" onClick={() => void spectraBus.command("work.open", { workId: block.workId!, surface: "panel" })}>{block.label ?? "Referenced artifact"}</button> : null}
       </div>;
     case "rule":
       return <hr />;

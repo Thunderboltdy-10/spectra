@@ -105,12 +105,12 @@ describe("widget limits", () => {
     const tool = showWidgetTool();
     const outcome = await tool.execute(tool.parse!({ title: "Angle", html: slider }), context);
     expect(outcome.widget).toEqual({ title: "Angle", html: slider });
-    expect(outcome.content).toMatch(/save it as work/);
+    expect(outcome.content).toMatch(/save it as an artifact/);
     expect(tool.effect).toBe("read");
   });
 });
 
-describe("saving a widget as work", () => {
+describe("saving a widget as artifact", () => {
   it("chooses code with the browser runtime and records why", () => {
     expect(chooseWidgetArtifactType(slider)).toMatchObject({ type: "code", runtime: "browser", reason: expect.stringMatching(/interactive/) });
     expect(chooseWidgetArtifactType("<svg><circle r='4'/></svg>").reason).toMatch(/HTML and SVG exactly as drawn/);

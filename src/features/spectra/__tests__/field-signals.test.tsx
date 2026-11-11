@@ -94,7 +94,7 @@ describe("fieldStateFor", () => {
   });
 });
 
-describe("open work identity", () => {
+describe("open artifact identity", () => {
   it("renders an open board card in the selected state", () => {
     const { container } = render(
       <ArtifactCard

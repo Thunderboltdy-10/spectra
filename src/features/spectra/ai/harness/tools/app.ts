@@ -4,6 +4,7 @@ import { applicationCommandCategory } from "../../../../../../shared/ai-applicat
 import { AI_SYNC_PURPOSES, SCHOOL_SYNC_KINDS, SCHOOL_SYNC_MODES } from "../../../../../../shared/school-sync";
 import { calendarLocalTimeToEpoch } from "../../../../../../shared/calendar-time";
 import { refusePastCalendarStart } from "../../../calendar/domain/past-start";
+import { CALENDAR_TOUCH_PREFIX } from "../../../calendar/domain/touch";
 import type { CommandResult } from "../backend";
 import { ToolInputError, type AnyHarnessTool, type HarnessTool, type PermissionCategory, type ToolEffect, type ToolOutcome } from "../types";
 import {
@@ -141,6 +142,31 @@ export function describePatch(patch: Record<string, unknown>, prefix = ""): stri
     if (value && typeof value === "object" && !Array.isArray(value)) return describePatch(value as Record<string, unknown>, name);
     return [`${name}: ${Array.isArray(value) ? value.join(", ") : String(value).replace(/_/g, " ")}`];
   });
+}
+
+/**
+ * What a calendar write made, as the reply's card. Anything to do is a task
+ * work ("planArtifactId"), so its card opens the task; a lesson is a plain
+ * event, "calendar:<item id>", landing on its start in the calendar.
+ */
+export function calendarEventTouch(content: string, title?: string) {
+  // Read by pattern, not JSON.parse: a long result is cut short for the model.
+  const id = /"id"\s*:\s*"([^"]+)"/.exec(content)?.[1];
+  if (!id) return null;
+  const work = /"planArtifactId"\s*:\s*"([^"]+)"/.exec(content)?.[1];
+  const startAt = /"startAt"\s*:\s*(\d+)/.exec(content)?.[1];
+  const named = /"title"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(content)?.[1];
+  const label = (named && named.replace(/\\(.)/g, "$1")) || title || "Event";
+  if (work)
+    return { id: work, type: "planner_task", title: label, action: "created" as const, change: "Added to your calendar" };
+  return {
+    id: `${CALENDAR_TOUCH_PREFIX}${id}`,
+    type: "calendar_event",
+    title: label,
+    action: "created" as const,
+    change: "Added to your calendar",
+    ...(startAt ? { region: `at:${startAt}` } : {}),
+  };
 }
 
 const LOCAL_TIME = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2})?$/;
@@ -371,7 +397,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     }),
     commandTool(session, {
       name: "calendar",
-      description: `Change the user's calendar. action add_event: a personal event {title, start, end?, allDay?, notes?}. A lesson or anything else that repeats takes repeat {everyWeeks, until (YYYY-MM-DD), except? (dates it does not happen)} on one add_event, instead of one call per date: a timetable lives here, not in a document. In a two-week cycle give each lesson everyWeeks 2 and start it in its own week, and say which week in notes. action schedule_task: a work block for a planner task {taskId (the task's artifact id), start, end}. When the user names a task, find it first and use it; make a new task only if none matches. action move_block {itemId, start, end?, expectedRevision} and resize_block {itemId, end, expectedRevision} for work blocks from read_calendar. complete_block {itemId, expectedRevision} marks a work block done; remove_event {itemId, andFollowing?} takes a personal event or work block off the calendar; andFollowing also takes every later event of its repeating lesson. To change one date of a repeating lesson, remove that event and add its replacement. Times are YYYY-MM-DDTHH:mm in the user's time zone (${timeZone}). A start that has already passed is refused; set alreadyHappened only when the user is logging something that already happened. Official school deadlines cannot be moved.`,
+      description: `Change the user's calendar. Everything on it that the user adds is one kind of thing, a task, which opens beside the conversation: action add_event {title, start, end?, allDay?, notes?} makes one. Give only a day (start YYYY-MM-DD, allDay true) when there is no set time: it sits at the top of that day. Give start alone for a deadline at a time ("hand in by 15:00"). Give start and end for something that fills those hours (an appointment, a match, a study session). notes is its description; a list in it breaks the task into parts. A task already open or found with search is changed with update_artifact, not added again. A lesson or anything else that repeats takes repeat {everyWeeks, until (YYYY-MM-DD), except? (dates it does not happen)} on one add_event, instead of one call per date: a timetable lives here, not in a document. In a two-week cycle give each lesson everyWeeks 2 and start it in its own week, and say which week in notes. action schedule_task: a work block for a planner task {taskId (the task's artifact id), start, end}. When the user names a task, find it first and use it; make a new task only if none matches. action move_block {itemId, start, end?, expectedRevision} and resize_block {itemId, end, expectedRevision} for work blocks from read_calendar. complete_block {itemId, expectedRevision} marks a work block done; remove_event {itemId, andFollowing?} takes a personal event or work block off the calendar; andFollowing also takes every later event of its repeating lesson. To change one date of a repeating lesson, remove that event and add its replacement. Times are YYYY-MM-DDTHH:mm in the user's time zone (${timeZone}). A start that has already passed is refused; set alreadyHappened only when the user is logging something that already happened. Official school deadlines cannot be moved.`,
       parameters: {
         type: "object",
         properties: {
@@ -405,6 +431,12 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
         args.action === "add_event" ? `Adding *${args.title}* to your calendar` : CALENDAR_WORDS[args.action]?.[0] ?? "Updating your calendar",
       doneLabel: (args: { action: string; title?: string }) =>
         args.action === "add_event" ? `Added *${args.title}* to your calendar` : CALENDAR_WORDS[args.action]?.[1] ?? "Updated your calendar",
+      // A new event stands under the reply as a card that opens the calendar on its day.
+      after: (args: { action: string; title?: string }, result) => {
+        if (args.action !== "add_event") return {};
+        const touch = calendarEventTouch(result.content, args.title);
+        return touch ? { artifacts: [touch] } : {};
+      },
       parse: (raw) => {
         const parsed = (() => {
         const action = oneOf(raw, "action", CALENDAR_ACTIONS);
@@ -468,7 +500,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "organize_library",
       description:
-        "Organize the library: create_folder {name, destinationId?}, create_workspace {name, destinationId?}, rename {targetIds: [one id], name} (folders, work and workspaces), move {targetIds, destinationId}, link {targetIds, destinationId} (adds a shortcut without moving), pin and unpin {targetIds: [one id]}. Ids are folder, workspace or item ids from list_library. If items have files on the user's computer through Bridge, the user is asked first.",
+        "Organize the library: create_folder {name, destinationId?}, create_workspace {name, destinationId?}, rename {targetIds: [one id], name} (folders, artifacts and workspaces), move {targetIds, destinationId}, link {targetIds, destinationId} (adds a shortcut without moving), pin and unpin {targetIds: [one id]}. Ids are folder, workspace or item ids from list_library. If items have files on the user's computer through Bridge, the user is asked first.",
       parameters: {
         type: "object",
         properties: {
@@ -529,7 +561,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "save_version",
       description:
-        "Save a named version of a work item: a checkpoint the user can return to from its history. Use it before a large change they may want to undo, or when they ask to keep this state.",
+        "Save a named version of an artifact: a checkpoint the user can return to from its history. Use it before a large change they may want to undo, or when they ask to keep this state.",
       parameters: {
         type: "object",
         properties: { artifactId: { type: "string" }, name: { type: "string" } },
@@ -537,27 +569,27 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
         additionalProperties: false,
       },
       effect: "write",
-      label: (args: { artifactId: string }) => `Saving a version of ${titled(session, args.artifactId, "your work")}`,
-      doneLabel: (args: { artifactId: string; name: string }) => `Saved *${args.name}* of ${titled(session, args.artifactId, "your work")}`,
+      label: (args: { artifactId: string }) => `Saving a version of ${titled(session, args.artifactId, "your artifact")}`,
+      doneLabel: (args: { artifactId: string; name: string }) => `Saved *${args.name}* of ${titled(session, args.artifactId, "your artifact")}`,
       parse: (raw) => ({ artifactId: requireString(raw, "artifactId", 200), name: requireString(raw, "name", 180) }),
       command: (args) => ({ command: "save_version", args: { artifactId: args.artifactId, name: args.name } }),
     }),
     commandTool(session, {
       name: "show_work",
       description:
-        "Place a work live in your reply, where the user can use it without leaving the conversation: flashcards they turn, a quiz they answer, slides they step through, a sheet or document they read. Use it right after you create something meant to be used now (\"quiz me\", \"make flashcards and let me practise\"), or when the user asks to see a work here. It appears under your reply; write the reply as if it is there. Opening a work in its own panel is open_in_spectra.",
+        "Place an artifact live in your reply, where the user can use it without leaving the conversation: flashcards they turn, a quiz they answer, slides they step through, a sheet or document they read. Use it right after you create something meant to be used now (\"quiz me\", \"make flashcards and let me practise\"), or when the user asks to see an artifact here. It appears under your reply; write the reply as if it is there. Opening an artifact in its own panel is open_in_spectra.",
       parameters: {
         type: "object",
         properties: {
           artifactId: { type: "string" },
-          size: { type: "string", enum: ["compact", "expanded"], description: "expanded (the default) gives the work room to be used; compact is a small preview." },
+          size: { type: "string", enum: ["compact", "expanded"], description: "expanded (the default) gives the artifact room to be used; compact is a small preview." },
         },
         required: ["artifactId"],
         additionalProperties: false,
       },
       effect: "write",
-      label: (args: { artifactId: string }) => `Placing ${titled(session, args.artifactId, "the work")} here`,
-      doneLabel: (args: { artifactId: string }) => `Placed ${titled(session, args.artifactId, "the work")} here`,
+      label: (args: { artifactId: string }) => `Placing ${titled(session, args.artifactId, "the artifact")} here`,
+      doneLabel: (args: { artifactId: string }) => `Placed ${titled(session, args.artifactId, "the artifact")} here`,
       parse: (raw) => {
         const size = raw.size === undefined ? undefined : oneOf(raw, "size", ["compact", "expanded"] as const);
         return { artifactId: requireString(raw, "artifactId", 200), ...(size ? { size } : {}) };
@@ -605,7 +637,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "move_to_trash",
       description:
-        "Move library items (work, folders) to the Trash. The user can restore them from the Trash, so this does not ask first unless desktop files are affected. Spectra never deletes permanently.",
+        "Move library items (artifact, folders) to the Trash. The user can restore them from the Trash, so this does not ask first unless desktop files are affected. Spectra never deletes permanently.",
       parameters: {
         type: "object",
         properties: { targetIds: { type: "array", items: { type: "string" } } },
@@ -622,7 +654,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "share",
       description:
-        "Change who can open the user's work (ids from read_sharing): invite {subjectId (an account id), level: read|modify}; change_level {invitationId, level}; revoke {grantId}; withdraw_invitation {invitationId} for a pending one; set_exception {accountId, effect: deny|restrict} limits one member who reaches a single work through a shared workspace (restrict means view only), clear_exception {accountId} lifts it; create_public_link {expiresInDays?: 7|30} makes a read-only address anyone can open, which goes to the user only, never to you; revoke_public_link {linkId}. The user approves every sharing change unless they allowed sharing changes, and every public link unless they allowed publishing outside Spectra.",
+        "Change who can open the user's artifact (ids from read_sharing): invite {subjectId (an account id), level: read|modify}; change_level {invitationId, level}; revoke {grantId}; withdraw_invitation {invitationId} for a pending one; set_exception {accountId, effect: deny|restrict} limits one member who reaches a single artifact through a shared workspace (restrict means view only), clear_exception {accountId} lifts it; create_public_link {expiresInDays?: 7|30} makes a read-only address anyone can open, which goes to the user only, never to you; revoke_public_link {linkId}. The user approves every sharing change unless they allowed sharing changes, and every public link unless they allowed publishing outside Spectra.",
       parameters: {
         type: "object",
         properties: {
@@ -644,13 +676,13 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       effect: "irreversible",
       label: (args: ShareArgs) =>
         args.action === "create_public_link"
-          ? `Making a public link to ${titled(session, args.resourceId, "your work")}`
-          : `Changing who can open ${titled(session, args.resourceId, "your work")}`,
+          ? `Making a public link to ${titled(session, args.resourceId, "your artifact")}`
+          : `Changing who can open ${titled(session, args.resourceId, "your artifact")}`,
       doneLabel: (args: ShareArgs) =>
         args.action === "create_public_link"
-          ? `Made a public link to ${titled(session, args.resourceId, "your work")}`
-          : `Changed sharing for ${titled(session, args.resourceId, "your work")}`,
-      question: (args: ShareArgs) => shareQuestion(titled(session, args.resourceId, "this work"), args),
+          ? `Made a public link to ${titled(session, args.resourceId, "your artifact")}`
+          : `Changed sharing for ${titled(session, args.resourceId, "your artifact")}`,
+      question: (args: ShareArgs) => shareQuestion(titled(session, args.resourceId, "this artifact"), args),
       parse: (raw): ShareArgs => {
         const action = oneOf(raw, "action", SHARE_ACTIONS);
         const parsed: ShareArgs = {
@@ -671,7 +703,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
         const needs = SHARE_NEEDS[action].filter((key) => parsed[key] === undefined);
         if (needs.length) throw new ToolInputError(`${action} needs ${needs.join(" and ")}${action === "invite" ? "" : " (read_sharing lists them)"}.`);
         if ((action === "set_exception" || action === "clear_exception") && parsed.resourceType === "workspace")
-          throw new ToolInputError("Exceptions are set on a single work: use resourceType artifact or agent.");
+          throw new ToolInputError("Exceptions are set on a single artifact: use resourceType artifact or agent.");
         return parsed;
       },
       command: (args) => ({ command: "change_sharing", args: args as Record<string, unknown> }),
@@ -679,7 +711,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "managebac",
       description:
-        "Act on the user's ManageBac connection: sync {purpose: upcoming_deadlines|class_resources|timetable|classes|past_tasks|grades|cas} refreshes school records; select_classes {classIds, expectedRevision?} sets which classes sync. set_sync_mode {kind, mode: auto|manual|off} sets whether a kind of school record syncs automatically, only when asked, or not at all; with classId (as read_school_data names it) it sets one class's own choice, and mode follow lets that class follow the kind's mode again. create_class_workspaces {classIds} makes a workspace for each class; release_class_workspaces {classIds, retention?: keep_in_spectra|archive_projection} lets them go. import_resource {resourceId} copies a class resource into the user's Library, as the class shelf's Import does: resourceId is the id of a record read_school_data {purpose: class_resources} returned, and Office files become editable works. When the resource changed since an earlier import, the result says so; refresh true then makes a new copy beside the earlier one. sync runs at once; the other actions need the user's approval unless they allowed ManageBac changes.",
+        "Act on the user's ManageBac connection: sync {purpose: upcoming_deadlines|class_resources|timetable|classes|past_tasks|grades|cas} refreshes school records; select_classes {classIds, expectedRevision?} sets which classes sync. set_sync_mode {kind, mode: auto|manual|off} sets whether a kind of school record syncs automatically, only when asked, or not at all; with classId (as read_school_data names it) it sets one class's own choice, and mode follow lets that class follow the kind's mode again. create_class_workspaces {classIds} makes a workspace for each class; release_class_workspaces {classIds, retention?: keep_in_spectra|archive_projection} lets them go. import_resource {resourceId} copies a class resource into the user's Library, as the class shelf's Import does: resourceId is the id of a record read_school_data {purpose: class_resources} returned, and Office files become editable artifacts. When the resource changed since an earlier import, the result says so; refresh true then makes a new copy beside the earlier one. sync runs at once; the other actions need the user's approval unless they allowed ManageBac changes.",
       parameters: {
         type: "object",
         properties: {
@@ -763,7 +795,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "add_comment",
       description:
-        "Leave a visible, AI-attributed comment on a piece of work, for feedback the user asked for without changing the work. regionId is a block, slide or cell region from the content; omit it to comment on the whole item. replyTo (a comment id from read_comments) answers that comment in its thread.",
+        "Leave a visible, AI-attributed comment on an artifact, for feedback the user asked for without changing the artifact. regionId is a block, slide or cell region from the content; omit it to comment on the whole item. replyTo (a comment id from read_comments) answers that comment in its thread.",
       parameters: {
         type: "object",
         properties: { artifactId: { type: "string" }, body: { type: "string" }, regionId: { type: "string" }, replyTo: { type: "string" } },
@@ -771,8 +803,8 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
         additionalProperties: false,
       },
       effect: "write",
-      label: (args: { artifactId: string }) => `Commenting on ${titled(session, args.artifactId, "your work")}`,
-      doneLabel: (args: { artifactId: string }) => `Commented on ${titled(session, args.artifactId, "your work")}`,
+      label: (args: { artifactId: string }) => `Commenting on ${titled(session, args.artifactId, "your artifact")}`,
+      doneLabel: (args: { artifactId: string }) => `Commented on ${titled(session, args.artifactId, "your artifact")}`,
       parse: (raw) => ({
         artifactId: requireString(raw, "artifactId", 200),
         body: requireString(raw, "body"),
@@ -792,7 +824,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
     commandTool(session, {
       name: "manage_comment",
       description:
-        "Change a comment on a piece of work (ids from read_comments): resolve or reopen its thread, edit its text, or delete it. Only the comment's author can edit or delete it. Deleting removes the text for good, so the user is asked first.",
+        "Change a comment on an artifact (ids from read_comments): resolve or reopen its thread, edit its text, or delete it. Only the comment's author can edit or delete it. Deleting removes the text for good, so the user is asked first.",
       parameters: {
         type: "object",
         properties: {
@@ -805,9 +837,9 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
         additionalProperties: false,
       },
       effect: (args: CommentArgs) => (args.action === "delete" ? "irreversible" : "write"),
-      label: (args: CommentArgs) => `${COMMENT_LABELS[args.action]?.[0] ?? "Changing a comment"} on ${titled(session, args.artifactId, "your work")}`,
-      doneLabel: (args: CommentArgs) => `${COMMENT_LABELS[args.action]?.[1] ?? "Changed a comment"} on ${titled(session, args.artifactId, "your work")}`,
-      question: (args: CommentArgs) => `Delete this comment on ${titled(session, args.artifactId, "this work")}? Its text can't be brought back.`,
+      label: (args: CommentArgs) => `${COMMENT_LABELS[args.action]?.[0] ?? "Changing a comment"} on ${titled(session, args.artifactId, "your artifact")}`,
+      doneLabel: (args: CommentArgs) => `${COMMENT_LABELS[args.action]?.[1] ?? "Changed a comment"} on ${titled(session, args.artifactId, "your artifact")}`,
+      question: (args: CommentArgs) => `Delete this comment on ${titled(session, args.artifactId, "this artifact")}? Its text can't be brought back.`,
       parse: (raw): CommentArgs => {
         const action = oneOf(raw, "action", COMMENT_ACTIONS);
         const body = action === "edit" ? requireString(raw, "body") : undefined;
@@ -831,9 +863,9 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
       },
       effect: "read",
       label: (args: { destination: string; targetId?: string; region?: string }) =>
-        args.destination === "artifact" ? `Opening ${titled(session, args.targetId, "your work")}` : `Opening ${args.destination}`,
+        args.destination === "artifact" ? `Opening ${titled(session, args.targetId, "your artifact")}` : `Opening ${args.destination}`,
       doneLabel: (args: { destination: string; targetId?: string }) =>
-        args.destination === "artifact" ? `Opened ${titled(session, args.targetId, "your work")}` : `Opened ${args.destination}`,
+        args.destination === "artifact" ? `Opened ${titled(session, args.targetId, "your artifact")}` : `Opened ${args.destination}`,
       parse: (raw) => {
         const destination = oneOf(raw, "destination", OPEN_IN_SPECTRA_DESTINATIONS);
         const targetId = optionalString(raw, "targetId", 200);

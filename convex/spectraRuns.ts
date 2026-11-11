@@ -987,7 +987,7 @@ export const beginRun = mutation({
         status: "completed",
         phase: "completed",
         outcome: "answer_only",
-        finalSummary: "Clarification answered; continuing with the selected work.",
+        finalSummary: "Clarification answered; continuing with the selected artifact.",
         completedAt: now,
         workerId: undefined,
         leaseExpiresAt: undefined,
@@ -3096,7 +3096,7 @@ export const stopRun = mutation({
             ? `Stopped by you. ${ATTACHMENT_RETRY_MESSAGE}`
             : recovery.retryable
               ? "Stopped by you. Any partial response remains available in the thread."
-              : "Stopped by you. Some work may already be visible — review it before continuing.",
+              : "Stopped by you. Some changes may already be visible — review it before continuing.",
           actions: stopActions,
           updatedAt: now,
         }),

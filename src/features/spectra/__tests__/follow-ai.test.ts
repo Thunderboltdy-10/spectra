@@ -63,7 +63,7 @@ describe("follow AI", () => {
     return opened;
   }
 
-  it("ignores a late studio frame after its run advances to the next work", () => {
+  it("ignores a late studio frame after its run advances to the next artifact", () => {
     const opened = openEvents();
     followAiActor("run");
     noteAiLocation({ actorId: "run", artifactId: "first" });
@@ -298,7 +298,7 @@ describe("follow AI", () => {
     expect(opened).toEqual(["art-a2"]);
   });
 
-  it("opens the work at the place Spectra asked to show, and moves there when already open", () => {
+  it("opens the artifact at the place Spectra asked to show, and moves there when already open", () => {
     clearLandings();
     const regions: unknown[] = [];
     spectraBus.handle("work.open", ({ region }) => {

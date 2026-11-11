@@ -1,6 +1,7 @@
 import { query } from "./functions";
 import { internalMutation, mutation } from "./orgNodeMutation";
 import { internal } from "./_generated/api";
+import { SYLLABUS_BUNDLE_VERSION } from "../shared/syllabus/catalog.generated";
 import { v } from "convex/values";
 import { SCHOOL_SYNC_IDLE_AFTER_MS } from "../shared/school-sync-rest";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -133,7 +134,7 @@ async function assertCurrentSyncLease(
       syncRun.projectionIngestionComplete)
     throw new Error("INTEGRATION_SYNC_FENCED: This sync is no longer current.");
   if (syncRun.leaseToken && syncRun.leaseToken !== leaseToken)
-    throw new Error("INTEGRATION_SYNC_FENCED: A newer sync owns this work.");
+    throw new Error("INTEGRATION_SYNC_FENCED: A newer sync owns this artifact.");
   if (syncRun.leaseToken && (!syncRun.leaseExpiresAt || syncRun.leaseExpiresAt <= Date.now()))
     throw new Error("INTEGRATION_SYNC_FENCED: The sync lease expired.");
   if (syncRun.accountId && syncRun.selectionRevision !== undefined) {
@@ -2812,6 +2813,10 @@ async function ensureClassWorkspace(
       /* The tree names the workspace too; a class renamed in ManageBac is
          renamed in the Library, not only on its own page. */
       if (changedWorkspace) await ensureWorkspaceNode(ctx, (await ctx.db.get(existingWorkspace._id))!);
+      /* A class follows its course syllabus (shared/syllabus); checked again only
+         when the bundled syllabi change. */
+      if (existingWorkspace.syllabusBundle !== SYLLABUS_BUNDLE_VERSION || previouslyProjectedTitle !== projectedTitle)
+        await ctx.scheduler.runAfter(0, internal.workspaceSyllabus.ensure, { workspaceId: existingWorkspace._id, className: projectedTitle });
       await patchIfChanged(ctx, existing, {
         recordId: source._id,
         sourceHash: source.sourceHash,
@@ -2846,6 +2851,8 @@ async function ensureClassWorkspace(
      that has no node. */
   const projected = await ctx.db.get(workspaceId);
   if (projected) await ensureWorkspaceNode(ctx, projected);
+  // Its syllabus, when one matches the class, becomes its first artifact.
+  await ctx.scheduler.runAfter(0, internal.workspaceSyllabus.ensure, { workspaceId, className: projectedTitle });
   if (existing) {
     await ctx.db.patch(existing._id, {
       recordId: source._id,

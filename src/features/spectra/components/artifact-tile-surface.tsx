@@ -216,7 +216,7 @@ export function ArtifactTileSurface({
           ? "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--bg-primary)]"
           : "absolute inset-0 z-panel flex min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--bg-primary)]"
       }
-      aria-label={isolated ? "Focused work set" : "Workbench split layout"}
+      aria-label={isolated ? "Focused artifact set" : "Workbench split layout"}
       onDragOver={(event) => {
         if (event.dataTransfer.types.includes("application/x-spectra-artifact"))
           event.preventDefault();
@@ -242,7 +242,7 @@ export function ArtifactTileSurface({
               type="button"
               onClick={() => setAddOpen((value) => !value)}
               className="flex h-9 w-9 items-center justify-center rounded-control text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              aria-label="Add work to tiled set"
+              aria-label="Add artifacts to tiled set"
               aria-expanded={addOpen}
             >
               <Plus className="h-4 w-4" />
@@ -264,7 +264,7 @@ export function ArtifactTileSurface({
             type="button"
             onClick={onFocusSet}
             className="flex h-9 items-center gap-1.5 rounded-control px-2.5 text-ui font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-            title="Give these works their own tab"
+            title="Give these artifacts their own tab"
           >
             <Maximize2 className="h-3.5 w-3.5" />
             Expand tiles
@@ -328,7 +328,7 @@ export function ArtifactTileSurface({
                         setDropTargetId(null);
                       }}
                       className="tile-grip"
-                      title="Drag onto another work to trade places"
+                      title="Drag onto another artifact to trade places"
                       aria-hidden
                     >
                       <GripVertical className="h-3.5 w-3.5 rotate-90" />
@@ -400,8 +400,8 @@ function AddWorkPicker({
         onKeyDown={(event) => {
           if (event.key === "Enter" && found[0]) onPick(found[0]._id);
         }}
-        placeholder="Find a work to add"
-        aria-label="Find a work to add"
+        placeholder="Find an artifact to add"
+        aria-label="Find an artifact to add"
         className="h-10 shrink-0 border-b border-[var(--border-subtle)] bg-transparent px-3 text-ui text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
       />
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
@@ -418,7 +418,7 @@ function AddWorkPicker({
         ))}
         {found.length === 0 ? (
           <p className="px-2.5 py-3 text-caption text-[var(--text-tertiary)]">
-            {artifacts.length ? "No work by that name." : "Every work is already here."}
+            {artifacts.length ? "No artifact by that name." : "Every artifact is already here."}
           </p>
         ) : null}
       </div>

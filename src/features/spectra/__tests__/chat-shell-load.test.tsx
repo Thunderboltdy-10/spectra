@@ -192,7 +192,7 @@ vi.mock("../components/command-bar", () => ({
 }));
 
 vi.mock("../components/context-controls", () => ({
-  GlobalSearch: () => <button type="button">Search work</button>,
+  GlobalSearch: () => <button type="button">Search artifact</button>,
 }));
 
 vi.mock("../components/composer-artifact-dock", () => ({
@@ -349,7 +349,7 @@ describe("ChatShell load states", () => {
     });
 
     expect(
-      await screen.findByText(scope === "context" ? "Your work could not load" : "This thread could not refresh"),
+      await screen.findByText(scope === "context" ? "Your artifact could not load" : "This thread could not refresh"),
     ).toBeTruthy();
     expect(screen.getByText("Keep this message visible.")).toBeTruthy();
     expect(screen.queryByText(/New conversation/)).toBeNull();
@@ -567,9 +567,9 @@ describe("ChatShell primary conversation hydration", () => {
     mocks.getThread.mockResolvedValue(saved());
     render(<ChatShell />);
     expect(await screen.findByText("Saved answer is available.")).toBeTruthy();
-    expect(await screen.findByText("Your work could not load")).toBeTruthy();
+    expect(await screen.findByText("Your artifact could not load")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(screen.queryByText("Your work could not load")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Your artifact could not load")).toBeNull());
     expect(screen.getByText("Saved answer is available.")).toBeTruthy();
     expect(mocks.router.replace).not.toHaveBeenCalledWith("/home");
   });
@@ -599,7 +599,7 @@ describe("ChatShell primary conversation hydration", () => {
       await waitFor(() => expect(mocks.getThread).toHaveBeenCalledWith("new-thread"));
       await act(async () => { overview.reject(new Error("old context unavailable")); });
       expect(screen.getByText("Saved answer is available.")).toBeTruthy();
-      expect(screen.queryByText("Your work could not load")).toBeNull();
+      expect(screen.queryByText("Your artifact could not load")).toBeNull();
       expect(screen.queryByText("This thread could not load")).toBeNull();
     } finally { overview.resolve({ workspaces: [], artifacts: [] }); }
   });

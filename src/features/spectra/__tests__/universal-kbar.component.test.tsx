@@ -51,7 +51,7 @@ describe("UniversalKBar", () => {
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     expect(screen.getByRole("dialog", { name: "Spectra command bar" })).toBeTruthy();
 
-    const input = screen.getByPlaceholderText("Search commands, work, workspaces, conversations…");
+    const input = screen.getByPlaceholderText("Search commands, artifact, workspaces, conversations…");
     fireEvent.change(input, { target: { value: "new conversation" } });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Start a new thread" }));
@@ -65,7 +65,7 @@ describe("UniversalKBar", () => {
     render(<UniversalKBar />);
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     fireEvent.change(
-      screen.getByPlaceholderText("Search commands, work, workspaces, conversations…"),
+      screen.getByPlaceholderText("Search commands, artifact, workspaces, conversations…"),
       { target: { value: "continuation" } },
     );
     await act(async () => {
@@ -82,7 +82,7 @@ describe("UniversalKBar", () => {
     render(<UniversalKBar />);
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     fireEvent.change(
-      screen.getByPlaceholderText("Search commands, work, workspaces, conversations…"),
+      screen.getByPlaceholderText("Search commands, artifact, workspaces, conversations…"),
       { target: { value: "memory" } },
     );
     fireEvent.click(screen.getByRole("button", { name: "Update memory" }));

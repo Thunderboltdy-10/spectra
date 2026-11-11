@@ -69,7 +69,7 @@ export function loadSkillTool(): HarnessTool<LoadSkillArgs> {
   return {
     name: "load_skill",
     description:
-      "Load a skill: the craft guide for a kind of work, with the authoring format for artifact types. Load the matching skill before creating or substantially editing that kind of work, once per conversation. Pass resource to read one of the reference files the skill lists.",
+      "Load a skill: the craft guide for a kind of artifact, with the authoring format for artifact types. Load the matching skill before creating or substantially editing that kind of artifact, once per conversation. Pass resource to read one of the reference files the skill lists.",
     parameters: {
       type: "object",
       properties: {

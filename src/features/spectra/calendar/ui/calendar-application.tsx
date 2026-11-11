@@ -45,7 +45,7 @@ import { useClassBook } from "../../school/use-class-book";
 import { useDeadlineClasses, type DeadlineClass } from "../../school/use-deadline-classes";
 import { planWorkId } from "./calendar-plans";
 import { TaskPeek } from "./task-peek";
-import { schoolRecordOf, useTaskPeek } from "./use-task-peek";
+import { isAdoptable, isPeekable, schoolRecordOf, useTaskPeek } from "./use-task-peek";
 import { useOpenSchoolTask } from "../../school/open-school-task";
 import { formatTime, isDeadline, isReschedulable, layerFor } from "../domain/item-format";
 import { CalendarItemCard, type OpenedCalendarItem } from "./calendar-item-card";
@@ -425,8 +425,8 @@ function staleSyncIsDue() {
   return true;
 }
 
-export function CalendarApplication({ startAt, still = false }: { startAt?: number; still?: boolean } = {}) {
-  const initialStart = startAt ?? startOfLocalWeek(Date.now());
+export function CalendarApplication({ startAt, focusAt, still = false }: { startAt?: number; focusAt?: number; still?: boolean } = {}) {
+  const initialStart = startAt ?? startOfLocalWeek(focusAt ?? Date.now());
   const [daySpan, setDaySpanState] = useState(7);
   const [days, setDays] = useState(() => daysAround(initialStart));
   const [focusedStart, setFocusedStart] = useState(initialStart);
@@ -1019,8 +1019,14 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
 
   function openItem(item: CalendarItem, from?: HTMLElement) {
     openedOn.current = item.startAt;
-    // Every task opens as its work in the Side, a block of time for it too;
-    // a block's own actions (length, done, remove) are a right-click away.
+    // Everything one added, school deadlines and time given to a task open
+    // as the task sheet beside the block (CALENDAR.md, "Tasks"); "Open full"
+    // there takes it to the Side. Lessons keep their own card.
+    if (from && (isPeekable(item) || isAdoptable(item))) {
+      setOpened(null);
+      taskPeek.open(item, from);
+      return;
+    }
     const workId = planWorkId(item);
     if (workId) {
       openWork(workId);
@@ -1186,7 +1192,7 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
   const importCalendar = async (file: File) => {
     const toastId = toast(`Bringing in ${file.name}`);
     try {
-      const report = await importCalendarFile(file, timezone, (event) => calendarPost({ action: "createPersonalItem", ...event }));
+      const report = await importCalendarFile(file, timezone, (event) => calendarPost({ action: "createPersonalItem", ...event, plain: true }));
       const parts = [
         report.added ? `Added ${report.added} ${report.added === 1 ? "event" : "events"}.` : "Nothing new to add.",
         report.alreadyThere ? `${report.alreadyThere} already on your calendar.` : "",
@@ -1394,11 +1400,24 @@ export function CalendarApplication({ startAt, still = false }: { startAt?: numb
         <TaskPeek
           key={taskPeek.peek.item.id}
           anchor={taskPeek.peek.anchor}
+          // The task is the calendar's entry: a new day or time moves it here as soon as it is saved.
+          onSaved={() => void load("merge", visibleRange.from, visibleRange.to, true)}
           resolveWork={() => {
             const item = taskPeek.peek!.item;
             const workId = planWorkId(item);
             const recordId = recordOf(item);
-            return workId ? Promise.resolve(workId) : recordId ? schoolTask.workOf(recordId) : Promise.resolve(null);
+            if (workId) return Promise.resolve(workId);
+            if (recordId) return schoolTask.workOf(recordId);
+            // Added before everything here was a task: it becomes one now, in its place.
+            if (isAdoptable(item))
+              return calendarPost({ action: "adoptAsTask", itemId: item.id }).then((made) => {
+                const artifactId = (made as { artifactId?: string } | null)?.artifactId ?? null;
+                if (artifactId) void load("merge", visibleRange.from, visibleRange.to, true);
+                // Not something to do after all (a lesson): its own card.
+                else setOpened({ item, anchor: taskPeek.peek!.anchor });
+                return artifactId;
+              });
+            return Promise.resolve(null);
           }}
           onOpenFull={(workId) => {
             taskPeek.close();

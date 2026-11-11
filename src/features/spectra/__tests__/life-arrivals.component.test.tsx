@@ -98,7 +98,7 @@ describe("arrivals", () => {
     expect(field.form).not.toHaveBeenCalled();
   });
 
-  it("lands Spectra's work where it is, without loose light from the prism", () => {
+  it("lands Spectra's artifact where it is, without loose light from the prism", () => {
     render(<List ids={["b1"]} kinds={{ b1: "ai" }} />);
     expect(arrivals()).toBe(1);
     expect(field.travel).not.toHaveBeenCalled();
@@ -228,7 +228,7 @@ function Card({ id }: { id: string }) {
 }
 
 describe("returns", () => {
-  it("lands a closing work back on its card on the page", () => {
+  it("lands a closing artifact back on its card on the page", () => {
     const view = render(<><Surface id="r1" /><Card id="r1" /></>);
     settleBands();
     view.rerender(<><Card id="r1" /></>);
@@ -247,7 +247,7 @@ describe("returns", () => {
     expect(field.form).not.toHaveBeenCalled();
   });
 
-  it("does not land on a work another took the place of", () => {
+  it("does not land on an artifact another took the place of", () => {
     const view = render(<><Surface key="r3" id="r3" /><Card id="r3" /></>);
     settleBands();
     view.rerender(<><Surface key="r4" id="r4" /><Card id="r3" /></>);
@@ -326,7 +326,7 @@ describe("ticking something off", () => {
     done.remove();
   });
 
-  it("answers a checklist item ticked in a work, and not any checkbox", () => {
+  it("answers a checklist item ticked in an artifact, and not any checkbox", () => {
     const item = document.createElement("li");
     item.setAttribute("data-type", "taskItem");
     const box = document.createElement("input");

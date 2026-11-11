@@ -3,6 +3,7 @@ import { makeFunctionReference } from "convex/server";
 import { mutation } from "./functions";
 import type { MutationCtx } from "./_generated/server";
 import { findPrimaryNode } from "./orgTreeShared";
+import { isTaskProjection, restoreTaskWork } from "./calendarTaskWork";
 import { getAuthenticatedActor } from "./identityShared";
 import type { Doc, Id } from "./_generated/dataModel";
 import { commandHasNothingToUndo, type RunUndoCounts } from "../shared/run-undo";
@@ -359,6 +360,7 @@ export const bringBackCalendarItem = mutation({
     if (!actor) throw new Error("AUTH_ACCOUNT_REQUIRED");
     const item = await ctx.db.get(args.itemId);
     if (!item || item.ownerAccountId !== actor.accountId || item.status !== "removed") return { restored: false };
+    if (isTaskProjection(item)) return { restored: await restoreTaskWork(ctx, item) };
     await ctx.db.patch(item._id, { status: "active", revision: item.revision + 1, updatedAt: Date.now() });
     return { restored: true };
   },

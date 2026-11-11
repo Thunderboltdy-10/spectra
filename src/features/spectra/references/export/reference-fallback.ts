@@ -25,7 +25,7 @@ function clipped(value: string, length: number) {
 
 export function referenceFallbackSvg(fallback: ReferenceFallback) {
   const title = escapeXml(clipped(fallback.title || "Spectra reference", 70));
-  const type = escapeXml(clipped(fallback.typeLabel || "Referenced work", 40));
+  const type = escapeXml(clipped(fallback.typeLabel || "Referenced artifact", 40));
   const url = escapeXml(clipped(fallback.sourceUrl, 94));
   return `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420" role="img" aria-labelledby="title description">
   <title id="title">${title}</title>

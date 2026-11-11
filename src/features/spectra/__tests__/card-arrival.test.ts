@@ -4,7 +4,7 @@ import { cardArrival } from "../components/artifact-card";
 describe("cardArrival", () => {
   const now = 1_000_000;
 
-  it("lets Spectra's work travel from the prism while it is being made", () => {
+  it("lets Spectra's artifact travel from the prism while it is being made", () => {
     expect(cardArrival({}, "creating", now)).toBe("ai");
     expect(cardArrival({ createdAt: now - 5_000 }, "generated", now)).toBe("ai");
   });

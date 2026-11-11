@@ -1472,7 +1472,7 @@ export function DocumentStudio({
             );
           if (!suppliedReference && !target)
             throw new Error(
-              "Choose source work before adding a live reference.",
+              "Choose source artifact before adding a live reference.",
             );
           const reference =
             suppliedReference ??
@@ -3397,7 +3397,7 @@ export function DocumentStudio({
         selectionContext={selectionKind}
         modes={[]}
         context={docMode === "read" ? (readOnly ? "Read only" : "Reader preview") : undefined}
-        {...(docMode === "read" || docMode === "review"
+        {...((docMode === "read" || docMode === "review") && !readOnly
           ? {
               primary: {
                 label: "Back to editing",

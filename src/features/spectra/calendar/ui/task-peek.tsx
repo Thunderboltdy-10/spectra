@@ -53,6 +53,7 @@ export function TaskPeek({
   anchor,
   resolveWork,
   onOpenFull,
+  onSaved,
   onPointerEnter,
   onPointerLeave,
   onClose,
@@ -61,6 +62,8 @@ export function TaskPeek({
   /** The task work behind the block (made now, for a school task sync has not reached). */
   resolveWork: () => Promise<string | null>;
   onOpenFull: (workId: string) => void;
+  /** A change to the task has been saved: its place on the calendar may have moved. */
+  onSaved?: () => void;
   onPointerEnter: () => void;
   onPointerLeave: () => void;
   onClose: () => void;
@@ -73,6 +76,26 @@ export function TaskPeek({
   resolve.current = resolveWork;
   const close = useRef(onClose);
   close.current = onClose;
+  const saved = useRef(onSaved);
+  saved.current = onSaved;
+  const wasDirty = useRef(false);
+  const edited = useRef(false);
+  // A saved edit reaches the calendar through the server's copy of the work, a moment after the
+  // editor settles, so the calendar looks again shortly after a save and once more when the card closes.
+  const onDirtyChange = useMemo(
+    () => (_id: string, dirty: boolean) => {
+      if (dirty) edited.current = true;
+      if (wasDirty.current && !dirty) window.setTimeout(() => saved.current?.(), 1_500);
+      wasDirty.current = dirty;
+    },
+    [],
+  );
+  useEffect(
+    () => () => {
+      if (edited.current) window.setTimeout(() => saved.current?.(), 1_500);
+    },
+    [],
+  );
 
   useEffect(() => {
     const request = new AbortController();
@@ -82,7 +105,7 @@ export function TaskPeek({
       .then((found) => {
         if (request.signal.aborted) return;
         // A school task with no work yet, while ManageBac is not connected, has nothing to open beside it.
-        if (!found) close.current();
+        if (!found?.artifact) close.current();
         else setLoaded({ artifact: found.artifact });
       })
       .catch((error) => {
@@ -155,7 +178,7 @@ export function TaskPeek({
             onCloseTab={onClose}
             onExpand={() => onOpenFull(loaded.artifact._id)}
             onActivateTab={noop}
-            onDirtyChange={noop}
+            onDirtyChange={onDirtyChange}
           />
         </div>
       )}

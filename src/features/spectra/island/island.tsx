@@ -341,7 +341,7 @@ export function Island() {
         const onScreenNow =
           currentView.current?.runId === tab.runId ||
           spectraBus.getQuery("side.thread")?.threadId === tab.threadId ||
-          Boolean(slot?.bindsThread && slot.focus?.threadId === tab.threadId);
+          slot?.focus?.threadId === tab.threadId;
         if (line && !onScreenNow && !menuOpen() && !dialogOpen()) setReplyPeek(tab.runId);
         radiateFromIsland(STATUS_COLOURS.done, 14, 24);
       } else if (tab.state === "failed_terminal" || tab.state === "paused") {
@@ -371,7 +371,7 @@ export function Island() {
   // Questions put aside wait on their thread's tab, counted, until answered or brought back.
   const [later, setLater] = useState<ReadonlySet<string>>(new Set());
   // A question whose thread is already on the page is answered there: the card would only say it twice (F04).
-  const threadOnPage = slot?.bindsThread ? (slot.focus?.threadId ?? null) : null;
+  const threadOnPage = slot?.focus?.threadId ?? null;
   const asking = useMemo(
     () =>
       questions.filter(

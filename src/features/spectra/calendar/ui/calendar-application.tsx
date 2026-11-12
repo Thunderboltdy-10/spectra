@@ -1573,7 +1573,9 @@ function WeekGrid({
         <div className="spectra-calendar-gutter spectra-calendar-allday-label" />
         {dayDates.map((day) => {
           const items = dayItems.filter(
-            (item) => item.startAt !== undefined && zonedDayKey(item.startAt, timezone) === localDayKey(day.getTime()),
+            (item) => item.startAt !== undefined && (item.allDay && item.endAt !== undefined && item.endAt > item.startAt
+              ? zonedDayKey(item.startAt, timezone) <= localDayKey(day.getTime()) && zonedDayKey(item.endAt - 1, timezone) >= localDayKey(day.getTime())
+              : zonedDayKey(item.startAt, timezone) === localDayKey(day.getTime())),
           );
           return (
             <div

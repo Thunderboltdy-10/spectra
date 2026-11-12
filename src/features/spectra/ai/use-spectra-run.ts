@@ -1426,7 +1426,7 @@ export function useSpectraRun({
             current?.id === exchangeId ? null : current,
           );
           toast.error(
-            "Spectra is still preparing this run. Try again; your artifact and conversation are safe.",
+            "Spectra is still preparing this run. Try again; your artifacts and conversation are safe.",
           );
           settleBegin(false);
         }, RUN_BEGIN_TIMEOUT_MS);

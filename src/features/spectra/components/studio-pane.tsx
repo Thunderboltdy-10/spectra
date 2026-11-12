@@ -46,7 +46,7 @@ const STORE_KEY = "spectra.panel.studio-pane";
 const DEFAULT_WIDTH = 380;
 const MIN_WIDTH = 300;
 /** What a full work keeps before the pane stops sitting beside it and goes on top instead. */
-const STAGE_MIN = 560;
+export const STAGE_MIN = 560;
 
 function readWidth() {
   try {

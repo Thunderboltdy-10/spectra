@@ -9,7 +9,7 @@ export function withoutDerivedNativeBinding<T>(content: T): T {
   if (!content || typeof content !== "object" || Array.isArray(content)) return content;
   const binding = (content as { nativeBinding?: unknown }).nativeBinding;
   if (!binding || typeof binding !== "object") return content;
-  const record = binding as Record<string, unknown>;
+  const { externalTransaction: _externalTransaction, ...record } = binding as Record<string, unknown>;
   return {
     ...content,
     nativeBinding: {

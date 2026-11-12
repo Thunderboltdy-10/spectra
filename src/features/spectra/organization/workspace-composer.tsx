@@ -98,6 +98,8 @@ export function WorkspaceComposer({
     >
       <DialogContent className="work-composer max-w-[520px] gap-0 p-5">
         <form
+          // A long syllabus title must not widen the dialog past its edge.
+          className="min-w-0"
           onSubmit={(event) => {
             event.preventDefault();
             submit();

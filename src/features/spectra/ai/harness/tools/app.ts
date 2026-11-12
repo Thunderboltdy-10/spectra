@@ -475,7 +475,7 @@ export function appTools(session: HarnessSession): AnyHarnessTool[] {
             args: {
               title: args.title,
               startLocal: args.start,
-              ...(args.end ? { endLocal: args.end } : {}),
+              ...(args.end ? { endLocal: args.end } : args.allDay ? { endAt: calendarLocalTimeToEpoch(String(args.start), timeZone) + 86_400_000 } : {}),
               timezone: timeZone,
               ...(args.allDay ? { allDay: true } : {}),
               ...(args.notes ? { notes: args.notes } : {}),

@@ -1031,7 +1031,7 @@ function RightsSurface() {
             ["Keep a memory", "Spectra remembers what helps each person. Only they can see or clear it."],
             ["Make and share agents", "Anyone can build an agent, use it and share it."],
             ["Make every kind of artifact", "Documents, decks, quizzes, code and the rest, with import and export."],
-            ["Decide who sees their artifacts", "Artifact is private until its owner shares it."],
+            ["Decide who sees their artifacts", "An artifact is private until its owner shares it."],
           ].map(([title, detail]) => (
             <li key={title} className="admin-line">
               <span className="admin-line-main">

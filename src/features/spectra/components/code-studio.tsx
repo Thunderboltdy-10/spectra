@@ -4727,7 +4727,7 @@ function CodeSettings({
             <SelectField
               ariaLabel="Artifact to connect"
               size="sm"
-              placeholder="Choose accessible artifact"
+              placeholder="Choose an artifact you can open"
               value={bindingArtifactId}
               disabled={readOnly}
               options={availableArtifacts.map((artifact) => ({

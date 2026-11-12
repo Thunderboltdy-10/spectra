@@ -82,7 +82,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     targets: [],
     ask: "reminders",
     say: () =>
-      "Each morning I write you a short brief on Home: what's due, and what to start on. I also remind you of artifact dated for the day. Pick when they arrive; Settings can change it later.",
+      "Each morning I write you a short brief on Home: what's due, and what to start on. I also remind you of anything dated for that day. Pick when they arrive; Settings can change it later.",
   },
   {
     id: "school",

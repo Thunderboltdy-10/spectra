@@ -81,18 +81,20 @@ export function verifyCalendarActionPostcondition(
   item: CalendarItem,
 ): CalendarActionPostcondition {
   if (action.type === "calendar.create_personal_event") {
-    if (item.kind !== "personal_event")
+    const dayTask = action.allDay === true && action.endAt - action.startAt <= 86_400_000 &&
+      item.kind === "task" && Boolean(item.planArtifactId) && !item.sourceLocked;
+    if (item.kind !== "personal_event" && !(item.kind === "task" && dayTask))
       throw new Error("CALENDAR_POSTCONDITION_KIND_MISMATCH");
     if (item.startAt === undefined || item.endAt === undefined)
       throw new Error("CALENDAR_POSTCONDITION_TIME_MISSING");
-    if (item.startAt !== action.startAt || item.endAt !== action.endAt)
+    if (item.startAt !== action.startAt || item.endAt !== (dayTask ? action.startAt : action.endAt))
       throw new Error("CALENDAR_POSTCONDITION_TIME_MISMATCH");
     return {
       itemId: item.id,
       kind: item.kind,
       startAt: item.startAt,
       endAt: item.endAt,
-      linkedTask: false,
+      linkedTask: dayTask,
     };
   }
   if (item.kind !== "scheduled_work_block" && item.kind !== "personal_event" &&

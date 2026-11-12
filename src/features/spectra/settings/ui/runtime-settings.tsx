@@ -74,6 +74,8 @@ function ProviderRow({ provider, model, onModel }: {
           ariaLabel={`${name} model`}
           value={model}
           onChange={onModel}
+          // "" is Radix's empty value, which shows the placeholder: say what it means.
+          placeholder="Preferred"
           options={[{ value: "", label: "Preferred" }, ...entry.models.map((item) => ({ value: item.id, label: item.label }))]}
         />
       }
@@ -137,7 +139,7 @@ export function RuntimeSettings() {
     <div className="space-y-10">
       <Group
         title="Who runs your artifacts"
-        description="Use your own Codex or Claude Code subscription through Spectra Bridge. Spectra's tools and instructions stay the same. If yours can't answer, Spectra follows the order you set here. Artifact that runs on a schedule always uses Spectra's."
+        description="Use your own Codex or Claude Code subscription through Spectra Bridge. Spectra's tools and instructions stay the same. If yours can't answer, Spectra follows the order you set here. Anything that runs on a schedule always uses Spectra's."
       >
         <Row
           label="Default"

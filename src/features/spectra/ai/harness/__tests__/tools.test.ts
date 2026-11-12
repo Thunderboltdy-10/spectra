@@ -291,6 +291,7 @@ describe("harness tools", () => {
   });
 
   it.each([
+    ["calendar", { action: "add_event", title: "Buy boots", start: "2099-11-14", allDay: true }, { command: "create_calendar_personal_event", args: { startLocal: "2099-11-14T00:00", endAt: Date.parse("2099-11-15T00:00:00+01:00"), allDay: true } }],
     ["calendar", { action: "complete_block", itemId: "b1", expectedRevision: 2 }, { command: "complete_calendar_block", args: { itemId: "b1", expectedRevision: 2 } }],
     ["calendar", { action: "remove_event", itemId: "e1" }, { command: "remove_calendar_event", args: { itemId: "e1" } }],
     ["organize_library", { action: "pin", targetIds: ["n1"] }, { command: "pin_library_item", args: { targetId: "n1", pinned: true } }],

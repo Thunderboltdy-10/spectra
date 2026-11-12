@@ -125,6 +125,12 @@ afterAll(() => {
 });
 
 describe("Calendar application", () => {
+  it("shows an all-day stretch on every covered day, excluding its end day", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
+    installFetch(() => undefined, [{ ...workBlock(), kind: "personal_event", title: "Three-day trip", allDay: true, taskItemId: undefined, startAt: Date.parse("2026-09-29T00:00"), endAt: Date.parse("2026-10-02T00:00") }]);
+    render(<CalendarApplication />);
+    await waitFor(() => expect(screen.getAllByTitle("Three-day trip")).toHaveLength(3));
+  });
   it("removes items absent from a fresh overview after an AI calendar change", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 8, 29, 8, 0) });
     const items = [workBlock(), { ...workBlock(), id: "event", kind: "personal_event", title: "French practice", taskItemId: undefined }];

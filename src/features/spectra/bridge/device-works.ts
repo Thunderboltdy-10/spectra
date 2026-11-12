@@ -357,7 +357,7 @@ export async function enterDeviceRoom<T extends { token: string; device?: { stor
     summary = await deviceStoreSummary();
   } catch {
     throw new Error(
-      "COLLABORATION_DEVICE_UNAVAILABLE: This artifact is kept on this computer and Spectra Bridge isn't answering. Open it and your artifact comes straight back.",
+      "COLLABORATION_DEVICE_UNAVAILABLE: This artifact is kept on this computer and Spectra Bridge isn't answering. Open Spectra Bridge and it comes straight back.",
     );
   }
   assertAccountStorageRevision(revision);

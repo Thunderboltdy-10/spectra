@@ -151,6 +151,7 @@ import {
   stageMinimumFor,
   type WorkbenchPaneSpec,
 } from "../components/split-presentation";
+import { STAGE_MIN } from "../components/studio-pane";
 import {
   readSharedWorkbenchSession,
   updateWorkbenchSurface,
@@ -1605,6 +1606,17 @@ export function SpectraShell({
       : 560;
   }, [studio.activeArtifact?.blueprintKey]);
 
+  /* In tab mode the open work *is* the content column, so the reserve is the
+     work's own floor, plus the room its Comments, History or References asks
+     for. Where the row cannot also hold the conversation, the conversation
+     steps aside until that pane shuts (F01). */
+  const workbenchReserve =
+    studio.mode === "tab" && studio.activeArtifact
+      ? Math.max(WORKBENCH_CONTENT_RESERVE_PX, studioPaneFloor, studioPaneRoom ? STAGE_MIN : 0) + studioPaneRoom
+      : stageMinimumFor(pathname);
+  const threadStepsAside = studio.mode === "tab" && studioPaneRoom > 0 && workbenchRowWidth > 0 &&
+    workbenchRowWidth < workbenchReserve + SIDE_PANEL_FLOOR_PX;
+
   const workbenchPanes = useMemo<WorkbenchPaneSpec[]>(() => {
     const panes: WorkbenchPaneSpec[] = [];
     if (studio.mode === "split" && studio.activeArtifact)
@@ -1614,7 +1626,7 @@ export function SpectraShell({
         priority: 0,
         overlay: false,
       });
-    if (liveThread)
+    if (liveThread && !threadStepsAside)
       panes.push({
         id: "thread",
         floor: SIDE_PANEL_FLOOR_PX,
@@ -1642,18 +1654,13 @@ export function SpectraShell({
     studioPaneFloor,
     studioPaneRoom,
     liveThread,
+    threadStepsAside,
     activeRunPanelId,
     chatBrowserOpen,
   ]);
 
-  /* The reserve is the page's stage minimum (SHELL.md), so the rail gives way
-     before the page does and a panel floats before the page goes under it. In
-     tab mode the open work *is* the content column, so the reserve is the
-     work's own floor. */
-  const workbenchReserve =
-    studio.mode === "tab" && studio.activeArtifact
-      ? Math.max(WORKBENCH_CONTENT_RESERVE_PX, studioPaneFloor)
-      : stageMinimumFor(pathname);
+  /* The reserve (above) is the page's stage minimum (SHELL.md), so the rail
+     gives way before the page does and a panel floats before the page goes under it. */
 
   useEffect(() => {
     const panes = workbenchPanes.map((pane) => ({
@@ -1681,7 +1688,7 @@ export function SpectraShell({
      shell to rail it. Decided from the window width (not the row) so the
      rail itself cannot feed back into the decision. */
   useEffect(() => {
-    const demand = workbenchPanes.length
+    const demand = workbenchPanes.length || threadStepsAside
       ? workbenchReserve +
         workbenchPanes.reduce((total, pane) => total + pane.floor, 0)
       : 0;
@@ -1696,7 +1703,7 @@ export function SpectraShell({
       sidebarRailedRef.current = next;
       setSidebarRailed(next);
     }
-  }, [workbenchWindowWidth, workbenchPanes, workbenchReserve]);
+  }, [workbenchWindowWidth, workbenchPanes, workbenchReserve, threadStepsAside]);
 
   useEffect(() => {
     spectraBus.emit("shell.sidebarCrowd", { crowded: sidebarRailed });
@@ -4123,6 +4130,7 @@ export function SpectraShell({
                 <ArtifactStudio
                   key={studio.activeArtifact._id}
                   mode="tab"
+                  onPaneRoomChange={setStudioPaneRoom}
                   artifact={studio.activeArtifact}
                   artifacts={allArtifacts}
                   tabs={studio.tabs}
@@ -4376,7 +4384,7 @@ export function SpectraShell({
                 </div>
               </div>
             ) : null}
-            {liveThread ? (
+            {liveThread && !threadStepsAside ? (
               <LiveThreadPanel
                 threadId={liveThread.id}
                 title={liveThread.title}

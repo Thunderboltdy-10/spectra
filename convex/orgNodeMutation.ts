@@ -94,6 +94,15 @@ orgNodeAggregates.forEach((aggregate, index) =>
   ),
 );
 
+// Trashing or restoring a task's place takes its calendar entry with it.
+triggers.register("orgNodes", async (ctx, change) => {
+  const node = change.newDoc ?? change.oldDoc;
+  if (node?.kind !== "work" || !node.sourceId || change.oldDoc?.deletedAt === change.newDoc?.deletedAt) return;
+  const id = ctx.innerDb.normalizeId("spectraArtifacts", node.sourceId);
+  const artifact = id ? await ctx.innerDb.get(id) : null;
+  if (artifact?.blueprintKey === "planner_task") await syncTaskWorkProjection({ db: ctx.innerDb }, artifact);
+});
+
 /** Test-only I/O counters for heartbeat short-circuit proofs (W9-02 / F3). */
 export const runProjectionTriggerIo = {
   tabCollects: 0,

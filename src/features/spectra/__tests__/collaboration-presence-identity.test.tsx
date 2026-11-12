@@ -22,6 +22,13 @@ const nadia: CollaborationPresence = {
 };
 
 describe("collaborator identity", () => {
+  it("hides the same person's other tab while retaining their AI", () => {
+    render(<CollaborationPresenceIndicator presence={[nadia, { ...nadia, clientId: "ai", actorKind: "ai", name: "Your AI", previewPhase: "streaming" }]} currentClientId="other-tab" currentAccountId={nadia.accountId} regions={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "1 collaborator present" }));
+    expect(screen.queryByText("Nadia Park")).toBeNull();
+    expect(screen.getAllByText("Your AI").length).toBeGreaterThan(0);
+  });
+
   it("paints an idle person in their palette colour, the same one their interaction frames use", () => {
     const expected = actorPresenceColor({
       clientId: nadia.clientId,

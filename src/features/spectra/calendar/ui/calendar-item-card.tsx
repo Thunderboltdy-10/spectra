@@ -187,7 +187,9 @@ function CalendarItemDetails({
         {item.startAt === undefined
           ? "Date only"
           : item.allDay
-            ? `${formatDay(item.startAt, timezone)}, all day`
+            ? item.endAt !== undefined && item.endAt - item.startAt > 86_400_000
+              ? `${formatDay(item.startAt, timezone)} – ${formatDay(item.endAt - 1, timezone)}, all day` // The end is exclusive.
+              : `${formatDay(item.startAt, timezone)}, all day`
             : `${due ? "Due " : ""}${formatDay(item.startAt, timezone)}, ${formatTime(item.startAt, timezone)}${item.endAt !== undefined && !due ? ` – ${formatTime(item.endAt, timezone)}` : ""}`}
         {resizable ? (
           <span className="calendar-card-length" role="group" aria-label="Duration">

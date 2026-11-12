@@ -310,9 +310,11 @@ describe("Calendar personal events", () => {
     const user = t.withIdentity(identity);
     const day = 1_790_380_740_000;
     const created = await user.mutation(api.calendar.createPersonalItem, {
-      kind: "task", title: "Hand in the essay", startAt: day, allDay: true, timezone: "Europe/Madrid", actorKind: "ai",
+      kind: "personal_event", title: "Hand in the essay", startAt: day, endAt: day + 86_400_000, allDay: true, timezone: "Europe/Madrid", actorKind: "ai",
     });
     expect(created).toMatchObject({ kind: "task", allDay: true, startAt: day, endAt: day });
+    expect(interpretCalendarMutationResult({ type: "calendar.create_personal_event", title: "Hand in the essay", startAt: day, endAt: day + 86_400_000, allDay: true, timezone: "Europe/Madrid" }, created).postcondition)
+      .toMatchObject({ kind: "task", startAt: day, endAt: day, linkedTask: true });
     const workId = created.planArtifactId as Id<"spectraArtifacts">;
     const work = () => t.run((ctx) => ctx.db.get(workId));
     expect(await work()).toMatchObject({ blueprintKey: "planner_task", content: { taskTitle: "Hand in the essay", dueAt: day, allDay: true } });
@@ -334,6 +336,21 @@ describe("Calendar personal events", () => {
     expect((await work())!.content).toMatchObject({ dueAt: null });
     const item = await t.run((ctx) => ctx.db.get(created.id as Id<"calendarItems">));
     expect(item!.status).toBe("removed");
+  });
+
+  it("takes a task's calendar entry into the Trash with it and back", async () => {
+    const t = setupTest();
+    await seedCalendarTask(t);
+    const user = t.withIdentity(identity);
+    const created = await user.mutation(api.calendar.createPersonalItem, {
+      kind: "task", title: "Buy boots", startAt: 1_790_380_740_000, allDay: true, timezone: "Europe/Madrid", actorKind: "ai",
+    });
+    const node = await t.run((ctx) => ctx.db.query("orgNodes").withIndex("by_kind_source", (q) => q.eq("kind", "work").eq("sourceId", created.planArtifactId!)).first());
+    const status = async () => (await t.run((ctx) => ctx.db.get(created.id as Id<"calendarItems">)))!.status;
+    await user.mutation(api.orgTree.trash, { nodeIds: [node!._id] });
+    expect(await status()).toBe("removed");
+    await user.mutation(api.orgTree.restore, { nodeIds: [node!._id] });
+    expect(await status()).toBe("active");
   });
 
   it("keeps a block's length when it is moved with no end given", async () => {

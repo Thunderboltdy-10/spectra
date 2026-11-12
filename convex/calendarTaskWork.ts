@@ -16,8 +16,6 @@ import { buildArtifactTextIndex, defaultArtifactContent, defaultArtifactSchemaVe
  * calendars stay plain calendar items: they are not things to do.
  */
 
-const NOTES_CHARS = 1_200;
-
 export function taskProjectionKey(artifactId: Id<"spectraArtifacts">) {
   return `task:${artifactId}`;
 }
@@ -57,7 +55,9 @@ export async function syncTaskWorkProjection(ctx: Pick<MutationCtx, "db">, artif
     .query("calendarItems")
     .withIndex("by_source_key", (q) => q.eq("ownerAccountId", artifact.ownerAccountId).eq("sourceKey", key))
     .first();
-  const time = projectedTime(artifact);
+  // A task in the Trash leaves the calendar, whichever way it got there (run Undo, Library, Bridge).
+  const owned = (await ctx.db.query("orgNodes").withIndex("by_kind_source", (q) => q.eq("kind", "work").eq("sourceId", artifact._id)).collect()).filter((node) => node.accountId === artifact.ownerAccountId);
+  const time = owned.length && owned.every((node) => node.deletedAt !== undefined) ? null : projectedTime(artifact);
   const now = Date.now();
   if (!time) {
     if (existing && existing.status !== "removed") {
@@ -71,7 +71,8 @@ export async function syncTaskWorkProjection(ctx: Pick<MutationCtx, "db">, artif
   const value = {
     kind: (time.span ? "personal_event" : "task") as "personal_event" | "task",
     title: text(content.taskTitle) || artifact.title || "Untitled task",
-    notes: text(content.description, NOTES_CHARS) || undefined,
+    // No notes: the task opens as its sheet, and copying the description would rewrite this item on every autosave.
+    notes: undefined,
     startAt: time.startAt,
     endAt: time.endAt,
     allDay: time.allDay,

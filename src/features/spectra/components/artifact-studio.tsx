@@ -4394,7 +4394,7 @@ function ArtifactStudioEditor({
   /* A work beside a conversation asks for the pane's room, so the page keeps
      its own floor beside Comments or History instead of turning into a strip.
      Where the row cannot give it, the work covers the page until the pane shuts. */
-  const paneRoom = mode === "split" && !compact ? pane.requested : 0;
+  const paneRoom = (mode === "split" || mode === "tab") && !compact ? pane.requested : 0;
   const onPaneRoomChangeRef = useRef(onPaneRoomChange);
   onPaneRoomChangeRef.current = onPaneRoomChange;
   useEffect(() => {

@@ -230,7 +230,7 @@ export function WorkTouchCards({
   });
   if (unique.length === 0) return null;
   return (
-    <ul className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-2" aria-label="Artifact from this response">
+    <ul className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-2" aria-label="Artifacts from this response">
       {unique.map((touch) => {
         const calendar = isCalendarTouch(touch.id);
         const meta = calendar

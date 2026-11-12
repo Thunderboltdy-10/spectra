@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, Clock } from "@/components/icons/glyph-icons";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -193,6 +193,12 @@ export function TimeField({
     if (time !== null && time !== value) onChange(time);
   };
   const near = (time: string) => slots.reduce((best, slot) => (Math.abs(minutesOf(slot) - minutesOf(time)) < Math.abs(minutesOf(best) - minutesOf(time)) ? slot : best), slots[0]!);
+
+  // A start moving this end changes it just after focus lands here: keep it selected, or typing is appended and lost.
+  useLayoutEffect(() => {
+    if (draft === null && document.activeElement === input.current) input.current?.select();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
 
   useEffect(() => {
     if (!open) return;

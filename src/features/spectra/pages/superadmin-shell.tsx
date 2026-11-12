@@ -2160,6 +2160,7 @@ function SecuritySurface({
             label="School"
             value={schoolId}
             onChange={setSchoolId}
+            placeholder="Choose a school"
             options={[
               { value: "", label: "Choose a school" },
               ...schools.map((school) => ({

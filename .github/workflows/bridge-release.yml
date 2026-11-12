@@ -98,6 +98,11 @@ jobs:
         working-directory: bridge/bridge-app
         run: cargo tauri icon icons/app-icon.png
 
+      - name: Name the releases repository
+        id: releases
+        shell: bash
+        run: echo "owner=${RELEASES_REPO%%/*}" >> "$GITHUB_OUTPUT" && echo "name=${RELEASES_REPO#*/}" >> "$GITHUB_OUTPUT"
+
       - name: Build and upload installers
         uses: tauri-apps/tauri-action@v0
         env:
@@ -106,8 +111,8 @@ jobs:
           projectPath: bridge/bridge-app
           tauriScript: cargo tauri
           args: --bundles ${{ matrix.bundles }} --target ${{ matrix.target }}
-          owner: ${{ vars.BRIDGE_RELEASES_OWNER || 'Thunderboltdy-10' }}
-          repo: ${{ vars.BRIDGE_RELEASES_NAME || 'spectra-bridge' }}
+          owner: ${{ steps.releases.outputs.owner }}
+          repo: ${{ steps.releases.outputs.name }}
           releaseId: ${{ needs.release.outputs.release_id }}
           includeUpdaterJson: true
           updaterJsonPreferNsis: true

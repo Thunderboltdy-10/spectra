@@ -1994,7 +1994,7 @@ function EmptyState({
             ? {
                 recent: {
                   title: "Nothing opened yet",
-                  body: "Artifact you touch will show up here, newest first.",
+                  body: "Artifacts you open will show up here, newest first.",
                 },
                 favorites: {
                   title: "No favorites yet",

@@ -263,7 +263,7 @@ export function ArtifactEmbedList({
       className={className}
       aria-label={
         containerType === "thread"
-          ? "Artifact in this conversation"
+          ? "Artifacts in this conversation"
           : "Live references"
       }
     >

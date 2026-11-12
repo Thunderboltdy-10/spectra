@@ -633,7 +633,7 @@ export function AgentLibraryShell({
             commands={agentCommands}
             plan={AGENT_BAR_PLAN}
             barLabel="Agents commands"
-            description="Find, make and add agents for the artifact they are good at."
+            description="Find, make and add agents for the jobs they are good at."
           />
 
           {/* Nothing to search until there is an agent; the starters below lead instead. */}

@@ -120,7 +120,7 @@ describe("artifact preparation and archive approval boundary", () => {
 
   it("admits an approved native readback that regenerates file-owned binding hashes", async () => {
     const f = await fixture("artifact.update");
-    const binding = { format: "docx", sourcePayloadHash: "a".repeat(64), semanticDigest: "b".repeat(64), identityStable: false };
+    const binding = { format: "docx", sourcePayloadHash: "a".repeat(64), semanticDigest: "b".repeat(64), identityStable: false, externalTransaction: { label: "Edited in Word", occurredAt: 123 } };
     const before = { ...body("Authored explanation"), nativeBinding: binding };
     const after = body("Updated explanation");
     await f.t.run(async ctx => {
@@ -130,7 +130,8 @@ describe("artifact preparation and archive approval boundary", () => {
       await ctx.db.insert("syncPolicies", { accountId: f.ids.accountId, scopeKind: "account", scopeId: String(f.ids.accountId), ...POLICY_PRESETS.both, createdAt: Date.now(), updatedAt: Date.now() });
     });
     await f.approved();
-    const readback = { ...after, nativeBinding: { ...binding, sourcePayloadHash: "c".repeat(64), semanticDigest: "d".repeat(64), identityStable: true } };
+    const { externalTransaction: _externalTransaction, ...readbackBinding } = binding;
+    const readback = { ...after, nativeBinding: { ...readbackBinding, sourcePayloadHash: "c".repeat(64), semanticDigest: "d".repeat(64), identityStable: true } };
     await expect(f.t.run(ctx => assertAiArtifactWriteAdmission(ctx, { actorAccountId: f.ids.accountId,
       artifactId: f.ids.artifactId, aiOperation: { ...f.attempt, operationId: f.ids.operationId }, beforeContent: before, afterContent: readback,
     }))).resolves.toMatchObject({ scope: { approvalCategories: ["bridge_files"] } });

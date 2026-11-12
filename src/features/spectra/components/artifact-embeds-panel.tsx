@@ -475,7 +475,7 @@ export function ArtifactEmbedsPanel({
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
         {searching ? (
           candidates.length ? (
-            <ul aria-label="Artifact you can add">
+            <ul aria-label="Artifacts you can add">
               {candidates.map((candidate) => {
                 const busy = adding === candidate._id;
                 return (
@@ -499,7 +499,7 @@ export function ArtifactEmbedsPanel({
             </ul>
           ) : (
             <p className="px-2 py-6 text-center text-micro text-[var(--text-tertiary)]">
-              {semantic.status === "loading" ? "Searching your artifacts" : query.trim() ? "Nothing you can open matches that." : "Type to find artifact."}
+              {semantic.status === "loading" ? "Searching your artifacts" : query.trim() ? "Nothing you can open matches that." : "Type to find an artifact."}
             </p>
           )
         ) : loading ? (

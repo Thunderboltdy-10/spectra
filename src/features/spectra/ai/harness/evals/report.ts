@@ -64,7 +64,7 @@ ${row.problems.length ? `<p><b>Problems</b></p>${list(row.problems, "")}` : ""}
 <p><b>Steps</b></p>${list(row.steps, "No steps.")}
 ${row.title ? `<p><b>Thread title.</b> ${escapeHtml(row.title)}</p>` : ""}
 <p><b>Latency.</b> First output ${ms(row.firstOutputMs)}, total ${ms(row.totalMs)}${row.samples.length > 1 ? ` (median of ${row.samples.length} runs: ${row.samples.map((sample) => ms(sample.firstOutputMs)).join(", ")})` : ""}.</p>
-${artifacts ? `<p><b>Artifact it made or changed</b></p>${artifacts}` : ""}
+${artifacts ? `<p><b>Artifacts it made or changed</b></p>${artifacts}` : ""}
 </details>`;
 }
 

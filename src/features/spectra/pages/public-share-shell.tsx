@@ -493,7 +493,7 @@ function SharedWorkspace({
             className="col-span-full"
             icon="layers"
             title="Nothing shared here yet"
-            detail="The owner hasn't added any artifact to this view. Check back later or ask them for a new link."
+            detail="The owner hasn't added any artifacts to this view. Check back later or ask them for a new link."
           />
         ) : null}
       </div>

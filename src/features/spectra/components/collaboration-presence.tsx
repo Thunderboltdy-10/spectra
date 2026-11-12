@@ -677,7 +677,7 @@ export function CollaborationPresenceIndicator({
     () =>
       collapseCollaborators(
         presence.filter((person) => {
-          if (person.clientId === currentClientId) return false;
+          if (person.clientId === currentClientId || (person.actorKind !== "ai" && currentAccountId && person.accountId === currentAccountId)) return false;
           // Idle AI peers after a run must not linger as permanent avatars —
           // only show them while they are actively streaming or pointing.
           if (person.actorKind === "ai") {
@@ -691,7 +691,7 @@ export function CollaborationPresenceIndicator({
           return true;
         }),
       ),
-    [currentClientId, presence],
+    [currentAccountId, currentClientId, presence],
   );
   if (collaborators.length === 0) return null;
   const regionNames = new Map(

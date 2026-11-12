@@ -153,7 +153,7 @@ export function VersionTimeline({
           <span aria-hidden className="version-dot" style={{ background: "var(--success)" }} />
           <span className="min-w-0 flex-1">
             <span className="version-row-who">Now</span>
-            <span className="version-row-what">The work as it is</span>
+            <span className="version-row-what">As it is now</span>
           </span>
         </button>
         {days.map((day) => (

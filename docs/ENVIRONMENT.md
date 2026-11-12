@@ -155,8 +155,6 @@ uses `SPECTRA_CONVEX_URL` and `SPECTRA_ORIGINS` as repository variables too.
 | Key | Value |
 | --- | --- |
 | `BRIDGE_RELEASES_REPO` | GitHub variable: release repository `owner/name`, default `Thunderboltdy-10/spectra-bridge`. |
-| `BRIDGE_RELEASES_OWNER` | GitHub variable: matching owner, default `Thunderboltdy-10`. |
-| `BRIDGE_RELEASES_NAME` | GitHub variable: matching repository name, default `spectra-bridge`. |
 | `BRIDGE_RELEASES_TOKEN` | GitHub secret: token permitted to publish releases in that repository. |
 | `TAURI_SIGNING_PRIVATE_KEY` | GitHub secret: Tauri updater signing private key. |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | GitHub secret: password for that signing key, if encrypted. |

@@ -54,25 +54,31 @@ a diagnostic file. An unsigned app
 may be blocked by Gatekeeper; that is expected for this test artifact and is
 not a public launch result.
 
-## Public candidate (only after signing decisions)
+## Public candidate (without publisher certificates)
 
 The manual workflow `.github/workflows/bridge-desktop.yml` has two explicit
 modes. `friend-test` disables updater artifact generation and uploads unsigned
 `.app`/DMG/NSIS artifacts only as workflow artifacts. `public-candidate` embeds
-the supplied hosted Convex/origin configuration and requires all signing and
-notarization secrets; it still does not publish a GitHub release.
+the supplied hosted Convex/origin configuration and requires the Tauri updater
+signing key; it still does not publish a GitHub release.
 
-Before any public candidate, configure a real Tauri updater signing key and
-the exact hosted updater endpoint, Apple Developer ID Application certificate,
-notarization credentials, team identity, bundle identifier, and release
-artifact retention policy. Verify these on the Mac runner and inspect
-`latest.json` URLs/signatures before adding a publish job. Never use the
-friend-test artifacts as public installers or updater inputs.
+`TAURI_SIGNING_PRIVATE_KEY` must match the public key in `tauri.conf.json`;
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` may be empty for an unencrypted key. This
+signature protects updater downloads and is separate from an OS publisher
+certificate. Do not set `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, or
+Apple notarization credentials in these workflows, even to empty strings: Tauri
+attempts a certificate import when both certificate variables exist. The macOS
+`signingIdentity: "-"` uses ad-hoc signing without an Apple Developer account.
+Windows NSIS packaging needs no certificate. These installers may show operating-
+system trust warnings. Inspect `latest.json` URLs/signatures and perform platform
+install checks before a launch claim. Never use friend-test artifacts as updater
+inputs.
 
 ## Mac launch gate
 
-A Mac launch claim requires a signed/notarized candidate that passes install,
-Gatekeeper assessment, first launch, login startup, update, uninstall/cleanup,
+A Mac runtime claim requires testing the actual ad-hoc-signed candidate through
+install, the expected operating-system warning, first launch, login startup, update, uninstall/cleanup,
 keychain credential persistence, filesystem permission prompts, provider
 hydration/offline behavior, APFS identity continuity, and native-writer
-stability. None of those Mac runtime claims can be established on Windows.
+stability. Ad-hoc signing does not confer Apple publisher verification or
+notarization. None of those Mac runtime claims can be established on Windows.

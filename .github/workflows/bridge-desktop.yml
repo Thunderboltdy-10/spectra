@@ -2,14 +2,14 @@ name: Spectra Bridge desktop artifacts
 
 # This workflow is deliberately manual. A friend-test run creates unsigned
 # artifacts for the final Mac smoke test; a public-candidate run requires the
-# explicitly configured signing/notarization secrets but still does not
+# updater signing key but no Apple/Windows certificate and still does not
 # publish a release. Publication and updater-host migration need an explicit
 # release decision after the artifacts have been tested.
 on:
   workflow_dispatch:
     inputs:
       distribution:
-        description: "Unsigned friend-Mac test or signed public candidate"
+        description: "Friend-Mac test or public candidate with updater signatures"
         required: true
         type: choice
         options:
@@ -53,14 +53,10 @@ jobs:
       # process environment overrides.
       SPECTRA_CONVEX_URL: ${{ inputs.convex_url }}
       SPECTRA_ORIGINS: ${{ inputs.allowed_origins }}
+      # Omit APPLE_* entirely, including empty certificate variables. macOS uses
+      # the ad-hoc signing identity in tauri.conf.json, without notarization.
       TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.distribution == 'public-candidate' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.distribution == 'public-candidate' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
-      APPLE_CERTIFICATE: ${{ inputs.distribution == 'public-candidate' && secrets.APPLE_CERTIFICATE || '' }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ inputs.distribution == 'public-candidate' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-      APPLE_SIGNING_IDENTITY: ${{ inputs.distribution == 'public-candidate' && secrets.APPLE_SIGNING_IDENTITY || '' }}
-      APPLE_ID: ${{ inputs.distribution == 'public-candidate' && secrets.APPLE_ID || '' }}
-      APPLE_PASSWORD: ${{ inputs.distribution == 'public-candidate' && secrets.APPLE_PASSWORD || '' }}
-      APPLE_TEAM_ID: ${{ inputs.distribution == 'public-candidate' && secrets.APPLE_TEAM_ID || '' }}
 
     steps:
       - name: Check out source
@@ -75,23 +71,13 @@ jobs:
         shell: bash
         run: python bridge/scripts/verify-release-env.py
 
-      - name: Require signing inputs for a public candidate
+      - name: Require the updater signing key for a public candidate
         if: inputs.distribution == 'public-candidate'
         shell: bash
         run: |
-          for name in TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
-            if [ -z "${!name}" ]; then
-              echo "$name is required for a public candidate" >&2
-              exit 1
-            fi
-          done
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
-              if [ -z "${!name}" ]; then
-                echo "$name is required for a signed/notarized Mac candidate" >&2
-                exit 1
-              fi
-            done
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY is required for updater signatures" >&2
+            exit 1
           fi
 
       - name: Install the pinned Tauri CLI

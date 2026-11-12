@@ -1,7 +1,7 @@
 name: Spectra Bridge release
 
 # Pushing a tag `bridge-v<version>` (matching bridge-app/tauri.conf.json)
-# builds signed installers and publishes them, with the updater manifest, as a
+# builds installers and publishes them, with updater signatures and a manifest, as a
 # release of the public releases repository. Spectra's /bridge/download route
 # and the Bridge updater both read the latest release there.
 #
@@ -10,7 +10,8 @@ name: Spectra Bridge release
 #   vars.SPECTRA_ORIGINS          hosted browser origin(s), comma-separated
 #   vars.BRIDGE_RELEASES_REPO     owner/name of the public releases repository
 #   secrets.BRIDGE_RELEASES_TOKEN a token that can create releases there
-#   secrets.TAURI_SIGNING_PRIVATE_KEY(_PASSWORD), Apple signing secrets
+#   secrets.TAURI_SIGNING_PRIVATE_KEY(_PASSWORD) for updater signatures only.
+# Installers have no OS certificate; macOS uses an ad-hoc signature.
 on:
   push:
     tags:
@@ -55,7 +56,7 @@ jobs:
     needs: release
     runs-on: ${{ matrix.platform }}
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - platform: windows-latest
@@ -70,14 +71,10 @@ jobs:
     env:
       SPECTRA_CONVEX_URL: ${{ vars.SPECTRA_CONVEX_URL }}
       SPECTRA_ORIGINS: ${{ vars.SPECTRA_ORIGINS }}
+      # Do not set APPLE_* here: even empty certificate variables trigger import.
+      # The macOS config uses ad-hoc signing; Windows has no certificate signer.
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
 

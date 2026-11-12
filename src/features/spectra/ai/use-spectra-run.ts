@@ -1707,6 +1707,7 @@ export function useSpectraRun({
           toast.success(undone.summary ?? "Undone.", undone.notes?.length ? { description: undone.notes.join(" ") } : undefined);
           void refreshRunTabs(true);
           spectraBus.emit("threads.changed", {});
+          spectraBus.emit("calendar.changed", {});
           await onDataChanged?.();
         } catch (error) {
           toast.error(

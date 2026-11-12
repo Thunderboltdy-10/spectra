@@ -19,6 +19,8 @@ import type {
   SearchKind,
   SearchRequest,
   SearchResponse,
+  SyllabusGuideRead,
+  SyllabusGuideRequest,
   ThreadReadRequest,
   WebResult,
 } from "./backend";
@@ -54,6 +56,8 @@ export type MemoryBackendOptions = {
   agentBench?: Record<string, AgentBenchState>;
   /** The latest Foundry compilation by agent id. */
   agentCompilations?: Record<string, AgentCompilationState>;
+  /** What readSyllabusGuide answers; none by default, so read_syllabus keeps to the compact summary. */
+  syllabusGuide?: (input: SyllabusGuideRequest) => SyllabusGuideRead | null;
   /** Simulate the semantic layer answering with words only, or with a degraded index. */
   searchMode?: SearchResponse["mode"];
   searchDegraded?: SearchResponse["degraded"];
@@ -293,6 +297,10 @@ export class MemoryBackend implements HarnessBackend {
 
   async readAgentCompilation(input: { agentId: string }) {
     return this.options.agentCompilations?.[input.agentId] ?? null;
+  }
+
+  async readSyllabusGuide(input: SyllabusGuideRequest): Promise<SyllabusGuideRead | null> {
+    return this.options.syllabusGuide?.(input) ?? null;
   }
 
   async readSchoolData() {

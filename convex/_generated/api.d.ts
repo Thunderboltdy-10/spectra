@@ -149,6 +149,7 @@ import type * as spectraThreads from "../spectraThreads.js";
 import type * as spectraUiObservation from "../spectraUiObservation.js";
 import type * as spectraUiObservationSchema from "../spectraUiObservationSchema.js";
 import type * as spectraWorkspaces from "../spectraWorkspaces.js";
+import type * as syllabusGuides from "../syllabusGuides.js";
 import type * as syncOperationLifecycle from "../syncOperationLifecycle.js";
 import type * as syncPolicy from "../syncPolicy.js";
 import type * as timetableReminders from "../timetableReminders.js";
@@ -305,6 +306,7 @@ declare const fullApi: ApiFromModules<{
   spectraUiObservation: typeof spectraUiObservation;
   spectraUiObservationSchema: typeof spectraUiObservationSchema;
   spectraWorkspaces: typeof spectraWorkspaces;
+  syllabusGuides: typeof syllabusGuides;
   syncOperationLifecycle: typeof syncOperationLifecycle;
   syncPolicy: typeof syncPolicy;
   timetableReminders: typeof timetableReminders;

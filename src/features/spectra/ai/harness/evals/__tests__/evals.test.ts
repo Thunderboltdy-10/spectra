@@ -175,6 +175,7 @@ describe("loop discipline", () => {
     expect(names.has("read_artifact")).toBe(true);
     expect(names.has("find_commands")).toBe(true);
     expect(names.has("edit_artifact")).toBe(false);
+    expect(names.has("open_in_spectra")).toBe(false);
   });
 
   it("computes percentiles", () => {

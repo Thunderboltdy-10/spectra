@@ -12,7 +12,7 @@ import { HOME_PATH } from "../chat/home-routes";
 export type TourPerson = { firstName: string; school: string | null };
 
 /** A choice the step asks for, answered right in Spectra's note. */
-export type TourAsk = "reminders" | "bridge" | "storage";
+export type TourAsk = "reminders" | "bridge" | "subscriptions" | "storage";
 
 export type TourStep = {
   id: string;
@@ -105,6 +105,14 @@ export const TOUR_STEPS: readonly TourStep[] = [
     ask: "bridge",
     say: () =>
       "Devices connects Spectra Bridge on your computer. With it I can open, read and organise files on your own machine, only ever where you allow it.",
+  },
+  {
+    id: "subscriptions",
+    path: "/devices",
+    targets: ["[data-ai-subscriptions]", PAGE],
+    ask: "subscriptions",
+    say: () =>
+      "Pay for ChatGPT or Claude? Through Bridge I can run on your own subscription with Codex or Claude Code, with all the same tools. I can install either for you and open its log-in.",
   },
   {
     id: "storage",

@@ -102,6 +102,7 @@ export function syllabusTitle(entry: BundledSyllabus, level?: SyllabusLevel | nu
 function sectionOf(markdown: string, query: string) {
   const lines = markdown.split("\n");
   const want = normal(query);
+  const exact = lines.findIndex((line) => normal(/^#{1,6}\s+(.*)$/.exec(line)?.[1] ?? "") === want);
   let start = -1;
   let depth = 0;
   for (let at = 0; at < lines.length; at += 1) {
@@ -109,7 +110,7 @@ function sectionOf(markdown: string, query: string) {
     if (!heading) continue;
     if (start === -1) {
       const text = normal(heading[2]!);
-      if (text === want || text.startsWith(`${want} `) || text.includes(want)) {
+      if (at === exact || (exact === -1 && (text === want || text.startsWith(`${want} `) || text.includes(want)))) {
         start = at;
         depth = heading[1]!.length;
       }
@@ -144,8 +145,7 @@ export function readSyllabus(input: { subject?: string; level?: SyllabusLevel; s
   const variant = syllabusVariant(entry, level);
   const head = [
     `${entry.title} (${entry.programme}${variant.key !== "all" ? `, ${variant.key}` : ""}${entry.firstAssessment ? `, first assessment ${entry.firstAssessment}` : ""})`,
-    entry.source ? `Source: ${entry.source}` : null,
-    "Compact, sourced course reference; not the complete IB guide. Check the linked guide/class instructions for exact assessment requirements.",
+    "Spectra's compact summary of the course, not the guide's own words.",
     variant.key === "all" && entry.levels.length > 1 ? "Level unknown or mixed: confirm SL/HL before assigning level-specific work." : null,
     variant.key === "HL" ? "Sections marked (HL) are for HL students only." : null,
   ]

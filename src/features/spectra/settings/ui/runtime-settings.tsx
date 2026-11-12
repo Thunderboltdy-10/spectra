@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { SelectField } from "@/components/ui/select";
 import { claudeModelAlias } from "../../ai/model-config";
 import { PROVIDER_LABEL, providerProblem, useAgentRuntime } from "../../ai/use-agent-runtime";
+import { ProviderSetupButton } from "../../ai/provider-setup";
 import { bridgeUnavailableReason, useBridgeAvailability } from "../../bridge/availability";
 import { DEVICES_HREF } from "../../bridge/client";
 import { useSpectraPreferences } from "../preference-store";
@@ -62,7 +63,7 @@ function ProviderRow({ provider, model, onModel }: {
   }
   if (!entry) return <Row label={name} description="Checking this computer…" control={null} />;
   if (entry.state !== "ready") {
-    return <Row label={name} description={providerProblem(provider, entry.state) ?? undefined} control={null} />;
+    return <Row label={name} description={providerProblem(provider, entry.state) ?? undefined} control={<ProviderSetupButton provider={provider} state={entry.state} />} />;
   }
   const who = [entry.account, entry.plan].filter(Boolean).join(", ");
   return (

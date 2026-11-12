@@ -10,6 +10,8 @@ import type {
   SearchKind,
   SearchRequest,
   SearchResponse,
+  SyllabusGuideRead,
+  SyllabusGuideRequest,
   ThreadReadRequest,
   WebResult,
 } from "@/features/spectra/ai/harness/backend";
@@ -1060,6 +1062,10 @@ export class ConvexHarnessBackend implements HarnessBackend {
       "Spectra handed the request to this agent",
     );
     return agent ? { title: agent.title, instructions: agent.instructions } : null;
+  }
+
+  async readSyllabusGuide(input: SyllabusGuideRequest): Promise<SyllabusGuideRead | null> {
+    return query<SyllabusGuideRequest, SyllabusGuideRead | null>("syllabusGuides:read", input).catch(() => null);
   }
 
   /** Not connected, or not verified: it stays true for the rest of the run, so it is read once. */

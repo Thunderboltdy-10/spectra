@@ -27,7 +27,7 @@ export function buildHarnessTools(session: HarnessSession): AnyHarnessTool[] {
     webSearchTool(session),
     readCalendarTool(session),
     schoolDataTool(session),
-    readSyllabusTool(),
+    readSyllabusTool(session),
     loadSkillTool(),
     readMemoryTool(session),
     updateMemoryTool(session),

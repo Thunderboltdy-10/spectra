@@ -39,8 +39,9 @@ summarized here. Recheck sources and guide addenda when maintaining the files.
 
 ## Retrieval and cost
 
-- Markdown is bundled at build time; `read_syllabus` performs no Convex query or
-  network request. No syllabus text is inserted into the system prompt.
+- Markdown is bundled at build time. `read_syllabus` reads it without a network
+  request, then makes one indexed Convex query for the official guide (below).
+  No syllabus text is inserted into the system prompt.
 - A subject request returns its introduction and section index. Request only the
   relevant topic or `Assessment`; `section: "all"` explicitly retrieves the whole
   compact reference. Section responses are bounded to 6,000 characters.
@@ -66,6 +67,43 @@ tokens (maximum 340); median assessment-section read 125 tokens (maximum 146).
 These are tokenizer estimates, not a billing guarantee for the selected model.
 The generated TypeScript bundle is about 82 KB; all Markdown bodies total about
 39 KB. None of that full catalogue is sent to the model at run start.
+
+## Official guides
+
+The IB subject guides' own text is stored in Convex, so `read_syllabus` can quote
+them. Only what students ask about is kept, split along the guide's sections:
+
+- **Syllabus**: every topic and sub-topic with its content (and TOK's course chapter).
+- **Assessment**: this course's papers, internal assessment and marking criteria.
+  The IB's generic assessment pages are left out.
+- **Reference**: the command terms, the subject's glossary, formulae and notation.
+
+Front matter, approaches to teaching and learning, bibliographies and the rest are
+not stored. Page footers, running headers and bullets are cleaned on import.
+`shared/syllabus/guides.ts` holds the rules; `guides.test.ts` covers them.
+
+Tables: `syllabusGuides` (outline per guide), `syllabusGuideSegments` (one text
+segment per section, with a search index for questions that name no section) and
+`syllabusGuideCourses` (course id to guide). The three literature-and-performance
+courses have no guide and keep the compact reference only.
+
+With no `section`, the tool gives the compact overview plus the guide's outline. A
+`section` can be a code (`A.2`, `C1.3`, `SL 2.6`, several as `A.1, A.2`), a heading
+(`Paper 1`, `Internal assessment criteria`, `Glossary of command terms`) or words;
+`;` separates several. Reads are bounded to 12,000 characters per section and
+18,000 per call, and say which sub-sections to read for the rest.
+
+Import, once per deployment and again when a guide changes. The folder holds
+`course-map.json` and `extracted/<guide>/{index.json,full.txt}`:
+
+```sh
+# Local: CONVEX_SELF_HOSTED_URL and CONVEX_SELF_HOSTED_ADMIN_KEY
+# Production: CONVEX_URL and CONVEX_DEPLOY_KEY
+npx tsx scripts/import-syllabus-guides.ts <ib-guides folder> --dry-run
+npx tsx scripts/import-syllabus-guides.ts <ib-guides folder>
+```
+
+The import replaces each guide in place and is safe to run again.
 
 ## Maintenance
 

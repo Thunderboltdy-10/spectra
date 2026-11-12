@@ -141,6 +141,97 @@ struct StartFrame {
     /// What a Claude session is for. Codex always runs `app-server`.
     #[serde(default)]
     claude: Option<ClaudeIntent>,
+    /// Install or log in to the CLI in a terminal the person can see. Nothing else runs.
+    #[serde(default)]
+    setup: Option<SetupAction>,
+}
+
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+enum SetupAction {
+    Install,
+    Login,
+}
+
+/// The official installers and each CLI's own log-in, fixed here: the far side only picks one.
+fn setup_script(program: &str, action: SetupAction, windows: bool) -> Option<String> {
+    let (name, login, installer) = match (program, windows) {
+        ("claude", true) => ("Claude Code", "claude auth login", "irm https://claude.ai/install.ps1 | iex"),
+        ("claude", false) => ("Claude Code", "claude auth login", "curl -fsSL https://claude.ai/install.sh | bash"),
+        ("codex", true) => ("Codex", "codex login", "irm https://chatgpt.com/codex/install.ps1 | iex"),
+        ("codex", false) => ("Codex", "codex login", "curl -fsSL https://chatgpt.com/codex/install.sh | sh"),
+        _ => return None,
+    };
+    Some(if windows {
+        // The installers' folders go on PATH here, since this window started before the install.
+        let path = "$env:Path = \"$env:USERPROFILE\\.local\\bin;$env:LOCALAPPDATA\\Programs\\OpenAI\\Codex\\bin;$env:Path\"";
+        let title = format!("$Host.UI.RawUI.WindowTitle = 'Spectra: {name}'");
+        let done = "Write-Host ''; Write-Host 'Done. Close this window and go back to Spectra.'";
+        match action {
+            SetupAction::Install => format!("{title}; Write-Host 'Installing {name}...'; {installer}; {path}; {login}; {done}"),
+            SetupAction::Login => format!("{title}; {path}; {login}; {done}"),
+        }
+    } else {
+        let path = "export PATH=$HOME/.local/bin:$PATH";
+        let done = "echo; echo 'Done. Close this window and go back to Spectra.'";
+        match action {
+            SetupAction::Install => format!("{path}; echo 'Installing {name}...'; {installer} && {login}; {done}"),
+            SetupAction::Login => format!("{path}; {login}; {done}"),
+        }
+    })
+}
+
+/// Opens a terminal running the setup. "opened", or "unsupported" where Spectra can't open one.
+fn open_setup(program: &str, action: SetupAction) -> &'static str {
+    let Some(script) = setup_script(program, action, cfg!(windows)) else {
+        return "unsupported";
+    };
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let opened = std::process::Command::new("powershell.exe")
+            .args(["-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script])
+            .creation_flags(0x0000_0010) // CREATE_NEW_CONSOLE
+            .spawn();
+        return if opened.is_ok() { "opened" } else { "failed" };
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let opened = std::process::Command::new("osascript")
+            .args(["-e", &format!("tell application \"Terminal\" to do script \"{script}\""), "-e", "tell application \"Terminal\" to activate"])
+            .spawn();
+        return if opened.is_ok() { "opened" } else { "failed" };
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = script;
+        "unsupported"
+    }
+}
+
+/// Where the official installers put each CLI, for a Bridge that started before the install.
+fn installed_paths(program: &str) -> Vec<PathBuf> {
+    let file = if cfg!(windows) { format!("{program}.exe") } else { program.to_string() };
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from);
+    let mut paths: Vec<PathBuf> = home.iter().map(|home| home.join(".local").join("bin").join(&file)).collect();
+    if cfg!(windows) && program == "codex"
+        && let Some(local) = std::env::var_os("LOCALAPPDATA")
+    {
+        paths.push(PathBuf::from(local).join("Programs").join("OpenAI").join("Codex").join("bin").join(&file));
+    }
+    if !cfg!(windows) {
+        paths.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(|dir| PathBuf::from(dir).join(&file)));
+    }
+    paths
+}
+
+/// The CLI on PATH, else where its installer puts it, else its bare name (which then reports "not-installed").
+fn resolve_program(program: &str) -> PathBuf {
+    let file = if cfg!(windows) { format!("{program}.exe") } else { program.to_string() };
+    std::env::var_os("PATH")
+        .and_then(|path| std::env::split_paths(&path).map(|dir| dir.join(&file)).find(|candidate| candidate.is_file()))
+        .or_else(|| installed_paths(program).into_iter().find(|candidate| candidate.is_file()))
+        .unwrap_or_else(|| PathBuf::from(program))
 }
 
 #[derive(Deserialize)]
@@ -588,6 +679,11 @@ async fn run_cli(
     mut from_far: mpsc::Receiver<String>,
     to_far: mpsc::Sender<String>,
 ) {
+    if let Some(action) = start.setup {
+        let opened = open_setup(program, action);
+        let _ = to_far.send(relay_note("setup", opened)).await;
+        return;
+    }
     let _live = LiveSession::start();
     let codex = program == "codex";
     let (template, mcp) = if codex {
@@ -651,7 +747,15 @@ async fn run_cli(
         }
         arg
     });
-    let mut command = Command::new(program);
+    let resolved = resolve_program(program);
+    let mut command = Command::new(&resolved);
+    // The CLI's own folder first, for what it starts in turn.
+    if let Some(dir) = resolved.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+        let rest = std::env::var_os("PATH").unwrap_or_default();
+        if let Ok(path) = std::env::join_paths(std::iter::once(dir.to_path_buf()).chain(std::env::split_paths(&rest))) {
+            command.env("PATH", path);
+        }
+    }
     command
         .args(args)
         .current_dir(&cwd)
@@ -1134,6 +1238,48 @@ mod tests {
         }
         assert!(model_name_allowed("claude-haiku-4-5") && model_name_allowed("opus[1m]") && model_name_allowed("sonnet"));
         assert!(!model_name_allowed("") && !model_name_allowed("-p") && !model_name_allowed("Haiku") && !model_name_allowed("a b"));
+    }
+
+    #[test]
+    fn setup_runs_only_the_official_installer_and_the_clis_own_log_in() {
+        let start: StartFrame = serde_json::from_value(serde_json::json!({ "setup": "install", "args": ["rm", "-rf"] })).unwrap();
+        assert_eq!(start.setup, Some(SetupAction::Install));
+        assert!(serde_json::from_value::<StartFrame>(serde_json::json!({ "setup": "anything-else" })).is_err());
+        let windows = setup_script("claude", SetupAction::Install, true).unwrap();
+        assert!(windows.contains("irm https://claude.ai/install.ps1 | iex") && windows.ends_with("Done. Close this window and go back to Spectra.'"));
+        assert!(windows.find("install.ps1").unwrap() < windows.find("claude auth login").unwrap());
+        let mac = setup_script("codex", SetupAction::Install, false).unwrap();
+        assert!(mac.contains("curl -fsSL https://chatgpt.com/codex/install.sh | sh && codex login"));
+        // A Terminal script sits inside an AppleScript string, so it never has a double quote.
+        for program in ["claude", "codex"] {
+            for action in [SetupAction::Install, SetupAction::Login] {
+                assert!(!setup_script(program, action, false).unwrap().contains('"'));
+            }
+        }
+        let login = setup_script("codex", SetupAction::Login, true).unwrap();
+        assert!(login.contains("codex login") && !login.contains("install"));
+        assert!(setup_script("bash", SetupAction::Install, true).is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn powershell_reads_the_setup_script_as_written() {
+        // The quotes in the PATH line survive Windows argument quoting; nothing is installed here.
+        let script = setup_script("codex", SetupAction::Login, true).unwrap();
+        let path_line = script.split("; ").find(|part| part.starts_with("$env:Path")).unwrap();
+        let output = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &format!("{path_line}; Write-Output ($env:Path -split ';')[1]")])
+            .output()
+            .unwrap();
+        let printed = String::from_utf8_lossy(&output.stdout);
+        assert!(printed.trim().ends_with("Programs\\OpenAI\\Codex\\bin"), "{printed}");
+    }
+
+    #[test]
+    fn a_cli_is_looked_for_where_its_installer_puts_it() {
+        let paths = installed_paths("codex");
+        assert!(paths.iter().any(|path| path.ends_with(std::path::Path::new(".local").join("bin").join(if cfg!(windows) { "codex.exe" } else { "codex" }))));
+        assert_eq!(resolve_program("spectra-no-such-cli"), PathBuf::from("spectra-no-such-cli"));
     }
 
     fn claude_start(intent: serde_json::Value) -> StartFrame {

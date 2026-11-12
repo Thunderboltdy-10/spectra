@@ -1,4 +1,4 @@
-import { readSyllabus } from "../../../../../../shared/syllabus";
+import { examYearIn, findSyllabus, levelIn, readSyllabus, syllabusForClass } from "../../../../../../shared/syllabus";
 import { ARTIFACT_TYPE_KEYS } from "../../../artifacts/types";
 import { plannerTime } from "../authoring/items";
 import type { SearchHit, SearchResponse } from "../backend";
@@ -370,17 +370,17 @@ export function schoolDataTool(session: HarnessSession): HarnessTool<SchoolArgs>
 
 type SyllabusArgs = { subject?: string; level?: "SL" | "HL"; section?: string; examYear?: number };
 
-export function readSyllabusTool(): HarnessTool<SyllabusArgs> {
+export function readSyllabusTool(session: HarnessSession): HarnessTool<SyllabusArgs> {
   return {
     name: "read_syllabus",
     description:
-      "Read a sourced IB course reference (newest editions with first assessment through 2027). No subject lists available courses. Subject and level return a compact overview; use section for a topic or Assessment, or all for the full reference. Supply examYear to check the student's examination cohort. Use before course-aligned study, revision or practice. These references summarize official IB sources; consult linked guides for exact requirements.",
+      "Read an IB course: Spectra's compact summary and the official IB guide's own text (syllabus with every sub-topic, assessment, papers, marking criteria and command terms). No subject lists the courses. Subject and level give the summary and the guide's sections. section reads the guide: a code (\"A.2\", \"C1.3\", \"SL 2.6\"; several as \"A.1, A.2\"), a heading (\"Paper 1\", \"Internal assessment criteria\", \"Command terms\") or words to search for; separate several with \";\". section \"all\" gives the whole summary. Supply examYear to check the student's examination cohort. Use before course-aligned study, revision or practice.",
     parameters: {
       type: "object",
       properties: {
         subject: { type: "string", description: "The subject or class name, e.g. \"Physics HL\"." },
         level: { type: "string", enum: ["SL", "HL"] },
-        section: { type: "string", description: "A topic heading or its code, e.g. \"A.1\"." },
+        section: { type: "string", description: "A code, a heading or words, e.g. \"A.1\", \"Paper 2\", \"command terms\"." },
         examYear: { type: "integer", minimum: 2021, maximum: 2099, description: "Student's examination year, not the current school year." },
       },
       additionalProperties: false,
@@ -393,10 +393,36 @@ export function readSyllabusTool(): HarnessTool<SyllabusArgs> {
       section: optionalString(raw, "section", 200),
       examYear: typeof raw.examYear === "number" && Number.isInteger(raw.examYear) && raw.examYear >= 2021 && raw.examYear <= 2099 ? raw.examYear : undefined,
     }),
-    execute: async (args) => ({
+    execute: async (args, ctx) => ({
       ok: true,
-      content: readSyllabus(args),
+      content: await readCourse(session, args, ctx.signal),
       doneLabel: args.subject ? `Read the ${args.subject} syllabus` : "Checked the syllabi",
     }),
   };
+}
+
+const LEVEL_NOTE = {
+  SL: "The student is SL: leave out what the guide marks AHL, additional higher level or HL only.",
+  HL: "The student is HL: the guide's AHL, additional higher level and HL-only parts are theirs too.",
+} as const;
+
+/** The compact summary, with the official guide's outline or the guide's own text for a section. */
+async function readCourse(session: HarnessSession, args: SyllabusArgs, signal: AbortSignal) {
+  const summary = readSyllabus(args);
+  const entry = args.subject ? findSyllabus(args.subject, args.examYear ?? examYearIn(args.subject)) : null;
+  if (!entry || (args.section && /^all$/i.test(args.section.trim()))) return summary;
+  const level = args.level ?? syllabusForClass(args.subject!)?.level ?? levelIn(args.subject!) ?? undefined;
+  if (level && entry.levels.length && !entry.levels.includes(level)) return summary;
+  const guide = await session.backend
+    .readSyllabusGuide({ courseId: entry.id, ...(level ? { level } : {}), ...(args.section ? { section: args.section } : {}) }, signal)
+    .catch(() => null);
+  if (!guide) return summary;
+  const note = level ? LEVEL_NOTE[level] : entry.levels.length > 1 ? "Level unknown: confirm SL or HL before level-specific work." : null;
+  if (!args.section) {
+    // The guide's sections replace the summary's own list, so there is one way to ask for a part.
+    return `${summary.split("\n\nSections (")[0]}\n\nThe official ${guide.title}; read any part with section (a code, a heading or words):\n${guide.text}`;
+  }
+  // A heading only the summary has still answers from the summary.
+  if (guide.found === "none") return summary.includes("No section matches") ? guide.text : summary;
+  return [`From the official ${guide.title}${level ? ` (${level})` : ""}. Quote and plan from this text.`, note, guide.text].filter(Boolean).join("\n");
 }

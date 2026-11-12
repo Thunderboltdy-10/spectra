@@ -33,6 +33,7 @@ import { runLocalDeviceAction } from "./device-actions";
 import { devicesModel, nativeWritesChoice, nativeWritesPlan, type CloudOverview, type DeviceView, type NativeWrites } from "./devices-model";
 import { NativeWritesChoice } from "./native-writes-choice";
 import { WorkHomeChoice } from "./work-home-choice";
+import { SubscriptionSetup } from "../ai/provider-setup";
 import { PairingPanel, THIS_COMPUTER_LIFE_KEY } from "./pairing-panel";
 import { devicePairing } from "./pairing";
 import { firstTipMoment } from "../onboarding/first-tips";
@@ -345,6 +346,7 @@ export function DevicesPage() {
             </section>
 
             <aside aria-label="For every device" className="min-w-0 space-y-4">
+              <SubscriptionSetup />
               <WorkHomeChoice />
               <NativeWritesChoice value={nativeWrites} disabled={!policy} onChange={chooseNativeWrites} />
             </aside>

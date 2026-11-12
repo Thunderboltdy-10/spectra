@@ -128,11 +128,13 @@ export function recordingCaller(callModel: ModelCaller) {
   return { caller, calls };
 }
 
-/** Tool names whose effect is always a read. */
+/** Tool names whose effect is always a read. Opening something for the user is the answer itself, not a read before one. */
 export function readOnlyToolNames() {
   const session = createSession({ backend: new MemoryBackend(), prompt: "" });
   return new Set(
-    [...buildHarnessTools(session), ...runOnlyTools(session)].filter((tool) => tool.effect === "read").map((tool) => tool.name),
+    [...buildHarnessTools(session), ...runOnlyTools(session)]
+      .filter((tool) => tool.effect === "read" && tool.name !== "open_in_spectra")
+      .map((tool) => tool.name),
   );
 }
 

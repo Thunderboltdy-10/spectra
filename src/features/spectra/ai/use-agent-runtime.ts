@@ -102,7 +102,7 @@ export function providerProblem(provider: keyof typeof PROVIDER_LABEL, state: Ag
   const login = provider === "codex" ? "codex login" : "claude auth login";
   switch (state) {
     case "signed-out":
-      return `Not logged in. Run ${login} in a terminal, then come back.`;
+      return `Not logged in on this computer. Log in here, or run ${login} in a terminal.`;
     case "not-installed":
       return `${name} isn't installed on this computer.`;
     case "no-bridge":

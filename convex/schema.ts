@@ -5410,4 +5410,37 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_workspace", ["workspaceId"]),
+
+  /** The official IB guides read_syllabus serves (shared/syllabus/guides.ts): the outline of what is kept. */
+  syllabusGuides: defineTable({
+    guideId: v.string(),
+    title: v.string(),
+    outline: v.array(
+      v.object({
+        start: v.number(),
+        end: v.number(),
+        code: v.optional(v.string()),
+        title: v.string(),
+        depth: v.number(),
+        area: v.union(v.literal("syllabus"), v.literal("assessment"), v.literal("reference")),
+      }),
+    ),
+    sourceSha: v.string(),
+    importedAt: v.number(),
+  }).index("by_guide", ["guideId"]),
+
+  /** A guide's text, cut at its section starts; a section is the segments inside its span. */
+  syllabusGuideSegments: defineTable({
+    guideId: v.string(),
+    start: v.number(),
+    text: v.string(),
+  })
+    .index("by_guide_start", ["guideId", "start"])
+    .searchIndex("search_text", { searchField: "text", filterFields: ["guideId"] }),
+
+  /** Which guide a Spectra course reads (several language courses share one guide). */
+  syllabusGuideCourses: defineTable({
+    courseId: v.string(),
+    guideId: v.string(),
+  }).index("by_course", ["courseId"]),
 });

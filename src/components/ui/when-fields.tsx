@@ -244,7 +244,7 @@ export function TimeField({
             value={showing}
             placeholder={placeholder}
             onFocus={() => setOpen(true)}
-            onClick={() => setOpen(true)}
+            onClick={(event) => { setOpen(true); if (draft === null) event.currentTarget.select(); }}
             onChange={(event) => {
               setDraft(event.target.value);
               setActive(null);

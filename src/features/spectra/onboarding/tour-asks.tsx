@@ -7,12 +7,13 @@ import { Button } from "@/components/ui/button";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { bridgeDownloadUrl, bridgePlatform } from "../bridge/client";
 import { WorkHomeChoice } from "../devices/work-home-choice";
+import { SubscriptionSetup } from "../ai/provider-setup";
 import type { TourAsk } from "./tour-steps";
 
 /*
  * The choices the tour asks for while it is on the page they belong to: when
  * the brief and the reminders arrive, whether to get Bridge on this computer,
- * and where work is kept. All can be changed later (Settings, Devices).
+ * Codex or Claude Code for a subscription they pay for, and where work is kept. All can be changed later (Settings, Devices).
  */
 
 function TimeChoice({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
@@ -65,5 +66,6 @@ function BridgeChoice() {
 
 export function TourAskControl({ ask }: { ask: TourAsk }) {
   if (ask === "storage") return <WorkHomeChoice compact />;
+  if (ask === "subscriptions") return <SubscriptionSetup compact />;
   return ask === "reminders" ? <ReminderTimes /> : <BridgeChoice />;
 }

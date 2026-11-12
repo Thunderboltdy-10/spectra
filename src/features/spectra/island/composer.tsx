@@ -45,6 +45,7 @@ import { useSpectraPreferences } from "../settings/preference-store";
 import { applyRuntimeChoice } from "../settings/ui/runtime-settings";
 import { bridgeUnavailableReason, useBridgeAvailability } from "../bridge/availability";
 import { DEVICES_HREF } from "../bridge/client";
+import { setupActionFor, startProviderSetup } from "../ai/provider-setup";
 
 /*
  * The island's composer (ISLAND.md, "The composer"): Spectra's only one.
@@ -580,6 +581,11 @@ function RuntimeControls() {
                     <>
                       <div className="px-2 pb-1 text-micro font-medium text-[var(--text-tertiary)]">{PROVIDER_LABEL[provider]}</div>
                       <p className="px-2 pb-1 text-micro leading-[18px] text-[var(--text-secondary)]">{problem}</p>
+                      {setupActionFor(entry?.state) ? (
+                        <DropdownMenuItem onSelect={() => void startProviderSetup(provider, setupActionFor(entry?.state)!)}>
+                          {setupActionFor(entry?.state) === "install" ? `Install ${PROVIDER_LABEL[provider]}` : "Log in"}
+                        </DropdownMenuItem>
+                      ) : null}
                     </>
                   ) : (
                     <DropdownMenuDisclosure

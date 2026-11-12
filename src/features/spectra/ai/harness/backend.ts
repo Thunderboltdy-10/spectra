@@ -124,6 +124,9 @@ export type ThreadReadRequest = {
   limit?: number;
 };
 
+export type SyllabusGuideRequest = { courseId: string; level?: "SL" | "HL"; section?: string };
+export type SyllabusGuideRead = { title: string; found: "outline" | "section" | "search" | "none"; text: string };
+
 export interface HarnessBackend {
   /** The user's IANA time zone. */
   readonly timeZone: string;
@@ -177,6 +180,8 @@ export interface HarnessBackend {
   readAgentCompilation(input: { agentId: string }, signal: AbortSignal): Promise<AgentCompilationState | null>;
   /** School records: deadlines, resources, timetable, classes, past tasks, grades, CAS, or one task or CAS experience by recordId. */
   readSchoolData(input: { purpose: string; classId?: string; recordId?: string }, signal: AbortSignal): Promise<string>;
+  /** The official IB guide for a Spectra course: its outline, or sections by code, heading or words. Null when no guide is stored. */
+  readSyllabusGuide(input: SyllabusGuideRequest, signal: AbortSignal): Promise<SyllabusGuideRead | null>;
   /** One of the agent's longer notes about the user; null when there is no such topic. */
   readMemoryTopic(slug: string, signal: AbortSignal): Promise<{ title: string; summary: string; content: string } | null>;
   /** Change the agent's notes about the user. Why it could not is in the result. */

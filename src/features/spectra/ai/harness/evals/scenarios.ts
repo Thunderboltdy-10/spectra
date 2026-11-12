@@ -843,6 +843,8 @@ export const EVAL_SCENARIOS: EvalScenario[] = [
     group: "golden",
     prompt:
       "I have football on Tuesday and Thursday from 17:00 to 19:00. Put three 45-minute revision sessions for my Biology test on Friday 9 October into my calendar before the test.",
+    // Checking the calendar, then the timetable it points to, is a fair second look.
+    readTurns: 2,
     check: (context) => {
       const problems = [...completed(context)];
       const added = [...sent(context, "create_calendar_personal_event"), ...sent(context, "schedule_calendar_task")];
@@ -862,6 +864,8 @@ export const EVAL_SCENARIOS: EvalScenario[] = [
     name: "golden: one page",
     group: "golden",
     prompt: "Make a one-page revision sheet on photosynthesis.",
+    // With no course set, finding the student's course and then its topic is fair.
+    readTurns: 2,
     check: (context) => {
       const problems = [...completed(context), ...oneCreated(context, "document")];
       const sheet = createdOf(context, "document")[0];
@@ -901,8 +905,8 @@ export const EVAL_SCENARIOS: EvalScenario[] = [
     group: "golden",
     prompt: "Make a task to finish my History essay by Friday 9 October.",
     backend: LIBRARY_FIXTURE,
-    // Finding the essay to link the task to is fair; embedding it is not.
-    readTurns: 2,
+    // Finding the essay and its class to link the task to is fair; embedding it is not.
+    readTurns: 3,
     check: (context) => [
       ...completed(context),
       ...oneCreated(context, "planner_task"),

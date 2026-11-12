@@ -183,6 +183,8 @@ class RelaySocket {
   onClose: (reason: string) => void = () => undefined;
   /** A line the CLI wrote that is not a JSON frame on its own. */
   onLine: (line: string) => void = () => undefined;
+  /** What the Bridge did with a setup request: "opened", "unsupported" or "failed". */
+  setupResult?: string;
   /** A request from the CLI to Spectra's tools. */
   onMcp: (body: string) => Promise<string | undefined> = async () => undefined;
   readonly ready: Promise<void>;
@@ -214,6 +216,10 @@ class RelaySocket {
             return;
           }
           traceRaw("relay", frame);
+          if (frame.relay === "setup") {
+            this.setupResult = String(frame.detail);
+            resolve();
+          }
           if (frame.relay === "started") resolve();
           if (frame.relay === "error") {
             const message = relayErrorMessage(provider, String(frame.detail));
@@ -962,7 +968,7 @@ function claudeEffort(profile: SpectraReasoningProfile) {
  * refuses anything else; `args` is kept only for Bridges older than that rule.
  */
 type ClaudeIntent = { mode: "prompt"; model: string; tools?: boolean; effort?: string } | { mode: "auth-status" };
-type RelayStart = { args: string[]; system?: string; mcp?: boolean; claude?: ClaudeIntent };
+type RelayStart = { args: string[]; system?: string; mcp?: boolean; claude?: ClaudeIntent; setup?: RuntimeSetupAction };
 
 function claudeStart(intent: ClaudeIntent, system?: string): RelayStart {
   if (intent.mode === "auth-status") return { args: ["auth", "status"], claude: intent };
@@ -1325,6 +1331,30 @@ async function claudeStatus(accountId: string | undefined): Promise<RuntimeProvi
     );
   } catch (error) {
     return statusFromError(error);
+  } finally {
+    relay.close();
+  }
+}
+
+export type RuntimeSetupAction = "install" | "login";
+export type RuntimeSetupResult = { opened: true } | { opened: false; reason: "unsupported" | "update-bridge" | "no-bridge" | "failed" };
+
+/**
+ * Ask Bridge to open a terminal that installs the CLI with its official installer
+ * and logs in, or only logs in. Bridge runs its own fixed commands; this only picks one.
+ */
+export async function setupRuntime(provider: SubscriptionProvider, action: RuntimeSetupAction, accountId: string | undefined): Promise<RuntimeSetupResult> {
+  const relay = new RelaySocket(provider, { args: [], setup: action }, accountId);
+  try {
+    await withinStatusTime(relay.ready);
+    if (relay.setupResult === "opened") return { opened: true };
+    if (relay.setupResult === "unsupported") return { opened: false, reason: "unsupported" };
+    // An older Bridge ignores the request and starts the CLI instead.
+    return { opened: false, reason: relay.setupResult === undefined ? "update-bridge" : "failed" };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (/Update Spectra/.test(message)) return { opened: false, reason: "update-bridge" };
+    return { opened: false, reason: statusFromError(error).state === "no-bridge" ? "no-bridge" : "failed" };
   } finally {
     relay.close();
   }

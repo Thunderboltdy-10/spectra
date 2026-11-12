@@ -39,7 +39,7 @@ jobs:
           - platform: windows-latest
             bundles: nsis
             target: x86_64-pc-windows-msvc
-          - platform: macos-14
+          - platform: macos-latest
             bundles: app,dmg
             target: aarch64-apple-darwin
           # GitHub's current Intel macOS label. A Windows build is not evidence

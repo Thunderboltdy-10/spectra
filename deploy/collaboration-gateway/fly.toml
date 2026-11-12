@@ -26,7 +26,7 @@ kill_timeout = "30s"
   SPECTRA_COLLAB_PORT = "1234"
   SPECTRA_COLLAB_HOST = "0.0.0.0"
   # Leave headroom under the VM's memory for buffers outside the V8 heap.
-  NODE_OPTIONS = "--max-old-space-size=1536"
+  NODE_OPTIONS = "--max-old-space-size=768"
 
 [http_service]
   internal_port = 1234
@@ -51,8 +51,10 @@ kill_timeout = "30s"
     path = "/_spectra/health"
     timeout = "2s"
 
-# A dedicated CPU: the gateway is one Node process serving every school, and
-# a shared CPU's throttling stalls every room at once.
+# Fly bills a machine for every hour it runs, used or not, and this one always
+# runs. A shared CPU (about $6 a month) is enough for launch; a dedicated
+# performance-1x (about $32) is the next step if rooms stall under real load:
+# `fly scale vm performance-1x --memory 2048`, with NODE_OPTIONS raised to match.
 [vm]
-  size = "performance-1x"
-  memory = "2gb"
+  size = "shared-cpu-1x"
+  memory = "1gb"

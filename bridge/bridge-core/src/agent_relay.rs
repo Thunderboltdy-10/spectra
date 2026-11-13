@@ -151,6 +151,8 @@ struct StartFrame {
 enum SetupAction {
     Install,
     Login,
+    /// The official installer with no window: Spectra watches for the CLI to appear, then asks for the log-in.
+    InstallQuiet,
 }
 
 /// The official installers and each CLI's own log-in, fixed here: the far side only picks one.
@@ -170,6 +172,7 @@ fn setup_script(program: &str, action: SetupAction, windows: bool) -> Option<Str
         match action {
             SetupAction::Install => format!("{title}; Write-Host 'Installing {name}...'; {installer}; {path}; {login}; {done}"),
             SetupAction::Login => format!("{title}; {path}; {login}; {done}"),
+            SetupAction::InstallQuiet => installer.to_string(),
         }
     } else {
         let path = "export PATH=$HOME/.local/bin:$PATH";
@@ -177,6 +180,7 @@ fn setup_script(program: &str, action: SetupAction, windows: bool) -> Option<Str
         match action {
             SetupAction::Install => format!("{path}; echo 'Installing {name}...'; {installer} && {login}; {done}"),
             SetupAction::Login => format!("{path}; {login}; {done}"),
+            SetupAction::InstallQuiet => installer.to_string(),
         }
     })
 }
@@ -185,6 +189,18 @@ fn setup_script(program: &str, action: SetupAction, windows: bool) -> Option<Str
 fn open_setup(program: &str, action: SetupAction) -> &'static str {
     let Some(script) = setup_script(program, action, cfg!(windows)) else {
         return "unsupported";
+    };
+    if action == SetupAction::InstallQuiet {
+        return if install_quietly(&script) { "started" } else { "failed" };
+    }
+    // A CLI found off the PATH (npm, Claude Desktop's own) logs in by its full path.
+    let resolved = resolve_program(program);
+    let script = if action == SetupAction::Login && resolved.is_absolute() {
+        let quoted = resolved.to_string_lossy().replace('\'', "''");
+        let call = if cfg!(windows) { format!("& '{quoted}'") } else { format!("'{quoted}'") };
+        script.replacen(&format!("{program} "), &format!("{call} "), 1)
+    } else {
+        script
     };
     #[cfg(windows)]
     {
@@ -209,29 +225,164 @@ fn open_setup(program: &str, action: SetupAction) -> &'static str {
     }
 }
 
-/// Where the official installers put each CLI, for a Bridge that started before the install.
-fn installed_paths(program: &str) -> Vec<PathBuf> {
-    let file = if cfg!(windows) { format!("{program}.exe") } else { program.to_string() };
-    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from);
-    let mut paths: Vec<PathBuf> = home.iter().map(|home| home.join(".local").join("bin").join(&file)).collect();
-    if cfg!(windows) && program == "codex"
-        && let Some(local) = std::env::var_os("LOCALAPPDATA")
+/// Runs the official installer with no window. It is left to finish on its own:
+/// the CLI showing up where `resolve_program` looks is the sign it is done.
+fn install_quietly(script: &str) -> bool {
+    #[cfg(windows)]
     {
-        paths.push(PathBuf::from(local).join("Programs").join("OpenAI").join("Codex").join("bin").join(&file));
+        use std::os::windows::process::CommandExt;
+        return std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .spawn()
+            .is_ok();
     }
-    if !cfg!(windows) {
-        paths.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(|dir| PathBuf::from(dir).join(&file)));
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new("/bin/sh")
+            .args(["-c", script])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .is_ok()
     }
-    paths
 }
 
-/// The CLI on PATH, else where its installer puts it, else its bare name (which then reports "not-installed").
+/// Where the official installers and the usual package managers put each CLI,
+/// for a Bridge that started before the install.
+fn installed_dirs(program: &str) -> Vec<PathBuf> {
+    let var = |name: &str| std::env::var_os(name).map(PathBuf::from);
+    let home = var(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Some(home) = &home {
+        dirs.push(home.join(".local").join("bin"));
+        dirs.push(home.join(".bun").join("bin"));
+        dirs.push(home.join(".volta").join("bin"));
+    }
+    if cfg!(windows) {
+        if let Some(local) = var("LOCALAPPDATA") {
+            if program == "codex" {
+                dirs.push(local.join("Programs").join("OpenAI").join("Codex").join("bin"));
+            }
+            dirs.push(local.join("Microsoft").join("WinGet").join("Links"));
+            dirs.push(local.join("pnpm"));
+        }
+        if let Some(roaming) = var("APPDATA") {
+            dirs.push(roaming.join("npm"));
+        }
+        if let Some(home) = &home {
+            dirs.push(home.join("scoop").join("shims"));
+        }
+    } else {
+        dirs.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
+        if let Some(home) = &home {
+            dirs.push(home.join(".npm-global").join("bin"));
+            // nvm keeps one folder per Node version; the newest is the likeliest.
+            dirs.extend(newest_first(&home.join(".nvm").join("versions").join("node")).into_iter().map(|dir| dir.join("bin")));
+        }
+    }
+    dirs
+}
+
+/// The folders inside `dir`, most recently changed first.
+fn newest_first(dir: &std::path::Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut found: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .map(|entry| (entry.metadata().and_then(|meta| meta.modified()).unwrap_or(std::time::UNIX_EPOCH), entry.path()))
+        .collect();
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    found.into_iter().map(|(_, path)| path).collect()
+}
+
+/// Claude Desktop ships Claude Code (`claude-code/<version>/[<build>/]claude`)
+/// beside its own data; the newest is used when there is no CLI of its own.
+fn claude_desktop_cli() -> Option<PathBuf> {
+    let root = if cfg!(windows) {
+        PathBuf::from(std::env::var_os("APPDATA")?).join("Claude").join("claude-code")
+    } else {
+        PathBuf::from(std::env::var_os("HOME")?).join("Library").join("Application Support").join("Claude").join("claude-code")
+    };
+    let file = if cfg!(windows) { "claude.exe" } else { "claude" };
+    newest_first(&root).into_iter().find_map(|version| {
+        std::iter::once(version.join(file))
+            .chain(newest_first(&version).into_iter().map(|build| build.join(file)))
+            .find(|candidate| candidate.is_file())
+    })
+}
+
+/// The person's PATH as it is now: Bridge's own copy is from when it started,
+/// so on Windows the saved user and machine PATH are read again each time.
+fn current_path_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|path| std::env::split_paths(&path).collect()).unwrap_or_default();
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+        let saved = [
+            registry_path(HKEY_CURRENT_USER, "Environment"),
+            registry_path(HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+        ];
+        for value in saved.into_iter().flatten() {
+            for dir in std::env::split_paths(&value) {
+                if !dirs.contains(&dir) {
+                    dirs.push(dir);
+                }
+            }
+        }
+    }
+    dirs
+}
+
+/// A saved `Path` value, with `%VARIABLES%` expanded.
+#[cfg(windows)]
+fn registry_path(root: windows_sys::Win32::System::Registry::HKEY, key: &str) -> Option<std::ffi::OsString> {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows_sys::Win32::System::Registry::{RegGetValueW, RRF_RT_REG_SZ};
+    let wide = |text: &str| std::ffi::OsStr::new(text).encode_wide().chain(Some(0)).collect::<Vec<u16>>();
+    let (key, name) = (wide(key), wide("Path"));
+    let mut size: u32 = 0;
+    // SAFETY: valid NUL-terminated strings; a null buffer only asks for the size.
+    if unsafe { RegGetValueW(root, key.as_ptr(), name.as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), std::ptr::null_mut(), &mut size) } != 0 {
+        return None;
+    }
+    // Expanding can need more room than the stored value reported, so allow for it.
+    for _ in 0..3 {
+        let mut buffer = vec![0u16; (size as usize).div_ceil(2) + 512];
+        let mut bytes = (buffer.len() * 2) as u32;
+        // SAFETY: `buffer` holds `bytes` bytes.
+        let status = unsafe { RegGetValueW(root, key.as_ptr(), name.as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), buffer.as_mut_ptr().cast(), &mut bytes) };
+        if status == 0 {
+            let len = buffer.iter().position(|&unit| unit == 0).unwrap_or(buffer.len());
+            return Some(std::ffi::OsString::from_wide(&buffer[..len]));
+        }
+        size = bytes.max(size * 2);
+    }
+    None
+}
+
+/// The names a CLI goes by in a folder: the program itself first, then (Windows)
+/// the `.cmd` shim npm, pnpm and others make.
+fn program_files(program: &str) -> Vec<String> {
+    if cfg!(windows) { vec![format!("{program}.exe"), format!("{program}.cmd")] } else { vec![program.to_string()] }
+}
+
+/// The CLI on the PATH as it is now, else where an installer or package manager
+/// puts it, else Claude Desktop's own (for `claude`), else its bare name (which
+/// then reports "not-installed").
 fn resolve_program(program: &str) -> PathBuf {
-    let file = if cfg!(windows) { format!("{program}.exe") } else { program.to_string() };
-    std::env::var_os("PATH")
-        .and_then(|path| std::env::split_paths(&path).map(|dir| dir.join(&file)).find(|candidate| candidate.is_file()))
-        .or_else(|| installed_paths(program).into_iter().find(|candidate| candidate.is_file()))
+    resolve_in(program, &current_path_dirs(), &installed_dirs(program))
+        .or_else(|| if program == "claude" { claude_desktop_cli() } else { None })
         .unwrap_or_else(|| PathBuf::from(program))
+}
+
+fn resolve_in(program: &str, path: &[PathBuf], installed: &[PathBuf]) -> Option<PathBuf> {
+    // A real executable anywhere beats a shim, which needs a shell and Node behind it.
+    program_files(program).into_iter().find_map(|file| path.iter().chain(installed).map(|dir| dir.join(&file)).find(|candidate| candidate.is_file()))
 }
 
 #[derive(Deserialize)]
@@ -1277,9 +1428,43 @@ mod tests {
 
     #[test]
     fn a_cli_is_looked_for_where_its_installer_puts_it() {
-        let paths = installed_paths("codex");
-        assert!(paths.iter().any(|path| path.ends_with(std::path::Path::new(".local").join("bin").join(if cfg!(windows) { "codex.exe" } else { "codex" }))));
+        let dirs = installed_dirs("codex");
+        assert!(dirs.iter().any(|dir| dir.ends_with(std::path::Path::new(".local").join("bin"))));
+        if cfg!(windows) {
+            assert!(dirs.iter().any(|dir| dir.ends_with("npm")), "npm's global folder is looked in");
+            assert!(dirs.iter().any(|dir| dir.ends_with(std::path::Path::new("WinGet").join("Links"))));
+        }
         assert_eq!(resolve_program("spectra-no-such-cli"), PathBuf::from("spectra-no-such-cli"));
+    }
+
+    #[test]
+    fn a_real_executable_beats_a_shim_and_installed_folders_follow_the_path() {
+        let root = tempfile::tempdir().unwrap();
+        let (path_dir, npm_dir, local_dir) = (root.path().join("path"), root.path().join("npm"), root.path().join("local"));
+        for dir in [&path_dir, &npm_dir, &local_dir] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let exe = if cfg!(windows) { "fake.exe" } else { "fake" };
+        // Only a shim on the PATH: found, so an npm install is seen.
+        if cfg!(windows) {
+            std::fs::write(npm_dir.join("fake.cmd"), "").unwrap();
+            assert_eq!(resolve_in("fake", &[path_dir.clone()], &[npm_dir.clone()]), Some(npm_dir.join("fake.cmd")));
+        }
+        // An installed executable wins over the shim, wherever each is.
+        std::fs::write(local_dir.join(exe), "").unwrap();
+        assert_eq!(resolve_in("fake", &[path_dir.clone()], &[npm_dir.clone(), local_dir.clone()]), Some(local_dir.join(exe)));
+        // The PATH comes first among real executables.
+        std::fs::write(path_dir.join(exe), "").unwrap();
+        assert_eq!(resolve_in("fake", &[path_dir.clone()], &[local_dir.clone()]), Some(path_dir.join(exe)));
+        assert_eq!(resolve_in("missing", &[path_dir], &[local_dir]), None);
+    }
+
+    #[test]
+    fn the_quiet_install_runs_only_the_official_installer() {
+        assert_eq!(setup_script("codex", SetupAction::InstallQuiet, true).as_deref(), Some("irm https://chatgpt.com/codex/install.ps1 | iex"));
+        assert_eq!(setup_script("claude", SetupAction::InstallQuiet, false).as_deref(), Some("curl -fsSL https://claude.ai/install.sh | bash"));
+        let start: StartFrame = serde_json::from_value(serde_json::json!({ "args": [], "setup": "install-quiet" })).unwrap();
+        assert_eq!(start.setup, Some(SetupAction::InstallQuiet));
     }
 
     fn claude_start(intent: serde_json::Value) -> StartFrame {

@@ -4,7 +4,7 @@ import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/utils";
-import { workTypeMeta, type PresentedWorkType } from "../artifacts/presentation";
+import { presentWork, type PresentedWorkType } from "../artifacts/presentation";
 import { fileKind, previewExtent, type TaskStatus, type WorkPreview } from "../artifacts/work-preview";
 import { PageThumbnail } from "../whiteboard/page-thumbnail";
 import { sideClick } from "./side-open";
@@ -39,9 +39,10 @@ export type WorkCardContent = {
  * on a view across every place (Home, the Library's shelf), the ink of the
  * place it lives in.
  */
-export function workCardStyle(type: PresentedWorkType, ink?: string | null) {
+export function workCardStyle(type: PresentedWorkType, ink?: string | null, name?: string) {
   if (ink) return { "--work-hue": ink, "--work-tint": `color-mix(in oklab, ${ink} 16%, var(--card-paper))` } as CSSProperties;
-  const meta = workTypeMeta[type] ?? workTypeMeta.resource;
+  // A file wears the colour of what it holds (a spreadsheet, a slide deck), named by its extension.
+  const meta = presentWork(type, name) ?? presentWork("resource");
   return { "--work-hue": meta.color, "--work-tint": meta.soft } as CSSProperties;
 }
 
@@ -62,7 +63,7 @@ export function WorkCard({
   workId?: string;
 }) {
   return (
-    <Link href={href} prefetch={false} onClick={onOpen ? sideClick(onOpen) : undefined} data-work-card={content.type} data-work-source={workId} style={workCardStyle(content.type, ink)} className={cn("work-card group", className)}>
+    <Link href={href} prefetch={false} onClick={onOpen ? sideClick(onOpen) : undefined} data-work-card={content.type} data-work-source={workId} style={workCardStyle(content.type, ink, content.title)} className={cn("work-card group", className)}>
       <WorkCardBody {...content} />
     </Link>
   );
@@ -90,7 +91,7 @@ export function WorkCardBody({
   /** The face alone, where the tabs above it are someone else's (a stack). */
   bare?: boolean;
 }) {
-  const meta = workTypeMeta[type];
+  const meta = presentWork(type, title);
   return (
     <>
       {bare ? null : (

@@ -3584,8 +3584,46 @@
   padding: 4px 4px 0;
 }
 
-.auth-clerk .cl-header {
+/* The page has its own title on the first step. Past it (password, code),
+   Clerk's header says which email the step is for, with the way back to change it. */
+.auth-clerk :is(.cl-signIn-start, .cl-signUp-start) .cl-header {
   display: none;
+}
+
+.auth-clerk .cl-header {
+  gap: 6px;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.auth-clerk .cl-headerTitle {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.auth-clerk .cl-headerSubtitle {
+  color: var(--text-secondary);
+}
+
+.auth-clerk .cl-identityPreview {
+  justify-content: flex-start;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle, var(--border));
+  border-radius: 999px;
+  background: var(--bg-secondary);
+}
+
+.auth-clerk .cl-identityPreviewText {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.auth-clerk .cl-identityPreviewEditButton {
+  color: var(--text-secondary);
 }
 
 .auth-clerk .cl-footer {

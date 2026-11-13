@@ -17,7 +17,6 @@ import { FileViewer, type ViewedFile } from "../files/file-viewer";
 import { fileViewKind, type FileViewKind } from "../files/file-kind";
 import { handOffToLibrary } from "../workbench/library-handoff";
 import { dateLabel, sentenceOf, sizeLabel, type SchoolTaskDetail } from "./school-model";
-import { useClassBook } from "./use-class-book";
 
 /*
  * What a school task's work adds from ManageBac, below the task itself: the
@@ -58,7 +57,6 @@ export function SchoolTaskNotice({ artifactId }: { artifactId: string }) {
   const task = useQuery(api.school.taskOfWork, isAuthenticated ? { artifactId: artifactId as Id<"spectraArtifacts"> } : "skip");
   const convex = useConvex();
   const router = useRouter();
-  const book = useClassBook();
   const [busy, setBusy] = useState<string | null>(null);
   const [viewing, setViewing] = useState<ViewedFile | null>(null);
   const now = Date.now();
@@ -130,20 +128,15 @@ export function SchoolTaskNotice({ artifactId }: { artifactId: string }) {
     }
   }
 
-  const about = [book.of(task.providerClassId ?? null, task.className)?.name, task.taskType, task.status].filter(Boolean).join(", ");
-
   return (
     <>
-      <p className="task-school-notice">
-        <span>
-          Set in ManageBac{about ? ` (${about})` : ""}. Moving it in the Calendar gives you your own time for it; your teacher&apos;s date stays as they set it.
-        </span>
-        {task.provenanceUrl ? (
+      {task.provenanceUrl ? (
+        <p className="task-school-notice">
           <a href={task.provenanceUrl} target="_blank" rel="noreferrer">
             Open in ManageBac
           </a>
-        ) : null}
-      </p>
+        </p>
+      ) : null}
 
       {grade ? (
         <Section title="Grade">

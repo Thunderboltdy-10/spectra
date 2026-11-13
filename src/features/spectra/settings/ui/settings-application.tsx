@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { TimeField } from "@/components/ui/when-fields";
+
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import Link from "next/link";
 import { useClerk } from "@clerk/nextjs";
@@ -68,7 +70,7 @@ const isSection = (value: string): value is SectionId =>
 
 function SettingGroup({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return (
-    <section className="grid gap-5 @min-[860px]/settings:grid-cols-[220px_minmax(0,1fr)] @min-[860px]/settings:gap-10">
+    <section data-setting-group className="grid gap-5 @min-[860px]/settings:grid-cols-[220px_minmax(0,1fr)] @min-[860px]/settings:gap-10">
       <header className="pt-2">
         <h2 className="font-display text-heading font-semibold text-[var(--text-primary)]">{title}</h2>
         <p className="mt-1 max-w-2xl text-caption leading-5 text-[var(--text-secondary)]">{description}</p>
@@ -80,7 +82,7 @@ function SettingGroup({ title, description, children }: { title: string; descrip
 
 function SettingRow({ label, description, control }: { label: string; description?: string; control: ReactNode }) {
   return (
-    <div className="group flex min-h-[68px] items-center gap-4 rounded-card px-3.5 py-3 transition-colors hover:bg-[var(--bg-secondary)] sm:px-4">
+    <div data-setting-row className="group flex min-h-[68px] items-center gap-4 rounded-card px-3.5 py-3 transition-colors hover:bg-[var(--bg-secondary)] sm:px-4">
       <div className="min-w-0 flex-1">
         <div className="text-ui font-medium text-[var(--text-primary)]">{label}</div>
         {description ? <div className="mt-0.5 max-w-2xl text-micro leading-[18px] text-[var(--text-secondary)]">{description}</div> : null}
@@ -119,6 +121,7 @@ function ConversationSettings({ p, update }: SectionProps<"ai">) {
       <ToggleRow label="Open the thread when I send" description="When off, the answer rises from its tab when it is ready." checked={p.openConversationAfterSend} onCheckedChange={(openConversationAfterSend) => update({ openConversationAfterSend })} />
       <SettingRow label="The dock at rest" description="Show it from the edge keeps the dock hidden until the pointer reaches the bottom of the screen, or you press Ctrl+J. Spectra still shows it when it has a question for you." control={<SelectField ariaLabel="The dock at rest" value={p.islandWake} onChange={(islandWake) => update({ islandWake: islandWake as "prism" | "edge" })} options={ISLAND_WAKE_OPTIONS} />} />
       <SettingRow label="Where the island sits" description="The middle of the page moves as side columns open and close. The middle of the screen stays put." control={<SelectField ariaLabel="Where the island sits" value={p.islandCentre} onChange={(islandCentre) => update({ islandCentre: islandCentre as "page" | "screen" })} options={ISLAND_CENTRE_OPTIONS} />} />
+      <ToggleRow label="Always show thread tabs" description="When off, past three tabs the quiet ones tuck away until you point at the island." checked={p.islandTabsAlwaysShown} onCheckedChange={(islandTabsAlwaysShown) => update({ islandTabsAlwaysShown })} />
       <ToggleRow label="Open requests for input" description="Required questions expand automatically while the run waits for you." checked={p.expandRequiredInput} onCheckedChange={(expandRequiredInput) => update({ expandRequiredInput })} />
       <ToggleRow label="Keep completed runs nearby" checked={p.retainCompletedRunTabs} onCheckedChange={(retainCompletedRunTabs) => update({ retainCompletedRunTabs })} />
       {p.retainCompletedRunTabs ? <SettingRow label="Keep completed runs for" control={<SelectField ariaLabel="Keep completed runs for" value={String(p.completedRunRetentionMinutes)} onChange={(next) => update({ completedRunRetentionMinutes: Number(next) })} options={RETENTION_OPTIONS} />} /> : null}
@@ -187,13 +190,7 @@ function DaySettings({ p, update }: SectionProps<"notifications">) {
         label="Reminder time"
         description="A task with a day but no time reminds you at this time, on the day or the days before, as you choose on the task."
         control={
-          <Input
-            type="time"
-            aria-label="Reminder time"
-            className="h-9 w-[124px]"
-            value={p.reminderTime}
-            onChange={(event) => event.target.value && update({ reminderTime: event.target.value })}
-          />
+          <TimeField label="Reminder time" className="w-[124px]" value={p.reminderTime} onChange={(time) => time && update({ reminderTime: time })} />
         }
       />
       <ToggleRow
@@ -207,13 +204,7 @@ function DaySettings({ p, update }: SectionProps<"notifications">) {
           label="Wake-up time"
           description="Your brief is ready by this time each morning."
           control={
-            <Input
-              type="time"
-              aria-label="Wake-up time"
-              className="h-9 w-[124px]"
-              value={p.dailyBriefTime}
-              onChange={(event) => event.target.value && update({ dailyBriefTime: event.target.value })}
-            />
+            <TimeField label="Wake-up time" className="w-[124px]" value={p.dailyBriefTime} onChange={(time) => time && update({ dailyBriefTime: time })} />
           }
         />
       ) : null}
@@ -233,7 +224,32 @@ function AppearanceSettings({ p, update }: SectionProps<"appearance">) {
       <SelectRow label="Theme" value={p.theme} options={[{ value: "system", label: "System" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }]} onChange={applyTheme} />
       <SelectRow label="Editor text" value={p.editorTextScale} options={[{ value: "small", label: "Small" }, { value: "default", label: "Default" }, { value: "large", label: "Large" }, { value: "extra_large", label: "Extra large" }]} onChange={(editorTextScale) => update({ editorTextScale: editorTextScale as typeof p.editorTextScale })} />
       <SelectRow label="Interface text" value={p.interfaceTextScale} options={[{ value: "default", label: "Default" }, { value: "large", label: "Large" }]} onChange={(interfaceTextScale) => update({ interfaceTextScale: interfaceTextScale as typeof p.interfaceTextScale })} />
+      <SelectRow label="Contrast" description="High brings quieter text and lines closer to the main text." value={p.contrast} options={[{ value: "standard", label: "Standard" }, { value: "high", label: "High" }]} onChange={(contrast) => update({ contrast: contrast as typeof p.contrast })} />
       <ToggleRow label="Reduced motion" description="Removes decorative transitions while preserving state changes." checked={p.reducedMotion} onCheckedChange={(reducedMotion) => update({ reducedMotion, motionLevel: reducedMotion ? "reduced" : "full" })} />
+      <ToggleRow label="Reveal answers as they're written" description="When off, each part of an answer appears whole." checked={p.streamingReveal} onCheckedChange={(streamingReveal) => update({ streamingReveal })} />
+      <ToggleRow label="Shimmer on the line being written" checked={p.activeTailShimmer} onCheckedChange={(activeTailShimmer) => update({ activeTailShimmer })} />
+    </SettingGroup>
+  );
+}
+
+function FocusSettings({ p, update }: SectionProps<"accessibility">) {
+  return (
+    <SettingGroup title="Keyboard" description="How Spectra shows where you are when you move with the keyboard.">
+      <ToggleRow label="Always show focus" description="The focus ring shows after a click too, not only when you use the keyboard." checked={p.alwaysVisibleFocus} onCheckedChange={(alwaysVisibleFocus) => update({ alwaysVisibleFocus })} />
+    </SettingGroup>
+  );
+}
+
+const START_PAGE_OPTIONS = [
+  { value: "workspace", label: "Home" },
+  { value: "library", label: "Library" },
+  { value: "calendar", label: "Calendar" },
+];
+
+function StartSettings({ p, update }: SectionProps<"general">) {
+  return (
+    <SettingGroup title="Opening Spectra" description="Where Spectra opens when you arrive at Home.">
+      <SelectRow label="Start page" description="Links to a thread or a piece of work still open where they point." value={p.startPage === "chat" ? "workspace" : p.startPage} options={START_PAGE_OPTIONS} onChange={(startPage) => update({ startPage: startPage as typeof p.startPage })} />
     </SettingGroup>
   );
 }
@@ -390,7 +406,52 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
   const narrow = useSyncExternalStore(subscribeNarrow, isNarrow, wideOnServer);
   const folded = sideHeld || narrow;
   const [sectionsOpen, setSectionsOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const searching = query.trim().length > 0;
+  const results = useRef<HTMLDivElement>(null);
+  const [matches, setMatches] = useState(0);
   useEffect(() => { if (isSection(initialSection)) setActive(initialSection); }, [initialSection]);
+  // Searching shows every section at once and hides what doesn't match: a
+  // row by its own words, a group by its title (then all its rows show), a
+  // section by its name or anything left in it.
+  useLayoutEffect(() => {
+    const root = results.current;
+    if (!root || !searching) return;
+    const words = query.trim().toLowerCase().split(/\s+/);
+    const has = (element: Element) => {
+      const text = (element.textContent ?? "").toLowerCase();
+      return words.every((word) => text.includes(word));
+    };
+    let shown = 0;
+    for (const section of root.querySelectorAll<HTMLElement>("[data-settings-section]")) {
+      const groups = [...section.querySelectorAll<HTMLElement>("[data-setting-group]")];
+      if (has(section.querySelector("[data-settings-section-name]")!)) {
+        section.hidden = false;
+        for (const group of groups) {
+          group.hidden = false;
+          for (const row of group.querySelectorAll<HTMLElement>("[data-setting-row]")) row.hidden = false;
+        }
+        shown += 1;
+        continue;
+      }
+      let any = false;
+      for (const group of groups) {
+        const rows = [...group.querySelectorAll<HTMLElement>("[data-setting-row]")];
+        const titled = has(group.querySelector("header") ?? group);
+        let visible = 0;
+        for (const row of rows) {
+          row.hidden = !titled && !has(row);
+          if (!row.hidden) visible += 1;
+        }
+        group.hidden = rows.length ? visible === 0 : !has(group);
+        if (!group.hidden) any = true;
+      }
+      // A section built without rows (AI subscriptions, storage) matches by its words.
+      section.hidden = groups.length ? !any : !has(section);
+      if (!section.hidden) shown += 1;
+    }
+    setMatches(shown);
+  });
   const updateSection = <K extends PreferenceSection>(section: K) => (patch: Partial<SpectraPreferences[K]>) => update(section, patch);
   const body: Record<SectionId, ReactNode> = {
     ai: (
@@ -402,8 +463,18 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
     subscriptions: <RuntimeSettings />,
     storage: <div className="max-w-xl"><WorkHomeChoice /></div>,
     writing: <WritingSettings p={preferences.writing} update={updateSection("writing")} refreshConfirmedPreferences={refreshConfirmedPreferences} />,
-    day: <DaySettings p={preferences.notifications} update={updateSection("notifications")} />,
-    appearance: <AppearanceSettings p={preferences.appearance} update={updateSection("appearance")} />,
+    day: (
+      <div className="space-y-10">
+        <StartSettings p={preferences.general} update={updateSection("general")} />
+        <DaySettings p={preferences.notifications} update={updateSection("notifications")} />
+      </div>
+    ),
+    appearance: (
+      <div className="space-y-10">
+        <AppearanceSettings p={preferences.appearance} update={updateSection("appearance")} />
+        <FocusSettings p={preferences.accessibility} update={updateSection("accessibility")} />
+      </div>
+    ),
     workbar: <WorkbarSettings p={preferences.workbar} update={updateSection("workbar")} />,
     privacy: <div className="space-y-10"><AccountSettings /><PrivacySettings /></div>,
   };
@@ -429,7 +500,8 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
           {folded ? null : (
             <div className="w-48 shrink-0">
               <div className="sticky top-0">
-                <SectionList active={active} onChange={choose} />
+                <SettingsSearch value={query} onChange={setQuery} />
+                <SectionList active={searching ? null : active} onChange={(id) => { setQuery(""); choose(id); }} />
               </div>
             </div>
           )}
@@ -438,7 +510,8 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
             aria-labelledby="settings-section-title"
             data-spectra-ai-target={active}
           >
-            {folded ? (
+            {folded ? <SettingsSearch value={query} onChange={setQuery} /> : null}
+            {folded && !searching ? (
               <Popover open={sectionsOpen} onOpenChange={setSectionsOpen}>
                 <PopoverTrigger asChild>
                   <Button variant="ghost" size="sm" className="-ml-2 mb-4" aria-label={`${current.label}. Choose a settings section`}>
@@ -476,7 +549,26 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
                   {saveStatus}
                 </p>
               ) : null}
-              {body[active]}
+              {searching ? (
+                <div ref={results} className="space-y-14">
+                  {SECTIONS.map((section) => (
+                    <div key={section.id} data-settings-section={section.id} className="space-y-6">
+                      <h3 data-settings-section-name className="flex items-center gap-2 text-caption font-medium text-[var(--text-secondary)]">
+                        <Icon name={section.icon} size={16} />
+                        {section.label}
+                      </h3>
+                      {body[section.id]}
+                    </div>
+                  ))}
+                  {matches === 0 ? (
+                    <p className="text-ui text-[var(--text-secondary)]" role="status">
+                      No settings match &ldquo;{query.trim()}&rdquo;.
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                body[active]
+              )}
             </IsolatedErrorBoundary>
           </section>
         </div>
@@ -485,8 +577,31 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
   );
 }
 
+/** Finds a setting by its words, across every section. Escape clears it. */
+function SettingsSearch({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="relative mb-3">
+      <Icon name="search" size={16} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
+      <Input
+        type="search"
+        aria-label="Search settings"
+        placeholder="Search settings"
+        className="h-9 pl-8"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && value) {
+            event.preventDefault();
+            onChange("");
+          }
+        }}
+      />
+    </div>
+  );
+}
+
 /** The sections, as a list beside the page or inside the folded popover. */
-function SectionList({ active, onChange }: { active: SectionId; onChange: (id: SectionId) => void }) {
+function SectionList({ active, onChange }: { active: SectionId | null; onChange: (id: SectionId) => void }) {
   return (
     <nav aria-label="Settings sections">
       <ul className="space-y-0.5">

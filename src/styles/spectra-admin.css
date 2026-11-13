@@ -66,6 +66,10 @@
   outline-offset: 1px;
 }
 
+.feedback-trigger[aria-current="page"] {
+  color: var(--text-primary);
+}
+
 .feedback-trigger.is-capturing {
   color: var(--accent-mint);
 }
@@ -941,6 +945,132 @@ a.admin-line:focus-visible {
 .admin-chart-bar:hover,
 .admin-chart-bar:focus-visible {
   background: var(--brand-primary);
+}
+/* A school's bars split by person: colour follows the person, never the rank on a day. */
+.admin-chart {
+  --person-0: #2a78d6;
+  --person-1: #eb6834;
+  --person-2: #1baf7a;
+  --person-3: #eda100;
+  --person-4: #e87ba4;
+  --person-5: #008300;
+  --person-6: #6250d6;
+  --person-rest: color-mix(in oklab, var(--text-tertiary) 55%, var(--card-paper));
+}
+.dark .admin-chart {
+  --person-0: #3987e5;
+  --person-1: #d95926;
+  --person-2: #199e70;
+  --person-3: #c98500;
+  --person-4: #d55181;
+  --person-5: #008300;
+  --person-6: #9085e9;
+}
+.admin-chart [data-slot="0"] { background: var(--person-0); }
+.admin-chart [data-slot="1"] { background: var(--person-1); }
+.admin-chart [data-slot="2"] { background: var(--person-2); }
+.admin-chart [data-slot="3"] { background: var(--person-3); }
+.admin-chart [data-slot="4"] { background: var(--person-4); }
+.admin-chart [data-slot="5"] { background: var(--person-5); }
+.admin-chart [data-slot="6"] { background: var(--person-6); }
+.admin-chart [data-slot="rest"] { background: var(--person-rest); }
+.admin-chart-bars {
+  position: relative;
+}
+.admin-chart-stack {
+  display: flex;
+  min-width: 4px;
+  flex: 1;
+  flex-direction: column-reverse;
+  gap: 2px;
+  overflow: hidden;
+  border-radius: 4px 4px 0 0;
+  outline: none;
+}
+.admin-chart-stack > span {
+  min-height: 1px;
+  flex-basis: 0;
+}
+.admin-chart-bars:has([data-pointed]) .admin-chart-stack:not([data-pointed]) {
+  opacity: 0.55;
+}
+.admin-chart-stack:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus-ring-color);
+}
+.admin-chart-tip {
+  position: absolute;
+  bottom: calc(100% - 40px);
+  z-index: 2;
+  min-width: 190px;
+  max-width: 260px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  box-shadow: inset 0 0 0 1px var(--card-border), var(--shadow-card);
+  font-size: 13px;
+  pointer-events: none;
+}
+.admin-chart-tip[data-side="right"] {
+  transform: translateX(10px);
+}
+.admin-chart-tip[data-side="left"] {
+  transform: translateX(calc(-100% - 10px));
+}
+.admin-chart-tip p {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+}
+.admin-chart-tip strong {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.admin-chart-tip ul,
+.admin-chart-legend ul {
+  display: grid;
+  gap: 4px;
+}
+.admin-chart-tip li,
+.admin-chart-legend li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+}
+.admin-chart-tip li > span:first-of-type,
+.admin-chart-legend li > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.admin-chart-tip li > span:last-child,
+.admin-chart-legend li > span:last-child {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.admin-chart-tip i,
+.admin-chart-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.admin-chart-legend {
+  grid-column: 2;
+  margin-top: 16px;
+  font-size: 13px;
+}
+.admin-chart-legend ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 28px;
+}
+.admin-chart-legend li {
+  grid-template-columns: 10px auto auto;
+  max-width: 100%;
 }
 .admin-chart-days {
   display: flex;

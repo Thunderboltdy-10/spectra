@@ -55,6 +55,8 @@ export type SchoolSyncKindInfo = {
   availability: SchoolSyncAvailability;
   /** Plain words for the School page when the kind is unavailable. */
   unavailableReason?: string;
+  /** False when the student doesn't choose it: it always runs in its default mode, and Sync doesn't list it. */
+  choice?: false;
 };
 
 export const SCHOOL_SYNC_KIND_INFO: Record<SchoolSyncKind, SchoolSyncKindInfo> = {
@@ -81,13 +83,13 @@ export const SCHOOL_SYNC_KIND_INFO: Record<SchoolSyncKind, SchoolSyncKindInfo> =
   },
   past_tasks: {
     label: "Past tasks",
-    description: "Finished tasks, kept for revision and portfolios. Sync them here when you want your history; Sync now for the whole page starts from today.",
-    defaultMode: "manual", autoEveryMinutes: 24 * 60, classScoped: true, availability: "available",
+    description: "Finished tasks, kept for revision and portfolios.",
+    defaultMode: "auto", autoEveryMinutes: 24 * 60, classScoped: true, availability: "available", choice: false,
   },
   dropbox_files: {
     label: "Dropbox files",
     description: "What you handed in. Files download when you open them, and stay cached.",
-    defaultMode: "manual", autoEveryMinutes: 24 * 60, classScoped: true, availability: "available",
+    defaultMode: "auto", autoEveryMinutes: 24 * 60, classScoped: true, availability: "available",
   },
   cas: {
     label: "CAS",
@@ -134,6 +136,7 @@ export function effectiveSchoolSyncMode(
 ): SchoolSyncMode {
   const info = SCHOOL_SYNC_KIND_INFO[kind];
   if (info.availability === "unavailable") return "off";
+  if (info.choice === false) return info.defaultMode;
   if (info.classScoped && classOverride) return classOverride;
   return chosen ?? info.defaultMode;
 }

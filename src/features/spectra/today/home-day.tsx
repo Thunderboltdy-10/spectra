@@ -11,7 +11,7 @@ import { formatRelativeTime } from "../components/spectra-view-model";
 import { useClassBook } from "../school/use-class-book";
 import type { SpectraArtifact } from "../data/api";
 import { isActiveRunStatus, useRunTabs } from "../island/run-tabs";
-import { daySentence, firstQuestions, greeting } from "./today-model";
+import { daySentence, firstAhead, firstQuestions, greeting } from "./today-model";
 import { TodayBrief } from "./today-brief";
 import { useDailyBrief } from "./use-daily-brief";
 import { TodayThreads } from "./today-threads";
@@ -32,7 +32,11 @@ const WORKS_MORE = 6;
 
 const placeOf = (work: SpectraArtifact) => work.placements?.[0]?.workspaceTitle ?? (work.placementStatus === "shared" ? "Shared with you" : "Inbox");
 
-export function HomeDay({ onAllThreads }: { onAllThreads: () => void }) {
+/**
+ * `mockup` is Home drawn as a picture (the landing page): the brief and the
+ * week only, the brief's moves in a column beside its story.
+ */
+export function HomeDay({ onAllThreads, mockup = false }: { onAllThreads: () => void; mockup?: boolean }) {
   const today = useToday();
   const { now, name, threads, works, agenda, agendaFailed, needsSchool } = today;
   const brief = useDailyBrief(today.now);
@@ -57,7 +61,8 @@ export function HomeDay({ onAllThreads }: { onAllThreads: () => void }) {
     if (brief.status === "ready" || brief.status === "writing") return null;
     const named = book.classes.find((entry) => entry.selected && !entry.archived) ?? book.classes.find((entry) => !entry.archived);
     const suggestions = firstQuestions({ agenda, recentWork: recent?.[0] ?? null, className: named?.title ?? null, now });
-    return { status: "ready" as const, day: "first", wakeTime: "", recap: "", suggestions };
+    const ahead = firstAhead({ agenda, className: named?.title ?? null, now });
+    return { status: "ready" as const, day: "first", wakeTime: "", recap: "", ahead, suggestions };
   }, [agenda, book.classes, brief.status, now, recent, threads]);
 
   // Moving threads lead, then the most recent.
@@ -67,7 +72,7 @@ export function HomeDay({ onAllThreads }: { onAllThreads: () => void }) {
   );
 
   return (
-      <div className="today mx-auto flex max-w-[1480px] flex-wrap gap-x-12 gap-y-14 px-4 pb-40 pt-4 sm:px-6">
+      <div data-mockup={mockup || undefined} className="today mx-auto flex max-w-[1480px] flex-wrap gap-x-12 gap-y-14 px-4 pb-40 pt-4 sm:px-6">
         <header className="-mb-4 max-w-[760px]">
           <h1 className="page-greeting">{now ? greeting(new Date(now).getHours(), name) : " "}</h1>
           <p className="page-greeting-line mt-3 min-h-[1.6em]">{now ? daySentence({ moving: moving.size, agenda, now }) : ""}</p>
@@ -90,6 +95,7 @@ export function HomeDay({ onAllThreads }: { onAllThreads: () => void }) {
 
         {needsSchool ? null : now ? <TodayWeek agenda={agenda} failed={agendaFailed} now={now} /> : <div className="h-[260px]" />}
 
+        {mockup ? null : (
         <section aria-labelledby="today-works" className="today-works">
           <div className="today-section-head">
             <h2 id="today-works">Pick up where you left off</h2>
@@ -133,7 +139,9 @@ export function HomeDay({ onAllThreads }: { onAllThreads: () => void }) {
             </button>
           ) : null}
         </section>
+        )}
 
+        {mockup ? null : (
         <section aria-labelledby="today-threads" className="today-threads">
           <div className="today-section-head">
             <h2 id="today-threads">Threads</h2>
@@ -143,6 +151,7 @@ export function HomeDay({ onAllThreads }: { onAllThreads: () => void }) {
           </div>
           <TodayThreads threads={shownThreads} moving={moving} />
         </section>
+        )}
       </div>
   );
 }

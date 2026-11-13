@@ -225,7 +225,7 @@ export function strands(types: SchoolExperience["types"]) {
 }
 
 /** What the class-scoped kinds are called on a class's row. */
-export const CLASS_KIND_ORDER: SchoolSyncKind[] = ["classes", "current_tasks", "past_tasks", "task_resources", "grades", "dropbox_files"];
+export const CLASS_KIND_ORDER: SchoolSyncKind[] = ["classes", "current_tasks", "task_resources", "grades", "dropbox_files"];
 
 /** An error as one plain sentence, without its code (convex/school.README.md: errors read as `CODE: message`). */
 export function sentenceOf(error: unknown, fallback: string): string {

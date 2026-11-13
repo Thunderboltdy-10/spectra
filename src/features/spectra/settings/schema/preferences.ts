@@ -29,6 +29,8 @@ const aiSchema = z.object({
   islandWake: z.enum(["prism", "edge"]).default("prism"),
   /** The middle the island keeps to: of the page between the columns, or of the whole screen. */
   islandCentre: z.enum(["page", "screen"]).default("screen"),
+  /** Thread tabs stand on the rail at all times, instead of tucking away (past three) while the island isn't hovered. */
+  islandTabsAlwaysShown: z.boolean().default(false),
   autoRouteSpecialists: z.boolean().default(true),
   parallelSafeReads: z.boolean().default(true),
   researchDepth: z.enum(["automatic", "quick", "verified", "deep"]).default("automatic"),
@@ -148,6 +150,12 @@ const integrationsSchema = z.object({
   classShelfRecordIds: z.array(z.string().min(1).max(128)).max(100).default([]),
   /** Spectra's tour of the app: offered once after the school's first sync. */
   tourStatus: z.enum(["pending", "done"]).default("pending"),
+  /** The step the tour was on when it was put away: it carries on from there next time. */
+  tourStep: z.number().int().min(0).max(40).default(0),
+  /** Setup (onboarding/setup.tsx): a new account goes through it before the app. */
+  setupStatus: z.enum(["pending", "done"]).default("pending"),
+  /** The Setup step on screen, so a reload or another computer carries on there. */
+  setupStep: z.string().max(32).default(""),
   /** First-time tips already said (onboarding/first-tips), so none is said twice. */
   tipsSeen: z.array(z.string().min(1).max(64)).max(64).default([]),
 });
@@ -504,6 +512,9 @@ export function restoreDefaultPreferences(
       classShelvesStatus: current.integrations.classShelvesStatus,
       classShelfRecordIds: [...current.integrations.classShelfRecordIds],
       tourStatus: current.integrations.tourStatus,
+      tourStep: current.integrations.tourStep,
+      setupStatus: current.integrations.setupStatus,
+      setupStep: current.integrations.setupStep,
       tipsSeen: [...current.integrations.tipsSeen],
     },
   };

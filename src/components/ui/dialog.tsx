@@ -82,7 +82,7 @@ const DialogContent = React.forwardRef<
         <DialogPrimitive.Content
           ref={ref}
           className={cn(
-            "spectra-float fixed left-1/2 top-1/2 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 text-[var(--text-primary)] shadow-[var(--shadow-lg)]",
+            "spectra-float fixed left-1/2 top-1/2 grid max-h-[calc(100dvh-32px)] w-full max-w-lg overflow-y-auto overscroll-contain -translate-x-1/2 -translate-y-1/2 gap-4 rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] p-6 text-[var(--text-primary)] shadow-[var(--shadow-lg)]",
             LAYER_CLASS[layer],
             className,
           )}

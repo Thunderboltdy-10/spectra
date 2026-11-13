@@ -24,6 +24,10 @@ let fetchedAt = 0;
 let pending: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
+const notify = () => {
+  for (const listener of listeners) listener();
+};
+
 function refresh(force = false) {
   if (pending) return pending;
   if (!force && status && Date.now() - fetchedAt < STALE_MS) return Promise.resolve();
@@ -34,8 +38,10 @@ function refresh(force = false) {
       if (next) status = next;
       fetchedAt = Date.now();
       pending = null;
-      for (const listener of listeners) listener();
+      notify();
     });
+  // Whoever shows a check in progress hears that it started.
+  notify();
   return pending;
 }
 
@@ -44,6 +50,9 @@ const subscribe = (listener: () => void) => {
   return () => void listeners.delete(listener);
 };
 
+/** What this computer said last, outside React. */
+export const agentRuntimeNow = () => status;
+
 /** Bridge came or went: what this computer offers may have changed with it. */
 export function recheckAgentRuntime() {
   return refresh(true);
@@ -51,13 +60,19 @@ export function recheckAgentRuntime() {
 
 export function useAgentRuntime() {
   const current = useSyncExternalStore(subscribe, () => status, () => null);
+  const checking = useSyncExternalStore(subscribe, () => pending !== null, () => false);
   useEffect(() => {
     void refresh();
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
-  return { status: current, recheck: useCallback(() => refresh(true), []) };
+  return { status: current, checking, recheck: useCallback(() => refresh(true), []) };
+}
+
+/** The last answer, without asking again: for what only listens. */
+export function useAgentRuntimeStatus() {
+  return useSyncExternalStore(subscribe, () => status, () => null);
 }
 
 /** Re-asks when the last answer is older than a minute: the composer calls this as it takes focus. */

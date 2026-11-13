@@ -9,7 +9,7 @@ const route = vi.hoisted(() => ({ pathname: "/calendar", ready: true, router: { 
 vi.mock("next/font/google", () => ({ Figtree: () => ({ variable: "font-main" }), Newsreader: () => ({ variable: "font-display" }), IBM_Plex_Mono: () => ({ variable: "font-mono" }) }));
 vi.mock("../account-gate", () => ({ AccountGate: ({ children }: { children: import("react").ReactNode }) => children }));
 vi.mock("next/navigation", () => ({ usePathname: () => route.pathname, useRouter: () => route.router, useSearchParams: () => new URLSearchParams("section=appearance") }));
-vi.mock("sonner", () => ({ toast: { error: route.error } }));
+vi.mock("sonner", () => ({ toast: { error: route.error, dismiss: vi.fn() } }));
 vi.mock("next/link", () => ({ default: ({ children, ...props }: { children: ReactNode } & { prefetch?: boolean }) => { delete props.prefetch; return <a {...props} onClick={event => { event.preventDefault(); route.router.push(String((props as { href?: string }).href)); }}>{children}</a>; } }));
 vi.mock("@clerk/nextjs", () => ({ ClerkProvider: ({ children }: { children: ReactNode }) => children, useClerk: () => ({ openUserProfile: vi.fn() }) }));
 vi.mock("@/lib/clerk-config", () => ({ getClerkPublishableKey: () => undefined }));

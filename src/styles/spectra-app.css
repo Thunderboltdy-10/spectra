@@ -1822,6 +1822,10 @@ body {
    properties directly; TSX should prefer the generated utilities.
    --------------------------------------------------------------------------- */
 :root {
+  /* Native controls (checkboxes, scrollbars, date fields) follow Spectra's
+     theme, not the computer's: an OS in dark mode must not draw them black
+     on a light page. */
+  color-scheme: light;
   /* Brand identity. The violet is deepened one step from #7b5cf5 so white
      text on it clears WCAG AA (5.5:1, was 4.5:1 — the DS-4 remainder): the
      hue is unchanged, only the lightness moved. Fills that pair text with
@@ -2264,6 +2268,7 @@ html[data-spectra-motion="none"] *::after {
 }
 
 .dark {
+  color-scheme: dark;
   --brand-primary: #9a87ff;
   --brand-accent: #38d6a0;
 
@@ -13697,3 +13702,32 @@ button.work-origin:hover {
   bottom: 24px;
 }
 
+
+/* Settings → Appearance → Contrast: quieter text and lines come closer to the
+   main text, for bright rooms and tired eyes. Hues and surfaces stay. */
+:root[data-spectra-contrast="high"] {
+  --text-secondary: #3d3833;
+  --text-tertiary: #4a453f;
+  --text-placeholder: #4a453f;
+  --border-default: #b9b3a8;
+  --border-subtle: #c9c4ba;
+  --border-strong: #8f887d;
+  --card-border: #bdb7ac;
+}
+:root.dark[data-spectra-contrast="high"] {
+  --text-primary: #fbf9f6;
+  --text-secondary: #d9d4cd;
+  --text-tertiary: #bdb7af;
+  --text-placeholder: #bdb7af;
+  --border-default: #57534d;
+  --border-subtle: #4a4641;
+  --border-strong: #7d776f;
+  --card-border: color-mix(in oklab, #cfc1ac 40%, transparent);
+}
+
+/* Settings → Appearance → Always show focus: the ring follows focus after a
+   click too, not only from the keyboard. */
+:root[data-spectra-focus="always"] :focus:not([data-quiet-focus]) {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}

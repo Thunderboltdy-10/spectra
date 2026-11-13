@@ -4,6 +4,7 @@ import { artifactScopeDigest } from "./spectraArtifactWriteScope";
 import { canonicalArtifactWriteContent } from "../src/features/spectra/operations/artifact-write-content";
 import { internalMutation, mutation } from "./orgNodeMutation";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import {
@@ -732,39 +733,68 @@ export const list = query({
   },
 });
 
+/** One page of the projection fill for artifacts created before P9.I3; it records its place only when it holds it. */
+async function backfillSummaryPage(ctx: MutationCtx, cursor: string | null, limit?: number) {
+  const migration = await ctx.db.query("spectraReadModelMigrations")
+    .withIndex("by_key", q => q.eq("key", CATALOG_MIGRATION_KEY)).unique();
+  const tracked = cursor === null || (migration?.version === ARTIFACT_SUMMARY_READ_MODEL_VERSION &&
+    migration.state === "running" && migration.cursor === cursor);
+  const page = await ctx.db.query("spectraArtifacts").paginate({
+    cursor,
+    numItems: Math.max(1, Math.min(Math.floor(limit ?? 10), 25)),
+    maximumBytesRead: 2_000_000,
+  });
+  for (const artifact of page.page)
+    await upsertArtifactSummary(ctx, artifact);
+  if (tracked) {
+    const continuing = cursor !== null;
+    const value = {
+      key: CATALOG_MIGRATION_KEY, version: ARTIFACT_SUMMARY_READ_MODEL_VERSION,
+      state: page.isDone ? "complete" as const : "running" as const,
+      cursor: page.isDone ? undefined : page.continueCursor,
+      scanned: (continuing ? migration?.scanned ?? 0 : 0) + page.page.length,
+      repaired: (continuing ? migration?.repaired ?? 0 : 0) + page.page.length,
+      createdAt: continuing ? migration?.createdAt ?? Date.now() : Date.now(), updatedAt: Date.now(),
+    };
+    if (migration) await ctx.db.patch(migration._id, value);
+    else await ctx.db.insert("spectraReadModelMigrations", value);
+  }
+  return {
+    processed: page.page.length,
+    cursor: page.isDone ? null : page.continueCursor,
+    done: page.isDone,
+    tracked,
+  };
+}
+
 /** One-time, cursor-shaped projection fill for artifacts created before P9.I3. */
 export const backfillSummaries = internalMutation({
   args: { cursor: v.union(v.string(), v.null()), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    const { tracked: _tracked, ...result } = await backfillSummaryPage(ctx, args.cursor, args.limit);
+    return result;
+  },
+});
+
+/**
+ * The same fill, run by itself: the catalog (the Agents page among it) refuses
+ * to list until it is complete at the current version, so a deployment that
+ * never had it run by hand, or that moved to a new version, catches up on its
+ * own. One page per call, the next scheduled straight after; a second runner
+ * that finds its place taken stops instead of following.
+ */
+export const continueSummaryBackfill = internalMutation({
+  args: {},
+  handler: async (ctx) => {
     const migration = await ctx.db.query("spectraReadModelMigrations")
       .withIndex("by_key", q => q.eq("key", CATALOG_MIGRATION_KEY)).unique();
-    const tracked = args.cursor === null || (migration?.version === ARTIFACT_SUMMARY_READ_MODEL_VERSION &&
-      migration.state === "running" && migration.cursor === args.cursor);
-    const page = await ctx.db.query("spectraArtifacts").paginate({
-      cursor: args.cursor,
-      numItems: Math.max(1, Math.min(Math.floor(args.limit ?? 10), 25)),
-      maximumBytesRead: 2_000_000,
-    });
-    for (const artifact of page.page)
-      await upsertArtifactSummary(ctx, artifact);
-    if (tracked) {
-      const continuing = args.cursor !== null;
-      const value = {
-        key: CATALOG_MIGRATION_KEY, version: ARTIFACT_SUMMARY_READ_MODEL_VERSION,
-        state: page.isDone ? "complete" as const : "running" as const,
-        cursor: page.isDone ? undefined : page.continueCursor,
-        scanned: (continuing ? migration?.scanned ?? 0 : 0) + page.page.length,
-        repaired: (continuing ? migration?.repaired ?? 0 : 0) + page.page.length,
-        createdAt: continuing ? migration?.createdAt ?? Date.now() : Date.now(), updatedAt: Date.now(),
-      };
-      if (migration) await ctx.db.patch(migration._id, value);
-      else await ctx.db.insert("spectraReadModelMigrations", value);
-    }
-    return {
-      processed: page.page.length,
-      cursor: page.isDone ? null : page.continueCursor,
-      done: page.isDone,
-    };
+    const current = migration?.version === ARTIFACT_SUMMARY_READ_MODEL_VERSION;
+    if (current && migration?.state === "complete") return { done: true };
+    const cursor = current && migration?.state === "running" ? migration.cursor ?? null : null;
+    const page = await backfillSummaryPage(ctx, cursor, 25);
+    if (page.tracked && !page.done)
+      await ctx.scheduler.runAfter(0, internal.spectraArtifacts.continueSummaryBackfill, {});
+    return { done: page.done };
   },
 });
 

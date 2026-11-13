@@ -9,6 +9,20 @@ crons.interval(
   internal.spectraRuns.reconcileStaleRuns,
   {},
 );
+// The catalog's artifact summaries catch up by themselves after a deploy (Agents can't list until they have).
+crons.interval(
+  "continue-catalog-summary-backfill",
+  { minutes: 30 },
+  internal.spectraArtifacts.continueSummaryBackfill,
+  {},
+);
+// Auto school syncs whose own wake-up failed run without waiting for a visit.
+crons.interval(
+  "wake-overdue-school-syncs",
+  { minutes: 15 },
+  internal.managebac.wakeOverdueSyncs,
+  {},
+);
 crons.interval(
   "sweep-stale-bridge-work",
   { minutes: 15 },

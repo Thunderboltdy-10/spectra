@@ -21,7 +21,9 @@ import { BridgeConnection, BridgeDiscoveryMount } from "@/features/spectra/bridg
 import { LivePulseMount } from "@/features/spectra/threads/live-pulse-mount";
 import { TourMount } from "@/features/spectra/onboarding/tour";
 import { SchoolSetupMount } from "@/features/spectra/school/school-setup-mount";
+import { useStartPage } from "@/features/spectra/settings/use-start-page";
 import { FirstTipsMount } from "@/features/spectra/onboarding/first-tips";
+import { SetupMount } from "@/features/spectra/onboarding/setup";
 import { AppChoreographyMount } from "@/features/spectra/collaboration/app-choreography-host";
 import { spectraBus } from "@/features/spectra/events";
 import { Rail, rememberLibraryPlace } from "./rail";
@@ -50,6 +52,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const noScroll = under(pathname, FIXED_PAGES);
   const workTabs = under(pathname, TABBED_PAGES);
+  useStartPage();
 
   useLayoutEffect(() => {
     // The persisted work session is deliberately restored after mount. This
@@ -118,6 +121,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
         <SchoolSetupMount />
         <TourMount />
         <FirstTipsMount />
+        <SetupMount />
       </main>
     </div>
   );

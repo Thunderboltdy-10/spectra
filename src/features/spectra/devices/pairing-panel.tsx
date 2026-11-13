@@ -1,5 +1,6 @@
 "use client";
 
+import { BridgeInstallSteps } from "./bridge-install-steps";
 import { useEffect, useRef } from "react";
 import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
@@ -66,8 +67,9 @@ function PairingCard({
         <div className="space-y-3">
           <p className="text-ui font-medium text-[var(--text-primary)]">Get Spectra Bridge</p>
           <p className="max-w-xl text-caption text-[var(--text-secondary)]">
-            Spectra Bridge keeps the folders you choose on this computer in sync: download and open it, and Spectra carries on by itself.
+            Spectra Bridge keeps the folders you choose on this computer in sync. Download it, then:
           </p>
+          <BridgeInstallSteps platform={state.platform} />
           <div className="flex flex-wrap items-center gap-2">
             {state.url ? (
               <Button asChild variant="primary" size="sm">

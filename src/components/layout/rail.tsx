@@ -44,6 +44,8 @@ import { HOME_PATH, threadHref } from "@/features/spectra/chat/home-routes";
 export const RAIL_WIDTH = 232;
 export const RAIL_COLLAPSED_WIDTH = 56;
 const NARROW = "(max-width: 1023px)";
+/** Phones: the rail leaves the screen and opens over the page (spectra-field.css). */
+const PHONE = "(max-width: 639px)";
 const STORAGE_KEY = "spectra:sidebar-collapsed";
 const PINNED_LIMIT = 6;
 const THREAD_LIMIT = 8;
@@ -157,6 +159,10 @@ export function Rail() {
     [],
   );
   const collapsed = preferred || ((crowded || narrow) && !override);
+  // On a phone the open rail lies over the page; going somewhere puts it away.
+  useEffect(() => {
+    if (window.matchMedia?.(PHONE).matches) setOverride(false);
+  }, [pathname]);
   useLayoutEffect(() => {
     document.documentElement.dataset.spectraSidebarCollapsed = String(collapsed);
   }, [collapsed]);
@@ -356,9 +362,22 @@ export function Rail() {
               }}
             />
           </div>
+          <Tooltip label="Settings" side={collapsed ? "right" : "top"}>
+            <Link href="/settings" aria-label="Settings" className="feedback-trigger" aria-current={pathname?.startsWith("/settings") ? "page" : undefined}>
+              <Icon name="settings" size={16} aria-hidden="true" />
+            </Link>
+          </Tooltip>
           <FeedbackButton collapsed={collapsed} />
         </div>
       </aside>
+      {/* Phones only (spectra-field.css): the rail is off the screen until this opens it, and a tap beside it puts it away. */}
+      {collapsed ? (
+        <button type="button" aria-label="Show navigation" className="spectra-rail-phone-opener" onClick={toggle}>
+          <PrismLoader size={20} optics="dormant" />
+        </button>
+      ) : (
+        <button type="button" aria-label="Hide navigation" tabIndex={-1} className="spectra-rail-phone-scrim" onClick={toggle} />
+      )}
       {notificationsOpen ? (
         <NotificationsPanel
           items={notifications.items}

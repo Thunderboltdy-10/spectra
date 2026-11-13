@@ -83,7 +83,8 @@ export function nodeIdentity(node: TreeNode, open = false): NodeIdentity {
   const key = node.source?.blueprintKey as
     | ArtifactCardView["blueprintKey"]
     | undefined;
-  const meta = key && workTypeMeta[key] ? presentWork(key, node.name) : undefined;
+  // A work not read yet (a file the Bridge just brought in) is still named by its file name.
+  const meta = key && workTypeMeta[key] ? presentWork(key, node.name) : node.kind === "work" ? presentWork("resource", node.name) : undefined;
   return meta ?? { ...FOLDER, icon: Folder, label: "Artifact" };
 }
 

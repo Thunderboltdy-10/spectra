@@ -45,7 +45,7 @@ import { useSpectraPreferences } from "../settings/preference-store";
 import { applyRuntimeChoice } from "../settings/ui/runtime-settings";
 import { bridgeUnavailableReason, useBridgeAvailability } from "../bridge/availability";
 import { DEVICES_HREF } from "../bridge/client";
-import { setupActionFor, startProviderSetup } from "../ai/provider-setup";
+import { installProvider, setupActionFor, startProviderSetup } from "../ai/provider-setup";
 
 /*
  * The island's composer (ISLAND.md, "The composer"): Spectra's only one.
@@ -524,7 +524,14 @@ function AgentSwitch({
 /** The model and how hard it thinks. */
 function RuntimeControls() {
   const { preferences, update } = useSpectraPreferences();
-  const { status } = useAgentRuntime();
+  const { status, checking, recheck } = useAgentRuntime();
+  // The menu opening is a good moment to look again when nothing was found last time:
+  // someone who just installed Codex or Claude Code sees it here without reloading.
+  const nothingFound = status !== null && status.codex.state !== "ready" && status.claude.state !== "ready";
+  useEffect(() => {
+    if (nothingFound) void recheck();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, as the menu opens.
+  }, []);
   const ai = preferences.ai;
   const patch = (next: Partial<typeof ai>) => update("ai", next);
   const unavailable = bridgeUnavailableReason(useBridgeAvailability());
@@ -562,7 +569,7 @@ function RuntimeControls() {
           <DropdownMenuRadioGroup value={value} onValueChange={choose}>
             {(["codex", "claude"] as const).map((provider) => {
               const entry = status?.[provider];
-              const problem = entry ? providerProblem(provider, entry.state) : "Checking this computer…";
+              const problem = !entry || (checking && entry.state !== "ready") ? "Checking this computer…" : providerProblem(provider, entry.state);
               const providerChosen = ai.runtime === provider && !standingIn;
               return (
                 <div key={provider} className="mb-1.5 border-b border-[var(--border-subtle)] pb-1.5">
@@ -582,7 +589,11 @@ function RuntimeControls() {
                       <div className="px-2 pb-1 text-micro font-medium text-[var(--text-tertiary)]">{PROVIDER_LABEL[provider]}</div>
                       <p className="px-2 pb-1 text-micro leading-[18px] text-[var(--text-secondary)]">{problem}</p>
                       {setupActionFor(entry?.state) ? (
-                        <DropdownMenuItem onSelect={() => void startProviderSetup(provider, setupActionFor(entry?.state)!)}>
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            void (setupActionFor(entry?.state) === "install" ? installProvider(provider) : startProviderSetup(provider, setupActionFor(entry?.state)!))
+                          }
+                        >
                           {setupActionFor(entry?.state) === "install" ? `Install ${PROVIDER_LABEL[provider]}` : "Log in"}
                         </DropdownMenuItem>
                       ) : null}

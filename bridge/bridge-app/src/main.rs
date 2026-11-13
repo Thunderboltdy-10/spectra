@@ -4317,10 +4317,10 @@ async fn install_when_idle(app: tauri::AppHandle, update: tauri_plugin_updater::
 }
 
 async fn request_bridge_update(app: &tauri::AppHandle) -> Result<String, String> {
-    let tray_sentence = "Look for Spectra Bridge near the clock and open it to install the update.";
     let updater = match app.updater() {
         Ok(updater) => updater,
-        Err(_) => return Ok(tray_sentence.into()),
+        // A build from source has no updater; it is kept current by building it again.
+        Err(_) => return Ok("This Spectra Bridge was built from source, so it doesn't update itself.".into()),
     };
     match updater.check().await {
         Ok(Some(update)) => {
@@ -4333,7 +4333,12 @@ async fn request_bridge_update(app: &tauri::AppHandle) -> Result<String, String>
                 "Spectra Bridge is installing the update and will restart.".into()
             })
         }
-        Ok(None) | Err(_) => Ok(tray_sentence.into()),
+        // A check is what the button asks for, so its answer is said plainly.
+        Ok(None) => Ok("Spectra Bridge is up to date.".into()),
+        Err(error) => {
+            eprintln!("[update] check failed: {error}");
+            Ok("Spectra Bridge couldn't check for an update just now. It tries again by itself.".into())
+        }
     }
 }
 
@@ -4511,6 +4516,53 @@ mod pairing_tests {
     }
 }
 
+/// Bridge has no window of its own, so on Windows its pickers would open behind
+/// the browser that asked for them. A one-pixel always-on-top window owns them
+/// and brings them in front of every app; it closes with the picker.
+struct PickerOwner(Option<tauri::WebviewWindow>);
+
+impl PickerOwner {
+    fn new(app: &tauri::AppHandle) -> Self {
+        if !cfg!(windows) {
+            return Self(None);
+        }
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let label = format!("picker-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        let Ok(url) = "about:blank".parse() else { return Self(None) };
+        let window = tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::External(url))
+            .title("Spectra Bridge")
+            .inner_size(1.0, 1.0)
+            .decorations(false)
+            .resizable(false)
+            .skip_taskbar(true)
+            .always_on_top(true)
+            .center()
+            .focused(true)
+            .build()
+            .ok();
+        if let Some(window) = &window {
+            let _ = window.set_focus();
+        }
+        Self(window)
+    }
+
+    fn file(&self, app: &tauri::AppHandle) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
+        let builder = app.dialog().file();
+        match &self.0 {
+            Some(window) => builder.set_parent(window),
+            None => builder,
+        }
+    }
+}
+
+impl Drop for PickerOwner {
+    fn drop(&mut self) {
+        if let Some(window) = self.0.take() {
+            let _ = window.close();
+        }
+    }
+}
+
 async fn select_mount_impl(
     app: &tauri::AppHandle,
     grants: &Arc<GrantRegistry>,
@@ -4519,12 +4571,14 @@ async fn select_mount_impl(
     active_mount_syncs: &ActiveMountSyncs,
 ) -> Result<Option<(String, String)>, String> {
     let (selection_tx, selection_rx) = tokio::sync::oneshot::channel();
-    app.dialog().file().pick_folder(move |selection| {
+    let owner = PickerOwner::new(app);
+    owner.file(app).pick_folder(move |selection| {
         let _ = selection_tx.send(selection);
     });
     let selection = selection_rx
         .await
         .map_err(|_| "Folder picker closed before returning a selection".to_string())?;
+    drop(owner);
     let Some(selection) = selection else {
         return Ok(None);
     };
@@ -4545,20 +4599,27 @@ async fn sync_named_impl(
     let path = spectra_bridge_core::computer_names::resolve(relative)
         .map_err(|error| error.to_string())?;
     let (answer_tx, answer_rx) = tokio::sync::oneshot::channel();
-    app.dialog()
-        .message(format!(
+    let owner = PickerOwner::new(app);
+    let message = app.dialog().message(format!(
             "Spectra AI asked to sync this with your Spectra Library:
 
 {relative}
 
 It stays on this computer and stays in step with Spectra. Spectra AI can't run anything on this computer or delete your files."
-        ))
+        ));
+    let message = match &owner.0 {
+        Some(window) => message.parent(window),
+        None => message,
+    };
+    message
         .title("Sync with Spectra")
         .buttons(MessageDialogButtons::OkCancelCustom("Sync".into(), "Not now".into()))
         .show(move |confirmed| {
             let _ = answer_tx.send(confirmed);
         });
-    if !matches!(answer_rx.await, Ok(true)) {
+    let confirmed = matches!(answer_rx.await, Ok(true));
+    drop(owner);
+    if !confirmed {
         return Ok(None);
     }
     if path.is_dir() {
@@ -4755,13 +4816,15 @@ async fn select_files_impl(
     active_mount_syncs: &ActiveMountSyncs,
 ) -> Result<FilesSelected, String> {
     let (tx, rx) = tokio::sync::oneshot::channel();
-    app.dialog().file().pick_files(move |selection| {
+    let owner = PickerOwner::new(app);
+    owner.file(app).pick_files(move |selection| {
         let _ = tx.send(selection);
     });
-    let Some(selection) = rx
+    let selection = rx
         .await
-        .map_err(|_| "File picker closed before returning a selection".to_string())?
-    else {
+        .map_err(|_| "File picker closed before returning a selection".to_string())?;
+    drop(owner);
+    let Some(selection) = selection else {
         return Ok(FilesSelected::default());
     };
     let paths = selection

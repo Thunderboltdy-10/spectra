@@ -480,6 +480,25 @@ export const resumeRestedSyncs = internalMutation({
   },
 });
 
+/**
+ * A safety net for Auto syncs: each due job wakes the worker at its time, but a wake-up that
+ * failed (the worker was down, a deploy) would leave the job waiting for the student's next
+ * visit. Jobs overdue by a few minutes wake their school's worker again, once per school.
+ */
+export const wakeOverdueSyncs = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const overdue = await ctx.db
+      .query("schoolSyncStates")
+      .withIndex("by_due", (q) => q.gte("dueAt", 0).lte("dueAt", now - 5 * 60_000))
+      .take(200);
+    const integrations = new Set(overdue.map((state) => state.integrationId));
+    for (const integrationId of integrations) await scheduleSync(ctx, integrationId, now);
+    return { woken: integrations.size };
+  },
+});
+
 export const purgeSyncSeenKeys = internalMutation({
   args: { syncRunId: v.id("externalSyncRuns") },
   handler: async (ctx, args) => {

@@ -91,8 +91,45 @@ const todayAt = (minute: number) => {
   return day.getTime() + minute * MINUTE;
 };
 
+const titleCase = (word: string) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+
+/** A first name from what is typed: the name fields, or the start of an email's local part. */
+function nameFrom(fields: { first: string; last: string; identifier: string }) {
+  const first = fields.first.trim();
+  if (first) return { short: titleCase(first.split(/\s+/)[0]!), full: [first, fields.last.trim()].filter(Boolean).join(" ") };
+  const local = fields.identifier.trim().split("@")[0] ?? "";
+  const word = local.split(/[._\-+\d]+/).find(Boolean);
+  return word && word.length > 1 ? { short: titleCase(word), full: titleCase(word) } : null;
+}
+
+/**
+ * The name being typed into the form beside the picture, read from Clerk's own
+ * fields as they change, so the Home becomes the reader's as they sign in.
+ */
+function useTypedName() {
+  const [typed, setTyped] = useState<{ short: string; full: string } | null>(null);
+  useEffect(() => {
+    const fields = { first: "", last: "", identifier: "" };
+    const onInput = (event: Event) => {
+      const input = event.target;
+      if (!(input instanceof HTMLInputElement)) return;
+      if (input.name === "firstName") fields.first = input.value;
+      else if (input.name === "lastName") fields.last = input.value;
+      else if (input.name === "identifier" || input.name === "emailAddress") fields.identifier = input.value;
+      else return;
+      setTyped(nameFrom(fields));
+    };
+    document.addEventListener("input", onInput, true);
+    return () => document.removeEventListener("input", onInput, true);
+  }, []);
+  return typed;
+}
+
 export function AuthHome({ kind }: { kind: AuthHomeKind }) {
-  const story = STORIES[kind];
+  const typed = useTypedName();
+  const base = STORIES[kind];
+  const story = typed ? { ...base, who: typed.full } : base;
+  const greetingName = typed?.short ?? base.who;
   const [step, setStep] = useState(0);
   const [minute, setMinute] = useState(story.start);
 
@@ -117,7 +154,7 @@ export function AuthHome({ kind }: { kind: AuthHomeKind }) {
   const done = Math.max(0, Math.min(story.moves.length, kind === "joining" ? step - 5 : step));
   const arrived = kind === "joining" ? Math.min(5, step + 1) : 5;
   const hour = Math.floor(minute / 60);
-  const greeting = `Good ${hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}${kind === "joining" ? "" : `, ${story.who}`}.`;
+  const greeting = `Good ${hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening"}${kind === "joining" && !typed ? "" : `, ${greetingName}`}.`;
 
   return (
     <div className="auth-home" inert aria-hidden>

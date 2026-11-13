@@ -223,7 +223,8 @@ export function parseBrief(text: string, context: BriefContext): DailyBrief {
   const json = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
   const raw = JSON.parse(json) as Record<string, unknown>;
   const recap = str(raw.recap, 600) ?? "";
-  const ahead = str(raw.ahead, 600);
+  // The story is the heart of the brief: when the model leaves it out, the plain one stands in.
+  const ahead = str(raw.ahead, 600) ?? plainBrief(context).ahead;
   const works = new Map([...context.recentWorks, ...context.yesterdayWorks].map((item) => [item.id, item.type]));
   const tasks = new Set([...context.due, ...context.late, ...context.open, ...context.today].map((item) => item.id));
   const suggestions = (Array.isArray(raw.suggestions) ? raw.suggestions : []).flatMap((value): BriefSuggestion[] => {
@@ -249,7 +250,7 @@ export function parseBrief(text: string, context: BriefContext): DailyBrief {
     if (item.kind === "ask" && prompt) return [{ kind: "ask", title, why, prompt, ...how }];
     return [];
   });
-  if (!ahead && !suggestions.length) throw new Error("The brief came back empty.");
+  if (!str(raw.ahead, 600) && !suggestions.length) throw new Error("The brief came back empty.");
   return { recap, ...(ahead ? { ahead } : {}), suggestions: suggestions.slice(0, BRIEF_LIMITS.suggestions) };
 }
 

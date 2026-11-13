@@ -22,6 +22,9 @@
   color: var(--text-tertiary);
 }
 .when-field > span {
+  /* A flex item keeps its text's width unless told it may shrink. */
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

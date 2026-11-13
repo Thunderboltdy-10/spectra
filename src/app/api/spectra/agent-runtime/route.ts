@@ -18,7 +18,7 @@ export async function POST(request: Request) {
   const actor = await requireActor();
   const body = (await request.json().catch(() => null)) as { runtime?: unknown; setup?: unknown; action?: unknown } | null;
   if (body?.setup === "codex" || body?.setup === "claude") {
-    const action = body.action === "login" ? "login" : "install";
+    const action = body.action === "login" || body.action === "install-quiet" ? body.action : "install";
     return NextResponse.json(await setupRuntime(body.setup, action, String(actor.accountId)));
   }
   if (body?.runtime === "codex") await warmRuntime("codex", String(actor.accountId));

@@ -78,16 +78,17 @@ describe("current single-record ManageBac visibility", () => {
     });
   });
 
-  it("still uses time to hide an unclassified legacy task after it enters the archive", async () => {
+  it("still uses time to classify an unclassified legacy task once it enters the archive", async () => {
     const f = await fixture();
     const dueAt = Date.UTC(2026, 10, 1);
     await f.t.run(async ctx => {
       await ctx.db.patch(f.recordId, { recordType: "assignment", audienceScope: "mapped_user",
         mappedAccountId: f.accountId, normalized: { dueAt } });
       await ctx.db.insert("schoolSyncPreferences", { accountId: f.accountId, schoolId: f.schoolId, integrationId: f.integrationId,
-        kind: "past_tasks", mode: "off", updatedAt: dueAt });
+        kind: "current_tasks", mode: "off", updatedAt: dueAt });
     });
-    for (const [now, allowed] of [[dueAt, true], [dueAt + 8 * 86_400_000, false]] as const) {
+    // Current tasks are off and past tasks always sync: hidden while current, shown once archived.
+    for (const [now, allowed] of [[dueAt, false], [dueAt + 8 * 86_400_000, true]] as const) {
       await f.t.run(async ctx => {
         const source = (await ctx.db.get(f.recordId))!;
         const clock = vi.spyOn(Date, "now").mockReturnValue(now);

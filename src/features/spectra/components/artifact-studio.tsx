@@ -2200,7 +2200,7 @@ export function ArtifactStudio({
                 aria-label={
                   continuedThreadId === threadId
                     ? "Stop replying to this thread from the island"
-                    : "Reply to this thread from the island"
+                    : "Continue this thread from the island"
                 }
                 title={
                   continuedThreadId === threadId

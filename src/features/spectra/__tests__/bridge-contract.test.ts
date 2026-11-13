@@ -19,7 +19,7 @@ describe("N3 Bridge contract", () => {
       client.indexOf("export async function selectBridgeFolder(): Promise"),
       client.indexOf("export async function retryBridgeFolder"),
     );
-    expect(app).toContain("app.dialog().file().pick_folder(move |selection|");
+    expect(app).toContain(".pick_folder(move |selection|");
     expect(app).not.toContain("blocking_pick_folder()");
     expect(selectFolder).toContain("BRIDGE_FOLDER_PICKER_TIMEOUT_MS");
   });

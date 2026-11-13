@@ -652,3 +652,20 @@
   background: var(--bg-desk-hover);
   color: var(--text-primary);
 }
+
+/* Home as a picture (landing, sign-in): the moves stand beside the story instead of under it. */
+.today[data-mockup] .morning-body,
+.auth-home-page .morning-body {
+  flex-wrap: nowrap;
+}
+
+.today[data-mockup] .morning-body > *,
+.auth-home-page .morning-body > * {
+  flex: 1 1 0;
+  max-width: none;
+}
+
+.today[data-mockup] .morning-body > .morning-moves-fold,
+.auth-home-page .morning-body > :last-child {
+  flex-grow: 1.35;
+}

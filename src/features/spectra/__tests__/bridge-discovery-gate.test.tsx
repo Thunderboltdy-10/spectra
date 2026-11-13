@@ -116,7 +116,7 @@ describe("Bridge discovery gate (LV-012)", () => {
     expect(bridgeDiscoveryEnabled()).toBe(false);
   });
 
-  it("checks automatically once connected, backing off while Bridge is unreachable", async () => {
+  it("checks automatically once connected, backing off while Bridge is unreachable, and at once on return", async () => {
     window.localStorage.setItem(BRIDGE_DISCOVERY_STORAGE_KEY, "enabled");
     const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
     vi.stubGlobal("fetch", fetchMock);
@@ -133,12 +133,18 @@ describe("Bridge discovery gate (LV-012)", () => {
     expect(healthCalls(fetchMock)).toBe(2);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(59_000);
+    });
+    expect(healthCalls(fetchMock)).toBe(2);
+    // Coming back to the page looks at once (Bridge may just have been opened),
+    // but not again within a few seconds.
+    await act(async () => {
       window.dispatchEvent(new Event("focus"));
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(healthCalls(fetchMock)).toBe(2);
+    expect(healthCalls(fetchMock)).toBe(3);
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_000);
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(0);
     });
     expect(healthCalls(fetchMock)).toBe(3);
     await act(async () => {

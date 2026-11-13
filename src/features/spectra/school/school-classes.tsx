@@ -272,7 +272,11 @@ export function ClassDetails({
         <div className="mt-2">
       <p className="mb-2 text-caption text-[var(--text-secondary)]">Each kind follows your choice in Sync unless you set it here.</p>
       <ul className="space-y-2">
-        {CLASS_KIND_ORDER.filter((kind) => SCHOOL_SYNC_KIND_INFO[kind].classScoped).map((kind) => {
+        {/* Only what this school's ManageBac shares and a person can choose: the rest isn't theirs to set. */}
+        {CLASS_KIND_ORDER.filter((kind) => {
+          const entry = preferences.kinds.find((row) => row.kind === kind);
+          return SCHOOL_SYNC_KIND_INFO[kind].classScoped && entry?.available !== false && entry?.choice !== false;
+        }).map((kind) => {
           const own = overrides.get(kind);
           const base = preferences.kinds.find((entry) => entry.kind === kind);
           return (

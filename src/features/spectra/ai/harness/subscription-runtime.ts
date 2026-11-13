@@ -1336,7 +1336,8 @@ async function claudeStatus(accountId: string | undefined): Promise<RuntimeProvi
   }
 }
 
-export type RuntimeSetupAction = "install" | "login";
+/** `install-quiet` runs the installer with no window; Spectra watches for the CLI to appear. */
+export type RuntimeSetupAction = "install" | "login" | "install-quiet";
 export type RuntimeSetupResult = { opened: true } | { opened: false; reason: "unsupported" | "update-bridge" | "no-bridge" | "failed" };
 
 /**
@@ -1347,7 +1348,7 @@ export async function setupRuntime(provider: SubscriptionProvider, action: Runti
   const relay = new RelaySocket(provider, { args: [], setup: action }, accountId);
   try {
     await withinStatusTime(relay.ready);
-    if (relay.setupResult === "opened") return { opened: true };
+    if (relay.setupResult === "opened" || relay.setupResult === "started") return { opened: true };
     if (relay.setupResult === "unsupported") return { opened: false, reason: "unsupported" };
     // An older Bridge ignores the request and starts the CLI instead.
     return { opened: false, reason: relay.setupResult === undefined ? "update-bridge" : "failed" };

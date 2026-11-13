@@ -38,6 +38,7 @@ import { settleFirstVisit, useSeenRuns } from "./seen";
 import { ThreadSwitcher } from "./thread-switcher";
 import { ThreadView } from "./thread-view";
 import { PEEK_LIFE_MS, PEEK_REST_MS, ReplyPeek, peekLine } from "./reply-peek";
+import { useIslandRestsHidden } from "./phone-rest";
 import { runTabCard } from "./run-tabs";
 import { useFlip, useTabDrag } from "./use-tab-drag";
 import { threadHref } from "../chat/home-routes";
@@ -73,6 +74,8 @@ const ARRIVAL_MS = 1600;
 const PLACEHOLDER_TITLE = 36;
 /** How long a question stands untouched before it folds onto its thread's tab. */
 const QUESTION_IDLE_MS = 90_000;
+/** Up to this many thread tabs always stand on the rail; past it, they tuck away until the island is hovered. */
+const TABS_ALWAYS_STANDING = 3;
 
 /** A title for one line: cut on a word boundary, ending in one ellipsis and nothing after it. */
 export function shortTitle(title: string) {
@@ -136,7 +139,8 @@ export function Island() {
   const arrangement = useArrangement();
 
   const [hidden, setHidden] = useState(false);
-  const restShape: Shape | null = hidden || preferences.ai.islandWake === "edge" ? null : "composer";
+  const phoneRest = useIslandRestsHidden();
+  const restShape: Shape | null = hidden || phoneRest || preferences.ai.islandWake === "edge" ? null : "composer";
   const restRef = useRef(restShape);
   restRef.current = restShape;
 
@@ -735,6 +739,23 @@ export function Island() {
     }, CLOSE_DELAY);
   }, [go]);
 
+  // A phone has no hover to leave: a tap anywhere else puts a raised island
+  // back to its lip, unless something is being written in it.
+  useEffect(() => {
+    if (!phoneRest || target === null) return;
+    const away = (event: PointerEvent) => {
+      if ((event.target as Element | null)?.closest("[data-island], [role='menu'], [role='dialog'], [role='listbox']")) return;
+      if (composerRef.current?.hasContent() || currentView.current?.pinned) return;
+      pointerInside.current = false;
+      window.clearTimeout(closeTimer.current);
+      setView(null);
+      setReaching(false);
+      void go(restRef.current);
+    };
+    document.addEventListener("pointerdown", away, true);
+    return () => document.removeEventListener("pointerdown", away, true);
+  }, [go, phoneRest, target]);
+
   // Whatever held the rail up let go while the hand was elsewhere: it goes back down.
   useEffect(() => {
     if (reaching && !view && !pointerInside.current) scheduleClose();
@@ -934,7 +955,7 @@ export function Island() {
   const workingElsewhere = allTabs.find((tab) => tab.status === "working" && tab.threadId !== focus?.threadId);
   const liveCaption = workingElsewhere && live?.runId === workingElsewhere.runId ? live.steps.at(-1)?.title : undefined;
   const placeholder = focus
-    ? `Reply to ${shortTitle(focus.title)}`
+    ? `Continue in ${shortTitle(focus.title)}`
     : workingElsewhere
       ? workingLine(liveCaption ?? workingElsewhere.caption)
       : "Ask Spectra anything";
@@ -947,7 +968,8 @@ export function Island() {
   const raised = Boolean(seat) && (composerVisible || reaching);
   // The field open with the hand away: only threads in play that want attention stand (working, asking, a
   // problem, unread); the rest rise when the island is hovered or has the keyboard.
-  const settled = raised && !reaching;
+  // Three tabs or fewer always stand; so do all of them when the person asked for that.
+  const settled = raised && !reaching && allTabs.length > TABS_ALWAYS_STANDING && !preferences.ai.islandTabsAlwaysShown;
   const railHas = composerVisible || allTabs.length > 0;
   // The tab rail stands over the band; the clearance follows it as it comes and goes.
   useEffect(() => refreshComposerBands(), [railHas, seat]);
@@ -1258,7 +1280,31 @@ export function Island() {
 
       {/* Wake from the edge: a band along the bottom centre. */}
       {restShape === null && target === null ? (
-        <div aria-hidden className="pointer-events-auto absolute bottom-0 left-1/2 h-7 w-[360px] -translate-x-1/2" onPointerEnter={() => void go("composer")} />
+        phoneRest ? (
+          // On a phone: a faint lip at the bottom edge; a swipe up or a tap raises the island.
+          <button
+            type="button"
+            aria-label="Show the island"
+            className="spectra-island-lip pointer-events-auto absolute bottom-0 left-1/2 -translate-x-1/2"
+            onClick={() => void go("composer", { focus: true })}
+            onPointerDown={(event) => {
+              const startY = event.clientY;
+              const element = event.currentTarget;
+              element.setPointerCapture(event.pointerId);
+              const move = (next: PointerEvent) => {
+                if (startY - next.clientY < 14) return;
+                element.removeEventListener("pointermove", move);
+                void go("composer", { focus: true });
+              };
+              element.addEventListener("pointermove", move);
+              element.addEventListener("pointerup", () => element.removeEventListener("pointermove", move), { once: true });
+            }}
+          >
+            <span aria-hidden />
+          </button>
+        ) : (
+          <div aria-hidden className="pointer-events-auto absolute bottom-0 left-1/2 h-7 w-[360px] -translate-x-1/2" onPointerEnter={() => void go("composer")} />
+        )
       ) : null}
     </div>
   );

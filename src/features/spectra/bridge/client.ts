@@ -119,6 +119,28 @@ export function bridgeDiscoveryEnabled() {
   return Boolean(paired);
 }
 
+/*
+ * This computer was removed from Devices on purpose. Spectra then stops joining
+ * the Bridge here by itself (it would otherwise come straight back) until the
+ * person pairs it again.
+ */
+const BRIDGE_REMOVED_KEY = "spectra.bridge.removedHere";
+
+export function bridgeRemovedHere() {
+  if (typeof window === "undefined") return false;
+  return readStorage(() => window.localStorage, BRIDGE_REMOVED_KEY) === "1";
+}
+
+export function setBridgeRemovedHere(removed: boolean) {
+  if (typeof window === "undefined") return;
+  try {
+    if (removed) window.localStorage.setItem(BRIDGE_REMOVED_KEY, "1");
+    else window.localStorage.removeItem(BRIDGE_REMOVED_KEY);
+  } catch {
+    /* Without storage the choice lasts for this page. */
+  }
+}
+
 export function enableBridgeDiscovery() {
   if (typeof window === "undefined") return;
   try {
@@ -222,7 +244,7 @@ export function bridgeReachabilityCopy(kind: BridgeReachability): {
     return {
       label: "Not running",
       detail:
-        "The Spectra Bridge background helper is not running on this PC. Pairing and folder selection are managed here in Spectra.",
+        "Spectra Bridge isn't running on this computer. Open it from the Start menu (or Applications on a Mac); if it's already open, quit it from its icon near the clock and open it again.",
     };
   }
   if (kind === "port-taken") {
@@ -236,7 +258,7 @@ export function bridgeReachabilityCopy(kind: BridgeReachability): {
     return {
       label: "Update required",
       detail:
-        "This copy of Spectra Bridge is too old for this Spectra. Update it to keep using files on this PC.",
+        "This copy of Spectra Bridge is too old for this Spectra. Press Update Bridge below, or download it again and open the file.",
     };
   }
   if (kind === "running") {

@@ -13,7 +13,7 @@ import type { ClassIdentity } from "../../../../shared/class-identity";
 import { aiWorking } from "../artifacts/ai-working";
 import { authoredSummary } from "../artifacts/registry";
 import { useWorkPreview } from "../artifacts/use-work-previews";
-import { workTypeMeta } from "../components/artifact-card";
+import { presentWork } from "../artifacts/presentation";
 import { WorkCardBody, workCardStyle } from "../components/work-card";
 import { useAuthedArgs } from "../data/use-authed-args";
 import { LibraryNote, PickMark, pickable, previewSource, workSourceOf, workType, type WorkPicking } from "./library-note";
@@ -201,13 +201,13 @@ function LibraryStack({
       data-node-row={active.nodeId}
       data-picking={picking ? true : undefined}
       data-picked={picked || undefined}
-      style={workCardStyle(type, placeOf(active)?.ink)}
+      style={workCardStyle(type, placeOf(active)?.ink, active.name)}
       onPointerDown={(event) => onGather(event, active.nodeId, true)}
     >
       <div className="work-stack-tabs">
         <div role="tablist" aria-label={`Stack of ${nodes.length} works`} className="work-stack-tab-strip" inert={!open}>
           {nodes.map((node, index) => {
-            const meta = workTypeMeta[workType(node)];
+            const meta = presentWork(workType(node), node.name);
             return (
               <button
                 key={node.nodeId}
@@ -216,7 +216,7 @@ function LibraryStack({
                 aria-selected={node === active}
                 title={node.name}
                 className="work-card-tab work-stack-tab"
-                style={{ ...workCardStyle(workType(node), placeOf(node)?.ink), "--tab-index": index } as React.CSSProperties}
+                style={{ ...workCardStyle(workType(node), placeOf(node)?.ink, node.name), "--tab-index": index } as React.CSSProperties}
                 onClick={() => setActiveId(node.nodeId)}
               >
                 <Icon name={meta.glyph} size={12} />
@@ -309,7 +309,7 @@ function StackFolder({
       <div className="work-stack-folder-front">
         <ul className="work-stack-names" aria-label="Artifacts in this stack">
           {nodes.map((node) => (
-            <li key={node.nodeId} style={workCardStyle(workType(node))}>
+            <li key={node.nodeId} style={workCardStyle(workType(node), null, node.name)}>
               <button
                 type="button"
                 data-life-launch
@@ -319,7 +319,7 @@ function StackFolder({
                   onPick(node);
                 }}
               >
-                <Icon name={workTypeMeta[workType(node)].glyph} size={12} />
+                <Icon name={presentWork(workType(node), node.name).glyph} size={12} />
                 <span>{node.name}</span>
               </button>
             </li>

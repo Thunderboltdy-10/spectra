@@ -10,7 +10,7 @@ import { convexTest } from "convex-test";
 import aggregateTest from "@convex-dev/aggregate/test";
 import { v } from "convex/values";
 import schema from "./schema";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { internalAction } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { canReadManagebacRecord } from "./managebacVisibility";
@@ -264,36 +264,26 @@ describe("School isolation", () => {
   it("removes a kind's data when the student turns it off, and never syncs it again", async () => {
     const t = setup();
     const f = await seed(t);
-    await t.withIdentity(alice).mutation(api.school.setMode, { kind: "past_tasks", mode: "off" });
-    expect((await t.withIdentity(alice).query(api.school.tasks, { view: "past" })).tasks).toEqual([]);
-    expect(await t.run((ctx) => ctx.db.get(f.records.alicePast))).toBeNull();
-    // Only Alice's past tasks: her current task and Bob's data are untouched.
+    // Past tasks always sync: they can't be turned off.
+    await expect(t.withIdentity(alice).mutation(api.school.setMode, { kind: "past_tasks", mode: "off" }))
+      .rejects.toThrow("SCHOOL_SYNC_KIND_FIXED");
+    const bobGrades = (await t.withIdentity(bob).query(api.school.preferences, {})).kinds.find((row) => row.kind === "grades")?.mode;
+    await t.withIdentity(alice).mutation(api.school.setMode, { kind: "grades", mode: "off" });
+    expect(await t.run((ctx) => ctx.db.get(f.records.aliceGrade))).toBeNull();
+    // Only Alice's grades: her tasks and Bob's choices are untouched.
     expect(await t.run((ctx) => ctx.db.get(f.records.aliceCurrent))).not.toBeNull();
-    expect((await t.withIdentity(bob).query(api.school.preferences, {})).kinds.find((row) => row.kind === "past_tasks")?.mode).toBe("manual");
+    expect(await t.run((ctx) => ctx.db.get(f.records.alicePast))).not.toBeNull();
+    expect((await t.withIdentity(bob).query(api.school.preferences, {})).kinds.find((row) => row.kind === "grades")?.mode).toBe(bobGrades);
 
-    await expect(t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual", syncKind: "past_tasks" }))
+    await expect(t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual", syncKind: "grades" }))
       .rejects.toThrow("SCHOOL_SYNC_KIND_OFF");
-    // A current-tasks job that meets a task now in the archive does not store it.
-    const started = await t.withIdentity(alice).mutation(api.managebac.beginSync, { kind: "manual", syncKind: "current_tasks" });
-    const result = await commitTasks(t, alice, {
-      integrationId: f.a.integrationId, capabilityId: f.a.capabilityId, syncRunId: started.syncRunId,
-      leaseToken: started.leaseToken, selectionRevision: started.selectionRevision, binding: "101",
-      tasks: [
-        { id: "1", classId: "101", dueAt: new Date(Date.now() + 3 * DAY).toISOString(), title: "Alice lab report" },
-        { id: "40", classId: "101", dueAt: new Date(Date.now() - 200 * DAY).toISOString(), title: "Old essay" },
-      ],
-    });
-    expect(result.counts.skipped).toBe(1);
-    const old = await t.run((ctx) => ctx.db.query("externalRecords").withIndex("by_integration_key", (q) =>
-      q.eq("integrationId", f.a.integrationId).eq("providerRecordKey", "task:40")).collect());
-    expect(old).toEqual([]);
 
     // Even a record written behind the API's back stays invisible while its kind is off.
     const sneaked = await t.run(async (ctx) => {
-      const source = (await ctx.db.get(f.records.aliceCurrent))!;
+      const source = (await ctx.db.get(f.records.aliceGrade)) ?? (await ctx.db.get(f.records.aliceCurrent))!;
       const { _id: _ignored, _creationTime: _created, ...rest } = source;
-      return ctx.db.insert("externalRecords", { ...rest, providerRecordKey: "task:41", providerRecordId: "41",
-        sourceIdentityKey: `${rest.sourceIdentityKey}-41`, syncKind: "past_tasks" });
+      return ctx.db.insert("externalRecords", { ...rest, recordType: "grade", providerRecordKey: "grade:41", providerRecordId: "41",
+        sourceIdentityKey: `${rest.sourceIdentityKey}-41`, syncKind: "grades" });
     });
     expect(await t.run(async (ctx) => canReadManagebacRecord(ctx, { accountId: f.aliceId, schoolId: f.schoolA }, (await ctx.db.get(sneaked))!))).toBe(false);
   });
@@ -330,5 +320,29 @@ describe("School isolation", () => {
     const off = await t.withIdentity(bob).mutation(api.managebac.requestAiRefresh, { kinds: ["grades"] });
     expect(off.started).toBe(false);
     expect(await queued(f.bobId)).toEqual([]);
+  });
+  it("catches up Auto syncs older than their cadence when Spectra opens, and wakes overdue ones", async () => {
+    const t = setup();
+    const f = await seed(t);
+    const now = Date.now();
+    await t.run(async (ctx) => {
+      const base = { accountId: f.aliceId, schoolId: f.schoolA, integrationId: f.a.integrationId, state: "idle" as const, updatedAt: now };
+      // Classes run every 12 hours and last ran 13 hours ago; current tasks ran 10 minutes ago.
+      await ctx.db.insert("schoolSyncStates", { ...base, kind: "classes", lastSuccessAt: now - 13 * 60 * 60_000 });
+      await ctx.db.insert("schoolSyncStates", { ...base, kind: "current_tasks", lastSuccessAt: now - 10 * 60_000 });
+    });
+    const opened = await t.withIdentity(alice).mutation(api.school.syncStaleOnOpen, {});
+    expect(opened.queued).toContain("classes");
+    expect(opened.queued).not.toContain("current_tasks");
+    // Already due: opening again queues nothing twice.
+    expect((await t.withIdentity(alice).mutation(api.school.syncStaleOnOpen, {})).queued).toEqual([]);
+    // Bob's own syncs are his: Alice opening Spectra queued none of them.
+    expect((await t.run((ctx) => ctx.db.query("schoolSyncStates").collect())).filter((row) => row.accountId === f.bobId)).toEqual([]);
+    // A due job whose wake-up was lost is woken by the cron, once per school.
+    await t.run(async (ctx) => {
+      const row = (await ctx.db.query("schoolSyncStates").collect()).find((state) => state.kind === "classes")!;
+      await ctx.db.patch(row._id, { dueAt: now - 10 * 60_000 });
+    });
+    expect(await t.mutation(internal.managebac.wakeOverdueSyncs, {})).toEqual({ woken: 1 });
   });
 });

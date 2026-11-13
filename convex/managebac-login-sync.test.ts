@@ -34,8 +34,8 @@ async function fixture() {
     return { schoolId, accountId, integrationId };
   });
   const student = t.withIdentity(identity);
-  const run = () => t.run(async (ctx) => ctx.db.insert("externalSyncRuns", {
-    ...ids, kind: "manual", syncKind: "classes", status: "completed", trigger: "user", stage: "complete", capabilityIds: [], counts,
+  const run = (syncKind: "classes" | "past_tasks" = "classes") => t.run(async (ctx) => ctx.db.insert("externalSyncRuns", {
+    ...ids, kind: "manual", syncKind, status: "completed", trigger: "user", stage: "complete", capabilityIds: [], counts,
     attemptCount: 0, nextAttemptAt: Date.now(), createdAt: Date.now(), updatedAt: Date.now(),
   }));
   return { t, ids, student, run };
@@ -96,7 +96,7 @@ it("lists classes for choosing when only older changes wait for review", async (
   expect(await student.query(api.managebac.onboardingStatus, {})).toMatchObject({ phase: "choose_classes" });
 });
 
-it("can finish when the reader deliberately turns every kind off", async () => {
+it("can finish when the reader turns every kind off, once the always-on past tasks have synced", async () => {
   const { t, ids, student, run } = await fixture();
   const first = await student.mutation(api.managebac.claimLoginSync, {});
   await student.mutation(api.managebac.finishLoginSync, { attemptAt: first.attemptAt!, runIds: [await run()] });
@@ -106,7 +106,9 @@ it("can finish when the reader deliberately turns every kind off", async () => {
   await t.run(async (ctx) => {
     for (const kind of SCHOOL_SYNC_KINDS) await ctx.db.insert("schoolSyncPreferences", { ...ids, kind, mode: "off", updatedAt: Date.now() });
   });
-  expect(await student.mutation(api.managebac.finishLoginSync, { attemptAt: selected.attemptAt!, runIds: [] })).toMatchObject({ completed: true });
+  // Past tasks can't be turned off, so their run is still waited for.
+  expect(await student.mutation(api.managebac.finishLoginSync, { attemptAt: selected.attemptAt!, runIds: [] })).toEqual({ completed: false });
+  expect(await student.mutation(api.managebac.finishLoginSync, { attemptAt: selected.attemptAt!, runIds: [await run("past_tasks")] })).toMatchObject({ completed: true });
   expect(await student.query(api.managebac.onboardingStatus, {})).toMatchObject({ phase: "ready" });
 });
 

@@ -1122,6 +1122,7 @@ export const SERVER_PLUMBING: Readonly<Record<string, string>> = {
   "dailyBriefs:mark": "Home's morning brief protocol: which suggestions the student has acted on.",
   "dailyBriefs:setSchedule": "Keeps the brief's wake-up schedule in step with the student's settings.",
   "school:ensureTaskWork": "Opens a school deadline as its task artifact, made on demand when the student opens it.",
+  "school:syncStaleOnOpen": "Catches up Auto school syncs older than their cadence when the app opens; it queues only what the reader already chose.",
   "changeGroups:commitImport": "Saves edit history for imports.",
   "changeGroups:commitRestore": "A refusing tombstone for older clients; restores run through the signed artifactRestore admission, which restore_version calls.",
   "changeGroups:reconcileImports": "Saves edit history for imports.",

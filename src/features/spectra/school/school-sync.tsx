@@ -21,6 +21,10 @@ import { MODE_HINT, MODE_LABEL, kindLine, sentenceOf, type SchoolPreferences, ty
 const MODE_OPTIONS = (["auto", "manual", "off"] as const).map((value) => ({ value, label: MODE_LABEL[value] }));
 
 /** How often Auto runs, in words. */
+function listOf(items: string[]) {
+  return items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+}
+
 function cadence(minutes: number) {
   if (minutes >= 60 * 24) return "Kept up to date once a day";
   if (minutes >= 120) return `Kept up to date every ${Math.round(minutes / 60)} hours`;
@@ -56,6 +60,10 @@ export function SyncSection({
     }
   }
 
+  // Kinds Spectra can sync but this school's ManageBac refused on trying: they
+  // leave the list, and say why here rather than vanishing without a word.
+  const refused = preferences.kinds.filter((kind) => !kind.available && kind.choice !== false && SCHOOL_SYNC_KIND_INFO[kind.kind].availability === "available");
+
   return (
     <section aria-label="Sync" className="min-w-0">
       <p className="mb-5 max-w-2xl text-ui leading-6 text-[var(--text-secondary)]">
@@ -63,7 +71,7 @@ export function SyncSection({
         {MODE_LABEL.off} never brings it in and removes what was.
       </p>
       <ul className="school-kinds">
-        {preferences.kinds.filter((kind) => kind.available).map((kind) => {
+        {preferences.kinds.filter((kind) => kind.available && kind.choice !== false).map((kind) => {
           const info = SCHOOL_SYNC_KIND_INFO[kind.kind];
           const state = status.kinds.find((entry) => entry.kind === kind.kind);
           const problem = state?.problem && (state.state === "failed" || state.state === "blocked") ? state.problem : null;
@@ -123,6 +131,12 @@ export function SyncSection({
           );
         })}
       </ul>
+      {refused.length > 0 ? (
+        <p className="mt-3 max-w-2xl text-caption leading-5 text-[var(--text-tertiary)]">
+          Your school&apos;s ManageBac doesn&apos;t share {listOf(refused.map((kind) => kind.label.toLowerCase()))} with Spectra, so{" "}
+          {refused.length === 1 ? "it isn't" : "they aren't"} synced. If your school grants it, it comes back here.
+        </p>
+      ) : null}
       <ClassChoice onNotice={onNotice} />
     </section>
   );

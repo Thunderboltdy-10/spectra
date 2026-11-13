@@ -15,12 +15,15 @@ import { recheckAgentRuntime, useAgentRuntime } from "../ai/use-agent-runtime";
 import { rejoinBridge } from "../devices/pairing";
 import { publishBridgeAvailability } from "./availability";
 import { useSpectraPreferences } from "../settings/preference-store";
+import { setupDue } from "../onboarding/setup-state";
+import { useTourStore } from "../onboarding/tour-store";
 import { useBridgeHealth } from "./use-bridge";
 import {
   BRIDGE_DISCOVERY_STORAGE_KEY,
   BRIDGE_SESSION_STORAGE_KEY,
   bridgeDiscoveryEnabled,
   bridgePlatform,
+  bridgeRemovedHere,
   enableBridgeDiscovery,
   setBridgeAgentHub,
 } from "./client";
@@ -97,9 +100,13 @@ export function BridgeConnection() {
   const { isAuthenticated } = useConvexAuth();
   const requestPairing = useMutation(api.bridge.requestPairing);
   const { discovery, status, checked, refresh } = useBridgeHealth();
-  const { preferences, hydrated, update } = useSpectraPreferences();
+  const { preferences, hydrated, accountReady, update } = useSpectraPreferences();
+  // Setup has its own Bridge step and the tour its own say, so nothing about the Bridge is offered over either.
+  const touring = useTourStore((tour) => tour.index !== null);
+  const inSetup = !accountReady || setupDue(preferences.integrations) || touring;
   const hasDevice = useSession()?.hasDevice;
-  const unjoined = checked && discovery.kind === "running" && !status?.paired;
+  // A computer removed on purpose waits for "Pair again" instead of joining by itself.
+  const unjoined = checked && discovery.kind === "running" && !status?.paired && !bridgeRemovedHere();
   const [activation, setActivation] = useState(0);
   useEffect(() => {
     const activate = () => {
@@ -213,14 +220,20 @@ export function BridgeConnection() {
     else publishBridgeAvailability(hasDevice ? "not-running" : "not-installed");
   }, [checked, discovery.kind, hasDevice, joined]);
   useEffect(() => {
-    if (!unjoined || rejoinable || pathname.startsWith("/devices") || offeredRecently()) return;
+    if (inSetup || !unjoined || rejoinable || pathname.startsWith("/devices") || offeredRecently()) return;
     toast.info("Spectra Bridge is running on this computer.", {
       id: "bridge-connect-offer",
       action: { label: "Connect", onClick: () => router.push("/devices?connect=1") },
     });
-  }, [pathname, rejoinable, router, unjoined]);
+  }, [inSetup, pathname, rejoinable, router, unjoined]);
   useEffect(() => {
-    if (entryPromptShown || !checked || hasDevice === undefined || joined || discovery.kind === "running") return;
+    if (joined || discovery.kind === "running" || inSetup) {
+      toast.dismiss("bridge-entry");
+      // Held back for Setup or the tour, it is offered once they are done.
+      if (inSetup) entryPromptShown = false;
+      return;
+    }
+    if (entryPromptShown || !checked || hasDevice === undefined) return;
     if (pathname.startsWith("/devices") || bridgePlatform() === "other") return;
     entryPromptShown = true;
     toast.warning(
@@ -229,20 +242,22 @@ export function BridgeConnection() {
         : "Get Spectra Bridge to keep your files and artifacts on this computer in step with Spectra.",
       {
         id: "bridge-entry",
-        duration: 20_000,
+        // It stays until closed, and comes back on the next visit while Bridge is still missing.
+        duration: Infinity,
+        closeButton: true,
         action: { label: hasDevice ? "Open Devices" : "Get Bridge", onClick: () => router.push("/devices") },
       },
     );
-  }, [checked, discovery.kind, hasDevice, joined, pathname, router]);
+  }, [checked, discovery.kind, hasDevice, inSetup, joined, pathname, router]);
   // Someone who was here before there was a choice hears about it once.
   useEffect(() => {
-    if (!joined || !workSettings || workSettings.storage || pathname.startsWith("/devices")) return;
+    if (inSetup || !joined || !workSettings || workSettings.storage || pathname.startsWith("/devices")) return;
     if (askedWhereWorkLives()) return;
     toast.info("Your artifacts can now live on this computer.", {
       id: "work-home-offer",
       action: { label: "Choose", onClick: () => router.push("/devices") },
     });
-  }, [joined, pathname, router, workSettings]);
+  }, [inSetup, joined, pathname, router, workSettings]);
   const undecided = joined && hydrated && !preferences.ai.runtimeChosen && preferences.ai.runtime === "spectra";
   return undecided ? <OwnAgentByDefault onFound={(runtime) => update("ai", { runtime })} /> : null;
 }

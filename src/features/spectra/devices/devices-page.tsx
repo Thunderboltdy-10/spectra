@@ -1,5 +1,7 @@
 "use client";
 
+import { NETWORK_PERMISSION_FIX, useNetworkPermission } from "../bridge/network-permission";
+import { BridgeInstallSteps } from "./bridge-install-steps";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useConvexAuth, useMutation } from "convex/react";
 import { useQuery } from "@/features/spectra/data/use-kept-query";
@@ -15,8 +17,10 @@ import {
   bridgeDownloadUrl,
   bridgePlatform,
   bridgeReachabilityCopy,
+  bridgeRemovedHere,
   DEVICES_HREF,
   pairingFailureMessage,
+  setBridgeRemovedHere,
   unpairBridge,
   type BridgeFile,
   type BridgeReachability,
@@ -61,6 +65,7 @@ type Confirm =
  */
 export function DevicesPage() {
   const local = useBridgeHealth();
+  const permission = useNetworkPermission();
   const { isAuthenticated } = useConvexAuth();
   const cloudEnabled = local.online && isAuthenticated;
   const cloud = useQuery(api.bridge.overview, cloudEnabled ? {} : "skip") as CloudOverview | null | undefined;
@@ -107,6 +112,7 @@ export function DevicesPage() {
 
   const connect = useCallback(() => {
     setNotice(undefined);
+    setBridgeRemovedHere(false);
     void pairing.start(requestPairing).then((state) => {
       if (state.phase === "paired") firstTipMoment("bridge");
     });
@@ -210,6 +216,7 @@ export function DevicesPage() {
         await revokeDevice({ deviceId: confirm.device.id as Id<"bridgeDevices">, removeFiles });
         if (!accountStorageMatches(revision)) return;
         if (confirm.device.isThisComputer) {
+          setBridgeRemovedHere(true);
           await unpairBridge();
           if (!accountStorageMatches(revision)) return;
           local.forgetSession();
@@ -234,6 +241,8 @@ export function DevicesPage() {
   }
 
   const connecting = pairingState.phase !== "idle" && pairingState.phase !== "paired";
+  // Read on each render: removing and pairing again both change it.
+  const removedHere = bridgeRemovedHere();
   const selecting = busy === "add_folder" || busy === "add_files";
   const commands: BarCommand[] = [
     ...(here?.live
@@ -303,6 +312,18 @@ export function DevicesPage() {
                 Your computers
               </h2>
               {alreadySynced ? <AlreadySyncedNotice files={alreadySynced} onDismiss={() => setAlreadySynced(null)} /> : null}
+              {permission === "denied" && local.reachability !== "connected" ? (
+                <div className="device-problem" role="alert">
+                  <p className="device-problem-title">Your browser is blocking Spectra from reaching Bridge</p>
+                  <p>
+                    Spectra talks to Spectra Bridge on this computer, and the browser was told not to allow that. {NETWORK_PERMISSION_FIX}
+                  </p>
+                </div>
+              ) : permission === "prompt" && bridgeMissing(local.reachability) && !here ? (
+                <p className="device-problem-hint">
+                  Once Bridge is open, your browser asks to let Spectra reach apps on this device. Choose Allow.
+                </p>
+              ) : null}
               <PairingPanel state={pairingState} onCancel={() => pairing.cancel()} onRetry={connect} />
               {here ? (
                 deviceCard(here)
@@ -312,8 +333,9 @@ export function DevicesPage() {
                 <div className="device-connect" data-step="download">
                   <p className="text-ui font-medium text-[var(--text-primary)]">Get Spectra Bridge</p>
                   <p className="max-w-xl text-ui leading-6 text-[var(--text-secondary)]">
-                    Bridge keeps the files and folders you choose on this computer in sync with Spectra. Download and open it, and this computer connects by itself.
+                    Bridge keeps the files and folders you choose on this computer in sync with Spectra. Download it, then:
                   </p>
+                  <BridgeInstallSteps platform={platform} />
                   <div className="flex flex-wrap items-center gap-2">
                     <Button asChild variant="primary" size="sm">
                       <a href={downloadUrl} rel="noopener" onClick={connect}>
@@ -329,13 +351,15 @@ export function DevicesPage() {
               ) : !connecting ? (
                 <div className="device-connect">
                   <p className="max-w-xl text-ui leading-6 text-[var(--text-secondary)]">
-                    {isAuthenticated
+                    {isAuthenticated && removedHere && local.discovery.kind === "running"
+                      ? "You removed this computer. Spectra Bridge is still running here; pair it again to use its files."
+                      : isAuthenticated
                       ? // Pairing is per browser: Bridge can be running, even paired, while this browser isn't connected to it.
                         bridgeReachabilityCopy(local.reachability).detail
                       : "Sign in to connect this computer."}
                   </p>
                   <Button variant="primary" size="sm" disabled={!isAuthenticated} onClick={connect}>
-                    Connect this computer
+                    {removedHere ? "Pair again" : "Connect this computer"}
                   </Button>
                 </div>
               ) : null}

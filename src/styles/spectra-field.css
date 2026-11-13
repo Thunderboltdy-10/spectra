@@ -622,6 +622,61 @@ html[data-spectra-sidebar-collapsed="true"]
   display: none !important;
 }
 
+/* Phones: the page keeps the whole width. The rail leaves the screen and its
+   prism waits in the bottom-left corner, under the thumb; opened, the rail
+   lies over the page, and a tap beside it or going anywhere puts it away. */
+.spectra-rail-phone-opener,
+.spectra-rail-phone-scrim {
+  display: none;
+}
+@media (max-width: 639px) {
+  :root,
+  html[data-spectra-sidebar-collapsed],
+  html:not([data-spectra-sidebar-collapsed="false"]) {
+    --spectra-rail-width: 0px;
+  }
+  .spectra-shell-sidebar[data-collapsed="true"] {
+    visibility: hidden;
+  }
+  .spectra-shell-sidebar[data-collapsed="false"] {
+    z-index: calc(var(--z-panel) + 20);
+    width: min(280px, 84vw);
+    background: var(--bg-desk);
+    box-shadow: var(--shadow-lg);
+  }
+  .spectra-rail-phone-opener {
+    position: fixed;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    left: 10px;
+    z-index: calc(var(--z-panel) + 5);
+    display: grid;
+    width: 40px;
+    height: 40px;
+    place-items: center;
+    border-radius: 999px;
+    background: var(--bg-elevated);
+    box-shadow:
+      inset 0 0 0 1px var(--card-border),
+      var(--shadow-card);
+  }
+  .spectra-rail-phone-opener:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: 2px;
+  }
+  /* The open rail has the screen; the island waits under it. */
+  html:has(.spectra-shell-sidebar[data-collapsed="false"]) [data-island-root] {
+    visibility: hidden;
+  }
+  .spectra-rail-phone-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: calc(var(--z-panel) + 19);
+    display: block;
+    background: color-mix(in oklab, var(--bg-primary) 40%, transparent);
+    backdrop-filter: blur(2px);
+  }
+}
+
 .sheets-grid-frame {
   min-height: 0;
   flex: 1 1 auto;

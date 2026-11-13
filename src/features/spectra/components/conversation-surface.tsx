@@ -2259,13 +2259,23 @@ export function ConversationSurface({
                   liveExchange && liveExchange.runId === message.runId &&
                   !visibleMessages.slice(messageIndex + 1).some((other) => other.role === "assistant" && other.runId === message.runId)
                 )
+                {
+                  // The answer is saved: the run is over unless the thread still says it is working.
+                  // The live copy can linger (a stream that ended without its last event), and must not keep the clock running.
+                  const stillWorking = activeRun
+                    ? isWorkingAiRunStatus(activeRun.status)
+                    : trace
+                      ? trace.run.status === "queued" || trace.run.status === "running"
+                      : false;
+                  const active = stillWorking && liveExchange.status !== "failed" && liveExchange.status !== "waiting" && liveExchange.status !== "stopped";
                   return {
-                    steps: liveExchange.steps,
+                    steps: active ? liveExchange.steps : liveExchange.steps.map((step) => (step.status === "running" ? { ...step, status: "done" as const } : step)),
                     answers: liveExchange.answers,
-                    active: liveExchange.status !== "failed" && liveExchange.status !== "waiting" && liveExchange.status !== "stopped",
+                    active,
                     startedAt: liveExchange.startedAt as number | undefined,
-                    endedAt: undefined as number | undefined,
+                    endedAt: active ? undefined : message.createdAt,
                   };
+                }
                 if (trace) {
                   const fields = harnessTraceFields(trace);
                   if (fields)

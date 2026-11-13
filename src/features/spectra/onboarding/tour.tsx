@@ -12,14 +12,18 @@ import { TOUR_STEPS, type TourPerson } from "./tour-steps";
 import { TourLayer } from "./tour-layer";
 import { TourAskControl } from "./tour-asks";
 import { useTourStore } from "./tour-store";
+import { setupDue } from "./setup-state";
 
 /*
  * Spectra's tour of the app (SHELL.md, "Onboarding tour"). It starts by itself
- * once, on Home, right after a new student's school is synced and their class
- * shelves are chosen; the account menu's "Take the tour" plays it again. Each
- * step can be skipped, the whole tour can be ended at any point, and either
- * way it is not offered again by itself.
+ * on Home once Setup is done and the class shelves are chosen; the account
+ * menu's "Take the tour" plays it again from the start. Ended early, it is put
+ * away for this visit and carries on from the same step the next time Spectra
+ * opens; only reaching the end finishes it.
  */
+
+/** Put away during this visit: it waits for the next one. */
+let endedThisVisit = false;
 
 /** A moment for Home to settle before Spectra starts talking. */
 const START_DELAY_MS = 900;
@@ -38,21 +42,32 @@ export function TourMount() {
   const pathname = usePathname();
   const router = useSpectraRouter();
   const person = useTourPerson();
-  const { preferences, update } = useSpectraPreferences();
+  const { preferences, accountReady, update } = useSpectraPreferences();
   const index = useTourStore((state) => state.index);
   const { start, next, back, stop } = useTourStore.getState();
-  const { classShelvesStatus, tourStatus } = preferences.integrations;
-  // The class shelves are chosen only after the school's first sync, and they
-  // are read from the account, so a "pending" default never starts the tour.
-  const due = tourStatus === "pending" && classShelvesStatus !== "pending" && person.school !== null;
+  const { classShelvesStatus, tourStatus, tourStep } = preferences.integrations;
+  // Read from the account, never the defaults before it arrives; after Setup,
+  // and once the class shelves are chosen (or passed over).
+  const due =
+    accountReady &&
+    tourStatus === "pending" &&
+    !setupDue(preferences.integrations) &&
+    classShelvesStatus !== "pending" &&
+    person.school !== null;
 
   useEffect(() => {
-    if (!due || index !== null || pathname !== HOME_PATH) return;
-    const timer = setTimeout(start, START_DELAY_MS);
+    if (!due || endedThisVisit || index !== null || pathname !== HOME_PATH) return;
+    const timer = setTimeout(() => start(tourStep), START_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [due, index, pathname, start]);
+  }, [due, index, pathname, start, tourStep]);
 
-  useEffect(() => spectraBus.on("tour.start", start), [start]);
+  useEffect(() => spectraBus.on("tour.start", () => start(0)), [start]);
+
+  // Where it is, kept on the account so it carries on from there.
+  useEffect(() => {
+    if (index === null || tourStatus === "done" || index === tourStep) return;
+    update("integrations", { tourStep: index });
+  }, [index, tourStatus, tourStep, update]);
 
   const step = index === null ? null : TOUR_STEPS[index];
   // Only a step change moves the student; wandering off mid-step is theirs to do.
@@ -65,17 +80,18 @@ export function TourMount() {
   }, [index, stepPath]);
 
   const end = useCallback(() => {
+    endedThisVisit = true;
     stop();
-    if (tourStatus !== "done") update("integrations", { tourStatus: "done" });
-  }, [stop, tourStatus, update]);
+  }, [stop]);
 
-  // Finishing the last step ends the tour the same way ending it early does.
   const finishOrNext = useCallback(() => {
     if (index !== null && index + 1 >= TOUR_STEPS.length) {
-      end();
+      endedThisVisit = true;
+      stop();
+      update("integrations", { tourStatus: "done", tourStep: 0 });
       spectraBus.emit("island.compose", {});
     } else next();
-  }, [end, index, next]);
+  }, [index, next, stop, update]);
 
   if (!step || index === null) return null;
   return (

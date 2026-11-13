@@ -846,7 +846,7 @@ function CommunicationSurface({ operatorSessionId, busy, mutate, refreshKey, rea
 
 /** The meters a school is measured by, in its own words, and how each is written. */
 function UsageSurface({ overview }: { overview: SchoolAdministrationOverview }) {
-  const { totals, series, completeThrough } = overview.usage;
+  const { totals, series, completeThrough, people } = overview.usage;
   const limits = overview.limits;
   return (
     <div className="admin-page">
@@ -861,7 +861,7 @@ function UsageSurface({ overview }: { overview: SchoolAdministrationOverview }) 
 
       <section>
         <AdminSectionHeader title="Day by day" />
-        <UsageDayChart series={series} through={completeThrough} />
+        <UsageDayChart series={series} through={completeThrough} people={people ?? {}} />
       </section>
 
       <PrivacyNotice>

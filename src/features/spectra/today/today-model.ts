@@ -70,6 +70,20 @@ export function daySentence({ moving, agenda, now }: { moving: number; agenda: T
 }
 
 /**
+ * The first brief's story, before Spectra has written one: what is next from
+ * School, or where to begin when nothing has a date yet.
+ */
+export function firstAhead({ agenda, className, now }: { agenda: TodayAgenda | null; className?: string | null; now: number }) {
+  const due = [...(agenda?.today ?? []), ...(agenda?.upcoming ?? [])].filter((item) => DUE_KINDS.has(item.kind) && item.startAt);
+  const [next, after] = due;
+  if (next?.startAt)
+    return `${next.title} is due ${relativeDay(next.startAt, now)}${after?.startAt ? `, then ${after.title} ${relativeDay(after.startAt, now)}` : ""}. Spectra writes you a brief like this each morning.`;
+  return className
+    ? `Nothing is due yet, so this is a good week to get ahead in ${className}. Spectra writes you a brief like this each morning.`
+    : "Nothing is due yet, so this is a good week to get ahead. Spectra writes you a brief like this each morning.";
+}
+
+/**
  * Three first questions for an account with no threads yet (F9), from what
  * Spectra can already see: the next date from School, the work touched last,
  * a class. Drawn in the brief's own suggestion rows; each waits in the field.

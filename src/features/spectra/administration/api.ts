@@ -18,6 +18,8 @@ export type AdministrationIdentity = {
 export type UsageSeriesPoint = {
   day: string;
   values: Record<string, number>;
+  /** By meter, each person's share of the day (account id, or "school" for what no one account used). */
+  parts?: Record<string, Record<string, number>>;
 };
 
 export type AdministrationMetricState =
@@ -68,6 +70,8 @@ export type SchoolAdministrationOverview = {
     totals: Record<string, number>;
     series: UsageSeriesPoint[];
     completeThrough: string;
+    /** Account id to name, for the people the chart splits by. */
+    people?: Record<string, string>;
   };
   limits: {
     policyId: string | null;

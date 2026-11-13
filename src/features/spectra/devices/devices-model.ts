@@ -70,11 +70,15 @@ export type FolderView = {
   label: string;
   detail?: string;
   progress?: { synced: number; total: number };
+  /** A sync pass is running now, so it can be cancelled. */
+  syncing?: boolean;
   paused: boolean;
   /** Folder actions run only on the computer that holds the folder. */
   actionable: boolean;
   /** The folder as it stands in the Library. */
   rootNodeId?: string;
+  /** Another computer syncs a folder of the same name: likely one folder kept in step by OneDrive or the like. */
+  alsoOn?: string;
 };
 
 export type DeviceView = {
@@ -150,10 +154,15 @@ export function liveFolder(mount: BridgeMount, allPaused: boolean): FolderView {
     case "waiting":
       return { ...base, tone: "busy", label: "Waiting to retry", detail: humanizePublicFailure(mount.detail || "Spectra retries it by itself."), paused, progress };
     case "scanning":
+      return { ...base, tone: "busy", label: "Looking through the files", paused };
     case "syncing":
-      return { ...base, tone: "busy", label: "Syncing", paused, progress };
+      return { ...base, tone: "busy", label: "Syncing", paused, progress, syncing: true };
     default:
-      if (progress && progress.synced < progress.total) return { ...base, tone: "busy", label: "Syncing", paused, progress };
+      // A finished pass: files it skipped (too large, held open, online-only) are said, not shown as syncing forever.
+      if (progress && progress.synced < progress.total) {
+        const left = progress.total - progress.synced;
+        return { ...base, tone: "ok", label: "Up to date", detail: `${left.toLocaleString()} file${left === 1 ? "" : "s"} not synced`, paused };
+      }
       return { ...base, tone: "ok", label: "Up to date", paused };
   }
 }
@@ -290,7 +299,25 @@ export function devicesModel(input: {
     .map((device) =>
       otherDeviceView(device, mounts.filter((mount) => mount.deviceId === device._id && mount.state !== "revoked"), now),
     );
+  markTwins([...(thisComputer ? [thisComputer] : []), ...others]);
   return { thisComputer, others };
+}
+
+/**
+ * The same folder synced from two computers (OneDrive, Dropbox or iCloud keep
+ * it on both) comes into Spectra twice. Spectra only knows each folder's name
+ * elsewhere, so a shared name is the sign it says something about.
+ */
+function markTwins(devices: DeviceView[]) {
+  const key = (folder: FolderView) => (folder.kind === "file" ? null : folder.name.trim().toLocaleLowerCase());
+  for (const device of devices) {
+    for (const folder of device.folders) {
+      const name = key(folder);
+      if (!name) continue;
+      const twin = devices.find((other) => other !== device && other.folders.some((theirs) => key(theirs) === name));
+      if (twin) folder.alsoOn = twin.name;
+    }
+  }
 }
 
 /* Native writes: when Spectra may write back to files on the computer. */

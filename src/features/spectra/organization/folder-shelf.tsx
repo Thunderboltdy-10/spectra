@@ -1,5 +1,6 @@
 "use client";
 
+import { ShelfSection } from "./shelf-fold";
 import type { WorkPicking } from "./library-note";
 import { FolderCards } from "./folder-cards";
 import { LibraryShelfSkeleton } from "./library-shelf";
@@ -49,18 +50,14 @@ export function FolderShelf({
     <div className="library-shelf">
       <div className="min-w-0">
         {places.length ? (
-          <section aria-labelledby="shelf-folders">
-            <h2 id="shelf-folders" className="library-shelf-heading">
-              Folders <span className="school-heading-count">{places.length}</span>
-            </h2>
+          <ShelfSection foldKey="folder:folders" id="shelf-folders" title="Folders" count={places.length}>
             <FolderCards folders={places} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} />
-          </section>
+          </ShelfSection>
         ) : null}
         {groups.map((group) => (
-          <section key={group.key} aria-label={group.label}>
-            <h2 className="library-shelf-heading">{group.label}</h2>
+          <ShelfSection key={group.key} foldKey={`when:${group.key}`} label={group.label} title={group.label}>
             <ShelfNotes items={group.items} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} whereOf={sharedMark} />
-          </section>
+          </ShelfSection>
         ))}
         <SharedWorkGroups groups={shared} place={name} workspaceId={workspaceId} now={now} onOpen={onOpen} picking={picking} />
         {work.length === 0 && children.status === "Exhausted" && !sharedCount ? (

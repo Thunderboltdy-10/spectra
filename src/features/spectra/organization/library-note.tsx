@@ -77,7 +77,7 @@ function LibraryNoteCard({ node, place, where, now, onOpen, onMenu, picked }: Li
       aria-pressed={picking ? picked : undefined}
       onClick={() => onOpen(node)}
       onContextMenu={(event) => onMenu(event, node)}
-      style={workCardStyle(type, place?.ink)}
+      style={workCardStyle(type, place?.ink, node.name)}
       className="work-card w-full text-left"
     >
       <WorkCardBody
@@ -111,7 +111,13 @@ export function sharedLabel(node: TreeNode) {
 }
 
 /** Picking work for Spectra or the tiles (Select): which work is picked, and how to pick or put back one. */
-export type WorkPicking = { has: (node: TreeNode) => boolean; toggle: (node: TreeNode) => void };
+export type WorkPicking = {
+  has: (node: TreeNode) => boolean;
+  toggle: (node: TreeNode) => void;
+  /** The same by a work's id, for what is drawn from elsewhere (a ManageBac task's planner work). */
+  hasWork: (workId: string) => boolean;
+  toggleWork: (workId: string, meta: { title: string; type: string }) => void;
+};
 
 /** Only work is picked; places still open while picking, so work can be gathered across them. */
 export function pickable(node: TreeNode) {

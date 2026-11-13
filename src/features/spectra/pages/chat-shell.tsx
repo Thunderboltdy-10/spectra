@@ -443,9 +443,6 @@ export function ChatShell() {
   }, [focusedArtifact, setVisibleArtifactIds]);
   const scopedWorkspaceId = chatWorkspaceId ?? detail?.thread.workspaceId;
 
-  const openAfterSendRef = useRef(preferences.ai?.openConversationAfterSend ?? false);
-  openAfterSendRef.current = preferences.ai?.openConversationAfterSend ?? false;
-  const [homeQuiet, setHomeQuiet] = useState(false);
   const runEngine = useSpectraRun({
     surface: "chat",
     workspaceId: scopedWorkspaceId,
@@ -455,13 +452,9 @@ export function ChatShell() {
     currentView: "conversation",
     initialCards: [],
     onThreadReady: async (id) => {
-      // Sent from Home with "Open the thread when I send" off: Home stays where
-      // it is and the answer rises from its tab on the island (ISLAND.md, "Sending").
-      if (!activeThreadRef.current && !openAfterSendRef.current) {
-        setHomeQuiet(true);
-        setComposerThread(null);
-        return;
-      }
+      // Sent from Home, the thread takes the page and stays there: Home is the
+      // big view of the conversation it starts. ("Open the thread when I send"
+      // decides what happens on every other page.)
       setComposerThread({
         id,
         title:
@@ -605,9 +598,7 @@ export function ChatShell() {
   }, [studioBeside, studioPanelWidth]);
   const column = useThreadColumn(studioBeside);
   // Home is this page before a thread: the day lifts away once one is sent or opened, and comes back with a new one.
-  // A run left to answer in the background from Home does not take the page.
-  const quietLive = homeQuiet && (!threadId || (runEngine.liveExchange?.threadId !== undefined && runEngine.liveExchange.threadId !== threadId));
-  const started = Boolean(threadId || detail || (runEngine.liveExchange && !quietLive) || loading);
+  const started = Boolean(threadId || detail || runEngine.liveExchange || loading);
   const [leadState, setLeadState] = useState<"shown" | "leaving" | "gone">(requestedThreadId ? "gone" : "shown");
   useEffect(() => {
     if (started && leadState === "shown") setLeadState("leaving");
@@ -754,7 +745,7 @@ export function ChatShell() {
               />
             ) : undefined
           }
-          liveExchange={quietLive ? null : runEngine.liveExchange}
+          liveExchange={runEngine.liveExchange}
           workspaces={workspaces}
           onOpenArtifact={openArtifact}
           onOpenWorkspace={(workspaceId) =>

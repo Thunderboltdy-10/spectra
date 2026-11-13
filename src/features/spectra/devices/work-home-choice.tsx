@@ -360,7 +360,7 @@ function BringBackBackup() {
   );
 }
 
-export function WorkHomeChoice({ compact = false }: { compact?: boolean }) {
+export function WorkHomeChoice({ compact = false, only }: { compact?: boolean; /** Show just this choice (Setup shows only the one it recommends). */ only?: WorkStorage }) {
   const { isAuthenticated } = useConvexAuth();
   const { storeId } = useDeviceState();
   const settings = useQuery(api.deviceWorks.settings, isAuthenticated ? (storeId ? { storeId } : {}) : "skip");
@@ -389,7 +389,7 @@ export function WorkHomeChoice({ compact = false }: { compact?: boolean }) {
         </>
       )}
       <div role="radiogroup" aria-label="Where your artifacts are kept" className={compact ? "space-y-2" : "mt-4 space-y-2"}>
-        {CHOICES.map((choice) => (
+        {CHOICES.filter((choice) => !only || choice.value === only).map((choice) => (
           <ChoiceCard
             key={choice.value}
             choice={choice}

@@ -478,6 +478,8 @@ function LibraryOrganizerContent({
             toggle: (node) => {
               if (node.sourceId) onToggleContext(node.sourceId, { title: node.name, type: node.typeKey });
             },
+            hasWork: (workId) => Boolean(contextIds?.has(workId)),
+            toggleWork: (workId, meta) => onToggleContext(workId, meta),
           }
         : undefined,
     [contextIds, onToggleContext, selectionMode],
@@ -1194,6 +1196,18 @@ function LibraryOrganizerContent({
             <IconButton icon="sidebar" label={paneOpen ? "Hide places" : "Show places"} aria-pressed={paneOpen} onClick={togglePane} />
           ) : null}
           {toolbarLead}
+          {/* Shelf or List leads the bar, where a deep folder path can't push it along. */}
+          {shelfable ? (
+            <SurfaceViewSwitch
+              view={shelf ? "shelf" : "list"}
+              onChange={(next) => {
+                setView(next);
+                // The shelf shows everything; asking for it lifts a type filter.
+                if (next === "shelf") setFilter("all");
+              }}
+              views={VIEW_CHOICES}
+            />
+          ) : null}
           <nav
             aria-label="Location"
             className="flex min-w-0 items-center gap-0.5 overflow-x-auto text-ui"
@@ -1214,18 +1228,6 @@ function LibraryOrganizerContent({
               />
             ) : null}
           </nav>
-          {/* Shelf or List sits beside where you are, one press away. */}
-          {shelfable ? (
-            <SurfaceViewSwitch
-              view={shelf ? "shelf" : "list"}
-              onChange={(next) => {
-                setView(next);
-                // The shelf shows everything; asking for it lifts a type filter.
-                if (next === "shelf") setFilter("all");
-              }}
-              views={VIEW_CHOICES}
-            />
-          ) : null}
         </div>
 
         <div className="surface-bar-tools">

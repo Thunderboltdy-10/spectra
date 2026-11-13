@@ -506,3 +506,40 @@
 .island-rail-tab[data-life-working]::after {
   content: none;
 }
+
+/* A dialog stands in front of the page, so the island steps back while one is
+   open: nothing of a dialog (its options, its accept button) is ever hidden
+   behind the island's band. */
+body:has(.spectra-float.z-modal[data-state="open"]) [data-island-root] {
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* A phone's island at rest (phone-rest.ts): the faint top of it at the bottom
+   edge, wide enough for a thumb; a swipe up or a tap raises the island. */
+.spectra-island-lip {
+  display: grid;
+  width: min(200px, 56vw);
+  height: calc(26px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  place-items: center;
+  touch-action: none;
+}
+.spectra-island-lip > span {
+  width: 64px;
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--text-tertiary) 55%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--bg-primary) 60%, transparent);
+  transition:
+    width var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
+}
+.spectra-island-lip:active > span,
+.spectra-island-lip:focus-visible > span {
+  width: 84px;
+  background: var(--text-secondary);
+}
+.spectra-island-lip:focus-visible {
+  outline: none;
+}

@@ -99,7 +99,7 @@ function PeekCard({ node, left, top }: Peek) {
       aria-hidden
       data-work-card={type}
       className="work-card row-peek"
-      style={{ ...workCardStyle(type), left, top, width: CARD_WIDTH } as CSSProperties}
+      style={{ ...workCardStyle(type, null, node.name), left, top, width: CARD_WIDTH } as CSSProperties}
     >
       <WorkCardBody
         type={type}

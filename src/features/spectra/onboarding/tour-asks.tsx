@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "@/features/spectra/data/use-session";
-import { Input } from "@/components/ui/input";
+import { TimeField } from "@/components/ui/when-fields";
 import { Button } from "@/components/ui/button";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { bridgeDownloadUrl, bridgePlatform } from "../bridge/client";
@@ -20,13 +20,7 @@ function TimeChoice({ label, value, onChange }: { label: string; value: string; 
   return (
     <label className="flex items-center justify-between gap-3 text-caption text-[var(--text-secondary)]">
       <span>{label}</span>
-      <Input
-        type="time"
-        aria-label={label}
-        className="h-8 w-[112px]"
-        value={value}
-        onChange={(event) => event.target.value && onChange(event.target.value)}
-      />
+      <TimeField label={label} className="h-8 w-[112px]" value={value} onChange={(time) => time && onChange(time)} />
     </label>
   );
 }

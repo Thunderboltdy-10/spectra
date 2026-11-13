@@ -316,7 +316,7 @@ export function Hero({ film = false }: { film?: boolean } = {}) {
           >
             <ShowcaseTime.Provider value={time}>
               <div ref={homeRef} className="sp-home">
-                <HomeDay onAllThreads={() => undefined} />
+                <HomeDay mockup onAllThreads={() => undefined} />
               </div>
             </ShowcaseTime.Provider>
           </Window>

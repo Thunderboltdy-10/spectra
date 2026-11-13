@@ -1,6 +1,6 @@
 "use client";
 
-import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Component, useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { useSpectraRouter as useRouter } from "@/features/spectra/hooks/use-spectra-router";
 import type { BarCommand, CollapseStep } from "@/components/ui/adaptive-bar";
@@ -33,6 +33,26 @@ import { TasksSection, type TaskView } from "./school-tasks";
  */
 
 type Section = "overview" | "tasks" | "classes" | "sync";
+
+// The sync asked for here outlives the page: leaving School while it runs and
+// coming back still shows it running. What runs in the background shows from
+// the server's own status (syncStatus.running), after a reload too.
+let syncInFlight: SchoolSyncKind | "all" | null = null;
+const syncListeners = new Set<() => void>();
+function setSyncInFlight(next: SchoolSyncKind | "all" | null) {
+  syncInFlight = next;
+  for (const listener of syncListeners) listener();
+}
+function useSyncInFlight() {
+  return useSyncExternalStore(
+    (listener) => {
+      syncListeners.add(listener);
+      return () => syncListeners.delete(listener);
+    },
+    () => syncInFlight,
+    () => null,
+  );
+}
 const SECTIONS: { id: Section; label: string; icon: "home" | "task" | "school" | "syncing" }[] = [
   { id: "overview", label: "Overview", icon: "home" },
   { id: "tasks", label: "Tasks", icon: "task" },
@@ -73,13 +93,14 @@ export function SchoolPage() {
   const [openedTask, setOpenedTask] = useState<string | null>(null);
   const { workOf } = useOpenSchoolTask();
   const [now, setNow] = useState(() => Date.now());
-  const [syncing, setSyncing] = useState<SchoolSyncKind | "all" | null>(null);
+  const asked = useSyncInFlight();
   const [notice, setNotice] = useState<string>();
   const [admin, setAdmin] = useState(false);
   const router = useRouter();
   const preferences = useQuery(api.school.preferences, useAuthedArgs({}));
   const status = useQuery(api.school.syncStatus, useAuthedArgs({}));
   const current = useQuery(api.school.tasks, useAuthedArgs({ view: "current" as const }));
+  const busy = asked !== null || status?.running === true;
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
@@ -110,7 +131,8 @@ export function SchoolPage() {
   }, []);
 
   const sync = useCallback(async (kind?: SchoolSyncKind) => {
-    setSyncing(kind ?? "all");
+    if (syncInFlight !== null) return;
+    setSyncInFlight(kind ?? "all");
     setNotice(undefined);
     try {
       const result = await syncSpectraManageBac(kind);
@@ -119,12 +141,12 @@ export function SchoolPage() {
     } catch (error) {
       setNotice(sentenceOf(error, "The sync didn't finish. Check your connection, then try again."));
     } finally {
-      setSyncing(null);
+      setSyncInFlight(null);
       setNow(Date.now());
     }
   }, []);
 
-  const statusView = schoolStatus(status, now, syncing !== null);
+  const statusView = schoolStatus(status, now, busy);
   const commands: BarCommand[] = [
     ...(statusView
       ? [{
@@ -132,14 +154,14 @@ export function SchoolPage() {
           icon: statusView.glyph,
           label: statusView.name ?? "Status",
           pinned: true,
-          render: () => <ArtifactStatusControl status={statusView} busy={syncing !== null} onAction={() => void sync()} />,
+          render: () => <ArtifactStatusControl status={statusView} busy={busy} onAction={() => void sync()} />,
         } satisfies BarCommand]
       : []),
     {
       id: "sync",
       icon: "syncing",
-      label: syncing ? "Syncing" : "Sync now",
-      disabled: syncing !== null || !preferences?.connected,
+      label: busy ? "Syncing" : "Sync now",
+      disabled: busy || !preferences?.connected,
       onSelect: () => void sync(),
     },
     ...(admin ? [{ id: "connection", icon: "settings", label: "Connection", onSelect: () => router.push("/managebac") } satisfies BarCommand] : []),
@@ -183,7 +205,7 @@ export function SchoolPage() {
                 onOpenClasses={() => go("classes")}
                 onOpenSync={() => go("sync")}
                 onSync={sync}
-                syncing={syncing !== null}
+                syncing={busy}
                 onNotice={setNotice}
               />
             ) : section === "tasks" ? (
@@ -196,13 +218,13 @@ export function SchoolPage() {
                 onSelect={(id) => select({ kind: "task", id })}
                 preferences={preferences}
                 onSync={(kind) => void sync(kind)}
-                syncing={syncing !== null}
+                syncing={busy}
                 onOpenSync={() => go("sync")}
               />
             ) : section === "classes" ? (
               <ClassesSection status={status} selectedId={selection?.kind === "class" ? selectedId : null} onSelect={(id) => select({ kind: "class", id })} onOpenSync={() => go("sync")} />
             ) : (
-              <SyncSection now={now} preferences={preferences} status={status} syncingKind={syncing} onSync={(kind) => void sync(kind)} onNotice={setNotice} />
+              <SyncSection now={now} preferences={preferences} status={status} syncingKind={asked} onSync={(kind) => void sync(kind)} onNotice={setNotice} />
             )}
           </SectionBoundary>
         </PageBody>

@@ -156,7 +156,7 @@ export function DeviceCard({
         ) : null}
         {device.isThisComputer && (local || device.updateRequired) ? (
           <Button variant={device.updateRequired ? "primary" : "ghost"} size="sm" disabled={busy === "update"} onClick={() => onAction({ action: "update" })}>
-            Update Bridge
+            {busy === "update" ? "Checking…" : device.updateRequired ? "Update Bridge" : "Check for update"}
           </Button>
         ) : null}
         {device.isThisComputer && !local && !device.updateRequired && downloadUrl ? (
@@ -206,6 +206,8 @@ function PlaceFile({ grantId, name }: { grantId: string; name: string }) {
   );
 }
 
+const percent = (progress: { synced: number; total: number }) => Math.floor((progress.synced / Math.max(1, progress.total)) * 100);
+
 function FolderTile({
   folder,
   ink,
@@ -243,9 +245,24 @@ function FolderTile({
           {folder.detail ? `, ${folder.detail}` : ""}
         </span>
       </span>
+      {folder.alsoOn ? (
+        <span className="device-folder-twin">
+          {folder.alsoOn} also syncs a folder called {folder.name}. If it&apos;s the same folder kept on both by OneDrive, Dropbox or iCloud, sync it from one computer only, or its files come into Spectra twice.
+        </span>
+      ) : null}
       {progress ? (
-        <span className="device-folder-progress" role="progressbar" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.synced} aria-label={`${progress.synced} of ${progress.total} files`}>
-          <span style={{ width: `${(progress.synced / Math.max(1, progress.total)) * 100}%` }} />
+        <span className="device-folder-sync">
+          <span className="device-folder-progress" role="progressbar" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.synced} aria-label={`${progress.synced} of ${progress.total} files`}>
+            <span style={{ width: `${percent(progress)}%` }} />
+          </span>
+          <span className="device-folder-count">
+            {percent(progress)}%, {(progress.total - progress.synced).toLocaleString()} file{progress.total - progress.synced === 1 ? "" : "s"} left
+          </span>
+          {act && folder.syncing && !folder.paused ? (
+            <button type="button" className="device-folder-cancel" disabled={working} onClick={() => onAction({ action: "pause_folder", grantId: folder.id })}>
+              Cancel
+            </button>
+          ) : null}
         </span>
       ) : null}
       {folder.rootNodeId && !isFile ? (

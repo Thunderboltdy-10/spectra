@@ -213,9 +213,43 @@
   color: var(--warning);
 }
 
+.device-folder-sync {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 6px;
+}
+
+.device-folder-sync .device-folder-progress {
+  grid-column: 1 / -1;
+  margin-top: 0;
+}
+
+.device-folder-count {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro, 12px);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-folder-cancel {
+  color: var(--text-secondary);
+  font-size: var(--text-micro, 12px);
+  text-underline-offset: 2px;
+}
+
+.device-folder-cancel:hover:not(:disabled) {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
 .device-folder-progress {
   display: block;
-  height: 3px;
+  height: 4px;
   margin-top: 6px;
   overflow: hidden;
   border-radius: 999px;
@@ -743,4 +777,77 @@
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--card-border);
+}
+
+/* After the download: three things in order, numbered because they are a sequence. */
+.bridge-install-steps {
+  display: grid;
+  gap: 10px;
+  max-width: 36rem;
+  counter-reset: install;
+}
+
+.bridge-install-steps > li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  column-gap: 10px;
+  counter-increment: install;
+  font-size: var(--text-caption, 13px);
+  line-height: 1.45;
+}
+
+.bridge-install-steps > li::before {
+  content: counter(install);
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.bridge-install-steps strong {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.bridge-install-steps span {
+  color: var(--text-secondary);
+}
+
+/* Something stands between Spectra and Bridge: what it is, then what to do. */
+.device-problem {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--danger, #c0392b) 35%, var(--border-default));
+  background: color-mix(in oklab, var(--danger, #c0392b) 6%, var(--bg-elevated));
+  font-size: var(--text-caption, 13px);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.device-problem-title {
+  font-size: var(--text-ui, 14px);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.device-problem-hint {
+  font-size: var(--text-caption, 13px);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* The same folder on two computers: said in the folder, quietly, with what to do. */
+.device-folder-twin {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
 }

@@ -1129,3 +1129,105 @@ li[data-shelf-place][data-gather-over]::after {
     animation: none;
   }
 }
+
+/* A heading folds its section: the whole name is the switch, a chevron says which way. */
+.library-shelf-fold {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  border-radius: 6px;
+}
+
+.library-shelf-fold-mark {
+  order: 3;
+  align-self: center;
+  width: 14px;
+  height: 14px;
+  rotate: 90deg;
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition: rotate 160ms ease, opacity 120ms ease;
+}
+
+.library-shelf-fold:hover .library-shelf-fold-mark,
+.library-shelf-fold:focus-visible .library-shelf-fold-mark,
+.library-shelf-fold[aria-expanded="false"] .library-shelf-fold-mark {
+  opacity: 1;
+}
+
+.library-shelf-fold[aria-expanded="false"] .library-shelf-fold-mark {
+  rotate: 0deg;
+}
+
+.library-shelf-fold[aria-expanded="false"] {
+  color: var(--text-secondary);
+}
+
+.library-shelf-fold:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--brand-primary));
+  outline-offset: 2px;
+}
+
+.library-shelf-heading-extra {
+  margin-left: auto;
+  align-self: center;
+  font-family: var(--font-sans);
+}
+
+.library-shelf section[data-folded] .library-shelf-heading,
+.class-shelf section[data-folded] .library-shelf-heading {
+  margin-bottom: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library-shelf-fold-mark { transition: none; }
+}
+
+/* A small switch beside a heading ("Hide late"); pressed reads as on. */
+.shelf-chip {
+  padding: 2px 9px;
+  border: 1px solid var(--border-subtle, var(--border));
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--text-secondary);
+  background: transparent;
+}
+
+.shelf-chip:hover {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+}
+
+.shelf-chip[aria-pressed="true"] {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+}
+
+.shelf-chip:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--brand-primary));
+  outline-offset: 2px;
+}
+
+/* Picking a ManageBac task (Select): the ring sits at the row's end, and a picked task is held in the brand's ink. */
+.class-due-task[data-picking] .work-pick,
+.class-past-task[data-picking] .work-pick {
+  position: static;
+  flex: none;
+  margin-left: auto;
+}
+
+.class-past-task[data-picking] .work-pick {
+  width: 18px;
+  height: 18px;
+}
+
+.class-due-task[data-picked] {
+  box-shadow:
+    0 0 0 2px var(--brand-primary),
+    0 12px 24px -18px color-mix(in oklab, var(--brand-primary) 60%, transparent);
+}

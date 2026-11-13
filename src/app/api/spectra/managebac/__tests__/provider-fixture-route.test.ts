@@ -486,9 +486,10 @@ describe("ManageBac route provider fixture", () => {
 
     const selectedSyncResponse = await post({ action: "syncOnLogin" });
     expect(selectedSyncResponse.status).toBe(200);
-    expect((await selectedSyncResponse.json()).jobs.map((job: { kind: string }) => job.kind)).toEqual(["classes", "current_tasks", "grades"]);
+    expect((await selectedSyncResponse.json()).jobs.map((job: { kind: string }) => job.kind)).toEqual(["classes", "current_tasks", "grades", "past_tasks", "dropbox_files"]);
     expect(await query("managebac:onboardingStatus", {})).toMatchObject({ phase: "ready" });
-    expect(fixture.requests.some((request) => request.path.includes("/submissions/"))).toBe(false);
+    // Dropbox files are Auto by default, so the sign-in sync already reads submissions.
+    expect(fixture.requests.some((request) => request.path.includes("/submissions/"))).toBe(true);
     const dropboxSyncResponse = await post({ action: "sync", kind: "dropbox_files" });
     expect(dropboxSyncResponse.status).toBe(200);
     expect(fixture.requests.some((request) => request.path === "/v2p2/classes/101/tasks")).toBe(true);

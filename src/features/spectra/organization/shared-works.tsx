@@ -1,5 +1,6 @@
 "use client";
 
+import { ShelfSection } from "./shelf-fold";
 import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { useState } from "react";
 import { Copy, ExternalLink } from "@/components/icons/glyph-icons";
@@ -88,10 +89,15 @@ export function SharedWorkGroups({
         </DropdownMenu>
       ) : null}
       {groups.map((group) => (
-        <section key={group.workspaceId} aria-label={`From ${group.author}`} className="shared-works">
-          <h3 className="library-shelf-heading">
-            From {group.author} {group.works.length ? <span className="school-heading-count">{group.works.length}</span> : null}
-          </h3>
+        <ShelfSection
+          key={group.workspaceId}
+          foldKey={`shared:${group.workspaceId}`}
+          label={`From ${group.author}`}
+          className="shared-works"
+          level={3}
+          title={`From ${group.author}`}
+          count={group.works.length}
+        >
           <p className="shared-works-note">
             {group.title !== place ? `Shared in ${group.title}. ` : ""}
             {group.level === "modify" ? "You can edit what is shared here." : "Read only."}
@@ -118,7 +124,7 @@ export function SharedWorkGroups({
           ) : (
             <p className="class-shelf-quiet">Nothing shared yet. What {group.author} shares in {group.title} shows here.</p>
           )}
-        </section>
+        </ShelfSection>
       ))}
     </>
   );

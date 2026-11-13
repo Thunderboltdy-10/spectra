@@ -247,17 +247,23 @@ async function schoolUsage(
     collaboration_bytes: 0,
   };
   const series: Record<string, Record<string, number>> = {};
+  // Each day's meters by who used them, for the chart's split by person;
+  // what no one account used (shared work, the school's own) is "school".
+  const parts: Record<string, Record<string, Record<string, number>>> = {};
   for (const meter of meters) {
     totals[meter.category] = (totals[meter.category] ?? 0) + meter.quantity;
     series[meter.day] ??= {};
     series[meter.day]![meter.category] =
       (series[meter.day]![meter.category] ?? 0) + meter.quantity;
+    const who = meter.accountId ?? "school";
+    const byCategory = ((parts[meter.day] ??= {})[meter.category] ??= {});
+    byCategory[who] = (byCategory[who] ?? 0) + meter.quantity;
   }
   return {
     totals,
     series: Object.entries(series)
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([date, values]) => ({ day: date, values })),
+      .map(([date, values]) => ({ day: date, values, parts: parts[date] ?? {} })),
     completeThrough: toDay,
   };
 }
@@ -448,7 +454,15 @@ export const schoolOverview = mutation({
         aiRuns: counterMetricState,
       },
       computedAt,
-      usage,
+      usage: {
+        ...usage,
+        // Names for the people the chart splits by: members the admin already sees in People.
+        people: Object.fromEntries(
+          memberRows
+            .filter(({ account }) => account)
+            .map(({ account }) => [account!._id as string, account!.name || account!.email || "Someone"]),
+        ),
+      },
       limits: limitPolicy
         ? {
             policyId: limitPolicy._id,

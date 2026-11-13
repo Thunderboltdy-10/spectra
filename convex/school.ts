@@ -234,6 +234,7 @@ function kindInfo(kind: SchoolSyncKind) {
     defaultMode: info.defaultMode,
     classScoped: info.classScoped,
     available: info.availability === "available",
+    choice: info.choice !== false,
     unavailableReason: info.unavailableReason ?? null,
     autoEveryMinutes: info.autoEveryMinutes,
   };
@@ -341,6 +342,8 @@ export const setMode = mutation({
   handler: async (ctx, args) => {
     const actor = await requireStudent(ctx);
     const { integration, scope } = await stateScope(ctx, actor, args.kind);
+    if (SCHOOL_SYNC_KIND_INFO[args.kind].choice === false)
+      throw new Error(`SCHOOL_SYNC_KIND_FIXED: ${SCHOOL_SYNC_KIND_INFO[args.kind].label} always syncs.`);
     if (SCHOOL_SYNC_KIND_INFO[args.kind].availability === "unavailable" && args.mode !== "off")
       throw new Error(`SCHOOL_SYNC_KIND_UNAVAILABLE: ${SCHOOL_SYNC_KIND_INFO[args.kind].unavailableReason ?? "This isn't available."}`);
     const now = Date.now();
@@ -417,6 +420,39 @@ export const syncNow = mutation({
     for (const kind of kinds)
       await queueSyncJob(ctx, { accountId: actor.accountId, schoolId: actor.schoolId, integrationId: integration._id, kind }, "user", now);
     return { queued: kinds };
+  },
+});
+
+/**
+ * Opening Spectra: every Auto kind whose last sync is older than its cadence runs now, in the
+ * background. Nothing happens for a student ManageBac doesn't know yet, or a kind already due.
+ */
+export const syncStaleOnOpen = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) return { queued: [] as SchoolSyncKind[] };
+    const integration = await managebacFor(ctx, actor);
+    if (!integration || !["connected", "degraded"].includes(integration.status)) return { queued: [] as SchoolSyncKind[] };
+    const mapping = await ctx.db.query("externalIdentityMappings")
+      .withIndex("by_integration_account", (q) => q.eq("integrationId", integration._id).eq("accountId", actor.accountId))
+      .first();
+    if (mapping?.status !== "verified") return { queued: [] as SchoolSyncKind[] };
+    const prefs = await loadSyncPreferences(ctx, actor.accountId, integration._id);
+    const now = Date.now();
+    const queued: SchoolSyncKind[] = [];
+    for (const kind of SCHOOL_SYNC_KINDS) {
+      if (!prefs.hasAuto(kind)) continue;
+      const state = await ctx.db.query("schoolSyncStates")
+        .withIndex("by_account_integration_kind", (q) => q.eq("accountId", actor.accountId).eq("integrationId", integration._id).eq("kind", kind))
+        .first();
+      if (state?.state === "running" || state?.state === "queued" || (state?.dueAt !== undefined && state.dueAt <= now)) continue;
+      const due = nextAutoRunAt(prefs, kind, state?.lastSuccessAt, now);
+      if (due === undefined || due > now) continue;
+      await queueSyncJob(ctx, { accountId: actor.accountId, schoolId: actor.schoolId, integrationId: integration._id, kind }, "schedule", now);
+      queued.push(kind);
+    }
+    return { queued };
   },
 });
 

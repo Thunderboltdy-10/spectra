@@ -79,10 +79,10 @@ export function TasksSection({
         compact
         icon="task"
         title={view === "past" ? "No past tasks yet" : view === "current" ? "Nothing due" : "No tasks yet"}
-        detail={view === "past" ? "Spectra starts from today. Bring in your earlier tasks from ManageBac when you want them for revision." : "New tasks from ManageBac show up here."}
+        detail={view === "past" ? "Your finished tasks from ManageBac show up here." : "New tasks from ManageBac show up here."}
         action={
           <Button size="sm" disabled={syncing} onClick={() => onSync(view === "past" ? "past_tasks" : view === "current" ? "current_tasks" : undefined)}>
-            {syncing ? "Syncing" : view === "past" ? "Bring in past tasks" : "Sync now"}
+            {syncing ? "Syncing" : "Sync now"}
           </Button>
         }
       />

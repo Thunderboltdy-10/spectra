@@ -37,7 +37,7 @@ describe("Bridge on the Devices page", () => {
       }),
     ).toContain("could not");
     expect(pairingFailureMessage("ignored", { kind: "not-running" })).toContain(
-      "not running",
+      "isn't running",
     );
   });
 });

@@ -47,6 +47,44 @@ export function ClassShelfOnboarding({
   /** Put away for now: nothing is saved, and School offers the choice again. */
   onDismiss: () => void;
 }) {
+  const submitting = useRef(false);
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        // Closing is "not now", never a lost choice: a save under way finishes first.
+        if (!next && !submitting.current) onDismiss();
+      }}
+    >
+      <DialogContent
+        className="max-w-[min(720px,calc(100vw-32px))] gap-0 p-5 sm:p-6"
+        // A press beside the dialog is too easy to make by accident while choosing.
+        onPointerDownOutside={(event) => event.preventDefault()}
+      >
+        <DialogTitle>Choose this year&apos;s classes</DialogTitle>
+        <DialogDescription className="mt-1.5 max-w-xl text-caption">
+          Each class you pick becomes a workspace, and its tasks and artifacts come
+          in from ManageBac. Close this to decide later in School, Sync.
+        </DialogDescription>
+        <div className="mt-5">
+          <ClassShelfChoice active={open} onCompleted={onCompleted} onSubmitting={(value) => (submitting.current = value)} />
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** The class choice itself, in the dialog above or a step of Setup. It loads each time it becomes active. */
+export function ClassShelfChoice({
+  active,
+  onCompleted,
+  onSubmitting,
+}: {
+  active: boolean;
+  onCompleted: () => void | Promise<void>;
+  onSubmitting?: (submitting: boolean) => void;
+}) {
+  const open = active;
   const { update } = useSpectraPreferences();
   const [state, setState] = useState<ClassShelfLoadState>({ kind: "loading" });
   const [classes, setClasses] = useState<ClassShelfCandidate[]>([]);
@@ -137,6 +175,7 @@ export function ClassShelfOnboarding({
       return;
     inFlight.current = true;
     setSubmitting(true);
+    onSubmitting?.(true);
     setSubmitError("");
     try {
       if (state.kind === "ready" || state.kind === "empty") {
@@ -167,6 +206,7 @@ export function ClassShelfOnboarding({
     } finally {
       inFlight.current = false;
       setSubmitting(false);
+      onSubmitting?.(false);
     }
   }
 
@@ -185,55 +225,34 @@ export function ClassShelfOnboarding({
     .map((item) => item.recordId);
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        // Closing is "not now", never a lost choice: a save under way finishes first.
-        if (!next && !submitting) onDismiss();
-      }}
-    >
-      <DialogContent
-        className="max-w-[min(720px,calc(100vw-32px))] gap-0 p-5 sm:p-6"
-        // A press beside the dialog is too easy to make by accident while choosing.
-        onPointerDownOutside={(event) => event.preventDefault()}
-      >
-        <DialogTitle>Choose this year&apos;s classes</DialogTitle>
-        <DialogDescription className="mt-1.5 max-w-xl text-caption">
-          Each class you pick becomes a workspace, and its tasks and artifacts come
-          in from ManageBac. Close this to decide later in School, Sync.
-        </DialogDescription>
-        <div className="mt-5">
-          <ClassShelfPicker
-            state={state}
-            selectedIds={selectedIds}
-            initialSelectedIds={initialSelectedIds}
-            onSelectedIdsChange={setSelectedIds}
-            submitting={submitting}
-            submitError={submitError}
-            submitDisabled={!canContinue}
-            primaryLabel={
-              canChoose
-                ? selectedIds.length > 0
-                  ? "Use selected classes"
-                  : "Continue without classes"
-                : "Continue"
-            }
-            onSubmit={() =>
-              void finish(
-                canChoose && selectedIds.length > 0 ? "chosen" : "skipped",
-                canChoose ? selectedIds : [],
-              )
-            }
-            skipLabel={canChoose ? "Skip" : undefined}
-            onSkip={canChoose ? () => void finish("skipped", []) : undefined}
-            retention={retention}
-            onRetentionChange={setRetention}
-            onResolveIdentity={() => void resolveIdentity()}
-            resolvingIdentity={resolvingIdentity}
-            identityStatus={identityStatus}
-          />
-        </div>
-      </DialogContent>
-    </Dialog>
+    <ClassShelfPicker
+      state={state}
+      selectedIds={selectedIds}
+      initialSelectedIds={initialSelectedIds}
+      onSelectedIdsChange={setSelectedIds}
+      submitting={submitting}
+      submitError={submitError}
+      submitDisabled={!canContinue}
+      primaryLabel={
+        canChoose
+          ? selectedIds.length > 0
+            ? "Use selected classes"
+            : "Continue without classes"
+          : "Continue"
+      }
+      onSubmit={() =>
+        void finish(
+          canChoose && selectedIds.length > 0 ? "chosen" : "skipped",
+          canChoose ? selectedIds : [],
+        )
+      }
+      skipLabel={canChoose ? "Skip" : undefined}
+      onSkip={canChoose ? () => void finish("skipped", []) : undefined}
+      retention={retention}
+      onRetentionChange={setRetention}
+      onResolveIdentity={() => void resolveIdentity()}
+      resolvingIdentity={resolvingIdentity}
+      identityStatus={identityStatus}
+    />
   );
 }

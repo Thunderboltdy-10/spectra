@@ -1,0 +1,256 @@
+/* Setup (onboarding/setup.tsx): a new account's first choices, a step at a
+   time, over the whole app. One sheet in the middle of a quiet page; the only
+   colour is the progress line, which fills with the spectrum a hue per step
+   done, so finishing Setup is the prism's light made whole. */
+
+.spectra-setup {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: grid;
+  grid-template-rows: max-content;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg-primary);
+  padding: clamp(16px, 6vh, 72px) 16px 24px;
+}
+/* The island waits behind Setup, except on its own step: there the real one
+   sits in its place below the sheet, to be tried, and the sheet keeps clear of it. */
+body:has(.spectra-setup:not([data-step="island"])) [data-island-root] {
+  visibility: hidden;
+}
+.spectra-setup[data-step="island"] {
+  padding-bottom: calc(var(--spectra-composer-safe-area, 120px) + 32px);
+}
+.spectra-setup[data-step="island"]::after {
+  content: "";
+  position: fixed;
+  inset: auto 0 0;
+  height: calc(var(--spectra-composer-safe-area, 120px) + 24px);
+  background: linear-gradient(to bottom, transparent, var(--bg-primary) 55%);
+  pointer-events: none;
+}
+
+.spectra-setup-sheet {
+  display: flex;
+  width: min(680px, 100%);
+  /* Grows with its step, so the page scrolls as one and its foot clears the island. */
+  min-height: 100%;
+  flex-direction: column;
+  margin: 0 auto;
+}
+
+.spectra-setup-count {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-tertiary);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}
+.spectra-setup-count span:last-child {
+  color: var(--text-secondary);
+}
+
+.spectra-setup-line {
+  display: flex;
+  gap: 4px;
+  margin-top: 10px;
+}
+.spectra-setup-line li {
+  position: relative;
+  height: 4px;
+  flex: 1 1 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--border-subtle);
+}
+.spectra-setup-line li::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--setup-hue);
+  content: "";
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 620ms var(--ease-out-expo);
+}
+.spectra-setup-line li[data-state="done"]::after {
+  transform: scaleX(1);
+}
+.spectra-setup-line li[data-state="now"]::after {
+  opacity: 0.45;
+  transform: scaleX(0.18);
+}
+
+.spectra-setup-body {
+  display: flex;
+  flex-direction: column;
+  margin-top: clamp(28px, 7vh, 64px);
+  animation: spectra-setup-in 460ms var(--ease-out-expo) both;
+}
+@keyframes spectra-setup-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+.spectra-setup-heading {
+  max-width: 18ch;
+  font-family: var(--font-display);
+  font-size: clamp(32px, 4.2vw, 46px);
+  font-weight: 400;
+  line-height: 1.08;
+  letter-spacing: -0.018em;
+  font-variation-settings: "opsz" 72;
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+.spectra-setup-about {
+  max-width: 58ch;
+  margin-top: 14px;
+  color: var(--text-secondary);
+  font-size: var(--text-ui);
+  line-height: 1.6;
+}
+.spectra-setup-content {
+  margin-top: 28px;
+}
+.spectra-setup-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.spectra-setup-feedback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 48px;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+}
+
+.spectra-setup-waiting,
+.spectra-setup-done {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: var(--text-ui);
+}
+.spectra-setup-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--hue-violet);
+  animation: spectra-setup-pulse 1.4s var(--ease-standard) infinite;
+}
+@keyframes spectra-setup-pulse {
+  50% {
+    opacity: 0.25;
+    transform: scale(0.7);
+  }
+}
+.spectra-setup-check {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--hue-green);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--hue-green) 22%, transparent);
+}
+
+.spectra-setup-note {
+  display: grid;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: var(--text-ui);
+}
+
+.spectra-setup-card {
+  padding: 16px;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px var(--card-border);
+}
+
+.spectra-setup-answers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+.spectra-setup-answers button {
+  min-height: 52px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  color: var(--text-primary);
+  font-size: var(--text-ui);
+  text-align: left;
+  box-shadow: inset 0 0 0 1px var(--card-border);
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+.spectra-setup-answers button:hover {
+  background: var(--bg-hover);
+}
+.spectra-setup-answers button[aria-checked="true"] {
+  box-shadow: inset 0 0 0 1.5px var(--brand-primary);
+}
+.spectra-setup-answers button:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 2px;
+}
+
+/* The island's settings: a name (and a line under it) beside its control. */
+.spectra-setup-settings {
+  display: grid;
+  margin-top: 24px;
+}
+.spectra-setup-settings > div,
+.spectra-setup-syncs li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.spectra-setup-settings dt {
+  color: var(--text-primary);
+  font-size: var(--text-ui);
+}
+.spectra-setup-settings dt small,
+.spectra-setup-syncs small {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-tertiary);
+  font-size: var(--text-micro);
+}
+.spectra-setup-syncs {
+  display: grid;
+}
+.spectra-setup-syncs strong {
+  font-size: var(--text-ui);
+  font-weight: 500;
+}
+
+@media (max-width: 560px) {
+  .spectra-setup:not([data-step="island"]) .spectra-setup-actions {
+    position: sticky;
+    bottom: -24px;
+    padding-bottom: 12px;
+    background: var(--bg-primary);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spectra-setup-body {
+    animation: none;
+  }
+}

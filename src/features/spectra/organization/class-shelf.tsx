@@ -8,11 +8,12 @@ import { classIdentity, type ClassIdentity } from "../../../../shared/class-iden
 import { useAuthedArgs } from "../data/use-authed-args";
 import { startOfDay, type SchoolTask } from "../school/school-model";
 import { inkStyle, type ClassBook } from "../school/use-class-book";
-import { DueTask, TaskLink, type TaskOpen } from "./due-task";
+import { DueTask, TaskLink, useTaskPicking, type TaskOpen } from "./due-task";
 import type { WorkPicking } from "./library-note";
 import { ShelfNotes, useShelfStacks } from "./shelf-stacks";
 import { SharedWorkGroups, useSharedWorks } from "./shared-works";
 import { useTreeChildren, type TreeNode } from "./tree-client";
+import { ShelfSection, useShelfFold } from "./shelf-fold";
 
 /*
  * A class's workspace as the class rather than a folder of rows (LIBRARY.md,
@@ -116,10 +117,18 @@ export function ClassShelf({
   const ownTaskItems = useShelfStacks(ownTasks);
   const workItems = useShelfStacks(work);
   const shownWork = allWork ? workItems : workItems.slice(0, WORK_SHOWN);
-  const shownAhead = allAhead ? ahead : ahead.slice(0, AHEAD_SHOWN);
+  // Late tasks can be put out of sight, so To do shows what can still be done on time.
+  const [hideLate, toggleHideLate] = useShelfFold("class:todo:hide-late");
+  const today = startOfDay(now);
+  const isLate = (task: SchoolTask) => task.dueAt !== null && task.dueAt < today;
+  const late = ahead.filter(isLate).length;
+  const todo = hideLate ? ahead.filter((task) => !isLate(task)) : ahead;
+  const shownAhead = allAhead ? todo : todo.slice(0, AHEAD_SHOWN);
   // Each ManageBac task has a planner work Spectra made for it; a task opens as that work.
   const plannerOf = usePlannerWorks(children.nodes);
+  const taskPicking = useTaskPicking(picking);
   const open = (task: SchoolTask): TaskOpen => {
+    if (taskPicking) return taskPicking.open(task);
     const planner = plannerOf(task);
     return planner ? { onClick: () => onOpen(planner) } : { href: `/school?task=${encodeURIComponent(task.recordId)}` };
   };
@@ -129,44 +138,52 @@ export function ClassShelf({
     <div className="class-shelf" style={inkStyle(identity)}>
       <div className="class-shelf-columns">
         <div className="min-w-0">
-          <section aria-labelledby="class-due">
-            <h3 id="class-due" className="library-shelf-heading">
-              To do {ahead.length ? <span className="school-heading-count">{ahead.length}</span> : null}
-            </h3>
+          <ShelfSection
+            foldKey="class:todo"
+            id="class-due"
+            level={3}
+            title="To do"
+            count={ahead.length}
+            extra={
+              late ? (
+                <button type="button" className="shelf-chip" aria-pressed={hideLate} onClick={toggleHideLate}>
+                  {hideLate ? `Show ${late} late` : "Hide late"}
+                </button>
+              ) : null
+            }
+          >
             {loading ? (
               <div aria-hidden className="class-due-ghost" />
-            ) : !ahead.length ? (
+            ) : !todo.length ? (
               <p className="class-shelf-quiet">
-                {providerClassId ? "Nothing to do for this class. New tasks from ManageBac show here with their dates." : "No tasks from School for this class yet."}
+                {ahead.length
+                  ? `Only late tasks here, ${late} of them, hidden for now.`
+                  : providerClassId
+                    ? "Nothing to do for this class. New tasks from ManageBac show here with their dates."
+                    : "No tasks from School for this class yet."}
               </p>
             ) : (
               <ol className="class-due">
                 {shownAhead.map((task) => (
                   <li key={task.recordId}>
-                    <DueTask task={task} now={now} open={open(task)} />
+                    <DueTask task={task} now={now} open={open(task)} picked={taskPicking?.picked(task)} />
                   </li>
                 ))}
               </ol>
             )}
-            {!loading && ahead.length > AHEAD_SHOWN ? (
+            {!loading && todo.length > AHEAD_SHOWN ? (
               <button type="button" className="today-link mt-3 inline-block" aria-expanded={allAhead} onClick={() => setAllAhead((more) => !more)}>
-                {allAhead ? "Show fewer" : `Show all ${ahead.length}`}
+                {allAhead ? "Show fewer" : `Show all ${todo.length}`}
               </button>
             ) : null}
-          </section>
+          </ShelfSection>
 
           {ownTaskItems.length ? (
-          <section aria-labelledby="class-own-tasks">
-            <h3 id="class-own-tasks" className="library-shelf-heading">
-              Your tasks <span className="school-heading-count">{ownTasks.length}</span>
-            </h3>
-            <ShelfNotes items={ownTaskItems} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} whereOf={sharedMark} />
-          </section>
-        ) : null}
-        <section aria-labelledby="class-work">
-            <h3 id="class-work" className="library-shelf-heading">
-              Your artifacts {work.length ? <span className="school-heading-count">{work.length}</span> : null}
-            </h3>
+            <ShelfSection foldKey="class:own-tasks" id="class-own-tasks" level={3} title="Your tasks" count={ownTasks.length}>
+              <ShelfNotes items={ownTaskItems} now={now} onOpen={onOpen} onMenu={onMenu} picking={picking} whereOf={sharedMark} />
+            </ShelfSection>
+          ) : null}
+          <ShelfSection foldKey="class:work" id="class-work" level={3} title="Your artifacts" count={work.length}>
             {work.length || folders.length ? (
               <>
                 {folders.length ? (
@@ -192,24 +209,21 @@ export function ClassShelf({
                 ) : null}
               </div>
             )}
-          </section>
+          </ShelfSection>
 
           <SharedWorkGroups groups={shared} place={name} workspaceId={workspaceId} now={now} onOpen={onOpen} picking={picking} />
         </div>
 
         {months.length ? (
           <aside aria-labelledby="class-past" className="library-shelf-side">
-            <section>
-              <h3 id="class-past" className="library-shelf-heading">
-                Past tasks <span className="school-heading-count">{pastCount}</span>
-              </h3>
+            <ShelfSection foldKey="class:past" id="class-past" level={3} title="Past tasks" count={pastCount}>
               {shownMonths.map((month) => (
                 <div key={month.key} className="class-past-month">
                   <h4 className="class-past-label">{month.label}</h4>
                   <ul>
                     {(allMonths ? month.tasks : month.tasks.slice(0, MONTH_TASKS_SHOWN)).map((task) => (
                       <li key={task.recordId}>
-                        <TaskLink open={open(task)} className="class-past-task">
+                        <TaskLink open={open(task)} picked={taskPicking?.picked(task)} className="class-past-task">
                           <span className="min-w-0 flex-1 truncate">{task.title}</span>
                           {task.dueAt !== null ? <span className="class-past-day">{new Date(task.dueAt).getDate()}</span> : null}
                         </TaskLink>
@@ -226,7 +240,7 @@ export function ClassShelf({
                   {allMonths ? "Show fewer" : `Show all ${pastCount}`}
                 </button>
               ) : null}
-            </section>
+            </ShelfSection>
           </aside>
         ) : null}
       </div>

@@ -17,7 +17,8 @@ type TourState = {
   /** The spotlight's last box, while a tour is running. */
   lastBox: Box | null;
   rememberBox: (box: Box | null) => void;
-  start: () => void;
+  /** From the first step, or from where it was put away. */
+  start: (at?: number) => void;
   next: () => void;
   back: () => void;
   stop: () => void;
@@ -27,7 +28,7 @@ export const useTourStore = create<TourState>((set) => ({
   index: null,
   lastBox: null,
   rememberBox: (lastBox) => set({ lastBox }),
-  start: () => set({ index: 0, lastBox: null }),
+  start: (at = 0) => set({ index: Math.min(Math.max(0, at), TOUR_STEPS.length - 1), lastBox: null }),
   next: () => set(({ index }) => ({ index: index === null || index + 1 >= TOUR_STEPS.length ? null : index + 1 })),
   back: () => set(({ index }) => ({ index: index ? index - 1 : index })),
   stop: () => set({ index: null, lastBox: null }),

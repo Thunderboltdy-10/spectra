@@ -70,6 +70,9 @@ export function resetBridgeProbeForTests() {
   sharedProbe = null;
 }
 
+/** The shortest gap between two checks made because the page came back into view. */
+const FOCUS_RECHECK_MS = 3_000;
+
 export function useBridgeHealth() {
   const [health, setHealth] = useState<BridgeHealth | null>(null);
   const [discovery, setDiscovery] = useState<BridgeDiscovery>({
@@ -98,6 +101,7 @@ export function useBridgeHealth() {
     let wasRunning = false;
     let timer: number | null = null;
     let nextDueAt = 0;
+    let lastCheckAt = 0;
     const cached = loadBridgeStatusCache();
     if (cached) setStatus({ ...cached, paired: false, cloudConnected: false });
     const unpair = () =>
@@ -120,6 +124,7 @@ export function useBridgeHealth() {
       }, delay);
     };
     const check = async (fresh: boolean) => {
+      lastCheckAt = Date.now();
       const revision = accountStorageRevision();
       if (fresh) misses = 0;
       const next = await probeBridge({ fresh });
@@ -146,10 +151,11 @@ export function useBridgeHealth() {
     checkRef.current = check;
     void check(false);
     const onFocus = () => {
-      // Returning to the page checks only once the backoff allows it, so an
-      // absent Bridge is not probed on every focus.
-      if (document.visibilityState === "visible" && Date.now() >= nextDueAt)
-        void check(false);
+      if (document.visibilityState !== "visible") return;
+      // Coming back to the page is when Bridge has often just been installed or
+      // opened: look at once (a local probe is cheap), at most every few seconds.
+      // A running Bridge keeps to its schedule.
+      if (!wasRunning ? Date.now() - lastCheckAt >= FOCUS_RECHECK_MS : Date.now() >= nextDueAt) void check(!wasRunning);
     };
     document.addEventListener("visibilitychange", onFocus);
     window.addEventListener("focus", onFocus);

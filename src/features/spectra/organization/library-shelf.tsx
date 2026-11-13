@@ -1,5 +1,6 @@
 "use client";
 
+import { ShelfSection } from "./shelf-fold";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@/features/spectra/data/use-kept-query";
@@ -19,7 +20,7 @@ import { useAuthedArgs } from "../data/use-authed-args";
 import { schoolTaskHref, useOpenSchoolTask } from "../school/open-school-task";
 import { startOfDay } from "../school/school-model";
 import { classWorkspaceIdentity, isClassWorkspace } from "./class-shelf";
-import { DueTask } from "./due-task";
+import { DueTask, useTaskPicking } from "./due-task";
 import { PlaceRow, type WorkPicking } from "./library-note";
 import { relativeTime, workspaceInk } from "./node-identity";
 import { groupByWhen } from "./shelf-model";
@@ -143,6 +144,7 @@ export function LibraryShelf({
   const recent = useTreeQuickView("recent", ["work"]);
   const mark = useLoadOnApproach(recent.status, recent.loadMore);
   const comingUp = useComingUp(now);
+  const taskPicking = useTaskPicking(picking);
   const [allWorkspaces, setAllWorkspaces] = useState(false);
   const [allLoose, setAllLoose] = useState(false);
   const { preferences, update: updatePreferences } = useSpectraPreferences();
@@ -225,11 +227,7 @@ export function LibraryShelf({
     <div className="library-shelf">
       <div className="min-w-0">
         {workspaces.length || onNewWorkspace ? (
-          <section aria-labelledby="shelf-workspaces">
-            <h2 id="shelf-workspaces" className="library-shelf-heading">
-              Workspaces{" "}
-              <span className="school-heading-count">{workspaces.length}</span>
-            </h2>
+          <ShelfSection foldKey="library:workspaces" id="shelf-workspaces" title="Workspaces" count={workspaces.length}>
             <div ref={(node) => void (tileOrder.containerRef.current = node)} className="school-tiles">
               {shownPlaces.map((place) => tile(place))}
               {onNewWorkspace ? (
@@ -253,14 +251,11 @@ export function LibraryShelf({
                 {allWorkspaces ? "Show fewer" : `Show all ${workspaces.length}`}
               </button>
             ) : null}
-          </section>
+          </ShelfSection>
         ) : null}
 
         {comingUp.length ? (
-          <section aria-labelledby="shelf-coming-up">
-            <h2 id="shelf-coming-up" className="library-shelf-heading">
-              Coming up
-            </h2>
+          <ShelfSection foldKey="library:coming-up" id="shelf-coming-up" title="Coming up">
             <ol className="class-due">
               {comingUp.map((task) => {
                 const identity = book.of(task.providerClassId, task.className);
@@ -270,7 +265,8 @@ export function LibraryShelf({
                     task={task}
                     now={now}
                     place={identity?.name ?? task.className}
-                    open={{ href: schoolTaskHref(task.recordId), onClick: onTaskClick(task.recordId) }}
+                    open={taskPicking ? taskPicking.open(task) : { href: schoolTaskHref(task.recordId), onClick: onTaskClick(task.recordId) }}
+                    picked={taskPicking?.picked(task)}
                   />
                 </li>
                 );
@@ -279,17 +275,14 @@ export function LibraryShelf({
             <Link href="/school" className="today-link mt-3 inline-block">
               Every task in School
             </Link>
-          </section>
+          </ShelfSection>
         ) : null}
 
       </div>
 
       {loose.length ? (
         <aside aria-label="Not in a workspace" className="library-shelf-side">
-          <section aria-labelledby="shelf-loose">
-            <h2 id="shelf-loose" className="library-shelf-heading">
-              Not in a workspace
-            </h2>
+          <ShelfSection foldKey="library:loose" id="shelf-loose" title="Not in a workspace">
             <ul className="library-loose">
               {shownLoose.map((node) => (
                 <li
@@ -312,15 +305,14 @@ export function LibraryShelf({
                 {allLoose ? "Show fewer" : `Show all ${loose.length}`}
               </button>
             ) : null}
-          </section>
+          </ShelfSection>
         </aside>
       ) : null}
 
       {/* The work touched lately runs the shelf's whole width, as many cards to a row as fit. */}
       <div className="library-shelf-wide">
         {recentGroups.map((group) => (
-          <section key={group.key} aria-label={group.label}>
-            <h2 className="library-shelf-heading">{group.label}</h2>
+          <ShelfSection key={group.key} foldKey={`when:${group.key}`} label={group.label} title={group.label}>
             <ShelfNotes
               items={group.items}
               now={now}
@@ -331,7 +323,7 @@ export function LibraryShelf({
               picking={picking}
               onMoveInto={moveInto}
             />
-          </section>
+          </ShelfSection>
         ))}
         <div ref={mark} aria-hidden />
       </div>

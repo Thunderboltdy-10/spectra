@@ -5,6 +5,8 @@ import { toast } from "@/components/ui/toast";
 import { spectraBus } from "../events";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { useTourStore } from "./tour-store";
+import { setupDue } from "./setup-state";
+import { useAgentRuntimeStatus } from "../ai/use-agent-runtime";
 
 /*
  * Tips that arrive the first time the student does the thing they are about,
@@ -20,7 +22,11 @@ export const FIRST_TIPS = {
   task: "Drag a task onto another day to move it. Moving a ManageBac task makes your own copy, so your teacher's stays as they set it.",
   agent: "Your agent is ready. When a request is squarely what it is for, I hand it over.",
   bridge: "Bridge is connected. Add a folder on Devices and its files appear in the Library, filed with their class.",
+  subscription: "Your own subscription is ready on this computer. Pick Codex or Claude Code from the model menu on the island and Spectra runs on it, with the same tools.",
 } as const;
+
+/** Tips that come back until they are answered, not just closed. */
+const UNTIL_ANSWERED: ReadonlySet<FirstTipId> = new Set(["subscription"]);
 
 export type FirstTipId = keyof typeof FIRST_TIPS;
 
@@ -38,19 +44,26 @@ export function firstTipMoment(id: FirstTipId) {
 
 export function FirstTipsMount() {
   const { preferences, update } = useSpectraPreferences();
-  const { tipsSeen, tourStatus } = preferences.integrations;
+  const { tipsSeen, tourStatus, setupStatus } = preferences.integrations;
   const said = useRef(new Set<string>());
-  const latest = useRef({ tipsSeen, tourStatus, update });
-  latest.current = { tipsSeen, tourStatus, update };
+  const latest = useRef({ tipsSeen, tourStatus, setupStatus, update });
+  latest.current = { tipsSeen, tourStatus, setupStatus, update };
 
   useEffect(() => {
     const say = (id: FirstTipId) => {
-      const { tipsSeen: seen, tourStatus: tour, update: save } = latest.current;
-      if (tour !== "done" || useTourStore.getState().index !== null) return;
+      const { tipsSeen: seen, tourStatus: tour, setupStatus: setup, update: save } = latest.current;
+      // Never over Setup or the tour; a tour put away early still lets tips come.
+      if (setupDue({ setupStatus: setup, tourStatus: tour }) || useTourStore.getState().index !== null) return;
       if (seen.includes(id) || said.current.has(id)) return;
       said.current.add(id);
+      const remember = () => save("integrations", { tipsSeen: [...latest.current.tipsSeen, id] });
+      if (UNTIL_ANSWERED.has(id)) {
+        // Closed without an answer, it is said again on the next visit.
+        toast.info(FIRST_TIPS[id], { id: `tip:${id}`, duration: Infinity, closeButton: true, action: { label: "Got it", onClick: remember } });
+        return;
+      }
       toast.info(FIRST_TIPS[id], { id: `tip:${id}`, duration: TIP_MS, closeButton: true });
-      save("integrations", { tipsSeen: [...seen, id] });
+      remember();
     };
     const releases = [
       spectraBus.on("tip.moment", ({ id }) => say(id)),
@@ -58,6 +71,13 @@ export function FirstTipsMount() {
     ];
     return () => releases.forEach((release) => release());
   }, []);
+
+  // A subscription found on this computer is worth saying once it is there.
+  const runtime = useAgentRuntimeStatus();
+  const subscriptionReady = runtime?.codex?.state === "ready" || runtime?.claude?.state === "ready";
+  useEffect(() => {
+    if (subscriptionReady) firstTipMoment("subscription");
+  }, [subscriptionReady, tourStatus, setupStatus]);
 
   return null;
 }

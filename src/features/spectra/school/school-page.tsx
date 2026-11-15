@@ -164,7 +164,7 @@ export function SchoolPage() {
       disabled: busy || !preferences?.connected,
       onSelect: () => void sync(),
     },
-    ...(admin ? [{ id: "connection", icon: "settings", label: "Connection", onSelect: () => router.push("/managebac") } satisfies BarCommand] : []),
+    ...(admin ? [{ id: "connection", icon: "settings", label: "Connection", onSelect: () => router.push("/admin?tab=integrations") } satisfies BarCommand] : []),
   ];
 
   const select = (next: Selection) => {

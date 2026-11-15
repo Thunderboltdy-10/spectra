@@ -8,6 +8,8 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import {
+  OLD_TASK_RESTORE_LIMIT,
+  OLD_TASK_RESTORE_MAX_RANGE_MS,
   SCHOOL_SYNC_KIND_INFO,
   effectiveSchoolSyncMode,
   modeAdmitsTrigger,
@@ -141,13 +143,31 @@ type StatePatch = Partial<Omit<Doc<"schoolSyncStates">, "_id" | "_creationTime" 
 export async function writeSyncState(ctx: MutationCtx, scope: StateScope, patch: StatePatch) {
   const now = Date.now();
   const existing = await syncStateFor(ctx, scope.accountId, scope.integrationId, scope.kind);
-  if (existing) await ctx.db.patch(existing._id, { ...patch, updatedAt: now });
-  else await ctx.db.insert("schoolSyncStates", { ...scope, state: "idle", ...patch, updatedAt: now });
+  // Nothing due means no range of older tasks waiting either.
+  const fields = "dueAt" in patch && patch.dueAt === undefined ? { ...patch, dueWindow: undefined } : patch;
+  if (existing) await ctx.db.patch(existing._id, { ...fields, updatedAt: now });
+  else await ctx.db.insert("schoolSyncStates", { ...scope, state: "idle", ...fields, updatedAt: now });
   const dueAt = patch.dueAt;
   if (typeof dueAt === "number" && dueAt !== existing?.dueAt)
-    await ctx.scheduler.runAt(Math.max(now, dueAt), internal.executionScheduler.dispatchManageBacSync, {
-      integrationId: scope.integrationId, scheduledFor: dueAt,
-    });
+    await scheduleManageBacDispatch(ctx, scope.integrationId, dueAt);
+}
+
+/** A wake-up due about now may be the one running (scheduled functions can start a little early). */
+const DISPATCH_SLACK_MS = 1_000;
+
+/**
+ * Makes sure the ManageBac worker wakes by `at`. One wake-up claims every job then due, and
+ * each finished wake-up schedules the next (managebac:scheduleNextDispatch), so a wake-up
+ * already scheduled between now and `at` covers this one: students due together share it.
+ */
+export async function scheduleManageBacDispatch(ctx: MutationCtx, integrationId: Id<"schoolIntegrations">, at: number) {
+  const now = Date.now();
+  const marker = await ctx.db.query("managebacDispatcher").first();
+  if (marker && marker.scheduledFor > now + DISPATCH_SLACK_MS && marker.scheduledFor <= at) return;
+  const scheduledFor = Math.max(now, at);
+  if (marker) await ctx.db.patch(marker._id, { scheduledFor });
+  else await ctx.db.insert("managebacDispatcher", { scheduledFor });
+  await ctx.scheduler.runAt(scheduledFor, internal.executionScheduler.dispatchManageBacSync, { integrationId, scheduledFor: at });
 }
 
 /** Applying staged changes is still running; partial results are never successful syncs. */
@@ -187,12 +207,15 @@ export function nextAutoRunAt(preferences: SyncPreferences, kind: SchoolSyncKind
  * Puts a job in the worker's queue. A student's or the AI's request runs as soon as possible;
  * the schedule never moves an earlier request later.
  */
-export async function queueSyncJob(ctx: MutationCtx, scope: StateScope, trigger: SyncTrigger, at = Date.now()) {
+export async function queueSyncJob(ctx: MutationCtx, scope: StateScope, trigger: SyncTrigger, at = Date.now(),
+  window?: PastTaskWindow) {
   const current = await syncStateFor(ctx, scope.accountId, scope.integrationId, scope.kind);
-  if (current?.dueAt !== undefined && current.dueAt <= at && (current.dueTrigger !== "schedule" || trigger === "schedule")) return;
+  if (!window && current?.dueAt !== undefined && current.dueAt <= at && (current.dueTrigger !== "schedule" || trigger === "schedule")) return;
   await writeSyncState(ctx, scope, {
     dueAt: at,
     dueTrigger: trigger,
+    // A request for older tasks replaces any range still waiting; any other request drops it.
+    dueWindow: window,
     ...(current?.state === "running" ? {} : { state: trigger === "schedule" ? (current?.state ?? "idle") : "queued" }),
   });
 }
@@ -228,7 +251,12 @@ export type SyncTargets = {
   classIds: string[];
   yearGroupIds: string[];
   tasks: Array<{ classId: string; taskId: string }>;
+  /** Bringing back older past tasks: only those due in this range, at most `limit` of them. */
+  window?: { from: number; to: number; limit: number };
 };
+
+/** One class and due-date range of older past tasks to bring back. */
+export type PastTaskWindow = { classId: string; from: number; to: number };
 
 /**
  * What one job may reach: the selected classes whose mode admits the trigger, the student's
@@ -243,11 +271,23 @@ export async function syncTargets(
     trigger: SyncTrigger;
     preferences: SyncPreferences;
     mapping: Doc<"externalIdentityMappings"> | null;
+    window?: PastTaskWindow;
   },
 ): Promise<SyncTargets> {
   const { integration, accountId, kind, trigger, preferences } = input;
   const empty: SyncTargets = { classIds: [], yearGroupIds: [], tasks: [] };
   if (kind === "calendar_events") return empty;
+  if (kind === "past_tasks" && input.window) {
+    // One of the student's own classes (selected or not: an old class may be archived), and
+    // only a bounded range of its tasks. Never the whole history.
+    const { classId, from, to } = input.window;
+    const known = (await ctx.db.query("externalRecords")
+      .withIndex("by_account_kind_class", (q) => q.eq("mappedAccountId", accountId).eq("syncKind", "classes").eq("providerClassId", classId))
+      .take(10))
+      .some((row) => row.integrationId === integration._id && !row.tombstone && CLASS_IDENTITY_TYPES.has(row.recordType));
+    if (!known || !preferences.admits("past_tasks", trigger, classId)) return empty;
+    return { ...empty, classIds: [classId], window: { from, to: Math.min(to, from + OLD_TASK_RESTORE_MAX_RANGE_MS), limit: OLD_TASK_RESTORE_LIMIT } };
+  }
   if (kind === "cas") {
     if (!preferences.admits("cas", trigger)) return empty;
     const classRows = await ctx.db.query("externalRecords")

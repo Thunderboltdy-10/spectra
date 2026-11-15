@@ -1,7 +1,7 @@
 "use client";
 
 import { SearchField } from "@/components/ui/search-field";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@/features/spectra/data/use-kept-query";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
@@ -9,7 +9,9 @@ import { Segmented } from "@/components/ui/segmented";
 import { SelectField } from "@/components/ui/select";
 import { api } from "../../../../convex/_generated/api";
 import type { SchoolSyncKind } from "../../../../shared/school-sync";
+import { restoreSpectraPastTasks } from "../data/api";
 import { useAuthedArgs } from "../data/use-authed-args";
+import { isKeptRecordId, keepPastTasks, keptTasksMissingFrom, readKeptTasks, type KeptTask } from "./past-task-shelf";
 import { groupCurrentTasks, groupPastTasks, hasSchoolTaskSnapshot, taskMatches, type SchoolPreferences, type SchoolSyncStatus } from "./school-model";
 import { TaskGroup, TaskTicket, TicketsSkeleton } from "./school-tickets";
 import { inkStyle, useClassBook } from "./use-class-book";
@@ -17,7 +19,12 @@ import { inkStyle, useClassBook } from "./use-class-book";
 /*
  * Tasks: every task as a ticket. Current work is grouped by when it is due;
  * past work by class, each class under its own ink, and by term within it.
+ * Past tasks older than the two weeks Spectra keeps come from this device's
+ * own shelf, and come back from ManageBac when opened.
  */
+
+const DAY_MS = 24 * 60 * 60_000;
+type Restore = "restoring" | "failed";
 
 export type TaskView = "current" | "past" | "all";
 
@@ -45,13 +52,41 @@ export function TasksSection({
   onOpenSync: () => void;
 }) {
   const [query, setQuery] = useState("");
+  const pastMode = preferences?.kinds.find((kind) => kind.kind === "past_tasks")?.mode;
   const [classId, setClassId] = useState("all");
   const tasks = useQuery(api.school.tasks, useAuthedArgs({ view, ...(classId !== "all" ? { providerClassId: classId } : {}) }));
   const book = useClassBook();
+  const [kept, setKept] = useState<KeptTask[]>([]);
+  const [restores, setRestores] = useState<Record<string, Restore>>({});
+  useEffect(() => setKept(readKeptTasks()), []);
+  useEffect(() => {
+    if (!tasks) return;
+    const shelf = keepPastTasks(tasks.tasks);
+    if (shelf) setKept(shelf);
+  }, [tasks]);
+  const showsPast = view !== "current" && pastMode !== "off";
+  const older = useMemo(
+    () => showsPast && tasks
+      ? keptTasksMissingFrom(kept, tasks.tasks, { ...(classId !== "all" ? { providerClassId: classId } : {}), matches: (task) => taskMatches(task, query) })
+      : [],
+    [classId, kept, query, showsPast, tasks],
+  );
   const visible = useMemo(() => (tasks?.tasks ?? []).filter((task) => taskMatches(task, query)), [query, tasks]);
   const current = useMemo(() => groupCurrentTasks(visible, now), [now, visible]);
-  const past = useMemo(() => groupPastTasks(visible.filter((task) => task.past)), [visible]);
-  const pastMode = preferences?.kinds.find((kind) => kind.kind === "past_tasks")?.mode;
+  const past = useMemo(() => groupPastTasks([...visible.filter((task) => task.past), ...older]), [older, visible]);
+
+  async function bringBack(task: (typeof visible)[number]) {
+    if (!task.providerClassId || task.dueAt === null || restores[task.recordId] === "restoring") return;
+    setRestores((state) => ({ ...state, [task.recordId]: "restoring" }));
+    try {
+      // The day it was due, either side of midnight in any time zone.
+      await restoreSpectraPastTasks({ providerClassId: task.providerClassId, from: task.dueAt - DAY_MS, to: task.dueAt + DAY_MS });
+      // It leaves the shelf when the sync brings it back; if ManageBac no longer has it, it can be tried again.
+      window.setTimeout(() => setRestores(({ [task.recordId]: _done, ...rest }) => rest), 2 * 60_000);
+    } catch {
+      setRestores((state) => ({ ...state, [task.recordId]: "failed" }));
+    }
+  }
   const currentMode = preferences?.kinds.find((kind) => kind.kind === "current_tasks")?.mode;
 
   const classOptions = [
@@ -89,16 +124,20 @@ export function TasksSection({
     );
   }
 
-  const ticket = (task: (typeof visible)[number]) => (
-    <TaskTicket
-      key={task.recordId}
-      task={task}
-      identity={book.of(task.providerClassId, task.className)}
-      now={now}
-      selected={selectedId === task.recordId}
-      onSelect={() => onSelect(task.recordId)}
-    />
-  );
+  const ticket = (task: (typeof visible)[number]) => {
+    const keptCopy = isKeptRecordId(task.recordId);
+    return (
+      <TaskTicket
+        key={task.recordId}
+        task={task}
+        identity={book.of(task.providerClassId, task.className)}
+        now={now}
+        selected={selectedId === task.recordId}
+        kept={keptCopy ? restores[task.recordId] ?? "kept" : undefined}
+        onSelect={() => (keptCopy ? void bringBack(task) : onSelect(task.recordId))}
+      />
+    );
+  };
 
   return (
     <section aria-label="Tasks" className="min-w-0">
@@ -118,7 +157,7 @@ export function TasksSection({
       </div>
       {tasks === undefined ? (
         <TicketsSkeleton count={6} />
-      ) : !visible.length ? (
+      ) : !visible.length && !older.length ? (
         empty()
       ) : (
         <>

@@ -212,6 +212,60 @@ export function ProviderSetupButton({ provider, state, size = "sm" }: { provider
   );
 }
 
+/** What each CLI's own log-in asks, so the browser page that opens isn't a surprise. */
+const LOGIN_STEPS: Record<Provider, { account: string; choose: string; finish: string }> = {
+  codex: {
+    account: "the ChatGPT account that has your Plus, Pro, Business or Edu plan",
+    choose: "Choose Sign in with ChatGPT and continue.",
+    finish: "When the page says you're signed in, close it.",
+  },
+  claude: {
+    account: "the Claude account that has your Pro or Max plan",
+    choose: "Choose your Claude subscription (not the API console) and select Authorize.",
+    finish: "If the page shows a code instead, paste it into the small window that opened, then press Enter.",
+  },
+};
+
+/** The log-in, step by step: shown while it is the next thing to do. */
+export function ProviderLoginSteps({ provider, platform }: { provider: Provider; platform: BridgePlatform }) {
+  const steps = LOGIN_STEPS[provider];
+  return (
+    <ol className="bridge-install-steps mt-2" aria-label={`Logging in to ${PROVIDER_LABEL[provider]}`}>
+      <li>
+        <strong>Select Log in</strong>
+        <span>Your browser opens {PROVIDER_LABEL[provider]}&apos;s sign-in, with a small {terminalName(platform)} window beside it.</span>
+      </li>
+      <li>
+        <strong>Sign in with {steps.account}</strong>
+        <span>{steps.choose}</span>
+      </li>
+      <li>
+        <strong>Come back here</strong>
+        <span>{steps.finish} Spectra checks again by itself.</span>
+      </li>
+    </ol>
+  );
+}
+
+function ProviderRow({ provider, entry, checking }: { provider: Provider; entry: AgentProviderStatus | undefined; checking: boolean }) {
+  const installingNow = useInstalling(provider);
+  const [platform, setPlatform] = useState<BridgePlatform>("other");
+  useEffect(() => setPlatform(bridgePlatform()), []);
+  const loginNext = installingNow || entry?.state === "signed-out";
+  return (
+    <li className="grid gap-1">
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
+          <div className="text-ui font-medium text-[var(--text-primary)]">{PROVIDER_LABEL[provider]}</div>
+          <div className="text-micro text-[var(--text-secondary)]">{providerLine(entry, checking)}</div>
+        </div>
+        <ProviderSetupButton provider={provider} state={entry?.state} />
+      </div>
+      {loginNext ? <ProviderLoginSteps provider={provider} platform={platform} /> : null}
+    </li>
+  );
+}
+
 function providerLine(entry: AgentProviderStatus | undefined, checking = false) {
   if (!entry || (checking && entry.state !== "ready")) return "Checking this computer…";
   if (entry.state === "ready") {
@@ -235,20 +289,9 @@ export function SubscriptionSetup({ compact = false }: { compact?: boolean }) {
     <p className="text-caption leading-5 text-[var(--text-secondary)]">Set up Spectra Bridge first: Codex and Claude Code run through it.</p>
   ) : (
     <ul className="grid gap-3">
-      {(["codex", "claude"] as const).map((provider) => {
-        const entry = status?.[provider];
-        return (
-          <li key={provider} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-            <div className="min-w-0">
-              <div className="text-ui font-medium text-[var(--text-primary)]">
-                {PROVIDER_LABEL[provider]}
-              </div>
-              <div className="text-micro text-[var(--text-secondary)]">{providerLine(entry, checking)}</div>
-            </div>
-            <ProviderSetupButton provider={provider} state={entry?.state} />
-          </li>
-        );
-      })}
+      {(["codex", "claude"] as const).map((provider) => (
+        <ProviderRow key={provider} provider={provider} entry={status?.[provider]} checking={checking} />
+      ))}
     </ul>
   );
   if (compact) return body;

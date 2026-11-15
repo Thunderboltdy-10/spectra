@@ -1350,9 +1350,15 @@ async function postManageBac<T>(body: Record<string, unknown>) {
   );
 }
 
-export async function getSpectraManageBacOverview() {
+/** Brings one class's older tasks, due in the range, back from ManageBac (a few at a time). */
+export async function restoreSpectraPastTasks(range: { providerClassId: string; from: number; to: number }) {
+  return postManageBac<{ started: boolean; skipped: boolean }>({ action: "restorePastTasks", ...range });
+}
+
+export async function getSpectraManageBacOverview(scope?: "school" | "personal") {
+  const action = scope === "school" ? "adminOverview" : scope === "personal" ? "myOverview" : "overview";
   return readJson<SpectraManageBacOverview>(
-    await requestSpectra("/api/spectra/managebac?action=overview", {
+    await requestSpectra(`/api/spectra/managebac?action=${action}`, {
       cache: "no-store",
     }),
   );

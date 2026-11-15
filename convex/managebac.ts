@@ -36,12 +36,14 @@ import {
 import { vSchoolSyncKind } from "./schoolSyncSchema";
 import {
   CLASS_IDENTITY_TYPES, hiddenByPreferences, isArchived, loadSyncPreferences, queueSyncJob, syncStateFor,
-  syncTargets, writeSyncState, settleStudentSyncState, schoolSetupForAccount, LOGIN_SYNC_SETUP_VERSION, type SyncPreferences, type SyncTargets, type SyncTrigger,
+  syncTargets, writeSyncState, settleStudentSyncState, schoolSetupForAccount, LOGIN_SYNC_SETUP_VERSION, scheduleManageBacDispatch,
+  type SyncPreferences, type SyncTargets, type SyncTrigger, type PastTaskWindow,
 } from "./schoolSyncShared";
 import { deleteStorageIfNoOtherBinding, storageHasOtherBinding } from "./durableStorageBindings";
 import { evaluateAccessForActor } from "./authorityShared";
 import {
   SCHOOL_FILE_MAX_BYTES, SCHOOL_FILE_TEXT_MAX_CHARS, SCHOOL_SYNC_KINDS, SCHOOL_SYNC_KIND_INFO, capabilitySyncKinds, joinsPageSync, recordSyncKind,
+  OLD_TASK_RESTORE_LIMIT, OLD_TASK_RESTORE_MAX_RANGE_MS, PAST_TASK_KEEP_MS, TASK_KEPT_INDEFINITELY, isTaskRecordType, taskDueAt, taskExpiresAt,
   type SchoolSyncKind,
 } from "../shared/school-sync";
 
@@ -572,12 +574,40 @@ function scheduleSync(
   integrationId: Id<"schoolIntegrations">,
   scheduledFor: number,
 ) {
-  return ctx.scheduler.runAt(
-    Math.max(Date.now(), scheduledFor),
-    internal.executionScheduler.dispatchManageBacSync,
-    { integrationId, scheduledFor },
-  );
+  return scheduleManageBacDispatch(ctx, integrationId, scheduledFor);
 }
+
+/** Next look while due jobs wait for a free slot or a worker that is still running. */
+const DISPATCH_BUSY_RETRY_MS = 60_000;
+/** Work overdue longer than this is the 15-minute wake cron's (wakeOverdueSyncs), not a retry loop's. */
+const DISPATCH_RECENT_MS = 5 * 60_000;
+
+/**
+ * After each worker wake-up: the next one, for the earliest work still waiting. A job left
+ * due (its school's slots were busy, or the worker ran out of time) is looked at again
+ * shortly. A failed wake-up schedules nothing: the wake cron retries overdue work.
+ */
+export const scheduleNextDispatch = internalMutation({
+  args: { integrationId: v.id("schoolIntegrations"), failed: v.optional(v.boolean()), full: v.optional(v.boolean()) },
+  handler: async (ctx, args) => {
+    if (args.failed) return { next: null };
+    const now = Date.now();
+    const [state, ...schools] = await Promise.all([
+      ctx.db.query("schoolSyncStates").withIndex("by_due", (q) => q.gt("dueAt", now - DISPATCH_RECENT_MS)).first(),
+      ...(["connected", "degraded"] as const).map((status) =>
+        ctx.db.query("schoolIntegrations")
+          .withIndex("by_status_next_sync", (q) => q.eq("status", status).gt("nextSyncAt", now - DISPATCH_RECENT_MS))
+          .first()),
+    ]);
+    const times = [state?.dueAt, ...schools.map((row) => (row && !row.blockedReason ? row.nextSyncAt : undefined))]
+      .filter((value): value is number => typeof value === "number");
+    if (!times.length) return { next: null };
+    const earliest = Math.min(...times);
+    const next = earliest > now ? earliest : args.full ? now : now + DISPATCH_BUSY_RETRY_MS;
+    await scheduleManageBacDispatch(ctx, args.integrationId, next);
+    return { next };
+  },
+});
 
 export const scheduleExisting = internalMutation({
   args: {
@@ -1632,6 +1662,10 @@ export const upsertCalendarPeriodMap = mutation({
       metadata: { periodKey, timezone },
       retentionClass: "security",
     });
+    const integration = await integrationForSchool(ctx, actor.schoolId);
+    if (integration) await ctx.scheduler.runAfter(0, internal.managebac.refreshPeriodLessons, {
+      integrationId: integration._id, periodKey, cursor: null,
+    });
     return { periodMapId, verifiedAt: now };
   },
 });
@@ -1644,6 +1678,10 @@ export const removeCalendarPeriodMap = mutation({
     if (!period || period.schoolId !== actor.schoolId)
       throw new Error("CALENDAR_PERIOD_NOT_FOUND");
     await ctx.db.delete(period._id);
+    const integration = await integrationForSchool(ctx, actor.schoolId);
+    if (integration) await ctx.scheduler.runAfter(0, internal.managebac.refreshPeriodLessons, {
+      integrationId: integration._id, periodKey: period.periodKey, cursor: null,
+    });
     await writeAuditEvent(ctx, {
       actorAccountId: actor.accountId,
       schoolId: actor.schoolId,
@@ -1837,6 +1875,8 @@ async function startStudentJob(
     trigger: SyncTrigger;
     leaseOwner: string;
     now: number;
+    /** Past tasks only: bring back this class's older tasks in this range. */
+    window?: PastTaskWindow;
   },
 ) {
   const { integration, actor, syncKind, trigger, now } = input;
@@ -1862,13 +1902,17 @@ async function startStudentJob(
   const selection = await selectionSnapshot(ctx, integration._id, actor.accountId);
   const targets = await syncTargets(ctx, {
     integration, accountId: actor.accountId, kind: syncKind, trigger, preferences, mapping: input.mapping,
+    ...(syncKind === "past_tasks" && input.window ? { window: input.window } : {}),
   });
+  if (input.window && !targets.window)
+    throw new Error("INTEGRATION_CLASS_UNKNOWN: That class isn't one of the student's ManageBac classes.");
   const identity = await passIdentity(ctx, integration, actor.accountId, syncKind, targets);
   const scope = { accountId: actor.accountId, schoolId: integration.schoolId, integrationId: integration._id, kind: syncKind };
   const running = (syncRunId: Id<"externalSyncRuns">) => writeSyncState(ctx, scope, {
     state: "running",
     dueAt: now + JOB_WATCHDOG_MS,
     dueTrigger: trigger,
+    dueWindow: undefined,
     lastRunAt: now,
     lastSyncRunId: syncRunId,
     errorCode: undefined,
@@ -2011,6 +2055,7 @@ async function claimStudentJob(
     try {
       const started = await startStudentJob(ctx, {
         integration, actor, mapping, syncKind: state.kind, trigger, leaseOwner: workerId, now,
+        ...(state.dueWindow ? { window: state.dueWindow } : {}),
       });
       return {
         ...started,
@@ -2519,6 +2564,8 @@ export const requestAiRefresh = mutation({
     force: v.optional(v.boolean()),
     /** The kinds the AI needs fresher; every kind not Off when omitted. */
     kinds: v.optional(v.array(vSchoolSyncKind)),
+    /** Bring back older past tasks: one class, due in this range (at most OLD_TASK_RESTORE_LIMIT). */
+    pastTasks: v.optional(v.object({ providerClassId: v.string(), from: v.number(), to: v.number() })),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
@@ -2545,11 +2592,20 @@ export const requestAiRefresh = mutation({
       };
     const now = Date.now();
     const preferences = await loadSyncPreferences(ctx, actor.accountId, integration._id);
-    const kinds = SCHOOL_SYNC_KINDS.filter(
-      (kind) =>
-        preferences.hasAny(kind) &&
-        (args.kinds ? args.kinds.includes(kind) : joinsPageSync(kind, preferences.hasAuto(kind))),
-    );
+    const window = args.pastTasks && args.pastTasks.to >= args.pastTasks.from
+      ? {
+          classId: text(args.pastTasks.providerClassId, 500),
+          from: args.pastTasks.from,
+          to: Math.min(args.pastTasks.to, args.pastTasks.from + OLD_TASK_RESTORE_MAX_RANGE_MS),
+        }
+      : undefined;
+    const kinds = window
+      ? (preferences.hasAny("past_tasks") ? (["past_tasks"] as SchoolSyncKind[]) : [])
+      : SCHOOL_SYNC_KINDS.filter(
+          (kind) =>
+            preferences.hasAny(kind) &&
+            (args.kinds ? args.kinds.includes(kind) : joinsPageSync(kind, preferences.hasAuto(kind))),
+        );
     const states = (
       await Promise.all(kinds.map((kind) => syncStateFor(ctx, actor.accountId, integration._id, kind)))
     ).filter((state): state is Doc<"schoolSyncStates"> => Boolean(state));
@@ -2558,7 +2614,8 @@ export const requestAiRefresh = mutation({
       undefined,
     );
     const lastRunAt = states.reduce((latest, state) => Math.max(latest, state.lastRunAt ?? 0), 0);
-    const cooldownMs = args.force ? 2 * 60_000 : AI_REFRESH_COOLDOWN_MS;
+    // A range of older tasks is its own small request, so it waits only for the last one to start.
+    const cooldownMs = args.force || window ? 2 * 60_000 : AI_REFRESH_COOLDOWN_MS;
     if (lastRunAt && now - lastRunAt < cooldownMs)
       return {
         started: false,
@@ -2575,7 +2632,7 @@ export const requestAiRefresh = mutation({
         lastSyncAt,
       };
     for (const kind of kinds)
-      await queueSyncJob(ctx, { accountId: actor.accountId, schoolId: actor.schoolId, integrationId: integration._id, kind }, "ai", now);
+      await queueSyncJob(ctx, { accountId: actor.accountId, schoolId: actor.schoolId, integrationId: integration._id, kind }, "ai", now, window);
     await writeAuditEvent(ctx, {
       actorAccountId: actor.accountId,
       schoolId: actor.schoolId,
@@ -2586,6 +2643,7 @@ export const requestAiRefresh = mutation({
         reason: (args.reason ?? "stale_school_data").slice(0, 240),
         kinds: kinds.join(","),
         nextSyncAt: now,
+        ...(window ? { classId: window.classId, from: window.from, to: window.to } : {}),
       },
       retentionClass: "operational",
     });
@@ -2594,6 +2652,7 @@ export const requestAiRefresh = mutation({
       skipped: kinds.length === 0,
       lastSyncAt,
       nextSyncAt: now,
+      ...(window ? { restoring: { classId: window.classId, from: window.from, to: window.to, limit: OLD_TASK_RESTORE_LIMIT } } : {}),
     };
   },
 });
@@ -2953,12 +3012,7 @@ export async function ensurePlannerProjection(
       q.eq("integrationId", integration._id).eq("providerKey", providerKey),
     )
     .collect();
-  const existingByRecord = await ctx.db
-    .query("externalProjections")
-    .withIndex("by_record_type", (q) =>
-      q.eq("recordId", source._id).eq("projectionType", "planner_task"),
-    )
-    .collect();
+  // The key finds it on every sync after the first; the record lookup is for older rows.
   const existing =
     existingByKey.find(
       (item) =>
@@ -2966,7 +3020,14 @@ export async function ensurePlannerProjection(
         item.accountId === accountId &&
         item.projectionType === "planner_task",
     ) ??
-    existingByRecord.find(
+    (
+      await ctx.db
+        .query("externalProjections")
+        .withIndex("by_record_type", (q) =>
+          q.eq("recordId", source._id).eq("projectionType", "planner_task"),
+        )
+        .collect()
+    ).find(
       (item) => item.schoolId === integration.schoolId && item.accountId === accountId,
     ) ??
     null;
@@ -3087,12 +3148,7 @@ async function ensureTimetableProjection(
       q.eq("integrationId", integration._id).eq("providerKey", providerKey),
     )
     .collect();
-  const existingByRecord = await ctx.db
-    .query("externalProjections")
-    .withIndex("by_record_type", (q) =>
-      q.eq("recordId", source._id).eq("projectionType", "timetable_event"),
-    )
-    .collect();
+  // The key finds it on every sync after the first; the record lookup is for older rows.
   const existing =
     existingByKey.find(
       (item) =>
@@ -3100,7 +3156,14 @@ async function ensureTimetableProjection(
         item.accountId === accountId &&
         item.projectionType === "timetable_event",
     ) ??
-    existingByRecord.find(
+    (
+      await ctx.db
+        .query("externalProjections")
+        .withIndex("by_record_type", (q) =>
+          q.eq("recordId", source._id).eq("projectionType", "timetable_event"),
+        )
+        .collect()
+    ).find(
       (item) => item.schoolId === integration.schoolId && item.accountId === accountId,
     ) ??
     null;
@@ -3333,7 +3396,7 @@ async function ensureTimetableLessons(
     source.sourceHash,
     title,
     cycleLength,
-    period ? `${period.startMinutes}-${period.endMinutes}-${period.timezone}` : "",
+    period ? `${period.startMinutes}-${period.endMinutes}-${period.timezone}-${[...period.weekdays].sort().join(",")}` : "",
   ].join("|").slice(0, 180);
   const providerKey = `timetable:${sourceKey}`;
   const today = Math.floor(now / DAY_MS) * DAY_MS;
@@ -3368,8 +3431,9 @@ async function ensureTimetableLessons(
     const key = `${sourceKey}:${date}:official_event`.slice(0, 500);
     keys.add(key);
     const known = lessonByKey.get(key);
-    // A lesson someone took off stays off until the slot itself changes.
-    if (known?.sourceHash === sourceHash) {
+    // Keep personal removals; lessons retired by a period change may return.
+    if (known?.sourceHash === sourceHash &&
+      !(known.sourceLocked && known.status === "removed" && known.sourceCapabilityState === "stale")) {
       firstItemId ??= known._id;
       continue;
     }
@@ -3428,6 +3492,40 @@ async function ensureTimetableLessons(
   });
   return { projection: (await ctx.db.get(projectionId))!, created };
 }
+
+/** Rebuild stored timetable slots after a school changes its clock times; no provider request is needed. */
+export const refreshPeriodLessons = internalMutation({
+  args: {
+    integrationId: v.id("schoolIntegrations"),
+    periodKey: v.string(),
+    cursor: v.union(v.string(), v.null()),
+  },
+  handler: async (ctx, args) => {
+    const integration = await ctx.db.get(args.integrationId);
+    if (!integration || integration.status === "revoked" || integration.status === "disconnected") return;
+    const page = await ctx.db.query("externalRecords")
+      .withIndex("by_integration_type", (q) => q.eq("integrationId", integration._id).eq("recordType", "timetable"))
+      .paginate({ cursor: args.cursor, numItems: 10 });
+    const followsClass = classFollowPolicy(ctx, integration._id);
+    for (const source of page.page) {
+      const accountId = source.mappedAccountId;
+      const cycleDay = timetableCycleDay(source);
+      const normalized = record(source.normalized);
+      if (source.schoolId !== integration.schoolId || source.tombstone || !accountId || cycleDay === undefined ||
+        String(normalized.periodKey ?? normalized.period ?? "") !== args.periodKey ||
+        !await followsClass(accountId, source)) continue;
+      const preferences = await loadSyncPreferences(ctx, accountId, integration._id);
+      if (hiddenByPreferences(preferences, source, Date.now())) continue;
+      const existing = await ctx.db.query("externalProjections")
+        .withIndex("by_account_record", (q) => q.eq("accountId", accountId).eq("recordId", source._id)).take(10);
+      if (existing.some((projection) => projection.projectionType === "timetable_event" && projection.state !== "active")) continue;
+      await ensureTimetableLessons(ctx, integration, accountId, source, cycleDay);
+    }
+    if (!page.isDone) await ctx.scheduler.runAfter(0, internal.managebac.refreshPeriodLessons, {
+      ...args, cursor: page.continueCursor,
+    });
+  },
+});
 
 function legacyTimetableParts(projectionId: string) {
   const separator = projectionId.indexOf("#");
@@ -3579,6 +3677,7 @@ async function ensureResourceProjection(
 }
 
 const classRecordsByPage = new WeakMap<MutationCtx, Doc<"externalRecords">[]>();
+const classTargetsByPage = new WeakMap<MutationCtx, Map<string, Promise<Doc<"externalRecords">[]>>>();
 
 async function ensureSourceRelations(
   ctx: MutationCtx,
@@ -3586,22 +3685,40 @@ async function ensureSourceRelations(
   source: Doc<"externalRecords">,
 ) {
   if (!source.providerClassId || source.recordType === "class") return;
-  const known = classRecordsByPage.get(ctx);
-  const classCandidates = known ?? await ctx.db
-    .query("externalRecords")
-    .withIndex("by_integration_type", (q) =>
-      q.eq("integrationId", integration._id).eq("recordType", "class"),
-    )
-    .take(500);
-  classRecordsByPage.set(ctx, classCandidates);
-  const target = classCandidates.find(
-    (item) =>
-      item.schoolId === integration.schoolId &&
-      (item.mappedAccountId === undefined ||
-        item.mappedAccountId === source.mappedAccountId) &&
-      (item.providerRecordId === source.providerClassId ||
-        item.providerClassId === source.providerClassId),
-  );
+  const providerClassId = source.providerClassId;
+  const matches = (item: Doc<"externalRecords">) =>
+    item.integrationId === integration._id &&
+    item.schoolId === integration.schoolId &&
+    item.recordType === "class" &&
+    (item.mappedAccountId === undefined ||
+      item.mappedAccountId === source.mappedAccountId) &&
+    (item.providerRecordId === providerClassId ||
+      item.providerClassId === providerClassId);
+  // A class row names its own class id, so one indexed read finds it. Every
+  // record of a page used to read the integration's whole class list instead.
+  const byClass = classTargetsByPage.get(ctx) ?? new Map<string, Promise<Doc<"externalRecords">[]>>();
+  classTargetsByPage.set(ctx, byClass);
+  let direct = byClass.get(providerClassId);
+  if (!direct) {
+    direct = ctx.db
+      .query("externalRecords")
+      .withIndex("by_class_type", (q) => q.eq("providerClassId", providerClassId).eq("recordType", "class"))
+      .take(50);
+    byClass.set(providerClassId, direct);
+  }
+  let target = (await direct).find(matches);
+  if (!target) {
+    // Older class rows may lack their own class id: the full list, once per page.
+    const known = classRecordsByPage.get(ctx);
+    const classCandidates = known ?? await ctx.db
+      .query("externalRecords")
+      .withIndex("by_integration_type", (q) =>
+        q.eq("integrationId", integration._id).eq("recordType", "class"),
+      )
+      .take(500);
+    classRecordsByPage.set(ctx, classCandidates);
+    target = classCandidates.find(matches);
+  }
   if (!target) return;
   const relationType =
     source.recordType === "assessment"
@@ -3896,6 +4013,30 @@ async function projectRecord(
   return { projected: false, created: false };
 }
 
+/** How stale the school's shared "last synced" stamp may get from students' own jobs. */
+const SCHOOL_SYNC_STAMP_MS = 10 * 60_000;
+
+/**
+ * A student's finished job freshens the school's connection row. Every
+ * student's School, Calendar and status reads that row, so it is rewritten
+ * only when the stamp is getting old or the status changes, not after every
+ * job of every student.
+ */
+async function stampSchoolSync(
+  ctx: MutationCtx,
+  integration: Doc<"schoolIntegrations">,
+  now: number,
+  change: { completed: boolean; reconnect: boolean },
+) {
+  const stamp = change.completed && now - (integration.lastSyncAt ?? 0) >= SCHOOL_SYNC_STAMP_MS;
+  if (!stamp && !change.reconnect) return;
+  await ctx.db.patch(integration._id, {
+    ...(stamp ? { lastSyncAt: now } : {}),
+    ...(change.reconnect ? { status: "connected" as const } : {}),
+    updatedAt: now,
+  });
+}
+
 /** Errors no retry fixes: someone has to change something first (see describeSchoolSyncProblem). */
 const BLOCKING_SYNC_ERRORS = new Set([
   "INTEGRATION_PERMISSION_DENIED",
@@ -3997,6 +4138,8 @@ function inJobTargets(
   if (!runKind) return true;
   if (source.syncKind !== runKind) return false;
   if (!targets) return true;
+  // Bringing back a range of older tasks reads a slice, never the whole list: nothing is unseen.
+  if (targets.window) return false;
   if (
     SCHOOL_SYNC_KIND_INFO[runKind].classScoped &&
     !CLASS_IDENTITY_TYPES.has(source.recordType) &&
@@ -4062,6 +4205,67 @@ export async function purgeSchoolRecord(
   await ctx.db.delete(source._id);
   return true;
 }
+
+const TASK_SWEEP_BATCH = 100;
+const TASK_RECORD_TYPES = ["assignment", "deadline", "assessment", "task"] as const;
+
+/**
+ * Lets go of one task past its keep date. Only the copy Spectra kept goes: work the student
+ * made from it (a plan, notes) and the deadline already on their Calendar stay, and its
+ * projections stay linked by provider key, so bringing the task back reuses them. A task the
+ * student edited in Spectra is kept.
+ */
+async function retireExpiredTask(ctx: MutationCtx, source: Doc<"externalRecords">) {
+  const edited = await ctx.db.query("externalRecordOverlays").withIndex("by_record_account", (q) => q.eq("recordId", source._id)).first();
+  if (edited) {
+    await ctx.db.patch(source._id, { expiresAt: TASK_KEPT_INDEFINITELY });
+    return false;
+  }
+  const [outgoing, incoming, conflicts, migrations] = await Promise.all([
+    ctx.db.query("externalRecordRelations").withIndex("by_source", (q) => q.eq("sourceRecordId", source._id)).take(200),
+    ctx.db.query("externalRecordRelations").withIndex("by_target", (q) => q.eq("targetRecordId", source._id)).take(200),
+    ctx.db.query("externalSyncConflicts").withIndex("by_record_status", (q) => q.eq("recordId", source._id)).take(50),
+    ctx.db.query("externalRecordIdentityMigrations").withIndex("by_legacy_record", (q) => q.eq("legacyRecordId", source._id)).take(10),
+  ]);
+  for (const row of [...outgoing, ...incoming, ...conflicts, ...migrations]) await ctx.db.delete(row._id);
+  await ctx.db.delete(source._id);
+  return true;
+}
+
+/**
+ * The retention sweep (daily cron, continuing itself while there is work): removes tasks past
+ * their keep date, and gives older rows saved before keep dates existed theirs.
+ */
+export const sweepExpiredTasks = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    let budget = TASK_SWEEP_BATCH;
+    let retired = 0;
+    let dated = 0;
+    for (const recordType of TASK_RECORD_TYPES) {
+      if (budget <= 0) break;
+      const undated = await ctx.db.query("externalRecords")
+        .withIndex("by_type_expiry", (q) => q.eq("recordType", recordType).eq("expiresAt", undefined)).take(budget);
+      budget -= undated.length;
+      for (const row of undated) {
+        const expiresAt = taskExpiresAt(row.normalized);
+        if (expiresAt <= now && await retireExpiredTask(ctx, row)) retired += 1;
+        else if (expiresAt > now) {
+          await ctx.db.patch(row._id, { expiresAt });
+          dated += 1;
+        }
+      }
+      if (budget <= 0) break;
+      const expired = await ctx.db.query("externalRecords")
+        .withIndex("by_type_expiry", (q) => q.eq("recordType", recordType).gte("expiresAt", 0).lte("expiresAt", now)).take(budget);
+      budget -= expired.length;
+      for (const row of expired) if (await retireExpiredTask(ctx, row)) retired += 1;
+    }
+    if (budget <= 0) await ctx.scheduler.runAfter(0, internal.managebac.sweepExpiredTasks, {});
+    return { retired, dated, more: budget <= 0 };
+  },
+});
 
 /** Records one student keeps of one kind (in one class, when given). */
 function recordsOfKind(
@@ -4206,6 +4410,8 @@ export const commitNormalizedPage = mutation({
     const followsClass = classFollowPolicy(ctx, integration._id);
     const kindOf = recordKindPolicy(ctx, integration._id, capability, now);
     const runTrigger = triggerOfRun(syncRun);
+    const restoring = syncPass(syncRun)?.targets?.window;
+    const taskRoute = isTaskRecordType(capability.recordType);
     const seenKeys: Array<{ sourceIdentityKey: string; providerRecordKey: string }> = [];
     for (const input of args.records) {
       const mappedAccountId =
@@ -4215,12 +4421,26 @@ export const commitNormalizedPage = mutation({
         audienceScope: input.audienceScope,
         academicPeriodKey: input.academicPeriodKey,
       });
-      // Every listed record counts as seen, followed or not, exactly as the
-      // reconciliation compares them.
-      seenKeys.push({
+      const seen = {
         sourceIdentityKey: canonicalKey,
         providerRecordKey: input.providerRecordKey.slice(0, 700),
-      });
+      };
+      // Spectra keeps tasks for two weeks in the archive. An older one is not
+      // looked up or stored (the retention sweep removes a kept copy), unless
+      // the student asked for its range back, a bounded number at a time.
+      const expiresAt = taskRoute ? taskExpiresAt(input.normalized) : undefined;
+      const expired = expiresAt !== undefined && expiresAt <= now;
+      if (taskRoute && restoring) {
+        const due = taskDueAt(input.normalized);
+        if (due === undefined || due < restoring.from || due > restoring.to ||
+            counts.created + counts.updated + counts.unchanged >= restoring.limit) {
+          counts.skipped += 1;
+          continue;
+        }
+      } else if (expired) {
+        counts.skipped += 1;
+        continue;
+      }
       if (!await followsClass(syncRun.accountId, { ...input, recordType: capability.recordType })) {
         counts.skipped += 1;
         continue;
@@ -4255,6 +4475,9 @@ export const commitNormalizedPage = mutation({
             canonicalAcademicPeriodKey(item.academicPeriodKey) ===
               canonicalAcademicPeriodKey(input.academicPeriodKey),
         );
+      // Only a stored row can be taken for one that vanished, so only those
+      // are recorded as seen; a row this pass writes is newer than the pass.
+      if (existing) seenKeys.push(seen);
       // The student's modes decide what a personal record may become, on
       // every page: Off never stores, and a job stores only its own kind.
       const syncKind = mappedAccountId ? await kindOf(mappedAccountId, input) : undefined;
@@ -4274,6 +4497,12 @@ export const commitNormalizedPage = mutation({
           continue;
         }
       }
+      // A task brought back is kept two weeks from now; a kept copy never shortens.
+      const keepUntil = expiresAt === undefined ? undefined : Math.max(
+        expiresAt,
+        restoring ? now + PAST_TASK_KEEP_MS : 0,
+        existing?.expiresAt !== undefined && existing.expiresAt < TASK_KEPT_INDEFINITELY ? existing.expiresAt : 0,
+      );
       let source: Doc<"externalRecords">;
       if (existing?.sourceHash === input.sourceHash && !existing.tombstone) {
         counts.unchanged += 1;
@@ -4281,21 +4510,26 @@ export const commitNormalizedPage = mutation({
         // records writes nothing. A week-old stamp is still refreshed, which
         // keeps a concurrent pass from taking the record for one that vanished.
         if (
+          existing.expiresAt !== keepUntil ||
           existing.syncKind !== syncKind ||
           existing.sourceIdentityKey !== canonicalKey ||
           existing.sourceState !== "available" ||
           existing.sourceStateReason !== undefined ||
           now - (existing.sourceStateAt ?? 0) > RECORD_SEEN_STAMP_MS
         )
-          await ctx.db.patch(existing._id, {
+        {
+          const stamp = {
             syncKind,
             sourceIdentityKey: canonicalKey,
-            sourceState: "available",
+            sourceState: "available" as const,
             sourceStateAt: now,
             sourceStateReason: undefined,
+            expiresAt: keepUntil,
             updatedAt: now,
-          });
-        source = (await ctx.db.get(existing._id))!;
+          };
+          await ctx.db.patch(existing._id, stamp);
+          source = { ...existing, ...stamp };
+        } else source = existing;
       } else if (existing) {
         const previousNormalized = existing.normalized;
         await ctx.db.patch(existing._id, {
@@ -4315,6 +4549,7 @@ export const commitNormalizedPage = mutation({
           tombstonedAt: undefined,
           syncKind,
           sourceIdentityKey: canonicalKey,
+          expiresAt: keepUntil,
           sourceState:
             existing.sourceHash === input.sourceHash ? "available" : "changed",
           sourceStateAt: now,
@@ -4391,6 +4626,7 @@ export const commitNormalizedPage = mutation({
           tombstone: false,
           syncKind,
           sourceIdentityKey: canonicalKey,
+          expiresAt: keepUntil,
           sourceState: "available",
           sourceStateAt: now,
           fetchedAt: now,
@@ -4401,6 +4637,8 @@ export const commitNormalizedPage = mutation({
         counts.created += 1;
       }
       await ensureSourceRelations(ctx, integration, source);
+      // An older task brought back is for reading: it puts nothing back on the planner or Calendar.
+      if (expired) continue;
       const projection = await projectRecord(ctx, integration, syncRun, source);
       if (projection.projected) counts.projected += projection.created ? 1 : 0;
     }
@@ -5045,17 +5283,14 @@ async function reconcileSyncPass(
   const jobScope = stateScope(syncRun);
   if (jobScope) {
     await settleStudentSyncState(ctx, latestRun, status, now);
-    await ctx.db.patch(integration._id, {
-      ...(status === "completed" ? { lastSyncAt: now } : {}),
-      ...(integration.status === "degraded" && !integration.blockedReason && syncRun.counts.errors === 0
-        ? { status: "connected" as const }
-        : {}),
-      updatedAt: now,
+    await stampSchoolSync(ctx, integration, now, {
+      completed: status === "completed",
+      reconnect: integration.status === "degraded" && !integration.blockedReason && syncRun.counts.errors === 0,
     });
     return { status, counts };
   }
   if (syncRun.accountId) {
-    await ctx.db.patch(integration._id, { lastSyncAt: now, updatedAt: now });
+    await stampSchoolSync(ctx, integration, now, { completed: true, reconnect: false });
     return { status, counts };
   }
   const nextSyncAt =
@@ -5083,6 +5318,9 @@ async function removeUnseenSource(
 ) {
   if (source.tombstone || !await followsClass(source.mappedAccountId ?? syncRun.accountId, source))
     return false;
+  // A task past its keep date is no longer read or recorded as seen; the retention sweep removes it.
+  if (isTaskRecordType(source.recordType) && (source.expiresAt ?? taskExpiresAt(source.normalized)) <= now)
+    return false;
   const seen = source.sourceIdentityKey !== undefined
     ? await ctx.db.query("externalSyncSeenKeys").withIndex("by_run_identity", (q) =>
         q.eq("syncRunId", syncRun._id).eq("sourceIdentityKey", source.sourceIdentityKey!)).first()
@@ -5092,9 +5330,9 @@ async function removeUnseenSource(
   // A pass reads the provider over time. A record another sync created or
   // saw after this pass began is present, even though this pass read its
   // page before it appeared; it is not removed.
-  if (source.createdAt > pass.startedAt ||
+  if (source.createdAt >= pass.startedAt ||
       ((source.sourceState === "available" || source.sourceState === "changed") &&
-        (source.sourceStateAt ?? 0) > pass.startedAt))
+        (source.sourceStateAt ?? 0) >= pass.startedAt))
     return false;
   await ctx.db.patch(source._id, {
     tombstone: true,

@@ -159,7 +159,21 @@ export type HarnessTool<A = Record<string, unknown>> = {
   stage?: (args: A, ctx: ToolContext) => Promise<void>;
   /** Turns a user's answer into the tool result (ask_user). */
   answer?: (args: A, answer: InputAnswer) => ToolOutcome;
+  /**
+   * Reference reads whose answer doesn't change during a run (a course guide, a
+   * web search). A call repeating one whose result is still in the transcript is
+   * answered by pointing at it instead of reading again.
+   */
+  stable?: boolean;
+  /**
+   * A stable read worth carrying into the thread's next message (a course guide):
+   * the next run starts with its result in history instead of reading it again.
+   */
+  carry?: boolean;
 };
+
+/** A carried read: the call to replay into the next run's history. */
+export type CarriedRead = { name: string; arguments: string };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type AnyHarnessTool = HarnessTool<any>;

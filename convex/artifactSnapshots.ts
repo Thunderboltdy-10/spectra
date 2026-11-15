@@ -211,7 +211,11 @@ export const maintain = internalMutation({
     const unreferenced = await ctx.db.query("artifactSnapshotObjects").withIndex("by_state_reference", (q) => q.eq("state", "cold").lt("lastReferencedAt", purgeBefore)).take(verifyLimit);
     let purged = 0;
     for (const object of unreferenced) {
-      if (object.refCount > 0) continue;
+      // Still referenced: look again in a month rather than rereading its payload every day.
+      if (object.refCount > 0) {
+        await ctx.db.patch(object._id, { lastReferencedAt: now });
+        continue;
+      }
       await ctx.db.patch(object._id, { payload: null, byteLength: 0, state: "deleted", verifiedAt: now });
       purged += 1;
     }

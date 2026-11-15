@@ -192,6 +192,9 @@ function isAbort(error: unknown, signal: AbortSignal) {
   );
 }
 
+export const ALREADY_READ_RESULT =
+  "You already made this exact call in this conversation, and its full result is above, unchanged. Use that result instead of calling again. If it is no longer in your context, make the same call once more and it will run.";
+
 function canonicalArguments(raw: string) {
   try {
     return JSON.stringify(sortKeys(JSON.parse(raw)));
@@ -403,6 +406,30 @@ export async function runHarnessLoop(
     }
   };
 
+  /** Stable reads already answered by pointing back, so a second repeat runs for real. */
+  const pointedBack = new Set<string>();
+
+  /** Whether an identical stable read still has its full, successful result in the transcript. */
+  const answeredAbove = (prepared: Prepared) => {
+    if (!prepared.tool?.stable || prepared.error) return false;
+    const signature = `${prepared.call.name}:${canonicalArguments(prepared.call.arguments)}`;
+    if (pointedBack.has(signature)) return false;
+    const earlier = new Set<string>();
+    for (const message of state.messages) {
+      if (message.role === "assistant")
+        for (const call of message.tool_calls ?? [])
+          if (call.id !== prepared.call.id && call.function.name === prepared.call.name && canonicalArguments(call.function.arguments) === canonicalArguments(prepared.call.arguments))
+            earlier.add(call.id);
+      if (message.role === "tool" && earlier.has(message.tool_call_id) && typeof message.content === "string" &&
+          message.content !== ALREADY_READ_RESULT && !message.content.startsWith(`${prepared.call.name} failed`) && !message.content.startsWith(`${prepared.call.name} did not finish`) &&
+          message.content !== STOPPED_RESULT) {
+        pointedBack.add(signature);
+        return true;
+      }
+    }
+    return false;
+  };
+
   const noteRepeat = (prepared: Prepared, outcome: ToolOutcome): ToolOutcome => {
     const signature = `${prepared.call.name}:${canonicalArguments(prepared.call.arguments)}`;
     const key = hashText(signature);
@@ -461,6 +488,8 @@ export async function runHarnessLoop(
       outcome = { ok: false, content: prepared.error ?? "This call could not run." };
     } else if (deps.signal.aborted) {
       outcome = { ok: false, content: STOPPED_RESULT };
+    } else if (answeredAbove(prepared)) {
+      outcome = { ok: true, content: ALREADY_READ_RESULT, doneLabel: "Used what it already read" };
     } else if (
       (prepared.effect === "irreversible" || prepared.effect === "settings") &&
       deps.policy(prepared.effect, prepared.category) === "deny"

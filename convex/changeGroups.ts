@@ -22,8 +22,11 @@ import {
 } from "../shared/collaboration-change-group-capacity";
 import { confirmCanonicalPlacements } from "./artifactEmbeds";
 import { fitsConvexNesting } from "../shared/convex-nesting.mjs";
+import { CHANGE_GROUP_SNAPSHOT_KEEP_MS } from "./collaborationRetention";
 
 export const HUMAN_CHANGE_IDLE_MS = 45_000;
+/** Longest wait between recovery checks on idle history still awaiting its projection. */
+export const IDLE_RECOVERY_MAX_MS = 30 * 60_000;
 
 async function hasPendingProjection(ctx: MutationCtx, artifactId: Id<"spectraArtifacts">) {
   const room = await ctx.db.query("collaborationRooms").withIndex("by_artifact_partition", q => q.eq("artifactId", artifactId).eq("partitionKey", "root")).unique();
@@ -329,6 +332,9 @@ export async function commitChangeGroup(
     return group?.versionId
       ? { status: "committed" as const, versionId: group.versionId }
       : { status: "unavailable" as const };
+  // Checked before loading the artifact: a waiting group is retried often, and the room row is small.
+  if (group.source === "human" && await hasPendingProjection(ctx, group.artifactId))
+    return { status: "pending_projection" as const };
   const artifact = await ctx.db.get(group.artifactId);
   if (!artifact) {
     await ctx.db.patch(group._id, {
@@ -337,8 +343,6 @@ export async function commitChangeGroup(
     });
     return { status: "abandoned" as const };
   }
-  if (group.source === "human" && await hasPendingProjection(ctx, group.artifactId))
-    return { status: "pending_projection" as const };
   let before = group.baseSnapshot;
   let after = group.finalSnapshot;
   const now = Date.now();
@@ -667,7 +671,8 @@ export const commitIdle = internalMutation({
       // A disconnected room can leave a durable head awaiting projection for
       // days. Back off these recovery checks; a catching-up checkpoint below
       // commits idle groups immediately when their projection arrives.
-      const retryMs = Math.min(60_000, Math.max(5_000,
+      // The delay doubles from 5 seconds up to half an hour.
+      const retryMs = Math.min(IDLE_RECOVERY_MAX_MS, Math.max(5_000,
         Date.now() - group.lastActivityAt - HUMAN_CHANGE_IDLE_MS));
       await ctx.scheduler.runAfter(retryMs, internal.changeGroups.commitIdle, args);
     }
@@ -930,7 +935,16 @@ export const revertPlanForRun = mutation({
     }> = [];
     const blocked: Array<{ artifactId: string; reason: string }> = [];
     for (const group of groups) {
-      if (group.source !== "ai" || group.baseSnapshot === undefined) continue;
+      if (group.source !== "ai") continue;
+      if (group.baseSnapshot === undefined) {
+        // Before/after copies are let go two weeks after a run (collaborationRetention.ts).
+        if (group.status === "committed" && (group.committedAt ?? 0) < Date.now() - CHANGE_GROUP_SNAPSHOT_KEEP_MS)
+          blocked.push({
+            artifactId: String(group.artifactId),
+            reason: "This run finished over two weeks ago. Undo from Version history if you want the earlier copy.",
+          });
+        continue;
+      }
       const versions = await ctx.db
         .query("spectraArtifactVersions")
         .withIndex("by_artifact_created", (q) =>

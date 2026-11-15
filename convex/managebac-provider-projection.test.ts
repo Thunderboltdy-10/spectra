@@ -8,6 +8,12 @@ import { bridgeKey, calendarFixture, identity, initialSource } from "../scripts/
 import { planArtifactYjsMutation } from "../src/features/spectra/collaboration/artifact-yjs-model";
 import { artifactProjection } from "../scripts/collaboration-artifact-projection.mjs";
 
+// These fixtures use fixed due dates, so the two-week task retention would treat them as long gone.
+vi.mock("../shared/school-sync", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../shared/school-sync")>();
+  return { ...actual, taskExpiresAt: () => actual.TASK_KEPT_INDEFINITELY };
+});
+
 const modules = import.meta.glob("./**/*.ts");
 const changedSource = { ...initialSource, title: "Revised official essay", description: "New source instructions.", dueAt: "2026-10-25T09:00:00+01:00" };
 const vectorHash = (document: Y.Doc) => createHash("sha256").update(Y.encodeStateVector(document)).digest("base64url");
@@ -233,6 +239,8 @@ describe("ManageBac provider projection through canonical history", () => {
     const f = await calendarFixture(modules);
     await f.sync();
     const { planId, roomId } = await openRoomWithPersonalEdit(f, content => { content.progressNote = "Personal"; });
+    // The fresh reconciliation starts after the source was last seen.
+    vi.setSystemTime(Date.now() + 1);
     expect(await f.complete([])).toMatchObject({ status: "running" });
     await drain(f);
     const after = await state(f, planId);

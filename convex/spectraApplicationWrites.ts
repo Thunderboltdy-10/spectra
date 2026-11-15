@@ -159,7 +159,7 @@ function mutationFor(command: string, args: Row, runId: string, executionId: str
       ...(typeof args.required === "boolean" ? { required: args.required } : {}),
     } };
     case "remove_agent_bench_case": return { name: "agents:removeBenchCase", args: { agentId: String(args.agentId ?? ""), caseId: String(args.caseId ?? "") } };
-    case "trigger_managebac_sync": return { name: "managebac:requestAiRefresh", args: aiRefreshRequest(args.purpose, args.force) };
+    case "trigger_managebac_sync": return { name: "managebac:requestAiRefresh", args: aiRefreshRequest(args.purpose, args.force, args) };
     case "select_managebac_classes": return { name: "managebac:setSelectedClasses", args: {
       recordIds: strings(args.recordIds),
       ...(typeof args.expectedRevision === "number" ? { expectedRevision: args.expectedRevision } : {}),

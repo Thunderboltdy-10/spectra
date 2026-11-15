@@ -317,7 +317,7 @@ describe("application action contract matrix (stubbed persistence)", () => {
     "asks ManageBac only for the kinds the %s refresh needs", (purpose, kinds) => {
       expect(aiRefreshRequest(purpose, undefined)).toEqual({ reason: `ai_${aiSyncPurpose(purpose)}`, force: true, kinds });
       expect(aiRefreshRequest(purpose, false).force).toBe(false);
-      expect(readFileSync("convex/spectraApplicationWrites.ts", "utf8")).toContain("aiRefreshRequest(args.purpose, args.force)");
+      expect(readFileSync("convex/spectraApplicationWrites.ts", "utf8")).toContain("aiRefreshRequest(args.purpose, args.force, args)");
     });
 
   it.each(Object.entries(CALENDAR_COMMAND_ALIASES))("dispatches Calendar alias %s with its operation identity", async (alias, canonical) => {

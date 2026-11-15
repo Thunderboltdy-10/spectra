@@ -139,8 +139,6 @@ export function DayField({
   );
 }
 
-const QUARTERS = Array.from({ length: 96 }, (_, index) => `${String(Math.floor(index / 4)).padStart(2, "0")}:${String((index % 4) * 15).padStart(2, "0")}`);
-
 function minutesOf(time: string) {
   const [hour, minute] = time.split(":").map(Number);
   return hour! * 60 + minute!;
@@ -160,6 +158,7 @@ export function TimeField({
   placeholder = "Add a time",
   from,
   opensAt = "08:00",
+  stepMinutes = 15,
   className,
 }: {
   value: string;
@@ -171,6 +170,8 @@ export function TimeField({
   from?: string;
   /** Where the list opens when no time is chosen yet. */
   opensAt?: string;
+  /** The interval offered in the list; typing still accepts any exact time. */
+  stepMinutes?: 5 | 15;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -180,10 +181,14 @@ export function TimeField({
   const list = useRef<HTMLUListElement>(null);
   const listId = useId();
   const slots = useMemo(() => {
-    if (!from) return QUARTERS;
-    const start = QUARTERS.findIndex((slot) => slot > from);
-    return start < 0 ? QUARTERS : [...QUARTERS.slice(start), ...QUARTERS.slice(0, start)];
-  }, [from]);
+    const times = Array.from({ length: 1440 / stepMinutes }, (_, index) => {
+      const minutes = index * stepMinutes;
+      return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+    });
+    if (!from) return times;
+    const start = times.findIndex((slot) => slot > from);
+    return start < 0 ? times : [...times.slice(start), ...times.slice(0, start)];
+  }, [from, stepMinutes]);
 
   const showing = draft ?? (value ? formatTimeOfDay(value) : "");
   const commit = (time: string | null) => {

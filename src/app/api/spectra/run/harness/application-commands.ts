@@ -239,7 +239,14 @@ const COMMANDS: Record<string, ApplicationCommand> = {
     authority: "sharing",
   },
   trigger_managebac_sync: {
-    input: z.object({ purpose: z.enum(AI_SYNC_PURPOSES as [AiSyncPurpose, ...AiSyncPurpose[]]), force: z.boolean().optional() }),
+    input: z.object({
+      purpose: z.enum(AI_SYNC_PURPOSES as [AiSyncPurpose, ...AiSyncPurpose[]]),
+      force: z.boolean().optional(),
+      // past_tasks only: bring back one class's older tasks due between these dates (YYYY-MM-DD).
+      classId: z.string().min(1).max(200).optional(),
+      from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    }),
     authority: "managebac_sync",
   },
   select_managebac_classes: {

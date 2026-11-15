@@ -506,7 +506,24 @@ function timeFromMinutes(value: number) {
   return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 }
 
-function PeriodMapPanel({
+type PeriodTimes = Pick<PeriodMap, "periodKey" | "startMinutes" | "endMinutes" | "timezone" | "weekdays">;
+
+function nextPeriod(periods: PeriodTimes[]) {
+  const previous = periods.toSorted((a, b) => a.endMinutes - b.endMinutes).at(-1);
+  const nextId = Math.max(0, ...periods.map((period) => /^\d+$/.test(period.periodKey) ? Number(period.periodKey) : 0)) + 1;
+  const start = previous?.endMinutes ?? 8 * 60 + 30;
+  const end = start + (previous ? previous.endMinutes - previous.startMinutes : 50);
+  return {
+    periodKey: String(nextId),
+    label: `Period ${nextId}`,
+    start: start < 1440 ? timeFromMinutes(start) : "",
+    end: end <= 1439 ? timeFromMinutes(end) : "",
+    timezone: previous?.timezone ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"),
+    weekdays: previous?.weekdays ?? [1, 2, 3, 4, 5],
+  };
+}
+
+export function PeriodMapPanel({
   periodMaps,
   busy,
   onSave,
@@ -525,21 +542,14 @@ function PeriodMapPanel({
   onRemove: (periodMapId: string) => Promise<unknown>;
 }) {
   const [editorOpen, setEditorOpen] = useState(false);
-  const [draft, setDraft] = useState({
-    periodKey: "",
-    label: "",
-    start: "08:30",
-    end: "09:20",
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-    weekdays: [1, 2, 3, 4, 5],
-  });
+  const [draft, setDraft] = useState(() => nextPeriod(periodMaps));
   const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   return (
     <div className="grid gap-x-10 gap-y-7 xl:grid-cols-[minmax(0,1fr)_320px]">
       <section className="min-w-0">
         <header className="mb-4">
           <div className="flex items-center gap-2"><Clock3 size={14} className="text-[var(--accent-mint)]" /><h2 className="text-body font-semibold">Verified school periods</h2></div>
-          <p className="mt-1 max-w-2xl text-micro leading-5 text-[var(--text-tertiary)]">Calendar uses a period only when a source event has no exact time. Exact source times always win.</p>
+          <p className="mt-1 max-w-2xl text-micro leading-5 text-[var(--text-tertiary)]">Set the school’s lesson times. Saving a period updates the matching lessons in everyone’s Calendar.</p>
         </header>
         {periodMaps.length ? (
           <div className="space-y-1">
@@ -559,9 +569,9 @@ function PeriodMapPanel({
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-body font-semibold">Period editor</h2>
-            <p className="mt-1 text-micro leading-5 text-[var(--text-tertiary)]">Use the provider’s exact period key.</p>
+            <p className="mt-1 text-micro leading-5 text-[var(--text-tertiary)]">The next period follows the previous one. Adjust the times for breaks.</p>
           </div>
-          <button type="button" onClick={() => setEditorOpen((open) => !open)} className="grid size-8 shrink-0 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-expanded={editorOpen} aria-label={editorOpen ? "Close period editor" : "Add period"} title={editorOpen ? "Close period editor" : "Add period"}>
+          <button type="button" onClick={() => { if (!editorOpen) setDraft(nextPeriod(periodMaps)); setEditorOpen((open) => !open); }} className="grid size-8 shrink-0 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-expanded={editorOpen} aria-label={editorOpen ? "Close period editor" : "Add period"} title={editorOpen ? "Close period editor" : "Add period"}>
             {editorOpen ? <X size={14} /> : <Plus size={14} />}
           </button>
         </div>
@@ -569,21 +579,28 @@ function PeriodMapPanel({
         className="mt-5"
         onSubmit={(event) => {
           event.preventDefault();
-          void onSave({
+          if (!draft.start || !draft.end || minutesFromTime(draft.end) <= minutesFromTime(draft.start)) {
+            toast.error("Choose a start and end time, with the end after the start.");
+            return;
+          }
+          const period = {
             periodKey: draft.periodKey,
             label: draft.label,
             startMinutes: minutesFromTime(draft.start),
             endMinutes: minutesFromTime(draft.end),
             timezone: draft.timezone,
             weekdays: draft.weekdays,
-          }).then(() => setDraft((current) => ({ ...current, periodKey: "", label: "" })));
+          };
+          void onSave(period).then((saved) => {
+            if (saved !== false) setDraft(nextPeriod([...periodMaps.filter((item) => item.periodKey !== period.periodKey), period]));
+          });
         }}
       >
         <div className="grid grid-cols-2 gap-3">
-          <label className="text-micro font-medium text-[var(--text-secondary)]">Period key<input required value={draft.periodKey} onChange={(event) => setDraft((current) => ({ ...current, periodKey: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro outline-none focus:border-[var(--accent-mint)]" placeholder="period-1" /></label>
+          <label className="text-micro font-medium text-[var(--text-secondary)]">Period ID<input required inputMode="numeric" value={draft.periodKey} onChange={(event) => setDraft((current) => ({ ...current, periodKey: event.target.value, label: current.label === `Period ${current.periodKey}` ? `Period ${event.target.value}` : current.label }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro outline-none focus:border-[var(--accent-mint)]" placeholder="1" /></label>
           <label className="text-micro font-medium text-[var(--text-secondary)]">Label<input required value={draft.label} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro outline-none focus:border-[var(--accent-mint)]" placeholder="Period 1" /></label>
-          <div className="text-micro font-medium text-[var(--text-secondary)]">Start<TimeField label="Start" className="mt-1 w-full" value={draft.start} onChange={(time) => setDraft((current) => ({ ...current, start: time }))} /></div>
-          <div className="text-micro font-medium text-[var(--text-secondary)]">End<TimeField label="End" className="mt-1 w-full" from={draft.start} value={draft.end} onChange={(time) => setDraft((current) => ({ ...current, end: time }))} /></div>
+          <div className="text-micro font-medium text-[var(--text-secondary)]">Start<TimeField label="Start" stepMinutes={5} className="mt-1 w-full" value={draft.start} onChange={(time) => setDraft((current) => ({ ...current, start: time }))} /></div>
+          <div className="text-micro font-medium text-[var(--text-secondary)]">End<TimeField label="End" stepMinutes={5} className="mt-1 w-full" from={draft.start} value={draft.end} onChange={(time) => setDraft((current) => ({ ...current, end: time }))} /></div>
         </div>
         <label className="mt-3 block text-micro font-medium text-[var(--text-secondary)]">IANA timezone<input required value={draft.timezone} onChange={(event) => setDraft((current) => ({ ...current, timezone: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro" placeholder="Europe/Madrid" /></label>
         <fieldset className="mt-3"><legend className="text-micro font-medium text-[var(--text-secondary)]">Weekdays</legend><div className="mt-1.5 flex flex-wrap gap-1">{weekdays.map((label, value) => <button key={label} type="button" aria-pressed={draft.weekdays.includes(value)} onClick={() => setDraft((current) => ({ ...current, weekdays: current.weekdays.includes(value) ? current.weekdays.filter((day) => day !== value) : [...current.weekdays, value].sort() }))} className={cn("h-7 rounded-md border px-2 text-micro font-semibold", draft.weekdays.includes(value) ? "border-[var(--accent-mint)] bg-[color-mix(in_oklab,var(--accent-mint)_8%,var(--bg-primary))] text-[var(--accent-mint)]" : "border-[var(--border-default)] text-[var(--text-tertiary)]")}>{label}</button>)}</div></fieldset>
@@ -594,7 +611,7 @@ function PeriodMapPanel({
   );
 }
 
-export function ManageBacIntegrationShell() {
+export function ManageBacIntegrationShell({ embedded = false }: { embedded?: boolean } = {}) {
   const [overview, setOverview] = useState<SpectraManageBacOverview | null>(
     null,
   );
@@ -606,8 +623,8 @@ export function ManageBacIntegrationShell() {
   // School links straight to what needs a decision (?tab=conflicts).
   useEffect(() => {
     const asked = new URLSearchParams(window.location.search).get("tab");
-    if (asked === "conflicts" || asked === "history") setTab(asked);
-  }, []);
+    if (!embedded && (asked === "conflicts" || asked === "history")) setTab(asked);
+  }, [embedded]);
   const [detailsTab, setDetailsTab] = useState<"details" | "activity">(
     "details",
   );
@@ -628,7 +645,7 @@ export function ManageBacIntegrationShell() {
   const refresh = useCallback(async ({ progressOnly = false }: { progressOnly?: boolean } = {}) => {
     try {
       const [overviewResult, classesResult] = await Promise.allSettled([
-        getSpectraManageBacOverview(), progressOnly ? Promise.resolve(null) : fetchMyClassCandidates(),
+        getSpectraManageBacOverview(embedded ? "school" : undefined), embedded || progressOnly ? Promise.resolve(null) : fetchMyClassCandidates(),
       ]);
       if (overviewResult.status === "rejected") throw overviewResult.reason;
       const value = overviewResult.value;
@@ -665,7 +682,7 @@ export function ManageBacIntegrationShell() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [embedded]);
 
   useEffect(() => {
     void refresh();
@@ -731,15 +748,17 @@ export function ManageBacIntegrationShell() {
 
   const runAction = useCallback(
     async (key: string, action: () => Promise<unknown>) => {
-      if (busyRef.current) return;
+      if (busyRef.current) return false;
       busyRef.current = true;
       setBusy(key);
       setError("");
       try {
         await action();
         await refresh();
+        return true;
       } catch (nextError) {
         setError(humanizeIntegrationError(nextError));
+        return false;
       } finally {
         busyRef.current = false;
         setBusy("");
@@ -796,7 +815,7 @@ export function ManageBacIntegrationShell() {
 
   const syncLabel = busy === "sync" || syncInProgress ? "Syncing…" : integration?.status === "validating" ? "Validating…" : "Sync now";
   const commands: BarCommand[] = [
-    ...(integration
+    ...(!embedded && integration
       ? [{
           id: "sync",
           icon: "syncing",
@@ -810,22 +829,28 @@ export function ManageBacIntegrationShell() {
       ? [{ id: "settings", icon: "settings", label: "ManageBac settings", labelPolicy: "never", onSelect: () => setSettingsOpen(true) } satisfies BarCommand]
       : []),
   ];
+  const Main = embedded ? "section" : "main";
+  const Body = embedded ? "div" : PageBody;
 
   if (loading)
     return (
-      <main className="min-h-0 flex-1 overflow-y-auto" data-spectra-app-surface="true">
-        <PageBody>
-          <PageHeader title="ManageBac" />
+      <Main className="min-h-0 flex-1 overflow-y-auto" data-spectra-app-surface="true">
+        <Body>
+          <PageHeader title="ManageBac" level={embedded ? "nested" : "top"} />
           <LoadingRows label="Loading ManageBac" count={6} />
-        </PageBody>
-      </main>
+        </Body>
+      </Main>
     );
 
+  if (embedded && !overview?.admin)
+    return <p role="alert" className="py-4 text-caption text-[var(--danger)]">{error || "School administrator access is required."}</p>;
+
   return (
-    <div className="spectra-wave-y relative flex h-full min-h-0 overflow-hidden text-[var(--text-primary)]">
-      <main className="min-w-0 flex-1 overflow-y-auto" data-spectra-app-surface="true">
-        <PageBody>
+    <div className={cn("relative flex min-h-0 text-[var(--text-primary)]", !embedded && "spectra-wave-y h-full overflow-hidden")}>
+      <Main className={cn("min-w-0 flex-1", !embedded && "overflow-y-auto")} data-spectra-app-surface="true">
+        <Body>
           <PageHeader
+            level={embedded ? "nested" : "top"}
             title={overview?.admin ? "ManageBac connection" : "Your ManageBac data"}
             commands={commands}
             plan={[{ hideLabel: "sync" }]}
@@ -845,7 +870,7 @@ export function ManageBacIntegrationShell() {
             </div>
           ) : null}
 
-          {integration && overview?.admin && data?.mapping?.status !== "verified" ? (
+          {!embedded && integration && overview?.admin && data?.mapping?.status !== "verified" ? (
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 px-0.5">
               <div className="min-w-0">
                 <strong className="block text-ui font-semibold">Match your verified school account</strong>
@@ -889,9 +914,9 @@ export function ManageBacIntegrationShell() {
             </div>
           ) : null}
 
-          <PanelTabs label="ManageBac sections" tabs={tabs} value={tab} onChange={(id) => setTab(id as Tab)} primaryCount={5} className="mt-5" />
+          {!embedded ? <PanelTabs label="ManageBac sections" tabs={tabs} value={tab} onChange={(id) => setTab(id as Tab)} primaryCount={5} className="mt-5" /> : null}
 
-          <div className="min-h-[470px] py-4">
+          <div className={cn("py-4", !embedded && "min-h-[470px]")}>
             {!integration ? (
               <EmptyState
                 icon={LockKeyhole}
@@ -915,7 +940,7 @@ export function ManageBacIntegrationShell() {
                 }
               />
             ) : tab === "overview" ? (
-              <div className="grid gap-x-12 gap-y-10 py-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(260px,.8fr)]">
+              <div className={cn("grid gap-x-12 gap-y-10 py-4", !embedded && "lg:grid-cols-[minmax(0,1.2fr)_minmax(260px,.8fr)]")}>
                 <section className="min-w-0">
                   <h2 className="text-caption font-medium text-[var(--text-tertiary)]">Connection</h2>
                   <div className="mt-3 flex items-start gap-3">
@@ -961,14 +986,16 @@ export function ManageBacIntegrationShell() {
                             {busy === "recheck" ? "Checking…" : "Check the connection again"}
                           </Button>
                         ) : null}
-                        <Button variant="ghost" size="sm" onClick={() => setTab("history")}>Sync history</Button>
-                        <Button variant="ghost" size="sm" onClick={() => setTab("conflicts")}>Review conflicts</Button>
+                        {!embedded ? <>
+                          <Button variant="ghost" size="sm" onClick={() => setTab("history")}>Sync history</Button>
+                          <Button variant="ghost" size="sm" onClick={() => setTab("conflicts")}>Review conflicts</Button>
+                        </> : null}
                       </div>
                     </div>
                   </div>
                 </section>
 
-                <section className="min-w-0">
+                {!embedded ? <section className="min-w-0">
                   <h2 className="text-caption font-medium text-[var(--text-tertiary)]">Synced data</h2>
                   <div className="-mx-2.5 mt-2">
                     {([
@@ -990,7 +1017,7 @@ export function ManageBacIntegrationShell() {
                       </button>
                     ))}
                   </div>
-                </section>
+                </section> : null}
               </div>
             ) : tab === "classes" ? (
               <ClassShelfEditor
@@ -1000,7 +1027,7 @@ export function ManageBacIntegrationShell() {
                 classes={classes}
                 selectionRevision={classCollection?.selectionRevision}
                 classLoadError={classLoadError}
-                onSaved={() => runAction("sync", () => syncSpectraManageBac())}
+                onSaved={async () => { await runAction("sync", () => syncSpectraManageBac()); }}
               />
             ) : tab === "calendar" ? (
               <RecordsList
@@ -1057,8 +1084,14 @@ export function ManageBacIntegrationShell() {
               />
             )}
           </div>
-        </PageBody>
-      </main>
+          {embedded ? <PeriodMapPanel
+            periodMaps={data?.periodMaps ?? []}
+            busy={busy}
+            onSave={(period) => runAction(`period:${period.periodKey}`, () => upsertSpectraCalendarPeriodMap(period))}
+            onRemove={(periodMapId) => runAction(`period-remove:${periodMapId}`, () => removeSpectraCalendarPeriodMap(periodMapId))}
+          /> : null}
+        </Body>
+      </Main>
 
       <SidePanel
         id="managebac.details"
@@ -1120,13 +1153,15 @@ export function ManageBacIntegrationShell() {
               <p className="text-caption leading-5 text-[var(--text-secondary)]">
                 Everything Spectra brings in remembers where it came from and when. Your own changes stay separate.
               </p>
-              <Button variant="ghost" size="sm" className="-ml-2 mt-1" onClick={() => setTab("provenance")}>
+              {!embedded ? <Button variant="ghost" size="sm" className="-ml-2 mt-1" onClick={() => setTab("provenance")}>
                 Review provenance
-              </Button>
+              </Button> : null}
             </RightCard>
             <RightCard title="Quick actions">
-              <QuickAction icon={AlertCircle} label="Review conflicts" onClick={() => setTab("conflicts")} />
-              <QuickAction icon={ShieldCheck} label="Review capabilities" onClick={() => setTab("provenance")} />
+              {!embedded ? <>
+                <QuickAction icon={AlertCircle} label="Review conflicts" onClick={() => setTab("conflicts")} />
+                <QuickAction icon={ShieldCheck} label="Review capabilities" onClick={() => setTab("provenance")} />
+              </> : null}
               {integration?.referenceUrl ? (
                 <a
                   href={integration.referenceUrl}

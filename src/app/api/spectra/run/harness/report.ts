@@ -167,6 +167,8 @@ export async function saveAssistantMessage(params: {
   workedMs?: number;
   /** The runtime the run moved to and finished with, when it moved. */
   finishedWith?: string;
+  /** Course guides to carry into the thread's next message. */
+  carriedReads?: Array<{ name: string; arguments: string }>;
 }) {
   if (!params.threadId || !params.content.trim()) return;
   await mutate("spectraThreads:appendMessage", {
@@ -190,6 +192,7 @@ export async function saveAssistantMessage(params: {
       ...(params.sources?.length ? { sources: params.sources } : {}),
       ...(params.workedMs !== undefined ? { workedMs: Math.round(params.workedMs) } : {}),
       ...(params.finishedWith ? { finishedWith: params.finishedWith } : {}),
+      ...(params.carriedReads?.length ? { carriedReads: params.carriedReads } : {}),
     },
   });
 }

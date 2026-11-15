@@ -201,6 +201,10 @@ function calendarItemLine(item: Record<string, unknown>, timeZone: string) {
   return `- ${parts.filter(Boolean).join(", ")}`;
 }
 
+const SYLLABUS_GUIDE_CACHE_MS = 60 * 60_000;
+const SYLLABUS_GUIDE_CACHE_SIZE = 300;
+const SYLLABUS_GUIDE_CACHE = new Map<string, { read: SyllabusGuideRead; at: number }>();
+
 export class ConvexHarnessBackend implements HarnessBackend {
   readonly timeZone: string;
   /** The operation ids recorded for each tool call, this attempt. */
@@ -1065,7 +1069,17 @@ export class ConvexHarnessBackend implements HarnessBackend {
   }
 
   async readSyllabusGuide(input: SyllabusGuideRequest): Promise<SyllabusGuideRead | null> {
-    return query<SyllabusGuideRequest, SyllabusGuideRead | null>("syllabusGuides:read", input).catch(() => null);
+    // The official guides are the same for everyone and rarely change, so a warm server reads each part once.
+    const key = JSON.stringify([input.courseId, input.level ?? "", input.section ?? ""]);
+    const cached = SYLLABUS_GUIDE_CACHE.get(key);
+    if (cached && Date.now() - cached.at < SYLLABUS_GUIDE_CACHE_MS) return cached.read;
+    const read = await query<SyllabusGuideRequest, SyllabusGuideRead | null>("syllabusGuides:read", input).catch(() => null);
+    if (read) {
+      SYLLABUS_GUIDE_CACHE.delete(key);
+      SYLLABUS_GUIDE_CACHE.set(key, { read, at: Date.now() });
+      if (SYLLABUS_GUIDE_CACHE.size > SYLLABUS_GUIDE_CACHE_SIZE) SYLLABUS_GUIDE_CACHE.delete(SYLLABUS_GUIDE_CACHE.keys().next().value!);
+    }
+    return read;
   }
 
   /** Not connected, or not verified: it stays true for the rest of the run, so it is read once. */

@@ -19,8 +19,10 @@ const TOUCH_INTERVAL_MS = 60_000;
 type QueueDb = Pick<MutationCtx["db"], "query" | "insert" | "patch">;
 type QueueCtx = { db: QueueDb; scheduler: MutationCtx["scheduler"] };
 
-/** One scheduled dispatch per transaction, however many items it touches. */
-const scheduledIn = new WeakSet<object>();
+/** The earliest dispatch this transaction scheduled, however many items it touches. */
+const scheduledIn = new WeakMap<object, number>();
+/** A dispatch due about now may be the one running (scheduled functions can start a little early). */
+const DISPATCH_SLACK_MS = 1_000;
 
 export async function enqueueSemanticItem(ctx: QueueCtx, kind: IndexedSemanticKind, itemId: string,
   options: { schoolId?: Id<"schools">; immediate?: boolean } = {}) {
@@ -36,17 +38,29 @@ export async function enqueueSemanticItem(ctx: QueueCtx, kind: IndexedSemanticKi
     const capped = Math.min(dueAt, existing.firstQueuedAt + SEMANTIC_MAX_WAIT_MS);
     if (options.immediate ? existing.dueAt <= now : now - existing.lastTouchedAt < TOUCH_INTERVAL_MS) return;
     await ctx.db.patch(existing._id, { dueAt: Math.max(now, capped), lastTouchedAt: now });
-    if (options.immediate) await scheduleDispatch(ctx, 0);
+    if (options.immediate) await scheduleSemanticDispatch(ctx, now);
     return;
   }
   await ctx.db.insert("semanticIndexQueue", { itemKind: kind, itemId, schoolId: options.schoolId, status: "waiting",
     dueAt, firstQueuedAt: now, lastTouchedAt: now, attempts: 0 });
-  await scheduleDispatch(ctx, dueAt - now);
+  await scheduleSemanticDispatch(ctx, dueAt);
 }
 
-async function scheduleDispatch(ctx: QueueCtx, delayMs: number) {
-  const marker = ctx.db as object;
-  if (scheduledIn.has(marker)) return;
-  scheduledIn.add(marker);
-  await ctx.scheduler.runAfter(delayMs, internal.semanticIndex.dispatch, {});
+/**
+ * Makes sure a dispatch runs by `at`. A dispatch already scheduled between now and
+ * then covers it: each dispatch schedules the next for the work still waiting, so a
+ * sync that queues hundreds of items schedules one dispatch, not hundreds. A duplicate
+ * dispatch is harmless because jobs are leased.
+ */
+export async function scheduleSemanticDispatch(ctx: QueueCtx, at: number) {
+  const transaction = ctx.db as object;
+  const earliest = scheduledIn.get(transaction);
+  if (earliest !== undefined && earliest <= at) return;
+  const now = Date.now();
+  const marker = await ctx.db.query("semanticDispatcher").first();
+  if (marker && marker.scheduledFor > now + DISPATCH_SLACK_MS && marker.scheduledFor <= at) return;
+  if (marker) await ctx.db.patch(marker._id, { scheduledFor: at });
+  else await ctx.db.insert("semanticDispatcher", { scheduledFor: at });
+  scheduledIn.set(transaction, at);
+  await ctx.scheduler.runAfter(Math.max(0, at - now), internal.semanticIndex.dispatch, {});
 }

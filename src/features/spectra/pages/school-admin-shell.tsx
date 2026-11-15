@@ -43,6 +43,7 @@ import { formatMeter, USAGE_METERS, UsageDayChart } from "@/features/spectra/adm
 import { PeopleSurface } from "@/features/spectra/administration/people/people-surface";
 import { MessageDialog } from "@/features/spectra/administration/people/message-dialog";
 import type { Person } from "@/features/spectra/administration/people/people-model";
+import { ManageBacIntegrationShell } from "./managebac-integration-shell";
 
 /*
  * School admin (docs/product: administration). The same desk as Home: what
@@ -208,7 +209,7 @@ function ManageBacLink({ operator, children }: { operator: boolean; children: Re
       {children}
     </InlineLink>
   ) : (
-    <InlineLink href="/managebac">{children}</InlineLink>
+    <InlineLink href="/admin?tab=integrations">{children}</InlineLink>
   );
 }
 
@@ -420,6 +421,9 @@ export function SchoolAdminShell() {
   const [tab, setTabState] = useState<Tab>(
     requestedTab && tabs.some((item) => item.id === requestedTab) ? requestedTab : "overview",
   );
+  useEffect(() => {
+    if (requestedTab && tabs.some((item) => item.id === requestedTab)) setTabState(requestedTab);
+  }, [requestedTab]);
   const [overview, setOverview] = useState<SchoolAdministrationOverview | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -587,7 +591,7 @@ export function SchoolAdminShell() {
         ) : tab === "agents" ? (
           <AgentsSurface operatorSessionId={operatorSessionId} refreshKey={refreshKey} />
         ) : tab === "integrations" ? (
-          <ManageBacSurface overview={overview} operator={Boolean(session)} />
+          session ? <ManageBacSurface overview={overview} operator /> : <ManageBacIntegrationShell embedded />
         ) : tab === "governance" ? (
           <RightsSurface />
         ) : tab === "feedback" ? (

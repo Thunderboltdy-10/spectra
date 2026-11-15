@@ -7,6 +7,12 @@ import { scheduleTask } from "./calendar";
 import { bridgeKey, calendarFixture, initialSource } from "../scripts/test-fixtures/managebac-calendar";
 import { observeDatabase } from "../scripts/perf-read-ledger";
 
+// These fixtures use fixed due dates, so the two-week task retention would treat them as long gone.
+vi.mock("../shared/school-sync", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../shared/school-sync")>();
+  return { ...actual, taskExpiresAt: () => actual.TASK_KEPT_INDEFINITELY };
+});
+
 const modules = import.meta.glob("./**/*.ts");
 const times = { startAt: 1_800_000_000_000, endAt: 1_800_003_600_000, timezone: "Europe/Madrid" };
 const fixture = async () => {

@@ -6,6 +6,12 @@ import type { MutationCtx } from "./_generated/server";
 import { bridgeKey, calendarFixture, identity } from "../scripts/test-fixtures/managebac-calendar";
 import { observeDatabase } from "../scripts/perf-read-ledger";
 
+// These fixtures use fixed due dates, so the two-week task retention would treat them as long gone.
+vi.mock("../shared/school-sync", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../shared/school-sync")>();
+  return { ...actual, taskExpiresAt: () => actual.TASK_KEPT_INDEFINITELY };
+});
+
 const modules = import.meta.glob("./**/*.ts");
 beforeEach(() => vi.stubEnv("SPECTRA_CONNECTOR_BRIDGE_KEY", bridgeKey));
 afterEach(() => vi.unstubAllEnvs());

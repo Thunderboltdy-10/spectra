@@ -1045,12 +1045,14 @@ export async function appendRoomUpdate(
       await providerContext.validateProjection(projection);
     }
     const now = Date.now();
+    // Only a claim whose lease still runs can authorize this update; released
+    // claims pile up over an artifact's life, so the rest are never read.
     const [activeClaims, releasedClaims] = await Promise.all(
       (["active", "released"] as const).map((status) =>
         ctx.db
           .query("regionClaims")
           .withIndex("by_artifact_status", (q) =>
-            q.eq("artifactId", artifact._id).eq("status", status),
+            q.eq("artifactId", artifact._id).eq("status", status).gt("leaseExpiresAt", now),
           )
           .collect(),
       ),

@@ -10,6 +10,12 @@ import { bridgeKey, calendarFixture, identity, initialSource } from "../scripts/
 import { observeDatabase } from "../scripts/perf-read-ledger";
 import { calendarItemFromWire } from "../src/features/spectra/calendar/domain/model";
 
+// These fixtures use fixed due dates, so the two-week task retention would treat them as long gone.
+vi.mock("../shared/school-sync", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../shared/school-sync")>();
+  return { ...actual, taskExpiresAt: () => actual.TASK_KEPT_INDEFINITELY };
+});
+
 const modules = import.meta.glob("./**/*.ts");
 const range = { from: Date.parse("2026-10-20"), to: Date.parse("2026-10-30") };
 const times = { startAt: Date.parse("2026-10-23T08:00:00Z"), endAt: Date.parse("2026-10-23T09:00:00Z"), timezone: "Europe/Madrid" };

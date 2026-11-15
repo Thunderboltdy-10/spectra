@@ -8,6 +8,12 @@ import schema from "../../../../../../convex/schema";
 import { api } from "../../../../../../convex/_generated/api";
 import * as fixtureModule from "../../../../../../scripts/local/managebac-provider-fixture.mjs";
 
+// These fixtures use fixed due dates, so the two-week task retention would treat them as long gone.
+vi.mock("../../../../../../shared/school-sync", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../../../shared/school-sync")>();
+  return { ...actual, taskExpiresAt: () => actual.TASK_KEPT_INDEFINITELY };
+});
+
 const modules = import.meta.glob("../../../../../../convex/**/*.ts");
 const bridgeKey = "managebac-route-fixture-bridge-key-0123456789";
 const identity = {

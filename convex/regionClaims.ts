@@ -177,7 +177,10 @@ export const listForArtifact = query({
     await requireArtifactAuthority(ctx, args.artifactId, "read");
     const now = Date.now();
     const statuses = args.includeResolved ? ["active", "queued", "released", "rejected"] as const : ["active", "queued"] as const;
-    const groups = await Promise.all(statuses.map((status) => ctx.db.query("regionClaims").withIndex("by_artifact_status", (q) => q.eq("artifactId", args.artifactId).eq("status", status)).collect()));
+    // Resolved claims are history: the most recent few are enough to show.
+    const groups = await Promise.all(statuses.map((status) => status === "released" || status === "rejected"
+      ? ctx.db.query("regionClaims").withIndex("by_artifact_status", (q) => q.eq("artifactId", args.artifactId).eq("status", status)).order("desc").take(100)
+      : ctx.db.query("regionClaims").withIndex("by_artifact_status", (q) => q.eq("artifactId", args.artifactId).eq("status", status)).collect()));
     return groups.flat().filter((claim) => args.includeResolved || claim.leaseExpiresAt > now).map((claim) => {
       const expired = claim.leaseExpiresAt <= now && (claim.status === "active" || claim.status === "queued");
       return { claimId: claim._id, actorKind: claim.actorKind, actorAccountId: claim.actorAccountId, runId: claim.runId, regionId: claim.regionId, overlapDomains: claim.overlapDomains, status: expired ? "released" as const : claim.status, queuePosition: expired ? undefined : claim.queuePosition, leaseExpiresAt: claim.leaseExpiresAt, resolution: expired ? "expired" as const : claim.resolution, createdAt: claim.createdAt };

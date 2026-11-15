@@ -3,7 +3,7 @@ import { DEFAULT_PERMISSION_PREFS, readPermissionPrefs, type PermissionPrefs } f
 import type { EnvironmentInput, EnvironmentPlace, EnvironmentPointer, EnvironmentRecentWork } from "@/features/spectra/ai/harness/prompt";
 import { notesMessage } from "@/features/spectra/ai/harness/compaction";
 import { claudeModelAlias } from "@/features/spectra/ai/model-config";
-import type { HarnessContentPart, HarnessMessage } from "@/features/spectra/ai/harness/types";
+import type { CarriedRead, HarnessContentPart, HarnessMessage } from "@/features/spectra/ai/harness/types";
 import type { PreparedAttachment, RunPointers } from "./contract";
 import { rows } from "./effects";
 import { query } from "./io";
@@ -159,7 +159,19 @@ export type ThreadHistory = {
   notes?: string;
   /** The messages after the notes, oldest first, for folding once the run is done. */
   unfolded: Array<HarnessMessage & { createdAt: number }>;
+  /** What the thread's last reply had read and carries forward (course guides). */
+  carriedReads?: CarriedRead[];
 };
+
+function carriedReadsFrom(value: unknown): CarriedRead[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(-4).flatMap((entry) => {
+    const row = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
+    return typeof row.name === "string" && typeof row.arguments === "string" && row.arguments.length <= 2_000
+      ? [{ name: row.name.slice(0, 80), arguments: row.arguments }]
+      : [];
+  });
+}
 
 export const EMPTY_HISTORY: ThreadHistory = { messages: [], unfolded: [] };
 
@@ -171,8 +183,10 @@ export async function readThreadHistory(actorClerkId: string, threadId: string |
     limit: HISTORY_MESSAGES,
   }).catch(() => null);
   const unfolded: ThreadHistory["unfolded"] = [];
+  let carriedReads: CarriedRead[] = [];
   for (const message of rows(page?.messages)) {
     if (String(message.runId ?? "") === runId) continue;
+    if (message.role === "assistant") carriedReads = carriedReadsFrom(message.carriedReads);
     const role = message.role === "assistant" ? "assistant" : message.role === "user" ? "user" : null;
     const content = text(message.content).trim();
     if (!role || !content) continue;
@@ -181,7 +195,12 @@ export async function readThreadHistory(actorClerkId: string, threadId: string |
   }
   const notes = text(page?.notes).trim() || undefined;
   const replay = unfolded.map(({ role, content }) => ({ role, content }) as HarnessMessage);
-  return { messages: notes ? [notesMessage(notes), ...replay] : replay, unfolded, ...(notes ? { notes } : {}) };
+  return {
+    messages: notes ? [notesMessage(notes), ...replay] : replay,
+    unfolded,
+    ...(notes ? { notes } : {}),
+    ...(carriedReads.length ? { carriedReads } : {}),
+  };
 }
 
 /** Attachments as model content parts: images and PDFs natively, the rest as text. */

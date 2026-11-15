@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   mutate: vi.fn(),
   sync: vi.fn(),
   resolveIdentity: vi.fn(),
+  overview: vi.fn(),
+  resolveConflict: vi.fn(),
   identity: vi.fn(),
 }));
 
@@ -29,6 +31,8 @@ vi.mock("../data/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../data/api")>()),
   syncSpectraManageBac: mocks.sync,
   resolveSpectraManageBacIdentity: mocks.resolveIdentity,
+  getSpectraManageBacOverview: mocks.overview,
+  resolveSpectraManageBacConflict: mocks.resolveConflict,
 }));
 
 import { SchoolPage } from "../school/school-page";
@@ -138,6 +142,21 @@ describe("School page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Match my account" }));
     await waitFor(() => expect(mocks.resolveIdentity).toHaveBeenCalledOnce());
     expect(await screen.findByText(/Matched\./)).toBeTruthy();
+  });
+
+  it("keeps students' conflict review in School without opening administration", async () => {
+    mocks.data["school:syncStatus"] = connected({ problem: { code: "INTEGRATION_REVIEW_REQUIRED", message: "Review a school change.", fixBy: "student", fixHint: "Choose which version to keep." } });
+    mocks.overview.mockResolvedValueOnce({ data: { conflicts: [{ _id: "conflict-1", kind: "source_changed", projectionType: "timetable_event", oldSource: { title: "Old lesson" }, newSource: { title: "Updated lesson" }, suggestedActions: ["rebase"], affectedLinks: [], status: "open", createdAt: NOW }] } }).mockResolvedValue({ data: { conflicts: [] } });
+    mocks.resolveConflict.mockResolvedValue({});
+    render(<SchoolPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    expect(await screen.findByRole("dialog", { name: "Review your school changes" })).toBeTruthy();
+    expect(await screen.findByText("Updated lesson", { selector: "strong" })).toBeTruthy();
+    expect(mocks.overview).toHaveBeenCalledWith("personal");
+    fireEvent.click(screen.getByRole("button", { name: "Use ManageBac's" }));
+    await waitFor(() => expect(mocks.resolveConflict).toHaveBeenCalledWith({ conflictId: "conflict-1", resolution: "rebase" }));
+    expect(await screen.findByText("There are no changes to review.")).toBeTruthy();
+    expect(window.location.pathname).toBe("/");
   });
 
   it("keeps the page while Sync now runs, then says how it went", async () => {

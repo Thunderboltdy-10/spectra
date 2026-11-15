@@ -1258,7 +1258,11 @@ export const agentHistory = query({
       messages: page
         .slice(0, limit)
         .reverse()
-        .map((message) => ({ role: message.role, content: message.content, runId: message.runId, createdAt: message.createdAt })),
+        .map((message) => ({
+          role: message.role, content: message.content, runId: message.runId, createdAt: message.createdAt,
+          // Course guides the run read, so the next run starts with them instead of reading again.
+          ...(message.role === "assistant" && Array.isArray(message.metadata?.carriedReads) ? { carriedReads: message.metadata.carriedReads } : {}),
+        })),
     };
   },
 });

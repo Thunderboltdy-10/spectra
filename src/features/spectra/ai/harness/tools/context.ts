@@ -256,6 +256,7 @@ export function webSearchTool(session: HarnessSession): HarnessTool<WebArgs> {
       additionalProperties: false,
     },
     effect: "read",
+    stable: true,
     label: (args) => `Searching the web for "${args.query}"`,
     parse: (raw) => ({ query: requireString(raw, "query", 400), deep: raw.deep === true }),
     execute: async (args, ctx) => {
@@ -386,7 +387,9 @@ export function readSyllabusTool(session: HarnessSession): HarnessTool<SyllabusA
       additionalProperties: false,
     },
     effect: "read",
-    label: (args) => (args.subject ? `Reading the ${args.subject} syllabus` : "Checking the syllabi"),
+    stable: true,
+    carry: true,
+    label: (args) => (args.subject ? `Reading the ${args.subject} syllabus${args.section ? `: ${args.section}` : ""}` : "Checking the syllabi"),
     parse: (raw) => ({
       subject: optionalString(raw, "subject", 200),
       level: raw.level === undefined || raw.level === null || raw.level === "" ? undefined : oneOf(raw, "level", ["SL", "HL"] as const),
@@ -396,7 +399,7 @@ export function readSyllabusTool(session: HarnessSession): HarnessTool<SyllabusA
     execute: async (args, ctx) => ({
       ok: true,
       content: await readCourse(session, args, ctx.signal),
-      doneLabel: args.subject ? `Read the ${args.subject} syllabus` : "Checked the syllabi",
+      doneLabel: args.subject ? `Read the ${args.subject} syllabus${args.section ? `: ${args.section}` : ""}` : "Checked the syllabi",
     }),
   };
 }

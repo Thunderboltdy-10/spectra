@@ -1137,10 +1137,13 @@ export default defineSchema({
     provenanceUrl: v.optional(v.string()),
     tombstone: v.boolean(),
     tombstonedAt: v.optional(v.number()),
+    /** Tasks only: when Spectra stops keeping it (shared/school-sync.ts, PAST_TASK_KEEP_MS). */
+    expiresAt: v.optional(v.number()),
     fetchedAt: v.number(),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_type_expiry", ["recordType", "expiresAt"])
     .index("by_integration_key", ["integrationId", "providerRecordKey"])
     .index("by_source_identity", ["integrationId", "sourceIdentityKey"])
     .index("by_integration_type", ["integrationId", "recordType"])
@@ -1541,6 +1544,8 @@ export default defineSchema({
     state: vSchoolSyncState,
     dueAt: v.optional(v.number()),
     dueTrigger: v.optional(vSchoolSyncTrigger),
+    /** Past tasks only: the one class and due-date range a queued request brings back. */
+    dueWindow: v.optional(v.object({ classId: v.string(), from: v.number(), to: v.number() })),
     lastRunAt: v.optional(v.number()),
     lastSuccessAt: v.optional(v.number()),
     lastSyncRunId: v.optional(v.id("externalSyncRuns")),
@@ -3769,7 +3774,8 @@ export default defineSchema({
     byteLength: v.number(),
     createdAt: v.number(),
   })
-    .index("by_room_idempotency", ["roomId", "idempotencyKey"]),
+    .index("by_room_idempotency", ["roomId", "idempotencyKey"])
+    .index("by_created", ["createdAt"]),
 
   collaborationUpdates: defineTable({
     roomId: v.id("collaborationRooms"),
@@ -3867,10 +3873,12 @@ export default defineSchema({
     updatedAt: v.number(),
     releasedAt: v.optional(v.number()),
   })
-    .index("by_artifact_status", ["artifactId", "status"])
+    // Lease expiry last: an update reads only the released claims whose lease is still running.
+    .index("by_artifact_status", ["artifactId", "status", "leaseExpiresAt"])
     .index("by_artifact_expiry", ["artifactId", "leaseExpiresAt"])
     .index("by_run_status", ["runId", "status"])
-    .index("by_client_status", ["clientId", "status"]),
+    .index("by_client_status", ["clientId", "status"])
+    .index("by_status_expiry", ["status", "leaseExpiresAt"]),
 
   artifactComments: defineTable({
     artifactId: v.id("spectraArtifacts"),
@@ -4024,6 +4032,7 @@ export default defineSchema({
     baseSnapshot: v.optional(v.any()),
     finalStateVectorHash: v.optional(v.string()),
     finalSnapshot: v.optional(v.any()),
+    snapshotsTrimmed: v.optional(v.boolean()),
     finalIntegrityHash: v.optional(v.string()),
     restoreRequestId: v.optional(v.string()),
     restoreRequestFingerprint: v.optional(v.string()),
@@ -4051,7 +4060,8 @@ export default defineSchema({
     ])
     .index("by_run", ["runId"])
     .index("by_version", ["versionId"])
-    .index("by_artifact_restore_request", ["artifactId", "actorAccountId", "restoreRequestId"]),
+    .index("by_artifact_restore_request", ["artifactId", "actorAccountId", "restoreRequestId"])
+    .index("by_status_committed", ["status", "snapshotsTrimmed", "committedAt"]),
 
   artifactEmbeds: defineTable({
     containerType: artifactEmbedContainerTypeValidator,
@@ -4402,6 +4412,8 @@ export default defineSchema({
 
   // Singleton: the earliest dispatch already scheduled, so dispatch chains collapse into one.
   semanticDispatcher: defineTable({ scheduledFor: v.number() }),
+  // Singleton: the earliest ManageBac worker wake-up already scheduled, so jobs due together share one.
+  managebacDispatcher: defineTable({ scheduledFor: v.number() }),
 
   semanticBackfills: defineTable({
     /** A registered kind, then "sweep", "memory", "done" (convex/semanticIndex.ts). */

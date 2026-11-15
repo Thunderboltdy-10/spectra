@@ -71,3 +71,29 @@ it("keeps ordinary overview reads on the account-scoped reader", async () => {
   expect(result.data.records.map((r: { normalized: { title: string } }) => r.normalized.title).sort()).toEqual(["own-calendar", "own-task"]);
   expect(harness.query.mock.calls.map(([name]) => name)).toEqual(["managebac:myOverview"]);
 });
+
+it("keeps the school admin section on the school-only reader", async () => {
+  await setup();
+  const response = await GET(new NextRequest("http://localhost/api/spectra/managebac?action=adminOverview"));
+  expect(response.status).toBe(200);
+  const result = await response.json();
+  expect(result.admin).toBe(true);
+  expect(result.data.previews.map((r: { normalized: { title: string } }) => r.normalized.title)).toEqual(["shared-task"]);
+  expect(result.data.records).toBeUndefined();
+  expect(harness.query.mock.calls.map(([name]) => name)).toEqual(["managebac:adminOverview"]);
+});
+
+it.each(["student", "teacher"])("refuses the school overview to a %s before reading it", async (role) => {
+  harness.role = role;
+  const response = await GET(new NextRequest("http://localhost/api/spectra/managebac?action=adminOverview"));
+  expect(response.status).toBe(403);
+  expect(harness.query).not.toHaveBeenCalled();
+});
+
+it("lets admins review only their own conflicts from their personal School page", async () => {
+  await setup();
+  const response = await GET(new NextRequest("http://localhost/api/spectra/managebac?action=myOverview"));
+  expect(response.status).toBe(200);
+  expect((await response.json()).admin).toBe(false);
+  expect(harness.query.mock.calls.map(([name]) => name)).toEqual(["managebac:myOverview"]);
+});

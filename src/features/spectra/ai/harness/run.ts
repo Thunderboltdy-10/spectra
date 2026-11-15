@@ -23,6 +23,7 @@ import {
   type LoopOutcome,
   type LoopState,
   type ModelCaller,
+  ALREADY_READ_RESULT,
 } from "./loop";
 import { callSpectraModel, createOpenRouterCaller, spectraModelContextWindow } from "./model";
 import { permissionDecision, permissionSummary, type PermissionPrefs } from "./permissions";
@@ -32,7 +33,9 @@ import { buildHarnessTools, createSession } from "./tools";
 import { rememberTitle } from "./tools/shared";
 import type { RunSource } from "./sources";
 import type {
+  AnyHarnessTool,
   ArtifactTouch,
+  CarriedRead,
   HarnessContentPart,
   HarnessMessage,
   InputAnswer,
@@ -96,6 +99,8 @@ export type HarnessRunInput = {
   attachments?: HarnessContentPart[];
   /** This thread's earlier turns, oldest first. Never other threads. */
   history?: HarnessMessage[];
+  /** Course guides the thread's last run read: their results start this run's history. */
+  carriedReads?: CarriedRead[];
   environment: Omit<EnvironmentInput, "permissions" | "timeZone"> & { timeZone?: string };
   permissions: PermissionPrefs;
   workspaceId?: string;
@@ -137,6 +142,8 @@ export type HarnessRunResult = LoopOutcome & {
   titling: Promise<void>;
   /** The agent changed its notes itself during this run. */
   memoryWritten: boolean;
+  /** Reads to carry into the thread's next message (saved with the reply). */
+  carriedReads: CarriedRead[];
   /** Who answered last: the person's runtime, or the one the run moved to. */
   finishedWith: RuntimeName;
   /** The run left the person's runtime for the next in their order. */
@@ -264,7 +271,11 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
   let state: LoopState;
   if (input.resume) state = input.resume.state;
   else if (input.restore) state = input.restore;
-  else state = emptyLoopState([...(input.history ?? []), userMessage(input.prompt, input.attachments)]);
+  else state = emptyLoopState([
+    ...(input.history ?? []),
+    ...(await replayCarriedReads(tools, input.carriedReads, input.runId, input.signal)),
+    userMessage(input.prompt, input.attachments),
+  ]);
   latestText = state.text;
   let artifactsSeen = state.artifacts.length;
   let sourcesSeen = state.sources?.length ?? 0;
@@ -459,9 +470,74 @@ export async function runHarness(input: HarnessRunInput): Promise<HarnessRunResu
     durationMs: now() - started,
     titling,
     memoryWritten: session.memoryWritten === true,
+    carriedReads: carriedReadsOf(tools, outcome.state.messages),
     finishedWith: chain?.finishedWith() ?? (provider ?? "spectra"),
     moved: Boolean(chain && chain.finishedWith() !== provider),
   };
+}
+
+const MAX_CARRIED_READS = 4;
+const CARRIED_RESULT_CHARS = 24_000;
+
+/** The carried reads this run's transcript holds, newest last, each once. */
+export function carriedReadsOf(tools: readonly AnyHarnessTool[], messages: readonly HarnessMessage[]): CarriedRead[] {
+  const carried = new Set(tools.filter((tool) => tool.carry).map((tool) => tool.name));
+  if (!carried.size) return [];
+  const calls = new Map<string, CarriedRead>();
+  const answered = new Set<string>();
+  for (const message of messages) {
+    if (message.role === "tool") answered.add(message.tool_call_id);
+  }
+  const reads: CarriedRead[] = [];
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    for (const call of message.tool_calls ?? []) {
+      if (!carried.has(call.function.name) || !answered.has(call.id)) continue;
+      calls.set(call.id, { name: call.function.name, arguments: call.function.arguments });
+    }
+  }
+  for (const message of messages) {
+    if (message.role !== "tool") continue;
+    const read = calls.get(message.tool_call_id);
+    if (!read || message.content === ALREADY_READ_RESULT || message.content.startsWith(`${read.name} failed`)) continue;
+    const at = reads.findIndex((row) => row.name === read.name && row.arguments === read.arguments);
+    if (at >= 0) reads.splice(at, 1);
+    reads.push(read);
+  }
+  return reads.slice(-MAX_CARRIED_READS);
+}
+
+/**
+ * The thread's carried reads, run again and placed as earlier calls, so the model
+ * has the guide it read for the last message and doesn't read it once more.
+ */
+async function replayCarriedReads(
+  tools: readonly AnyHarnessTool[],
+  reads: readonly CarriedRead[] | undefined,
+  runId: string,
+  signal: AbortSignal,
+): Promise<HarnessMessage[]> {
+  const messages: HarnessMessage[] = [];
+  for (const [index, read] of (reads ?? []).slice(-MAX_CARRIED_READS).entries()) {
+    const tool = tools.find((candidate) => candidate.name === read.name && candidate.carry);
+    if (!tool) continue;
+    try {
+      const raw = JSON.parse(read.arguments) as Record<string, unknown>;
+      const args = tool.parse ? tool.parse(raw) : raw;
+      const id = `carried-${index}`;
+      const outcome = await tool.execute(args, { signal, runId, toolCallId: id });
+      if (!outcome.ok || !outcome.content) continue;
+      const content = outcome.content.length > CARRIED_RESULT_CHARS ? `${outcome.content.slice(0, CARRIED_RESULT_CHARS)}
+… (cut short)` : outcome.content;
+      messages.push(
+        { role: "assistant", content: "", tool_calls: [{ id, type: "function", function: { name: read.name, arguments: read.arguments } }] },
+        { role: "tool", tool_call_id: id, content },
+      );
+    } catch {
+      // A read that no longer parses or runs is simply not carried.
+    }
+  }
+  return messages;
 }
 
 /**

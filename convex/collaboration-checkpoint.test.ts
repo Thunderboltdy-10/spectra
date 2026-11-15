@@ -143,7 +143,7 @@ describe("P5.I2 checkpoint projection and compaction", () => {
       })).toMatchObject({ status: "pending_projection" });
       const retries = await t.run(ctx => ctx.db.system.query("_scheduled_functions").collect());
       expect(retries.some(job => /changeGroups(?:\.js)?:commitIdle$/.test(job.name) &&
-        job.scheduledTime === Date.now() + 60_000)).toBe(true);
+        job.scheduledTime === Date.now() + 30 * 60_000)).toBe(true);
 
       const projection = projectionWithTitle("Latest typed artifact");
       await t.mutation(internal.collaborationGatewayStore.checkpoint, {

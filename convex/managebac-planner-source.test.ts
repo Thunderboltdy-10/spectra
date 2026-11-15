@@ -4,6 +4,12 @@ import { bridgeKey, calendarFixture, initialSource } from "../scripts/test-fixtu
 import { assertPlannerSourceEdit } from "../shared/planner-source.mjs";
 import { normalizePlanContent } from "../src/features/spectra/plan/model";
 
+// These fixtures use fixed due dates, so the two-week task retention would treat them as long gone.
+vi.mock("../shared/school-sync", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../shared/school-sync")>();
+  return { ...actual, taskExpiresAt: () => actual.TASK_KEPT_INDEFINITELY };
+});
+
 const modules = import.meta.glob("./**/*.ts");
 const changedSource = { ...initialSource, title: "Revised official essay", description: "New source instructions.", dueAt: "2026-10-25T09:00:00+01:00" };
 

@@ -45,9 +45,9 @@ describe("hosted gateway package startup", () => {
     // A second machine would split a room; `fly deploy` adds one unless told not to.
     expect(fly).toMatch(/fly deploy [^\n]*--ha=false/);
     expect(fly).toContain("fly scale count 1");
-    expect(setting("size")).toBe("performance-1x");
+    expect(setting("size")).toBe("shared-cpu-1x");
     const memoryMb = Number(setting("memory").replace(/gb$/i, "")) * (/gb$/i.test(setting("memory")) ? 1024 : 1);
-    expect(memoryMb).toBeGreaterThanOrEqual(2048);
+    expect(memoryMb).toBeGreaterThanOrEqual(1024);
     const heapMb = Number(setting("NODE_OPTIONS").match(/--max-old-space-size=(\d+)/)?.[1]);
     expect(heapMb).toBeGreaterThan(0);
     expect(heapMb).toBeLessThanOrEqual(memoryMb * 0.8);

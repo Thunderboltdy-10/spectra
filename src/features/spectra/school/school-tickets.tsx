@@ -52,6 +52,7 @@ export function TaskTicket({
   now,
   selected,
   compact = false,
+  kept,
   onSelect,
 }: {
   task: SchoolTask;
@@ -59,6 +60,8 @@ export function TaskTicket({
   now: number;
   selected: boolean;
   compact?: boolean;
+  /** A past task only this device still holds: opening it brings it back from ManageBac. */
+  kept?: "kept" | "restoring" | "failed";
   onSelect: () => void;
 }) {
   const late = !task.past && task.dueAt !== null && task.dueAt < now;
@@ -70,7 +73,10 @@ export function TaskTicket({
       data-life-launch
       data-late={late || undefined}
       data-past={task.past || undefined}
-      aria-pressed={selected}
+      data-kept={kept}
+      aria-pressed={kept ? undefined : selected}
+      aria-busy={kept === "restoring" || undefined}
+      title={kept === "kept" ? "Spectra keeps past tasks for two weeks. Open this one to bring it back from ManageBac." : undefined}
       onClick={onSelect}
       style={inkStyle(identity)}
       className={cn("school-ticket", compact && "school-ticket--compact")}
@@ -86,7 +92,11 @@ export function TaskTicket({
             </span>
           ) : null}
           {when ? <span className={late ? "text-[var(--danger)]" : undefined}>{when}</span> : null}
-          {task.status && !compact ? <span>{task.status}</span> : null}
+          {kept ? (
+            <span className={kept === "failed" ? "text-[var(--danger)]" : undefined}>
+              {kept === "restoring" ? "Bringing it back from ManageBac" : kept === "failed" ? "Couldn't bring it back. Try again." : "On this device. Open to bring it back"}
+            </span>
+          ) : task.status && !compact ? <span>{task.status}</span> : null}
         </span>
       </span>
     </button>

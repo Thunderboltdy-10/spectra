@@ -54,6 +54,7 @@ import type * as collaborationDurablePayload from "../collaborationDurablePayloa
 import type * as collaborationGatewayBridge from "../collaborationGatewayBridge.js";
 import type * as collaborationGatewayStore from "../collaborationGatewayStore.js";
 import type * as collaborationPolicyPush from "../collaborationPolicyPush.js";
+import type * as collaborationRetention from "../collaborationRetention.js";
 import type * as collaborationSnapshotCandidate from "../collaborationSnapshotCandidate.js";
 import type * as collaborationSnapshotVerification from "../collaborationSnapshotVerification.js";
 import type * as crons from "../crons.js";
@@ -211,6 +212,7 @@ declare const fullApi: ApiFromModules<{
   collaborationGatewayBridge: typeof collaborationGatewayBridge;
   collaborationGatewayStore: typeof collaborationGatewayStore;
   collaborationPolicyPush: typeof collaborationPolicyPush;
+  collaborationRetention: typeof collaborationRetention;
   collaborationSnapshotCandidate: typeof collaborationSnapshotCandidate;
   collaborationSnapshotVerification: typeof collaborationSnapshotVerification;
   crons: typeof crons;

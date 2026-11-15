@@ -2238,6 +2238,13 @@ export async function GET(request: NextRequest) {
         data: await convexQuery("managebac:listMyClassCandidates", {}),
       });
     }
+    if (action === "adminOverview") {
+      if (actor.schoolRole !== "school_admin")
+        throw new Error("AUTH_SCHOOL_ADMIN_REQUIRED: School administrator access is required.");
+      return ok({ admin: true, data: await convexQuery("managebac:adminOverview", {}) });
+    }
+    if (action === "myOverview")
+      return ok({ admin: false, data: await convexQuery("managebac:myOverview", {}) });
     if (action !== "overview")
       return badRequest("That ManageBac action is unavailable.");
     const admin = actor.schoolRole === "school_admin";
@@ -2673,6 +2680,22 @@ export async function POST(request: NextRequest) {
       }
       throw new Error(
         "Those class shelves could not be saved. Try again.",
+      );
+    }
+
+    if (action === "restorePastTasks") {
+      const providerClassId = string(body.providerClassId, 500);
+      const from = Number(body.from);
+      const to = Number(body.to);
+      if (!providerClassId || !Number.isFinite(from) || !Number.isFinite(to) || to < from)
+        return badRequest("Choose a class and a date range to bring back.");
+      return ok(
+        await convexMutation("managebac:requestAiRefresh", {
+          reason: "user_past_tasks",
+          force: true,
+          kinds: ["past_tasks"],
+          pastTasks: { providerClassId, from, to },
+        }),
       );
     }
 

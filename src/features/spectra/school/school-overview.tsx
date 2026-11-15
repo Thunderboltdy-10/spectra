@@ -2,11 +2,13 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ProblemState } from "@/components/ui/page-state";
 import { SCHOOL_SYNC_KIND_INFO, type SchoolSyncKind } from "../../../../shared/school-sync";
-import { resolveSpectraManageBacIdentity } from "../data/api";
+import { getSpectraManageBacOverview, resolveSpectraManageBacConflict, resolveSpectraManageBacIdentity, type SpectraManageBacConflict } from "../data/api";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { ClassTile, useDueByClass } from "./school-classes";
 import { SearchField } from "@/components/ui/search-field";
 import { ago, groupCurrentTasks, hasSchoolTaskSnapshot, sentenceOf, taskMatches, type SchoolSyncStatus } from "./school-model";
@@ -22,6 +24,7 @@ import { useClassBook } from "./use-class-book";
 
 /** How many of the later tasks the Overview shows (one row) before Tasks takes over: the week is the point here. */
 const LATER_SHOWN = 3;
+const ConflictList = dynamic(() => import("../pages/managebac-integration-shell").then((module) => module.ConflictList));
 
 export type OverviewChoice = { kind: "task" | "class"; id: string } | null;
 
@@ -52,6 +55,19 @@ export function Overview({
   const { tasks, counts } = useDueByClass();
   const [matching, setMatching] = useState(false);
   const [query, setQuery] = useState("");
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [conflicts, setConflicts] = useState<SpectraManageBacConflict[] | null>(null);
+  const [reviewError, setReviewError] = useState("");
+  const [reviewBusy, setReviewBusy] = useState("");
+  const openReview = async () => {
+    setReviewOpen(true);
+    setReviewError("");
+    try {
+      setConflicts((await getSpectraManageBacOverview("personal")).data.conflicts);
+    } catch (error) {
+      setReviewError(sentenceOf(error, "Your changes could not be loaded. Try again."));
+    }
+  };
   const searching = Boolean(query.trim());
   const groups = useMemo(() => groupCurrentTasks((tasks ?? []).filter((task) => taskMatches(task, query)), now), [now, query, tasks]);
   const subjects = book.classes.filter((cls) => !cls.archived && book.of(cls.providerClassId, cls.title)?.subject);
@@ -104,9 +120,7 @@ export function Overview({
             detail={connection.problem.fixHint}
             action={
               connection.problem.code === "INTEGRATION_REVIEW_REQUIRED" ? (
-                <Button size="sm" variant="primary" asChild>
-                  <Link href="/managebac?tab=conflicts">Review changes</Link>
-                </Button>
+                <Button size="sm" variant="primary" onClick={() => void openReview()}>Review changes</Button>
               ) : connection.problem.fixBy === "student" ? (
                 <Button size="sm" variant="primary" disabled={matching} onClick={() => void matchAccount()}>
                   {matching ? "Matching" : "Match my account"}
@@ -200,9 +214,7 @@ export function Overview({
                     </span>
                   </span>
                   {kind.problem!.code === "INTEGRATION_REVIEW_REQUIRED" ? (
-                    <Button size="sm" variant="ghost" asChild>
-                      <Link href="/managebac?tab=conflicts">Review changes</Link>
-                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => void openReview()}>Review changes</Button>
                   ) : kind.problem!.fixBy === "student" || kind.problem!.fixBy === "spectra" ? (
                     <Button size="sm" variant="ghost" disabled={syncing} onClick={() => void onSync(kind.kind)}>
                       Try again
@@ -225,6 +237,20 @@ export function Overview({
           </p>
         </section>
       </aside>
+      <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto">
+          <DialogTitle>Review your school changes</DialogTitle>
+          <DialogDescription>Choose what to keep when ManageBac updates something you have changed.</DialogDescription>
+          {reviewError ? <p role="alert" className="text-caption text-[var(--danger)]">{reviewError}</p> : conflicts === null ? <p className="text-caption text-[var(--text-tertiary)]">Loading your changes…</p> : conflicts.length ? (
+            <ConflictList conflicts={conflicts} busy={reviewBusy} onResolve={(conflict, resolution) => {
+              setReviewBusy(`conflict:${conflict._id}`);
+              void resolveSpectraManageBacConflict({ conflictId: conflict._id, resolution }).then(openReview).catch((error) => {
+                setReviewError(sentenceOf(error, "Your choice could not be saved. Try again."));
+              }).finally(() => setReviewBusy(""));
+            }} />
+          ) : <p className="text-caption text-[var(--text-tertiary)]">There are no changes to review.</p>}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

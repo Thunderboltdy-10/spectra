@@ -451,7 +451,7 @@ export function SettingsApplication({ initialSection = "ai" }: { initialSection?
       if (!section.hidden) shown += 1;
     }
     setMatches(shown);
-  });
+  }, [query, searching, preferences, hydrated]);
   const updateSection = <K extends PreferenceSection>(section: K) => (patch: Partial<SpectraPreferences[K]>) => update(section, patch);
   const body: Record<SectionId, ReactNode> = {
     ai: (

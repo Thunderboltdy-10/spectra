@@ -600,6 +600,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       prompt: params.prompt,
       attachments: attachmentParts(params.attachments),
       history: history.messages,
+      ...(history.carriedReads?.length ? { carriedReads: history.carriedReads } : {}),
       environment: {
         ...environment,
         timeZone,
@@ -720,6 +721,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
         widgets: result.state.widgets,
         sources: citedSources(content, result.state.sources),
         model: getSpectraModelId(),
+        carriedReads: result.carriedReads,
         ...runAccount(result),
       }).catch(() => null);
       publish({ type: "stopped", runId, partial: Boolean(reply || touches.length) });
@@ -806,6 +808,7 @@ async function attempt(params: AttemptParams, emit: (event: unknown) => void) {
       widgets: result.state.widgets,
       sources: citedSources(content, result.state.sources),
       model: getSpectraModelId(),
+      carriedReads: result.carriedReads,
       ...runAccount(result),
     }).catch(() => null);
     // The reply is out; the notes catch up behind it.

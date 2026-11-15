@@ -88,7 +88,7 @@ describe("School admin People", () => {
     render(<SchoolAdminShell />);
     expect(await screen.findByText("ManageBac: needs review")).toBeTruthy();
     expect(screen.queryByText(/Nothing needs you right now/)).toBeNull();
-    expect(screen.getByRole("link", { name: "Review ManageBac" }).getAttribute("href")).toBe("/managebac");
+    expect(screen.getByRole("link", { name: "Review ManageBac" }).getAttribute("href")).toBe("/admin?tab=integrations");
     cleanup();
     api.getAdministration.mockResolvedValue({ ...overview, integration: { status: "connected", hasOpenConflicts: false, syncFreshness: "stale" } });
     render(<SchoolAdminShell />);

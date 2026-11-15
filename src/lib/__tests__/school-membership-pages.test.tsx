@@ -3,6 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const auth = vi.hoisted(() => ({ requireActor: vi.fn() }));
+vi.mock("next/navigation", () => ({
+  redirect: (path: string) => { throw new Error(`REDIRECT:${path}`); },
+}));
 const readers = vi.hoisted(() => ({
   school: vi.fn(),
   managebac: vi.fn(),
@@ -60,7 +63,6 @@ beforeEach(() => {
 
 describe.each([
   ["/school", SchoolPage],
-  ["/managebac", ManageBacPage],
   ["/analytics", AnalyticsPage],
 ] as const)("school membership boundary on %s", (_path, page) => {
   it("explains missing membership before mounting school readers", async () => {
@@ -93,5 +95,20 @@ describe.each([
     expect(readers.school).not.toHaveBeenCalled();
     expect(readers.managebac).not.toHaveBeenCalled();
     expect(readers.analytics).not.toHaveBeenCalled();
+  });
+});
+
+describe("legacy ManageBac route", () => {
+  it.each(["student", "teacher"])("returns a %s to their personal School page", async (schoolRole) => {
+    auth.requireActor.mockResolvedValue({ schoolId: "school", schoolRole });
+    await expect(ManageBacPage()).rejects.toThrow("REDIRECT:/school");
+    expect(auth.requireActor).toHaveBeenCalledWith({ fresh: true });
+    expect(readers.managebac).not.toHaveBeenCalled();
+  });
+
+  it("takes school admins to ManageBac in School admin", async () => {
+    auth.requireActor.mockResolvedValue({ schoolId: "school", schoolRole: "school_admin" });
+    await expect(ManageBacPage()).rejects.toThrow("REDIRECT:/admin?tab=integrations");
+    expect(readers.managebac).not.toHaveBeenCalled();
   });
 });

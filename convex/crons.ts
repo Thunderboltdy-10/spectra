@@ -101,6 +101,18 @@ crons.interval(
   internal.dailyBriefs.dispatchDue,
   {},
 );
+crons.daily(
+  "sweep-expired-school-tasks",
+  { hourUTC: 3, minuteUTC: 10 },
+  internal.managebac.sweepExpiredTasks,
+  {},
+);
+crons.daily(
+  "sweep-collaboration-history",
+  { hourUTC: 3, minuteUTC: 30 },
+  internal.collaborationRetention.sweep,
+  {},
+);
 crons.interval(
   "purge-expired-secret-nonces",
   { hours: 1 },

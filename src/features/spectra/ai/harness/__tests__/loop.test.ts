@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  ALREADY_READ_RESULT,
   emptyLoopState,
   runHarnessLoop,
   type LoopDeps,
@@ -256,6 +257,41 @@ describe("runHarnessLoop", () => {
     expect(results[1]).toBe("same");
     expect(results[2]).toContain("call 3 with exactly the same arguments");
     expect(outcome.status).toBe("completed");
+  });
+
+  it("answers a repeated stable read from the result already above, then runs it if asked again", async () => {
+    const execute = vi.fn(async () => ({ ok: true, content: "Paper 1: 40 multiple-choice questions." }));
+    const guide = tool({ name: "read_syllabus", stable: true, execute });
+    const model = scripted([
+      { text: "", toolCalls: [call("a", "read_syllabus", { subject: "Physics", section: "Paper 1" })] },
+      { text: "", toolCalls: [call("b", "read_syllabus", { section: "Paper 1", subject: "Physics" })] },
+      { text: "", toolCalls: [call("c", "read_syllabus", { subject: "Physics", section: "Paper 1" })] },
+      { text: "", toolCalls: [call("d", "read_syllabus", { subject: "Physics", section: "Paper 2" })] },
+      { text: "Done.", toolCalls: [] },
+    ]);
+    const outcome = await runHarnessLoop(emptyLoopState([user("go")]), deps({ callModel: model.caller, tools: [guide] }));
+    const results = outcome.state.messages.filter((m) => m.role === "tool").map((m) => (m as { content: string }).content);
+    expect(results[0]).toBe("Paper 1: 40 multiple-choice questions.");
+    expect(results[1]).toBe(ALREADY_READ_RESULT);
+    // Asked again after the pointer: the model may have lost it, so it runs.
+    expect(results[2]).toBe("Paper 1: 40 multiple-choice questions.");
+    expect(execute).toHaveBeenCalledTimes(3);
+  });
+
+  it("runs a repeated read again when its earlier result was a failure, and never dedupes ordinary reads", async () => {
+    let attempt = 0;
+    const guide = tool({ name: "read_syllabus", stable: true, execute: async () => (++attempt === 1 ? Promise.reject(new Error("offline")) : { ok: true, content: "Guide" }) });
+    const look = tool({ name: "look", execute: async () => ({ ok: true, content: "fresh" }) });
+    const model = scripted([
+      { text: "", toolCalls: [call("a", "read_syllabus", { subject: "Physics" }), call("x", "look")] },
+      { text: "", toolCalls: [call("b", "read_syllabus", { subject: "Physics" }), call("y", "look")] },
+      { text: "Done.", toolCalls: [] },
+    ]);
+    const outcome = await runHarnessLoop(emptyLoopState([user("go")]), deps({ callModel: model.caller, tools: [guide, look] }));
+    const results = outcome.state.messages.filter((m) => m.role === "tool").map((m) => (m as { content: string }).content);
+    expect(results[0]).toContain("read_syllabus failed");
+    expect(results).toContain("Guide");
+    expect(results.filter((content) => content === "fresh")).toHaveLength(2);
   });
 
   it("gives the model one final turn without tools when the turn budget runs out", async () => {

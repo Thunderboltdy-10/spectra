@@ -1879,3 +1879,101 @@ describe("ManageBac credential-block recovery", () => {
     await expect(actor.mutation(api.managebac.beginSync, { kind: "identity" })).rejects.toThrow("INTEGRATION_NOT_READY");
   });
 });
+
+describe("school period timetable rebuilds", () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date("2026-11-14T12:00:00Z")); });
+  afterEach(() => vi.useRealTimers());
+  const period = { periodKey: "1", label: "Period 1", startMinutes: 535, endMinutes: 590, timezone: "Europe/Madrid", weekdays: [1, 2, 3, 4, 5] };
+
+  async function seedSlots(t: ReturnType<typeof setupTest>) {
+    const f = await seedFixture(t);
+    const slots = await t.run(async ctx => {
+      const now = Date.now();
+      for (const accountId of [f.aliceId, f.bobId]) await ctx.db.insert("managebacClassSelections", {
+        integrationId: f.integrationId, schoolId: f.schoolId, accountId,
+        providerClassId: "class-current", providerRecordKey: "class:current", academicPeriodKey: "2026",
+        selected: true, retention: "keep_in_spectra", selectionRevision: 1, createdAt: now, updatedAt: now,
+      });
+      const ids: Id<"externalRecords">[] = [];
+      // More than one page, with two different owners.
+      for (let i = 0; i < 12; i++) ids.push(await ctx.db.insert("externalRecords", {
+        integrationId: f.integrationId, schoolId: f.schoolId, mappedAccountId: i % 2 ? f.bobId : f.aliceId,
+        providerRecordId: `slot-${i}`, providerRecordKey: `slot:${i}`, recordType: "timetable",
+        classification: "personal", audienceScope: "mapped_user", providerClassId: "class-current", academicPeriodKey: "2026",
+        normalized: { day: i % 5 + 1, periodKey: "1", academicYearStartsOn: "2026-08-01", academicYearEndsOn: "2027-07-31" },
+        sourceHash: `slot-${i}`, payloadVersion: "v2", sourceState: "available", tombstone: false,
+        fetchedAt: now, createdAt: now, updatedAt: now,
+      }));
+      // These records must not be picked up just because the school saved a clock time.
+      const template = (await ctx.db.get(ids[0]))!;
+      const { _id, _creationTime, ...source } = template;
+      void _id; void _creationTime;
+      for (const [key, changes] of [
+        ["unselected", { providerClassId: "class-off" }],
+        ["other-period", { normalized: { ...template.normalized as object, periodKey: "2" } }],
+        ["deleted", { tombstone: true }],
+      ] as const) await ctx.db.insert("externalRecords", { ...source, ...changes, providerRecordId: key, providerRecordKey: key });
+      return ids;
+    });
+    return { ...f, slots };
+  }
+
+  it("creates missing lessons for both owners across every page as soon as the map is saved", async () => {
+    const t = setupTest(); const f = await seedSlots(t);
+    expect(await t.run(ctx => ctx.db.query("calendarItems").collect())).toHaveLength(0);
+    await t.withIdentity(admin).mutation(api.managebac.upsertCalendarPeriodMap, period);
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const lessons = await t.run(ctx => ctx.db.query("calendarItems").collect());
+    expect(new Set(lessons.map(item => item.sourceRecordId))).toEqual(new Set(f.slots));
+    expect(new Set(lessons.map(item => item.ownerAccountId))).toEqual(new Set([f.aliceId, f.bobId]));
+    for (const item of lessons) {
+      expect(item.timePrecision).toBe("verified_period");
+      expect(item.endAt! - item.startAt!).toBe(55 * 60_000);
+      expect(new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Madrid", hour: "2-digit", minute: "2-digit" }).format(item.startAt)).toBe("08:55");
+    }
+  });
+
+  it("updates existing lessons in place, honours changed weekdays, and retires them when a period is removed", async () => {
+    const t = setupTest(); await seedSlots(t);
+    const client = t.withIdentity(admin);
+    const { periodMapId } = await client.mutation(api.managebac.upsertCalendarPeriodMap, period);
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const before = await t.run(ctx => ctx.db.query("calendarItems").collect());
+    await client.mutation(api.managebac.upsertCalendarPeriodMap, { ...period, startMinutes: 540, endMinutes: 600 });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const updated = await t.run(ctx => ctx.db.query("calendarItems").collect());
+    expect(updated.map(item => item._id).sort()).toEqual(before.map(item => item._id).sort());
+    expect(updated.every(item => item.endAt! - item.startAt! === 60 * 60_000)).toBe(true);
+    await client.mutation(api.managebac.upsertCalendarPeriodMap, { ...period, startMinutes: 540, endMinutes: 600, weekdays: [1] });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const active = await t.run(ctx => ctx.db.query("calendarItems").filter(q => q.eq(q.field("status"), "active")).collect());
+    expect(active.length).toBeGreaterThan(0);
+    expect(active.length).toBeLessThan(updated.length);
+    expect(active.every(item => new Date(item.startAt!).getUTCDay() === 1)).toBe(true);
+    await client.mutation(api.managebac.removeCalendarPeriodMap, { periodMapId });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    expect(await t.run(ctx => ctx.db.query("calendarItems").filter(q => q.eq(q.field("status"), "active")).collect())).toHaveLength(0);
+    await client.mutation(api.managebac.upsertCalendarPeriodMap, { ...period, startMinutes: 540, endMinutes: 600, weekdays: [1] });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const restored = await t.run(ctx => ctx.db.query("calendarItems").collect());
+    expect(restored).toHaveLength(updated.length);
+    expect(restored.filter(item => item.status === "active").map(item => item._id).sort()).toEqual(active.map(item => item._id).sort());
+  });
+
+  it("keeps detached projections and other schools untouched and refuses students' changes", async () => {
+    const t = setupTest(); const f = await seedSlots(t);
+    await t.run(async ctx => {
+      const now = Date.now();
+      const otherSchoolId = await ctx.db.insert("schools", { name: "Other school", slug: "period-other-school", verifiedDomains: [], status: "active", timezone: "UTC", policyVersion: 1, createdAt: now, updatedAt: now });
+      await ctx.db.insert("externalProjections", { integrationId: f.integrationId, schoolId: f.schoolId, accountId: f.aliceId, recordId: f.slots[0], projectionType: "timetable_event", projectionId: "", providerKey: "timetable:slot-0", sourceHash: "slot-0", state: "detached", bootstrapVersion: 1, createdAt: now, updatedAt: now });
+      await ctx.db.patch(f.slots[1], { schoolId: otherSchoolId });
+    });
+    await expect(t.withIdentity(alice).mutation(api.managebac.upsertCalendarPeriodMap, period)).rejects.toThrow("AUTH_SCHOOL_ADMIN_REQUIRED");
+    await t.withIdentity(admin).mutation(api.managebac.upsertCalendarPeriodMap, period);
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const records = new Set((await t.run(ctx => ctx.db.query("calendarItems").collect())).map(item => item.sourceRecordId));
+    expect(records.size).toBe(10);
+    expect(records.has(f.slots[0])).toBe(false);
+    expect(records.has(f.slots[1])).toBe(false);
+  });
+});

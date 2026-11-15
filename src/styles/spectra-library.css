@@ -1189,7 +1189,7 @@ li[data-shelf-place][data-gather-over]::after {
 /* A small switch beside a heading ("Hide late"); pressed reads as on. */
 .shelf-chip {
   padding: 2px 9px;
-  border: 1px solid var(--border-subtle, var(--border));
+  border: 1px solid var(--border-subtle);
   border-radius: 999px;
   font-size: 12px;
   font-weight: 500;

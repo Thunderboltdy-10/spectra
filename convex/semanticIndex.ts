@@ -5,7 +5,7 @@
  * Mutations here never do network work; `reindexItem` is the only action and it embeds through
  * ./embeddingProvider. A provider outage keeps full-text chunks current and retries vectors later.
  */
-import { v } from "convex/values";
+import { v, type Infer } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { ActionCtx, MutationCtx, QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
@@ -13,7 +13,7 @@ import { internalAction, internalMutation, internalQuery } from "./functions";
 import { embeddingConfig, embeddingVersion, requestEmbeddings, validEmbeddingVector } from "./embeddingProvider";
 import { enqueueClaimEmbedding } from "./memory";
 import { lexicalKeysFor, vectorKeysFor, vSemanticKind } from "./semanticKeys";
-import { enqueueSemanticItem } from "./semanticQueue";
+import { enqueueSemanticItem, scheduleSemanticDispatch } from "./semanticQueue";
 import { loadSourceDoc, sourceFor, sourceIndexable, type DurableContent, type LoadedSource } from "./semanticSources";
 import { chunkDrafts, finalizeChunks, sha256Hex } from "../shared/semantic-chunks";
 import { centroid } from "../shared/semantic-ranking";
@@ -31,55 +31,68 @@ const BACKFILL_STEP_MS = 2_000;
 const BACKFILL_FULL_QUEUE_MS = 30_000;
 const RECOVER_PAGE = 25;
 const RECOVER_AFTER_MS = 30 * 60_000;
-const DISPATCH_SLACK_MS = 1_000;
 
 const vKind = vSemanticKind;
 
 // ---------------------------------------------------------------------------------------------
 // Dispatch
 
+/** Work due this soon starts with the work due now, so a sync's burst of saves shares one dispatch. */
+const DUE_EARLY_MS = 10_000;
+
+/** Leases due rows up to the free capacity and starts their re-index actions. */
+async function startDue(ctx: MutationCtx, now: number) {
+  const active = await ctx.db.query("semanticIndexQueue")
+    .withIndex("by_status_due", (q) => q.eq("status", "running").gt("dueAt", now)).take(CONCURRENCY);
+  let capacity = CONCURRENCY - active.length;
+  let started = 0;
+  if (capacity > 0) {
+    // Expired leases first: their actions died, and the rows are the oldest work.
+    const expired = await ctx.db.query("semanticIndexQueue")
+      .withIndex("by_status_due", (q) => q.eq("status", "running").lte("dueAt", now)).take(capacity);
+    const due = expired.length < capacity
+      ? await ctx.db.query("semanticIndexQueue")
+        .withIndex("by_status_due", (q) => q.eq("status", "waiting").lte("dueAt", now + DUE_EARLY_MS)).take(capacity - expired.length)
+      : [];
+    for (const row of [...expired, ...due]) {
+      const leaseOwner = crypto.randomUUID();
+      await ctx.db.patch(row._id, { status: "running", leaseOwner, dueAt: now + LEASE_MS });
+      await ctx.scheduler.runAfter(0, internal.semanticIndex.reindexItem, { queueId: row._id, leaseOwner });
+      started += 1;
+      capacity -= 1;
+    }
+  }
+  return { started, full: capacity <= 0 };
+}
+
+/**
+ * The next dispatch, only for work nothing is already on its way to. While every
+ * slot is busy nothing polls: each finished job starts the next one itself, and
+ * the maintenance cron re-dispatches the leases of actions that died.
+ */
+async function scheduleFollowUp(ctx: MutationCtx, now: number, state: { full: boolean }) {
+  if (state.full) return;
+  const next = await ctx.db.query("semanticIndexQueue")
+    .withIndex("by_status_due", (q) => q.eq("status", "waiting")).first();
+  if (next) await scheduleSemanticDispatch(ctx, Math.max(next.dueAt, now + 1_000));
+}
+
 export const dispatch = internalMutation({
   args: {},
   handler: async (ctx): Promise<{ started: number }> => {
     const now = Date.now();
-    const active = await ctx.db.query("semanticIndexQueue")
-      .withIndex("by_status_due", (q) => q.eq("status", "running").gt("dueAt", now)).take(CONCURRENCY);
-    let capacity = CONCURRENCY - active.length;
-    let started = 0;
-    if (capacity > 0) {
-      // Expired leases first: their actions died, and the rows are the oldest work.
-      const expired = await ctx.db.query("semanticIndexQueue")
-        .withIndex("by_status_due", (q) => q.eq("status", "running").lte("dueAt", now)).take(capacity);
-      const due = await ctx.db.query("semanticIndexQueue")
-        .withIndex("by_status_due", (q) => q.eq("status", "waiting").lte("dueAt", now)).take(capacity);
-      for (const row of [...expired, ...due].slice(0, capacity)) {
-        const leaseOwner = crypto.randomUUID();
-        await ctx.db.patch(row._id, { status: "running", leaseOwner, dueAt: now + LEASE_MS });
-        await ctx.scheduler.runAfter(0, internal.semanticIndex.reindexItem, { queueId: row._id, leaseOwner });
-        started += 1;
-        capacity -= 1;
-      }
-    }
-    const next = await ctx.db.query("semanticIndexQueue")
-      .withIndex("by_status_due", (q) => q.eq("status", "waiting")).first();
-    const nextRun = next ? Math.max(next.dueAt, now + (capacity > 0 ? 5_000 : 15_000)) : undefined;
-    await scheduleNext(ctx, nextRun);
-    return { started };
+    const state = await startDue(ctx, now);
+    await scheduleFollowUp(ctx, now, state);
+    return { started: state.started };
   },
 });
 
-async function scheduleNext(ctx: MutationCtx, at: number | undefined) {
-  if (at === undefined) return;
+/** A finished job hands its slot straight to the next due one. */
+async function continueQueue(ctx: MutationCtx) {
   const now = Date.now();
-  const marker = await ctx.db.query("semanticDispatcher").first();
-  // Trust the marker only for a dispatch clearly in the future: one due about now may be the
-  // dispatch that is running (scheduled functions can start a little before their clock time),
-  // and a duplicate dispatch is harmless because jobs are leased.
-  if (marker && marker.scheduledFor > now + DISPATCH_SLACK_MS && marker.scheduledFor <= at) return;
-  if (marker) await ctx.db.patch(marker._id, { scheduledFor: at });
-  else await ctx.db.insert("semanticDispatcher", { scheduledFor: at });
-  await ctx.scheduler.runAfter(Math.max(0, at - now), internal.semanticIndex.dispatch, {});
+  await scheduleFollowUp(ctx, now, await startDue(ctx, now));
 }
+
 
 async function leasedRow(ctx: { db: MutationCtx["db"] } | { db: QueryCtx["db"] },
   queueId: Id<"semanticIndexQueue">, leaseOwner: string) {
@@ -95,27 +108,31 @@ type SourcePayload =
   | { exists: false }
   | (LoadedSource & { exists: true; existing: ExistingChunk[] });
 
-export const leasedJob = internalQuery({
+/** The leased job and its source in one read, or null once the lease is lost. */
+export const leasedSource = internalQuery({
   args: { queueId: v.id("semanticIndexQueue"), leaseOwner: v.string() },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<{ kind: IndexedSemanticKind; itemId: string; source: SourcePayload } | null> => {
     const row = await leasedRow(ctx, args.queueId, args.leaseOwner);
-    return row ? { kind: row.itemKind, itemId: row.itemId } : null;
+    if (!row) return null;
+    return { kind: row.itemKind, itemId: row.itemId, source: await loadSourcePayload(ctx, row.itemKind, row.itemId) };
   },
 });
 
+async function loadSourcePayload(ctx: QueryCtx, kind: IndexedSemanticKind, itemId: string): Promise<SourcePayload> {
+  const source = sourceFor(kind);
+  const doc = await loadSourceDoc(ctx, kind, itemId);
+  if (!doc || !(await sourceIndexable(ctx, kind, doc))) return { exists: false };
+  const loaded = await source.load(ctx, doc);
+  const existing = (await ctx.db.query("semanticChunks")
+    .withIndex("by_item", (q) => q.eq("itemKind", kind).eq("itemId", itemId)).take(MAX_STORED_CHUNKS))
+    .map((chunk) => ({ chunkKey: chunk.chunkKey, contentHash: chunk.contentHash, embeddingVersion: chunk.embeddingVersion,
+      hasEmbedding: Boolean(chunk.embedding) }));
+  return { ...loaded, exists: true, existing };
+}
+
 export const loadSource = internalQuery({
   args: { kind: vKind, itemId: v.string() },
-  handler: async (ctx, { kind, itemId }): Promise<SourcePayload> => {
-    const source = sourceFor(kind);
-    const doc = await loadSourceDoc(ctx, kind, itemId);
-    if (!doc || !(await sourceIndexable(ctx, kind, doc))) return { exists: false };
-    const loaded = await source.load(ctx, doc);
-    const existing = (await ctx.db.query("semanticChunks")
-      .withIndex("by_item", (q) => q.eq("itemKind", kind).eq("itemId", itemId)).take(MAX_STORED_CHUNKS))
-      .map((chunk) => ({ chunkKey: chunk.chunkKey, contentHash: chunk.contentHash, embeddingVersion: chunk.embeddingVersion,
-        hasEmbedding: Boolean(chunk.embedding) }));
-    return { ...loaded, exists: true, existing };
-  },
+  handler: (ctx, { kind, itemId }): Promise<SourcePayload> => loadSourcePayload(ctx, kind, itemId),
 });
 
 async function resolveDurable(ctx: ActionCtx, durable: DurableContent) {
@@ -145,9 +162,9 @@ const vScope = v.object({
 export const reindexItem = internalAction({
   args: { queueId: v.id("semanticIndexQueue"), leaseOwner: v.string() },
   handler: async (ctx, args): Promise<{ status: string }> => {
-    const job = await ctx.runQuery(internal.semanticIndex.leasedJob, args);
+    const job = await ctx.runQuery(internal.semanticIndex.leasedSource, args);
     if (!job) return { status: "lease_lost" };
-    const source = await ctx.runQuery(internal.semanticIndex.loadSource, job);
+    const source = job.source;
     if (!source.exists) {
       await ctx.runMutation(internal.semanticIndex.purgeItem, { ...args, kind: job.kind, itemId: job.itemId });
       return { status: "purged" };
@@ -169,17 +186,20 @@ export const reindexItem = internalAction({
       if (result.ok) stale.forEach((chunk, index) => vectors.set(chunk.chunkKey, result.vectors[index]!));
       else failure = { code: result.code, retryable: result.retryable };
     }
-    for (let start = 0; start < chunks.length; start += APPLY_PAGE) {
-      const page = chunks.slice(start, start + APPLY_PAGE).map((chunk) => ({
-        chunkKey: chunk.chunkKey, ordinal: chunk.ordinal, label: chunk.label, regionId: chunk.regionId, messageId: chunk.messageId,
-        ownerOnly: chunk.ownerOnly, text: chunk.text, searchText: chunk.searchText, contentHash: chunk.contentHash,
-        embedding: vectors.get(chunk.chunkKey),
-      }));
+    const rows = chunks.map((chunk) => ({
+      chunkKey: chunk.chunkKey, ordinal: chunk.ordinal, label: chunk.label, regionId: chunk.regionId, messageId: chunk.messageId,
+      ownerOnly: chunk.ownerOnly, text: chunk.text, searchText: chunk.searchText, contentHash: chunk.contentHash,
+      embedding: vectors.get(chunk.chunkKey),
+    }));
+    // Most items fit one page, which the finishing mutation writes itself.
+    const inline = rows.length <= APPLY_PAGE;
+    for (let start = 0; !inline && start < rows.length; start += APPLY_PAGE) {
       const applied = await ctx.runMutation(internal.semanticIndex.applyChunks, { ...args, kind: job.kind, itemId: job.itemId,
-        title: source.title, scope: source.scope, embeddingVersion: config?.version, chunks: page });
+        title: source.title, scope: source.scope, embeddingVersion: config?.version, chunks: rows.slice(start, start + APPLY_PAGE) });
       if (!applied) return { status: "lease_lost" };
     }
     await ctx.runMutation(internal.semanticIndex.finalizeItem, { ...args, kind: job.kind, itemId: job.itemId,
+      ...(inline ? { embeddingVersion: config?.version, chunks: rows } : {}),
       title: source.title, subtype: source.subtype, scope: source.scope, lineageIds: source.lineageIds.slice(0, 50),
       workspaceId: source.workspaceId, timeAt: source.timeAt, mirrors: source.mirrors,
       sourceUpdatedAt: source.sourceUpdatedAt, keepKeys: chunks.map((chunk) => chunk.chunkKey),
@@ -195,6 +215,13 @@ export const applyChunks = internalMutation({
     scope: vScope, embeddingVersion: v.optional(v.string()), chunks: v.array(vChunk) },
   handler: async (ctx, args): Promise<boolean> => {
     if (!(await leasedRow(ctx, args.queueId, args.leaseOwner))) return false;
+    await writeChunks(ctx, args);
+    return true;
+  },
+});
+
+async function writeChunks(ctx: MutationCtx, args: { kind: IndexedSemanticKind; itemId: string; title: string;
+  scope: Infer<typeof vScope>; embeddingVersion?: string; chunks: Array<Infer<typeof vChunk>> }) {
     const now = Date.now();
     const title = args.title.slice(0, 300);
     for (const chunk of args.chunks) {
@@ -220,9 +247,7 @@ export const applyChunks = internalMutation({
         (Object.keys(nextRest) as Array<keyof typeof nextRest>).every((key) => storedRest[key] === nextRest[key]);
       if (!same) await ctx.db.patch(stored._id, { ...fields, updatedAt: now });
     }
-    return true;
-  },
-});
+}
 
 /**
  * The item's embedding in words: the passages nearest its centroid, so an
@@ -254,10 +279,15 @@ export const finalizeItem = internalMutation({
     workspaceId: v.optional(v.id("spectraWorkspaces")), timeAt: v.optional(v.number()), mirrors: v.optional(v.string()),
     keepKeys: v.array(v.string()), contentDigest: v.string(),
     embeddingState: v.union(v.literal("complete"), v.literal("pending"), v.literal("disabled")),
-    failure: v.optional(v.object({ code: v.string(), retryable: v.boolean() })) },
+    failure: v.optional(v.object({ code: v.string(), retryable: v.boolean() })),
+    /** The chunks themselves when they fit one page; a larger item's arrive through applyChunks first. */
+    embeddingVersion: v.optional(v.string()), chunks: v.optional(v.array(vChunk)) },
   handler: async (ctx, args): Promise<void> => {
     const row = await leasedRow(ctx, args.queueId, args.leaseOwner);
     if (!row) return;
+    if (args.chunks?.length)
+      await writeChunks(ctx, { kind: args.kind, itemId: args.itemId, title: args.title, scope: args.scope,
+        embeddingVersion: args.embeddingVersion, chunks: args.chunks });
     const now = Date.now();
     const keep = new Set(args.keepKeys);
     const chunks = await ctx.db.query("semanticChunks").withIndex("by_item", (q) => q.eq("itemKind", args.kind).eq("itemId", args.itemId))
@@ -293,7 +323,7 @@ export const finalizeItem = internalMutation({
       await ctx.db.patch(row._id, { status: "waiting", leaseOwner: undefined, attempts: row.attempts + 1, dueAt: now + backoff,
         firstQueuedAt: now, lastTouchedAt: now });
     } else await ctx.db.delete(row._id);
-    await scheduleNext(ctx, now);
+    await continueQueue(ctx);
   },
 });
 
@@ -305,7 +335,7 @@ export const purgeItem = internalMutation({
     await purgeItemRows(ctx, args.kind, args.itemId);
     if (row.rerun) await ctx.db.patch(row._id, { status: "waiting", rerun: false, leaseOwner: undefined, dueAt: Date.now() });
     else await ctx.db.delete(row._id);
-    await scheduleNext(ctx, Date.now());
+    await continueQueue(ctx);
   },
 });
 

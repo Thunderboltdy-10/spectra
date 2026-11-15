@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { ManageBacIntegrationShell } from "../pages/managebac-integration-shell";
+import { ManageBacIntegrationShell, PeriodMapPanel } from "../pages/managebac-integration-shell";
 
 const harness = vi.hoisted(() => ({ overview: vi.fn(), candidates: vi.fn() }));
 vi.mock("../data/api", async importOriginal => ({
@@ -37,6 +37,51 @@ beforeEach(() => {
   harness.candidates.mockResolvedValue({ integration, identityRequired: false, classes, selectionRevision: 1 });
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.clearAllMocks(); });
+
+it("embeds only school administration and period times, without fetching personal classes", async () => {
+  render(<ManageBacIntegrationShell embedded />);
+  expect(await screen.findByText("ManageBac is connected")).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Verified school periods" })).toBeTruthy();
+  expect(screen.queryByRole("tablist", { name: "ManageBac sections" })).toBeNull();
+  expect(screen.queryByText("Synced data")).toBeNull();
+  expect(harness.overview).toHaveBeenCalledWith("school");
+  expect(harness.candidates).not.toHaveBeenCalled();
+});
+
+it("offers five-minute choices and carries the previous period's duration into numeric defaults", async () => {
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+  const onSave = vi.fn().mockResolvedValue(true);
+  const period = { _id: "period-2", periodKey: "2", label: "Period 2", startMinutes: 535, endMinutes: 590, timezone: "Europe/Madrid", weekdays: [1, 2, 3, 4, 5], verifiedAt: 1, source: "school_admin" as const };
+  render(<PeriodMapPanel periodMaps={[period]} busy="" onSave={onSave} onRemove={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Add period" }));
+  expect((screen.getByLabelText("Period ID") as HTMLInputElement).value).toBe("3");
+  expect((screen.getByLabelText("Label") as HTMLInputElement).value).toBe("Period 3");
+  expect((screen.getByRole("combobox", { name: "Start" }) as HTMLInputElement).value).toBe("9:50");
+  expect((screen.getByRole("combobox", { name: "End" }) as HTMLInputElement).value).toBe("10:45");
+  fireEvent.click(screen.getByRole("combobox", { name: "Start" }));
+  expect(screen.getAllByRole("option")).toHaveLength(288);
+  fireEvent.click(screen.getByRole("option", { name: "9:55" }));
+  fireEvent.click(screen.getByRole("button", { name: "Verify period" }));
+  await waitFor(() => expect(onSave).toHaveBeenCalledWith({ periodKey: "3", label: "Period 3", startMinutes: 595, endMinutes: 645, timezone: "Europe/Madrid", weekdays: period.weekdays }));
+  await waitFor(() => expect((screen.getByLabelText("Period ID") as HTMLInputElement).value).toBe("4"));
+  expect((screen.getByRole("combobox", { name: "Start" }) as HTMLInputElement).value).toBe("10:45");
+  expect((screen.getByRole("combobox", { name: "End" }) as HTMLInputElement).value).toBe("11:35");
+});
+
+it("updates the automatic label but preserves a custom label and a failed draft", async () => {
+  render(<PeriodMapPanel periodMaps={[]} busy="" onSave={vi.fn().mockResolvedValue(false)} onRemove={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Add period" }));
+  expect((screen.getByLabelText("Period ID") as HTMLInputElement).value).toBe("1");
+  fireEvent.change(screen.getByLabelText("Period ID"), { target: { value: "2" } });
+  expect((screen.getByLabelText("Label") as HTMLInputElement).value).toBe("Period 2");
+  fireEvent.change(screen.getByLabelText("Label"), { target: { value: "Registration" } });
+  fireEvent.change(screen.getByLabelText("Period ID"), { target: { value: "3" } });
+  expect((screen.getByLabelText("Label") as HTMLInputElement).value).toBe("Registration");
+  fireEvent.click(screen.getByRole("button", { name: "Verify period" }));
+  await act(async () => {});
+  expect((screen.getByLabelText("Period ID") as HTMLInputElement).value).toBe("3");
+  expect((screen.getByLabelText("Label") as HTMLInputElement).value).toBe("Registration");
+});
 
 it("uses the personal class collection for the admin overview and picker without an empty preview list", async () => {
   render(<ManageBacIntegrationShell />);

@@ -32,9 +32,25 @@ export const AI_SYNC_PURPOSES = Object.keys(AI_SYNC_PURPOSE_KINDS) as AiSyncPurp
 export function aiSyncPurpose(value: unknown): AiSyncPurpose {
   return typeof value === "string" && value in AI_SYNC_PURPOSE_KINDS ? (value as AiSyncPurpose) : "upcoming_deadlines";
 }
-/** The `managebac:requestAiRefresh` arguments for an AI sync: only the kinds its purpose needs. */
-export function aiRefreshRequest(purposeValue: unknown, forceValue: unknown) {
+function dayStart(value: unknown) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
+  const at = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(at) ? at : undefined;
+}
+/**
+ * The `managebac:requestAiRefresh` arguments for an AI sync: only the kinds its purpose needs.
+ * Past tasks with a class and dates bring back that class's older tasks due in the range (at most
+ * OLD_TASK_RESTORE_LIMIT), never every old task.
+ */
+export function aiRefreshRequest(purposeValue: unknown, forceValue: unknown, range?: { classId?: unknown; from?: unknown; to?: unknown }) {
   const purpose = aiSyncPurpose(purposeValue);
+  const from = dayStart(range?.from);
+  const toDay = dayStart(range?.to);
+  const classId = typeof range?.classId === "string" && range.classId.trim() ? range.classId.trim() : undefined;
+  if (purpose === "past_tasks" && classId && from !== undefined) {
+    const to = Math.min(toDay === undefined ? from + OLD_TASK_RESTORE_MAX_RANGE_MS : toDay + 24 * 60 * 60_000 - 1, from + OLD_TASK_RESTORE_MAX_RANGE_MS);
+    return { reason: `ai_${purpose}`, force: forceValue !== false, kinds: ["past_tasks"] as SchoolSyncKind[], pastTasks: { providerClassId: classId, from, to } };
+  }
   return { reason: `ai_${purpose}`, force: forceValue !== false, kinds: [...AI_SYNC_PURPOSE_KINDS[purpose]] as SchoolSyncKind[] };
 }
 
@@ -166,6 +182,34 @@ function dueTime(normalized: unknown) {
     if (Number.isFinite(time)) return time;
   }
   return undefined;
+}
+
+/**
+ * How long Spectra keeps a past task: two weeks in the archive, so three weeks after it was
+ * due. Older tasks stay in ManageBac (and on the student's device) and come back on request,
+ * a class and a date range at a time, never the whole history.
+ */
+export const PAST_TASK_KEEP_MS = 14 * 24 * 60 * 60_000;
+/** The most older tasks one request brings back. */
+export const OLD_TASK_RESTORE_LIMIT = 20;
+/** The widest date range one request may bring back. */
+export const OLD_TASK_RESTORE_MAX_RANGE_MS = 120 * 24 * 60 * 60_000;
+/** Stands for "kept until removed by hand": a task without a due date never ages out. */
+export const TASK_KEPT_INDEFINITELY = 8_640_000_000_000_000;
+
+export function isTaskRecordType(recordType: string) {
+  return TASK_TYPES.has(recordType);
+}
+
+/** When Spectra stops keeping a task, from its due date. */
+export function taskExpiresAt(normalized: unknown) {
+  const due = dueTime(normalized);
+  return due === undefined ? TASK_KEPT_INDEFINITELY : due + PAST_TASK_GRACE_MS + PAST_TASK_KEEP_MS;
+}
+
+/** The due date of a task, if it has one. */
+export function taskDueAt(normalized: unknown) {
+  return dueTime(normalized);
 }
 
 /** Whether a task belongs to the archive: its class is archived, or it was due over a week ago. */

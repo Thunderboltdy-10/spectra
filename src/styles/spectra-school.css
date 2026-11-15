@@ -223,6 +223,32 @@ section:first-child > .school-heading:first-child {
   opacity: 0.8;
 }
 
+/* A carbon copy: a past task only this device keeps. Dashed edge, unfilled leaf. */
+.school-ticket[data-kept] {
+  background: transparent;
+  box-shadow: none;
+  outline: 1px dashed var(--card-border);
+  outline-offset: -1px;
+}
+
+.school-ticket[data-kept]:hover {
+  background: color-mix(in oklab, var(--card-paper) 60%, transparent);
+  box-shadow: none;
+}
+
+.school-ticket[data-kept]:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+}
+
+.school-ticket[data-kept] .school-ticket-leaf {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--class-ink) 40%, transparent);
+}
+
+.school-ticket[data-kept="restoring"] {
+  cursor: progress;
+}
+
 .school-ticket-leaf {
   display: flex;
   width: 44px;

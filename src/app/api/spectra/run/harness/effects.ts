@@ -648,7 +648,7 @@ export async function executeApplicationCommand(
     throw new Error("SHARING_ACTION_INVALID");
   }
   if (command === "trigger_managebac_sync") {
-    const result = await applyMutation("managebac:requestAiRefresh", aiRefreshRequest(parsed.purpose, parsed.force));
+    const result = await applyMutation("managebac:requestAiRefresh", aiRefreshRequest(parsed.purpose, parsed.force, parsed));
     onUiEvent?.({
       key: "managebac_sync_requested",
       payload: { targetId: "managebac", note: "Requested a ManageBac refresh" },

@@ -1,12 +1,9 @@
-import { ManageBacIntegrationShell } from "@/features/spectra/pages/managebac-integration-shell";
-import { SchoolMembershipGate } from "@/features/spectra/components/school-membership-gate";
+import { requireActor } from "@/lib/auth-server";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
-export default function ManageBacPage() {
-  return (
-    <SchoolMembershipGate>
-      <ManageBacIntegrationShell />
-    </SchoolMembershipGate>
-  );
+export default async function ManageBacPage() {
+  const actor = await requireActor({ fresh: true });
+  redirect(actor.schoolRole === "school_admin" ? "/admin?tab=integrations" : "/school");
 }

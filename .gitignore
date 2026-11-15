@@ -101,6 +101,7 @@ storage-state-*.json
 /CLAUDE.md
 /CODEX.md
 /SKILL.md
+/FEEDBACK.md
 
 # External Office corpus and generated native build metadata.
 /fixtures/office/

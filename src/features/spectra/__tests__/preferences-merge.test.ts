@@ -257,7 +257,7 @@ describe("preference merge (P3.I4)", () => {
     expect(idle).toContain("document.visibilityState !== \"visible\"");
     expect(store).toContain("subscribeIdleSurfaceRefresh");
     expect(store).toContain("unsub?.()");
-    expect(store).toContain("refreshLayersRef.current()");
+    expect(store).toContain("writes.refreshers.forEach");
   });
 });
 

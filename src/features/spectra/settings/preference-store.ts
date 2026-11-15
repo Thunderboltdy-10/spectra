@@ -39,6 +39,10 @@ const DEVICE_SECTIONS = new Set<PreferenceSection>([
   "compute",
 ]);
 
+// Hook instances share writes so one consumer cannot publish an older reply
+// while another is still saving the next Setup step (or another setting).
+const preferenceWrites = new WeakMap<object, { generation: number; pending: number; refreshers: Set<() => void> }>();
+
 function deviceId(storage: Pick<Storage, "getItem" | "setItem">) {
   const existing = storage.getItem(DEVICE_ID_KEY);
   if (existing) return existing;
@@ -147,6 +151,15 @@ export function useSpectraPreferences({
   const [saving, setSaving] = useState(false);
   const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(null);
   const convex = useConvex() as ReturnType<typeof useConvex> | undefined;
+  const writes = useMemo(() => {
+    const key = convex ?? {};
+    let shared = preferenceWrites.get(key);
+    if (!shared) {
+      shared = { generation: 0, pending: 0, refreshers: new Set() };
+      preferenceWrites.set(key, shared);
+    }
+    return shared;
+  }, [convex]);
   /*
    * Account-scoped queries require a session. Public surfaces (the landing
    * page among them) mount this hook signed out; subscribing anyway made the
@@ -178,22 +191,22 @@ export function useSpectraPreferences({
   const initialCache = useRef<SpectraPreferences | null>(null);
   const preferencesRef = useRef(preferences);
   const confirmedRef = useRef(DEFAULT_SPECTRA_PREFERENCES);
-  const writeGeneration = useRef(0);
   const externalRefreshGeneration = useRef(0);
   const inflightWrites = useRef(0);
-  const refreshLayersRef = useRef<() => void>(() => {});
   preferencesRef.current = preferences;
 
   const beginWrite = useCallback(() => {
     inflightWrites.current += 1;
+    writes.pending += 1;
     setSaving(true);
-  }, []);
+  }, [writes]);
 
   const endWrite = useCallback(() => {
     inflightWrites.current = Math.max(0, inflightWrites.current - 1);
     setSaving(inflightWrites.current > 0);
-    if (inflightWrites.current === 0) refreshLayersRef.current();
-  }, []);
+    writes.pending -= 1;
+    if (writes.pending === 0) writes.refreshers.forEach(refresh => refresh());
+  }, [writes]);
 
   const commitLocal = useCallback((next: SpectraPreferences) => {
     preferencesRef.current = next;
@@ -238,6 +251,7 @@ export function useSpectraPreferences({
         workType,
       });
       const publish = () => {
+        if (cancelled || writes.pending > 0) return;
         try {
           const value = watch.localQueryResult();
           if (value === undefined) return;
@@ -250,19 +264,19 @@ export function useSpectraPreferences({
           console.warn("[spectra:preferences] subscription unavailable", error);
         }
       };
-      publish();
       unsub = watch.onUpdate(publish);
+      publish();
     };
-    refreshLayersRef.current = subscribe;
+    writes.refreshers.add(subscribe);
     subscribe();
     const stopIdle = subscribeIdleSurfaceRefresh(subscribe);
     return () => {
       cancelled = true;
+      writes.refreshers.delete(subscribe);
       unsub?.();
       stopIdle();
-      refreshLayersRef.current = () => {};
     };
-  }, [convex, currentDeviceId, workspaceId, workType, signedIn]);
+  }, [convex, currentDeviceId, workspaceId, workType, signedIn, writes]);
 
   const resolvedRemote = useMemo(() => {
     if (!remotePreferenceLayersAreReady(remoteLayers)) return null;
@@ -277,11 +291,11 @@ export function useSpectraPreferences({
 
   useEffect(() => {
     if (!resolvedRemote || !hydrated) return;
-    if (inflightWrites.current > 0) return;
+    if (writes.pending > 0) return;
     confirmedRef.current = resolvedRemote;
     commitLocal(resolvedRemote);
     setSaveError(null);
-  }, [commitLocal, hydrated, resolvedRemote]);
+  }, [commitLocal, hydrated, resolvedRemote, writes]);
 
   useEffect(() => {
     if (
@@ -320,10 +334,10 @@ export function useSpectraPreferences({
   }, [convex, currentDeviceId, hydrated, remoteLayers, signedIn, writeLayer]);
 
   const revertFailedWrite = useCallback((generation: number) => {
-    if (generation !== writeGeneration.current) return;
+    if (generation !== writes.generation) return;
     commitLocal(confirmedRef.current);
     setSaveError(PREFERENCE_SAVE_FAILURE);
-  }, [commitLocal]);
+  }, [commitLocal, writes]);
 
   const persistSection = useCallback(
     async <K extends PreferenceSection>(section: K, next: SpectraPreferences, generation: number) => {
@@ -337,7 +351,7 @@ export function useSpectraPreferences({
           scopeKey,
           values: { [section]: next[section] as PreferenceLayerValues[K] },
         });
-        if (generation === writeGeneration.current) {
+        if (generation === writes.generation) {
           confirmedRef.current = next;
           setSaveError(null);
         }
@@ -347,13 +361,13 @@ export function useSpectraPreferences({
         endWrite();
       }
     },
-    [beginWrite, currentDeviceId, endWrite, revertFailedWrite, signedIn, writeLayer],
+    [beginWrite, currentDeviceId, endWrite, revertFailedWrite, signedIn, writeLayer, writes],
   );
 
   const replace = useCallback(
     (next: SpectraPreferences) => {
       const pruned = updatePreference(next, "workbar", next.workbar, MERGE_OPTIONS);
-      const generation = ++writeGeneration.current;
+      const generation = ++writes.generation;
       commitLocal(pruned);
       if (!currentDeviceId || !signedIn) {
         confirmedRef.current = pruned;
@@ -373,7 +387,7 @@ export function useSpectraPreferences({
         }),
       ]).then(
         () => {
-          if (generation === writeGeneration.current) {
+          if (generation === writes.generation) {
             confirmedRef.current = pruned;
             setSaveError(null);
           }
@@ -383,7 +397,7 @@ export function useSpectraPreferences({
         endWrite();
       });
     },
-    [beginWrite, commitLocal, currentDeviceId, endWrite, revertFailedWrite, signedIn, writeLayer],
+    [beginWrite, commitLocal, currentDeviceId, endWrite, revertFailedWrite, signedIn, writeLayer, writes],
   );
 
   const update = useCallback(
@@ -392,11 +406,11 @@ export function useSpectraPreferences({
       patch: Partial<SpectraPreferences[K]>,
     ) => {
       const next = updatePreference(preferencesRef.current, section, patch, MERGE_OPTIONS);
-      const generation = ++writeGeneration.current;
+      const generation = ++writes.generation;
       commitLocal(next);
       void persistSection(section, next, generation);
     },
-    [commitLocal, persistSection],
+    [commitLocal, persistSection, writes],
   );
 
   const reset = useCallback(
@@ -409,17 +423,17 @@ export function useSpectraPreferences({
   const refreshConfirmedPreferences = useCallback(async () => {
     if (!convex || !signedIn || !currentDeviceId)
       throw new Error("SETTINGS_SESSION_UNAVAILABLE");
-    const generation = writeGeneration.current;
+    const generation = writes.generation;
     const refreshGeneration = ++externalRefreshGeneration.current;
     const layers = await convex.query(api.accountPreferences.layers, {
       deviceId: currentDeviceId, workspaceId, workType,
     });
     // A human write that started during this read owns the local optimistic
     // value. Its existing completion refresh will reconcile server state.
-    if (generation !== writeGeneration.current ||
-      refreshGeneration !== externalRefreshGeneration.current || inflightWrites.current > 0) return;
+    if (generation !== writes.generation ||
+      refreshGeneration !== externalRefreshGeneration.current || writes.pending > 0) return;
     setRemoteLayers(layers ?? undefined);
-  }, [convex, signedIn, currentDeviceId, workspaceId, workType]);
+  }, [convex, signedIn, currentDeviceId, workspaceId, workType, writes]);
 
   /* What the account says has arrived (or there is no account to ask): a
      default read before then is not the person's choice, so anything that

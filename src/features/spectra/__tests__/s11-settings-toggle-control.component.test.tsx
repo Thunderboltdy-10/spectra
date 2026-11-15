@@ -19,18 +19,21 @@ const remote = vi.hoisted(() => ({
   query: vi.fn(),
   mutation: vi.fn(),
 }));
-vi.mock("convex/react", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("convex/react")>()),
-  useConvexAuth: () => ({ isLoading: false, isAuthenticated: true }),
-  useConvex: () => ({
+vi.mock("convex/react", async (importOriginal) => {
+  const client = {
     query: remote.query,
     mutation: remote.mutation,
     watchQuery: () => ({
       localQueryResult: () => remote.layers,
       onUpdate: () => () => undefined,
     }),
-  }),
-}));
+  };
+  return {
+    ...(await importOriginal<typeof import("convex/react")>()),
+    useConvexAuth: () => ({ isLoading: false, isAuthenticated: true }),
+    useConvex: () => client,
+  };
+});
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

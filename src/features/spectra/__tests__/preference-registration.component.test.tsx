@@ -2,6 +2,7 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PREFERENCE_SAVE_FAILURE, useSpectraPreferences } from "../settings/preference-store";
+import type { PreferenceLayerValues } from "../settings/schema";
 
 const remote = vi.hoisted(() => {
   const state = { layers: null as null | Array<{ scope: "account"; values: unknown; updatedAt: number }>, listeners: new Set<() => void>() };
@@ -49,4 +50,62 @@ it("reports a failed migration without marking it saved or leaking a rejection",
   const { result } = renderHook(() => useSpectraPreferences());
   await waitFor(() => expect(result.current.saveError).toBe(PREFERENCE_SAVE_FAILURE));
   expect(window.localStorage.getItem("spectra:preferences:account-migrated:v2")).toBeNull();
+});
+
+it.each([
+  { olderFirst: true, olderFails: false },
+  { olderFirst: true, olderFails: true },
+  { olderFirst: false, olderFails: false },
+  { olderFirst: false, olderFails: true },
+])("keeps Setup on Bridge across overlapping class and progress saves ($olderFirst, $olderFails)", async ({ olderFirst, olderFails }) => {
+  window.localStorage.setItem("spectra:preferences:account-migrated:v2", "true");
+  remote.state.layers = [{ scope: "account", values: { integrations: {
+    setupStep: "classes", classShelvesStatus: "chosen", classShelfRecordIds: ["already-selected"],
+  } }, updatedAt: 1 }];
+  const pending: Array<{ values: PreferenceLayerValues; resolve: () => void; reject: () => void }> = [];
+  remote.client.mutation.mockImplementation((_name: unknown, args: { values: PreferenceLayerValues }) =>
+    new Promise((resolve, reject) => pending.push({
+      values: args.values,
+      resolve: () => resolve("saved"),
+      reject: () => reject(new Error("earlier save failed")),
+    })));
+  const picker = renderHook(() => useSpectraPreferences());
+  const { result } = renderHook(() => ({ setup: useSpectraPreferences(), observer: useSpectraPreferences() }));
+  await waitFor(() => expect(result.current.observer.accountReady).toBe(true));
+  act(() => {
+    picker.result.current.update("integrations", { classShelvesStatus: "chosen", classShelfRecordIds: ["already-selected"] });
+    result.current.setup.update("integrations", { setupStep: "bridge" });
+  });
+  picker.unmount(); // The class picker goes away as soon as Setup advances.
+  expect(pending).toHaveLength(2);
+  const expectBridge = () => {
+    for (const hook of Object.values(result.current)) {
+      expect(hook.preferences.integrations.setupStep).toBe("bridge");
+      expect(hook.preferences.integrations.classShelfRecordIds).toEqual(["already-selected"]);
+    }
+  };
+  expectBridge();
+  const older = () => olderFails ? pending[0].reject() : pending[0].resolve();
+  await act(async () => {
+    remote.state.layers = [{ scope: "account", values: olderFirst ? pending[0].values : pending[1].values, updatedAt: 2 }];
+    remote.state.listeners.forEach(callback => callback());
+    if (olderFirst) older();
+    else pending[1].resolve();
+  });
+  expectBridge();
+  await act(async () => {
+    remote.state.layers = [{ scope: "account", values: pending[1].values, updatedAt: 3 }];
+    remote.state.listeners.forEach(callback => callback());
+    if (olderFirst) pending[1].resolve();
+    else older();
+  });
+  expectBridge();
+  for (const hook of Object.values(result.current)) expect(hook.saving).toBe(false);
+  expect(remote.state.listeners.size).toBe(0);
+  // Once writes settle, all consumers still accept later account changes.
+  await act(async () => {
+    remote.state.layers = [{ scope: "account", values: { integrations: { setupStep: "island" } }, updatedAt: 4 }];
+    window.dispatchEvent(new Event("focus"));
+  });
+  for (const hook of Object.values(result.current)) expect(hook.preferences.integrations.setupStep).toBe("island");
 });

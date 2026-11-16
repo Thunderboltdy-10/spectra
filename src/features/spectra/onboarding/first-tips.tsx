@@ -5,7 +5,7 @@ import { toast } from "@/components/ui/toast";
 import { spectraBus } from "../events";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { useTourStore } from "./tour-store";
-import { setupDue } from "./setup-state";
+import { useSetupDue } from "./setup-state";
 import { useAgentRuntimeStatus } from "../ai/use-agent-runtime";
 
 /*
@@ -45,15 +45,16 @@ export function firstTipMoment(id: FirstTipId) {
 export function FirstTipsMount() {
   const { preferences, update } = useSpectraPreferences();
   const { tipsSeen, tourStatus, setupStatus } = preferences.integrations;
+  const inSetup = useSetupDue(preferences.integrations);
   const said = useRef(new Set<string>());
-  const latest = useRef({ tipsSeen, tourStatus, setupStatus, update });
-  latest.current = { tipsSeen, tourStatus, setupStatus, update };
+  const latest = useRef({ tipsSeen, inSetup, update });
+  latest.current = { tipsSeen, inSetup, update };
 
   useEffect(() => {
     const say = (id: FirstTipId) => {
-      const { tipsSeen: seen, tourStatus: tour, setupStatus: setup, update: save } = latest.current;
+      const { tipsSeen: seen, inSetup: setup, update: save } = latest.current;
       // Never over Setup or the tour; a tour put away early still lets tips come.
-      if (setupDue({ setupStatus: setup, tourStatus: tour }) || useTourStore.getState().index !== null) return;
+      if (setup || useTourStore.getState().index !== null) return;
       if (seen.includes(id) || said.current.has(id)) return;
       said.current.add(id);
       const remember = () => save("integrations", { tipsSeen: [...latest.current.tipsSeen, id] });

@@ -12,7 +12,7 @@ import { TOUR_STEPS, type TourPerson } from "./tour-steps";
 import { TourLayer } from "./tour-layer";
 import { TourAskControl } from "./tour-asks";
 import { useTourStore } from "./tour-store";
-import { setupDue } from "./setup-state";
+import { useSetupDue } from "./setup-state";
 
 /*
  * Spectra's tour of the app (SHELL.md, "Onboarding tour"). It starts by itself
@@ -45,13 +45,14 @@ export function TourMount() {
   const { preferences, accountReady, update } = useSpectraPreferences();
   const index = useTourStore((state) => state.index);
   const { start, next, back, stop } = useTourStore.getState();
+  const inSetup = useSetupDue(preferences.integrations);
   const { classShelvesStatus, tourStatus, tourStep } = preferences.integrations;
   // Read from the account, never the defaults before it arrives; after Setup,
   // and once the class shelves are chosen (or passed over).
   const due =
     accountReady &&
     tourStatus === "pending" &&
-    !setupDue(preferences.integrations) &&
+    !inSetup &&
     classShelvesStatus !== "pending" &&
     person.school !== null;
 

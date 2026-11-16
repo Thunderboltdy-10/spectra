@@ -4,10 +4,12 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { getFunctionName } from "convex/server";
 import { mergePreferenceValues } from "../settings/schema";
 import { SetupMount } from "../onboarding/setup";
+import { SchoolSetupMount } from "../school/school-setup-mount";
 
 const remote = vi.hoisted(() => {
   const state = {
     layers: [{ scope: "account" as const, values: { integrations: { setupStatus: "pending", setupStep: "classes", classShelvesStatus: "chosen", classShelfRecordIds: ["biology"] } }, updatedAt: 1 }],
+    createdAt: new Date("2026-11-17T00:00:00Z"),
     listeners: new Set<() => void>(), phase: "ready", mutation: vi.fn(), request: vi.fn(),
   };
   const client = {
@@ -22,11 +24,12 @@ const remote = vi.hoisted(() => {
   };
   return { state, client };
 });
+vi.mock("@clerk/nextjs", () => ({ useUser: () => ({ user: { createdAt: remote.state.createdAt } }) }));
 vi.mock("convex/react", async (original) => ({
   ...(await original<typeof import("convex/react")>()),
   useConvexAuth: () => ({ isAuthenticated: true, isLoading: false }),
   useConvex: () => remote.client,
-  useMutation: () => vi.fn(),
+  useMutation: () => vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("../data/use-kept-query", () => ({ useQuery: (ref: Parameters<typeof getFunctionName>[0]) =>
   getFunctionName(ref) === "managebac:onboardingStatus" ? { phase: remote.state.phase } : { kinds: [] },
@@ -53,6 +56,7 @@ const choice = { classShelvesStatus: "chosen", classShelfRecordIds: ["biology"] 
 function answerClasses() { fireEvent.click(screen.getByRole("button", { name: "Use selected classes" })); }
 function bridgeVisible() { expect(screen.getByRole("heading", { name: "Put Spectra Bridge on this computer" })).toBeTruthy(); }
 beforeEach(() => {
+  remote.state.createdAt = new Date("2026-11-17T00:00:00Z");
   remote.state.phase = "ready";
   remote.state.layers = [{ scope: "account", values: { integrations: { setupStatus: "pending", setupStep: "classes", ...choice } }, updatedAt: 1 }];
   remote.state.listeners.clear();
@@ -136,4 +140,26 @@ it("shows a failed progress save and lets the user retry", async () => {
   await act(async () => answerClasses());
   bridgeVisible();
   expect(remote.state.mutation).toHaveBeenCalledTimes(2);
+});
+
+
+it.each(["classes", "bridge", ""])("does not show Setup for an existing account with saved step '%s'", async (setupStep) => {
+  remote.state.createdAt = new Date("2026-11-15T00:00:00Z");
+  remote.state.layers[0].values.integrations.setupStep = setupStep;
+  const view = render(<SetupMount />);
+  await act(async () => {});
+  expect(view.container.querySelector(".spectra-setup")).toBeNull();
+  expect(remote.state.request).not.toHaveBeenCalled();
+  expect(remote.state.mutation).not.toHaveBeenCalled();
+});
+
+
+it("does not replace Setup with the old class-choice popup for an existing account", async () => {
+  remote.state.createdAt = new Date("2026-11-15T00:00:00Z");
+  remote.state.phase = "choose_classes";
+  remote.state.layers[0].values.integrations.classShelvesStatus = "pending";
+  render(<><SetupMount /><SchoolSetupMount /></>);
+  await act(async () => {});
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(remote.state.request).not.toHaveBeenCalled();
 });

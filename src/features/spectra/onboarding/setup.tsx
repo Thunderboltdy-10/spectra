@@ -29,7 +29,7 @@ import { useAgentRuntime } from "../ai/use-agent-runtime";
 import { MODE_LABEL } from "../school/school-model";
 import { life } from "../life/life";
 import { useIslandShowcase } from "../island/phone-rest";
-import { setupDue } from "./setup-state";
+import { useSetupDue } from "./setup-state";
 
 /*
  * Setup: what a new account does once, before the app. A step at a time, in
@@ -65,7 +65,8 @@ function usePlatform(): BridgePlatform | null {
 export function SetupMount() {
   const { isAuthenticated } = useConvexAuth();
   const { preferences, accountReady } = useSpectraPreferences();
-  if (!isAuthenticated || !accountReady || !setupDue(preferences.integrations)) return null;
+  const due = useSetupDue(preferences.integrations);
+  if (!isAuthenticated || !accountReady || !due) return null;
   return <Setup />;
 }
 

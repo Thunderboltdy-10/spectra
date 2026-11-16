@@ -15,7 +15,7 @@ import { recheckAgentRuntime, useAgentRuntime } from "../ai/use-agent-runtime";
 import { rejoinBridge } from "../devices/pairing";
 import { publishBridgeAvailability } from "./availability";
 import { useSpectraPreferences } from "../settings/preference-store";
-import { setupDue } from "../onboarding/setup-state";
+import { useSetupDue } from "../onboarding/setup-state";
 import { useTourStore } from "../onboarding/tour-store";
 import { useBridgeHealth } from "./use-bridge";
 import {
@@ -103,7 +103,8 @@ export function BridgeConnection() {
   const { preferences, hydrated, accountReady, update } = useSpectraPreferences();
   // Setup has its own Bridge step and the tour its own say, so nothing about the Bridge is offered over either.
   const touring = useTourStore((tour) => tour.index !== null);
-  const inSetup = !accountReady || setupDue(preferences.integrations) || touring;
+  const setupPending = useSetupDue(preferences.integrations);
+  const inSetup = !accountReady || setupPending || touring;
   const hasDevice = useSession()?.hasDevice;
   // A computer removed on purpose waits for "Pair again" instead of joining by itself.
   const unjoined = checked && discovery.kind === "running" && !status?.paired && !bridgeRemovedHere();

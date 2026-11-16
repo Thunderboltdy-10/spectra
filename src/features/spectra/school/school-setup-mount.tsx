@@ -7,7 +7,7 @@ import { api } from "../../../../convex/_generated/api";
 import { ClassShelfOnboarding } from "../components/class-shelf-onboarding";
 import { spectraBus } from "../events";
 import { useSpectraPreferences } from "../settings/preference-store";
-import { setupDue } from "../onboarding/setup-state";
+import { useSetupDue } from "../onboarding/setup-state";
 
 /*
  * Choosing this year's classes, wherever the student is. School setup lists
@@ -47,11 +47,13 @@ export function SchoolSetupMount() {
   }, [isAuthenticated, syncStale]);
   const setup = useQuery(api.managebac.onboardingStatus, isAuthenticated ? {} : "skip");
   const { preferences, accountReady } = useSpectraPreferences();
+  const eligibleForSetup = useSetupDue({ setupStatus: "pending" });
+  const inSetup = eligibleForSetup && preferences.integrations.setupStatus === "pending";
   const phase = setup?.phase;
   const pending = preferences.integrations.classShelvesStatus === "pending";
   // The account's own answer, not the "pending" default read before it
   // arrives; and while Setup is on screen the choice is one of its steps.
-  const due = accountReady && !setupDue(preferences.integrations) && (phase === "choose_classes" || (pending && (phase === "syncing" || phase === "ready")));
+  const due = accountReady && eligibleForSetup && !inSetup && pending && (phase === "choose_classes" || phase === "syncing" || phase === "ready");
   // Once open it stays until the choice is saved, even as the phase moves on
   // under it, or until the reader puts it away. Put away, it waits for the
   // next visit; School's Sync holds the same choice meanwhile.

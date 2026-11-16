@@ -12,7 +12,7 @@ import { TimeField } from "@/components/ui/when-fields";
 import { FeedbackButton } from "@/components/layout/feedback-button";
 import { useTheme } from "@/components/theme-provider";
 import { SCHOOL_SYNC_KIND_INFO, type SchoolSyncKind, type SchoolSyncMode } from "../../../../shared/school-sync";
-import { ClassShelfChoice } from "../components/class-shelf-onboarding";
+import { ClassShelfChoice, type ClassShelfAnswer } from "../components/class-shelf-onboarding";
 import { useSpectraPreferences } from "../settings/preference-store";
 import { useSpectraRouter } from "../hooks/use-spectra-router";
 import { HOME_PATH } from "../chat/home-routes";
@@ -71,7 +71,7 @@ export function SetupMount() {
 
 function Setup() {
   const router = useSpectraRouter();
-  const { preferences, update } = useSpectraPreferences();
+  const { preferences, update, saveError } = useSpectraPreferences();
   const school = useQuery(api.managebac.onboardingStatus, {});
   const availability = useBridgeAvailability();
   const platform = usePlatform();
@@ -97,13 +97,14 @@ function Setup() {
   const step = steps[index]!;
 
   const go = (to: StepId) => update("integrations", { setupStep: to });
-  const next = () => {
+  const advance = (choice: Partial<ClassShelfAnswer> = {}) => {
     const after = steps[index + 1];
-    if (after) return go(after);
-    update("integrations", { setupStatus: "done", setupStep: "" });
+    if (after) return update("integrations", { ...choice, setupStep: after });
+    update("integrations", { ...choice, setupStatus: "done", setupStep: "" });
     spectraBus.emit("workspace.refreshRequested", {});
     router.push(HOME_PATH);
   };
+  const next = () => advance();
   const back = index > 0 ? () => go(steps[index - 1]!) : undefined;
 
   // Whatever was focused in the app behind stays behind.
@@ -140,9 +141,10 @@ function Setup() {
             ))}
           </ol>
         </header>
+        {saveError ? <p role="alert">{saveError}</p> : null}
         <div className="spectra-setup-body" key={step}>
           {step === "classes" ? (
-            <ClassesStep phase={phase} onDone={next} onBack={back} />
+            <ClassesStep phase={phase} onDone={advance} onBack={back} />
           ) : step === "bridge" ? (
             <BridgeStep platform={platform} ready={bridgeHere} onDone={next} onBack={back} />
           ) : step === "storage" ? (
@@ -204,7 +206,7 @@ function Actions({ onBack, children }: { onBack?: () => void; children: ReactNod
 
 /* ── Classes ─────────────────────────────────────────────────────────── */
 
-function ClassesStep({ phase, onDone, onBack }: { phase: string | undefined; onDone: () => void; onBack?: () => void }) {
+function ClassesStep({ phase, onDone, onBack }: { phase: string | undefined; onDone: (choice?: ClassShelfAnswer) => void; onBack?: () => void }) {
   const listing = phase === "loading_classes";
   return (
     <StepFrame
@@ -213,7 +215,7 @@ function ClassesStep({ phase, onDone, onBack }: { phase: string | undefined; onD
       actions={
         listing ? (
           <Actions onBack={onBack}>
-            <Button variant="ghost" onClick={onDone}>
+            <Button variant="ghost" onClick={() => onDone()}>
               Choose later
             </Button>
           </Actions>
@@ -228,7 +230,7 @@ function ClassesStep({ phase, onDone, onBack }: { phase: string | undefined; onD
           Finding your classes in ManageBac. This takes a moment the first time.
         </p>
       ) : (
-        <ClassShelfChoice active onCompleted={onDone} />
+        <ClassShelfChoice active saveChoice={false} selectionConfirmed={phase === "ready" || phase === "syncing"} onCompleted={onDone} />
       )}
     </StepFrame>
   );

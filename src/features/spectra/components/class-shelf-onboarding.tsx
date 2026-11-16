@@ -21,6 +21,11 @@ import {
 import { requestSpectra } from "../data/request";
 import { toast } from "@/components/ui/toast";
 
+export type ClassShelfAnswer = {
+  classShelvesStatus: "chosen" | "skipped";
+  classShelfRecordIds: string[];
+};
+
 async function manageBacPost(body: Record<string, unknown>) {
   const response = await requestSpectra("/api/spectra/managebac", {
     method: "POST",
@@ -79,10 +84,15 @@ export function ClassShelfChoice({
   active,
   onCompleted,
   onSubmitting,
+  saveChoice = true,
+  selectionConfirmed = false,
 }: {
   active: boolean;
-  onCompleted: () => void | Promise<void>;
+  onCompleted: (choice: ClassShelfAnswer) => void | Promise<void>;
   onSubmitting?: (submitting: boolean) => void;
+  /** Setup saves the answer and its next step together. */
+  saveChoice?: boolean;
+  selectionConfirmed?: boolean;
 }) {
   const open = active;
   const { update } = useSpectraPreferences();
@@ -178,7 +188,9 @@ export function ClassShelfChoice({
     onSubmitting?.(true);
     setSubmitError("");
     try {
-      if (state.kind === "ready" || state.kind === "empty") {
+      const unchanged = selectionConfirmed && recordIds.length === initialSelectedIds.length &&
+        recordIds.every(id => initialSelectedIds.includes(id));
+      if (!unchanged && (state.kind === "ready" || state.kind === "empty")) {
         const result = await manageBacPost({
           action: "selectClasses",
           recordIds,
@@ -188,12 +200,13 @@ export function ClassShelfChoice({
         if (typeof result?.selectionRevision === "number")
           setSelectionRevision(result.selectionRevision);
       }
-      update("integrations", {
+      const choice: ClassShelfAnswer = {
         classShelvesStatus: status,
         classShelfRecordIds: recordIds,
-      });
-      if (status === "chosen" && recordIds.length > 0) syncInBackground();
-      await onCompleted();
+      };
+      if (saveChoice) update("integrations", choice);
+      if (!unchanged && status === "chosen" && recordIds.length > 0) syncInBackground();
+      await onCompleted(choice);
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       setSubmitError(

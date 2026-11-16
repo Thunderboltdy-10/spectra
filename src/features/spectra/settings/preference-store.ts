@@ -192,6 +192,7 @@ export function useSpectraPreferences({
   const preferencesRef = useRef(preferences);
   const confirmedRef = useRef(DEFAULT_SPECTRA_PREFERENCES);
   const externalRefreshGeneration = useRef(0);
+  const remoteGeneration = useRef(0);
   const inflightWrites = useRef(0);
   preferencesRef.current = preferences;
 
@@ -255,9 +256,14 @@ export function useSpectraPreferences({
         try {
           const value = watch.localQueryResult();
           if (value === undefined) return;
+          remoteGeneration.current = writes.generation;
           setRemoteLayers(value ?? undefined);
-          // Keep watching while the signed-in account is being registered.
-          if (value === null) return;
+          // Setup must observe the acknowledged write, not a parked query's
+          // cached answer. Keep it live until Setup is durably finished.
+          if (value === null || resolvePreferences(value.map(layer => ({
+            scope: layer.scope,
+            values: layer.values as PreferenceLayerValues,
+          })), MERGE_OPTIONS).integrations.setupStatus !== "done") return;
           unsub?.();
           unsub = null;
         } catch (error) {
@@ -291,7 +297,7 @@ export function useSpectraPreferences({
 
   useEffect(() => {
     if (!resolvedRemote || !hydrated) return;
-    if (writes.pending > 0) return;
+    if (writes.pending > 0 || remoteGeneration.current !== writes.generation) return;
     confirmedRef.current = resolvedRemote;
     commitLocal(resolvedRemote);
     setSaveError(null);
@@ -340,7 +346,7 @@ export function useSpectraPreferences({
   }, [commitLocal, writes]);
 
   const persistSection = useCallback(
-    async <K extends PreferenceSection>(section: K, next: SpectraPreferences, generation: number) => {
+    async <K extends PreferenceSection>(section: K, next: SpectraPreferences, generation: number, patch: Partial<SpectraPreferences[K]>) => {
       if (!currentDeviceId || !signedIn) return;
       const scope = DEVICE_SECTIONS.has(section) ? "device" : "account";
       const scopeKey = scope === "device" ? currentDeviceId : "account";
@@ -349,7 +355,9 @@ export function useSpectraPreferences({
         await writeLayer({
           scope,
           scopeKey,
-          values: { [section]: next[section] as PreferenceLayerValues[K] },
+          // Unrelated settings must not replay an old Setup step (including
+          // writes from another tab). Workbar keeps its normalization rules.
+          values: { [section]: (section === "workbar" ? next[section] : patch) as PreferenceLayerValues[K] },
         });
         if (generation === writes.generation) {
           confirmedRef.current = next;
@@ -408,7 +416,7 @@ export function useSpectraPreferences({
       const next = updatePreference(preferencesRef.current, section, patch, MERGE_OPTIONS);
       const generation = ++writes.generation;
       commitLocal(next);
-      void persistSection(section, next, generation);
+      void persistSection(section, next, generation, patch);
     },
     [commitLocal, persistSection, writes],
   );
@@ -432,6 +440,7 @@ export function useSpectraPreferences({
     // value. Its existing completion refresh will reconcile server state.
     if (generation !== writes.generation ||
       refreshGeneration !== externalRefreshGeneration.current || writes.pending > 0) return;
+    remoteGeneration.current = generation;
     setRemoteLayers(layers ?? undefined);
   }, [convex, signedIn, currentDeviceId, workspaceId, workType, writes]);
 
